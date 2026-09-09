@@ -44,7 +44,8 @@ function leg(provider: string, overrides: Partial<HarnessResult> = {}): HarnessR
     costSource: "harness",
   };
   return {
-    provider,
+    provider: provider === "claude-sdk" ? "claude" : provider,
+    transport: provider === "claude-sdk" ? "sdk" : undefined,
     model: `${provider}-model`,
     status: "pass",
     durationMs: 9_000,
@@ -84,13 +85,49 @@ describe("nightly report", () => {
     });
     expect(report.ok).toBe(true);
     expect(report.missingLegs).toEqual([]);
-    expect(report.totalCostUsd).toBeCloseTo(0.0492, 6);
+    expect(report.totalCostUsd).toBeCloseTo(0.0615, 6);
     expect(report.warnings).toEqual([]);
     const markdown = nightlyMarkdown(report, [], DEFAULT_PROVIDERS);
     expect(markdown).toContain("## Nightly E2E: PASS");
-    expect(markdown).toContain("4/4 harness legs passed");
+    expect(markdown).toContain("5/5 harness legs passed");
     expect(markdown).toContain("| claude | claude-model | PASS | 1 |");
     expect(markdown).not.toContain("### Warnings");
+  });
+
+  test("keeps both Claude transports and fails if either leg is missing or fails", () => {
+    const cli = leg("claude", { transport: "cli" });
+    const sdk = leg("claude-sdk", {
+      status: "fail",
+      error: "SDK task failed",
+      attempts: [{ status: "fail", durationMs: 1, error: "SDK task failed" }],
+      totalCostUsd: 0.02,
+    });
+    const results = [contractResult(), harnessResult([cli]), harnessResult([sdk])];
+    const providers = ["claude", "claude-sdk"];
+    for (const ordered of [results, [...results].reverse()]) {
+      const report = buildNightlyReport({ ...base, providers, results: ordered });
+      expect(report.ok).toBe(false);
+      expect(report.harness).toHaveLength(2);
+      expect(report.missingLegs).toEqual([]);
+      expect(report.totalCostUsd).toBeCloseTo(0.0323, 6);
+      const markdown = nightlyMarkdown(report, [], providers);
+      expect(markdown).toContain("| claude | claude-model | PASS |");
+      expect(markdown).toContain("| claude-sdk | claude-sdk-model | FAIL |");
+      expect(markdown).toContain("claude-sdk attempt 1: SDK task failed");
+      expect(markdown).toContain("$0.0123 | fail ($0.0200) | $0.0323");
+    }
+    for (const [present, missing] of [
+      [cli, "claude-sdk"],
+      [sdk, "claude"],
+    ] as const) {
+      const report = buildNightlyReport({
+        ...base,
+        providers,
+        results: [contractResult(), harnessResult([present])],
+      });
+      expect(report.ok).toBe(false);
+      expect(report.missingLegs).toEqual([missing]);
+    }
   });
 
   test("fails on a missing leg and on a failed leg, with the log tail in details", () => {
@@ -122,7 +159,7 @@ describe("nightly report", () => {
       results: [contractResult(), harnessResult([leg("claude")]), harnessResult([failed])],
     });
     expect(report.ok).toBe(false);
-    expect(report.missingLegs).toEqual(["pi", "opencode"]);
+    expect(report.missingLegs).toEqual(["claude-sdk", "pi", "opencode"]);
     expect(report.warnings).toContain("pi: no result file from the leg.");
     expect(report.warnings).toContain("codex: needed 2 attempts.");
     const markdown = nightlyMarkdown(report, [], DEFAULT_PROVIDERS);

@@ -115,6 +115,8 @@ describe("Claude E2E transport harness", () => {
         );
 
         expect(result.status, result.error).toBe("pass");
+        expect(result.provider).toBe("claude");
+        expect(result.transport).toBe(transport);
         const configCall = calls.find((call) => call.method === "PUT");
         expect(configCall?.options?.body).toEqual({
           scope: "agent",

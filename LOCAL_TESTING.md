@@ -116,7 +116,13 @@ environment plus common token shapes) before they enter the result file or the c
 ### Nightly E2E workflow
 
 `.github/workflows/nightly-e2e.yml` runs the contract scenarios once on plain Ubuntu, then one harness
-leg per provider inside the `worker:slim` image, then a `report` job that merges every result file with
+leg per provider inside the `worker:slim` image, plus a separate Claude SDK leg.
+Both Claude legs use Haiku, the same image, and the dedicated OAuth secret.
+Each leg asserts the selected transport from the completed task and requires persisted cost records.
+The container uses `--init` to reap child processes.
+The CLI leg keeps the historical `claude` label. The SDK leg uses `claude-sdk` in artifacts, failures, and cost trends.
+A missing SDK result fails the report independently of the CLI result.
+A `report` job merges every result file with
 `scripts/e2e/nightly-report.ts` into one step summary and the `nightly-e2e-report` artifact. The report
 lists cost per leg, the cost trend over earlier runs, warnings (retries, missing cost rows, an expiring
 Codex OAuth blob), and the worker log tail of every failed attempt. While the nightly fails, one sticky

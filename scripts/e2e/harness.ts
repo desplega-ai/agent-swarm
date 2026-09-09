@@ -474,6 +474,7 @@ export async function runHarnessLeg(
   const last = attempts[attempts.length - 1]!;
   return {
     provider,
+    transport: provider === "claude" ? claudeTransport : undefined,
     model,
     status: last.status,
     durationMs: Date.now() - started,

@@ -13,9 +13,9 @@
  */
 import { parseArgs } from "node:util";
 import type { E2eResult, HarnessResult, ScenarioResult } from "./report";
-import { harnessFailureDetails, harnessTable, markdownCell, usd } from "./report";
+import { harnessFailureDetails, harnessLegName, harnessTable, markdownCell, usd } from "./report";
 
-export const DEFAULT_PROVIDERS = ["claude", "codex", "pi", "opencode"];
+export const DEFAULT_PROVIDERS = ["claude", "claude-sdk", "codex", "pi", "opencode"];
 const TREND_LIMIT = 14;
 
 export type ContractSummary = {
@@ -79,7 +79,7 @@ export function buildNightlyReport(inputs: ReportInputs): NightlyReport {
     : null;
   const legs = new Map<string, HarnessResult>();
   for (const result of inputs.results) {
-    for (const leg of result.harness) legs.set(leg.provider, normalizeLeg(leg));
+    for (const leg of result.harness) legs.set(harnessLegName(leg), normalizeLeg(leg));
   }
   const harness = inputs.providers
     .filter((provider) => legs.has(provider))
@@ -92,20 +92,20 @@ export function buildNightlyReport(inputs: ReportInputs): NightlyReport {
   for (const provider of missingLegs) warnings.push(`${provider}: no result file from the leg.`);
   for (const leg of harness) {
     if (leg.attempts.length > 1) {
-      warnings.push(`${leg.provider}: needed ${leg.attempts.length} attempts.`);
+      warnings.push(`${harnessLegName(leg)}: needed ${leg.attempts.length} attempts.`);
     }
     if (leg.status === "pass" && leg.cost && leg.cost.records === 0) {
-      warnings.push(`${leg.provider}: the task passed but the API stored no cost record.`);
+      warnings.push(`${harnessLegName(leg)}: the task passed but the API stored no cost record.`);
     }
     if (leg.credentialExpiresAt) {
       const days = daysUntil(leg.credentialExpiresAt, inputs.generatedAt);
       if (days < 0) {
         warnings.push(
-          `${leg.provider}: the seeded OAuth access token expired on ${leg.credentialExpiresAt.slice(0, 10)}. Re-seed the secret before the refresh token rotates.`,
+          `${harnessLegName(leg)}: the seeded OAuth access token expired on ${leg.credentialExpiresAt.slice(0, 10)}. Re-seed the secret before the refresh token rotates.`,
         );
       } else if (days <= inputs.credentialWarnDays) {
         warnings.push(
-          `${leg.provider}: the seeded OAuth access token expires in ${days.toFixed(1)} days (${leg.credentialExpiresAt.slice(0, 10)}). Re-seed the secret.`,
+          `${harnessLegName(leg)}: the seeded OAuth access token expires in ${days.toFixed(1)} days (${leg.credentialExpiresAt.slice(0, 10)}). Re-seed the secret.`,
         );
       }
     }
@@ -136,7 +136,7 @@ function trendRows(current: NightlyReport, previous: NightlyReport[], providers:
     .slice(0, TREND_LIMIT);
   return runs.map((run) => {
     const cells = providers.map((provider) => {
-      const leg = run.harness.find((candidate) => candidate.provider === provider);
+      const leg = run.harness.find((candidate) => harnessLegName(candidate) === provider);
       if (!leg) return "-";
       if (leg.status === "fail") return `fail (${usd(leg.totalCostUsd)})`;
       return leg.cost?.records ? usd(leg.totalCostUsd) : "no record";

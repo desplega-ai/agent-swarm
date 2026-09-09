@@ -32,6 +32,8 @@ export type HarnessAttempt = {
 };
 export type HarnessResult = {
   provider: string;
+  /** Selected Claude transport. Absent in older results and for other providers. */
+  transport?: "cli" | "sdk";
   model: string;
   /** Status of the final attempt. */
   status: "pass" | "fail";
@@ -202,13 +204,18 @@ export function costCell(cost: HarnessCost | undefined): string {
   return `${usd(cost.totalUsd)} (${cost.costSource})`;
 }
 
+/** Preserve the historical CLI label while keeping SDK results distinct. */
+export function harnessLegName(leg: HarnessResult): string {
+  return leg.provider === "claude" && leg.transport === "sdk" ? "claude-sdk" : leg.provider;
+}
+
 export function printHarness(result: HarnessResult): void {
   const color = colors[result.status];
   const detail = result.error ? `: ${result.error}` : "";
   const attempts = result.attempts.length > 1 ? `, ${result.attempts.length} attempts` : "";
   const cost = result.cost ? `, ${costCell(result.cost)}` : "";
   console.log(
-    `${color}${result.status.toUpperCase()}${colors.reset} harness ${result.provider} ` +
+    `${color}${result.status.toUpperCase()}${colors.reset} harness ${harnessLegName(result)} ` +
       `(${result.model}, ${seconds(result.durationMs)}${attempts}${cost})${detail}`,
   );
 }
@@ -226,7 +233,7 @@ export function harnessTable(legs: HarnessResult[]): string[] {
       const tokens = leg.cost?.records
         ? `${leg.cost.inputTokens + leg.cost.cacheReadTokens + leg.cost.cacheWriteTokens} / ${leg.cost.outputTokens}`
         : "";
-      return `| ${leg.provider} | ${markdownCell(leg.model)} | ${leg.status.toUpperCase()} | ${leg.attempts.length} | ${seconds(leg.durationMs)} | ${costCell(leg.cost)} | ${tokens} | ${markdownCell(leg.error ?? "")} |`;
+      return `| ${harnessLegName(leg)} | ${markdownCell(leg.model)} | ${leg.status.toUpperCase()} | ${leg.attempts.length} | ${seconds(leg.durationMs)} | ${costCell(leg.cost)} | ${tokens} | ${markdownCell(leg.error ?? "")} |`;
     }),
   ];
 }
@@ -239,7 +246,7 @@ export function harnessFailureDetails(legs: HarnessResult[]): string[] {
       if (attempt.status !== "fail") return;
       lines.push(
         "<details>",
-        `<summary>${leg.provider} attempt ${index + 1}: ${markdownCell(attempt.error ?? "failed")}${attempt.failureKind ? ` (${attempt.failureKind})` : ""}</summary>`,
+        `<summary>${harnessLegName(leg)} attempt ${index + 1}: ${markdownCell(attempt.error ?? "failed")}${attempt.failureKind ? ` (${attempt.failureKind})` : ""}</summary>`,
         "",
         "```text",
         attempt.logTail?.replaceAll("```", "` ` `") ?? "(no worker log)",
