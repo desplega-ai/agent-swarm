@@ -57,6 +57,59 @@ export async function enableSlackDelegation(ctx: ScenarioContext): Promise<void>
 }
 
 /**
+ * Flips SLACK_RENDER_V2 on but leaves SLACK_RENDER_V2_DELEGATION untouched —
+ * the actual production state Taras confirmed on 2026-09-09 ("SLACK_RENDER_V2_DELEGATION
+ * is not set, the render v2 yes"). Confirms delegation is really off, not just
+ * "we didn't call enableSlackDelegation": reads slack_render_v2_state back
+ * (activated_at must be set, delegation_activated_at must still be null) and
+ * confirms the config API doesn't carry SLACK_RENDER_V2_DELEGATION=true either.
+ * Must run before enableSlackDelegation, which flips delegation on globally
+ * for the rest of the process — after that this scenario's premise is
+ * unreachable (see run.ts's ordering comment on the slackDelegation* block).
+ */
+export async function enableSlackRenderV2Only(ctx: ScenarioContext): Promise<void> {
+  expectStatus(
+    await ctx.api("PUT", "/api/config", {
+      body: {
+        scope: "global",
+        scopeId: null,
+        key: "SLACK_RENDER_V2",
+        value: "true",
+        isSecret: false,
+      },
+    }),
+    [200],
+    "enable SLACK_RENDER_V2 for flag-off-delegation e2e",
+  );
+  const activated = await pollUntil(() => {
+    const row = ctx.db.get<{ activated_at: string | null }>(
+      "SELECT activated_at FROM slack_render_v2_state WHERE id = 1",
+    );
+    return row?.activated_at != null;
+  }, 15_000);
+  expect(activated, "Slack render v2 never activated within 15 seconds");
+
+  const state = ctx.db.get<{ delegation_activated_at: string | null }>(
+    "SELECT delegation_activated_at FROM slack_render_v2_state WHERE id = 1",
+  );
+  expect(
+    state?.delegation_activated_at == null,
+    "SLACK_RENDER_V2_DELEGATION is already activated — this scenario must run before any flag-on delegation scenario",
+  );
+
+  const configResponse = await ctx.api("GET", "/api/config?scope=global");
+  expectStatus(configResponse, [200], "list global config while confirming delegation is off");
+  const configs = asRecord(configResponse.json).configs;
+  expect(Array.isArray(configs), "Config list has no configs array");
+  expect(
+    !configs
+      .map(asRecord)
+      .some((config) => config.key === "SLACK_RENDER_V2_DELEGATION" && config.value === "true"),
+    "SLACK_RENDER_V2_DELEGATION is set to true in global config",
+  );
+}
+
+/**
  * A non-lead agent finishing a task auto-spawns a "worker task follow-up"
  * review task for the lead (`createWorkerTaskFollowUp` in
  * `src/tasks/worker-follow-up.ts`) — unrelated to Slack delegation, it fires
@@ -188,6 +241,38 @@ export async function waitForBotReply(
       `bot reply in C0GENERAL0 thread ${threadTs}: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
+}
+
+/**
+ * Asserts a message matching `needle` never lands in the thread within
+ * `timeoutMs`. Calibrated against slack-delegation-child-result.ts's
+ * `waitForOutcome(ctx, message.ts, childOutput)` call, which uses this same
+ * default (30s) to see the flag-on child card land — using it here too means
+ * absence is a real assertion bounded by the watcher's own tick cadence, not
+ * a race that just happens to return before the card would have appeared.
+ */
+export async function waitForOutcomeAbsence(
+  ctx: ScenarioContext,
+  threadTs: string,
+  needle: string,
+  timeoutMs = 30_000,
+): Promise<void> {
+  const appeared = await pollUntil(
+    () =>
+      ctx.slack
+        .messages("general")
+        .some(
+          (message) =>
+            message.channel === "C0GENERAL0" &&
+            message.thread_ts === threadTs &&
+            JSON.stringify(message).includes(needle),
+        ),
+    timeoutMs,
+  );
+  expect(
+    !appeared,
+    `Expected "${needle}" to never land in C0GENERAL0 thread ${threadTs}, but it did within ${timeoutMs}ms`,
+  );
 }
 
 export async function findSlackTask(
