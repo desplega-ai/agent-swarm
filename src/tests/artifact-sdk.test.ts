@@ -120,8 +120,18 @@ describe("BROWSER_SDK_JS", () => {
     expect(BROWSER_SDK_JS).toContain("'/assets/mappings'");
   });
 
-  test("fetches config on construction", () => {
-    expect(BROWSER_SDK_JS).toContain("fetch('/@swarm/config')");
+  test("does not fetch on SDK load or construction", () => {
+    const fetchMock = mock(() => Promise.resolve(Response.json({})));
+    const window = {};
+    const loadSdk = new Function("window", "fetch", `${BROWSER_SDK_JS}\nreturn window.SwarmSDK;`);
+
+    const SwarmSDK = loadSdk(window, fetchMock);
+    expect(window).toHaveProperty("swarmSdk");
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    new SwarmSDK();
+    new SwarmSDK();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
