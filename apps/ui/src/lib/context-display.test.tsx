@@ -32,4 +32,12 @@ describe("findLatestUsableContextSnapshot", () => {
 
     expect(findLatestUsableContextSnapshot([usage, terminal])).toBe(usage);
   });
+
+  test("returns no usage snapshot when each value comes from a different row", () => {
+    const usedOnly = snapshot({ contextUsedTokens: 191_533 });
+    const totalOnly = snapshot({ id: "snapshot-2", contextTotalTokens: 200_000 });
+    const percentOnly = snapshot({ id: "snapshot-3", contextPercent: 18.241238095238096 });
+
+    expect(findLatestUsableContextSnapshot([usedOnly, totalOnly, percentOnly])).toBeUndefined();
+  });
 });

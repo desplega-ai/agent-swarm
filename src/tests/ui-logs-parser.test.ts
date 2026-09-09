@@ -280,6 +280,36 @@ describe("ui logs parser", () => {
     });
   });
 
+  test("ignores a stale codex delta persisted after its completed message", () => {
+    const result = normalizeSessionLogs([
+      log(
+        "done",
+        "codex",
+        0,
+        {
+          type: "item.completed",
+          item: { id: "msg-1", type: "agent_message", text: "Final response" },
+        },
+        "2026-09-09T00:00:20.000Z",
+      ),
+      log(
+        "late-delta",
+        "codex",
+        0,
+        { type: "message.delta", item_id: "msg-1", delta: " stale fragment" },
+        "2026-09-09T00:00:21.000Z",
+      ),
+    ]);
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({
+      kind: "text",
+      text: "Final response",
+      recId: "done",
+      coveredRecIds: ["late-delta"],
+    });
+  });
+
   test("keeps repeated codex item ids separate across sessions", () => {
     const first = log("first", "codex", 1, {
       type: "message.delta",
@@ -333,6 +363,38 @@ describe("ui logs parser", () => {
       recId: "user-start",
       coveredRecIds: ["user-done"],
     });
+  });
+
+  test("renders codex reasoning summary and content arrays", () => {
+    const result = normalizeSessionLogs([
+      log("summary", "codex", 1, {
+        type: "item.completed",
+        item: {
+          id: "reasoning-1",
+          type: "reasoning",
+          summary: ["Checked the parser", "Found the ordering issue"],
+          content: [],
+        },
+      }),
+      log("content", "codex", 2, {
+        type: "item.completed",
+        item: {
+          id: "reasoning-2",
+          type: "reasoning",
+          summary: [],
+          content: ["Verified the fix", "Tests pass"],
+        },
+      }),
+      log("empty", "codex", 3, {
+        type: "item.completed",
+        item: { id: "reasoning-3", type: "reasoning", summary: [], content: [] },
+      }),
+    ]);
+
+    expect(result.items.map((item) => item.text)).toEqual([
+      "Checked the parser\nFound the ordering issue",
+      "Verified the fix\nTests pass",
+    ]);
   });
 
   test("pairs production-shaped codex MCP calls and preserves failed status", () => {

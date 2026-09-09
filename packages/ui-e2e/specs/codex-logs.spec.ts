@@ -130,6 +130,7 @@ async function seedContextSnapshots(
   taskId: string,
   agentId: string,
   suffix: string,
+  completeMeasurement = true,
 ) {
   const postSnapshot = async (body: Record<string, unknown>) => {
     const response = await fetch(`${swarm.apiUrl}/api/tasks/${taskId}/context`, {
@@ -148,7 +149,7 @@ async function seedContextSnapshots(
     eventType: "progress",
     sessionId: `e2e-codex-context-${suffix}`,
     contextUsedTokens: 191_533,
-    contextTotalTokens: 1_050_000,
+    contextTotalTokens: completeMeasurement ? 1_050_000 : undefined,
     contextPercent: 18.241238095238096,
   });
   await postSnapshot({
@@ -183,10 +184,6 @@ test("Codex app-server logs render messages, deltas, and MCP results", async ({
   await expect(page.getByText("Unknown · message.delta", { exact: true })).toHaveCount(0);
 
   await page.getByRole("button", { name: /e2e-mcp\.inspect/ }).click();
-  await page
-    .getByRole("button", { name: /e2e-mcp\.inspect/ })
-    .last()
-    .click();
   await expect(
     page.getByText(logs.mcpResult, { exact: true }).filter({ visible: true }),
   ).toBeVisible();
@@ -215,8 +212,32 @@ test("context usage keeps the latest complete measurement", async ({
     page.getByText("191.5K / 1.1M", { exact: true }).filter({ visible: true }),
   ).toBeVisible();
   await expect(page.getByText("18%", { exact: true }).filter({ visible: true })).toHaveCount(2);
-  await expect(page.getByText("200K", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("191.5K / 200.0K", { exact: true })).toHaveCount(0);
 
+  await clean.assertClean();
+});
+
+test("context usage does not combine incomplete measurements", async ({
+  page,
+  seed,
+  swarm,
+  clean,
+}, testInfo) => {
+  test.skip(!seed, "remote run without seed");
+  await seedContextSnapshots(
+    swarm,
+    seed!.tasks.completed,
+    seed!.agents.workerA,
+    testInfo.testId,
+    false,
+  );
+  await page.goto(`/tasks/${seed!.tasks.completed}`);
+
+  await expect(
+    page.getByText("Unavailable", { exact: true }).filter({ visible: true }),
+  ).toBeVisible();
+  await expect(page.getByText("191.5K / 200.0K", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("18%", { exact: true }).filter({ visible: true })).toHaveCount(1);
   await clean.assertClean();
 });
 

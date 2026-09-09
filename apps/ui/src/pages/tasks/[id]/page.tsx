@@ -467,9 +467,6 @@ function TaskContextSection({
 
   const { summary } = context;
   const latestUsageSnapshot = findLatestUsableContextSnapshot(context.snapshots);
-  const currentPercent = latestUsageSnapshot?.contextPercent ?? summary.peakContextPercent ?? 0;
-  const usedTokens = latestUsageSnapshot?.contextUsedTokens ?? summary.peakContextTokens ?? 0;
-  const totalTokens = latestUsageSnapshot?.contextTotalTokens ?? summary.contextWindowSize ?? 0;
 
   return (
     <>
@@ -478,33 +475,42 @@ function TaskContextSection({
         <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
           Context Usage
         </span>
-        <div className="flex items-center gap-2 py-1">
-          <Progress
-            value={currentPercent}
-            className={cn("h-1.5 flex-1", progressBarTone(currentPercent))}
-          />
-          <span className="text-[10px] font-mono text-muted-foreground shrink-0">
-            {currentPercent.toFixed(0)}%
-          </span>
-        </div>
-        <MetaRow icon={Cpu} label="Used">
-          <span className="flex flex-col items-start gap-1 font-mono text-xs">
-            <span className="whitespace-nowrap">
-              {formatTokens(usedTokens)} / {formatTokens(totalTokens)}
-            </span>
-            {latestUsageSnapshot?.contextFormula &&
-              latestUsageSnapshot.contextFormula !== "unknown" && (
-                <Badge
-                  variant="outline"
-                  size="tag"
-                  className="text-muted-foreground"
-                  title={`Computed via formula: ${latestUsageSnapshot.contextFormula}`}
-                >
-                  {latestUsageSnapshot.contextFormula}
-                </Badge>
-              )}
-          </span>
-        </MetaRow>
+        {latestUsageSnapshot ? (
+          <>
+            <div className="flex items-center gap-2 py-1">
+              <Progress
+                value={latestUsageSnapshot.contextPercent}
+                className={cn("h-1.5 flex-1", progressBarTone(latestUsageSnapshot.contextPercent))}
+              />
+              <span className="text-[10px] font-mono text-muted-foreground shrink-0">
+                {latestUsageSnapshot.contextPercent.toFixed(0)}%
+              </span>
+            </div>
+            <MetaRow icon={Cpu} label="Used">
+              <span className="flex flex-col items-start gap-1 font-mono text-xs">
+                <span className="whitespace-nowrap">
+                  {formatTokens(latestUsageSnapshot.contextUsedTokens)} /{" "}
+                  {formatTokens(latestUsageSnapshot.contextTotalTokens)}
+                </span>
+                {latestUsageSnapshot.contextFormula &&
+                  latestUsageSnapshot.contextFormula !== "unknown" && (
+                    <Badge
+                      variant="outline"
+                      size="tag"
+                      className="text-muted-foreground"
+                      title={`Computed via formula: ${latestUsageSnapshot.contextFormula}`}
+                    >
+                      {latestUsageSnapshot.contextFormula}
+                    </Badge>
+                  )}
+              </span>
+            </MetaRow>
+          </>
+        ) : (
+          <MetaRow icon={Cpu} label="Current">
+            <span className="text-xs text-muted-foreground">Unavailable</span>
+          </MetaRow>
+        )}
         {summary.peakContextPercent != null && (
           <MetaRow icon={Activity} label="Peak">
             <span className="text-xs font-mono">{summary.peakContextPercent.toFixed(0)}%</span>
