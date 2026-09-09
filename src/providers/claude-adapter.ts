@@ -532,7 +532,9 @@ export function buildClaudeSessionEnvironment(
   model: string,
   taskFilePath: string,
 ): { env: Record<string, string>; appliedReasoningEffort: ReasoningEffort | null } {
-  const sourceEnv = config.env || process.env;
+  const sourceEnv = { ...(config.env || process.env) };
+  // Summaries run in the adapter process. Do not bypass Claude's OAuth filtering for hooks.
+  delete sourceEnv.AGENT_SWARM_CLAUDE_OAUTH_TOKEN;
   const reasoningApplication = applyReasoningEffort("claude", model, config.reasoningEffort);
   return {
     env: {
@@ -545,9 +547,6 @@ export function buildClaudeSessionEnvironment(
       AGENT_SWARM_TASK_ID: config.taskId,
       AGENT_SWARM_AGENT_ID: config.agentId,
       AGENT_SWARM_ADAPTER_SESSION_SUMMARY: "1",
-      ...(sourceEnv.CLAUDE_CODE_OAUTH_TOKEN
-        ? { AGENT_SWARM_CLAUDE_OAUTH_TOKEN: sourceEnv.CLAUDE_CODE_OAUTH_TOKEN }
-        : {}),
       CONTEXT_MODE_EXTERNAL_MCP_NUDGE_EVERY: CTX_MODE_NUDGE_EVERY,
     } as Record<string, string>,
     appliedReasoningEffort:

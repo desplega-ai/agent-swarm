@@ -177,3 +177,21 @@ They do not establish every worker shutdown path or context restoration behavior
 Authentication success does not establish account billing behavior.
 Anthropic's current guidance says the separate SDK credit-pool change remains paused.
 Source: https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan
+
+
+## Project-hook OAuth isolation follow-up
+
+The legacy OAuth mirror bypassed Claude's filtering of `CLAUDE_CODE_OAUTH_TOKEN` for command hooks.
+Both transports now remove `AGENT_SWARM_CLAUDE_OAUTH_TOKEN`, including inherited stale values, before starting Claude.
+Adapter-owned summaries retain the selected OAuth and API-key credentials.
+
+Verification with installed Claude 2.1.266 used synthetic credentials and zero model turns:
+
+```bash
+RUN_CLAUDE_HOOK_CREDENTIALS=1 bun run test:root -- src/tests/claude-hook-credentials.test.ts
+bun run test:root -- src/tests/claude-sdk-transport.test.ts src/tests/claude-stop-hook.test.ts
+```
+
+Both real project-hook tests passed. The 26 transport and summary tests passed with 103 assertions.
+The hook observed neither the native OAuth variable nor its legacy mirror under either transport.
+Stock Claude retained `ANTHROPIC_API_KEY` in the hook environment. This change does not provide general credential isolation for untrusted hooks.

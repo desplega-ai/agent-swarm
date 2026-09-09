@@ -19,6 +19,9 @@ Operational rules for editing or adding harness providers (claude, codex, openco
 `CLAUDE_TRANSPORT=cli|sdk` selects execution inside `ClaudeAdapter`. CLI remains the default.
 The SDK uses the installed Claude executable with pinned SDK `0.3.266`.
 Both transports share configuration, credentials, normalized events, and adapter-owned summaries.
+Both transports remove the legacy `AGENT_SWARM_CLAUDE_OAUTH_TOKEN` mirror from the Claude child environment.
+Adapter-owned summaries retain their selected credentials outside that child.
+Claude filters its standard OAuth variable from command hooks, but retains API keys. Only enable trusted project hooks.
 The worker persists `providerMeta.transport` on session initialization.
 
 The runtime endpoint accepts `claude: { transport: "cli" | "sdk" | null }`.

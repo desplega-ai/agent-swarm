@@ -3,7 +3,12 @@ import { randomUUID } from "node:crypto";
 import { chmod, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cleanupTaskFile, getTaskFilePath } from "../providers/claude-adapter";
+import {
+  buildClaudeSessionEnvironment,
+  cleanupTaskFile,
+  getTaskFilePath,
+  runClaudeSessionSummary,
+} from "../providers/claude-adapter";
 import {
   buildClaudeSdkCommand,
   ClaudeInputQueue,
@@ -11,7 +16,47 @@ import {
   validateClaudeSdkAdditionalArgs,
 } from "../providers/claude-sdk-session";
 import { normalizeClaudeMessage } from "../providers/claude-session-events";
+import type { ProviderSessionConfig } from "../providers/types";
 import { isClaudeBridgeEffective, resolveClaudeTransport } from "../utils/claude-transport";
+
+describe("Claude hook credential boundary", () => {
+  test("does not mirror OAuth into the harness and preserves adapter summary credentials", async () => {
+    for (const transport of ["cli", "sdk"]) {
+      const sourceEnv = {
+        CLAUDE_TRANSPORT: transport,
+        CLAUDE_CODE_OAUTH_TOKEN: "fixture-selected-oauth",
+        ANTHROPIC_API_KEY: "fixture-selected-api",
+        AGENT_SWARM_CLAUDE_OAUTH_TOKEN: "fixture-stale-mirror",
+      };
+      const config = {
+        taskId: crypto.randomUUID(),
+        agentId: crypto.randomUUID(),
+        env: sourceEnv,
+        apiUrl: "http://fixture.invalid",
+        apiKey: "fixture-swarm-key",
+      } as ProviderSessionConfig;
+      const { env } = buildClaudeSessionEnvironment(
+        config,
+        "claude-haiku-4-5",
+        "/tmp/fixture-task",
+      );
+      expect(env.AGENT_SWARM_CLAUDE_OAUTH_TOKEN).toBeUndefined();
+      expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe(sourceEnv.CLAUDE_CODE_OAUTH_TOKEN);
+      expect(env.ANTHROPIC_API_KEY).toBe(sourceEnv.ANTHROPIC_API_KEY);
+      expect(sourceEnv.AGENT_SWARM_CLAUDE_OAUTH_TOKEN).toBe("fixture-stale-mirror");
+      let summaryEnv: NodeJS.ProcessEnv | undefined;
+      await runClaudeSessionSummary(
+        config,
+        ["A completed task with durable evidence. ".repeat(5)],
+        async (options) => {
+          summaryEnv = options.env;
+        },
+      );
+      expect(summaryEnv?.CLAUDE_CODE_OAUTH_TOKEN).toBe(sourceEnv.CLAUDE_CODE_OAUTH_TOKEN);
+      expect(summaryEnv?.ANTHROPIC_API_KEY).toBe(sourceEnv.ANTHROPIC_API_KEY);
+    }
+  });
+});
 
 describe("Claude transport resolution", () => {
   test("uses the resolved overlay, then fallback, then CLI", () => {
