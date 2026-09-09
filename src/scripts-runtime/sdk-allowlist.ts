@@ -27,6 +27,12 @@ export const SDK_TOOL_NAME_MAP = {
   kv_incr: "kv-incr",
   kv_list: "kv-list",
 
+  // ── realtime rooms ──
+  room_get: "room-get",
+  room_change: "room-change",
+  room_reset: "room-reset",
+  room_decode: "room-decode",
+
   // ── repos ──
   repo_list: "get-repos",
   repo_update: "update-repo",

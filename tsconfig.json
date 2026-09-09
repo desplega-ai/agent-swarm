@@ -34,6 +34,7 @@
     "noPropertyAccessFromIndexSignature": false
   },
   "exclude": [
+    "src/realtime/browser.ts",
     "apps",
     "packages",
     "node_modules",

@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Shared board</title>
+    <style>
+      :root {
+        color: #252522;
+        background: #f7f6f3;
+        font-family: "SF Pro Display", "Helvetica Neue", ui-sans-serif, system-ui, sans-serif;
+        font-synthesis: none;
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        min-width: 320px;
+        padding: 0;
+        background: #f7f6f3;
+        color: #252522;
+        font-family: "SF Pro Display", "Helvetica Neue", ui-sans-serif, system-ui, sans-serif;
+      }
+
+      button, input, textarea { font: inherit; }
+
+      button {
+        border: 1px solid #252522;
+        border-radius: 8px;
+        background: #252522;
+        color: #fff;
+        cursor: pointer;
+        padding: 10px 14px;
+      }
+
+      button:hover { background: #3c3c37; }
+      button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px solid #e1a52c; outline-offset: 2px; }
+      button:disabled { cursor: not-allowed; opacity: .5; }
+
+      .page { max-width: 1120px; margin: 0 auto; padding: 32px 24px 56px; }
+
+      header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 24px;
+        border-bottom: 1px solid #d9d7d0;
+        padding-bottom: 24px;
+      }
+
+      h1, h2, p { margin-top: 0; }
+      h1 { font-size: clamp(2rem, 5vw, 3rem); letter-spacing: -.04em; margin-bottom: 8px; }
+      h2 { font-size: 1.15rem; letter-spacing: -.02em; margin-bottom: 16px; }
+      .lede, .muted { color: #67665f; }
+      .lede { max-width: 46rem; margin-bottom: 0; }
+
+      .viewer {
+        min-width: 170px;
+        border: 1px solid #d9d7d0;
+        border-radius: 8px;
+        background: #fff;
+        padding: 12px;
+      }
+
+      .eyebrow {
+        color: #67665f;
+        display: block;
+        font-size: .72rem;
+        font-weight: 700;
+        letter-spacing: .08em;
+        margin-bottom: 4px;
+        text-transform: uppercase;
+      }
+
+      .viewer-name { font-weight: 700; overflow-wrap: anywhere; }
+
+      .notice {
+        border: 1px solid #d9d7d0;
+        border-left: 4px solid #e1a52c;
+        border-radius: 8px;
+        background: #fffdf8;
+        margin: 24px 0;
+        min-height: 47px;
+        padding: 12px 14px;
+      }
+
+      .notice[data-tone="error"] { border-left-color: #a34736; background: #fff9f7; }
+      .notice[data-tone="stale"] { border-left-color: #e1a52c; background: #fffdf8; }
+      .notice:empty { display: none; }
+
+      .grid { display: grid; gap: 24px; grid-template-columns: minmax(0, 1.65fr) minmax(260px, .85fr); }
+      .panel { border: 1px solid #d9d7d0; border-radius: 12px; background: #fff; padding: 20px; }
+      .panel + .panel { margin-top: 24px; }
+
+      .add-row { display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr) auto; margin-bottom: 16px; }
+      input, textarea {
+        border: 1px solid #bdbbb4;
+        border-radius: 8px;
+        background: #fff;
+        color: inherit;
+        padding: 10px 12px;
+        width: 100%;
+      }
+
+      textarea { min-height: 94px; resize: vertical; }
+      label { display: block; font-size: .88rem; font-weight: 650; margin-bottom: 8px; }
+
+      .cards, .peers { list-style: none; margin: 0; padding: 0; }
+      .cards { border-top: 1px solid #e7e5df; }
+      .card {
+        align-items: center;
+        border-bottom: 1px solid #e7e5df;
+        display: flex;
+        gap: 12px;
+        justify-content: space-between;
+        padding: 13px 0;
+      }
+
+      .card-title { font-weight: 650; overflow-wrap: anywhere; }
+      .card-status {
+        background: #fff;
+        border-color: #bdbbb4;
+        color: #252522;
+        flex: 0 0 auto;
+        font-size: .82rem;
+        padding: 7px 10px;
+      }
+
+      .card-status[data-done="true"] { background: #f6efd9; border-color: #c89429; }
+      .empty { color: #67665f; padding: 16px 0 4px; }
+      .agent-note { background: #f7f6f3; border-radius: 8px; min-height: 46px; padding: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+      .agent-note:empty::before { color: #67665f; content: "No note yet. A server-side agent can write one here."; }
+
+      .peers { display: grid; gap: 8px; }
+      .peer {
+        border: 1px solid #e7e5df;
+        border-radius: 8px;
+        display: grid;
+        gap: 3px;
+        padding: 10px;
+      }
+
+      .peer-name { font-weight: 650; overflow-wrap: anywhere; }
+      .cursor { color: #67665f; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .78rem; }
+      .room-meta { color: #67665f; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .75rem; margin: 0 0 16px; }
+      .save-state { color: #67665f; font-size: .82rem; margin: 8px 0 0; min-height: 1.2em; }
+
+      @media (max-width: 720px) {
+        .page { padding: 24px 16px 40px; }
+        header { align-items: stretch; flex-direction: column; }
+        .viewer { min-width: 0; }
+        .grid { grid-template-columns: 1fr; }
+        .add-row { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <header>
+        <div>
+          <h1>Shared board</h1>
+          <p class="lede">A small board shared by everyone in match-42. Changes appear as peers make them.</p>
+        </div>
+        <section class="viewer" aria-label="Current viewer">
+          <span class="eyebrow">Connected as</span>
+          <div class="viewer-name" id="viewer-name">Connecting…</div>
+        </section>
+      </header>
+
+      <div id="notice" class="notice" role="status" aria-live="polite"></div>
+
+      <div class="grid">
+        <section class="panel" aria-labelledby="board-heading">
+          <h2 id="board-heading">Match board</h2>
+          <p class="room-meta">Room: match-42 · Schema: 1</p>
+          <form id="add-card-form" class="add-row">
+            <label for="card-title" class="sr-only" hidden>New card title</label>
+            <input id="card-title" name="title" maxlength="120" placeholder="Write a card title" required>
+            <button type="submit">Add card</button>
+          </form>
+          <ul id="cards" class="cards" aria-live="polite"></ul>
+        </section>
+
+        <aside>
+          <section class="panel" aria-labelledby="peers-heading">
+            <h2 id="peers-heading">Live peers</h2>
+            <p class="muted">Cursor values use each peer's viewport coordinates.</p>
+            <ul id="peers" class="peers" aria-live="polite"></ul>
+          </section>
+
+          <section class="panel" aria-labelledby="agent-note-heading">
+            <h2 id="agent-note-heading">Agent note</h2>
+            <div id="agent-note" class="agent-note" aria-live="polite"></div>
+          </section>
+        </aside>
+      </div>
+
+      <section class="panel" aria-labelledby="lobby-heading">
+        <h2 id="lobby-heading">Lobby</h2>
+        <p class="room-meta">Room: lobby · Schema: 1</p>
+        <form id="lobby-form">
+          <label for="lobby-message">Shared lobby message</label>
+          <textarea id="lobby-message" maxlength="1000" placeholder="Leave a message for everyone in the lobby"></textarea>
+          <button type="submit">Save lobby message</button>
+          <p id="lobby-save-state" class="save-state" aria-live="polite"></p>
+        </form>
+      </section>
+    </main>
+
+    <script>
+      (() => {
+        const ui = {
+          viewerName: document.querySelector('#viewer-name'),
+          notice: document.querySelector('#notice'),
+          cards: document.querySelector('#cards'),
+          peers: document.querySelector('#peers'),
+          agentNote: document.querySelector('#agent-note'),
+          addCardForm: document.querySelector('#add-card-form'),
+          cardTitle: document.querySelector('#card-title'),
+          lobbyForm: document.querySelector('#lobby-form'),
+          lobbyMessage: document.querySelector('#lobby-message'),
+          lobbySaveState: document.querySelector('#lobby-save-state')
+        };
+
+        let board;
+        let lobby;
+        let peers = [];
+        let lobbyDirty = false;
+
+        function message(error) {
+          return error && error.message ? error.message : String(error);
+        }
+
+        function showNotice(text, tone) {
+          ui.notice.textContent = text || '';
+          ui.notice.dataset.tone = tone || '';
+        }
+
+        function markStale(room, roomName) {
+          if (!room.stale) return false;
+          showNotice(`${roomName} uses a different schema version. Its saved state remains visible, but this page cannot write changes.`, 'stale');
+          return true;
+        }
+
+        function renderBoard(state) {
+          const cards = state && state.cards && typeof state.cards === 'object' ? state.cards : {};
+          ui.cards.replaceChildren();
+          const entries = Object.entries(cards);
+
+          if (!entries.length) {
+            const empty = document.createElement('li');
+            empty.className = 'empty';
+            empty.textContent = 'No cards yet. Add the first card.';
+            ui.cards.append(empty);
+          }
+
+          for (const [id, card] of entries) {
+            const item = document.createElement('li');
+            item.className = 'card';
+            const title = document.createElement('span');
+            title.className = 'card-title';
+            title.textContent = card && typeof card.title === 'string' ? card.title : 'Untitled card';
+            const toggle = document.createElement('button');
+            const done = Boolean(card && card.done);
+            toggle.className = 'card-status';
+            toggle.dataset.done = String(done);
+            toggle.type = 'button';
+            toggle.textContent = done ? 'Done' : 'Open';
+            toggle.setAttribute('aria-label', `Mark ${title.textContent} as ${done ? 'open' : 'done'}`);
+            toggle.addEventListener('click', () => toggleCard(id));
+            item.append(title, toggle);
+            ui.cards.append(item);
+          }
+
+          ui.agentNote.textContent = state && typeof state.agentNote === 'string' ? state.agentNote : '';
+        }
+
+        function renderPeers(nextPeers) {
+          peers = Array.isArray(nextPeers) ? nextPeers : [];
+          ui.peers.replaceChildren();
+
+          if (!peers.length) {
+            const empty = document.createElement('li');
+            empty.className = 'empty';
+            empty.textContent = 'No other peers are connected.';
+            ui.peers.append(empty);
+            return;
+          }
+
+          for (const peer of peers) {
+            const item = document.createElement('li');
+            item.className = 'peer';
+            const name = document.createElement('span');
+            name.className = 'peer-name';
+            name.textContent = peer.name || 'Guest';
+            const cursor = document.createElement('span');
+            cursor.className = 'cursor';
+            const data = peer.data || {};
+            cursor.textContent = Number.isFinite(data.x) && Number.isFinite(data.y)
+              ? `cursor: ${Math.round(data.x)}, ${Math.round(data.y)}`
+              : 'cursor: not shared yet';
+            item.append(name, cursor);
+            ui.peers.append(item);
+          }
+        }
+
+        function renderLobby(state) {
+          if (lobbyDirty) return;
+          ui.lobbyMessage.value = state && typeof state.message === 'string' ? state.message : '';
+        }
+
+        async function addCard(title) {
+          if (markStale(board, 'match-42')) return;
+          try {
+            await board.change(state => {
+              state.cards ??= {};
+              state.cards[crypto.randomUUID()] = { title, done: false };
+            });
+            ui.cardTitle.value = '';
+            showNotice('Card added.', 'success');
+          } catch (error) {
+            showNotice(`Could not add the card: ${message(error)}`, 'error');
+          }
+        }
+
+        async function toggleCard(id) {
+          if (markStale(board, 'match-42')) return;
+          try {
+            await board.change(state => {
+              const card = state.cards && state.cards[id];
+              if (card) card.done = !card.done;
+            });
+          } catch (error) {
+            showNotice(`Could not update the card: ${message(error)}`, 'error');
+          }
+        }
+
+        async function saveLobbyMessage() {
+          if (markStale(lobby, 'lobby')) return;
+          try {
+            const value = ui.lobbyMessage.value;
+            await lobby.change(state => {
+              state.message = value;
+            });
+            lobbyDirty = false;
+            ui.lobbySaveState.textContent = 'Saved to the lobby room.';
+          } catch (error) {
+            ui.lobbySaveState.textContent = `Could not save: ${message(error)}`;
+            showNotice(`Could not save the lobby message: ${message(error)}`, 'error');
+          }
+        }
+
+        async function initialize() {
+          try {
+            board = await window.swarmSdk.room('match-42', { schemaVersion: 1 });
+            lobby = await window.swarmSdk.room('lobby', { schemaVersion: 1 });
+
+            const viewer = board.me || lobby.me || {};
+            ui.viewerName.textContent = viewer.name || 'Guest';
+
+            board.on('change', renderBoard);
+            board.on('presence', renderPeers);
+            board.on('error', error => showNotice(`match-42 error: ${message(error)}`, 'error'));
+            board.on('reset', () => showNotice('match-42 was reset by another participant. The board has resynchronized.', 'stale'));
+            lobby.on('change', renderLobby);
+            lobby.on('error', error => showNotice(`lobby error: ${message(error)}`, 'error'));
+            lobby.on('reset', () => showNotice('lobby was reset by another participant. The lobby has resynchronized.', 'stale'));
+
+            renderBoard(board.state);
+            renderPeers(board.presence.peers);
+            renderLobby(lobby.state);
+            markStale(board, 'match-42');
+            markStale(lobby, 'lobby');
+
+            if (!board.stale) {
+              await board.change(state => {
+                state.cards ??= {};
+                state.agentNote ??= '';
+              });
+            }
+            if (!lobby.stale) {
+              await lobby.change(state => {
+                state.message ??= '';
+                state.activeMatch ??= 'match-42';
+              });
+            }
+          } catch (error) {
+            showNotice(`Could not connect to the shared rooms: ${message(error)}`, 'error');
+            ui.viewerName.textContent = 'Unavailable';
+          }
+        }
+
+        ui.addCardForm.addEventListener('submit', event => {
+          event.preventDefault();
+          const title = ui.cardTitle.value.trim();
+          if (title) addCard(title);
+        });
+        ui.lobbyMessage.addEventListener('input', () => { lobbyDirty = true; });
+        ui.lobbyForm.addEventListener('submit', event => {
+          event.preventDefault();
+          saveLobbyMessage();
+        });
+        document.addEventListener('pointermove', event => {
+          if (board) board.presence.set({ x: event.clientX, y: event.clientY });
+        }, { passive: true });
+        window.addEventListener('pagehide', () => {
+          if (board) board.close();
+          if (lobby) lobby.close();
+        });
+
+        initialize();
+      })();
+    </script>
+  </body>
+</html>

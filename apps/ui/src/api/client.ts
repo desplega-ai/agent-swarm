@@ -2935,6 +2935,33 @@ class ApiClient {
     return this.appRequest("/api/apps", undefined, "Failed to list apps");
   }
 
+  async inspectPageRoom(
+    pageId: string,
+    name: string,
+  ): Promise<{
+    schemaVersion: number;
+    generation: string;
+    state: unknown;
+  } | null> {
+    const namespace = encodeURIComponent(`task:page:${pageId}`);
+    const key = `_room/${name}`;
+    const params = new URLSearchParams({ prefix: key, limit: "1" });
+    const response = await fetch(`${this.getBaseUrl()}/api/kv/_/${namespace}?${params}`, {
+      headers: this.getHeaders(),
+    });
+    if (!response.ok) throw new Error(`Cannot read the saved room: ${response.status}`);
+    const result = (await response.json()) as { entries: { key: string; value: unknown }[] };
+    const entry = result.entries.find((candidate) => candidate.key === key);
+    if (!entry) return null;
+    const decoded = await fetch(`${this.getBaseUrl()}/api/rooms/decode`, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify({ value: entry.value }),
+    });
+    if (!decoded.ok) throw new Error(`Cannot decode the saved room: ${decoded.status}`);
+    return decoded.json();
+  }
+
   async getApp(id: string): Promise<{ app: AppDetail }> {
     return this.appRequest(`/api/apps/${encodeURIComponent(id)}`, undefined, "Failed to load app");
   }

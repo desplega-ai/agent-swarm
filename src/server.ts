@@ -87,6 +87,12 @@ import { registerRegisterServiceTool } from "./tools/register-service";
 import { registerGetReposTool, registerUpdateRepoTool } from "./tools/repos";
 import { registerRequestHumanInputTool } from "./tools/request-human-input";
 import { registerResolveUserTool } from "./tools/resolve-user";
+import {
+  registerRoomChangeTool,
+  registerRoomDecodeTool,
+  registerRoomGetTool,
+  registerRoomResetTool,
+} from "./tools/rooms";
 // Scheduling capability
 import {
   registerCreateScheduleTool,
@@ -501,6 +507,10 @@ export async function createServer(opts: { scriptsOnly?: boolean; fullSurface?: 
     registerKvDeleteTool(server);
     registerKvIncrTool(server);
     registerKvListTool(server);
+    registerRoomGetTool(server);
+    registerRoomChangeTool(server);
+    registerRoomResetTool(server);
+    registerRoomDecodeTool(server);
   }
 
   // Slack capability - Slack integration tools (no-op if Slack is not configured)

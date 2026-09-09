@@ -17,6 +17,7 @@ import {
 } from "../../scripts-runtime/executors/types";
 import { runScript } from "../../scripts-runtime/loader";
 import type { ExecutorMeta } from "../../types";
+import { getMcpBaseUrl } from "../../utils/constants";
 import { findInterpolationTokens } from "../../utils/template";
 import { BaseExecutor, type ExecutorResult } from "./base";
 
@@ -123,6 +124,7 @@ export class SwarmScriptExecutor extends BaseExecutor<
       args: config.args,
       fsMode: "none",
       agentId: agentId ?? "workflow",
+      mcpBaseUrl: getMcpBaseUrl(),
       egressSecrets: credentials.egressSecrets,
       failedBindings: credentials.failedBindings,
       apiConnections: getScriptApiConnectionDescriptors({ agentId: agentId ?? undefined }),

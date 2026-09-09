@@ -70,6 +70,8 @@
     "unrs-resolver"
   ],
   "scripts": {
+    "build:realtime-browser": "bun scripts/build-realtime-browser.ts",
+    "check:realtime-browser": "bun tsc -p src/realtime/tsconfig.browser.json && bun scripts/build-realtime-browser.ts --check",
     "build:pi-skills": "bun run plugin/build-pi-skills.ts",
     "build:skill-md": "bun scripts/build-skill-md.ts",
     "check:skill-md": "bun scripts/build-skill-md.ts --check",
@@ -216,6 +218,9 @@
     "sqlite-vec": "^0.1.9",
     "svix": "^1.62.0",
     "viem": "^2.46.3",
+    "ws": "8.18.3",
+    "y-protocols": "1.0.7",
+    "yjs": "13.6.32",
     "zod": "^4.2.1",
     "zod-to-json-schema": "^3.25.1"
   }

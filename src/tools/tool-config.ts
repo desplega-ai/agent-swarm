@@ -187,6 +187,12 @@ export const DEFERRED_TOOLS = new Set([
   "kv-incr",
   "kv-list",
 
+  // Realtime rooms (4)
+  "room-get",
+  "room-change",
+  "room-reset",
+  "room-decode",
+
   // Reusable scripts (9)
   "script-search",
   "script-run",

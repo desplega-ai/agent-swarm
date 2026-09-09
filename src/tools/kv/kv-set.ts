@@ -61,7 +61,11 @@ export const registerKvSetTool = (server: McpServer) => {
         return toolErr(resolved.error, { data: { yourAgentId: requestInfo.agentId } });
       }
 
-      const authErr = await kvWriteAuthError(resolved.namespace, { agentId: requestInfo.agentId });
+      const authErr = await kvWriteAuthError(
+        resolved.namespace,
+        { agentId: requestInfo.agentId },
+        key,
+      );
       if (authErr) {
         return toolErr(authErr, {
           data: { yourAgentId: requestInfo.agentId, namespace: resolved.namespace },

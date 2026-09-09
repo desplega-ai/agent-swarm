@@ -10930,6 +10930,465 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/@swarm/realtime.js": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Browser SDK for realtime rooms and channels */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description JavaScript module */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/rooms/get": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read a realtime room */
+        get: {
+            parameters: {
+                query?: {
+                    name?: string;
+                    namespace?: string;
+                    schemaVersion?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Room view */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            room: {
+                                namespace: string;
+                                name: string;
+                                schemaVersion: number;
+                                generation: string;
+                                stale: boolean;
+                                state?: unknown;
+                                snapshot: string;
+                                bytes: number;
+                            };
+                        };
+                    };
+                };
+                /** @description Validation or room error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Room access denied */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Room not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /** Read a realtime room */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @default default */
+                        name?: string;
+                        namespace?: string;
+                        /** @default 1 */
+                        schemaVersion?: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description Room view */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            room: {
+                                namespace: string;
+                                name: string;
+                                schemaVersion: number;
+                                generation: string;
+                                stale: boolean;
+                                state?: unknown;
+                                snapshot: string;
+                                bytes: number;
+                            };
+                        };
+                    };
+                };
+                /** @description Validation or room error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Room access denied */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Room not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Request body exceeds the room body limit */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/rooms/change": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Apply operations to a realtime room */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @default default */
+                        name?: string;
+                        namespace?: string;
+                        /** @default 1 */
+                        schemaVersion?: number;
+                        operations: ({
+                            /** @enum {string} */
+                            type: "set";
+                            path: (string | number)[];
+                            value: unknown;
+                        } | {
+                            /** @enum {string} */
+                            type: "delete";
+                            path: (string | number)[];
+                        } | {
+                            /** @enum {string} */
+                            type: "insert";
+                            path: (string | number)[];
+                            index: number;
+                            values: unknown[];
+                        } | {
+                            /** @enum {string} */
+                            type: "increment";
+                            path: (string | number)[];
+                            by: number;
+                        } | {
+                            /** @enum {string} */
+                            type: "text";
+                            path: (string | number)[];
+                            index: number;
+                            deleteCount?: number;
+                            insert?: string;
+                        })[];
+                    };
+                };
+            };
+            responses: {
+                /** @description Changed room view */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            room: {
+                                namespace: string;
+                                name: string;
+                                schemaVersion: number;
+                                generation: string;
+                                stale: boolean;
+                                state?: unknown;
+                                snapshot: string;
+                                bytes: number;
+                            };
+                        };
+                    };
+                };
+                /** @description Validation or room error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Room write denied */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Room schema or size conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Request body exceeds the room body limit */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/rooms/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reset a realtime room */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @default default */
+                        name?: string;
+                        namespace?: string;
+                        /** @default 1 */
+                        schemaVersion?: number;
+                        state?: unknown;
+                    };
+                };
+            };
+            responses: {
+                /** @description Reset room view */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            room: {
+                                namespace: string;
+                                name: string;
+                                schemaVersion: number;
+                                generation: string;
+                                stale: boolean;
+                                state?: unknown;
+                                snapshot: string;
+                                bytes: number;
+                            };
+                        };
+                    };
+                };
+                /** @description Validation or room error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Room write denied */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Request body exceeds the room body limit */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/rooms/decode": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Decode a realtime room snapshot */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        value?: unknown;
+                    };
+                };
+            };
+            responses: {
+                /** @description Decoded room state */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            schemaVersion: number;
+                            generation: string;
+                            state?: unknown;
+                        };
+                    };
+                };
+                /** @description Invalid room snapshot */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Request body exceeds the room body limit */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/schedules": {
         parameters: {
             query?: never;

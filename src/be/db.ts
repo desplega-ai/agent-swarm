@@ -9,6 +9,7 @@ import {
   matchesDefaultIdentityMd,
 } from "../prompts/defaults";
 import { configureDbResolver } from "../prompts/resolver";
+import { realtimeBus } from "../realtime/bus";
 import { slackChannelFromContextKey } from "../tasks/slack-routing";
 import { _resolveIntegrationType, emitIntegrationConnected, telemetry } from "../telemetry";
 import type {
@@ -10904,7 +10905,13 @@ export async function deletePage(id: string): Promise<boolean> {
     await tx.run("DELETE FROM user_favorites WHERE itemType = 'page' AND itemId = ?", [id]);
     await tx.run("DELETE FROM kv_entries WHERE namespace = ?", [`task:page:${id}`]);
     // ON DELETE CASCADE on page_versions.pageId handles history cleanup.
-    return await tx.run("DELETE FROM pages WHERE id = ?", [id]);
+    const deleted = await tx.run("DELETE FROM pages WHERE id = ?", [id]);
+    if (deleted.changes > 0) {
+      getDbClient().afterCommit(() =>
+        realtimeBus.publish("room:namespace-deleted", `task:page:${id}`),
+      );
+    }
+    return deleted;
   });
   return result.changes > 0;
 }

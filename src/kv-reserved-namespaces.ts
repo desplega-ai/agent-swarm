@@ -12,3 +12,9 @@ export function reservedNamespaceError(namespace: string): string | null {
     ? "namespace is reserved for swarm apps; use the app row endpoints"
     : null;
 }
+
+export function reservedRoomKeyError(key: string): string | null {
+  return key.startsWith("_room/")
+    ? "room snapshot keys are reserved; use the room endpoints"
+    : null;
+}

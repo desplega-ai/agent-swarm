@@ -1,4 +1,4 @@
-import { EventEmitter } from "node:events";
+import { InProcessBus, realtimeBus } from "../realtime/bus";
 
 export interface WorkflowEventBus {
   emit(event: string, data: unknown): void;
@@ -7,23 +7,19 @@ export interface WorkflowEventBus {
 }
 
 export class InProcessEventBus implements WorkflowEventBus {
-  private emitter = new EventEmitter();
-
-  constructor() {
-    this.emitter.setMaxListeners(100);
-  }
+  constructor(private readonly bus = new InProcessBus()) {}
 
   emit(event: string, data: unknown): void {
-    this.emitter.emit(event, data);
+    this.bus.publish(`workflow:${event}`, data);
   }
 
   on(event: string, handler: (data: unknown) => void): void {
-    this.emitter.on(event, handler);
+    this.bus.subscribe(`workflow:${event}`, handler);
   }
 
   off(event: string, handler: (data: unknown) => void): void {
-    this.emitter.off(event, handler);
+    this.bus.unsubscribe(`workflow:${event}`, handler);
   }
 }
 
-export const workflowEventBus: WorkflowEventBus = new InProcessEventBus();
+export const workflowEventBus: WorkflowEventBus = new InProcessEventBus(realtimeBus);

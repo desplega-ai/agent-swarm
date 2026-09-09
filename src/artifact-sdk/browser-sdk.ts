@@ -25,6 +25,11 @@ class SwarmSDK {
   constructor() {
     this._configPromise = fetch('/@swarm/config').then(r => r.json()).catch(() => null);
 
+    let realtime;
+    const loadRealtime = () => realtime || (realtime = import('/@swarm/realtime.js'));
+    this.room = async (name, options) => (await loadRealtime()).room(name, options);
+    this.channel = async (name) => (await loadRealtime()).channel(name);
+
     const base = '/@swarm/api';
     const call = async (method, path, body) => {
       const init = { method };

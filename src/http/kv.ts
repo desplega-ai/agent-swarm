@@ -12,7 +12,7 @@ import {
   upsertKv,
 } from "../be/db";
 import { mcpOverflowAuthError } from "../kv-overflow";
-import { reservedNamespaceError } from "../kv-reserved-namespaces";
+import { reservedNamespaceError, reservedRoomKeyError } from "../kv-reserved-namespaces";
 import { can } from "../rbac";
 import { agentContextKey, pageContextKey } from "../tasks/context-key";
 import { KvEntrySchema, KvKeySchema, KvNamespaceSchema, KvValueTypeSchema } from "../types";
@@ -611,6 +611,11 @@ async function handleIncr(
     jsonError(res, authErr.message, authErr.status);
     return true;
   }
+  const reservedKeyErr = reservedRoomKeyError(key);
+  if (reservedKeyErr) {
+    jsonError(res, reservedKeyErr, 403);
+    return true;
+  }
 
   const respond: PutKvRespond = explicit ? incrKvExplicit.respond : incrKvHeader.respond;
   const by = body?.by ?? 1;
@@ -662,6 +667,11 @@ async function sendPut(
     jsonError(res, authErr.message, authErr.status);
     return true;
   }
+  const reservedKeyErr = reservedRoomKeyError(key);
+  if (reservedKeyErr) {
+    jsonError(res, reservedKeyErr, 403);
+    return true;
+  }
   const valueType = body.valueType ?? "json";
   const encoded = encodeValueOrError(res, body.value, valueType);
   if (!encoded) return true;
@@ -697,6 +707,11 @@ async function sendDelete(
   const authErr = authorizeWrite(namespace, await buildAuthCtx(req));
   if (authErr) {
     jsonError(res, authErr.message, authErr.status);
+    return true;
+  }
+  const reservedKeyErr = reservedRoomKeyError(key);
+  if (reservedKeyErr) {
+    jsonError(res, reservedKeyErr, 403);
     return true;
   }
   const removed = await deleteKv(namespace, key);

@@ -152,6 +152,9 @@ Before publishing:
 - No nested cards, decorative gradients, oversized art, or cramped default browser styles.
 - No text overlaps, clipped buttons, or unreadable low-contrast text.
 
+Pages inject a default body theme. For a custom palette, set `body` background, color, font, and padding explicitly in your stylesheet.
+Setting these properties only on `:root` does not replace the injected body styles.
+
 ---
 
 # Reference
@@ -160,9 +163,9 @@ Before publishing:
 
 | Mode | URL behavior | When to use |
 |---|---|---|
-| `public` | No gate. Anyone with the URL sees the content. Browser SDK calls **return 401** (no viewer identity → no API access). | Static reports, marketing pages, anything safe to share externally. |
-| `authed` | SPA `app_url` works for any signed-in dashboard user. Direct `api_url` requires a `page_session` cookie (mint via `POST /api/pages/:id/launch`). Browser SDK calls run as the viewing user. | Per-team dashboards, JSON pages with action buttons. |
-| `password` | `?key=<password>` or HTTP Basic on `/p/:id` unlocks. Once unlocked, behaves like `authed` (cookie minted, SDK calls run as viewer's identity). | Pages shared with non-swarm users (clients, contractors). |
+| `public` | No gate. Anyone with the URL sees the content. General API calls require a page session. Rooms and channels permit anonymous guests. | Static reports, marketing pages, anything safe to share externally. |
+| `authed` | SPA `app_url` works for any signed-in dashboard user. Direct `api_url` requires a `page_session` cookie (mint via `POST /api/pages/:id/launch`). User-token launches retain viewer identity. Operator launches use guest sessions. | Per-team dashboards, JSON pages with action buttons. |
+| `password` | `?key=<password>` or HTTP Basic on `/p/:id` unlocks. Unlock mints an anonymous guest session. It does not establish a user identity. | Pages shared with non-swarm users (clients, contractors). |
 
 > Password unlock has to happen on `/p/:id` directly (the API origin) because
 > the password isn't sent to the SPA. Sharing an `app_url` for a `password`
@@ -450,17 +453,17 @@ with a custom `swarm.call` action handler. Action shape:
 
 `swarm.call` dispatches through the SPA's bearer (for `app_url` loads) or
 the page-session cookie (for direct `api_url` loads). The endpoint must be
-a valid swarm API path — there is no allowlist, but the viewer's identity
-bounds what the call can do.
+a valid swarm API path. User-token sessions retain user authorization.
+Operator and password sessions retain deployment-level API access.
 
 See the `@json-render/core` docs for the supported node types (`text`,
 `button`, `input`, `card`, etc.).
 
 ## Security & Blast Radius
 
-- Declared actions on `authed` / `password` pages run with the **viewer's**
-  identity, not the page author's. A button that says "Delete all tasks"
-  will delete the viewer's tasks if the viewer clicks it.
+- User-token launches retain the signed viewer identity and its API permissions.
+- Operator and password sessions are guests with deployment-level API access.
+  They do not inherit the page author's agent identity. Review actions before sharing these pages.
 - Treat agent-generated HTML / JSON like trusted code — the agent already
   has equivalent MCP access, so a malicious page is no worse than a
   malicious tool call. But: don't ship pages to **external** users (via
@@ -507,3 +510,137 @@ human-facing summary.
 - SPA listing: `${APP_URL}/pages` — the same `APP_URL` used for share links above.
   Prefer the `app_url` that `create_page` returns; build URLs by hand only when
   you have no page id.
+
+## Multiplayer rooms and live channels
+
+Use rooms for shared boards, games, and collaborative documents. The SDK supplies the connection and CRDT implementation automatically.
+Public pages permit guest room peers. Authenticated pages use the signed viewer identity when launched with a user token.
+Operator launches and password pages show guest names. Never accept a viewer identity from page input.
+
+```html
+<div id="status"></div>
+<button id="add">Add card</button>
+<ul id="cards"></ul>
+<script type="module">
+  const lobby = await swarmSdk.room('lobby', { schemaVersion: 1 });
+  const board = await swarmSdk.room('match-42', { schemaVersion: 1 });
+
+  function render(state) {
+    document.querySelector('#cards').replaceChildren(
+      ...Object.entries(state.cards || {}).map(([id, card]) => {
+        const li = document.createElement('li');
+        li.textContent = card.title;
+        return li;
+      })
+    );
+  }
+  board.on('change', render);
+  board.on('error', error => { document.querySelector('#status').textContent = error.message; });
+  board.on('presence', peers => {
+    document.querySelector('#status').textContent = peers.map(peer => peer.name).join(', ');
+  });
+  render(board.state);
+  document.querySelector('#add').onclick = async () => {
+    await board.change(state => {
+      state.cards ??= {};
+      state.cards[crypto.randomUUID()] = { title: 'New card', done: false };
+    });
+  };
+  document.addEventListener('pointermove', event => {
+    board.presence.set({ x: event.clientX, y: event.clientY });
+  });
+  await lobby.change(state => { state.activeMatch = 'match-42'; });
+</script>
+```
+
+Initialize shared containers once before inviting other peers. Prefer maps keyed by stable IDs for cards, players, and documents.
+`room.change(fn)` supports synchronous edits to JSON objects and arrays. It rejects unsupported values and unsafe property names.
+Updates to separate existing fields merge. Concurrent replacements of the same scalar use Yjs conflict resolution.
+A numeric assignment, including `+=`, replaces a scalar. Use an increment operation when every increment must count.
+
+```js
+await board.apply([{ type: 'set', path: ['score'], value: 0 }]);
+await board.apply([{ type: 'increment', path: ['score'], by: 1 }]);
+await board.apply([{ type: 'text', path: ['notes'], index: 0, insert: 'Hello' }]);
+```
+
+`room.apply(operations)` sends operations to the server. Operations require a connection and apply against the live document.
+Paths contain object keys or numeric array indices. Parent containers must exist.
+Supported operations are `set`, `delete`, `insert`, `increment`, and `text`.
+Array insertion takes `path`, `index`, and `values`. Text editing takes `path`, `index`, optional `deleteCount`, and optional `insert`.
+`room.ydoc` exposes the Yjs document for editor bindings. The shared root is `room.ydoc.getMap('root')`.
+
+`room.state` returns the current JSON state. `room.me` contains `{userId, name, kind}`.
+`room.on(event, handler)` returns an unsubscribe function. Events include `change`, `presence`, `reset`, and `error`.
+`room.presence.peers` contains `{userId, name, kind, data}` entries. Cursor data belongs in `peer.data`.
+Presence updates default to one transmission per 50 milliseconds. Presence never enters the persisted document.
+Use `await room.close()` when the page no longer needs a room.
+
+### Schema changes and persistence
+
+Declare a positive integer `schemaVersion`. A mismatch opens a stale room with readable state and rejected writes.
+Read and preserve old content before a deliberate reset:
+
+```js
+const next = await swarmSdk.room('board', { schemaVersion: 2 });
+if (next.stale) {
+  const previous = next.state;
+  // Ask the person before destructive resets in a real application.
+  await next.reset({ cards: {}, recovered: previous });
+}
+```
+
+A reset creates a new generation. Connected peers discard the old replica, and the server rejects old-generation updates.
+Do not reset during ordinary page initialization. Reset destroys the previous document history.
+The page body is the application program. Room state is runtime data, separate from page versions.
+
+The API stores one snapshot under `_room/<name>` in the room namespace. Generic KV writes cannot modify these keys.
+Snapshots flush within a one-second window under normal operation. A crash can lose changes since the last successful flush.
+Connected browser replicas resync on reconnect. This provides best-effort durability, not database transaction guarantees.
+Use ordinary API records for data that requires guaranteed durability.
+
+Each encoded snapshot is limited to 2 MiB, including metadata and base64. This permits approximately 1.5 MiB of binary state.
+A namespace permits 100 rooms. The API permits 1,000 active rooms and evicts idle rooms after flushing.
+Deleting a page removes its rooms. Presence remains ephemeral during every flush and reset.
+Room data bypasses secret scrubbing during CRDT transport and persistence. Never place credentials or secrets in a room.
+Run one API replica. Sticky sessions alone do not make shared room state correct across multiple replicas.
+
+### Agents, scripts, and workflows
+
+Page rooms always use `task:page:<pageId>`. A page cannot select another namespace.
+A bearer-authenticated agent can join that namespace explicitly through `room-get`, `room-change`, and `room-reset`.
+`room-get` reads existing rooms. It reports a missing room without creating it. Browser joins and authorized changes can create rooms.
+Scripts use the same API without loading Yjs:
+
+```ts
+const namespace = 'task:page:<pageId>';
+const result = await ctx.swarm.room.get({ namespace, name: 'match-42', schemaVersion: 1 });
+await ctx.swarm.room.change({
+  namespace, name: 'match-42', schemaVersion: 1,
+  operations: [{ type: 'set', path: ['agentNote'], value: 'Reviewed by an agent' }],
+});
+```
+
+`room-decode` and `ctx.swarm.room.decode({value})` decode a saved snapshot. The REST equivalent is `POST /api/rooms/decode`.
+The decoder reads the supplied value. It does not join or change a live room.
+
+Room changes emit a coalesced `room.changed` workflow event. Its payload includes `namespace`, `room`, `schemaVersion`, and `generation`.
+A workflow `wait` node uses `mode: 'event'`, `scope: 'global'`, and `eventName: 'room.changed'`.
+Filter by `{namespace: 'task:page:<pageId>', room: 'match-42'}`. Start the wait before the external page action occurs.
+A `swarm-script` node can then read or change the room. Declare workflow inputs explicitly when passing outputs between nodes.
+
+### Channels without a document
+
+Channels transmit transient messages in the same namespace. They have no persistence or replay.
+Use a channel for game signals or notifications that do not require a shared document:
+
+```js
+const signals = await swarmSdk.channel('signals');
+const stop = signals.on('message', data => console.log(data.action));
+await signals.publish({ action: 'round-started' });
+stop();
+await signals.close();
+```
+
+Room and channel names must match `[a-zA-Z0-9_-]{1,64}`. A page shares one socket across all its rooms and channels.
+Channels cannot access internal workflow topics. The socket closes when its authenticated page session expires.

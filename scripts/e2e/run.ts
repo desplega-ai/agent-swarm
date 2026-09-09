@@ -20,6 +20,7 @@ import { auth } from "./scenarios/auth";
 import { configRoundtrip } from "./scenarios/config-roundtrip";
 import { health } from "./scenarios/health";
 import { mcpSurface } from "./scenarios/mcp-surface";
+import { realtimeRooms } from "./scenarios/realtime-rooms";
 import { slackFailedTask } from "./scenarios/slack-failed-task";
 import { slackFollowUp } from "./scenarios/slack-follow-up";
 import { slackMention } from "./scenarios/slack-mention";
@@ -49,6 +50,7 @@ const scenarios: Scenario[] = [
   auth,
   taskLifecycle,
   mcpSurface,
+  realtimeRooms,
   workflowScriptNode,
   configRoundtrip,
   slackMention,
@@ -181,7 +183,9 @@ async function main(): Promise<number> {
   if (scenarioResults.some((result) => result.status === "fail")) {
     activeSut.flushLog();
     const tails = await Promise.all(
-      activeSut.logPaths.map(async (path) => `Last 40 lines of ${path}:\n${await tailLog(path, 40)}`),
+      activeSut.logPaths.map(
+        async (path) => `Last 40 lines of ${path}:\n${await tailLog(path, 40)}`,
+      ),
     );
     console.error(tails.join("\n"));
   }

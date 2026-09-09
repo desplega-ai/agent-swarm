@@ -39,6 +39,9 @@ import {
 } from "../otel";
 import { startQueueStallAlarm, stopQueueStallAlarm } from "../queue-stall-alarm";
 import { clearAuditSink, isRbacEnabled, setAuditSink } from "../rbac";
+import { realtimeBus } from "../realtime/bus";
+import { closeRooms, removeNamespaceRooms, sweepRooms } from "../realtime/rooms";
+import { attachRealtimeTransport } from "../realtime/transport";
 import { startScriptRunSupervisor, stopScriptRunSupervisor } from "../script-workflows/supervisor";
 import { getServerSessionsProcessed } from "../server-runtime-counters";
 import { startSlackApp, stopSlackApp } from "../slack";
@@ -91,7 +94,9 @@ import { handlePagesPublic } from "./pages-public";
 import { handlePoll } from "./poll";
 import { handlePricing } from "./pricing";
 import { handlePromptTemplates } from "./prompt-templates";
+import { handleRealtimeAsset } from "./realtime";
 import { handleRepos } from "./repos";
+import { handleRooms } from "./rooms";
 import { describeRequestRoute } from "./route-def";
 import { handleSchedules } from "./schedules";
 import { handleScriptConnectionProxy } from "./script-connection-proxy";
@@ -144,6 +149,7 @@ const globalState = globalThis as typeof globalThis & {
   __sigintRegistered?: boolean;
   __apiGcInterval?: ReturnType<typeof setInterval>;
   __runId?: string;
+  __closeRealtime?: () => void;
 };
 
 const API_GC_INTERVAL_MS = 5 * 60 * 1000;
@@ -179,6 +185,9 @@ function startApiGcInterval() {
   }
 
   const interval = setInterval(() => {
+    void sweepRooms().catch((error) =>
+      console.error("[rooms] Sweep failed:", scrubSecrets(String(error))),
+    );
     const closedOwnerTransports = closeIdleMcpTransports(transports, transportActivity, {
       idleTimeoutMs: MCP_TRANSPORT_IDLE_TIMEOUT_MS,
       label: "MCP",
@@ -205,6 +214,7 @@ function startApiGcInterval() {
 
 // Clean up previous server on hot reload
 if (globalState.__httpServer) {
+  globalState.__closeRealtime?.();
   console.log("[HTTP] Hot reload detected, closing previous server...");
   globalState.__httpServer.close();
 }
@@ -324,6 +334,8 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleConfig(req, res, pathSegments, queryParams),
         () => handleFs(req, res, pathSegments, queryParams, myAgentId),
         () => handleKv(req, res, pathSegments, queryParams),
+        () => handleRooms(req, res, pathSegments, queryParams),
+        () => handleRealtimeAsset(req, res),
         () => handleIntegrations(req, res, pathSegments),
         () => handlePromptTemplates(req, res, pathSegments, queryParams),
         () => handleDbQuery(req, res, pathSegments, queryParams),
@@ -401,6 +413,16 @@ const httpServer = createHttpServer(async (req, res) => {
 });
 
 // Store references in globalThis for hot reload persistence
+const detachRealtime = attachRealtimeTransport(httpServer);
+const stopRoomDeletion = realtimeBus.subscribe("room:namespace-deleted", (namespace) => {
+  void Promise.resolve(removeNamespaceRooms(String(namespace))).catch((error) =>
+    console.error("[rooms] Deletion failed:", scrubSecrets(String(error))),
+  );
+});
+globalState.__closeRealtime = () => {
+  detachRealtime();
+  stopRoomDeletion();
+};
 globalState.__httpServer = httpServer;
 globalState.__transports = transports;
 globalState.__transportsUser = transportsUser;
@@ -410,6 +432,7 @@ globalState.__transportActivity = transportActivity;
 globalState.__transportActivityUser = transportActivityUser;
 
 async function shutdown() {
+  globalState.__closeRealtime?.();
   console.log("Shutting down HTTP server...");
   telemetry.server("shutdown", {
     signal: shutdownSignal,
@@ -481,13 +504,14 @@ async function shutdown() {
     delete transportActivityUser[id];
   }
 
-  // Close all active connections forcefully
-  httpServer.closeAllConnections();
-  httpServer.close(() => {
-    closeDb();
-    console.log("MCP HTTP server closed, and database connection closed");
-    process.exit(0);
+  // Drain accepted requests before flushing rooms and closing their database.
+  await new Promise<void>((resolve, reject) => {
+    httpServer.close((error) => (error ? reject(error) : resolve()));
   });
+  await closeRooms();
+  closeDb();
+  console.log("MCP HTTP server closed, and database connection closed");
+  process.exit(0);
 }
 
 // Only register signal handlers once (avoid duplicates on hot reload)

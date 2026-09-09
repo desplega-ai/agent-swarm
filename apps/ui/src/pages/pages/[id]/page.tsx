@@ -52,6 +52,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getConfig } from "@/lib/config";
 import { JsonPageRenderer } from "./json-page-renderer";
+import { RoomInspector } from "./room-inspector";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -511,6 +512,7 @@ export default function ArtifactPage() {
         }
       />
       <PageSlugLine id={pageId!} />
+      <RoomInspector key={pageId} pageId={pageId!} />
       {body}
     </div>
   );
