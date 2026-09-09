@@ -120,6 +120,7 @@ export default function AgentsPage() {
           <HarnessCell
             harnessProvider={params.data?.harnessProvider}
             credStatus={params.data?.credStatus}
+            claudeTransport={params.data?.claudeTransport}
           />
         ),
       },

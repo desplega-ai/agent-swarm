@@ -293,6 +293,43 @@ async function getClaudeRuntimeMetadata(
   };
 }
 
+/**
+ * Effective `CLAUDE_TRANSPORT` for a batch of agents, using the same
+ * global → agent precedence as `getClaudeRuntimeMetadata` (minus repo scope,
+ * which a list has no context for). Two queries total, not two per agent.
+ * Non-Claude agents and invalid values yield `undefined` so the list never
+ * fails on one bad config row.
+ */
+async function resolveListClaudeTransports(
+  agents: ReadonlyArray<{ id: string; harnessProvider?: ProviderName | null }>,
+): Promise<Map<string, ClaudeTransport>> {
+  const result = new Map<string, ClaudeTransport>();
+  if (!agents.some((agent) => agent.harnessProvider === "claude")) return result;
+  const [globalRows, agentRows] = await Promise.all([
+    getSwarmConfigs({ scope: "global", key: "CLAUDE_TRANSPORT" }),
+    getSwarmConfigs({ scope: "agent", key: "CLAUDE_TRANSPORT" }),
+  ]);
+  const globalValue = globalRows[0]?.value;
+  const agentValues = new Map(agentRows.map((row) => [row.scopeId, row.value]));
+  for (const agent of agents) {
+    if (agent.harnessProvider !== "claude") continue;
+    try {
+      result.set(
+        agent.id,
+        resolveClaudeTransport({ CLAUDE_TRANSPORT: agentValues.get(agent.id) ?? globalValue }),
+      );
+    } catch {
+      // Invalid stored value: leave the field absent rather than 500 the list.
+    }
+  }
+  return result;
+}
+
+/** List/detail rows carry the effective Claude transport so the dashboard can flag SDK agents. */
+const AgentListItemSchema = AgentWithCapacityAndTasksSchema.extend({
+  claudeTransport: ClaudeTransportSchema.optional(),
+});
+
 const listAgents = route({
   method: "get",
   path: "/api/agents",
@@ -309,7 +346,7 @@ const listAgents = route({
   responses: {
     200: {
       description: "Agent list with capacity info",
-      schema: z.object({ agents: z.array(AgentWithCapacityAndTasksSchema) }),
+      schema: z.object({ agents: z.array(AgentListItemSchema) }),
     },
   },
 });
@@ -442,7 +479,7 @@ const getAgent = route({
     include: z.enum(["tasks"]).optional(),
   }),
   responses: {
-    200: { description: "Agent with capacity info", schema: AgentWithCapacityAndTasksSchema },
+    200: { description: "Agent with capacity info", schema: AgentListItemSchema },
     404: { description: "Agent not found" },
   },
 });
@@ -701,8 +738,16 @@ export async function handleAgentsRest(
     const agents = includeTasks
       ? await getAllAgentsWithTasks({ slim })
       : await getAllAgents({ slim });
-    const agentsWithCapacity = await Promise.all(agents.map(agentWithCapacity));
-    listAgents.respond(res, 200, { agents: agentsWithCapacity });
+    const [agentsWithCapacity, transports] = await Promise.all([
+      Promise.all(agents.map(agentWithCapacity)),
+      resolveListClaudeTransports(agents),
+    ]);
+    listAgents.respond(res, 200, {
+      agents: agentsWithCapacity.map((agent) => {
+        const claudeTransport = transports.get(agent.id);
+        return claudeTransport ? { ...agent, claudeTransport } : agent;
+      }),
+    });
     return true;
   }
 
@@ -1279,7 +1324,16 @@ export async function handleAgentsRest(
       return true;
     }
 
-    getAgent.respond(res, 200, await agentWithCapacity(agent));
+    const [agentWithCap, transports] = await Promise.all([
+      agentWithCapacity(agent),
+      resolveListClaudeTransports([agent]),
+    ]);
+    const claudeTransport = transports.get(agent.id);
+    getAgent.respond(
+      res,
+      200,
+      claudeTransport ? { ...agentWithCap, claudeTransport } : agentWithCap,
+    );
     return true;
   }
 

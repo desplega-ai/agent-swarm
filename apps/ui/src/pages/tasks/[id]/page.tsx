@@ -49,6 +49,7 @@ import {
 import { useUsers } from "@/api/hooks/use-users";
 import type {
   AgentLog,
+  ClaudeProviderMeta,
   DevinProviderMeta,
   ProviderName,
   SessionCost,
@@ -281,7 +282,7 @@ function TaskCostSection({
   costs: SessionCost[] | undefined;
   isLoading: boolean;
   provider?: ProviderName;
-  providerMeta?: DevinProviderMeta | Record<string, never>;
+  providerMeta?: DevinProviderMeta | ClaudeProviderMeta | Record<string, never>;
 }) {
   const isDevin = provider === "devin";
   const devinMeta = isDevin ? (providerMeta as DevinProviderMeta | undefined) : undefined;
@@ -406,7 +407,7 @@ function TaskContextSection({
   context: TaskContextResponse | undefined;
   isLoading: boolean;
   provider?: ProviderName;
-  providerMeta?: DevinProviderMeta | Record<string, never>;
+  providerMeta?: DevinProviderMeta | ClaudeProviderMeta | Record<string, never>;
   costs?: SessionCost[];
 }) {
   const isDevin = provider === "devin";
@@ -1028,6 +1029,14 @@ export default function TaskDetailPage() {
               <span className="opacity-60">
                 {" · "}
                 {task.harnessVariantMeta.version}
+              </span>
+            ) : null}
+            {task.providerMeta &&
+            "transport" in task.providerMeta &&
+            task.providerMeta.transport === "sdk" ? (
+              <span className="opacity-60" title="Ran through the Claude Agent SDK transport">
+                {" · "}
+                sdk
               </span>
             ) : null}
           </Badge>
