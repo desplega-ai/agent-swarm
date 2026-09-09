@@ -3,6 +3,29 @@
 These probes extend the [initial spike](../2026-09-09-claude-agent-sdk-spike/README.md).
 The [follow-up report](../2026-09-09-claude-sdk-parity-follow-up.md) explains the results and their limits.
 
+## Implementation status
+
+PR #1404 now includes the production adapter and agent transport selector.
+Taras approved rejecting SDK selection when Claude Bridge is effective.
+The [implementation verification report](../2026-09-09-claude-sdk-implementation-verification.md) separates production verification from these earlier probes.
+The probes below remain historical evidence. Their results do not establish complete worker parity.
+
+The new `adapter-configuration.ts.example` compares installed configuration through the production adapter.
+Stage it with the same repository-path substitution shown below.
+Run both transports with an isolated OAuth environment:
+
+```sh
+SPIKE_RUN_ADAPTER_CONFIGURATION=1 \
+SPIKE_CONTEXT_MODE_PLUGIN=/absolute/path/to/context-mode/plugin \
+  bun --env-file="$SPIKE_ENV_FILE" adapter-configuration.ts "$SPIKE_CLAUDE_EXECUTABLE"
+```
+
+Set `SPIKE_ADAPTER_TRANSPORT=cli` or `sdk` to run one transport.
+Each transport uses Haiku, eight turns, a 90-second deadline, and an estimated $0.30 budget.
+The script records sanitized tool diagnostics and deletes its fixture directories.
+It checks project instructions, plugins, command hooks, permission tool errors, strict MCP, context-mode execution, and telemetry privacy.
+It does not replace worker persistence, real account rotation, or lifecycle tests.
+
 ## Stage
 
 Run from the repository root. Templates use a repository-path placeholder to avoid machine-specific imports.
@@ -10,7 +33,7 @@ Run from the repository root. Templates use a repository-path placeholder to avo
 ```sh
 bun -e '
 const source = "thoughts/taras/research/2026-09-09-claude-sdk-parity";
-for (const name of ["hooks", "environment", "lifecycle", "permissions", "telemetry", "context-mode", "bridge"]) {
+for (const name of ["hooks", "environment", "lifecycle", "permissions", "telemetry", "context-mode", "bridge", "adapter-configuration"]) {
   const text = await Bun.file(`${source}/${name}.ts.example`).text();
   await Bun.write(`/private/tmp/claude-sdk-parity-20260909/${name}.ts`, text.replaceAll("__SPIKE_REPO_ROOT__", process.cwd()));
 }

@@ -84,6 +84,22 @@ Override with `E2E_MODEL_<PROVIDER>`. Each leg needs its provider credential in 
 bun run e2e --only health --harness claude
 bun run e2e --only health --harness claude,pi --harness-attempts 2
 E2E_MODEL_CLAUDE=claude-haiku-4-5 bun run e2e --only health --harness claude
+E2E_CLAUDE_TRANSPORT=cli E2E_MODEL_CLAUDE=claude-haiku-4-5 bun run e2e --only health --harness claude
+E2E_CLAUDE_TRANSPORT=sdk E2E_MODEL_CLAUDE=claude-haiku-4-5 bun run e2e --only health --harness claude
+```
+
+The Claude leg checks the persisted `providerMeta.transport`, task output, and cost records.
+`E2E_CLAUDE_TRANSPORT` defaults to `cli` and accepts `cli` or `sdk`.
+Use `E2E_CLAUDE_BINARY` to select the same installed executable for both runs.
+Set `E2E_WORKER_BINARY=/usr/local/bin/agent-swarm` to exercise a compiled worker inside its image.
+Run both commands in the same worker image to compare Linux behavior.
+Use the image's `tini` entrypoint, or `docker run --init`, so orphaned processes are reaped.
+
+The opt-in SDK lifecycle suite exercises concurrent input, explicit compaction, and tool cancellation with an isolated home directory.
+It requires an OAuth token and defaults to Haiku with bounded turns:
+
+```bash
+RUN_CLAUDE_SDK_LIFECYCLE=1 bun run test:root -- src/tests/claude-sdk-live-lifecycle.test.ts
 ```
 
 When the runner is root and `gosu` exists (the nightly container job), the worker starts as `gosu worker env HOME=<temp HOME> ...`.

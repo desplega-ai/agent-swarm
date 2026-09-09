@@ -21,6 +21,15 @@ Each row shows a source chip when the underlying environment variable is set on 
 
 ## Groups
 
+### Claude transport default
+
+The **Harness & tools** group includes `CLAUDE_TRANSPORT`, with `cli` as the default and `sdk` as the optional value.
+Agents can inherit this default or assign a transport beneath the harness selector on their details page.
+An agent override takes precedence over the global default. A repository override takes precedence when the session supplies its repository.
+Transport changes apply to future sessions and do not require a worker restart.
+The worker resolves this key for each session instead of retaining a scoped value in its deployment environment.
+SDK selection is incompatible with an effective Claude Bridge or legacy bridge binary.
+
 | Group | Examples |
 | --- | --- |
 | Steering | `STEERING_ENABLED`, `SLACK_THREAD_STEERING`, `SLACK_THREAD_STEERING_MODE` |

@@ -34,6 +34,23 @@ export type ReasoningEffortLevel = (typeof REASONING_EFFORT_LEVELS)[number];
 
 export type AcpTarget = "opencode" | "custom";
 
+export type ClaudeTransport = "cli" | "sdk";
+
+export interface ClaudeRuntimeConfig {
+  /** `null` clears the agent override. Omission leaves it unchanged. */
+  transport?: ClaudeTransport | null;
+}
+
+export interface AgentRuntimeResponse {
+  claude: {
+    /** The agent-scoped override. `null` means inherit. */
+    transport: ClaudeTransport | null;
+    effectiveTransport: ClaudeTransport;
+    inheritedTransport: ClaudeTransport;
+    bridgeEffective: boolean;
+  };
+}
+
 export interface AcpRuntimeConfig {
   target: AcpTarget;
   command?: string | null;

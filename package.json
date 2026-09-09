@@ -177,6 +177,7 @@
   "dependencies": {
     "@agentclientprotocol/sdk": "1.4.0",
     "@ai-sdk/openai": "^3.0.41",
+    "@anthropic-ai/claude-agent-sdk": "0.3.266",
     "@anthropic-ai/sdk": "^0.93.0",
     "@asteasolutions/zod-to-openapi": "^8.0.0",
     "@aws-sdk/client-bedrock": "3.1048.0",
@@ -187,7 +188,7 @@
     "@earendil-works/pi-coding-agent": "^0.85.1",
     "@inkjs/ui": "^2.0.0",
     "@linear/sdk": "^77.0.0",
-    "@modelcontextprotocol/sdk": "^1.25.1",
+    "@modelcontextprotocol/sdk": "1.29.0",
     "@openai/codex": "0.153.4",
     "@opencode-ai/sdk": "^1.18.29",
     "@openfort/openfort-node": "^0.9.1",

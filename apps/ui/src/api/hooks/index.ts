@@ -14,6 +14,7 @@ export {
 } from "./use-agent-activity";
 export {
   useAgent,
+  useAgentRuntime,
   useAgentRuntimeInstances,
   useAgents,
   useUpdateAgentMaxTasks,

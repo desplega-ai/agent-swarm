@@ -47,7 +47,30 @@ When the runner refreshes an already-cloned repo for a new task, dirty working t
 
 ## Claude Code (Default)
 
-Claude Code is the default and recommended harness. It spawns the `claude` CLI as a subprocess with `--output-format stream-json` for structured event streaming.
+Claude Code is the default harness.
+It supports two transports: CLI, the default, and the optional Claude Agent SDK.
+Both transports start the installed Claude Code executable as a child process.
+
+Select **Claude transport** beneath **Harness** on the agent details page.
+Choose **CLI**, **SDK**, or **Inherit** to use the configured default.
+Saving affects future sessions. An active session retains its transport.
+Selecting another harness hides this control and preserves the saved Claude setting.
+
+`CLAUDE_TRANSPORT=cli|sdk` uses the existing configuration precedence: repository, agent, global, deployment environment, then `cli`.
+Repository settings apply when the task supplies a registered repository.
+Set the global default under **Settings > Configuration**.
+The SDK supports the same OAuth and API-key credential selection as CLI, including credential pools.
+When both credential types exist, Swarm preserves both selected values and prefers OAuth for validation and tracking.
+Claude Code determines which credential it uses.
+
+SDK sessions retain Swarm context preambles and never use native session resume.
+They share settings, project instructions, plugins, hooks, strict MCP configuration, telemetry, and summary preparation with CLI sessions.
+`CLAUDE_BINARY` selects the executable and any wrapper prefix.
+A custom wrapper must support the SDK protocol. An executable override alone does not establish compatibility.
+The SDK preserves custom argument order and executable prefixes.
+It rejects arguments that replace protocol framing, MCP isolation, the appended Swarm prompt, or native continuation behavior.
+`CLAUDE_QUEUE_STEERING=0` disables queued input for either transport.
+The worker rejects SDK selection when a bridge is effective, including legacy bridge binaries.
 
 ### Authentication Methods
 
@@ -84,6 +107,7 @@ bunx @desplega.ai/agent-swarm onboard
 | `ANTHROPIC_API_KEY` | Alt* | — | Anthropic API key (alternative to OAuth). Also supports multi-credential pools |
 | `SWARM_USE_CLAUDE_BRIDGE` | No | `false` | Enables the bundled `@desplega.ai/claude-bridge` path for interactive Claude sessions. Requires `CLAUDE_CODE_OAUTH_TOKEN`; if only `ANTHROPIC_API_KEY` is available, the worker falls back to stock `claude` |
 | `CLAUDE_BINARY` | No | `claude` | Path to the Claude CLI binary (if not in `$PATH`) |
+| `CLAUDE_TRANSPORT` | No | `cli` | Claude execution transport: `cli` or `sdk`. Applies to future sessions |
 | `CLAUDE_QUEUE_STEERING` | No | automatic probe | Controls raw Claude queue steering. Unset requires stock Claude Code `>=2.1.205`; `0`/`false`/`off`/`no` keeps the legacy `-p` path; `1`/`true`/`on`/`yes` forces stream-json input. |
 
 \* One of `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` is required.

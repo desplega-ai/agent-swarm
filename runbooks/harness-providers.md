@@ -6,13 +6,34 @@ Operational rules for editing or adding harness providers (claude, codex, openco
 
 | Provider | `HARNESS_PROVIDER` | Adapter | Notes |
 |----------|--------------------|---------|-------|
-| Claude Code | `claude` | `ClaudeAdapter` | Default; spawns `claude` CLI |
+| Claude Code | `claude` | `ClaudeAdapter` | CLI by default; optional Agent SDK transport |
 | Codex | `codex` | `CodexAdapter` | Starts a fresh `codex app-server` for each task. OpenAI/ChatGPT OAuth |
 | opencode | `opencode` | `OpencodeAdapter` | Spawns `opencode` CLI; OpenRouter primary; agent-swarm plugin auto-injected. See [harness-configuration § Opencode](/docs/guides/harness-configuration#opencode) |
 | pi-mono | `pi` | `PiMonoAdapter` | In-process library; OpenRouter, Anthropic, or Amazon Bedrock (via `MODEL_OVERRIDE=amazon-bedrock/*` — see Bedrock auth below) |
 | Devin | `devin` | `DevinAdapter` | Cloud-managed via Cognition `/sessions` API |
 | Claude Managed | `claude-managed` | `ClaudeManagedAdapter` | Anthropic managed sandbox; SSE relay |
 | ACP | `acp` | `ACPAdapter` | Curated `opencode` preset or a custom [Agent Client Protocol](https://agentclientprotocol.com) command. Session knobs such as model use `session/set_config_option` when advertised, with target-specific startup fallbacks. No swarm-side *model-provider* credential — the target owns its own model auth. The target receives the worker's swarm API key as the swarm MCP bearer, so point custom targets only at binaries you trust |
+
+## Claude transport selection
+
+`CLAUDE_TRANSPORT=cli|sdk` selects execution inside `ClaudeAdapter`. CLI remains the default.
+The SDK uses the installed Claude executable with pinned SDK `0.3.266`.
+Both transports share configuration, credentials, normalized events, and adapter-owned summaries.
+The worker persists `providerMeta.transport` on session initialization.
+
+The runtime endpoint accepts `claude: { transport: "cli" | "sdk" | null }`.
+Omission preserves the agent's transport override. `null` deletes the override and restores inheritance.
+The dashboard shows the inherited effective value and preserves Claude settings when another harness hides the selector.
+
+Resolve transport from each session's fresh configuration, including repository scope when available.
+Do not export scoped transport values into `process.env` at boot or during reload.
+That would retain an override after its configuration row was deleted.
+In-flight sessions retain their original transport.
+
+Reject SDK selection when a supported, direct, or legacy bridge is effective.
+Preserve the bridge flag's existing fallback without OAuth credentials.
+Custom executable prefixes must speak the SDK protocol. Never silently remove their arguments.
+Swarm context preambles remain the continuation mechanism. Native SDK resume stays disabled.
 
 ## `HARNESS_PROVIDER` resolution + live re-assignment
 
@@ -63,7 +84,7 @@ MCP tools return `isError` on the wire `CallToolResult` (see [runbooks/mcp-tool-
 | `claude-managed` | Yes | Yes | Sends ordered `user.message` events to the managed session. |
 | `opencode` | Lossy: SDK abort, then `promptAsync` | Native `promptAsync` | Interrupt discards the in-flight turn before re-prompting; queue is the zero-loss path. |
 | `devin` | No | Yes | `sendMessage` accepts a working session but does not guarantee interruption, so the adapter always reports `mode: "queue"`. |
-| `claude` | No | Conditional | Raw CLI stream-json queues input at a turn boundary; it does not interrupt. See the gate below. |
+| `claude` | No | Conditional | Both transports queue input at a turn boundary. CLI uses the version gate below. SDK enables queueing unless explicitly disabled. |
 | `codex` | Native `turn/steer` | Adapter queue | The per-task app-server receives steering over JSON-RPC. `steer` interrupts the active turn. `queue` starts after that turn ends. See below. |
 | `acp` | No | No | ACP has one in-flight `session/prompt` and no queue primitive; `session/cancel` is a full abort, not an interrupt. Advertises `[]`. |
 
@@ -72,6 +93,10 @@ The server-side `PROVIDER_STEER_CAPABILITIES` map in `src/types.ts` must deep-eq
 Steering is disabled by default; `STEERING_ENABLED=true|1` is the global opt-in (set it on the API server and worker containers). While off, new steering requests are rejected, steering MCP/UI surfaces are removed, and worker delivery polling is skipped. Existing read-only message history, in-flight worker delivery callbacks, and terminal-status promotion remain available so pre-existing rows can be inspected and drain to a terminal state.
 
 ### Claude queue-steering gate
+
+These version checks apply to the CLI transport.
+The SDK always uses streaming input and enables queued delivery unless `CLAUDE_QUEUE_STEERING` explicitly disables it.
+The SDK rejects bridge selection before starting a session.
 
 Claude's queued steering needs `--input-format stream-json`. That input mode is mutually exclusive with the long-standing `-p <prompt>` invocation, so enabling it changes startup for every Claude task, including tasks that are never steered.
 
@@ -256,13 +281,17 @@ Internal refactors that don't change observable behavior don't need a doc update
 7. Add adapter tests for advertised steering modes and SDK rejection.
 8. Verify the docs build per [docs-site/CLAUDE.md](../docs-site/CLAUDE.md).
 
-## Alt-binary: claude-bridge (subscription-pool variant)
+## Alt-binary: claude-bridge
 
 User-facing guide: [docs-site/.../guides/claude-bridge-experimental.mdx](../docs-site/content/docs/(documentation)/guides/claude-bridge-experimental.mdx). Engineering notes below.
 
 [`@desplega.ai/claude-bridge`](https://github.com/desplega-ai/claude-bridge) is a Desplega-owned drop-in front for common `claude -p` automation. It drives interactive `claude` inside `tmux`, sends the prompt through the pane, tails Claude's JSONL transcript, and emits Claude-compatible `text`, `json`, or `stream-json`. It accepts the flags the swarm passes today (`-p`, `--model`, `--verbose`, `--output-format stream-json`, `--permission-mode`, `--append-system-prompt`, `--mcp-config`, `--strict-mcp-config`, `--dangerously-skip-permissions`), so `ClaudeAdapter.buildCommand()` does not branch — only the argv prefix changes.
 
-**Why it exists.** Starting **2026-06-15**, `claude -p` (and the Agent SDK / GitHub Actions surfaces) draws from a dedicated programmatic-credit pool rather than the Max/Pro subscription quota. Interactive `claude` sessions stay on the subscription pool. Routing the harness through claude-bridge keeps swarm runs on the subscription pool for users who pay for one.
+**Billing guidance, checked September 9, 2026.** Anthropic paused the separate SDK credit pool on June 15.
+Its [support update](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan) says SDK and `claude -p` usage still consume subscription limits.
+OAuth success alone does not prove account billing behavior.
+Existing bridge configuration remains effective on CLI.
+SDK sessions reject an effective bridge because it cannot speak the SDK control protocol.
 
 ### Bridge toggle
 

@@ -203,6 +203,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     if (parsed.success) return null;
     return `Invalid HARNESS_PROVIDER value (must be one of: ${ProviderNameSchema.options.join(", ")})`;
   },
+  ...enumValidator("CLAUDE_TRANSPORT", ["cli", "sdk"]),
   // Codex credits-exhausted cooldown (ms). Permissive on range here (positive
   // integer) — the worker clamps to [5m, 7d] via resolveCodexCreditsExhaustedCooldownMs.
   CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS: (value) => {

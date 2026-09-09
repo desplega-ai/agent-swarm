@@ -288,7 +288,7 @@ const updateSession = route({
       claudeSessionId: z.string().min(1),
       provider: ProviderNameSchema.exclude(["devin"]).optional(),
       model: z.string().optional(),
-      providerMeta: z.object({}).optional(),
+      providerMeta: z.object({ transport: z.enum(["cli", "sdk"]).optional() }).optional(),
       harnessVariant: z.string().optional(),
       harnessVariantMeta: z.record(z.string(), z.unknown()).optional(),
     }),

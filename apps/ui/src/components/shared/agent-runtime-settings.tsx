@@ -2,7 +2,7 @@ import { AlertTriangle, ArrowUpCircle, Check, ChevronsUpDown, Lock, Save } from 
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { useUpdateAgentRuntime } from "@/api/hooks/use-agents";
+import { useAgentRuntime, useUpdateAgentRuntime } from "@/api/hooks/use-agents";
 import { useResolvedConfigs } from "@/api/hooks/use-config-api";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useEnvPresence } from "@/api/hooks/use-integrations-meta";
@@ -11,6 +11,7 @@ import {
   type AcpSessionConfigOption,
   type AcpTarget,
   type Agent,
+  type ClaudeTransport,
   REASONING_EFFORT_LEVELS,
   type ReasoningEffortLevel,
 } from "@/api/types";
@@ -65,6 +66,7 @@ import { cn } from "@/lib/utils";
 
 /** Unset sentinel — no `REASONING_EFFORT_OVERRIDE` (harness-native default). */
 type EffortValue = ReasoningEffortLevel | "";
+type ClaudeTransportValue = ClaudeTransport | "inherit";
 
 const RUNTIME_EDIT_MIN_VERSION = "1.77.2";
 const ACP_RUNTIME_EDIT_MIN_VERSION = "1.142.0";
@@ -161,6 +163,7 @@ function nearestSupportedLevel(
 export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
   const initialHarness = isLocalHarness(agent.harnessProvider) ? agent.harnessProvider : "claude";
   const configsQuery = useResolvedConfigs({ agentId: agent.id });
+  const runtimeQuery = useAgentRuntime(agent.id);
   const envPresenceQuery = useEnvPresence(CREDENTIAL_KEYS);
   const updateRuntime = useUpdateAgentRuntime();
   const gate = useFeatureGate(RUNTIME_EDIT_MIN_VERSION);
@@ -171,6 +174,9 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
   const [model, setModel] = useState(() => configuredModel(configs));
   const [customMode, setCustomMode] = useState(false);
   const [effort, setEffort] = useState<EffortValue>("");
+  const [claudeTransport, setClaudeTransport] = useState<ClaudeTransportValue>(
+    runtimeQuery.data?.claude.transport ?? "inherit",
+  );
   const [acpTarget, setAcpTarget] = useState<AcpTarget>(
     configuredAcpTarget(configs, initialHarness === "acp" ? "custom" : "opencode"),
   );
@@ -216,6 +222,17 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
   );
   const acpModelOption = findModelOption(model, acpModelGroups);
   const latestModel = agent.credStatus?.latestModel ?? null;
+  const inheritedClaudeTransport = runtimeQuery.data?.claude.inheritedTransport ?? "cli";
+  const selectedClaudeTransport =
+    claudeTransport === "inherit" ? inheritedClaudeTransport : claudeTransport;
+  const persistedClaudeTransport = runtimeQuery.data?.claude.transport;
+  const claudeBridgeConflict =
+    harness === "claude" &&
+    runtimeQuery.data?.claude.bridgeEffective === true &&
+    selectedClaudeTransport === "sdk";
+  const claudeRuntimeUnsupported = runtimeQuery.data === null;
+  const claudeRuntimeUnavailable =
+    harness === "claude" && (runtimeQuery.isError || runtimeQuery.data === undefined);
 
   // Re-syncs the editable fields from PERSISTED settings only when those
   // settings actually change. The async inputs (env presence, Bedrock probe,
@@ -258,6 +275,11 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
     setAcpModelEnvKey(configuredValue(configs, "ACP_MODEL_ENV_KEY"));
   }, [syncKey, configs, initialHarness, envPresenceQuery.data, liveBedrockStatus, liveCatalog]);
 
+  useEffect(() => {
+    if (persistedClaudeTransport === undefined) return;
+    setClaudeTransport(persistedClaudeTransport ?? "inherit");
+  }, [persistedClaudeTransport]);
+
   // Clears `effort` whenever it ends up unsupported by the (possibly new)
   // selected model, rather than silently coercing it to a supported value.
   function clearEffortIfUnsupported(option: ModelOption | null) {
@@ -296,6 +318,7 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
   function save() {
     if (modelSelectionEnabled && !model.trim()) return;
     if (acpSelected && acpTarget === "custom" && !acpCommand.trim()) return;
+    if (claudeBridgeConflict || claudeRuntimeUnavailable) return;
     updateRuntime.mutate(
       {
         id: agent.id,
@@ -315,6 +338,13 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
                       modelEnvKey: acpModelEnvKey.trim() || null,
                     }
                   : { target: acpTarget },
+            }
+          : {}),
+        ...(harness === "claude" && !claudeRuntimeUnsupported
+          ? {
+              claude: {
+                transport: claudeTransport === "inherit" ? null : claudeTransport,
+              },
             }
           : {}),
       },
@@ -344,24 +374,88 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="w-44 space-y-1.5">
-          <Label>Harness</Label>
-          <Select value={harness} onValueChange={(v) => changeHarness(v as LocalHarnessProvider)}>
-            <SelectTrigger className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {LOCAL_HARNESSES.map((h) => (
-                <SelectItem key={h} value={h}>
-                  <span className="flex items-center gap-2">
-                    <HarnessIcon harness={h} className="h-4 w-4 opacity-100" />
-                    {HARNESS_LABEL[h]}
-                  </span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+      <div className="flex flex-wrap items-start gap-3">
+        <div className="w-56 space-y-3">
+          <div className="space-y-1.5">
+            <Label>Harness</Label>
+            <Select value={harness} onValueChange={(v) => changeHarness(v as LocalHarnessProvider)}>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {LOCAL_HARNESSES.map((h) => (
+                  <SelectItem key={h} value={h}>
+                    <span className="flex items-center gap-2">
+                      <HarnessIcon harness={h} className="h-4 w-4 opacity-100" />
+                      {HARNESS_LABEL[h]}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {harness === "claude" ? (
+            <div className="space-y-1.5">
+              <Label htmlFor="claude-transport">Transport</Label>
+              {runtimeQuery.data ? (
+                <Select
+                  value={claudeTransport}
+                  onValueChange={(value) => setClaudeTransport(value as ClaudeTransportValue)}
+                >
+                  <SelectTrigger
+                    id="claude-transport"
+                    className="w-full"
+                    aria-label="Claude transport"
+                    aria-invalid={claudeBridgeConflict}
+                  >
+                    <SelectValue>
+                      {claudeTransport === "inherit"
+                        ? `Inherit (${inheritedClaudeTransport.toUpperCase()})`
+                        : claudeTransport.toUpperCase()}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="inherit">
+                      Inherit ({inheritedClaudeTransport.toUpperCase()})
+                    </SelectItem>
+                    <SelectItem value="cli">CLI</SelectItem>
+                    <SelectItem value="sdk">SDK</SelectItem>
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Select value="unavailable" disabled>
+                  <SelectTrigger
+                    id="claude-transport"
+                    className="w-full"
+                    aria-label="Claude transport"
+                  >
+                    <SelectValue>
+                      {claudeRuntimeUnsupported ? "Unavailable" : "Loading..."}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="unavailable">Unavailable</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+              <p className="text-xs text-muted-foreground">
+                {runtimeQuery.isError
+                  ? "Transport settings are unavailable. Refresh the page before saving."
+                  : claudeRuntimeUnsupported
+                    ? "Claude transport requires a newer API. Other runtime settings remain available."
+                    : runtimeQuery.data
+                      ? "Changes apply to future Claude sessions. Workers validate their own environment before each session."
+                      : "Loading transport settings."}
+              </p>
+              {claudeBridgeConflict ? (
+                <AlertCallout tone="warning" icon={AlertTriangle}>
+                  SDK conflicts with the Claude Bridge configuration visible to this API. Choose
+                  CLI, or disable Bridge.
+                </AlertCallout>
+              ) : null}
+            </div>
+          ) : null}
         </div>
 
         {modelSelectionEnabled ? (
@@ -495,6 +589,8 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
           onClick={save}
           disabled={
             updateRuntime.isPending ||
+            claudeRuntimeUnavailable ||
+            claudeBridgeConflict ||
             (acpSelected && !acpGate.supported) ||
             (modelSelectionEnabled && (!model.trim() || disabledChoice)) ||
             (acpSelected && acpTarget === "custom" && !acpCommand.trim())

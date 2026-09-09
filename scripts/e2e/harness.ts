@@ -25,6 +25,17 @@ const PROVIDER_CREDENTIAL_KEYS = {
 } as const;
 type HarnessChild = Bun.Subprocess<"ignore", "pipe", "pipe">;
 
+export type ClaudeTransport = "cli" | "sdk";
+
+export function claudeTransportFromEnv(
+  env: Record<string, string | undefined> = process.env,
+): ClaudeTransport {
+  const raw = env.E2E_CLAUDE_TRANSPORT?.trim();
+  if (!raw || raw === "cli") return "cli";
+  if (raw === "sdk") return "sdk";
+  throw new Error("E2E_CLAUDE_TRANSPORT must be cli or sdk");
+}
+
 const activeChildren = new Set<HarnessChild>();
 
 function errorMessage(error: unknown): string {
@@ -94,6 +105,9 @@ function workerEnv(
   for (const key of [...credentialKeys, "PI_PACKAGE_DIR", "CODEX_PATH_OVERRIDE"]) {
     const value = process.env[key];
     if (value) env[key] = value;
+  }
+  if (provider === "claude" && process.env.E2E_CLAUDE_BINARY) {
+    env.CLAUDE_BINARY = process.env.E2E_CLAUDE_BINARY;
   }
   return env;
 }
@@ -210,7 +224,9 @@ async function prepareHarnessHome(homeDir: string, provider: string): Promise<st
  * codex auth.json are found.
  */
 function workerCommand(homeDir: string): string[] {
-  const command = ["bun", "run", "src/cli.tsx", "worker", "--yolo"];
+  const command = process.env.E2E_WORKER_BINARY
+    ? [process.env.E2E_WORKER_BINARY, "worker", "--yolo"]
+    : ["bun", "run", "src/cli.tsx", "worker", "--yolo"];
   return process.getuid?.() === 0 && Bun.which("gosu")
     ? ["gosu", "worker", "env", `HOME=${homeDir}`, ...command]
     : command;
@@ -285,6 +301,7 @@ async function runHarnessAttempt(
   apiKey: string,
   nonce: string,
   model: string,
+  claudeTransport: ClaudeTransport,
 ): Promise<HarnessAttempt> {
   const started = Date.now();
   const stamp = `${Date.now()}-${provider}`;
@@ -313,6 +330,17 @@ async function runHarnessAttempt(
     expectStatus(register, [201], `register ${provider} harness agent`);
     const agentId = asRecord(register.json).id;
     expect(typeof agentId === "string", `${provider} registration response has no id`);
+    if (provider === "claude") {
+      const config = await api("PUT", "/api/config", {
+        body: {
+          scope: "agent",
+          scopeId: agentId,
+          key: "CLAUDE_TRANSPORT",
+          value: claudeTransport,
+        },
+      });
+      expectStatus(config, [200], `set Claude transport ${claudeTransport}`);
+    }
     const marker = `PONG-${nonce}`;
     // The session runs in a directory the worker user owns. In CI the checkout
     // belongs to root, and codex writes AGENTS.md into the session cwd.
@@ -378,6 +406,16 @@ async function runHarnessAttempt(
       typeof task.claudeSessionId === "string" && task.claudeSessionId.length > 0,
       `${provider} task has no session id`,
     );
+    if (provider === "claude") {
+      const providerMeta = asRecord(task.providerMeta);
+      expect(
+        providerMeta.transport === claudeTransport,
+        `Claude task providerMeta.transport was ${String(providerMeta.transport)}, expected ${claudeTransport}`,
+      );
+      expect(cost.records > 0, "Claude task has no persisted cost record");
+      expect(cost.inputTokens > 0, "Claude persisted cost has no input tokens");
+      expect(cost.outputTokens > 0, "Claude persisted cost has no output tokens");
+    }
     return { status: "pass", durationMs: Date.now() - started, cost };
   } catch (error) {
     writer?.flush();
@@ -413,6 +451,7 @@ export async function runHarnessLeg(
 ): Promise<HarnessResult> {
   const started = Date.now();
   const model = modelFor(provider);
+  const claudeTransport = provider === "claude" ? claudeTransportFromEnv() : "cli";
   const attempts: HarnessAttempt[] = [];
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const result = await runHarnessAttempt(
@@ -422,6 +461,7 @@ export async function runHarnessLeg(
       apiKey,
       `${nonce}-a${attempt}`,
       model,
+      claudeTransport,
     );
     attempts.push(result);
     if (result.status === "pass") break;

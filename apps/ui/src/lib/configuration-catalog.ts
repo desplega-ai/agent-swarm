@@ -283,6 +283,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
     icon: Cpu,
     entries: [
       {
+        key: "CLAUDE_TRANSPORT",
+        label: "Default Claude transport",
+        description:
+          "Choose the default Claude execution transport. Agent runtime settings can override it. Existing agents inherit CLI unless you change this value.",
+        kind: "enum",
+        options: ["cli", "sdk"],
+        defaultValue: "cli",
+        docsUrl: `${DOCS}guides/harness-providers`,
+      },
+      {
         key: "SCRIPTS_ONLY_MCP",
         label: "Scripts-only MCP",
         description:

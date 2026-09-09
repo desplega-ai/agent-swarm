@@ -455,7 +455,7 @@ type NoProviderMeta = Record<string, never>;
 
 export type ProviderMetaMap = {
   devin: DevinProviderMeta;
-  claude: NoProviderMeta;
+  claude: { transport?: "cli" | "sdk" };
   codex: NoProviderMeta;
   pi: NoProviderMeta;
   "claude-managed": NoProviderMeta;
