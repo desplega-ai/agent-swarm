@@ -1,0 +1,104 @@
+import { query } from "@anthropic-ai/claude-agent-sdk@0.3.266";
+import {
+  buildClaudeCodeOtelEnv,
+  buildClaudeCodeRuntimeEnv,
+} from "__SPIKE_REPO_ROOT__/src/providers/claude-adapter";
+import {
+  registerVolatileSecret,
+  scrubSecrets,
+} from "__SPIKE_REPO_ROOT__/src/utils/secret-scrubber";
+
+const root = "/private/tmp/claude-sdk-parity-20260909";
+const dir = `${root}/telemetry-${crypto.randomUUID()}`;
+const token = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+if (!token) throw new Error("The OAuth token is required.");
+registerVolatileSecret(token, "oauth");
+const promptMarker = `PRIVATE_PROMPT_${crypto.randomUUID()}`;
+const requests: { path: string; bytes: number; promptFound: boolean; traceFound: boolean }[] = [];
+const traceId = "d6c4f8c9d6c4f8c9d6c4f8c9d6c4f8c9";
+const collector = Bun.serve({
+  port: 0,
+  hostname: "127.0.0.1",
+  async fetch(request) {
+    const text = await request.text();
+    requests.push({
+      path: new URL(request.url).pathname,
+      bytes: text.length,
+      promptFound: text.includes(promptMarker),
+      traceFound: text.includes(traceId),
+    });
+    return Response.json({});
+  },
+});
+const abort = new AbortController();
+const timeout = setTimeout(() => abort.abort(), 60_000);
+let sdk: ReturnType<typeof query> | undefined;
+const summary: Record<string, unknown> = {};
+try {
+  await Bun.write(`${dir}/workspace/.keep`, "");
+  await Bun.write(`${dir}/config/.keep`, "");
+  sdk = query({
+    prompt: `Reply OK. Ignore this diagnostic marker: ${promptMarker}`,
+    options: {
+      pathToClaudeCodeExecutable: process.argv[2],
+      cwd: `${dir}/workspace`,
+      env: {
+        PATH: process.env.PATH,
+        HOME: dir,
+        CLAUDE_CONFIG_DIR: `${dir}/config`,
+        CLAUDE_CODE_OAUTH_TOKEN: token,
+        CLAUDE_CODE_ENABLE_TELEMETRY: "1",
+        CLAUDE_CODE_ENHANCED_TELEMETRY_BETA: "1",
+        OTEL_TRACES_EXPORTER: "otlp",
+        OTEL_METRICS_EXPORTER: "otlp",
+        OTEL_LOGS_EXPORTER: "otlp",
+        OTEL_EXPORTER_OTLP_PROTOCOL: "http/json",
+        OTEL_EXPORTER_OTLP_ENDPOINT: `http://127.0.0.1:${collector.port}`,
+        OTEL_METRIC_EXPORT_INTERVAL: "1000",
+        OTEL_LOGS_EXPORT_INTERVAL: "1000",
+        OTEL_BSP_SCHEDULE_DELAY: "1000",
+        TRACEPARENT: `00-${traceId}-a2b3c4d5e6f70809-01`,
+        ...buildClaudeCodeRuntimeEnv({}),
+        ...buildClaudeCodeOtelEnv({ SWARM_ENABLE_HARNESS_OTEL: "1" }),
+      },
+      settingSources: [],
+      strictMcpConfig: true,
+      tools: [],
+      model: "claude-haiku-4-5",
+      maxBudgetUsd: 0.1,
+      maxTurns: 1,
+      abortController: abort,
+      stderr: (text) => {
+        summary.stderr = scrubSecrets(String(summary.stderr ?? "") + text).slice(-1000);
+      },
+    },
+  });
+  for await (const message of sdk)
+    if (message.type === "result")
+      summary.result = { subtype: message.subtype, cost: message.total_cost_usd };
+  await Bun.sleep(1500);
+  summary.requests = requests;
+  summary.metricsExported = requests.some((row) => row.path === "/v1/metrics");
+  summary.logsExported = requests.some((row) => row.path === "/v1/logs");
+  summary.tracesExported = requests.some((row) => row.path === "/v1/traces");
+  summary.parentTraceFound = requests.some((row) => row.traceFound);
+  summary.promptPrivacyPreserved = requests.every((row) => !row.promptFound);
+  summary.passed =
+    summary.metricsExported &&
+    summary.logsExported &&
+    summary.tracesExported &&
+    summary.parentTraceFound &&
+    summary.promptPrivacyPreserved;
+  if (!summary.passed) process.exitCode = 1;
+} catch (error) {
+  summary.error = scrubSecrets(String(error));
+  summary.passed = false;
+  process.exitCode = 1;
+} finally {
+  clearTimeout(timeout);
+  sdk?.close();
+  collector.stop(true);
+  const output = scrubSecrets(JSON.stringify(summary, null, 2));
+  await Bun.write(`${root}/telemetry-result.json`, output);
+  console.log(output);
+}

@@ -1,0 +1,242 @@
+import { query } from "@anthropic-ai/claude-agent-sdk@0.3.266";
+import {
+  type Sut,
+  startSut,
+  stopSut,
+} from "__SPIKE_REPO_ROOT__/scripts/e2e/sut";
+import { buildClaudeCodeRuntimeEnv } from "__SPIKE_REPO_ROOT__/src/providers/claude-adapter";
+import {
+  registerVolatileSecret,
+  scrubSecrets,
+} from "__SPIKE_REPO_ROOT__/src/utils/secret-scrubber";
+
+const repo = "__SPIKE_REPO_ROOT__";
+const root = "/private/tmp/claude-sdk-parity-20260909";
+const dir = `${root}/hooks-${crypto.randomUUID()}`;
+const token = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+if (!token) throw new Error("The OAuth token is required.");
+registerVolatileSecret(token, "oauth");
+const assert = (ok: unknown, message: string) => {
+  if (!ok) throw new Error(message);
+};
+const summary: Record<string, unknown> = {
+  scope: "Actual Swarm hooks through SDK, with isolated PM2 and HOME",
+};
+let sut: Sut | undefined;
+let proxy: ReturnType<typeof Bun.serve> | undefined;
+let sdk: ReturnType<typeof query> | undefined;
+const abort = new AbortController();
+const timer = setTimeout(() => abort.abort(), 120_000);
+const requests: { method: string; path: string; status: number }[] = [];
+try {
+  await Bun.$`mkdir -p ${dir}/workspace/.claude ${dir}/home/.claude ${dir}/bin`.quiet();
+  await Bun.$`ln -s ${process.execPath} ${dir}/bin/bun`.quiet();
+  await Bun.write(`${dir}/bin/pm2`, '#!/bin/sh\nif [ "$1" = "jlist" ]; then printf "[]\\n"; fi\n');
+  await Bun.$`chmod +x ${dir}/bin/pm2`.quiet();
+  await Bun.write(`${dir}/workspace/fixture.txt`, "HOOK_READ_CONTROL\n");
+  sut = await startSut(false, { SLACK_DISABLE: "true" });
+  registerVolatileSecret(sut.apiKey, "swarm");
+  const base = sut.baseUrl;
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${sut.apiKey}`,
+    "Content-Type": "application/json",
+  };
+  async function api<T>(path: string, body?: unknown): Promise<T> {
+    const response = await fetch(`${base}${path}`, {
+      method: body === undefined ? "GET" : "POST",
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    assert(response.ok, `${path} returned ${response.status}`);
+    return response.json() as Promise<T>;
+  }
+  const agent = await api<{ id: string }>("/api/agents", {
+    name: "SDK production hook probe",
+    isLead: false,
+  });
+  const task = await api<{ id: string }>("/api/tasks", {
+    agentId: agent.id,
+    task: "Read a fixture and verify hook effects.",
+    source: "api",
+  });
+  headers["X-Agent-ID"] = agent.id;
+  const polled = await api<{ trigger?: { taskId?: string } }>("/api/poll");
+  assert(polled.trigger?.taskId === task.id, "The task was not claimed.");
+  type ActiveSession = { id: string; lastHeartbeatAt: string };
+  const active = await api<{ session: ActiveSession }>("/api/active-sessions", {
+    agentId: agent.id,
+    taskId: task.id,
+    triggerType: "task_assigned",
+  });
+  proxy = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    async fetch(request) {
+      const path = new URL(request.url).pathname;
+      const response = await fetch(`${base}${path}${new URL(request.url).search}`, {
+        method: request.method,
+        headers: request.headers,
+        body: ["GET", "HEAD"].includes(request.method) ? undefined : await request.arrayBuffer(),
+      });
+      requests.push({ method: request.method, path, status: response.status });
+      return response;
+    },
+  });
+  const proxyUrl = `http://127.0.0.1:${proxy.port}`;
+  await Bun.write(
+    `${dir}/workspace/.mcp.json`,
+    JSON.stringify({
+      mcpServers: { "agent-swarm": { type: "http", url: `${proxyUrl}/mcp`, headers } },
+    }),
+    { mode: 0o600 },
+  );
+  await Bun.write(
+    `${dir}/task.json`,
+    JSON.stringify({ taskId: task.id, agentId: agent.id, startedAt: new Date().toISOString() }),
+  );
+  await Bun.write(
+    `${dir}/hook-wrapper.ts`,
+    `
+import { scrubSecrets } from ${JSON.stringify(`${repo}/src/utils/secret-scrubber`)};
+const input = await Bun.stdin.text();
+const msg = JSON.parse(input);
+const child = Bun.spawn([process.execPath, ${JSON.stringify(`${repo}/src/cli.tsx`)}, "hook"], {
+  cwd: ${JSON.stringify(`${dir}/workspace`)},
+  env: { ...process.env, PATH: ${JSON.stringify(`${dir}/bin:/usr/bin:/bin`)} },
+  stdin: "pipe", stdout: "pipe", stderr: "pipe",
+});
+child.stdin.write(input); child.stdin.end();
+const [out, err, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+const record = { event: msg.hook_event_name, code, summarySkipped: out.includes("adapter owns the in-memory transcript"), registrationNudge: out.includes("not registered") };
+await Bun.write(${JSON.stringify(`${dir}/events/`)} + crypto.randomUUID() + ".json", JSON.stringify(record));
+process.stdout.write(scrubSecrets(out));
+process.stderr.write(scrubSecrets(err));
+process.exit(code);
+`,
+  );
+  const hookEvents = [
+    "SessionStart",
+    "UserPromptSubmit",
+    "PreToolUse",
+    "PostToolUse",
+    "PreCompact",
+    "Stop",
+  ];
+  await Bun.write(
+    `${dir}/workspace/.claude/settings.json`,
+    JSON.stringify({
+      hooks: Object.fromEntries(
+        hookEvents.map((event) => [
+          event,
+          [
+            {
+              matcher: "*",
+              hooks: [{ type: "command", command: `${process.execPath} ${dir}/hook-wrapper.ts` }],
+            },
+          ],
+        ]),
+      ),
+      permissions: {
+        deny: [
+          "AskUserQuestion",
+          "NotebookEdit",
+          "EnterPlanMode",
+          "ExitPlanMode",
+          "Artifact",
+          "Workflow",
+          "ReportFindings",
+        ],
+      },
+    }),
+  );
+  let result: { subtype: string; cost: number } | undefined;
+  const effectiveTools: string[] = [];
+  sdk = query({
+    prompt: "Use Read to read fixture.txt, then reply with its content. Do not use other tools.",
+    options: {
+      pathToClaudeCodeExecutable: process.argv[2],
+      cwd: `${dir}/workspace`,
+      env: {
+        PATH: process.env.PATH,
+        HOME: `${dir}/home`,
+        CLAUDE_CONFIG_DIR: `${dir}/home/.claude`,
+        CLAUDE_PROJECT_DIR: `${dir}/workspace`,
+        CLAUDE_CODE_OAUTH_TOKEN: token,
+        AGENT_SWARM_API_KEY: sut.apiKey,
+        AGENT_SWARM_AGENT_ID: agent.id,
+        AGENT_SWARM_TASK_ID: task.id,
+        AGENT_SWARM_ADAPTER_SESSION_SUMMARY: "1",
+        TASK_FILE: `${dir}/task.json`,
+        MCP_BASE_URL: proxyUrl,
+        ...buildClaudeCodeRuntimeEnv({}),
+      },
+      settingSources: ["user", "project", "local"],
+      strictMcpConfig: true,
+      mcpServers: {},
+      tools: ["Read"],
+      permissionMode: "bypassPermissions",
+      allowDangerouslySkipPermissions: true,
+      maxBudgetUsd: 0.3,
+      maxTurns: 3,
+      model: "claude-haiku-4-5",
+      abortController: abort,
+      stderr: (text) => {
+        summary.stderr = scrubSecrets(String(summary.stderr ?? "") + text).slice(-2000);
+      },
+    },
+  });
+  for await (const message of sdk) {
+    if (message.type === "system" && message.subtype === "init")
+      effectiveTools.push(...message.tools);
+    if (message.type === "result")
+      result = { subtype: message.subtype, cost: message.total_cost_usd };
+  }
+  const events = [];
+  for await (const path of new Bun.Glob("*.json").scan(`${dir}/events`))
+    events.push(await Bun.file(`${dir}/events/${path}`).json());
+  const after = await api<{ sessions: ActiveSession[] }>(
+    `/api/active-sessions?agentId=${agent.id}`,
+  );
+  const agentAfter = await api<{ status: string }>(`/api/agents/${agent.id}`);
+  summary.events = events;
+  summary.result = result;
+  summary.effectiveTools = effectiveTools;
+  summary.requests = requests.map(({ method, path, status }) => ({
+    method,
+    path: path.replaceAll(agent.id, "<agent>").replaceAll(task.id, "<task>"),
+    status,
+  }));
+  summary.heartbeatAdvanced = after.sessions.some(
+    (row: { id: string; lastHeartbeatAt: string }) =>
+      row.id === active.session.id && row.lastHeartbeatAt > active.session.lastHeartbeatAt,
+  );
+  summary.finalAgentStatus = agentAfter.status;
+  summary.stopSummarySkipped = events.some((row) => row.event === "Stop" && row.summarySkipped);
+  summary.registrationNudgeAbsent = events.every((row) => !row.registrationNudge);
+  for (const name of ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"])
+    assert(
+      events.some((row) => row.event === name && row.code === 0),
+      `${name} did not finish successfully.`,
+    );
+  assert(result?.subtype === "success", "The query did not succeed.");
+  assert(summary.heartbeatAdvanced, "The active session heartbeat did not advance.");
+  assert(summary.stopSummarySkipped, "The hook did not preserve summary ownership.");
+  assert(summary.registrationNudgeAbsent, "A registered agent received a registration nudge.");
+  assert(agentAfter.status === "offline", "Stop did not mark the agent offline.");
+  summary.passed = true;
+} catch (error) {
+  summary.error = scrubSecrets(String(error));
+  summary.passed = false;
+  process.exitCode = 1;
+} finally {
+  clearTimeout(timer);
+  sdk?.close();
+  proxy?.stop(true);
+  if (sut) await stopSut(sut, false);
+  await Bun.file(`${dir}/workspace/.mcp.json`)
+    .delete()
+    .catch(() => {});
+  const output = scrubSecrets(JSON.stringify(summary, null, 2));
+  await Bun.write(`${root}/hooks-result.json`, output);
+  console.log(output);
+}

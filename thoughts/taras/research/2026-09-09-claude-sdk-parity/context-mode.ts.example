@@ -1,0 +1,124 @@
+import { query } from "@anthropic-ai/claude-agent-sdk@0.3.266";
+import {
+  registerVolatileSecret,
+  scrubSecrets,
+} from "__SPIKE_REPO_ROOT__/src/utils/secret-scrubber";
+
+const root = "/private/tmp/claude-sdk-parity-20260909";
+const source = process.env.SPIKE_CONTEXT_MODE_PLUGIN;
+if (!source) throw new Error("SPIKE_CONTEXT_MODE_PLUGIN must name the installed plugin directory.");
+const token = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+if (!token) throw new Error("The OAuth token is required.");
+registerVolatileSecret(token, "oauth");
+const dir = `${root}/context-mode-${crypto.randomUUID()}`;
+const plugin = `${dir}/plugin`;
+const marker = `CONTEXT_PROBE_${crypto.randomUUID()}`;
+const summary: Record<string, unknown> = {
+  scope: "Installed context-mode plugin, isolated copy, installer repair disabled",
+};
+const abort = new AbortController();
+const timeout = setTimeout(() => abort.abort(), 90_000);
+let sdk: ReturnType<typeof query> | undefined;
+try {
+  await Bun.$`mkdir -p ${dir}/workspace ${dir}/config ${dir}/home ${dir}/tmp`.quiet();
+  await Bun.$`cp -R ${source} ${plugin}`.quiet();
+  for (const name of [
+    "better-sqlite3",
+    "@modelcontextprotocol/sdk",
+    "turndown",
+    "turndown-plugin-gfm",
+    "@mixmark-io/domino",
+  ]) {
+    if (!(await Bun.file(`${plugin}/node_modules/${name}/package.json`).exists()))
+      throw new Error(`Missing plugin dependency: ${name}`);
+  }
+  const hooksPath = `${plugin}/hooks/hooks.json`;
+  await Bun.write(hooksPath, (await Bun.file(hooksPath).text()).replaceAll(source, plugin));
+  const env = {
+    PATH: process.env.PATH ?? "",
+    HOME: `${dir}/home`,
+    TMPDIR: `${dir}/tmp`,
+    CLAUDE_CONFIG_DIR: `${dir}/config`,
+    CLAUDE_PROJECT_DIR: `${dir}/workspace`,
+    CONTEXT_MODE_PROJECT_DIR: `${dir}/workspace`,
+    CONTEXT_MODE_DIR: `${dir}/storage`,
+    CLAUDE_PLUGIN_ROOT: plugin,
+    VITEST: "1",
+  };
+  const tools = new Set<string>();
+  const executions = new Set<string>();
+  let successfulExecutionResult = false;
+  let final = "";
+  sdk = query({
+    prompt: `Use mcp__context-mode__ctx_execute with language javascript and code console.log(${JSON.stringify(marker)}). Report its exact output.`,
+    options: {
+      pathToClaudeCodeExecutable: process.argv[2],
+      cwd: `${dir}/workspace`,
+      env: { ...env, CLAUDE_CODE_OAUTH_TOKEN: token },
+      plugins: [{ type: "local", path: plugin }],
+      mcpServers: {
+        "context-mode": {
+          command: process.execPath,
+          args: [`${plugin}/start.mjs`],
+          env: { ...env, CLAUDE_CODE_OAUTH_TOKEN: "" },
+        },
+      },
+      strictMcpConfig: true,
+      settingSources: [],
+      tools: ["ToolSearch"],
+      permissionMode: "bypassPermissions",
+      allowDangerouslySkipPermissions: true,
+      model: "claude-haiku-4-5",
+      maxBudgetUsd: 0.3,
+      maxTurns: 4,
+      abortController: abort,
+      stderr: (text) => {
+        summary.stderr = scrubSecrets(String(summary.stderr ?? "") + text).slice(-2000);
+      },
+    },
+  });
+  for await (const message of sdk) {
+    if (message.type === "system" && message.subtype === "init") {
+      summary.mcpServers = message.mcp_servers;
+      summary.plugins = message.plugins.map((item) => item.name);
+    }
+    if (message.type === "assistant")
+      for (const block of message.message.content)
+        if (block.type === "tool_use") {
+          tools.add(block.name);
+          if (block.name === "mcp__context-mode__ctx_execute") executions.add(block.id);
+        }
+    if (message.type === "user" && Array.isArray(message.message.content))
+      for (const block of message.message.content)
+        if (
+          block.type === "tool_result" &&
+          executions.has(block.tool_use_id) &&
+          !block.is_error &&
+          JSON.stringify(block.content).includes(marker)
+        )
+          successfulExecutionResult = true;
+    if (message.type === "result") {
+      summary.result = { subtype: message.subtype, cost: message.total_cost_usd };
+      if (message.subtype === "success") final = message.result;
+    }
+  }
+  summary.toolUses = [...tools];
+  summary.markerReturned = final.includes(marker);
+  summary.successfulExecutionResult = successfulExecutionResult;
+  summary.passed =
+    tools.has("mcp__context-mode__ctx_execute") &&
+    successfulExecutionResult &&
+    final.includes(marker);
+  if (!summary.passed) process.exitCode = 1;
+} catch (error) {
+  summary.error = scrubSecrets(String(error));
+  summary.passed = false;
+  process.exitCode = 1;
+} finally {
+  clearTimeout(timeout);
+  sdk?.close();
+  await Bun.$`rm -rf ${dir}`.quiet();
+  const output = scrubSecrets(JSON.stringify(summary, null, 2));
+  await Bun.write(`${root}/context-mode-result.json`, output);
+  console.log(output);
+}

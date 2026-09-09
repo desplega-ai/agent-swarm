@@ -24,6 +24,10 @@ What benefits does the SDK provide, and can we choose its internal Claude execut
 
 ## Summary
 
+The [follow-up report](./2026-09-09-claude-sdk-parity-follow-up.md) adds actual hook, permission, telemetry, context-mode, and cancellation probes.
+It confirms direct bridge incompatibility, corrects the billing premise, and records the agent-details UI requirement.
+Use that report for the latest verification status.
+
 **Yes. An optional SDK transport is technically feasible.**
 Keep `HARNESS_PROVIDER=claude` and introduce a separate transport choice, such as `CLAUDE_TRANSPORT=cli|sdk`.
 This setting does not exist today.

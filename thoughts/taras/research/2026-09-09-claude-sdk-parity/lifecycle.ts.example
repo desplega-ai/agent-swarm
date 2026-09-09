@@ -1,0 +1,233 @@
+import { type Options, query, type SDKMessage } from "@anthropic-ai/claude-agent-sdk@0.3.266";
+import {
+  registerVolatileSecret,
+  scrubObject,
+  scrubSecrets,
+} from "__SPIKE_REPO_ROOT__/src/utils/secret-scrubber";
+
+const probeDir = "/private/tmp/claude-sdk-parity-20260909";
+const workspaceDir = `${probeDir}/lifecycle-workspace`;
+const configDir = `${probeDir}/lifecycle-config`;
+const pidPath = `${workspaceDir}/fixture-pids.json`;
+const executable = process.argv[2] ?? Bun.which("claude") ?? "";
+const timeoutMs = 90_000;
+const exitWindowMs = 5_000;
+
+type FixturePids = { parentPid: number; childPid: number };
+
+function assert(condition: unknown, message: string): asserts condition {
+  if (!condition) throw new Error(message);
+}
+
+function safeJson(value: unknown): string {
+  return scrubSecrets(JSON.stringify(scrubObject(value)));
+}
+
+async function writeText(path: string, value: string): Promise<void> {
+  await Bun.write(path, scrubSecrets(value));
+}
+
+async function waitForFile(path: string, timeout: number): Promise<void> {
+  const deadline = Date.now() + timeout;
+  while (!(await Bun.file(path).exists())) {
+    if (Date.now() >= deadline) throw new Error(`Fixture did not write ${path}`);
+    await Bun.sleep(100);
+  }
+}
+
+async function isAlive(pid: number): Promise<boolean> {
+  const result = Bun.spawn(["/bin/kill", "-0", String(pid)], {
+    stdout: "ignore",
+    stderr: "ignore",
+  });
+  return (await result.exited) === 0;
+}
+
+async function waitForExit(pid: number): Promise<{ exited: boolean; elapsedMs: number }> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt <= exitWindowMs) {
+    if (!(await isAlive(pid))) return { exited: true, elapsedMs: Date.now() - startedAt };
+    await Bun.sleep(100);
+  }
+  return { exited: !(await isAlive(pid)), elapsedMs: Date.now() - startedAt };
+}
+
+async function commandForPid(pid: number): Promise<string> {
+  const process = Bun.spawn(["/bin/ps", "-p", String(pid), "-o", "command="], {
+    stdout: "pipe",
+    stderr: "ignore",
+  });
+  const command = await new Response(process.stdout).text();
+  await process.exited;
+  return command.trim();
+}
+
+async function isFixtureProcess(pid: number, role: "parent" | "child"): Promise<boolean> {
+  const command = await commandForPid(pid);
+  return role === "parent"
+    ? command.includes("fixture.ts")
+    : command.includes("/bin/sleep") && command.includes("60");
+}
+
+async function settlesWithin(promise: Promise<void>, timeout: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise.then(() => true),
+      new Promise<false>((resolve) => {
+        timer = setTimeout(() => resolve(false), timeout);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function terminateFixtureProcess(pid: number, role: "parent" | "child"): Promise<boolean> {
+  if (!(await isAlive(pid))) return false;
+  if (!(await isFixtureProcess(pid, role))) return false;
+  const term = Bun.spawn(["/bin/kill", "-TERM", String(pid)], {
+    stdout: "ignore",
+    stderr: "ignore",
+  });
+  await term.exited;
+  const exited = await waitForExit(pid);
+  if (exited.exited) return true;
+  if (!(await isFixtureProcess(pid, role))) return false;
+  const kill = Bun.spawn(["/bin/kill", "-KILL", String(pid)], {
+    stdout: "ignore",
+    stderr: "ignore",
+  });
+  await kill.exited;
+  await waitForExit(pid);
+  return true;
+}
+
+async function setup(): Promise<void> {
+  await Bun.$`rm -rf ${workspaceDir} ${configDir}`.quiet();
+  await Bun.$`mkdir -p ${workspaceDir} ${configDir}`.quiet();
+  await writeText(
+    `${workspaceDir}/fixture.ts`,
+    `import { scrubSecrets } from "__SPIKE_REPO_ROOT__/src/utils/secret-scrubber";
+const child = Bun.spawn(["/bin/sleep", "60"], { stdout: "ignore", stderr: "ignore" });
+await Bun.write(process.argv[2]!, scrubSecrets(JSON.stringify({ parentPid: process.pid, childPid: child.pid })));
+await child.exited;\n`,
+  );
+}
+
+async function main(): Promise<void> {
+  const oauthToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  assert(oauthToken, "CLAUDE_CODE_OAUTH_TOKEN is required");
+  registerVolatileSecret(oauthToken, "CLAUDE_CODE_OAUTH_TOKEN");
+  assert(await Bun.file(executable).exists(), "Pinned stock Claude executable is absent");
+  await setup();
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let sdk: ReturnType<typeof query> | undefined;
+  let pids: FixturePids | undefined;
+  let streamError: string | undefined;
+  let cleanup: { parent: boolean; child: boolean } | undefined;
+  let consume: Promise<void> | undefined;
+  let fixtureIdentityVerified = false;
+  let resultSubtype: string | undefined;
+  let estimatedCostUsd: number | undefined;
+
+  try {
+    const options: Options = {
+      cwd: workspaceDir,
+      pathToClaudeCodeExecutable: executable,
+      model: "claude-haiku-4-5",
+      tools: ["Bash"],
+      permissionMode: "bypassPermissions",
+      allowDangerouslySkipPermissions: true,
+      settingSources: [],
+      maxBudgetUsd: 0.3,
+      maxTurns: 4,
+      abortController: controller,
+      env: {
+        PATH: process.env.PATH ?? "/usr/bin:/bin",
+        HOME: workspaceDir,
+        CLAUDE_CONFIG_DIR: configDir,
+        CLAUDE_CODE_OAUTH_TOKEN: oauthToken,
+      },
+      stderr: (data: string) => {
+        void scrubSecrets(data);
+      },
+    };
+    sdk = query({
+      prompt: `Use Bash to run bun fixture.ts fixture-pids.json from the current directory. Wait after it writes the file.`,
+      options,
+    });
+
+    consume = (async () => {
+      try {
+        for await (const message of sdk as AsyncIterable<SDKMessage>) {
+          if (message.type === "result") {
+            resultSubtype = message.subtype;
+            estimatedCostUsd = message.total_cost_usd;
+          }
+          void scrubObject(message);
+        }
+      } catch (error) {
+        streamError = scrubSecrets(error instanceof Error ? error.message : String(error));
+      }
+    })();
+
+    await waitForFile(pidPath, 30_000);
+    pids = JSON.parse(await Bun.file(pidPath).text()) as FixturePids;
+    assert(Number.isInteger(pids.parentPid) && pids.parentPid > 1, "Fixture parent PID is invalid");
+    assert(Number.isInteger(pids.childPid) && pids.childPid > 1, "Fixture child PID is invalid");
+    const [parentIsFixture, childIsFixture] = await Promise.all([
+      isFixtureProcess(pids.parentPid, "parent"),
+      isFixtureProcess(pids.childPid, "child"),
+    ]);
+    assert(parentIsFixture, "Recorded parent PID is not the Bun fixture");
+    assert(childIsFixture, "Recorded child PID is not the sleep fixture");
+    fixtureIdentityVerified = true;
+    controller.abort();
+
+    const [iteratorShutdownWithinFiveSeconds, parent, child] = await Promise.all([
+      settlesWithin(consume, exitWindowMs),
+      waitForExit(pids.parentPid),
+      waitForExit(pids.childPid),
+    ]);
+    cleanup = {
+      parent: parent.exited ? false : await terminateFixtureProcess(pids.parentPid, "parent"),
+      child: child.exited ? false : await terminateFixtureProcess(pids.childPid, "child"),
+    };
+    const passed = iteratorShutdownWithinFiveSeconds && parent.exited && child.exited;
+    console.log(
+      safeJson({
+        probe: "lifecycle",
+        pids,
+        abortRequested: controller.signal.aborted,
+        iteratorShutdownWithinFiveSeconds,
+        parentExitedWithinFiveSeconds: parent.exited,
+        childExitedWithinFiveSeconds: child.exited,
+        parentExitElapsedMs: parent.elapsedMs,
+        childExitElapsedMs: child.elapsedMs,
+        fixtureCleanupAttempted: cleanup,
+        resultSubtype,
+        estimatedCostUsd,
+        streamError,
+        passed,
+      }),
+    );
+    assert(passed, "AbortController did not stop both fixture processes within five seconds");
+  } finally {
+    clearTimeout(timeout);
+    controller.abort();
+    sdk?.close();
+    if (consume) await settlesWithin(consume, exitWindowMs);
+    if (pids && fixtureIdentityVerified) {
+      await terminateFixtureProcess(pids.parentPid, "parent");
+      await terminateFixtureProcess(pids.childPid, "child");
+    }
+  }
+}
+
+main().catch((error) => {
+  console.error(scrubSecrets(error instanceof Error ? error.message : String(error)));
+  process.exitCode = 1;
+});
