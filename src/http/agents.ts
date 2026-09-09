@@ -34,11 +34,13 @@ import {
   setRuntimeCredentialReady,
   upsertRuntimeInstance,
 } from "../be/multi-runtime";
+import { ACP_TARGET_IDS } from "../providers/acp-target-catalog";
 import { reasoningCapability } from "../providers/reasoning-effort";
 import { ALL_CAPABILITIES, getEnabledCapabilities } from "../server";
 import { telemetry } from "../telemetry";
 import {
   type Agent,
+  AgentAcpStatusSchema,
   AgentAvatarSchema,
   AgentCredStatusSchema,
   AgentLatestModelSchema,
@@ -170,7 +172,29 @@ const setAgentHarnessProviderRoute = route({
   },
 });
 
-const LocalHarnessProviderSchema = z.enum(["claude", "codex", "pi", "opencode"]);
+const LocalHarnessProviderSchema = z.enum(["claude", "codex", "pi", "opencode", "acp"]);
+const AcpRuntimeConfigSchema = z
+  .object({
+    target: z.enum(ACP_TARGET_IDS),
+    command: z.string().trim().min(1).nullable().optional(),
+    args: z.array(z.string()).optional(),
+    envKeys: z.array(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/)).optional(),
+    modelEnvKey: z
+      .string()
+      .regex(/^[A-Za-z_][A-Za-z0-9_]*$/)
+      .nullable()
+      .optional(),
+    options: z.record(z.string(), z.union([z.string(), z.boolean()])).optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.target === "custom" && !value.command) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["command"],
+        message: "Custom ACP targets require a command",
+      });
+    }
+  });
 
 const updateAgentRuntimeRoute = route({
   method: "patch",
@@ -186,6 +210,7 @@ const updateAgentRuntimeRoute = route({
     model: z.string().trim().min(1).nullable().optional(),
     allow_custom_model: z.boolean().optional().default(false),
     reasoning_effort: ReasoningEffortSchema.nullable().optional(),
+    acp: AcpRuntimeConfigSchema.optional(),
   }),
   responses: {
     200: { description: "Updated agent row", schema: AgentWithCapacitySchema },
@@ -366,6 +391,8 @@ const credentialStatusBody = z.object({
    * without `cred_status`, the API preserves existing readiness/live-test data.
    */
   latest_model: AgentLatestModelSchema.optional(),
+  /** ACP session options discovered after session/new. Merge-only. */
+  acp: AgentAcpStatusSchema.optional(),
 });
 
 const updateAgentCredentialStatusRoute = route({
@@ -818,7 +845,12 @@ export async function handleAgentsRest(
   if (updateAgentRuntimeRoute.match(req.method, pathSegments)) {
     const parsed = await updateAgentRuntimeRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const { harness_provider, model, allow_custom_model, reasoning_effort } = parsed.body;
+    const { harness_provider, model, allow_custom_model, reasoning_effort, acp } = parsed.body;
+
+    if (acp && harness_provider !== "acp") {
+      jsonError(res, "ACP configuration requires harness_provider=acp", 400);
+      return true;
+    }
 
     // Validate the requested level against the hybrid capability lookup
     // before touching the DB. `model` may be omitted (leave MODEL_OVERRIDE
@@ -837,8 +869,11 @@ export async function handleAgentsRest(
                 key: "MODEL_OVERRIDE",
               })
             )[0]?.value ?? "");
-      const capability = reasoningCapability(harness_provider, modelForValidation ?? "");
-      if (!capability.levels.includes(reasoning_effort)) {
+      const allowedLevels =
+        harness_provider === "acp"
+          ? []
+          : reasoningCapability(harness_provider, modelForValidation ?? "").levels;
+      if (!allowedLevels.includes(reasoning_effort)) {
         json(
           res,
           {
@@ -846,7 +881,7 @@ export async function handleAgentsRest(
             harness: harness_provider,
             model: modelForValidation || null,
             level: reasoning_effort,
-            allowed: capability.levels,
+            allowed: allowedLevels,
           },
           400,
         );
@@ -900,6 +935,69 @@ export async function handleAgentsRest(
           value: reasoning_effort,
           description: "Set via PATCH /api/agents/{id}/runtime",
         });
+      }
+
+      if (acp) {
+        await upsertSwarmConfig({
+          scope: "agent",
+          scopeId: parsed.params.id,
+          key: "ACP_TARGET",
+          value: acp.target,
+          description: "Set via PATCH /api/agents/{id}/runtime",
+        });
+        if (acp.command !== undefined) {
+          if (acp.command === null) {
+            await deleteSwarmConfigByKey("agent", parsed.params.id, "ACP_TARGET_COMMAND");
+          } else {
+            await upsertSwarmConfig({
+              scope: "agent",
+              scopeId: parsed.params.id,
+              key: "ACP_TARGET_COMMAND",
+              value: acp.command,
+              description: "Set via PATCH /api/agents/{id}/runtime",
+            });
+          }
+        }
+        if (acp.args !== undefined) {
+          await upsertSwarmConfig({
+            scope: "agent",
+            scopeId: parsed.params.id,
+            key: "ACP_TARGET_ARGS",
+            value: JSON.stringify(acp.args),
+            description: "Set via PATCH /api/agents/{id}/runtime",
+          });
+        }
+        if (acp.envKeys !== undefined) {
+          await upsertSwarmConfig({
+            scope: "agent",
+            scopeId: parsed.params.id,
+            key: "ACP_TARGET_ENV_KEYS",
+            value: JSON.stringify(acp.envKeys),
+            description: "Set via PATCH /api/agents/{id}/runtime",
+          });
+        }
+        if (acp.modelEnvKey !== undefined) {
+          if (acp.modelEnvKey === null) {
+            await deleteSwarmConfigByKey("agent", parsed.params.id, "ACP_MODEL_ENV_KEY");
+          } else {
+            await upsertSwarmConfig({
+              scope: "agent",
+              scopeId: parsed.params.id,
+              key: "ACP_MODEL_ENV_KEY",
+              value: acp.modelEnvKey,
+              description: "Set via PATCH /api/agents/{id}/runtime",
+            });
+          }
+        }
+        if (acp.options !== undefined) {
+          await upsertSwarmConfig({
+            scope: "agent",
+            scopeId: parsed.params.id,
+            key: "ACP_CONFIG_OPTIONS",
+            value: JSON.stringify(acp.options),
+            description: "Set via PATCH /api/agents/{id}/runtime",
+          });
+        }
       }
 
       return updated;
@@ -997,10 +1095,11 @@ export async function handleAgentsRest(
               parsed.body.cred_status.latestModel ??
               agent.credStatus?.latestModel ??
               null,
+            acp: parsed.body.acp ?? parsed.body.cred_status.acp ?? agent.credStatus?.acp ?? null,
           }
         : null;
       finalAgent = (await updateAgentCredStatus(parsed.params.id, nextStatus)) ?? agent;
-    } else if (parsed.body.latest_model) {
+    } else if (parsed.body.latest_model || parsed.body.acp) {
       const current = agent.credStatus ?? {
         ready: parsed.body.ready ?? true,
         missing: parsed.body.missing ?? [],
@@ -1008,14 +1107,16 @@ export async function handleAgentsRest(
         hint: null,
         liveTest: null,
         latestModel: null,
-        reportedAt: parsed.body.latest_model.reportedAt,
+        reportedAt: parsed.body.latest_model?.reportedAt ?? parsed.body.acp!.reportedAt,
         reportKind: "post_task" as const,
         bedrock: null,
+        acp: null,
       };
       finalAgent =
         (await updateAgentCredStatus(parsed.params.id, {
           ...current,
-          latestModel: parsed.body.latest_model,
+          latestModel: parsed.body.latest_model ?? current.latestModel,
+          acp: parsed.body.acp ?? current.acp,
         })) ?? agent;
     }
     updateAgentCredentialStatusRoute.respond(res, 200, await agentWithCapacity(finalAgent));

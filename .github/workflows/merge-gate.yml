@@ -118,7 +118,7 @@ jobs:
 
           # ui app lint + typecheck. ui's dependency tree is resolved by the ROOT
           # bun.lock + root overrides since the workspace migration.
-          UI=$(match '^(apps/ui/|bun\.lock|package\.json$|bunfig\.toml$)')
+          UI=$(match '^(apps/ui/|packages/ui-e2e/|bun\.lock|package\.json$|bunfig\.toml$)')
 
           # workflow template validation: content.md changes in templates/workflows/.
           TEMPLATES_WORKFLOWS=$(match '^(templates/workflows/|scripts/validate-template-workflows\.ts$|src/workflows/definition\.ts$|src/types\.ts$)')
@@ -253,6 +253,18 @@ jobs:
           echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
           exit $code
 
+      - name: Check test spawnSync boundary
+        id: test-spawn-sync-boundary
+        run: |
+          start=$(date +%s%3N)
+          set +e
+          bash scripts/check-test-spawn-sync.sh
+          code=$?
+          set -e
+          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
+          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          exit $code
+
       - name: Check async DB seam
         id: async-db-seam
         run: |
@@ -369,6 +381,12 @@ jobs:
       - name: Check Bun version pins
         run: bun run check:bun-version
 
+      # scripts/pre-push-tests.sh prints a skip-list when its worker-image sandbox
+      # probe trips; keep it mechanically synced to the SKIP_SANDBOX_SPAWN_TESTS
+      # importer set so it can't silently drift again.
+      - name: Check sandbox-spawn skip-list sync
+        run: bun run check:sandbox-spawn-skip-list
+
       # Same-run calls merge server-side. See agent-fs docs/ci-timings.md.
       # Skipped on merge_group events and forks (no secret); never blocks the gate.
       - name: Report check timings to ci-timings
@@ -392,6 +410,8 @@ jobs:
           STRUCTURAL_LINT_STATUS: ${{ steps.structural-lint.outputs.status || 'skipped' }}
           DB_BOUNDARY_DURATION: ${{ steps.db-boundary.outputs.duration_ms || '0' }}
           DB_BOUNDARY_STATUS: ${{ steps.db-boundary.outputs.status || 'skipped' }}
+          TEST_SPAWN_SYNC_BOUNDARY_DURATION: ${{ steps.test-spawn-sync-boundary.outputs.duration_ms || '0' }}
+          TEST_SPAWN_SYNC_BOUNDARY_STATUS: ${{ steps.test-spawn-sync-boundary.outputs.status || 'skipped' }}
           API_KEY_BOUNDARY_DURATION: ${{ steps.api-key-boundary.outputs.duration_ms || '0' }}
           API_KEY_BOUNDARY_STATUS: ${{ steps.api-key-boundary.outputs.status || 'skipped' }}
           RBAC_BOUNDARY_DURATION: ${{ steps.rbac-boundary.outputs.duration_ms || '0' }}
@@ -407,9 +427,9 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "$TOKEN" ]; then echo "SWARM_CI_TIMINGS_TOKEN not available; skipping"; exit 0; fi
-          BOUNDARIES_DURATION=$((STRUCTURAL_LINT_DURATION + DB_BOUNDARY_DURATION + API_KEY_BOUNDARY_DURATION + RBAC_BOUNDARY_DURATION + DEPENDENCY_GRAPH_DURATION + AUDIT_COLUMNS_DURATION + SDK_TOOL_REGISTRATION_DURATION + RBAC_COVERAGE_DURATION))
+          BOUNDARIES_DURATION=$((STRUCTURAL_LINT_DURATION + DB_BOUNDARY_DURATION + TEST_SPAWN_SYNC_BOUNDARY_DURATION + API_KEY_BOUNDARY_DURATION + RBAC_BOUNDARY_DURATION + DEPENDENCY_GRAPH_DURATION + AUDIT_COLUMNS_DURATION + SDK_TOOL_REGISTRATION_DURATION + RBAC_COVERAGE_DURATION))
           BOUNDARIES_STATUS=success
-          for status in "$STRUCTURAL_LINT_STATUS" "$DB_BOUNDARY_STATUS" "$API_KEY_BOUNDARY_STATUS" "$RBAC_BOUNDARY_STATUS" "$DEPENDENCY_GRAPH_STATUS" "$AUDIT_COLUMNS_STATUS" "$SDK_TOOL_REGISTRATION_STATUS" "$RBAC_COVERAGE_STATUS"; do
+          for status in "$STRUCTURAL_LINT_STATUS" "$DB_BOUNDARY_STATUS" "$TEST_SPAWN_SYNC_BOUNDARY_STATUS" "$API_KEY_BOUNDARY_STATUS" "$RBAC_BOUNDARY_STATUS" "$DEPENDENCY_GRAPH_STATUS" "$AUDIT_COLUMNS_STATUS" "$SDK_TOOL_REGISTRATION_STATUS" "$RBAC_COVERAGE_STATUS"; do
             if [ "$status" = failure ]; then BOUNDARIES_STATUS=failure; break; fi
             if [ "$status" = skipped ]; then BOUNDARIES_STATUS=skipped; fi
           done
@@ -489,6 +509,47 @@ jobs:
           path: .bun-test-timings
           include-hidden-files: true
           retention-days: 1
+
+  e2e-contract:
+    name: E2E Contract
+    needs: detect-changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Check E2E boundary
+        run: bash scripts/check-e2e-boundary.sh
+
+      - name: Type check E2E runner
+        run: bun run e2e:tsc
+
+      - name: Run E2E contract suite
+        run: bun run e2e --json e2e-results.json --summary-md e2e-summary.md
+
+      - name: Add E2E job summary
+        if: always()
+        run: test ! -f e2e-summary.md || cat e2e-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload E2E results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-contract-results
+          path: e2e-results.json
+          if-no-files-found: warn
 
   test:
     name: Run Tests (${{ matrix.shard }}/2)
@@ -813,7 +874,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
       - name: Start Docker build timer
         id: docker-timer
@@ -957,6 +1018,12 @@ jobs:
           exit $code
         working-directory: apps/ui
 
+      - name: Run UI E2E TypeScript type check
+        run: bun run e2e:ui:tsc
+
+      - name: Run UI E2E Biome check
+        run: bunx biome check packages/ui-e2e
+
       # See agent-fs docs/ci-timings.md. Skipped on merge_group events and forks
       # (no secret); reporting is best-effort and never blocks the gate.
       - name: Report UI check timings to ci-timings
@@ -1022,9 +1089,27 @@ jobs:
       - name: Validate workflow templates
         run: bun run scripts/validate-template-workflows.ts
 
+  operator-skill:
+    name: Operator Skill Check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      - name: Check operator skill
+        run: bun run check:operator-skill
+
   gate:
     name: Merge Gate
-    needs: [detect-changes, restore-timings, lint-and-typecheck, test, pi-skills-freshness, seed-skills, script-types-freshness, openapi-freshness, vendored-openapi, docker-build, ui-lint, template-workflow-validation]
+    needs: [detect-changes, restore-timings, lint-and-typecheck, test, e2e-contract, pi-skills-freshness, seed-skills, script-types-freshness, openapi-freshness, vendored-openapi, docker-build, ui-lint, template-workflow-validation, operator-skill]
     if: always()
     runs-on: ubuntu-latest
     # No checkout, no API calls; the job only inspects `needs` results.

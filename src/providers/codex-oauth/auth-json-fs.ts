@@ -4,9 +4,9 @@
  * partial file, which would break the Codex CLI's auth bootstrap.
  */
 
-import os from "node:os";
 import { join } from "node:path";
 import { credentialsToAuthJson } from "./auth-json.js";
+import { codexUserHome } from "./home.js";
 import type { CodexOAuthCredentials } from "./types.js";
 
 /**
@@ -39,7 +39,7 @@ export async function materializeCodexAuthJson(
   } = {},
 ): Promise<void> {
   const fsModule = await import("node:fs/promises");
-  const homedir = deps.homedir ?? os.homedir.bind(os);
+  const homedir = deps.homedir ?? codexUserHome;
   const fs = deps.fs ?? {
     mkdir: (path: string, opts: { recursive: boolean; mode: number }) => fsModule.mkdir(path, opts),
     writeFile: (path: string, data: string, opts: { mode: number }) =>

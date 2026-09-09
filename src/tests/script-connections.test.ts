@@ -19,6 +19,9 @@ import { buildScriptCredentialBindings } from "../be/script-credential-broker";
 import { typecheckScript } from "../be/scripts/typecheck";
 import { runScript } from "../scripts-runtime/loader";
 import { registerScriptConnectionsTool } from "../tools/script-connections";
+import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
+
+const skip = test.skipIf(SKIP_SANDBOX_SPAWN_TESTS);
 
 const createdBindingIds: string[] = [];
 const createdConnectionIds: string[] = [];
@@ -553,6 +556,14 @@ describe("script connections", () => {
       markMigrationApplied(database, "137_memory_retrieval_composite_index.sql");
       // 138 alters scheduled_tasks, which this migration-112-only fixture does not create.
       markMigrationApplied(database, "138_scheduled_tasks_parent_task.sql");
+      // 140 rebuilds approval_requests, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "140_approval_request_cancelled_status.sql");
+      // 141 alters scheduled_tasks and 142 alters workflows, neither of which
+      // this migration-112-only fixture creates.
+      markMigrationApplied(database, "141_scheduled_task_automation_preflight.sql");
+      markMigrationApplied(database, "142_workflow_automation_preflight.sql");
+      // 143 backfills pricing, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "143_backfill_gpt_6_astra_pricing.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
@@ -659,9 +670,12 @@ describe("script connections", () => {
   });
 
   test("migration 117 keeps a user-attached shared binding standalone (adopts only derived-key bindings)", () => {
-    const dbPath = "./test-script-connections-migration-117-adoption.sqlite";
-    removeDbFiles(dbPath);
-    const database = new Database(dbPath, { create: true });
+    // In-memory scratch DB on purpose: this fixture replays the whole migration
+    // chain, and the runner commits each migration in its own transaction. On a
+    // file-backed DB that is one fsync per migration (~1.9s locally, >13s on a
+    // contended CI runner — it blew the 10s default timeout); in memory the same
+    // chain is ~0.3s. Nothing asserted here needs on-disk durability.
+    const database = new Database(":memory:");
     try {
       // Materialize the pre-redesign schema through 116 by temporarily marking
       // the consolidated migration as applied.
@@ -683,7 +697,7 @@ describe("script connections", () => {
           new Date().toISOString(),
           createHash("sha256").update(sql117).digest("hex"),
         );
-      runMigrations(database); // applies 001..116
+      runMigrations(database); // applies every migration except 117
 
       const now = new Date().toISOString();
       // A user-created STANDALONE binding: source='user', arbitrary config_key
@@ -752,7 +766,6 @@ describe("script connections", () => {
       expect(conn?.auth_type).toBe("none");
     } finally {
       database.close();
-      removeDbFiles(dbPath);
     }
   });
 
@@ -1172,7 +1185,7 @@ describe("script connections", () => {
     createdBindingIds.push(bindingRow!.id);
   });
 
-  test("ctx.api runtime emits plain fetch with credential placeholders", async () => {
+  skip("ctx.api runtime emits plain fetch with credential placeholders", async () => {
     let observed: { url: string; authorization: string | null } | null = null;
     const server = Bun.serve({
       port: 0,
@@ -1186,10 +1199,17 @@ describe("script connections", () => {
     });
     const binding = await upsertCredentialBinding({
       configKey: "RUNTIME_VENDOR_KEY",
-      allowedHosts: [`127.0.0.1:${server.port}`],
+      allowedHosts: ["127.0.0.1"],
       headerTemplate: "Authorization: Bearer [REDACTED:RUNTIME_VENDOR_KEY]",
     });
     createdBindingIds.push(binding.id);
+    const secretConfig = await upsertSwarmConfig({
+      scope: "global",
+      key: "RUNTIME_VENDOR_KEY",
+      value: "runtime-vendor-secret",
+      isSecret: true,
+    });
+    createdConfigIds.push(secretConfig.id);
     const connection = await upsertScriptConnection({
       slug: "runtimeVendor",
       kind: "openapi",
@@ -1203,6 +1223,7 @@ describe("script connections", () => {
       const output = await runScript({
         agentId: "agent-1",
         resources,
+        egressSecrets: await buildScriptCredentialBindings({ agentId: "agent-1" }),
         apiConnections: getScriptApiConnectionDescriptors(),
         source: `
           export default async (_args, ctx) => {
@@ -1218,7 +1239,7 @@ describe("script connections", () => {
       expect(output.result).toEqual({ full_name: "desplega-ai/agent-swarm", private: false });
       expect(observed).toEqual({
         url: `http://127.0.0.1:${server.port}/repos/desplega-ai/agent-swarm?include=stats`,
-        authorization: "Bearer [REDACTED:RUNTIME_VENDOR_KEY]",
+        authorization: "Bearer runtime-vendor-secret",
       });
     } finally {
       server.stop(true);

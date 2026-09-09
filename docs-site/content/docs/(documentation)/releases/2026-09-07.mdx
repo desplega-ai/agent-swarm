@@ -1,0 +1,46 @@
+---
+title: "Release Notes — Week of August 31 to September 7, 2026"
+description: "Five releases expand runtime, model, browser, and integration choice while hardening orchestration and self-hosted operations across 69 merged commits."
+---
+
+## Highlights
+
+### Bring your own ACP runtime
+
+Agent Swarm can now connect to generic Agent Client Protocol runtimes and expose ACP as a selectable runtime in the dashboard. Teams are no longer limited to a fixed adapter catalog: operators can add an ACP-compatible provider, see its supported capabilities, and assign it to an agent without editing backend configuration by hand. This turns Agent Swarm into a more flexible control plane for heterogeneous agent infrastructure. [#1320](https://github.com/desplega-ai/agent-swarm/pull/1320) [#1363](https://github.com/desplega-ai/agent-swarm/pull/1363)
+
+Provider choice also appears earlier in onboarding, while runtime capability state is available to the product and operators. That makes it clearer which execution features are available before a team launches work, especially when an ACP runtime does not implement every optional capability. [#1315](https://github.com/desplega-ai/agent-swarm/pull/1315) [#1327](https://github.com/desplega-ai/agent-swarm/pull/1327)
+
+### Three new frontier models
+
+Agents can now run GPT-6 Astra through Codex and select Claude Fable or Claude Mythos 5.1. Model metadata, pricing, reasoning controls, context limits, and cost normalization were updated with the new entries, so model selection and usage reporting remain consistent across the dashboard and runtime. [#1358](https://github.com/desplega-ai/agent-swarm/pull/1358) [#1303](https://github.com/desplega-ai/agent-swarm/pull/1303)
+
+### Microsoft 365 access and browser automation
+
+Microsoft Graph is now a built-in integration, giving connected agents a supported path to Microsoft 365 data. The full worker image also ships with `agent-browser` and seeded browser-QA guidance, so agents can reproduce frontend issues, capture evidence, and verify web workflows from the same execution environment. [#1318](https://github.com/desplega-ai/agent-swarm/pull/1318) [#1352](https://github.com/desplega-ai/agent-swarm/pull/1352) [#1345](https://github.com/desplega-ai/agent-swarm/pull/1345)
+
+## Improvements
+
+- **Bounded database growth.** Self-hosted operators can opt into retention for non-critical database logs. Cleanup now drains in index order, completes under load, and reports telemetry so teams can control storage without losing visibility into the maintenance cycle. Retention remains disabled unless configured. [#1252](https://github.com/desplega-ai/agent-swarm/pull/1252) [#1299](https://github.com/desplega-ai/agent-swarm/pull/1299)
+
+- **More actionable setup.** Onboarding exposes provider selection and a configurable image pull policy. The dashboard proposes next steps and surfaces first-task setup failures, replacing silent dead ends with a clear recovery path. [#1302](https://github.com/desplega-ai/agent-swarm/pull/1302) [#1308](https://github.com/desplega-ai/agent-swarm/pull/1308) [#1331](https://github.com/desplega-ai/agent-swarm/pull/1331)
+
+- **Route-aware observability.** Inbound API spans are emitted as server work with resolvable routes, integration connections emit telemetry, and runtime feature state is available through stats. Operators can now distinguish traffic by endpoint and understand which capabilities are actually connected. [#1293](https://github.com/desplega-ai/agent-swarm/pull/1293) [#1324](https://github.com/desplega-ai/agent-swarm/pull/1324) [#1327](https://github.com/desplega-ai/agent-swarm/pull/1327)
+
+- **Configurable deployments.** Builds can opt into Plausible analytics and choose the site ID, while demo deployments can use a fixed operating mode. Slack behavior also gained broader visual and black-box coverage. [#1309](https://github.com/desplega-ai/agent-swarm/pull/1309) [#1334](https://github.com/desplega-ai/agent-swarm/pull/1334) [#1319](https://github.com/desplega-ai/agent-swarm/pull/1319)
+
+- **Sharper discovery and accounting.** Skill search handles multi-token queries more usefully, and memory-search consumption is counted per document for clearer usage accounting. [#1328](https://github.com/desplega-ai/agent-swarm/pull/1328) [#1264](https://github.com/desplega-ai/agent-swarm/pull/1264)
+
+## Bug Fixes
+
+- **Retries preserve workflow intent.** Retried steps rehydrate their context before execution, and external retries retain branch routing. Recovery no longer drops valid state or continues down the wrong workflow edge. [#1297](https://github.com/desplega-ai/agent-swarm/pull/1297) [#1298](https://github.com/desplega-ai/agent-swarm/pull/1298)
+
+- **Tasks reach the correct owner.** Direct assignments are no longer blocked by inherited provenance, lead-only work remains lead-only, pool-starvation escalation is explicit, and UI-created follow-ups route to Lead. [#1362](https://github.com/desplega-ai/agent-swarm/pull/1362) [#1276](https://github.com/desplega-ai/agent-swarm/pull/1276) [#1344](https://github.com/desplega-ai/agent-swarm/pull/1344) [#1316](https://github.com/desplega-ai/agent-swarm/pull/1316)
+
+- **Lifecycle state stays accurate.** Cancelling a workflow closes its pending approval requests. Reboot recovery avoids newly claimed tasks, sibling timestamps reflect the correct run, and attachment-backed tasks remain unavailable until their attachments exist. [#1300](https://github.com/desplega-ai/agent-swarm/pull/1300) [#1351](https://github.com/desplega-ai/agent-swarm/pull/1351) [#1281](https://github.com/desplega-ai/agent-swarm/pull/1281) [#1273](https://github.com/desplega-ai/agent-swarm/pull/1273)
+
+- **Capacity pressure is retryable.** Sandboxes have more process headroom and classify resource pressure as capacity exhaustion, allowing callers to retry instead of treating a transient condition as a permanent script failure. [#1326](https://github.com/desplega-ai/agent-swarm/pull/1326)
+
+- **Storage and worker startup recover cleanly.** Runner registration retries agent-fs provisioning, deployment paths now carry agent-fs 0.13.5, and startup scripts remain writable and readable across container restarts. [#1355](https://github.com/desplega-ai/agent-swarm/pull/1355) [#1347](https://github.com/desplega-ai/agent-swarm/pull/1347) [#1350](https://github.com/desplega-ai/agent-swarm/pull/1350) [#1360](https://github.com/desplega-ai/agent-swarm/pull/1360)
+
+- **Credentials and environment-sensitive tests are safer.** Codex OAuth honors custom home-directory overrides, nightly end-to-end runs preserve credential blobs, and sandbox and attachment tests now fail or skip for the correct environmental reason. [#1313](https://github.com/desplega-ai/agent-swarm/pull/1313) [#1348](https://github.com/desplega-ai/agent-swarm/pull/1348) [#1337](https://github.com/desplega-ai/agent-swarm/pull/1337) [#1354](https://github.com/desplega-ai/agent-swarm/pull/1354)

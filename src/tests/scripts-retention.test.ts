@@ -5,6 +5,9 @@ import { runMigrations } from "../be/migrations/runner";
 import { createScriptApi, getScript, insertScript, upsertScriptByName } from "../be/scripts/db";
 import { purgeExpiredScratchScripts } from "../be/scripts/retention";
 import { runSavedScriptAsAgent } from "../be/scripts/run-saved";
+import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
+
+const skip = test.skipIf(SKIP_SANDBOX_SPAWN_TESTS);
 
 const TEST_DB_PATH = "./test-scripts-retention.sqlite";
 const NOW = new Date("2026-08-13T12:00:00.000Z");
@@ -330,7 +333,7 @@ describe("scratch script retention", () => {
     expect(reused.script.updatedAt).not.toBe("2026-07-01T00:00:00.000Z");
   });
 
-  test("a successful shared saved-script execution refreshes scratch last-used time", async () => {
+  skip("a successful shared saved-script execution refreshes scratch last-used time", async () => {
     const script = await addScript("scratch-app-action-a1b2c3d4", true);
     const old = "2026-07-01T00:00:00.000Z";
     await getDbClient().run("UPDATE scripts SET updatedAt = ? WHERE id = ?", [old, script.id]);
@@ -343,7 +346,7 @@ describe("scratch script retention", () => {
     ).not.toBe(old);
   });
 
-  test("a stale scratch script survives a GC tick that fires while its run is still in flight", async () => {
+  skip("a stale scratch script survives a GC tick that fires while its run is still in flight", async () => {
     const script = await addScript("scratch-inflight-a1b2c3d4", true);
     const old = "2026-07-01T00:00:00.000Z";
     await getDbClient().run("UPDATE scripts SET updatedAt = ? WHERE id = ?", [old, script.id]);
@@ -363,7 +366,7 @@ describe("scratch script retention", () => {
     expect(output.exitCode).toBe(0);
   });
 
-  test("a failed saved-script execution restores the pre-run last-used time instead of extending it", async () => {
+  skip("a failed saved-script execution restores the pre-run last-used time instead of extending it", async () => {
     const script = await insertScript({
       name: "scratch-failing-a1b2c3d4",
       scope: "agent",

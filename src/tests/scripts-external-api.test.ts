@@ -18,6 +18,9 @@ import { handleScripts } from "../http/scripts";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { handleX } from "../http/x";
 import { refreshSecretScrubberCache, scrubSecrets } from "../utils/secret-scrubber";
+import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
+
+const skip = test.skipIf(SKIP_SANDBOX_SPAWN_TESTS);
 
 const TEST_DB_PATH = "./test-scripts-external-api.sqlite";
 const API_KEY = "test-external-api-key-1234567890";
@@ -266,7 +269,7 @@ describe("management routes", () => {
 });
 
 describe("public execution route", () => {
-  test("none-mode endpoint runs and returns the wrapped envelope", async () => {
+  skip("none-mode endpoint runs and returns the wrapped envelope", async () => {
     const script = await insertDoubler({ isScratch: true });
     const old = "2026-07-01T00:00:00.000Z";
     await getDbClient().run("UPDATE scripts SET updatedAt = ? WHERE id = ?", [old, script.id]);
@@ -295,7 +298,7 @@ describe("public execution route", () => {
     expect((await getScriptById(script.id))?.updatedAt).not.toBe(old);
   });
 
-  test("external endpoint runs receive ctx.mcp connections (parity with /api/scripts/run)", async () => {
+  skip("external endpoint runs receive ctx.mcp connections (parity with /api/scripts/run)", async () => {
     const mcpServer = await createMcpServer({
       name: `x-mcp-${crypto.randomUUID()}`,
       transport: "http",
@@ -359,7 +362,7 @@ describe("public execution route", () => {
     expect(res.status).toBe(413);
   });
 
-  test("bearer mode: missing/invalid token → 401, valid → 200", async () => {
+  skip("bearer mode: missing/invalid token → 401, valid → 200", async () => {
     const script = await insertDoubler();
     const endpoint = await createScriptApi({
       scriptId: script.id,
@@ -435,7 +438,7 @@ describe("public execution route", () => {
     expect(res.status).toBe(404);
   });
 
-  test("usage is tracked: callCount + an apiEndpointId-tagged run", async () => {
+  skip("usage is tracked: callCount + an apiEndpointId-tagged run", async () => {
     const script = await insertDoubler();
     const endpoint = await createScriptApi({
       scriptId: script.id,
@@ -459,7 +462,7 @@ describe("public execution route", () => {
     expect(runs).toHaveLength(1);
   });
 
-  test("an unparseable timeout header falls back to the default and still runs", async () => {
+  skip("an unparseable timeout header falls back to the default and still runs", async () => {
     const script = await insertDoubler();
     const endpoint = await createScriptApi({
       scriptId: script.id,

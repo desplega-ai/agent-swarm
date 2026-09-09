@@ -3,7 +3,7 @@ import { getAgentWorkingOnThread, getLeadAgent, getMostRecentTaskInThread } from
 import { resolveTemplate } from "../prompts/resolver";
 import { slackContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
-import { ackSlackMessage } from "./ack";
+import { ackSlackMessage, reactionName } from "./ack";
 import { resolveSlackUserId, rewriteSlackMentions } from "./enrich";
 import { wasEventSeen } from "./event-dedup";
 import { ensureSlackThreadTree, isSlackRenderV2Enabled } from "./render-v2";
@@ -128,12 +128,8 @@ export function createAssistant(): Assistant {
           if (isAdditiveSlack()) {
             bufferThreadMessage(channelId, threadTs, messageText, userId, message.ts);
             const count = getBufferMessageCount(`${channelId}:${threadTs}`);
-            await ackSlackMessage(
-              client,
-              channelId,
-              message.ts,
-              count === 1 ? "eyes" : "heavy_plus_sign",
-            );
+            const event = count === 1 ? "accepted" : "buffered";
+            await ackSlackMessage(client, channelId, message.ts, reactionName(event), event);
             await safeSetStatus("Queuing follow-up...");
             return;
           }
@@ -151,7 +147,13 @@ export function createAssistant(): Assistant {
             requestedByUserId,
             contextKey: slackContextKey({ channelId, threadTs }),
           });
-          await ackSlackMessage(client, channelId, message.ts, "eyes");
+          await ackSlackMessage(
+            client,
+            channelId,
+            message.ts,
+            reactionName("accepted"),
+            "accepted",
+          );
 
           if (isSlackRenderV2Enabled()) await ensureSlackThreadTree([task.id]);
 
@@ -189,7 +191,13 @@ export function createAssistant(): Assistant {
             requestedByUserId,
             contextKey: slackContextKey({ channelId, threadTs }),
           });
-          await ackSlackMessage(client, channelId, message.ts, "eyes");
+          await ackSlackMessage(
+            client,
+            channelId,
+            message.ts,
+            reactionName("accepted"),
+            "accepted",
+          );
           if (isSlackRenderV2Enabled()) {
             await ensureSlackThreadTree([task.id]);
           } else {
@@ -209,7 +217,7 @@ export function createAssistant(): Assistant {
           requestedByUserId,
           contextKey: slackContextKey({ channelId, threadTs }),
         });
-        await ackSlackMessage(client, channelId, message.ts, "eyes");
+        await ackSlackMessage(client, channelId, message.ts, reactionName("accepted"), "accepted");
         if (isSlackRenderV2Enabled()) await ensureSlackThreadTree([task.id]);
         // setStatus shows typing indicator — watcher will post final result when done
       } catch (error) {

@@ -7,7 +7,8 @@
   "description": "Ask the lead to summarize stuck work, failing checks, and owner decisions every weekday.",
   "version": "1.0.0",
   "category": "schedules",
-  "placeholders": ["SLACK_CHANNEL_ID", "TIMEZONE"],
+  "placeholders": [],
+  "requires": [],
   "runAllSeedersCandidate": true,
   "tags": ["operations", "slack", "digest"]
 }

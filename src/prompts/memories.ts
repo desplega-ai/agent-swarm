@@ -18,7 +18,7 @@ export type RelevantMemory = {
   similarity: number;
 };
 
-const SIMILARITY_THRESHOLD = 0.4;
+export const SIMILARITY_THRESHOLD = 0.4;
 
 const RATE_TOOL_HINT = `
 
@@ -29,7 +29,7 @@ This trains the swarm to surface better memories next time. Use sparingly:
 
 /**
  * Render the memories prompt section. Returns `null` when there are no
- * memories with `similarity > 0.4` — the caller should then skip the
+ * memories above `SIMILARITY_THRESHOLD` — the caller should then skip the
  * append entirely (matching pre-step-5 behaviour).
  */
 export function renderMemoriesPrompt(memories: RelevantMemory[]): string | null {

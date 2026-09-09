@@ -11,6 +11,7 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useConfig } from "@/hooks/use-config";
 import { useTheme } from "@/hooks/use-theme";
+import { isDemoMode } from "@/lib/deployment-config";
 import { cn } from "@/lib/utils";
 import { Breadcrumbs } from "./breadcrumbs";
 
@@ -45,6 +46,11 @@ export function AppHeader() {
     <header className="flex h-14 items-center gap-2 px-4">
       <SidebarTrigger className="md:hidden" />
       <Separator orientation="vertical" className="mr-2 h-4 md:hidden" />
+      {isDemoMode ? (
+        <span className="rounded-sm bg-status-info px-1.5 py-0.5 text-[10px] font-medium text-status-info-foreground md:hidden">
+          Demo
+        </span>
+      ) : null}
 
       {/* The trail owns the header's free space (no fixed spacer) so long
           entity names only truncate when the width is actually exhausted. */}

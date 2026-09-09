@@ -10,6 +10,7 @@ Three workflows live in `.github/workflows/`:
 |---|---|---|
 | `merge-gate.yml` | PR → `main` | **The gate.** All jobs below must pass for merge. |
 | `ci.yml` | Push → `main` | Lint + tsc + test (subset of merge-gate). |
+| `ui-e2e.yml` | PR touching `apps/ui/`, `packages/ui-e2e/`, `scripts/e2e/`, `src/http/`, `src/be/`, `bun.lock`, `package.json`, `bunfig.toml`. Push → `main`. Nightly cron `0 3 * * *` UTC. Manual dispatch. | Playwright UI suite (`bun run e2e:ui`) in 2 shards against a seeded API per worker. Uploads artifacts to agent-fs and ingests into the UI E2E tracker for every same-repo event. **Informational**, not a required check: merged HTML report artifact (`ui-e2e-html-report`) plus one sticky PR comment (`<!-- ui-e2e -->`). See [LOCAL_TESTING.md § UI E2E](../LOCAL_TESTING.md#ui-e2e-bun-run-e2eui). |
 | `docker-and-deploy.yml` | Push → `main` | Build images (API + worker-full + worker-slim, each amd64+arm64 with multi-arch manifest merges; slim publishes as `:slim` / `:{VERSION}-slim` / `:sha-*-slim`), publish release E2B templates, deploy, and publish npm/GitHub releases (only when `package.json` `version` changed). Not part of PR gate — see [release.md](./release.md). |
 
 Both PR-blocking workflows path-ignore `docs-site/**`. PRs that touch only those don't run code jobs (but Vercel deploys docs-site separately).
@@ -26,20 +27,33 @@ CI detects what changed and runs the matching jobs:
 | **Restore test timings** + **Run Tests (1/2, 2/2)** + **Save test timings** | `bun run test:root -- --parallel=4 --shard=1/2` and `--shard=2/2`. `restore-timings` resolves the latest per-file durations from the actions cache once and hands them to both shards as one artifact (two independent restores could pick different snapshots and split different file lists); `save-timings` merges the shards' `--update-timings` output into the next cache entry after a green matrix | New test or test that depends on undocumented setup; a hard-coded test port colliding under `--parallel` (use `getFreePort()` / `port: 0`, see [LOCAL_TESTING.md](../LOCAL_TESTING.md)) |
 | **Pi-Skills Freshness** | `bun run build:pi-skills` (must produce zero diff in `plugin/pi-skills/`) | Edited `plugin/commands/*.md` without rebuilding |
 | **Seeded Skills Check** | `bun run check:skill-sources && bun run check:ai-toolbox-skills && bun run check:skill-md && bun run check:seed-skill-files` | Edited a generated skill source without rebuilding its `SKILL.md`, drifted a vendored ai-toolbox skill from its manifest, left a seeded skill unwired, or introduced a delivery-path collision |
+| **Operator Skill Check** | `bun run check:operator-skill` | Missing public skill, invalid frontmatter, untracked GitHub target, or documentation URL without HTTP 200 after three HEAD attempts. Runs on every PR because any tracked target can disappear. Documentation outages can fail this check. |
 | **Script SDK Types Freshness** | `bun run check:script-types` (regenerates `src/scripts-runtime/types/*.d.ts`, must produce zero diff) | Edited `src/be/scripts/typecheck.ts` (the source of truth) without `bun run build:script-types`, or edited the generated `.d.ts` files directly (never do that) |
 | **OpenAPI Spec Freshness** | `bun run docs:openapi` (must produce zero diff in `openapi.json` AND `docs-site/content/docs/api-reference/`) | Edited an HTTP route or bumped `package.json` `version` without regenerating |
 | **Raw matchRoute check** | `! grep -rn 'matchRoute(' src/http/ --include='*.ts' \| grep -v 'route-def.ts' \| grep -v 'utils.ts'` | Used `matchRoute` directly instead of the `route()` factory |
 | **Docker Build (Dockerfile + Dockerfile.worker slim target + apps/evals/Dockerfile)** | `docker build -f Dockerfile . && docker build -f Dockerfile.worker --target worker-slim . && docker build -f apps/evals/Dockerfile .` | Broken multi-stage build, missing file in the worker context, evals image drifting from the root workspace lockfile. NOTE: the PR gate builds only the worker's `worker-slim` target (fast); `worker-full` is only built on merge by `docker-and-deploy.yml` — if you touched full-only stages (`worker-full-base` / `worker-full`), build the full target locally before merging. The api + worker-slim legs also report uncompressed image sizes to the **ci-metrics** swarm script (sticky "Docker image sizes" PR comment diffing vs main; baseline refreshed by `docker-and-deploy.yml`'s `report-metrics` job; contract doc: `agent-fs cat docs/ci-metrics.md`; secret: `SWARM_CI_METRICS_TOKEN`). Reporting is `continue-on-error` — it can never block the gate |
 
-### When `apps/ui/` changed (or root `bun.lock` / `package.json` / `bunfig.toml`)
+### When `apps/ui/` or `packages/ui-e2e/` changed (or root `bun.lock` / `package.json` / `bunfig.toml`)
 
 ui's dependency tree resolves from the **root** lockfile since the workspace migration, so root dep changes also trigger this job.
 
 | Job | Local equivalent (run from `apps/ui/`) |
 |---|---|
-| **UI Lint and Type Check** | `bun install --frozen-lockfile && bun run lint && bunx tsc -b` |
+| **UI Lint and Type Check** | `bun install --frozen-lockfile && bun run lint && bunx tsc -b`, then from the repo root `bun run e2e:ui:tsc && bunx biome check packages/ui-e2e` |
 
 > **Note:** CI uses `tsc -b` (project-references build mode), **not** `tsc --noEmit`. Use `tsc -b` locally to match.
+
+### ui-e2e.yml secrets and variables
+
+| Name | Kind | Owner | Feeds | When absent |
+|---|---|---|---|---|
+| `E2E_AGENT_FS_API_URL` | secret | Taras | agent-fs upload of screenshots and traces | Uploads skipped, comment stays text-only |
+| `E2E_AGENT_FS_API_KEY` | secret | Taras | agent-fs upload | Uploads skipped, comment stays text-only |
+| `E2E_AGENT_FS_ORG_ID` | secret | Taras | agent-fs upload target org | Uploads skipped, comment stays text-only |
+| `E2E_AGENT_FS_DRIVE_ID` | secret | Taras | agent-fs upload target drive | Uploads skipped, comment stays text-only |
+| `UI_E2E_INGEST_URL` | secret | Taras | tracker ingest endpoint | Ingest skipped |
+| `UI_E2E_INGEST_BEARER` | secret | Taras | tracker ingest bearer | Ingest skipped |
+| `UI_E2E_TRACKER_URL` | repository variable | Taras | sticky comment tracker link | No tracker link in the comment |
 
 ## The full local pre-push command
 
@@ -59,6 +73,7 @@ bash scripts/check-audit-columns.sh
 bun run check:rbac-coverage
 bun run check:openapi-response-coverage
 bun run check:dep-graph
+bun run check:operator-skill
 
 # Drift checks (run if you touched the relevant files)
 bun run build:pi-skills && git diff --quiet plugin/pi-skills/ || echo "pi-skills drift — commit the regenerated files"
@@ -94,6 +109,7 @@ docker build -f Dockerfile . && docker build -f Dockerfile.worker --target worke
 11. **Tool classification failure.** You registered a new MCP tool without adding it to `CORE_TOOLS`/`DEFERRED_TOOLS` in `src/tools/tool-config.ts` (`src/tests/tool-annotations.test.ts` fails in `test:root`).
 12. **Bun version pin drift.** You bumped `packageManager` in `package.json` (or one Dockerfile) without the others. `bun run check:bun-version` lists every pin that disagrees: `Dockerfile`, `Dockerfile.worker` (builder `FROM` + the runtime `bun.sh/install` pin), `apps/evals/Dockerfile`. CI installs whatever `packageManager` says (`setup-bun` with `bun-version-file: package.json`), so the pin IS the CI version.
 13. **Test port collision under `--parallel`.** A test bound a literal port and another file in the same shard bound the same one; the loser reports `Server did not start within 60000ms` or `EADDRINUSE`. Use `listenOnFreePort()` / `getFreePort()` from `src/tests/test-net.ts`.
+14. **Test spawnSync boundary violation.** A test called `Bun.spawnSync` / `spawnSync` / `execSync` / `execFileSync` (`scripts/check-test-spawn-sync.sh`). A blocked event loop cannot time a hung child out. Use `runChild()` / `expectChildOk()` from `src/tests/test-proc.ts` and pass `CHILD_PROCESS_TEST_BUDGET_MS` as the test's timeout argument.
 
 ## Bun version
 
@@ -122,4 +138,4 @@ CI uses `bun install --frozen-lockfile`. A single root install now covers `apps/
 - **`docs-site/`** deploys via Vercel — `pnpm build` in `docs-site/` must pass. See [docs-site/CLAUDE.md](../docs-site/CLAUDE.md).
 - **`apps/templates-ui/`** — same Vercel pattern.
 
-Frontend-touching PRs additionally need a `qa-use` session with screenshots — see [testing.md](./testing.md).
+Frontend-touching PRs additionally need `agent-browser` screenshots uploaded to agent-fs (reviewer convention, not a CI job). See [testing.md](./testing.md).

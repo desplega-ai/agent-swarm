@@ -55,7 +55,7 @@ type AgentTaskConfig = {
    * Default: 2 hours. Each poll round-trip already long-polls server-side
    * for up to ~30s, so this is checked with ~30s granularity. The
    * *effective* deadline is always clamped to the run's shared, absolute
-   * `SCRIPT_RUN_MAX_WALL_MS` cap (same clamp for every step in the run,
+   * run wall-clock cap (same clamp for every step in the run,
    * concurrent or not — never divided across concurrently waiting steps).
    * If the run-level cap fires first, the supervisor kills the harness
    * process, and every step resumes polling its own journaled taskId (no
@@ -76,22 +76,38 @@ const AGENT_TASK_TRANSIENT_RETRY_LIMIT = 5;
 const AGENT_TASK_TRANSIENT_RETRY_BASE_MS = 500;
 const DEFAULT_DRAIN_GRACE_MS = 35_000; // a bit above the server's ~30s long-poll window per call
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(signal.reason);
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason);
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) onAbort();
+  });
 }
 
 /**
  * Absolute wall-clock deadline shared by every `ctx.step.agentTask` wait in
  * this run — sourced from the persisted run row's `startedAt` (survives
- * supervisor restarts) and the server-resolved `SCRIPT_RUN_MAX_WALL_MS`
- * (see executor.ts). N concurrent `Promise.all` waits each clamp their own
+ * supervisor restarts) and the server-resolved run wall-clock limit passed
+ * by executor.ts. N concurrent `Promise.all` waits each clamp their own
  * per-step deadline to this SAME absolute point — never divided by N, never
  * re-derived per step.
  */
-function runWallDeadlineMs(): number | undefined {
-  const startedAt = Date.parse(process.env.SCRIPT_RUN_STARTED_AT ?? "");
-  const maxWallMs = Number(process.env.SCRIPT_RUN_MAX_WALL_MS);
-  if (!Number.isFinite(startedAt) || !Number.isFinite(maxWallMs) || maxWallMs <= 0) {
+function runWallDeadlineMs(startedAtValue?: string, maxWallMs?: number): number | undefined {
+  const startedAt = Date.parse(startedAtValue ?? "");
+  if (
+    !Number.isFinite(startedAt) ||
+    typeof maxWallMs !== "number" ||
+    !Number.isFinite(maxWallMs) ||
+    maxWallMs <= 0
+  ) {
     return undefined;
   }
   return startedAt + maxWallMs;
@@ -158,6 +174,8 @@ export type BuiltWorkflowCtx = {
    * the (runId, stepKey) contextKey lookup on the run's next resume.
    */
   drainInFlightSteps: (graceMs?: number) => Promise<void>;
+  /** Stop brokered HTTP work after the credential-free guest has terminated. */
+  abortInFlightSteps: (reason?: Error) => void;
 };
 
 export function buildWorkflowCtx(input: {
@@ -166,13 +184,17 @@ export function buildWorkflowCtx(input: {
   apiKey: string;
   baseUrl: string;
   args: unknown;
+  runStartedAt?: string;
+  runMaxWallMs?: number;
 }): BuiltWorkflowCtx {
   const baseUrl = input.baseUrl.replace(/\/$/, "");
   const authHeaders = headers(input.apiKey, input.agentId);
+  const abortController = new AbortController();
 
   async function fetchJson(path: string, init: RequestInit = {}): Promise<unknown> {
     const res = await fetch(`${baseUrl}${path}`, {
       ...init,
+      signal: init.signal ?? abortController.signal,
       headers: { ...authHeaders, ...((init.headers as Record<string, string>) ?? {}) },
     });
     const body = await readScriptSdkJsonResponse(res, path);
@@ -185,6 +207,7 @@ export function buildWorkflowCtx(input: {
       `${baseUrl}/api/internal/script-runs/${input.runId}/steps/${encodeStepKey(label)}`,
       {
         headers: authHeaders,
+        signal: abortController.signal,
       },
     );
     if (res.status === 404) return { found: false };
@@ -224,13 +247,15 @@ export function buildWorkflowCtx(input: {
           method: "POST",
           headers: authHeaders,
           body,
+          signal: abortController.signal,
         });
         const parsed = await readScriptSdkJsonResponse(res, `agent-task ${label}`);
         return { status: res.status, body: parsed };
       } catch (err) {
         lastError = err;
+        if (abortController.signal.aborted) throw abortController.signal.reason;
         if (attempt === AGENT_TASK_TRANSIENT_RETRY_LIMIT) break;
-        await sleep(AGENT_TASK_TRANSIENT_RETRY_BASE_MS * 2 ** attempt);
+        await sleep(AGENT_TASK_TRANSIENT_RETRY_BASE_MS * 2 ** attempt, abortController.signal);
       }
     }
     throw lastError instanceof Error
@@ -245,7 +270,7 @@ export function buildWorkflowCtx(input: {
     // Clamp to the run's shared absolute wall-clock cap — every concurrent
     // step clamps to the SAME point, not budgetMs/N.
     const requestedDeadline = Date.now() + budgetMs;
-    const sharedDeadline = runWallDeadlineMs();
+    const sharedDeadline = runWallDeadlineMs(input.runStartedAt, input.runMaxWallMs);
     const deadline =
       sharedDeadline !== undefined
         ? Math.min(requestedDeadline, sharedDeadline)
@@ -362,6 +387,10 @@ export function buildWorkflowCtx(input: {
     ]);
   }
 
+  function abortInFlightSteps(reason = new Error("Workflow capability guest terminated")): void {
+    abortController.abort(reason);
+  }
+
   const swarm = new Proxy({} as Record<string, (args?: unknown) => Promise<unknown>>, {
     get(_target, prop) {
       if (typeof prop !== "string") return undefined;
@@ -409,5 +438,5 @@ export function buildWorkflowCtx(input: {
     logger: console,
   };
 
-  return { ctx, drainInFlightSteps };
+  return { ctx, drainInFlightSteps, abortInFlightSteps };
 }

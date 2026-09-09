@@ -1,5 +1,10 @@
 import { fileURLToPath } from "node:url";
 import {
+  detachedProcessGroup,
+  registerProcessGroup,
+  terminateProcessGroup,
+} from "../../utils/process-group";
+import {
   buildSandboxedCommand,
   readStreamCapped,
   sandboxSpawnEnv,
@@ -18,11 +23,46 @@ function makeUnsupportedOutput(stderr: string): ExecutorOutput {
   };
 }
 
-function classifyExit(
+/**
+ * Exit 134 is SIGABRT. The framework code that runs before user code gets
+ * control never calls `abort()` itself, so a SIGABRT observed before that
+ * point is the runtime's own C++ layer aborting because it could not create
+ * a thread (pthread_create failing under an already-exhausted RLIMIT_NPROC)
+ * — a host-capacity fault, not a bug in the user script. See
+ * `JAVASCRIPT_RUNTIME_SANDBOX_MAX_PROCS` in `../../utils/sandboxed-process.ts`
+ * for the shared-limit mechanism.
+ *
+ * That guarantee does NOT extend past the point user-authored code starts
+ * running: `process.abort()`, a native assertion, or an OOM abort can also
+ * exit 134, and by then the script may already have caused an external side
+ * effect (e.g. an API POST). Retrying that case would silently replay it.
+ * `userCodeStarted` (backed by the sentinel file `eval-harness.ts` writes
+ * immediately before importing the user module) is what tells the two
+ * apart — see `runScript`'s retry loop in `../loader.ts`.
+ *
+ * 134 is checked before `timedOut`/`killed` below, and wins unconditionally.
+ * Both of our own termination paths (the wall-clock watchdog and an external
+ * `input.signal` abort) start process-group teardown with SIGTERM (exit 143)
+ * and escalate survivors to SIGKILL (exit 137) after a short grace period.
+ * Neither path can produce SIGABRT (134, signal 6), so an observed 134 can
+ * only be the process's own abort. Under load, teardown can race a self-abort
+ * that has started but whose exit has not been recorded yet; if SIGKILL wins,
+ * Bun observes 137 and a watchdog-triggered run is classified `timeout`
+ * instead of `eval_error`. Once Bun records 134, this branch preserves it
+ * even if the watchdog callback also flips `timedOut` before `proc.exited`
+ * resolves.
+ */
+const SANDBOX_CAPACITY_EXIT_CODE = 134;
+
+export function classifyExit(
   exitCode: number,
   timedOut: boolean,
   killed: boolean,
+  userCodeStarted: boolean,
 ): ScriptExecutorError | undefined {
+  if (exitCode === SANDBOX_CAPACITY_EXIT_CODE) {
+    return userCodeStarted ? "eval_error" : "capacity_exceeded";
+  }
   if (timedOut) return "timeout";
   if (killed) return "killed";
   if (exitCode === 0) return undefined;
@@ -117,15 +157,16 @@ export class NativeScriptExecutor implements ScriptExecutor {
     const sourceFile = `${tmpdir}/source.ts`;
     const resultFile = `${tmpdir}/result.json`;
     const errorFile = `${tmpdir}/error.json`;
+    const startedFile = `${tmpdir}/started.marker`;
     // In compiled binary mode, import.meta.url points into /$bunfs/ which spawned
     // subprocesses cannot access. Use the pre-built bundle from real filesystem instead.
     const harnessPath = process.env.SCRIPT_RUNTIME_DIR
       ? `${process.env.SCRIPT_RUNTIME_DIR}/eval-harness.bundle.js`
       : fileURLToPath(new URL("../eval-harness.ts", import.meta.url));
-    const controller = new AbortController();
     let timedOut = false;
     let killed = input.signal?.aborted ?? false;
     let removeAbortListener: (() => void) | undefined;
+    let proc: Bun.Subprocess<"pipe", "pipe", "pipe"> | undefined;
 
     try {
       if (killed) {
@@ -146,14 +187,14 @@ export class NativeScriptExecutor implements ScriptExecutor {
 
       const onExternalAbort = () => {
         killed = true;
-        controller.abort();
+        if (proc) void terminateProcessGroup(proc.pid);
       };
       input.signal?.addEventListener("abort", onExternalAbort, { once: true });
       removeAbortListener = () => input.signal?.removeEventListener("abort", onExternalAbort);
 
       const timeout = setTimeout(() => {
         timedOut = true;
-        controller.abort();
+        if (proc) void terminateProcessGroup(proc.pid);
       }, input.resources.wallClockMs);
 
       const harnessEnv = {
@@ -167,22 +208,25 @@ export class NativeScriptExecutor implements ScriptExecutor {
         SWARM_SCRIPT_SOURCE_FILE: sourceFile,
         SWARM_SCRIPT_RESULT_FILE: resultFile,
         SWARM_SCRIPT_ERROR_FILE: errorFile,
+        SWARM_SCRIPT_STARTED_FILE: startedFile,
       };
 
-      const proc = Bun.spawn(harnessCommand(harnessPath, input, harnessEnv), {
-        // On POSIX, Bun.spawn only needs PATH itself to locate the `sh`
-        // binary for argv[0] — the sandboxed command's `env -i` prelude is
-        // what actually scrubs the child's environment down to `harnessEnv`
-        // above. On win32 there is no such prelude, so `sandboxSpawnEnv`
-        // passes `harnessEnv` through directly instead — see
-        // `buildSandboxedCommand`'s win32 doc comment.
-        env: sandboxSpawnEnv(harnessEnv),
-        cwd: tmpdir,
-        stdin: "pipe",
-        stdout: "pipe",
-        stderr: "pipe",
-        signal: controller.signal,
-      });
+      proc = registerProcessGroup(
+        Bun.spawn(harnessCommand(harnessPath, input, harnessEnv), {
+          // On POSIX, Bun.spawn only needs PATH itself to locate the `sh`
+          // binary for argv[0] — the sandboxed command's `env -i` prelude is
+          // what actually scrubs the child's environment down to `harnessEnv`
+          // above. On win32 there is no such prelude, so `sandboxSpawnEnv`
+          // passes `harnessEnv` through directly instead — see
+          // `buildSandboxedCommand`'s win32 doc comment.
+          env: sandboxSpawnEnv(harnessEnv),
+          cwd: tmpdir,
+          detached: detachedProcessGroup,
+          stdin: "pipe",
+          stdout: "pipe",
+          stderr: "pipe",
+        }),
+      );
 
       proc.stdin.write(JSON.stringify(input.configPayload));
       proc.stdin.end();
@@ -192,10 +236,10 @@ export class NativeScriptExecutor implements ScriptExecutor {
         readStreamCapped(proc.stderr, input.resources.maxStdoutBytes),
         proc.exited.catch(() => (timedOut ? 124 : 1)),
       ]).finally(() => clearTimeout(timeout));
-
       const result = exitCode === 0 ? await readResultFile(resultFile) : undefined;
       const runtimeError = exitCode === 0 ? undefined : await readRuntimeError(errorFile);
-      const error = classifyExit(exitCode, timedOut, killed);
+      const userCodeStarted = await Bun.file(startedFile).exists();
+      const error = classifyExit(exitCode, timedOut, killed, userCodeStarted);
 
       return {
         result,
@@ -219,6 +263,7 @@ export class NativeScriptExecutor implements ScriptExecutor {
       };
     } finally {
       removeAbortListener?.();
+      if (proc) await terminateProcessGroup(proc.pid);
       await Bun.$`rm -rf ${tmpdir}`;
     }
   }

@@ -39,9 +39,24 @@ export const DEFAULT_SANDBOX_LIMITS: SandboxResourceLimits = {
  * threads before user code runs. Give their process trees enough RLIMIT_AS
  * and RLIMIT_NPROC headroom to boot while retaining the stricter defaults for
  * direct non-interpreter commands.
+ *
+ * `ulimit -u` is `RLIMIT_NPROC`: a per-real-UID, kernel-wide count of
+ * processes/threads, not a per-process-tree cap. On a host that runs many
+ * sibling containers under the same UID, this value competes with a live,
+ * fleet-wide number that has nothing to do with this container's own
+ * concurrency — it can already be within a few hundred of the ceiling before
+ * this process spawns anything. A soft limit set close to that live number
+ * makes an interpreter's own thread-pool startup (which this constant exists
+ * to allow) the thing that trips the cap, i.e. self-inflicted failures on top
+ * of the real constraint. This value only needs to sit well above observed
+ * ambient headroom (measured swinging in the high hundreds); it is not, and
+ * cannot be, a fix for the shared kernel-wide limit itself — see
+ * `ScriptExecutorError`'s `capacity_exceeded` classification in
+ * `src/scripts-runtime/executors/types.ts` for how that residual risk is
+ * handled instead.
  */
 export const BUN_SANDBOX_VIRTUAL_MEMORY_MB = 4096;
-export const JAVASCRIPT_RUNTIME_SANDBOX_MAX_PROCS = 512;
+export const JAVASCRIPT_RUNTIME_SANDBOX_MAX_PROCS = 4096;
 
 const JAVASCRIPT_RUNTIMES = new Set(["bun", "bunx", "node", "nodejs", "npx"]);
 const SHELL_RUNTIMES = new Set(["bash", "dash", "sh"]);
@@ -101,18 +116,19 @@ function withBunNoOrphans(innerCommand: readonly string[]): string[] {
  * `sandboxSpawnEnv(env)` for the `Bun.spawn` `env` option so both platforms
  * are handled correctly.
  */
-export function buildSandboxedCommand(
+function buildSandboxedCommandCore(
   innerCommand: readonly string[],
   env: Readonly<Record<string, string>>,
-  limits: SandboxResourceLimits = DEFAULT_SANDBOX_LIMITS,
+  limits: SandboxResourceLimits,
+  profile: { useBashShell: boolean; applyInterpreterFloor: boolean },
 ): string[] {
   if (process.platform === "win32") return [...innerCommand];
 
-  const usesInterpreterProfile = usesInterpreterSandboxProfile(innerCommand);
-  const virtualMemoryMb = usesInterpreterProfile
+  const { useBashShell, applyInterpreterFloor } = profile;
+  const virtualMemoryMb = applyInterpreterFloor
     ? Math.max(limits.virtualMemoryMb, BUN_SANDBOX_VIRTUAL_MEMORY_MB)
     : limits.virtualMemoryMb;
-  const maxProcs = usesInterpreterProfile
+  const maxProcs = applyInterpreterFloor
     ? Math.max(limits.maxProcs, JAVASCRIPT_RUNTIME_SANDBOX_MAX_PROCS)
     : limits.maxProcs;
 
@@ -122,6 +138,14 @@ export function buildSandboxedCommand(
     `ulimit -u ${maxProcs} 2>/dev/null || true`,
     `ulimit -f ${limits.maxFileKb} 2>/dev/null || true`,
     `ulimit -n ${limits.maxFdCount} 2>/dev/null || true`,
+    // Disable core dumps: a crash (e.g. SIGABRT/SIGSEGV) in the sandboxed
+    // process otherwise writes a core file containing the child's full
+    // address space — which can hold the decrypted stdin config payload
+    // (bearer token, egress secrets) — to disk. Also avoids multi-hundred-MB
+    // core writes stalling the parent's wait() on slow/contended CI storage,
+    // which manifested as a spurious ~10s hang on a deterministic
+    // process.abort() test that runs in well under 1s locally.
+    "ulimit -c 0 2>/dev/null || true",
   ].join("; ");
 
   const envAssignments = Object.entries(env)
@@ -130,10 +154,54 @@ export function buildSandboxedCommand(
   const quotedInner = withBunNoOrphans(innerCommand).map(shellQuote).join(" ");
 
   return [
-    usesInterpreterProfile ? "bash" : "sh",
+    useBashShell ? "bash" : "sh",
     "-c",
     `${ulimits}; exec env -i ${envAssignments} ${quotedInner}`,
   ];
+}
+
+export function buildSandboxedCommand(
+  innerCommand: readonly string[],
+  env: Readonly<Record<string, string>>,
+  limits: SandboxResourceLimits = DEFAULT_SANDBOX_LIMITS,
+): string[] {
+  const usesInterpreterProfile = usesInterpreterSandboxProfile(innerCommand);
+  return buildSandboxedCommandCore(innerCommand, env, limits, {
+    useBashShell: usesInterpreterProfile,
+    applyInterpreterFloor: usesInterpreterProfile,
+  });
+}
+
+/**
+ * TEST-ONLY escape hatch — never call this from production code.
+ *
+ * `ulimit -u` (RLIMIT_NPROC) can only be *enforced*, not just rendered,
+ * through bash: Ubuntu's `/bin/sh` is dash, and dash's `ulimit` does not
+ * implement `-u` at all (`sh -c 'ulimit -u 8'` fails with "Illegal option
+ * -u", silently swallowed by this module's `2>/dev/null || true`). But
+ * `buildSandboxedCommand` only ever selects the bash shell for an inner
+ * command it recognizes as a shell/JS runtime — and recognizing one also
+ * floors `maxProcs` to `JAVASCRIPT_RUNTIME_SANDBOX_MAX_PROCS` (4096). So
+ * through the public API there is no way to combine "the ulimit mechanism
+ * is actually constraining the process tree" with "the ceiling is the
+ * caller's own small value, small enough for a test to hit in a few
+ * seconds" — one or the other is always true, never both.
+ *
+ * This bypasses only the floor (forces the bash shell so `-u` is real,
+ * without raising `limits.maxProcs`), purely so a regression test can prove
+ * the underlying ulimit mechanism actually contains a runaway process tree
+ * (DES issue #1332) instead of asserting on behavior that would pass
+ * identically whether or not the limit did anything.
+ */
+export function buildSandboxedCommandForNprocEnforcementTest(
+  innerCommand: readonly string[],
+  env: Readonly<Record<string, string>>,
+  limits: SandboxResourceLimits = DEFAULT_SANDBOX_LIMITS,
+): string[] {
+  return buildSandboxedCommandCore(innerCommand, env, limits, {
+    useBashShell: true,
+    applyInterpreterFloor: false,
+  });
 }
 
 /**

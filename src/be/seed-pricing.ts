@@ -87,11 +87,17 @@ const MANUAL_PRICING_OVERRIDES: Array<{
  * fields the models.dev snapshot doesn't index directly; we map them here.
  */
 const ANTHROPIC_SHORTNAME_TO_MODELSDEV: Record<string, string> = {
-  fable: "claude-fable-5",
-  mythos: "claude-mythos-5",
+  fable: "claude-fable-5-1",
+  mythos: "claude-mythos-5-1",
   opus: "claude-opus-5",
   sonnet: "claude-sonnet-5",
   haiku: "claude-haiku-4-5",
+};
+
+/** Official rates used until a newly released model reaches the vendored models.dev snapshot. */
+const ANTHROPIC_SHORTNAME_PRICING_FALLBACKS: Record<string, ModelsDevCostBlock> = {
+  "claude-fable-5-1": { input: 10, output: 50, cache_read: 0.25, cache_write: 12.5 },
+  "claude-mythos-5-1": { input: 10, output: 50, cache_read: 0.25, cache_write: 12.5 },
 };
 
 export interface PricingSeedRow {
@@ -182,19 +188,23 @@ export function buildModelsDevSeedRows(cache: ModelsDevCache): PricingSeedRow[] 
   }
   // Anthropic shortnames (opus/sonnet/haiku) → resolve to the current default.
   for (const [shortname, fullId] of Object.entries(ANTHROPIC_SHORTNAME_TO_MODELSDEV)) {
-    const target = anthropic[fullId];
-    if (!target?.cost) continue;
+    const cost =
+      anthropic[fullId]?.cost ??
+      (cache.anthropic ? ANTHROPIC_SHORTNAME_PRICING_FALLBACKS[fullId] : undefined);
+    if (!cost) continue;
     for (const provider of ["claude", "claude-managed"] as const) {
-      for (const row of projectCostBlock(provider, shortname, target.cost)) {
+      for (const row of projectCostBlock(provider, shortname, cost)) {
         rows.push(row);
       }
     }
   }
   // Pi-mono uses anthropic models via OpenRouter mirrors; project those too.
   for (const [shortname, fullId] of Object.entries(ANTHROPIC_SHORTNAME_TO_MODELSDEV)) {
-    const target = anthropic[fullId];
-    if (!target?.cost) continue;
-    for (const row of projectCostBlock("pi", shortname, target.cost, { anthropicBilled: true })) {
+    const cost =
+      anthropic[fullId]?.cost ??
+      (cache.anthropic ? ANTHROPIC_SHORTNAME_PRICING_FALLBACKS[fullId] : undefined);
+    if (!cost) continue;
+    for (const row of projectCostBlock("pi", shortname, cost, { anthropicBilled: true })) {
       rows.push(row);
     }
   }

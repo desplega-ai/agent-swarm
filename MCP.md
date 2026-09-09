@@ -231,7 +231,7 @@ Returns a list of tasks in the swarm with various filters. Sorted by priority (d
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `status` | `backlog \| unassigned \| offered \| reviewing \| pending \| in_progress \| paused \| completed \| failed \| cancelled \| superseded` | No | - | Filter by task status (unassigned, offered, pending, in_progress, completed, failed). |
+| `status` | `draft \| backlog \| unassigned \| offered \| reviewing \| pending \| in_progress \| paused \| completed \| failed \| cancelled \| superseded` | No | - | Filter by task status (unassigned, offered, pending, in_progress, completed, failed). |
 | `mineOnly` | `boolean` | No | - | Only return tasks assigned to you. |
 | `unassigned` | `boolean` | No | - | Only return unassigned tasks in the pool. |
 | `offeredToMe` | `boolean` | No | - | Only return tasks offered to you (awaiting accept/reject). |
@@ -268,7 +268,8 @@ Sends a task to a specific agent, creates an unassigned task for the pool, or of
 | `offerMode` | `boolean` | No | false | If true, offer the task instead of direct assign (agent must accept/reject). |
 | `taskType` | `string` | No | - | Task type (e.g., 'bug', 'feature', 'review'). |
 | `tags` | `array` | No | - | Tags for filtering (e.g., ['urgent', 'frontend']). |
-| `requiredCapabilities` | `array` | No | - | Capabilities a claiming agent must have (declared via join-swarm/update-profile) to be pool-eligible for this task. Written into the created task's routingAffinity (role is left unset — only enforced when the pool auto-claim/claim-tool paths check it). Most useful when omitting agentId (unassigned pool task); a no-op for a task with an explicit agentId, which bypasses the pool gate entirely. |
+| `requiredCapabilities` | `array` | No | - | Capabilities required for pool routing. |
+| `leadOnly` | `boolean` | No | false | Structured authorization constraint for merge or other privileged work. Only Lead agents may be assigned, offered, or claim it; never inferred from task text. |
 | `priority` | `number` | No | - | Priority 0-100 (default: 50). |
 | `dependsOn` | `array` | No | - | Task IDs this task depends on. |
 | `parentTaskId` | `uuid` | No | - | Parent task ID for session continuity. Child task will resume the parent's Claude session. Auto-routes to the same worker unless agentId is explicitly provided. |
@@ -308,7 +309,7 @@ Stores the progress of a specific task. Can also mark task as completed or faile
 | `status` | `completed \| failed` | No | - | Set to 'completed' or 'failed' to finish the task. |
 | `output` | `string` | No | - | The task result (used when completing). For Slack-originated tasks, this is published verbatim in the thread's outcome card: provide a concrete summary scaled to what was asked, including only the outcome and any links or IDs the human needs—not process narration, a transcript, or a restatement of the brief. |
 | `failureReason` | `string` | No | - | The reason for failure (used when failing). |
-| `attachments` | `array` | No | - | Pointer-based artifacts produced by this step — agent-fs path, URL, shared-fs path, or swarm Page. No inline file data; upload to agent-fs first and attach by path. May be sent on any call (progress or completion) and accumulates across calls; duplicates are de-duped by sha256 (when present) or by (kind, pointer, name). |
+| `attachments` | `array` | No | - | Pointer-based artifacts produced by this step — agent-fs path, URL, shared-fs path, or swarm Page. No inline file data; upload to agent-fs first and attach by path. Agent-fs pointers are verified before task state changes, using the explicit org/drive pair or the registering agent's configured defaults. May be sent on any call (progress or completion) and accumulates across calls; duplicates are de-duped by sha256 (when present) or by (kind, pointer, name). |
 | `persistMemory` | `boolean` | No | - | Opt in to task_completion memory persistence for automatic/recurring tasks. Manual tasks are persisted by default; scheduled, system, heartbeat/boot-triage, monitor, and digest tasks are skipped unless this is true. |
 | `force` | `boolean` | No | - | On an already-terminal task, overwrite explicitly provided output and/or failureReason text while preserving status and finishedAt and without replaying events, memory writes, follow-up creation, business-use ensure, or capacity updates. Differing terminal text is otherwise discarded and reported as a failure. |
 
@@ -443,7 +444,8 @@ Perform task pool operations: create unassigned tasks, claim/release tasks from 
 | `model` | `string` | No | - | Concrete model override for the created task, interpreted by the claiming worker's harness/provider. This does not switch providers. Only used with 'create' action. |
 | `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Portable model tier for the created task: 'smol', 'regular', 'smart', or 'ultra'. Resolved when a worker claims/runs the task. Only used with 'create' action. |
 | `effort` | `off \| low \| medium \| high \| xhigh \| max` | No | - | Reasoning effort for the created task: 'off', 'low', 'medium', 'high', 'xhigh', or 'max'. Only used with 'create' action. |
-| `requiredCapabilities` | `array` | No | - | Capabilities a claiming agent must have (declared via join-swarm/update-profile) to be pool-eligible for this task. Written into the created task's routingAffinity (role is left unset). Only used with 'create' action. |
+| `requiredCapabilities` | `array` | No | - | Capabilities required for pool routing. |
+| `leadOnly` | `boolean` | No | false | Structured authorization constraint: only Lead agents may claim this privileged task. |
 
 ## Config Tools
 
@@ -1185,7 +1187,7 @@ Create a new automation workflow. Key concepts: - Nodes are linked via 'next' (s
 | `key` | `unknown` | No | - | Logical namespace. Defaults to a shared/workflow:<id>/ resource key. |
 | `description` | `string` | No | - | Description of what this workflow does |
 | `definition` | `unknown` | Yes | - | The workflow definition with nodes (each node has id, type, config, and optional next/retry/validation) |
-| `triggers` | `array` | No | - | Optional trigger configurations (webhook, schedule). Webhook verification formats: legacy omitted verification, hmac-sha256, timestamped-hmac-sha256, token-equality. |
+| `triggers` | `array` | No | - | Optional trigger configurations (webhook, schedule, event). Webhook verification formats: legacy omitted verification, hmac-sha256, timestamped-hmac-sha256, token-equality. |
 | `cooldown` | `unknown` | No | - | Optional cooldown configuration to prevent re-triggering too frequently |
 | `input` | `object` | No | - | Optional input values resolved at execution time (env vars like VAR_NAME, secrets secret.NAME, or literals) |
 | `dir` | `string` | No | - | Default working directory for all agent-task nodes (absolute path, e.g. /tmp/workspace) |

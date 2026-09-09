@@ -33,6 +33,29 @@ describe("db-client basics", () => {
     expect(await client.get("SELECT name FROM items WHERE name = ?", ["missing"])).toBeNull();
   });
 
+  test("runTimed charges the statement for driver execution, not for queueing behind the lock", async () => {
+    // A transaction holds the FIFO lock across an await, so the runTimed below
+    // cannot begin executing until it commits. Wall time around the call
+    // therefore includes that queueing — which is what made a caller-side
+    // measurement report a responsive process as stalled for multiple seconds.
+    const holding = client.transaction(async (tx) => {
+      await tx.run("INSERT INTO items (name) VALUES (?)", ["holder"]);
+      await Bun.sleep(250);
+    });
+    const startedAt = performance.now();
+    const timed = await client.runTimed("INSERT INTO items (name) VALUES (?)", ["queued"]);
+    const wallMs = performance.now() - startedAt;
+    await holding;
+
+    expect(timed.changes).toBe(1);
+    // It really did wait out the holder...
+    expect(wallMs).toBeGreaterThan(200);
+    // ...but only the driver call itself is charged to the statement. One
+    // in-memory INSERT is microseconds; the bound is loose on purpose.
+    expect(timed.executionMs).toBeGreaterThan(0);
+    expect(timed.executionMs).toBeLessThan(50);
+  });
+
   test("get supports RETURNING", async () => {
     const row = await client.get<{ id: number; name: string }>(
       "INSERT INTO items (name) VALUES (?) RETURNING *",

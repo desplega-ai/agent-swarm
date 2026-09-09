@@ -189,6 +189,35 @@ const OAUTH_PRESETS: readonly OAuthPreset[] = [
       "owner=user is required to receive a user-scoped token and is set here.",
     ],
   },
+  {
+    id: "microsoft",
+    displayName: "Microsoft 365 (Graph)",
+    provider: "microsoft",
+    authorizeUrl: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+    tokenUrl: "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+    scopes: [
+      "openid",
+      "profile",
+      "offline_access",
+      "User.Read",
+      "User.ReadBasic.All",
+      "Channel.ReadBasic.All",
+      "ChannelMessage.Read.All",
+      "ChannelMessage.Send",
+      "Chat.ReadWrite",
+      "Mail.Read",
+      "Mail.Send",
+      "Files.Read",
+    ],
+    scopeSeparator: " ",
+    tokenAuthStyle: "body",
+    tokenBodyFormat: "form",
+    setupHints: [
+      "Single-tenant apps must replace the common tenant segment in authorizeUrl and tokenUrl with their Microsoft Entra tenant ID by using the endpoint overrides.",
+      "offline_access is required for Microsoft Entra to issue a refresh token and is included in this preset.",
+      "An administrator may need to grant tenant-wide consent for the Teams read scopes before users can authorize the connection.",
+    ],
+  },
 ];
 
 /** All curated presets (stable order). */

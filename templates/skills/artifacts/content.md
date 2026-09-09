@@ -88,13 +88,24 @@ session goes to agent-fs.
 
 ## Binary artifacts (PNG, MP4)
 
-**`agent-fs write` is text-only and mangles binaries** (it inserts UTF-8
-replacement characters). Use a binary-safe upload path instead:
+`agent-fs write --content` is text-only and mangles binaries. Upload binaries
+with `--file` (or piped stdin), which uses the binary-safe raw route
+(agent-fs CLI >= 0.7.1):
 
-- QA screenshots → use `qa-use`'s built-in screenshot capture, which uploads
-  correctly on your behalf.
-- Custom captures → Playwright, ffmpeg, or a system screenshot tool, then
-  upload via the binary path rather than `agent-fs write`.
+```bash
+agent-fs write thoughts/<agent-id>/qa/<topic>-screenshots/login.png \
+  --file /tmp/login.png -m "login page after fix"
+agent-fs stat thoughts/<agent-id>/qa/<topic>-screenshots/login.png --json | jq '.size'
+```
+
+Capture with `agent-browser screenshot <path>` when it is installed, otherwise
+Playwright, ffmpeg, or a system screenshot tool. For an image that must render
+inside a PR body or a Slack message without a login, use a presigned URL
+instead of the viewer link:
+
+```bash
+agent-fs signed-url thoughts/<agent-id>/qa/<topic>-screenshots/login.png --json   # 24h default, --expires-in up to 7d
+```
 
 ## Naming conventions
 
@@ -111,7 +122,7 @@ misc/<agent-id>/<task-id>-<description>.ext
 
 - **PR body** — embed `![caption](<resolved-share-url>)` after resolving and
   printing the concrete URL as shown above.
-- **Slack** — link the agent-fs URL (public, no auth required).
+- **Slack** — link the agent-fs URL (team members only, the live viewer needs a login). Use a signed URL (`agent-fs signed-url`, up to 7 days) for anyone else.
 - **`store-progress`** — use the `attachments` field with `kind: "agent-fs"` and the path.
 - **Linear comments** — paste the live URL in the comment body.
 

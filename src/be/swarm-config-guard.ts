@@ -1,3 +1,4 @@
+import { normalizeSlackReactionShortcode } from "../slack/reaction-shortcode";
 import { ProviderNameSchema } from "../types";
 
 /**
@@ -39,6 +40,25 @@ type ConfigValidator = (value: unknown) => string | null;
 
 const BOOLEAN_LITERALS = ["true", "false", "1", "0"];
 
+/** A conservative window that remains representable by JavaScript Date arithmetic. */
+export const MAX_DB_RETENTION_DAYS = 1_000_000;
+
+/**
+ * The one source of truth for the retention tick's tuning ranges.
+ *
+ * db-retention.ts clamps each knob to exactly these bounds and falls back to
+ * its default outside them, and VALIDATED_KEYS below rejects out-of-range
+ * writes with the same numbers. Both sides read this constant, so the config
+ * API cannot accept a value the sweep will silently ignore. It lives here
+ * because db-retention.ts already imports from this module; the reverse
+ * direction would be a cycle.
+ */
+export const DB_RETENTION_TUNING_BOUNDS = {
+  DB_RETENTION_TICK_BUDGET_MS: { min: 1_000, max: 300_000 },
+  DB_RETENTION_CATCHUP_INTERVAL_MS: { min: 5_000, max: 3_600_000 },
+  DB_RETENTION_MAX_STATEMENT_MS: { min: 25, max: 5_000 },
+} as const;
+
 /** Build `{ KEY: validator }` entries accepting only boolean literals. */
 function booleanValidators(keys: string[]): Record<string, ConfigValidator> {
   const message = (key: string) =>
@@ -65,6 +85,18 @@ function enumValidator(key: string, options: string[]): Record<string, ConfigVal
   };
 }
 
+/** Build `{ KEY: validator }` entries accepting a Slack emoji shortcode. */
+function shortcodeValidators(keys: string[]): Record<string, ConfigValidator> {
+  const message = (key: string) =>
+    `Invalid ${key} (must be a Slack emoji shortcode: lowercase letters, digits, _ + ' -, with optional surrounding colons)`;
+  return Object.fromEntries(
+    keys.map((key) => [
+      key,
+      (value: unknown) => (normalizeSlackReactionShortcode(value) !== null ? null : message(key)),
+    ]),
+  );
+}
+
 /** Build `{ KEY: validator }` entries accepting integers >= `min`. */
 function integerValidators(keys: string[], min: number): Record<string, ConfigValidator> {
   return Object.fromEntries(
@@ -74,6 +106,38 @@ function integerValidators(keys: string[], min: number): Record<string, ConfigVa
         const str = String(value).trim();
         if (!/^\d+$/.test(str) || Number(str) < min) {
           return `Invalid ${key} (must be an integer >= ${min})`;
+        }
+        return null;
+      },
+    ]),
+  );
+}
+
+/** Build `{ KEY: validator }` entries from a per-key closed range. */
+function boundedIntegerValidatorsFor(
+  bounds: Record<string, { min: number; max: number }>,
+): Record<string, ConfigValidator> {
+  const validators: Record<string, ConfigValidator> = {};
+  for (const [key, { min, max }] of Object.entries(bounds)) {
+    Object.assign(validators, boundedIntegerValidators([key], min, max));
+  }
+  return validators;
+}
+
+/** Build `{ KEY: validator }` entries accepting integers inside a closed range. */
+function boundedIntegerValidators(
+  keys: string[],
+  min: number,
+  max: number,
+): Record<string, ConfigValidator> {
+  return Object.fromEntries(
+    keys.map((key) => [
+      key,
+      (value: unknown) => {
+        const str = String(value).trim();
+        const parsed = Number(str);
+        if (!/^\d+$/.test(str) || !Number.isSafeInteger(parsed) || parsed < min || parsed > max) {
+          return `Invalid ${key} (must be an integer between ${min} and ${max})`;
         }
         return null;
       },
@@ -96,6 +160,44 @@ function validateFloatRange(
 }
 
 const VALIDATED_KEYS: Record<string, ConfigValidator> = {
+  FEEDBACK_ENDPOINT: (value) => {
+    if (typeof value !== "string") {
+      return "Invalid FEEDBACK_ENDPOINT (must use HTTPS, or HTTP on a loopback host)";
+    }
+
+    try {
+      const endpoint = new URL(value.trim());
+      const loopbackHosts = new Set(["localhost", "127.0.0.1", "[::1]"]);
+      if (endpoint.protocol === "https:") return null;
+      if (endpoint.protocol === "http:" && loopbackHosts.has(endpoint.hostname)) return null;
+    } catch {
+      // Fall through to the shared validation error.
+    }
+
+    return "Invalid FEEDBACK_ENDPOINT (must use HTTPS, or HTTP on a loopback host)";
+  },
+  // OpenAI-compatible model gateway for every OpenRouter consumer (OpenCode and
+  // pi-mono sessions, model refreshes, internal summarizers). Call sites append
+  // `/models` and `/chat/completions` to it, so a value carrying a query string
+  // or a fragment would build a nonsense URL — reject those here rather than
+  // letting workers fail one request at a time. Blank is meaningful and allowed:
+  // it is how an operator reverts to openrouter.ai without deleting the row.
+  OPENROUTER_BASE_URL: (value) => {
+    const invalid =
+      "Invalid OPENROUTER_BASE_URL (must be an http(s) URL with no query string or fragment, e.g. https://api.example.com/v1 — leave blank for openrouter.ai)";
+    if (typeof value !== "string") return invalid;
+    const trimmed = value.trim();
+    if (trimmed.length === 0) return null;
+
+    try {
+      const url = new URL(trimmed);
+      if (url.protocol !== "https:" && url.protocol !== "http:") return invalid;
+      if (url.search || url.hash) return invalid;
+    } catch {
+      return invalid;
+    }
+    return null;
+  },
   HARNESS_PROVIDER: (value) => {
     const parsed = ProviderNameSchema.safeParse(value);
     if (parsed.success) return null;
@@ -163,9 +265,18 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     "ANONYMIZED_TELEMETRY",
     "SWARM_HIDE_CLOUD_PROMO",
     "DB_QUERY_BOUNDED_ENABLED",
+    "DB_RETENTION_DRY_RUN",
   ]),
   ...enumValidator("SLACK_THREAD_STEERING", ["lead", "all"]),
   ...enumValidator("SLACK_THREAD_STEERING_MODE", ["steer", "queue"]),
+  ...shortcodeValidators([
+    "SLACK_REACTION_ACCEPTED",
+    "SLACK_REACTION_BUFFERED",
+    "SLACK_REACTION_NOW",
+    "SLACK_REACTION_STEERED",
+    "SLACK_REACTION_COMPLETED",
+    "SLACK_REACTION_FAILED",
+  ]),
   // Counts, minutes, and intervals: positive integers. Deliberately permissive
   // on the upper bound — an operator raising a sweep cap is legitimate.
   ...integerValidators(
@@ -190,6 +301,17 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
       "AGENT_FS_REQUEST_TIMEOUT_MS",
     ],
     1,
+  ),
+  // The retention tick's knobs are NOT merely positive. The sweep clamps each
+  // to a distinct range and silently substitutes its default outside it, so a
+  // permissive "integer >= 1" here accepted settings that never took effect:
+  // an operator could save a 500ms tick budget, see it accepted, and have the
+  // sweep keep running for the default 30000ms.
+  ...boundedIntegerValidatorsFor(DB_RETENTION_TUNING_BOUNDS),
+  ...boundedIntegerValidators(
+    ["SESSION_LOG_RETENTION_DAYS", "AGENT_LOG_RETENTION_DAYS", "EVENTS_RETENTION_DAYS"],
+    1,
+    MAX_DB_RETENTION_DAYS,
   ),
   // 0 is meaningful here: "auto-assign nothing this sweep".
   ...integerValidators(["HEARTBEAT_MAX_AUTO_ASSIGN"], 0),

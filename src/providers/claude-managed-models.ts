@@ -2,7 +2,7 @@
  * Pricing table for Anthropic-managed Claude models, mirroring the layout of
  * `src/providers/codex-models.ts`. Rates are USD per million tokens (Mtok)
  * sourced from https://platform.claude.com/docs/en/about-claude/pricing
- * (verified 2026-04-28).
+ * (verified 2026-09-02).
  *
  * The managed-agents API does NOT report dollar cost on the `span.model_request_end`
  * event — only token counts (`input_tokens`, `output_tokens`,
@@ -25,6 +25,8 @@
 
 /** Models supported by the managed-agents surface for the swarm worker. */
 export const CLAUDE_MANAGED_MODELS = [
+  "claude-fable-5-1",
+  "claude-mythos-5-1",
   "claude-opus-5",
   "claude-fable-5",
   "claude-mythos-5",
@@ -63,10 +65,12 @@ export interface ClaudeManagedModelPricing extends ClaudeManagedTokenPricing {
  * Anthropic public list pricing. Source:
  * https://platform.claude.com/docs/en/about-claude/pricing
  *
+ * - claude-fable-5-1:  $10 / $50 / $0.25 / $12.50  (verified 2026-09-02)
+ * - claude-mythos-5-1: $10 / $50 / $0.25 / $12.50  (invite only, verified 2026-09-02)
  * - claude-fable-5:   $10 / $50 / $1.00 / $12.50   (verified 2026-06-10)
  * - claude-mythos-5:  $10 / $50 / $1.00 / $12.50   (limited availability, verified 2026-06-10)
  * - claude-opus-5:    $5 / $25 / $0.50 / $6.25     (verified 2026-07-25)
- * - claude-sonnet-5:  $2 / $10 / $0.20 / $2.50     (introductory rate, verified 2026-08-11; $3/$15 from 2026-09-01)
+ * - claude-sonnet-5:  $2 / $10 / $0.20 / $2.50     (standard rate, verified 2026-08-29)
  * - claude-sonnet-4-6: $3 / $15 / $0.30 / $3.75    (in / out / cache-read / cache-write)
  * - claude-opus-4-8:   $5 / $25 / $0.50 / $6.25    (verified 2026-05-28)
  * - claude-opus-4-7:   $15 / $75 / $1.50 / $18.75  (STALE — was correct at launch, Anthropic has since dropped Opus to $5/$25)
@@ -74,6 +78,18 @@ export interface ClaudeManagedModelPricing extends ClaudeManagedTokenPricing {
  * - claude-haiku-4-5:  $1 / $5 / $0.10 / $1.25
  */
 export const CLAUDE_MANAGED_MODEL_PRICING: Record<ClaudeManagedModel, ClaudeManagedModelPricing> = {
+  "claude-fable-5-1": {
+    inputPerMillion: 10.0,
+    outputPerMillion: 50.0,
+    cacheReadPerMillion: 0.25,
+    cacheWritePerMillion: 12.5,
+  },
+  "claude-mythos-5-1": {
+    inputPerMillion: 10.0,
+    outputPerMillion: 50.0,
+    cacheReadPerMillion: 0.25,
+    cacheWritePerMillion: 12.5,
+  },
   "claude-opus-5": {
     inputPerMillion: 5.0,
     outputPerMillion: 25.0,
@@ -92,21 +108,11 @@ export const CLAUDE_MANAGED_MODEL_PRICING: Record<ClaudeManagedModel, ClaudeMana
     cacheReadPerMillion: 1.0,
     cacheWritePerMillion: 12.5,
   },
-  // Introductory rate through 2026-08-31; changes to $3/$15 from 2026-09-01.
   "claude-sonnet-5": {
     inputPerMillion: 2.0,
     outputPerMillion: 10.0,
     cacheReadPerMillion: 0.2,
     cacheWritePerMillion: 2.5,
-    scheduledChange: {
-      effectiveAt: "2026-09-01T00:00:00.000Z",
-      pricing: {
-        inputPerMillion: 3.0,
-        outputPerMillion: 15.0,
-        cacheReadPerMillion: 0.3,
-        cacheWritePerMillion: 3.75,
-      },
-    },
   },
   "claude-sonnet-4-6": {
     inputPerMillion: 3.0,

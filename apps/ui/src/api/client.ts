@@ -1,6 +1,7 @@
 import type { LiveModelsCatalog } from "@/lib/agent-runtime-models";
 import { getConfig } from "@/lib/config";
 import type {
+  AcpRuntimeConfig,
   AgentAvatar,
   AgentMcpServersResponse,
   AgentRuntimeInstancesResponse,
@@ -36,6 +37,7 @@ import type {
   FavoriteItemType,
   FavoriteSetResponse,
   FavoritesResponse,
+  FeedbackInput,
   IdentitiesResponse,
   IdentityEvent,
   IdentityEventsResponse,
@@ -310,11 +312,12 @@ class ApiClient {
 
   async updateAgentRuntime(data: {
     id: string;
-    harnessProvider: "claude" | "codex" | "pi" | "opencode";
-    model: string;
+    harnessProvider: "claude" | "codex" | "pi" | "opencode" | "acp";
+    model: string | null;
     allowCustomModel?: boolean;
     /** `null` clears `REASONING_EFFORT_OVERRIDE`; omitted leaves it unchanged; a level sets it. */
     reasoningEffort?: ReasoningEffortLevel | null;
+    acp?: AcpRuntimeConfig;
   }): Promise<AgentWithTasks> {
     const url = `${this.getBaseUrl()}/api/agents/${data.id}/runtime`;
     const res = await fetch(url, {
@@ -325,6 +328,7 @@ class ApiClient {
         model: data.model,
         allow_custom_model: data.allowCustomModel ?? false,
         ...(data.reasoningEffort !== undefined ? { reasoning_effort: data.reasoningEffort } : {}),
+        ...(data.acp ? { acp: data.acp } : {}),
       }),
     });
     if (!res.ok) {
@@ -404,6 +408,12 @@ class ApiClient {
     model?: string;
     modelTier?: string;
     effort?: string;
+    /**
+     * Create in `draft` status (#1240) — visible to the owner but not
+     * dispatch-eligible. Used while attachments are still uploading; the
+     * caller must follow up with `promoteDraftTask` once the batch settles.
+     */
+    draft?: boolean;
   }): Promise<TaskWithLogs> {
     const url = `${this.getBaseUrl()}/api/tasks`;
     const res = await fetch(url, {
@@ -414,6 +424,23 @@ class ApiClient {
     if (!res.ok) {
       const error = await res.json().catch(() => ({ error: "Failed to create task" }));
       throw new Error(error.error || `Failed to create task: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  /**
+   * Promote a `draft` task (#1240) out of the pre-dispatch draft state.
+   * Idempotent — safe to call on a task that already left `draft`.
+   */
+  async promoteDraftTask(id: string): Promise<TaskWithLogs> {
+    const url = `${this.getBaseUrl()}/api/tasks/${id}/promote-draft`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to promote draft task" }));
+      throw new Error(error.error || `Failed to promote draft task: ${res.status}`);
     }
     return res.json();
   }
@@ -548,6 +575,47 @@ class ApiClient {
     if (res.status === 404) return null;
     if (!res.ok) throw new Error(`Failed to fetch status: ${res.status}`);
     return res.json();
+  }
+
+  async submitFeedback(endpoint: string, data: FeedbackInput): Promise<void> {
+    let parsedEndpoint: URL;
+    try {
+      parsedEndpoint = new URL(endpoint);
+    } catch {
+      throw new Error("Invalid feedback endpoint");
+    }
+
+    const loopbackHosts = new Set(["localhost", "127.0.0.1", "[::1]"]);
+    if (
+      parsedEndpoint.protocol !== "https:" &&
+      !(parsedEndpoint.protocol === "http:" && loopbackHosts.has(parsedEndpoint.hostname))
+    ) {
+      throw new Error("Invalid feedback endpoint");
+    }
+
+    const body = JSON.stringify(data);
+    let response: Response;
+
+    try {
+      response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+      });
+    } catch {
+      // Arbitrary self-hosted origins are not allowlisted by the shared proxy.
+      // Their preflight is blocked before the POST, so retain the simple opaque
+      // request as a fire-and-forget fallback.
+      await fetch(endpoint, {
+        method: "POST",
+        mode: "no-cors",
+        headers: { "Content-Type": "text/plain;charset=UTF-8" },
+        body,
+      });
+      return;
+    }
+
+    if (!response.ok) throw new Error(`Failed to submit feedback: ${response.status}`);
   }
 
   async testConnection(
@@ -995,6 +1063,7 @@ class ApiClient {
     id: string,
     data: Partial<
       Pick<Workflow, "key" | "name" | "description" | "enabled"> & {
+        params: Record<string, unknown>;
         // null = clear, object = set/replace, undefined/omitted = unchanged.
         triggerSchema: Record<string, unknown> | null;
       }

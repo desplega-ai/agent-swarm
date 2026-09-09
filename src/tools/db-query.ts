@@ -35,6 +35,7 @@ export const registerDbQueryTool = (server: McpServer) => {
         elapsed: z.number().optional(),
         total: z.number().optional(),
         truncated: z.boolean().optional(),
+        rowLimit: z.number().optional(),
       }),
     },
     async (input, _requestInfo, _meta) => {
@@ -48,19 +49,19 @@ export const registerDbQueryTool = (server: McpServer) => {
           getDbQueryMcpBudgetMs(),
           maxRows,
         );
-        const truncated = result.total > maxRows;
-
         // Build a simple text table for Claude
         const header = result.columns.join(" | ");
         const separator = result.columns.map(() => "---").join(" | ");
         const dataRows = result.rows.map((row) => row.map((v) => String(v ?? "NULL")).join(" | "));
         const table = [header, separator, ...dataRows].join("\n");
-        const suffix = truncated ? `\n(Showing ${maxRows} of ${result.total} rows)` : "";
+        const suffix = result.truncated
+          ? `\n(Showing ${result.rowLimit} of ${result.total} rows)`
+          : "";
         const details = `${table}${suffix}\n\n${result.total} rows in ${result.elapsed}ms`;
 
         return toolOk(`${result.total} row(s) in ${result.elapsed}ms`, {
           details,
-          data: { ...result, truncated },
+          data: { ...result },
         });
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);

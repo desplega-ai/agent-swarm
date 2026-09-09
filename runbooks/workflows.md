@@ -248,6 +248,16 @@ The echoed `triggerSchema` lets agents self-correct without a follow-up `get-wor
 - HTTP 400 helper: `src/http/utils.ts` (`triggerSchemaErrorResponse`)
 - MCP error formatting: `src/tools/workflows/trigger-workflow.ts` (`TriggerSchemaError` branch)
 
+## Event triggers
+
+An enabled workflow can subscribe to an event that starts a new run:
+
+```json
+{ "type": "event", "eventName": "slack.message" }
+```
+
+The event payload becomes the run's `triggerData` and passes through the workflow's optional `triggerSchema` validation. `slack.message` is currently wired as a start trigger during workflow initialization; the generic dispatcher can support more named bus events as their listeners are added.
+
 ## Wait nodes
 
 A `wait` node pauses a workflow until either a duration elapses or a named event satisfies a filter. It is async — the run transitions to `waiting` and resumes via the `wait-poller` (time mode + event-mode timeout) or the `workflowEventBus` listener (event mode).
@@ -322,6 +332,7 @@ The following events are already emitted on `workflowEventBus` today and are usa
 | `task.created` / `task.progress` / `task.budget_refused` | `src/be/db.ts` | task-id keyed lifecycle payloads |
 | `approval.resolved` | `src/http/approval-requests.ts:183` | `{ requestId, status, responses, workflowRunId, workflowRunStepId }` |
 | `agentmail.message.received` | `src/agentmail/handlers.ts:168` | inbox/message keyed payload |
+| `slack.message` | `src/slack/handlers.ts` | `{ channel, text, user, ts, threadTs }` |
 | `github.pull_request.<action>` | `src/http/webhooks.ts:177` | full GitHub PR payload |
 | `github.issue.<action>` | `src/http/webhooks.ts:192` | GitHub issue payload |
 | `github.issue_comment.created` | `src/http/webhooks.ts:202` | comment payload |
@@ -337,7 +348,6 @@ For `task.completed` specifically, the canonical payload shape lives in `src/be/
 
 The following sources do **not** currently emit on `workflowEventBus`. Hooking each one in is a one-line `workflowEventBus.emit(name, payload)` follow-up in the relevant handler — tracked as separate plans:
 
-- Slack messages (`src/slack/`)
 - Linear webhooks (`src/linear/`, `src/http/trackers/linear.ts`)
 - Jira webhooks (`src/jira/`, `src/http/trackers/jira.ts`)
 - Sentry alerts

@@ -3,41 +3,8 @@ import { Box, Text } from "ink";
 import { useEffect, useRef, useState } from "react";
 import { generateCompose } from "../compose-generator.ts";
 import { generateEnv } from "../env-generator.ts";
+import { generateManifest } from "../manifest.ts";
 import type { StepProps } from "../types.ts";
-
-interface ManifestConfig {
-  presetId: string | null;
-  deployType: string;
-  harness: string;
-  services: { template: string; displayName: string; count: number; role: string }[];
-  integrations: Record<string, boolean>;
-  agentIds: Record<string, string>;
-  createdAt: string;
-}
-
-function generateManifest(state: {
-  presetId: string | null;
-  deployType: string;
-  harness: string;
-  services: { template: string; displayName: string; count: number; role: string }[];
-  integrations: Record<string, boolean>;
-  agentIds: Record<string, string>;
-}): ManifestConfig {
-  return {
-    presetId: state.presetId,
-    deployType: state.deployType,
-    harness: state.harness,
-    services: state.services.map((s) => ({
-      template: s.template,
-      displayName: s.displayName,
-      count: s.count,
-      role: s.role,
-    })),
-    integrations: { ...state.integrations },
-    agentIds: { ...state.agentIds },
-    createdAt: new Date().toISOString(),
-  };
-}
 
 export function GenerateStep({ state, dryRun, addLog, goToNext, goToStep, goToError }: StepProps) {
   const executedRef = useRef(false);

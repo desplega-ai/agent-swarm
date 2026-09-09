@@ -12,6 +12,7 @@ import {
   updateAgentStatusFromCapacity,
   updateTaskProgress,
 } from "@/be/db";
+import { AgentFsProvider } from "@/fs/agent-fs-provider";
 import { runTaskTerminalEffects } from "@/tasks/task-terminal-effects";
 import {
   getTaskOutputValidationError,
@@ -19,6 +20,7 @@ import {
 } from "@/tasks/terminal-result-guard";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { AgentTaskStatusSchema, AttachmentInputSchema, isTerminalTaskStatus } from "@/types";
+import { scrubSecrets } from "@/utils/secret-scrubber";
 
 // Phase 11: the `cost` / `costData` field was removed from this tool's input
 // schema. Adapters (claude/codex/pi/opencode/devin/claude-managed) are the
@@ -87,7 +89,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
           .max(20)
           .optional()
           .describe(
-            "Pointer-based artifacts produced by this step — agent-fs path, URL, shared-fs path, or swarm Page. No inline file data; upload to agent-fs first and attach by path. May be sent on any call (progress or completion) and accumulates across calls; duplicates are de-duped by sha256 (when present) or by (kind, pointer, name).",
+            "Pointer-based artifacts produced by this step — agent-fs path, URL, shared-fs path, or swarm Page. No inline file data; upload to agent-fs first and attach by path. Agent-fs pointers are verified before task state changes, using the explicit org/drive pair or the registering agent's configured defaults. May be sent on any call (progress or completion) and accumulates across calls; duplicates are de-duped by sha256 (when present) or by (kind, pointer, name).",
           ),
         persistMemory: z
           .boolean()
@@ -117,25 +119,84 @@ export const registerStoreProgressTool = (server: McpServer) => {
         return toolErr('Agent ID not found. The MCP client should define the "X-Agent-ID" header.');
       }
 
-      // Resolve agent-fs default org/drive IDs from swarm config lazily —
-      // only if at least one `agent-fs` row arrives with missing IDs. Resolved
-      // BEFORE the transaction below (which must stay fully synchronous) so the
-      // attachment loop inside it can consume a plain, already-resolved value.
-      // Scope precedence is `getResolvedConfig`'s usual repo > agent > global;
-      // we pass the calling agent's id so agent-scoped overrides win. Defaults
-      // apply only when a row has neither ID: filling one missing ID would
-      // create a mismatched pair and a potentially wrong live-host URL.
-      // Env-var fallback in `constants.ts` remains the secondary path for
-      // self-hosters who deploy without a config DB.
-      let agentFsDefaults: { orgId?: string; driveId?: string } | undefined;
-      if (attachments?.some((a) => a.kind === "agent-fs" && !a.orgId && !a.driveId)) {
+      // Verify agent-fs pointers before opening the write transaction. The
+      // registering agent's resolved config selects both credentials and the
+      // exact org/drive; never let the provider fall back to a personal drive.
+      // Keeping the resolved scope per input also guarantees the verified pair
+      // is the pair persisted below.
+      const agentFsScopes = new Map<object, { orgId: string; driveId: string }>();
+      const agentFsAttachments = attachments?.filter((a) => a.kind === "agent-fs") ?? [];
+      if (agentFsAttachments.length > 0) {
+        // Validate the caller and target before an agent-fs lookup. Otherwise a
+        // forged X-Agent-ID or unknown task could use this tool as a file-existence
+        // oracle through the API-owned agent-fs credential fallback.
+        if (!(await getAgentById(requestInfo.agentId))) {
+          return toolErr(
+            `Agent with ID "${requestInfo.agentId}" not found in the swarm, register before storing task progress.`,
+          );
+        }
+        if (!(await getTaskById(taskId))) {
+          return toolErr(`Task with ID "${taskId}" not found.`);
+        }
+
         const configs = await getResolvedConfig(requestInfo.agentId ?? undefined);
-        const orgId = configs.find((c) => c.key === "AGENT_FS_DEFAULT_ORG_ID")?.value;
-        const driveId = configs.find((c) => c.key === "AGENT_FS_DEFAULT_DRIVE_ID")?.value;
-        agentFsDefaults = {
-          orgId: orgId && orgId.length > 0 ? orgId : undefined,
-          driveId: driveId && driveId.length > 0 ? driveId : undefined,
-        };
+        const configValue = (key: string) => configs.find((c) => c.key === key)?.value?.trim();
+        const defaultOrgId = configValue("AGENT_FS_DEFAULT_ORG_ID");
+        const defaultDriveId = configValue("AGENT_FS_DEFAULT_DRIVE_ID");
+        const apiUrl = configValue("AGENT_FS_API_URL") || process.env.AGENT_FS_API_URL?.trim();
+        const apiKey =
+          configValue("AGENT_FS_API_KEY") ||
+          configValue("API_AGENT_FS_API_KEY") ||
+          process.env.AGENT_FS_API_KEY?.trim() ||
+          process.env.API_AGENT_FS_API_KEY?.trim();
+
+        for (const attachment of agentFsAttachments) {
+          const hasExplicitScope = Boolean(attachment.orgId || attachment.driveId);
+          const orgId = (hasExplicitScope ? attachment.orgId : defaultOrgId)?.trim();
+          const driveId = (hasExplicitScope ? attachment.driveId : defaultDriveId)?.trim();
+          if (!orgId || !driveId) {
+            return toolErr(
+              `Agent-fs attachment "${attachment.name}" cannot be verified: both orgId and driveId must resolve from the attachment or the registering agent's config. No attachment was registered and task state was unchanged.`,
+            );
+          }
+          agentFsScopes.set(attachment, { orgId, driveId });
+        }
+
+        if (!apiUrl || !apiKey) {
+          return toolErr(
+            "Agent-fs attachments cannot be verified because the registering agent's agent-fs API URL or credential is unavailable. No attachment was registered and task state was unchanged.",
+          );
+        }
+
+        const firstScope = agentFsScopes.get(agentFsAttachments[0]!);
+        if (!firstScope) {
+          return toolErr("Agent-fs attachment scope resolution failed.");
+        }
+        const provider = new AgentFsProvider({ apiUrl, apiKey, ...firstScope });
+        const verificationErrors = await Promise.all(
+          agentFsAttachments.map(async (attachment) => {
+            const scope = agentFsScopes.get(attachment);
+            if (!scope) return "Agent-fs attachment scope resolution failed.";
+            try {
+              await provider.head({
+                taskId,
+                name: attachment.name,
+                key: attachment.path,
+                ...scope,
+              });
+              return undefined;
+            } catch (error) {
+              const detail = scrubSecrets(error instanceof Error ? error.message : String(error));
+              return `Agent-fs attachment "${attachment.name}" does not resolve at orgId=${scope.orgId}, driveId=${scope.driveId}, path=${attachment.path}: ${detail}.`;
+            }
+          }),
+        );
+        const verificationError = verificationErrors.find((error) => error !== undefined);
+        if (verificationError) {
+          return toolErr(
+            `${verificationError} No attachment was registered and task state was unchanged.`,
+          );
+        }
       }
 
       const result = await getDbClient().transaction(async () => {
@@ -174,9 +235,10 @@ export const registerStoreProgressTool = (server: McpServer) => {
           for (const a of attachments) {
             let orgId = a.kind === "agent-fs" ? a.orgId : undefined;
             let driveId = a.kind === "agent-fs" ? a.driveId : undefined;
-            if (a.kind === "agent-fs" && !orgId && !driveId) {
-              orgId = orgId || agentFsDefaults?.orgId;
-              driveId = driveId || agentFsDefaults?.driveId;
+            if (a.kind === "agent-fs") {
+              const verifiedScope = agentFsScopes.get(a);
+              orgId = verifiedScope?.orgId;
+              driveId = verifiedScope?.driveId;
             }
 
             await insertTaskAttachment({

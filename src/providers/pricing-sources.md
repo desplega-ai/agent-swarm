@@ -110,11 +110,11 @@ and heartbeat-classified roots are omitted, and the metrics remain separate.
 
 ## Provider pricing caveats
 
-- **Claude Sonnet 5 introductory rate:** Anthropic's pricing page lists
-  $2/M input and $10/M output through 2026-08-31. The models.dev snapshot and
-  server pricing table carry that introductory rate. Claude Code's bundled
-  local rate table is stale-high, so treat its reported USD as advisory and
-  use the server-recomputed row for the canonical total.
+- **Claude Sonnet 5 standard rate:** Anthropic's pricing page lists $2/M input
+  and $10/M output as the standard rate. Anthropic cancelled the previously
+  scheduled increase to $3/M input and $15/M output on 2026-09-01. Claude
+  Code's bundled local rate table may be stale-high, so treat its reported USD
+  as advisory and use the server-recomputed row for the canonical total.
 - **GPT-5.6 context tier:** above 272k context, the GPT-5.6 family bills
   2× input/cache rates and 1.5× output rates. The current recompute receives
   aggregate session token counts, not enough per-request context information
@@ -126,6 +126,9 @@ and heartbeat-classified roots are omitted, and the metrics remain separate.
   `src/providers/codex-models.ts` is advisory only. The canonical price is the
   server-side recompute against the runtime-refreshed pricing table;
   `agentswarm.cost.drift.usd` watches for divergence between the two.
+- **Codex usage:** the app-server reports cumulative token counters, including cache writes.
+  The adapter calculates each turn's delta before adding it to the session total.
+  This prevents repeated billing of earlier turns when the adapter processes queued input.
 - **Claude breakdown validity is all-or-nothing:** the claude adapter drops the
   entire `modelUsage` breakdown when any entry carries a missing, non-finite,
   or negative token counter — zero-filling would let the server price a

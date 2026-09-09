@@ -96,6 +96,7 @@ const SHOW_STATUS_PILL = new Set<string>([
   "offered",
   "backlog",
   "unassigned",
+  "draft",
 ]);
 
 export function TaskCard({

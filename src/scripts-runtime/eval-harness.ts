@@ -80,6 +80,14 @@ function buildStructuredError(err: unknown, userModulePath: string): StructuredE
 // ("Cannot find module ... from ''"). A fresh subdir is never in that snapshot.
 const userModulePath = `${requiredEnv("SWARM_SCRIPT_TMPDIR")}/user-module/user-script.ts`;
 const errorFile = process.env.SWARM_SCRIPT_ERROR_FILE;
+// Written immediately before user-authored code gets a chance to run (module
+// import can execute top-level side effects; the exported function can do
+// more). The executor checks this file's existence to tell "died before
+// touching user code" (safe to retry) apart from "died after" (must not
+// retry — see native.ts's classifyExit). Must stay the LAST framework
+// statement before that boundary: any code added after this line other than
+// the import/invocation itself narrows the retry-safety window it defines.
+const startedFile = process.env.SWARM_SCRIPT_STARTED_FILE;
 
 async function emitError(err: unknown): Promise<void> {
   const structured = buildStructuredError(err, userModulePath);
@@ -105,9 +113,7 @@ try {
   }
 
   const payload = JSON.parse(stdin) as SwarmConfigPayload;
-  if (payload.egressSecrets?.length || payload.failedBindings?.length) {
-    patchFetchWithEgressSubstitution(payload.egressSecrets ?? [], payload.failedBindings ?? []);
-  }
+  patchFetchWithEgressSubstitution(payload.egressSecrets ?? [], payload.failedBindings ?? []);
   const swarmConfig = new SwarmConfig(payload);
   const rawArgs = JSON.parse(await Bun.file(requiredEnv("SWARM_SCRIPT_ARGS_FILE")).text());
   // Accept both shapes: callers may pass an already-serialized JSON string.
@@ -120,6 +126,8 @@ try {
 
   const sourceText = await Bun.file(requiredEnv("SWARM_SCRIPT_SOURCE_FILE")).text();
   await Bun.write(userModulePath, sourceText);
+
+  if (startedFile) await Bun.write(startedFile, "1");
 
   // Import via file:// URL, not the raw path: on macOS the tmpdir lives behind
   // the /var -> /private/var symlink, and Bun >= 1.3.12 fails to resolve a

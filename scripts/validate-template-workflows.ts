@@ -22,6 +22,12 @@ const KNOWN_EXECUTOR_TYPES = new Set([
   "raw-llm",
   "validate",
   "property-match",
+  "code-match",
+  "notify",
+  "vcs",
+  "foreach",
+  "human-in-the-loop",
+  "wait",
 ]);
 
 function extractJsonBlock(markdown: string, file: string): unknown {
@@ -69,6 +75,35 @@ for (const slug of dirs) {
   // We normalise here: if there's a top-level `nodes` key, wrap it into the
   // `definition` shape that WorkflowDefinitionSchema expects.
   const obj = parsed as Record<string, unknown>;
+  if ("triggers" in obj) {
+    if (!Array.isArray(obj.triggers)) {
+      console.error(`[FAIL] ${slug}: triggers must be an array`);
+      hasErrors = true;
+      continue;
+    }
+    for (const trigger of obj.triggers) {
+      if (!trigger || typeof trigger !== "object") {
+        console.error(`[FAIL] ${slug}: trigger must be an object`);
+        hasErrors = true;
+        continue;
+      }
+      const item = trigger as Record<string, unknown>;
+      if (item.type === "event" && item.eventName !== "slack.message") {
+        console.error(`[FAIL] ${slug}: event trigger must use the wired slack.message event`);
+        hasErrors = true;
+      }
+      if (
+        item.type === "schedule" &&
+        (typeof item.scheduleId !== "string" || item.scheduleId.startsWith("configured-"))
+      ) {
+        console.error(
+          `[FAIL] ${slug}: schedule trigger requires a concrete scheduleId; defer the binding to the seeder instead`,
+        );
+        hasErrors = true;
+      }
+    }
+    if (hasErrors) continue;
+  }
   const definitionData: unknown =
     "nodes" in obj ? { nodes: obj.nodes, onNodeFailure: obj.onNodeFailure } : obj;
 
@@ -83,6 +118,23 @@ for (const slug of dirs) {
   }
 
   const def = parseResult.data;
+
+  if (slug === "competitor-radar") {
+    const helperScript = def.nodes.find((node) => node.id === "pull-competitor-queries")?.config
+      ?.script;
+    if (
+      typeof helperScript !== "string" ||
+      !helperScript.includes("1b1b79c189b0bc62e9bbc6abe54622fa011f198a") ||
+      !helperScript.includes("GSC_HELPER") ||
+      helperScript.includes("raw.githubusercontent.com")
+    ) {
+      console.error(
+        "[FAIL] competitor-radar: GSC helper must remain embedded at the reviewed commit",
+      );
+      hasErrors = true;
+      continue;
+    }
+  }
 
   // Run structural DAG checks (next refs, entry nodes, reachability, input sources).
   // We skip registry-based type validation here and do it ourselves below,

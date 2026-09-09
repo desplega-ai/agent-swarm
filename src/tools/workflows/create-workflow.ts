@@ -66,7 +66,7 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
           .array(TriggerConfigSchema)
           .optional()
           .describe(
-            "Optional trigger configurations (webhook, schedule). Webhook verification formats: legacy omitted verification, hmac-sha256, timestamped-hmac-sha256, token-equality.",
+            "Optional trigger configurations (webhook, schedule, event). Webhook verification formats: legacy omitted verification, hmac-sha256, timestamped-hmac-sha256, token-equality.",
           ),
         cooldown: CooldownConfigSchema.optional().describe(
           "Optional cooldown configuration to prevent re-triggering too frequently",

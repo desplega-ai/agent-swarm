@@ -43,6 +43,7 @@ const ACTIVE_STATUSES = new Set<AgentTaskStatus>([
   "offered",
   "backlog",
   "unassigned",
+  "draft",
   "in_progress",
   "paused",
   "reviewing",

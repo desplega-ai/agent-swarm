@@ -68,7 +68,7 @@ async function configValue(key: string): Promise<string | undefined> {
 
 function createFetchStub(
   records: RequestRecord[],
-  options: { members?: StubMember[] } = {},
+  options: { members?: StubMember[]; registerConflictEmail?: string } = {},
 ): typeof fetch {
   return (async (input, init) => {
     const url = new URL(String(input));
@@ -84,6 +84,14 @@ function createFetchStub(
     });
 
     if (url.pathname === "/auth/register" && method === "POST") {
+      if (
+        body &&
+        typeof body === "object" &&
+        "email" in body &&
+        body.email === options.registerConflictEmail
+      ) {
+        return Response.json({ error: "email already registered" }, { status: 409 });
+      }
       if (
         body &&
         typeof body === "object" &&
@@ -499,6 +507,79 @@ describe("agent-fs provisioning seeder", () => {
 
     expect(second.created).toBe(false);
     expect(records).toEqual([]);
+  });
+
+  test("recovers a lost agent credential by registering an alias after a 409", async () => {
+    const suffix = crypto.randomUUID().slice(0, 8);
+    const canonicalEmail = `recovery-worker-${suffix}@example.test`;
+    process.env.AGENT_FS_API_URL = "https://agent-fs.example.test/";
+    await upsertSwarmConfig({
+      scope: "global",
+      key: "API_AGENT_FS_API_KEY",
+      value: "afs-admin-key",
+      isSecret: true,
+    });
+    await upsertSwarmConfig({
+      scope: "global",
+      key: "AGENT_FS_DEFAULT_ORG_ID",
+      value: "shared-org",
+    });
+    await upsertSwarmConfig({
+      scope: "global",
+      key: "AGENT_FS_DEFAULT_DRIVE_ID",
+      value: "shared-drive",
+    });
+    const worker = await createAgent({
+      name: "Recovery Worker",
+      description: "Worker whose agent-fs key was lost",
+      role: "worker",
+      isLead: false,
+      status: "idle",
+      maxTasks: 1,
+      capabilities: [],
+    });
+    await upsertSwarmConfig({
+      scope: "agent",
+      scopeId: worker.id,
+      key: "AGENT_EMAIL",
+      value: canonicalEmail,
+    });
+
+    const records: RequestRecord[] = [];
+    setAgentFsProvisionFetchForTests(
+      createFetchStub(records, { registerConflictEmail: canonicalEmail }),
+    );
+
+    const result = await ensureAgentFsCredentialsForAgent(worker.id);
+
+    expect(result).toMatchObject({
+      enabled: true,
+      created: true,
+      agentId: worker.id,
+      orgId: "shared-org",
+      driveId: "shared-drive",
+    });
+    expect(result.email).toMatch(
+      new RegExp(`^recovery-worker-${suffix}\\+recovery-[0-9a-f-]+@example\\.test$`),
+    );
+    expect(
+      (
+        await getSwarmConfigs({
+          scope: "agent",
+          scopeId: worker.id,
+          key: "AGENT_FS_API_KEY",
+        })
+      )[0]?.value,
+    ).toBe("afs-agent-key");
+
+    const registrations = records
+      .filter((record) => record.path === "/auth/register")
+      .map((record) => record.body);
+    expect(registrations).toEqual([{ email: canonicalEmail }, { email: result.email }]);
+    expect(records.find((record) => record.path.endsWith("/members/invite"))?.body).toEqual({
+      email: result.email,
+      role: "editor",
+    });
   });
 
   test("invites an external email into the shared org with the requested role", async () => {

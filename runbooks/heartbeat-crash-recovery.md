@@ -20,10 +20,14 @@ flowchart TD
   health --> cleanup["cleanupStaleResources()<br/>stale sessions (30m), reviewing,<br/>inbox, mentions, workflow runs,<br/>+ reaper: escalate unreclaimed pinned resumes (§3)<br/>+ escalateStarvedPoolTasks: zero-eligible-agent pool tasks (§4)"]
   cleanup --> assign["autoAssignPoolTasks()<br/>per-task: first idle worker satisfying<br/>isAgentEligibleForTask (§4) — else leave queued"]
 
-  boot["Server boot (once)"] --> reboot["runRebootSweep()<br/>in_progress w/ no session<br/>OR pre-boot stale session<br/>→ failTask + retry child<br/>(pinned to original agent when recoverable, §4)"]
+  boot["Server boot (once)"] --> reboot["runRebootSweep()<br/>in_progress claimed after boot → skip<br/>else: no session OR pre-boot stale session<br/>→ failTask + retry child<br/>(pinned to original agent when recoverable, §4)"]
 ```
 
-- **Reboot sweep liveness predicate** (`runRebootSweep`): a session is considered "live, skip" only if `lastHeartbeatAt >= bootEpoch - 5s` (boot epoch parsed from `globalThis.__runId` = `run_<epochMs>`). Sessions with pre-boot heartbeats are stale artifacts that survived the WAL-mode SQLite restart and are treated as absent → auto-fail + retry child. If `__runId` is missing/unparseable, falls back to the legacy behavior (session exists → skip) — never more aggressive than before. This is **concurrency-safe**: a worker with N concurrent tasks keeps fresh (post-boot) heartbeats on its live sessions; only genuinely stale ones get classified.
+- **Reboot sweep liveness predicate** (`runRebootSweep`, boot epoch parsed from `globalThis.__runId` = `run_<epochMs>`), evaluated per `in_progress` task in this order:
+  1. **Claimed after boot → skip.** A task with `lastUpdatedAt >= bootEpoch - 5s` is skipped before any session lookup. `claimTask` / `startTask` stamp `lastUpdatedAt` at the `in_progress` transition and the API is the sole DB writer, so a post-boot value proves the claim (or a live worker's write) happened after this process started. It cannot be a pre-boot orphan. This is what keeps a task alive when its worker is still inside a slow provider spawn (opencode cold start exceeds the 5s sweep delay). If the task later goes quiet, the regular stalled-task sweep still covers it.
+  2. **Session live → skip.** A session is considered "live, skip" only if `lastHeartbeatAt >= bootEpoch - 5s`. Sessions with pre-boot heartbeats are stale artifacts that survived the WAL-mode SQLite restart and are treated as absent → auto-fail + retry child. This is **concurrency-safe**: a worker with N concurrent tasks keeps fresh (post-boot) heartbeats on its live sessions; only genuinely stale ones get classified.
+  3. If `__runId` is missing/unparseable, both checks fall back to the legacy behavior (session exists → skip, no claim-time check). Never more aggressive than before.
+- **Worker side** (`src/commands/runner.ts`): the worker registers its active session (POST `/api/active-sessions`, keyed on the per-task runner session id) *before* it starts the provider spawn, and fills in the provider session id on `session_init`. So the window in which an `in_progress` task has no session row is one HTTP round trip, not the whole spawn. On spawn failure the worker fails the task and then removes the row.
 - The **boot-triage seed script** (`src/be/seed-scripts/catalog/boot-triage.ts`) mirrors this logic: it flags `in_progress` tasks that are on an offline agent OR whose session's `lastHeartbeatAt` is older than `stuckMinutes` ago (no fresh session heartbeat).
 - `autoAssignPoolTasks` and `claimTask`/`assignUnassignedTaskPending` are gated by the **routing-affinity eligibility check** (§4, `isAgentEligibleForTask`) — a pooled task tagged with a `routingAffinity` snapshot (from a resume/retry, or an explicit `requiredCapabilities` on a fresh `send-task`) can only go to a role/capability-matching agent. Untagged tasks are unaffected — assignment stays open to any idle (non-lead) worker, exactly as before. `autoAssignPoolTasks` **does** skip idle workers whose `emptyPollCount >= MAX_EMPTY_POLLS` (the poll gate) — assigning to them would just have them exit on their next poll. The filter reads `emptyPollCount` off the rows `getIdleWorkersWithCapacity()` already returns (no per-worker re-query). Note the poll gate is cleared on a genuine `waiting_for_credentials -> ready` recovery (`updateAgentCredentialState`) and on re-register, but **not** by routine post-task `ready:true` credential reports.
 - `checkWorkerHealth` only flips `busy↔idle` (it pre-filters `offline`) and never sets `offline`. A successful `/api/poll` dispatch updates the agent to `busy` in the same transaction that starts a pre-assigned task or claims a pool task; the worker-only `poll-task` tool does the same for its direct pending-task path. The heartbeat sweep remains the reconciliation backstop for any other task-state transition that leaves `agents.status` stale. Leads can become `busy` while running a directly assigned task, but remain structurally excluded from pool assignment (`getIdleWorkersWithCapacity` and the pool dispatch query filter `isLead=0`). `offline` has two writers: the graceful `POST /close` handler (`src/http/core.ts`), and — only when `MULTI_RUNTIME_ENABLED` is set — the stale-runtime expiry in §1a. With the flag off (the default), a hard-crashed (SIGKILL) worker is still never auto-offlined.
@@ -113,7 +117,7 @@ flowchart TD
 ```mermaid
 flowchart TD
   entry["supersedeTask(parent) → frees capacity,<br/>then createResumeFollowUp(crash_recovery<br/>or graceful_shutdown)"]
-  entry --> gate{"original agent row exists,<br/>status≠offline, hasCap?<br/>(protected reasons IGNORE the 30s fresh gate)"}
+  entry --> gate{"lead-only parent?<br/>worker source → current Lead;<br/>otherwise original row exists,<br/>status≠offline, hasCap?"}
   gate -->|"yes (recoverable / restarting)"| pin["resume = PENDING, agentId = parent<br/>(reclaimed on the agent's next poll —<br/>never enters the pool)"]
   gate -->|"no — offline / row gone / at capacity /<br/>pin kill-switch=0"| pool["resume = UNASSIGNED → pool<br/>(genuinely-gone / rollback path)"]
   pin --> reap{"reaper (every sweep, in cleanupStaleResources):<br/>still PENDING after<br/>HEARTBEAT_RESUME_PIN_GRACE_MIN?"}
@@ -122,7 +126,7 @@ flowchart TD
   esc --> lead["Lead re-delegates via send-task(agentId=…)<br/>— explicit agent, never re-pooled"]
 ```
 
-**Heuristic (current):** `crash_recovery` and `graceful_shutdown` resumes are **pinned back to their own (stable-ID) agent**. `createResumeFollowUp` sets `agentId = parent.agentId` whenever the agent row still exists, is not `offline`, and has capacity — *regardless of the 30s `WORKER_LIVENESS_WINDOW_SECONDS` freshness*. The agent ID survives both crash recovery and deploy/SIGTERM graceful shutdown, so "stale" usually means "restarting", not "gone". The resume is `pending` and reclaimed on the agent's next poll; it **never enters the role-blind pool**, so no wrong-specialization worker can grab it (DES-523). It falls back to the pool only when the agent is genuinely gone (`offline`), its row is absent, capacity is full, or the reason-specific rollback switch is `0` (`HEARTBEAT_PIN_CRASH_RESUME` for crash recovery, `HEARTBEAT_PIN_GRACEFUL_RESUME` for graceful shutdown). Other reasons (`context_limits` / `manual_supersede`) still require `fresh`.
+**Heuristic (current):** `crash_recovery` and `graceful_shutdown` resumes are **pinned back to their own (stable-ID) agent**, except a structured `routingAffinity.leadOnly: true` task may only pin to a Lead. A legacy/misrouted worker parent is rerouted to the current Lead when available; otherwise its child remains unassigned (workers cannot claim it) and emits a `task_recovery_authorization` escalation event. `createResumeFollowUp` sets `agentId = parent.agentId` whenever the agent row still exists, is not `offline`, and has capacity — *regardless of the 30s `WORKER_LIVENESS_WINDOW_SECONDS` freshness*. The agent ID survives both crash recovery and deploy/SIGTERM graceful shutdown, so "stale" usually means "restarting", not "gone". The resume is `pending` and reclaimed on the agent's next poll; it **never enters the role-blind pool**, so no wrong-specialization worker can grab it (DES-523). It falls back to the pool only when the agent is genuinely gone (`offline`), its row is absent, capacity is full, or the reason-specific rollback switch is `0` (`HEARTBEAT_PIN_CRASH_RESUME` for crash recovery, `HEARTBEAT_PIN_GRACEFUL_RESUME` for graceful shutdown). Other reasons (`context_limits` / `manual_supersede`) still require `fresh`.
 
 A pin **never reclaimed within `HEARTBEAT_RESUME_PIN_GRACE_MIN`** (the agent that looked recoverable never returned) is escalated by the **reaper** (`escalateUnreclaimedResumes`, run inside `cleanupStaleResources` on *every* sweep, including the post-reboot sweep): it atomically cancels the still-`pending` resume (skipping if the agent reclaimed it in the gap — TOCTOU-safe) and creates a Lead-owned `task.reroute.decision` follow-up. The Lead re-delegates via `send-task` with an **explicit `agentId`** — the work is never re-pooled. A resume already at the generation cap (`MAX_RESUME_GENERATIONS`) is failed instead of escalated, bounding a flapping task. Net: protected pinned reasons touch the unassigned pool **zero times** unless a fail-open guard or rollback switch sends them there.
 
@@ -165,15 +169,16 @@ escalateUnreclaimedResumes():
 
 > The `crash-recovery-pin` and `graceful-shutdown-pin` tags are the reaper's scoping keys: only genuine same-agent pins carry them, so a *pooled* resume that `autoAssignPoolTasks` later flips to `pending` (keeping its old `createdAt`) is never mistaken for a stale pin and reaped.
 
-## 4. Routing affinity — role/capability gate on every pool consumer
+## 4. Routing affinity — producer/consumer contract
 
 **Goal:** a task interrupted by ANY event (crash, graceful shutdown, reboot, pool redispatch) must only ever land on an agent whose role matches the original assignee's role — and, where declared, whose capabilities cover the task's requirements. When no eligible agent exists, the task queues and is escalated to the Lead — it never falls to an arbitrary idle worker. Kill-switch: `POOL_AFFINITY_ENFORCEMENT=0` restores the pre-affinity, role-blind pool behavior verbatim; untagged tasks (no `routingAffinity`) are always unaffected.
 
-`agent_tasks.routingAffinity` (migration 113) is a nullable JSON snapshot — `{ sourceAgentId?, role?, capabilities: string[], harnessProvider? }` (`RoutingAffinitySchema`, `src/types.ts`). `harnessProvider` is informational only (native session resume is deprecated — see §3's model-inheritance note) and never enforced.
+`agent_tasks.routingAffinity` (migration 113) is a nullable JSON snapshot — `{ sourceAgentId?, role?, capabilities: string[], harnessProvider?, leadOnly: boolean }`. `leadOnly` is an explicit caller-supplied authorization constraint for merges and other privileged operations; the platform never infers it from prompt text. It is enforced for direct assignment, offers, pool claims, fallback dispatch, and recovery. (`RoutingAffinitySchema`, `src/types.ts`). `harnessProvider` is informational only (native session resume is deprecated — see §3's model-inheritance note) and never enforced.
 
 ```mermaid
 flowchart TD
   gate{"isAgentEligibleForTask(agent, task)"}
+  gate -->|"leadOnly and agent is not Lead"| no0["INELIGIBLE — authorization boundary"]
   gate -->|"enforcement off"| yes1["eligible"]
   gate -->|"task.routingAffinity is null"| yes2["eligible — untagged task"]
   gate -->|"affinity.sourceAgentId == agent.id"| yes3["eligible — own work"]
@@ -183,6 +188,32 @@ flowchart TD
   gate -->|"role matches, capabilities ⊆"| yes4["eligible"]
 ```
 
+The production inventory is enforced by `src/tests/routing-affinity-inventory.test.ts`. It parses every non-test TypeScript source file and classifies every `routingAffinity` property write/read site. Adding a producer without adding an executable dispatch proof fails CI instead of relying on another manual search.
+
+| Producer class | Affinity written | Intended destination |
+| --- | --- | --- |
+| `createTaskExtended` parent inheritance | Parent provenance or requirement; Lead-only requirements ratchet | Ordinary continuation destination, subject to create-time authorization |
+| `createResumeFollowUp` | Fresh source-agent snapshot, falling back to inherited parent affinity | Original agent when recoverable; otherwise eligible pool or Lead recovery |
+| `runRebootSweep` | Fresh source-agent snapshot | Original agent when recoverable; otherwise eligible pool |
+| `sendTaskHandler` | Explicit `{ leadOnly, capabilities }` requirement | Explicit assignee/offer, or starvation escalation for a capability-only pool task |
+| `taskActionHandler` create | Explicit `{ leadOnly, capabilities }` requirement | Pool claim or starvation escalation |
+| `createRerouteDecisionTask` | New Lead-only control-plane authorization | Current Lead |
+| `createPoolStarvationDecisionTask` | New Lead-only control-plane authorization | Current Lead |
+
+The two decision producers are not continuations of the original execution requirements. They pass `inheritParentRoutingAffinity: false` and declare `{ leadOnly: true, capabilities: [] }`; otherwise a replacement Lead can be rejected by the exact requirement that made the original task unrecoverable. Every other child inherits normally, and a Lead-only parent's capabilities remain a one-way ratchet.
+
+The consumer cross-product has three distinct policies. Pool selection always applies the full predicate. Direct assignments and established offers apply the full predicate when created, then re-check only corrupt affinity and the Lead-only authorization boundary when dispatched. Recovery selection applies the full predicate before pinning or rerouting.
+
+| Consumer surface | Policy |
+| --- | --- |
+| `createTaskExtended` direct assignment/offer | Full eligibility for caller-declared requirements; inherited provenance does not veto an explicit destination |
+| `getPendingTaskForAgent` | Re-check invalid affinity and Lead-only authorization; do not reinterpret ordinary provenance |
+| `acceptTask` / `claimOfferedTask` | Re-check invalid affinity and Lead-only authorization on the established offer |
+| `claimTask` / `assignUnassignedTaskPending` | Full eligibility before the atomic pool claim |
+| `getUnassignedTaskIdsForAgent` / HTTP poll | Filter by full eligibility before budget admission and claim |
+| `autoAssignPoolTasks` | Select only idle, capable workers that pass full eligibility |
+| `resolveLeadOnlyRecoveryAssignment` | Full eligibility for the source candidate and replacement Lead |
+
 Every consumer of the `unassigned` pool calls the **same** `isAgentEligibleForTask` predicate (`src/be/db.ts`) — there is no second implementation to drift out of sync:
 
 - `claimTask` / `assignUnassignedTaskPending` — pre-check before the atomic `UPDATE … WHERE status='unassigned'` (static per (agent, task), so it doesn't reopen the claim race). Rejection logs a distinct `task_claim_rejected_affinity` event and returns `null` — same shape as "already claimed by someone else", so existing callers (poll auto-claim, `task-action claim`) degrade safely.
@@ -190,7 +221,7 @@ Every consumer of the `unassigned` pool calls the **same** `isAgentEligibleForTa
 - `autoAssignPoolTasks` — pages through the pool in `POOL_SCAN_BATCH_SIZE`-row windows (via `getUnassignedPoolTasks(limit, offset)`); for each task in a window (priority/creation order), picks the first idle worker that has capacity **and** passes the predicate. Continues to the next window until it has assigned `MAX_AUTO_ASSIGN_PER_SWEEP` tasks or exhausted the pool (capped at `POOL_SCAN_CAP` rows scanned this sweep); a task with no eligible worker anywhere in the scanned pool is left queued (not blindly assigned to the next worker in line). Same PR #954 fix: a single bounded fetch of `MAX_AUTO_ASSIGN_PER_SWEEP` rows used to mean a run of high-priority ineligible affinity tasks could suppress lower-priority eligible work indefinitely — every sweep re-fetched the same ineligible head-of-line rows, so the starvation never self-resolved even as idle eligible workers came and went.
 - `task-action` `claim` — same predicate, with a human-readable rejection ("requires role X; yours is Y") so an agent can self-correct instead of retry-looping.
 
-**Where a `routingAffinity` snapshot comes from** (`buildRoutingAffinityFromAgent(agentId)` snapshots an agent's current `role`/`harnessProvider`/`capabilities`; `createTaskExtended` auto-inherits a parent's `routingAffinity` on `parentTaskId` when the child doesn't set its own — same treatment as `vcsRepo`/`contextKey`):
+**Where a `routingAffinity` snapshot comes from** (`buildRoutingAffinityFromAgent(agentId)` snapshots an agent's current `role`/`harnessProvider`/`capabilities`; `createTaskExtended` auto-inherits a parent's `routingAffinity` on `parentTaskId` when the child doesn't set its own, except for the explicit control-plane opt-out above):
 
 1. **`createResumeFollowUp`** (§3) stamps a fresh snapshot from `parent.agentId` on **every** leg — pinned AND pool-fallback — so even a resume that falls to the pool (agent offline/gone/at-capacity, or a pin kill-switch off) is gated. Falls back to the parent's own inherited snapshot when the agent row is already gone.
 2. **`runRebootSweep`**'s retry-child creation (§1) now applies the *same* recoverability gate `createResumeFollowUp` uses for its same-agent pin (row exists, not `offline`, has capacity — via the shared `getPinCandidateAgent` helper) — a recoverable retry is pinned `pending` to the original agent and tagged `reboot-retry-pin`; otherwise it falls to the pool with the snapshot stamped anyway. `getStalePinnedResumes`'s reaper scope (§3) now also covers `reboot-retry-pin`, so an unreclaimed reboot pin escalates to the Lead exactly like a crash/graceful pin (retry children are fresh tasks with no `resume-generation` tag, so the generation budget is 0 at first escalation — expected).
@@ -202,16 +233,25 @@ Every consumer of the `unassigned` pool calls the **same** `isAgentEligibleForTa
 
 ```text
 isAgentEligibleForTask(agent, task):
-    if not POOL_AFFINITY_ENFORCEMENT: return true
+    if task.routingAffinityInvalid: return false             # corrupt data — fail closed
     a = task.routingAffinity
     if not a: return true                                 # untagged — unchanged behavior
+    if a.leadOnly: return agent.isLead and capabilities match # authorization ignores kill-switch
+    if not POOL_AFFINITY_ENFORCEMENT: return true
     if a.sourceAgentId == agent.id: return true            # own work always eligible
     if not agent.role or not a.role: return false           # missing role data — no fail-open
     if agent.role != a.role: return false                   # exact match, v1 (no roleClass taxonomy)
     if a.capabilities not ⊆ agent.capabilities: return false
     return true
 
-# reboot-sweep retry child (runRebootSweep, on each auto-failed in_progress task):
+# reboot sweep (runRebootSweep, once, 5s after boot), per in_progress task:
+bootEpoch = parse(globalThis.__runId)                        # run_<epochMs>; null → legacy session-exists check only
+if bootEpoch and task.lastUpdatedAt >= bootEpoch - 5s: skip   # claimed after boot: not an orphan
+session = getActiveSessionForTask(task.id)
+if session and (bootEpoch is null or session.lastHeartbeatAt >= bootEpoch - 5s): skip
+failTask(task.id)                                             # then create the retry child below
+
+# reboot-sweep retry child (on each auto-failed in_progress task):
 preferredAgentId = undefined
 cand = getPinCandidateAgent(task.agentId)                   # row exists, not offline
 if cand and activeCount(cand) < cand.maxTasks:

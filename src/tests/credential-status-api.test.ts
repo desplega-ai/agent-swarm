@@ -264,4 +264,55 @@ describe("Phase 4 — credential-status HTTP endpoints", () => {
     expect(body.credStatus.liveTest).toMatchObject({ ok: true, latency_ms: 45 });
     expect(body.credStatus.latestModel).toMatchObject({ model: "gpt-5.4", source: "agent_config" });
   });
+
+  test("PUT /credential-status merges ACP options without clobbering readiness", async () => {
+    const reportedAt = Date.now();
+    const put = await fetch(`${baseUrl}/api/agents/${readyAgentId}/credential-status`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        acp: {
+          target: "opencode",
+          reportedAt,
+          configOptions: [
+            {
+              type: "select",
+              id: "model",
+              name: "Model",
+              currentValue: "opencode/big-pickle",
+              options: [{ value: "opencode/big-pickle", name: "Big Pickle" }],
+            },
+          ],
+        },
+      }),
+    });
+    expect(put.status).toBe(200);
+
+    const get = await fetch(`${baseUrl}/api/agents/${readyAgentId}/credential-status`);
+    const body = (await get.json()) as {
+      credStatus: { ready: boolean; acp?: { target: string; configOptions: unknown[] } };
+    };
+    expect(body.credStatus.ready).toBe(true);
+    expect(body.credStatus.acp).toMatchObject({ target: "opencode" });
+    expect(body.credStatus.acp?.configOptions).toHaveLength(1);
+
+    const snapshot = await fetch(`${baseUrl}/api/agents/${readyAgentId}/credential-status`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        cred_status: {
+          ready: true,
+          missing: [],
+          reportedAt: reportedAt + 1,
+          reportKind: "post_task",
+        },
+      }),
+    });
+    expect(snapshot.status).toBe(200);
+    const afterSnapshot = (await snapshot.json()) as {
+      credStatus: { acp?: { target: string; configOptions: unknown[] } };
+    };
+    expect(afterSnapshot.credStatus.acp).toMatchObject({ target: "opencode" });
+    expect(afterSnapshot.credStatus.acp?.configOptions).toHaveLength(1);
+  });
 });

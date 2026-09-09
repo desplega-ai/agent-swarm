@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "../client";
-import type { AgentAvatar, AgentWithTasks, ReasoningEffortLevel } from "../types";
+import type { AcpRuntimeConfig, AgentAvatar, AgentWithTasks, ReasoningEffortLevel } from "../types";
 
 export function useAgents(includeTasks = false) {
   return useQuery({
@@ -100,10 +100,11 @@ export function useUpdateAgentRuntime() {
   return useMutation({
     mutationFn: (data: {
       id: string;
-      harnessProvider: "claude" | "codex" | "pi" | "opencode";
-      model: string;
+      harnessProvider: "claude" | "codex" | "pi" | "opencode" | "acp";
+      model: string | null;
       allowCustomModel?: boolean;
       reasoningEffort?: ReasoningEffortLevel | null;
+      acp?: AcpRuntimeConfig;
     }) => api.updateAgentRuntime(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["agents"] });

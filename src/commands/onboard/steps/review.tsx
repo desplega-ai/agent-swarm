@@ -1,7 +1,7 @@
 import { Select } from "@inkjs/ui";
 import { Box, Text } from "ink";
 import { getPresetById } from "../presets.ts";
-import type { StepProps } from "../types.ts";
+import { BEDROCK_ALPHA_NOTICE, PROVIDER_LABELS, type StepProps } from "../types.ts";
 
 export function ReviewStep({ state, dryRun, goToNext, goToStep }: StepProps) {
   const preset = state.presetId ? getPresetById(state.presetId) : null;
@@ -42,8 +42,9 @@ export function ReviewStep({ state, dryRun, goToNext, goToStep }: StepProps) {
           </Text>
         ))}
         <Text>
-          Harness: <Text color="cyan">{state.harness}</Text>
+          Provider: <Text color="cyan">{PROVIDER_LABELS[state.provider]}</Text> ({state.harness})
         </Text>
+        {state.provider === "bedrock" ? <Text color="yellow">{BEDROCK_ALPHA_NOTICE}</Text> : null}
         <Text>
           Integrations:{" "}
           <Text color="cyan">

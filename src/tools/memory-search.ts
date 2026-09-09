@@ -4,7 +4,11 @@ import { getAgentById } from "@/be/db";
 import { getEmbeddingProvider, getMemoryStore } from "@/be/memory";
 import { CANDIDATE_SET_MULTIPLIER } from "@/be/memory/constants";
 import { expandCandidatesWithGraph } from "@/be/memory/graph-expansion";
-import { recordRetrievals } from "@/be/memory/raters/retrieval";
+import {
+  dedupeMemoryDocumentIds,
+  recordMemoryAccesses,
+  recordRetrievals,
+} from "@/be/memory/raters/retrieval";
 import { rerank } from "@/be/memory/reranker";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import type { AgentMemorySource } from "@/types";
@@ -26,6 +30,7 @@ type MemorySearchResult = {
   retrievalSource?: string;
   tags?: string[];
   createdAt: string;
+  accessCount?: number;
   rateHint?: string;
 };
 
@@ -57,6 +62,7 @@ export const memorySearchOutputSchema = swarmToolOutputSchema({
         retrievalSource: z.enum(["vec", "fts", "hybrid", "fallback", "graph"]).optional(),
         tags: z.array(z.string()).optional(),
         createdAt: z.string().optional(),
+        accessCount: z.number().int().optional(),
         rateHint: z.string().optional(),
       }),
     )
@@ -70,7 +76,8 @@ export const registerMemorySearchTool = (server: McpServer) => {
       title: "Search memories",
       description:
         "Search your accumulated memories using natural language. Returns summaries with IDs — use memory-get to retrieve full content.",
-      annotations: { readOnlyHint: true },
+      // Search updates access telemetry for every logical document returned.
+      annotations: { readOnlyHint: false },
 
       inputSchema: z.object({
         query: z.string().min(1).describe("Natural language search query."),
@@ -148,6 +155,14 @@ export const registerMemorySearchTool = (server: McpServer) => {
           }
         }
 
+        const consumedIds = dedupeMemoryDocumentIds(ranked);
+        try {
+          await recordMemoryAccesses(consumedIds);
+        } catch (err) {
+          console.error("[memory-search] recordMemoryAccesses failed:", (err as Error).message);
+        }
+        const consumedIdSet = new Set(consumedIds);
+
         const inTaskContext = !!requestInfo.sourceTaskId;
         const mapped = ranked.map((r) => ({
           id: r.id,
@@ -159,6 +174,7 @@ export const registerMemorySearchTool = (server: McpServer) => {
           retrievalSource: r.retrievalSource,
           tags: r.tags,
           createdAt: r.createdAt,
+          accessCount: (r.accessCount ?? 0) + (consumedIdSet.has(r.id) ? 1 : 0),
           ...(inTaskContext && NUDGE_ELIGIBLE_SOURCES.has(r.source as AgentMemorySource)
             ? { rateHint: rateHintFor(r.id) }
             : {}),
@@ -180,6 +196,14 @@ export const registerMemorySearchTool = (server: McpServer) => {
         source,
       });
 
+      const consumedIds = dedupeMemoryDocumentIds(recent);
+      try {
+        await recordMemoryAccesses(consumedIds);
+      } catch (err) {
+        console.error("[memory-search] recordMemoryAccesses failed:", (err as Error).message);
+      }
+      const consumedIdSet = new Set(consumedIds);
+
       const mapped = recent.map((r) => ({
         id: r.id,
         name: r.name,
@@ -188,6 +212,7 @@ export const registerMemorySearchTool = (server: McpServer) => {
         scope: r.scope,
         tags: r.tags,
         createdAt: r.createdAt,
+        accessCount: (r.accessCount ?? 0) + (consumedIdSet.has(r.id) ? 1 : 0),
       }));
 
       return toolOk(

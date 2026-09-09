@@ -31,10 +31,38 @@ export function generateEnv(state: OnboardState): string {
   // ── Authentication ──
   lines.push("");
   lines.push("# === Authentication ===");
-  if (state.credentialType === "api_key") {
-    lines.push(`ANTHROPIC_API_KEY=${state.anthropicApiKey}`);
-  } else {
-    lines.push(`CLAUDE_CODE_OAUTH_TOKEN=${state.claudeOAuthToken}`);
+  lines.push(`HARNESS_PROVIDER=${state.harness}`);
+  switch (state.provider) {
+    case "claude":
+      if (state.credentialType === "api_key") {
+        lines.push(`ANTHROPIC_API_KEY=${state.anthropicApiKey}`);
+      } else {
+        lines.push(`CLAUDE_CODE_OAUTH_TOKEN=${state.claudeOAuthToken}`);
+      }
+      break;
+    case "openai":
+      lines.push(`OPENAI_API_KEY=${state.openaiApiKey}`);
+      break;
+    case "openrouter":
+      lines.push(`OPENROUTER_API_KEY=${state.openrouterApiKey}`);
+      lines.push(`MODEL_OVERRIDE=${state.modelOverride}`);
+      break;
+    case "bedrock":
+      lines.push("# AWS Bedrock (alpha)");
+      lines.push(
+        "# Alpha: session summaries, memory rating, spend tracking and model tiers may be missing on Bedrock.",
+      );
+      lines.push("BEDROCK_AUTH_MODE=sdk");
+      lines.push(`AWS_REGION=${state.awsRegion}`);
+      if (state.awsProfile) {
+        lines.push(`AWS_PROFILE=${state.awsProfile}`);
+      } else {
+        lines.push(`AWS_ACCESS_KEY_ID=${state.awsAccessKeyId}`);
+        lines.push(`AWS_SECRET_ACCESS_KEY=${state.awsSecretAccessKey}`);
+        if (state.awsSessionToken) lines.push(`AWS_SESSION_TOKEN=${state.awsSessionToken}`);
+      }
+      lines.push(`MODEL_OVERRIDE=${state.modelOverride}`);
+      break;
   }
 
   // ── Integrations ──

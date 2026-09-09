@@ -62,8 +62,12 @@ export const sendTaskInputSchema = z
     requiredCapabilities: z
       .array(z.string())
       .optional()
+      .describe("Capabilities required for pool routing."),
+    leadOnly: z
+      .boolean()
+      .default(false)
       .describe(
-        "Capabilities a claiming agent must have (declared via join-swarm/update-profile) to be pool-eligible for this task. Written into the created task's routingAffinity (role is left unset — only enforced when the pool auto-claim/claim-tool paths check it). Most useful when omitting agentId (unassigned pool task); a no-op for a task with an explicit agentId, which bypasses the pool gate entirely.",
+        "Structured authorization constraint for merge or other privileged work. Only Lead agents may be assigned, offered, or claim it; never inferred from task text.",
       ),
     priority: z.number().int().min(0).max(100).optional().describe("Priority 0-100 (default: 50)."),
     dependsOn: z.array(z.uuid()).optional().describe("Task IDs this task depends on."),
@@ -198,6 +202,7 @@ export async function sendTaskHandler(
     taskType,
     tags,
     requiredCapabilities,
+    leadOnly,
     priority,
     dependsOn,
     dir,
@@ -240,6 +245,14 @@ export async function sendTaskHandler(
   const effectiveParentTask = effectiveParentTaskId
     ? await getTaskById(effectiveParentTaskId)
     : null;
+  if (effectiveParentTask?.routingAffinityInvalid) {
+    return toolErr("Cannot continue a task with an invalid routing affinity.", {
+      data: { yourAgentId: creatorAgentId },
+    });
+  }
+  // A public continuation cannot accidentally declassify its parent before
+  // createTaskExtended performs the authoritative merge.
+  const effectiveLeadOnly = leadOnly || effectiveParentTask?.routingAffinity?.leadOnly === true;
 
   // Slack-routing coherence guard: reject a hand-typed slackChannelId/slackThreadTs
   // that disagrees with the parent task or the contextKey this child will inherit.
@@ -423,13 +436,10 @@ export async function sendTaskHandler(
         slackUserId,
         overrideSlackContext,
         followUpConfig,
-        // Only meaningful here: a pool task's routingAffinity gates
-        // claimTask/autoAssignPoolTasks. offer/direct-assign below bypass the
-        // pool gate entirely via an explicit agentId, so requiredCapabilities
-        // is a no-op there.
-        routingAffinity: requiredCapabilities?.length
-          ? { capabilities: requiredCapabilities }
-          : undefined,
+        routingAffinity:
+          effectiveLeadOnly || requiredCapabilities?.length
+            ? { leadOnly: effectiveLeadOnly, capabilities: requiredCapabilities ?? [] }
+            : undefined,
       });
       await transferTrackerSyncToResumeChild({
         parentTaskId: effectiveParentTaskId,
@@ -453,10 +463,10 @@ export async function sendTaskHandler(
       };
     }
 
-    if (agent.isLead) {
+    if (effectiveLeadOnly && !agent.isLead) {
       return {
         success: false,
-        message: `Cannot assign tasks to the lead agent "${agent.name}", wtf?`,
+        message: `Lead-only task requires a Lead agent; "${agent.name}" is not a Lead.`,
       };
     }
 
@@ -492,6 +502,10 @@ export async function sendTaskHandler(
         slackUserId,
         overrideSlackContext,
         followUpConfig,
+        routingAffinity:
+          effectiveLeadOnly || requiredCapabilities?.length
+            ? { leadOnly: effectiveLeadOnly, capabilities: requiredCapabilities ?? [] }
+            : undefined,
       });
       await transferTrackerSyncToResumeChild({
         parentTaskId: effectiveParentTaskId,
@@ -528,6 +542,10 @@ export async function sendTaskHandler(
       slackUserId,
       overrideSlackContext,
       followUpConfig,
+      routingAffinity:
+        effectiveLeadOnly || requiredCapabilities?.length
+          ? { leadOnly: effectiveLeadOnly, capabilities: requiredCapabilities ?? [] }
+          : undefined,
     });
     await transferTrackerSyncToResumeChild({
       parentTaskId: effectiveParentTaskId,

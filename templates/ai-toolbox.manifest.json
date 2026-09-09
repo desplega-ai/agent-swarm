@@ -1,5 +1,5 @@
 {
-  "commit": "db05890849d4ea8ffe0827f095064ecda3f86ae2",
+  "commit": "a4e5e77923eaabc644f8290396ef341d041cdce1",
   "excludedSkills": [
     "feedback"
   ],
@@ -34,7 +34,7 @@
     "templates/skills/planning/content.md": "543476e4dbb5c352acd686c3929c45cc992d7d033d06f7e9a30f78009b50785c",
     "templates/skills/planning/files/template.md": "c0d5ca63c07934546172322bbd1180e2901dc45e27b5d12ce3dc5c30f5e7a98b",
     "templates/skills/qa/config.json": "c53b01558a691c0343b6270a548e6172af86600a429b789eedb518849f7ea741",
-    "templates/skills/qa/content.md": "afac65d0deef288b3e84aa2911c715028606ecc6e4dd251255fc31d98f1d04ec",
+    "templates/skills/qa/content.md": "93ad6b0fdfffaca5f04874e52fcefc46ab3ca2890cda74ebf0705ab5aedbe52a",
     "templates/skills/qa/files/template.md": "1902e4bb65b19ab58c54ab5b63693ad09adecee69079c2c70f58d7d6c6597896",
     "templates/skills/questioning/config.json": "da2d5fe6dfdac1915a0476a7063e62ebeb996b84caff07cc7527a55477656a80",
     "templates/skills/questioning/content.md": "66f826a191e96d0041adca00a7c197a458de8e6fe164c1599b8708098d4109ab",
@@ -45,7 +45,7 @@
     "templates/skills/reviewing/config.json": "09c40bb098e9738c60a848995fa9fe7568d158631a089c76ba02c0dd955445c7",
     "templates/skills/reviewing/content.md": "1bbc285c9ad8cc3312f1ee2c558b04ffee914ffb6f5c63fb3741fcbb3e300fa5",
     "templates/skills/script-builder/config.json": "6117cba2f490386d8a27e142e589a7ee034da7f5db968f34fe55ee9057c24fb3",
-    "templates/skills/script-builder/content.md": "453d8908a03f3e44ecaee87822515dc45cd7fc847f8af9372befa4a39755b817",
+    "templates/skills/script-builder/content.md": "23759d5741b887e5042e8d0b71ba01590e30660e284cf881f51b6d7243c82f29",
     "templates/skills/script-builder/files/templates/README.md": "fd96009834ab57d1862c41d215729f4a7e1e192850c0541afdaa081daa968854",
     "templates/skills/script-builder/files/templates/bash.sh.tmpl": "83430f02c2ac3cda8e2eaa1022e06f1801e58780a33c08d7b42c58209df96ac4",
     "templates/skills/script-builder/files/templates/python.py.tmpl": "e990a2e40c302de4a06140cfa88ab63de735dae1afae66386a2b62c161924c96",

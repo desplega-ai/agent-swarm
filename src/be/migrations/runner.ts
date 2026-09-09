@@ -102,6 +102,75 @@ function shouldBootstrapInitialMigration(db: Database): boolean {
 }
 
 /**
+ * A missing migrations directory or an empty migration set is a safe no-op
+ * on a database that already has tables (an already-migrated database, or a
+ * pre-migration-system legacy one that `shouldBootstrapInitialMigration`
+ * will handle). On a genuinely empty database it means the baseline schema
+ * — including `agents` — will never be created, and the process will instead
+ * crash several layers downstream (e.g. `ensureAgentProfileColumns` hitting
+ * `no such table: agents`) with no indication of the real cause. Fail loudly
+ * here instead, at the point where the cause is still known.
+ */
+export function assertNotEmptyDatabase(db: Database, reason: string): void {
+  const rows = db
+    .prepare<{ name: string }, []>(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE '\\_migrations' ESCAPE '\\'",
+    )
+    .all();
+  if (rows.length === 0) {
+    throw new Error(
+      `[migrations] Refusing to boot: ${reason}, and the database has no tables yet. ` +
+        "This looks like a fresh database whose baseline schema never got created — " +
+        "check MIGRATIONS_DIR and that the migrations directory is packaged correctly.",
+    );
+  }
+}
+
+/** Prefix `import.meta.dir` resolves to inside a `bun build --compile` binary. */
+const BUNFS_PREFIX = "/$bunfs/";
+
+/**
+ * Resolves the directory to load `.sql` migration files from.
+ *
+ * `import.meta.dir` resolves to `/$bunfs/root` in a `bun build --compile`
+ * binary — a virtual, read-only filesystem embedded in the executable that
+ * does not contain the `.sql` files (those are copied to a real path at
+ * `MIGRATIONS_DIR` by the Dockerfile instead; see `runner.ts`'s historical
+ * comment and the Dockerfile `COPY src/be/migrations/*.sql /app/migrations/`
+ * step). This used to be detected by calling `readdirSync` and catching the
+ * exception it threw on `/$bunfs/`. Bun 1.4 changed `readdirSync` to succeed
+ * there instead (returning the compiled binary's own directory listing), so
+ * the exception never fires, `MIGRATIONS_DIR` is never consulted, and the
+ * subsequent `.sql` filter matches nothing — silently skipping every
+ * migration on a fresh database. Detect the virtual filesystem by prefix
+ * instead of relying on `readdirSync`'s throw/no-throw behavior, which is not
+ * a stable contract across Bun versions.
+ */
+export function resolveMigrationsDir(
+  importDir: string,
+  migrationsDirEnv: string | undefined = process.env.MIGRATIONS_DIR,
+): string | null {
+  if (importDir.startsWith(BUNFS_PREFIX)) {
+    if (migrationsDirEnv) return migrationsDirEnv;
+    console.warn(
+      "[migrations] Running from a compiled binary (bunfs) and MIGRATIONS_DIR not set — skipping",
+    );
+    return null;
+  }
+
+  try {
+    readdirSync(importDir);
+    return importDir;
+  } catch {
+    if (migrationsDirEnv) return migrationsDirEnv;
+    console.warn(
+      "[migrations] Cannot read migrations directory and MIGRATIONS_DIR not set — skipping",
+    );
+    return null;
+  }
+}
+
+/**
  * Runs all pending database migrations.
  *
  * - Creates the `_migrations` tracking table if it doesn't exist
@@ -122,24 +191,15 @@ export function runMigrations(db: Database): void {
   `);
 
   // 2. Load migration files
-  // import.meta.dir resolves to /$bunfs/root in compiled binaries, which isn't scannable.
-  // Fall back to MIGRATIONS_DIR env var (set in Dockerfile) for compiled binary support.
-  const migrationsDir = (() => {
-    const dir = import.meta.dir;
-    try {
-      readdirSync(dir);
-      return dir;
-    } catch {
-      const fallback = process.env.MIGRATIONS_DIR;
-      if (fallback) return fallback;
-      console.warn(
-        "[migrations] Cannot read migrations directory and MIGRATIONS_DIR not set — skipping",
-      );
-      return null;
-    }
-  })();
+  const migrationsDir = resolveMigrationsDir(import.meta.dir);
 
-  if (!migrationsDir) return;
+  if (!migrationsDir) {
+    assertNotEmptyDatabase(
+      db,
+      "no migrations directory could be located (see the preceding [migrations] warning)",
+    );
+    return;
+  }
 
   const files = readdirSync(migrationsDir)
     .filter((f) => f.endsWith(".sql"))
@@ -154,6 +214,7 @@ export function runMigrations(db: Database): void {
   });
 
   if (migrations.length === 0) {
+    assertNotEmptyDatabase(db, `no .sql migration files found in ${migrationsDir}`);
     return;
   }
 

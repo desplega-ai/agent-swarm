@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { normalizeSessionLogs as normalizeEvalLogs } from "../../apps/evals/ui/src/logs-parser";
 import {
   extractSubagentRuns,
   normalizeSessionLogs,
@@ -209,6 +210,230 @@ describe("ui logs parser", () => {
     expect(result.pairing.orphanResults).toEqual([]);
   });
 
+  test("coalesces live codex message deltas across upload batch line resets", () => {
+    const result = normalizeSessionLogs([
+      log(
+        "start",
+        "codex",
+        0,
+        {
+          type: "item.started",
+          item: { id: "msg-1", type: "agent_message", text: "" },
+        },
+        "2026-09-09T00:00:17.565Z",
+      ),
+      log(
+        "delta-2",
+        "codex",
+        0,
+        { type: "message.delta", item_id: "msg-1", delta: "world" },
+        "2026-09-09T00:00:22.615Z",
+      ),
+      log(
+        "delta-1",
+        "codex",
+        1,
+        { type: "message.delta", item_id: "msg-1", delta: "Hello " },
+        "2026-09-09T00:00:17.565Z",
+      ),
+    ]);
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({
+      kind: "text",
+      role: "assistant",
+      text: "Hello world",
+      recId: "delta-1",
+      coveredRecIds: ["delta-2"],
+    });
+  });
+
+  test("replaces codex deltas with the completed message without duplicating it", () => {
+    const result = normalizeSessionLogs([
+      log("start", "codex", 0, {
+        type: "item.started",
+        item: { id: "msg-1", type: "agent_message", text: "" },
+      }),
+      log("delta-1", "codex", 1, {
+        type: "message.delta",
+        item_id: "msg-1",
+        delta: "Draft",
+      }),
+      log("delta-2", "codex", 2, {
+        type: "message.delta",
+        item_id: "msg-1",
+        delta: " response",
+      }),
+      log("done", "codex", 3, {
+        type: "item.completed",
+        item: { id: "msg-1", type: "agent_message", text: "Final response" },
+      }),
+    ]);
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({
+      kind: "text",
+      role: "assistant",
+      text: "Final response",
+      recId: "delta-1",
+      coveredRecIds: ["delta-2", "done"],
+    });
+  });
+
+  test("ignores a stale codex delta persisted after its completed message", () => {
+    const result = normalizeSessionLogs([
+      log(
+        "done",
+        "codex",
+        0,
+        {
+          type: "item.completed",
+          item: { id: "msg-1", type: "agent_message", text: "Final response" },
+        },
+        "2026-09-09T00:00:20.000Z",
+      ),
+      log(
+        "late-delta",
+        "codex",
+        0,
+        { type: "message.delta", item_id: "msg-1", delta: " stale fragment" },
+        "2026-09-09T00:00:21.000Z",
+      ),
+    ]);
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({
+      kind: "text",
+      text: "Final response",
+      recId: "done",
+      coveredRecIds: ["late-delta"],
+    });
+  });
+
+  test("keeps repeated codex item ids separate across sessions", () => {
+    const first = log("first", "codex", 1, {
+      type: "message.delta",
+      item_id: "msg-1",
+      delta: "First session",
+    });
+    const second = {
+      ...log("second", "codex", 1, {
+        type: "message.delta",
+        item_id: "msg-1",
+        delta: "Second session",
+      }),
+      sessionId: "session-2",
+      iteration: 2,
+    };
+    const result = normalizeSessionLogs([first, second]);
+
+    expect(result.items.map((item) => item.text)).toEqual(["First session", "Second session"]);
+  });
+
+  test("renders a wrapped codex user message once and omits empty reasoning items", () => {
+    const userItem = {
+      id: "user-1",
+      type: "unknown",
+      originalType: "userMessage",
+      value: {
+        type: "userMessage",
+        id: "user-1",
+        content: [{ type: "text", text: "Run the focused parser tests" }],
+        text_elements: [],
+      },
+    };
+    const result = normalizeSessionLogs([
+      log("user-start", "codex", 1, { type: "item.started", item: userItem }),
+      log("user-done", "codex", 2, { type: "item.completed", item: userItem }),
+      log("reasoning-start", "codex", 3, {
+        type: "item.started",
+        item: { id: "reasoning-1", type: "reasoning", summary: [], content: [] },
+      }),
+      log("reasoning-done", "codex", 4, {
+        type: "item.completed",
+        item: { id: "reasoning-1", type: "reasoning", summary: [], content: [] },
+      }),
+    ]);
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({
+      kind: "text",
+      role: "user",
+      text: "Run the focused parser tests",
+      recId: "user-start",
+      coveredRecIds: ["user-done"],
+    });
+  });
+
+  test("renders codex reasoning summary and content arrays", () => {
+    const result = normalizeSessionLogs([
+      log("summary", "codex", 1, {
+        type: "item.completed",
+        item: {
+          id: "reasoning-1",
+          type: "reasoning",
+          summary: ["Checked the parser", "Found the ordering issue"],
+          content: [],
+        },
+      }),
+      log("content", "codex", 2, {
+        type: "item.completed",
+        item: {
+          id: "reasoning-2",
+          type: "reasoning",
+          summary: [],
+          content: ["Verified the fix", "Tests pass"],
+        },
+      }),
+      log("empty", "codex", 3, {
+        type: "item.completed",
+        item: { id: "reasoning-3", type: "reasoning", summary: [], content: [] },
+      }),
+    ]);
+
+    expect(result.items.map((item) => item.text)).toEqual([
+      "Checked the parser\nFound the ordering issue",
+      "Verified the fix\nTests pass",
+    ]);
+  });
+
+  test("pairs production-shaped codex MCP calls and preserves failed status", () => {
+    const result = normalizeSessionLogs([
+      log("start", "codex", 1, {
+        type: "item.started",
+        item: {
+          id: "exec-1",
+          type: "mcp_tool_call",
+          server: "agent-swarm",
+          tool: "store-progress",
+          arguments: { status: "completed" },
+          status: "inProgress",
+          result: null,
+          error: null,
+        },
+      }),
+      log("done", "codex", 2, {
+        type: "item.completed",
+        item: {
+          id: "exec-1",
+          type: "mcp_tool_call",
+          server: "agent-swarm",
+          tool: "store-progress",
+          arguments: { status: "completed" },
+          status: "failed",
+          result: { content: [{ type: "text", text: "Input validation error" }] },
+          error: null,
+        },
+      }),
+    ]);
+
+    expect(result.items.map((item) => item.kind)).toEqual(["tool_call", "tool_result"]);
+    expect(result.items[1]?.result).toMatchObject({ id: "exec-1", isError: true });
+    expect(result.pairing).toEqual(
+      expect.objectContaining({ paired: 1, orphanCalls: [], orphanResults: [] }),
+    );
+  });
+
   test("pairs codex collaboration calls and surfaces collaboration state", () => {
     const result = normalizeSessionLogs([
       log("start", "codex", 1, {
@@ -402,6 +627,136 @@ describe("ui logs parser", () => {
         text: "[stderr] [opencode] skill resolver warning",
       }),
     ]);
+  });
+
+  test("parses ACP normalized traffic once while retaining raw session updates for diagnostics", () => {
+    const logs = [
+      log("raw-message", "acp", 1, {
+        sessionId: "session-1",
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: "Hello from ACP" },
+          messageId: "message-1",
+        },
+      }),
+      log("message", "acp", 2, {
+        type: "message",
+        role: "assistant",
+        content: "Hello ",
+        messageId: "message-1",
+      }),
+      log("message-2", "acp", 3, {
+        type: "message",
+        role: "assistant",
+        content: "from ACP",
+        messageId: "message-1",
+      }),
+      log("message-3", "acp", 4, {
+        type: "message",
+        role: "assistant",
+        content: "Second response",
+        messageId: "message-2",
+      }),
+      log("thought", "acp", 5, {
+        type: "custom",
+        name: "acp_agent_thought_chunk",
+        data: { content: { type: "text", text: "Checking " }, messageId: "thought-1" },
+      }),
+      log("thought-2", "acp", 6, {
+        type: "custom",
+        name: "acp_agent_thought_chunk",
+        data: { content: { type: "text", text: "files" }, messageId: "thought-1" },
+      }),
+      log("thought-3", "acp", 7, {
+        type: "custom",
+        name: "acp_agent_thought_chunk",
+        data: {
+          content: { type: "image", mimeType: "image/png", data: "encoded" },
+          messageId: "thought-2",
+        },
+      }),
+      log("raw-truncated", "acp", 8, {
+        type: "acp_log_truncated",
+        sessionId: "session-1",
+        sessionUpdate: "user_message_chunk",
+        preview: "large raw update",
+      }),
+      log("raw-tool", "acp", 9, {
+        sessionId: "session-1",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "call-1",
+          title: "Read file",
+          rawInput: { path: "README.md" },
+        },
+      }),
+      log("tool-start", "acp", 10, {
+        type: "tool_start",
+        toolCallId: "call-1",
+        toolName: "Read file",
+        args: { path: "README.md" },
+      }),
+      log("raw-tool-result", "acp", 11, {
+        sessionId: "session-1",
+        update: {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "call-1",
+          title: "Read file",
+          status: "completed",
+          rawOutput: "contents",
+        },
+      }),
+      log("tool-end", "acp", 12, {
+        type: "tool_end",
+        toolCallId: "call-1",
+        toolName: "Read file",
+        result: { status: "completed", rawOutput: "contents" },
+      }),
+      log("result", "acp", 13, {
+        type: "result",
+        cost: { totalCostUsd: 0, model: "opencode/glm-5.3-flash" },
+        output: "Hello from ACP",
+        isError: false,
+      }),
+    ];
+
+    for (const normalize of [normalizeSessionLogs, normalizeEvalLogs]) {
+      const result = normalize(logs);
+      expect(result.ordered).toHaveLength(13);
+      expect(result.items.map((item) => item.kind)).toEqual([
+        "text",
+        "text",
+        "reasoning",
+        "reasoning",
+        "tool_call",
+        "tool_result",
+        "result",
+      ]);
+      expect(result.items[0]).toMatchObject({
+        role: "assistant",
+        text: "Hello from ACP",
+        coveredRecIds: ["message-2"],
+      });
+      expect(result.items[1]).toMatchObject({
+        role: "assistant",
+        text: "Second response",
+      });
+      expect(result.items[2]).toMatchObject({
+        role: "assistant",
+        text: "Checking files",
+        coveredRecIds: ["thought-2"],
+      });
+      expect(result.items[3]?.text).toContain('"type": "image"');
+      expect(result.items[3]?.text).not.toBe("[object Object]");
+      expect(result.items[4]?.tool).toEqual({
+        id: "call-1",
+        name: "Read file",
+        input: { path: "README.md" },
+      });
+      expect(result.pairing).toEqual(
+        expect.objectContaining({ paired: 1, orphanCalls: [], orphanResults: [] }),
+      );
+    }
   });
 
   test("makes unknown top-level and nested codex event types self-describing", () => {
@@ -1045,5 +1400,52 @@ describe("ui logs parser", () => {
         content: [{ type: "text", text: "Pi response" }],
       }),
     );
+  });
+});
+
+// Exercise both deployed viewers with the exact production advisory and controls.
+describe.each([
+  ["dashboard", normalizeSessionLogs],
+  ["evals", normalizeEvalLogs],
+] as const)("%s Codex advisory classification", (_viewer, normalize) => {
+  const advisory =
+    "Skill descriptions were shortened to fit the skills context budget. Codex can still see every skill, but some descriptions are shorter. Disable unused skills or plugins to leave more room for the rest.";
+
+  test.each([
+    false,
+    true,
+  ])("keeps the advisory visible as a notice (after output: %s)", (afterOutput) => {
+    const rows = afterOutput
+      ? [
+          log("text", "codex", 1, {
+            type: "item.completed",
+            item: { type: "agent_message", text: "Working" },
+          }),
+        ]
+      : [];
+    rows.push(
+      log("notice", "codex", 2, {
+        type: "item.completed",
+        item: { id: "item_0", type: "error", message: advisory },
+      }),
+    );
+    const item = normalize(rows).items.at(-1);
+    expect(item?.kind).toBe("lifecycle");
+    expect(item?.meta).toMatchObject({ type: "codex_notice", output: advisory, isError: false });
+  });
+
+  test.each([
+    "Authentication failed",
+    `${advisory} Fatal startup failure.`,
+    undefined,
+  ])("preserves unknown error messages: %s", (message) => {
+    const item = normalize([
+      log("error", "codex", 1, {
+        type: "item.completed",
+        item: { id: "item_0", type: "error", message },
+      }),
+    ]).items[0];
+    expect(item?.kind).toBe("result");
+    expect(item?.meta).toMatchObject({ type: "codex_error", isError: true });
   });
 });

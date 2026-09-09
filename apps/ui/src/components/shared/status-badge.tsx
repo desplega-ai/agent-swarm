@@ -44,6 +44,12 @@ const statusConfig: Record<string, StatusConfig> = {
   },
 
   // Task statuses
+  draft: {
+    label: "UPLOADING",
+    dot: "bg-status-pending",
+    text: "text-status-pending-strong",
+    spinner: true,
+  },
   backlog: { label: "BACKLOG", dot: "bg-status-neutral", text: "text-status-neutral-strong" },
   unassigned: { label: "UNASSIGNED", dot: "bg-status-neutral", text: "text-status-neutral-strong" },
   offered: {

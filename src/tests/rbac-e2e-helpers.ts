@@ -66,8 +66,13 @@ export async function spawnSwarmServer(opts: {
       ...process.env,
       DATABASE_PATH: opts.dbPath,
       // Keep the local-fs provider (task attachments) inside the scratch dir
-      // instead of the repo-root ./data/fs default.
+      // instead of the repo-root ./data/fs default. Worker containers expose
+      // agent-fs credentials, so clear the remote provider selectors after
+      // spreading process.env or upload assertions escape to the live service.
       AGENT_FS_LOCAL_DIR: join(dirname(opts.dbPath), "fs"),
+      AGENT_FS_API_URL: "",
+      API_AGENT_FS_API_KEY: "",
+      AGENT_FS_API_KEY: "",
       API_KEY: E2E_API_KEY,
       AGENT_SWARM_API_KEY: E2E_API_KEY,
       PORT: String(port),

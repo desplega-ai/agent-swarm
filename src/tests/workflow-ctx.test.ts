@@ -63,30 +63,6 @@ function buildCtxWithBaseline(runId: string) {
   });
 }
 
-// Env vars the harness passes to a real subprocess (see executor.ts) so
-// ctx.step.agentTask can compute the shared run-level wall-clock deadline.
-// Wraps the whole async body — runWallDeadlineMs() reads process.env fresh
-// on every call, so the env must stay set for the full duration, not just
-// while building ctx.
-async function withRunWallEnv<T>(
-  startedAt: string,
-  maxWallMs: number,
-  fn: () => Promise<T>,
-): Promise<T> {
-  const savedStarted = process.env.SCRIPT_RUN_STARTED_AT;
-  const savedMaxWall = process.env.SCRIPT_RUN_MAX_WALL_MS;
-  process.env.SCRIPT_RUN_STARTED_AT = startedAt;
-  process.env.SCRIPT_RUN_MAX_WALL_MS = String(maxWallMs);
-  try {
-    return await fn();
-  } finally {
-    if (savedStarted === undefined) delete process.env.SCRIPT_RUN_STARTED_AT;
-    else process.env.SCRIPT_RUN_STARTED_AT = savedStarted;
-    if (savedMaxWall === undefined) delete process.env.SCRIPT_RUN_MAX_WALL_MS;
-    else process.env.SCRIPT_RUN_MAX_WALL_MS = savedMaxWall;
-  }
-}
-
 function sleepReal(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -292,12 +268,14 @@ describe("workflow-ctx: ctx.step.agentTask waits for a terminal status", () => {
 });
 
 describe("workflow-ctx: ctx.step.agentTask under Promise.all concurrency", () => {
-  test("dispatches concurrently and waits in parallel — wall time ~max(steps) not sum, results in argument order, distinct journal rows", async () => {
+  test("dispatches concurrently and waits in parallel — all three polls overlap in flight, results in argument order, distinct journal rows", async () => {
     const journaled: Record<string, unknown> = {};
     const dispatchOrder: string[] = [];
     const pollCounts: Record<string, number> = { a: 0, b: 0, c: 0 };
     const targetPolls: Record<string, number> = { a: 2, b: 4, c: 6 };
     const POLL_DELAY_MS = 25;
+    let inFlightPolls = 0;
+    let maxInFlightPolls = 0;
 
     const restore = installFetchMock(async (url, init) => {
       if (url.includes("/steps/step-")) {
@@ -308,7 +286,16 @@ describe("workflow-ctx: ctx.step.agentTask under Promise.all concurrency", () =>
         const label = body.stepKey.replace("step-", "");
         if (pollCounts[label] === 0) dispatchOrder.push(label);
         pollCounts[label] = (pollCounts[label] ?? 0) + 1;
-        await sleepReal(POLL_DELAY_MS); // simulates the server's per-call long-poll latency
+        // Track how many polls are simultaneously mid-flight. Any
+        // serialization — a shared mutex, a queue, a global poll cursor —
+        // caps this at 1 no matter how slow the machine is.
+        inFlightPolls++;
+        maxInFlightPolls = Math.max(maxInFlightPolls, inFlightPolls);
+        try {
+          await sleepReal(POLL_DELAY_MS); // simulates the server's per-call long-poll latency
+        } finally {
+          inFlightPolls--;
+        }
         if ((pollCounts[label] ?? 0) < (targetPolls[label] ?? 0)) {
           return new Response(JSON.stringify({ taskId: `task-${label}`, status: "pending" }), {
             status: 202,
@@ -328,22 +315,26 @@ describe("workflow-ctx: ctx.step.agentTask under Promise.all concurrency", () =>
 
     try {
       const { ctx } = buildCtxWithBaseline("run-parallel");
-      const start = Date.now();
       const results = await Promise.all([
         ctx.step.agentTask("step-a", { task: "a" }),
         ctx.step.agentTask("step-b", { task: "b" }),
         ctx.step.agentTask("step-c", { task: "c" }),
       ]);
-      const elapsed = Date.now() - start;
 
       // All three dispatch before any of them polls to completion — proof
       // Promise.all fired them concurrently, not one after another (no
       // shared mutex, no serializing queue, no global poll cursor).
       expect(dispatchOrder).toEqual(["a", "b", "c"]);
 
-      // Sequential would take (2+4+6)*25ms = 300ms; parallel is bounded by
-      // the slowest step: max(2,4,6)*25ms = 150ms (+ scheduling overhead).
-      expect(elapsed).toBeLessThan(250);
+      // Observed overlap, measured in the mock rather than on the clock.
+      // This replaces an `elapsed < 250` wall-clock margin that had no
+      // discriminating power: the parallel floor is max(2,4,6)*25ms = 150ms
+      // and full serialization costs (2+4+6)*25ms = 300ms, so a loaded
+      // runner whose 25ms timers slip to ~40ms puts a genuinely parallel
+      // run at ~250ms and fails. Raising the ceiling past 300ms would make
+      // the assertion vacuous instead. An in-flight count has no such
+      // tradeoff — it is 3 on a fast machine and 3 on a saturated one.
+      expect(maxInFlightPolls).toBe(3);
 
       // Promise.all preserves argument order regardless of completion order.
       expect(results).toEqual([{ label: "a" }, { label: "b" }, { label: "c" }]);
@@ -374,13 +365,19 @@ describe("workflow-ctx: ctx.step.agentTask under Promise.all concurrency", () =>
       // Run "started" 950ms ago with a 1000ms total wall budget — ~50ms of
       // shared budget left, no matter how many steps are racing for it.
       const startedAt = new Date(Date.now() - 950).toISOString();
-      const settled = await withRunWallEnv(startedAt, 1000, async () => {
-        const { ctx } = buildCtxWithBaseline("run-wall");
-        return Promise.allSettled([
-          ctx.step.agentTask("wall-a", { task: "a", timeoutMs: 60 * 60 * 1000 }), // huge per-step budget
-          ctx.step.agentTask("wall-b", { task: "b" }), // default 2h per-step budget
-        ]);
+      const { ctx } = buildWorkflowCtx({
+        runId: "run-wall",
+        agentId: "agent-1",
+        apiKey: "key",
+        baseUrl: "http://localhost:9999",
+        args: {},
+        runStartedAt: startedAt,
+        runMaxWallMs: 1000,
       });
+      const settled = await Promise.allSettled([
+        ctx.step.agentTask("wall-a", { task: "a", timeoutMs: 60 * 60 * 1000 }), // huge per-step budget
+        ctx.step.agentTask("wall-b", { task: "b" }), // default 2h per-step budget
+      ]);
 
       // Both clamp to the SAME shared run deadline (~50ms out), not their
       // own (much larger) per-step timeoutMs, and not that budget /2.

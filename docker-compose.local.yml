@@ -45,7 +45,7 @@ services:
 
   agent-fs:
     container_name: swarm-agent-fs
-    image: ghcr.io/desplega-ai/agent-fs:0.13.1
+    image: ghcr.io/desplega-ai/agent-fs:0.13.5
     platform: linux/amd64
     depends_on:
       minio-init:
@@ -91,6 +91,10 @@ services:
       context: .
       dockerfile: Dockerfile
     stop_grace_period: 60s
+    # Independent per-container cgroup pids ceiling — see the sizing
+    # arithmetic and rationale in docker-compose.example.yml's `api.pids_limit`
+    # comment (issue #1332).
+    pids_limit: 1024
     depends_on:
       agent-fs:
         condition: service_healthy

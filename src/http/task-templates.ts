@@ -11,7 +11,7 @@ const listTemplates = route({
   path: "/api/task-templates",
   pattern: ["api", "task-templates"],
   summary: "List task templates ('To start' bucket)",
-  tags: ["Task Templates"],
+  tags: ["Tasks"],
   query: z.object({
     category: z.string().optional(),
     /** v2 hook — v1 callers always pass `kind=task` (or omit). */

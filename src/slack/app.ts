@@ -1,5 +1,6 @@
 import { App, LogLevel } from "@slack/bolt";
-import { ensureSlackRenderV2Activation } from "../be/db";
+import { emitBuiltInIntegrationConnectedOnce, ensureSlackRenderV2Activation } from "../be/db";
+import { getSlackSocketModeBlockReason, SLACK_DEV_SOCKET_MODE_OPT_IN } from "./socket-mode-guard";
 import { startTaskWatcher, stopTaskWatcher } from "./watcher";
 
 let app: App | null = null;
@@ -32,11 +33,22 @@ export async function initSlackApp(): Promise<App | null> {
     return null;
   }
 
+  const socketModeBlockReason = getSlackSocketModeBlockReason(process.env);
+  if (socketModeBlockReason) {
+    console.error(
+      `[Slack] SOCKET MODE BLOCKED: ${socketModeBlockReason}. Set ${SLACK_DEV_SOCKET_MODE_OPT_IN}=true to opt in explicitly.`,
+    );
+    return null;
+  }
+
+  // SLACK_API_URL points Bolt (Web API and apps.connections.open) at a mock Slack server for e2e tests.
+  const slackApiUrl = process.env.SLACK_API_URL;
   app = new App({
     token: botToken,
     appToken: appToken,
     socketMode: true,
     logLevel: process.env.NODE_ENV === "development" ? LogLevel.DEBUG : LogLevel.INFO,
+    ...(slackApiUrl ? { clientOptions: { slackApiUrl } } : {}),
   });
 
   // Register handlers
@@ -66,6 +78,7 @@ export async function startSlackApp(): Promise<void> {
     if (isSlackRenderV2Enabled()) await ensureSlackRenderV2Activation();
     await app.start();
     console.log("[Slack] Bot connected via Socket Mode");
+    await emitBuiltInIntegrationConnectedOnce("slack");
 
     // Start watching for task completions
     await startTaskWatcher();

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { ExecutorMeta } from "../../types";
-import { getOpenRouterBaseUrl } from "../../utils/openrouter-base-url";
 import { BaseExecutor, type ExecutorResult } from "./base";
+import { resolveWorkflowLlmConfig } from "./workflow-llm";
 
 // ─── Schemas ────────────────────────────────────────────────
 
@@ -114,14 +114,15 @@ export class ValidateExecutor extends BaseExecutor<
     try {
       const { createOpenAI } = await import("@ai-sdk/openai");
       const { generateObject, jsonSchema } = await import("ai");
+      const llmConfig = await resolveWorkflowLlmConfig();
 
-      const openrouter = createOpenAI({
-        baseURL: getOpenRouterBaseUrl(),
-        apiKey: process.env.OPENROUTER_API_KEY,
+      const provider = createOpenAI({
+        baseURL: llmConfig.baseURL,
+        apiKey: llmConfig.apiKey,
       });
 
       const { object } = await generateObject({
-        model: openrouter("google/gemini-3-flash-preview"),
+        model: provider(llmConfig.model),
         schema: jsonSchema({
           type: "object",
           properties: {

@@ -73,6 +73,7 @@ describe("task lifecycle telemetry", () => {
           taskId: task.id,
           source: "mcp",
           hasParent: false,
+          has_repo: false,
           priority: 60,
         },
       },

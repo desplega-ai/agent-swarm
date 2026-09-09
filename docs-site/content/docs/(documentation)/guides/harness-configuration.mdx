@@ -3,6 +3,8 @@ title: Harness Configuration
 description: Configure the AI provider (Claude Code, Codex, opencode, pi-mono, Devin, or Claude Managed Agents) that powers your agents
 ---
 
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
+
 Agent Swarm uses a **harness** abstraction to decouple task execution from the underlying AI provider. Each worker runs one harness — the harness spawns sessions, manages credentials, and normalizes events so the rest of the system doesn't care which provider is underneath.
 
 ## Supported Providers
@@ -15,6 +17,7 @@ Agent Swarm uses a **harness** abstraction to decouple task execution from the u
 | **pi-mono** | `pi` | Open-source coding agent by [@badlogic](https://github.com/badlogic/pi-mono). Supports multiple model backends |
 | **Devin** | `devin` | Cognition's Devin via the `/sessions` API — session executes in Devin's managed cloud, ACU-based cost tracking |
 | **Claude Managed Agents** | `claude-managed` | Anthropic's managed cloud sandbox — sessions execute outside the worker. Requires one-time setup CLI to create the Anthropic-side Agent + Environment |
+| **ACP (Agent Client Protocol)** | `acp` | Any [Agent Client Protocol](https://agentclientprotocol.com) agent, spawned as a subprocess and driven over stdio. No swarm-side model-provider credential — the target owns its own model auth. It does receive the worker's swarm API key as the swarm MCP bearer, same as every other spawned harness |
 
 ## How It Works
 
@@ -22,7 +25,7 @@ The `HARNESS_PROVIDER` environment variable selects which provider adapter is us
 
 ```
 HARNESS_PROVIDER=claude          →  ClaudeAdapter         →  spawns `claude` CLI process
-HARNESS_PROVIDER=codex           →  CodexAdapter          →  spawns `codex` CLI process
+HARNESS_PROVIDER=codex           →  CodexAdapter          →  starts an isolated `codex app-server`
 HARNESS_PROVIDER=opencode        →  OpencodeAdapter       →  spawns `opencode` CLI process
 HARNESS_PROVIDER=pi              →  PiMonoAdapter         →  creates in-process pi-mono session
 HARNESS_PROVIDER=devin           →  DevinAdapter          →  POSTs /sessions, polls events
@@ -30,6 +33,8 @@ HARNESS_PROVIDER=devin           →  DevinAdapter          →  POSTs /sessions
 HARNESS_PROVIDER=claude-managed  →  ClaudeManagedAdapter  →  opens SSE stream against
                                                             Anthropic's managed sandbox
                                                             (session executes server-side)
+HARNESS_PROVIDER=acp             →  ACPAdapter            →  spawns `ACP_TARGET_COMMAND`,
+                                                            speaks ndjson ACP over stdio
 ```
 
 Both adapters implement the same `ProviderAdapter` interface, producing normalized `ProviderEvent` streams (session init, tool calls, cost data, context usage, etc.) that the runner consumes identically.
@@ -92,9 +97,10 @@ The Claude adapter passes the model string directly to the `claude` CLI via `--m
 | `opus` | Claude Opus 5 (highest capability; 1M context) |
 | `sonnet` | Claude Sonnet (balanced) |
 | `haiku` | Claude Haiku (fastest) |
-| `fable` | Claude Fable 5 (1M-context premium shortname) |
+| `fable` | Claude Fable 5.1 (1M-context premium shortname) |
+| `mythos` | Claude Mythos 5.1 (invite-only premium shortname) |
 
-Models can be set per-task via the API or per-agent via the agent profile. The `opus` shortname resolves to `claude-opus-5`; `fable` and the other shortnames also propagate through MCP task-creation surfaces (`send-task`, `task-action`, and schedules). See the [Anthropic models overview](https://platform.claude.com/docs/en/about-claude/models/overview) for all available model IDs.
+Models can be set per-task via the API or per-agent via the agent profile. The `opus` shortname resolves to `claude-opus-5`; `fable` and `mythos` resolve to their 5.1 model IDs. These shortnames also propagate through MCP task-creation surfaces (`send-task`, `task-action`, and schedules). See the [Anthropic models overview](https://platform.claude.com/docs/en/about-claude/models/overview) for all available model IDs.
 
 If you want provider-agnostic intent instead of a concrete model string, use `modelTier` on tasks, schedules, or workflow `agent-task` nodes. The tier values are `smol`, `regular`, `smart`, and `ultra`; the claiming worker resolves them to concrete models for its own harness/provider, and local env overrides (`MODEL_TIER_MAP`, `MODEL_TIER_<TIER>`) can adjust the mapping without changing the task payload.
 
@@ -108,9 +114,11 @@ Set a per-agent reasoning/effort level with `PATCH /api/agents/{id}/runtime` (`r
 
 ## Codex
 
-Codex runs through the `codex` CLI and supports both direct OpenAI API keys and ChatGPT OAuth.
+Codex runs through `codex app-server` and supports direct OpenAI API keys and ChatGPT OAuth.
 
-Each task runs inside a throwaway `codex-session-runner` subprocess. The worker sends the session config over stdin and receives line-delimited events/results over stdout, so `@openai/codex-sdk` state dies with the task instead of accumulating in the long-lived runner process.
+Each task runs inside a throwaway `codex-session-runner` subprocess. That process starts one fresh `codex app-server` process.
+
+The worker sends session configuration and control messages over stdin. The runner returns line-delimited events and results over stdout. Both processes exit with the task.
 
 ### Authentication Methods
 
@@ -155,7 +163,7 @@ Set the per-agent reasoning/effort level (`off | low | medium | high | xhigh`) v
 ### Codex Specifics
 
 - **Cross-keyType failover**: when Codex workers have both `OPENAI_API_KEY` slots and `codex_oauth_*` slots available, the runner now fails over across key types instead of retrying a known-exhausted pool. A successful task also clears stale rate-limit state for the credential that proved healthy.
-- **Per-task subprocess isolation**: each task gets a fresh `codex-session-runner` process, which keeps the worker's baseline memory flat and avoids long-lived SDK heap growth on hot workers.
+- **Per-task subprocess isolation**: each task gets a fresh `codex-session-runner` and `codex app-server` process. This keeps worker memory stable on hot workers.
 - **Small spawn argv**: large system prompts are staged to a temp file and passed via `--append-system-prompt-file`, avoiding Linux `MAX_ARG_STRLEN` / `E2BIG` failures on prompt-heavy repos.
 - **Actionable failure reporting**: subprocess startup / parse failures are emitted back to the parent as structured errors, and non-TTY runs no longer leak cursor escape sequences into the JSON pipe.
 
@@ -331,23 +339,116 @@ Default: `claude-sonnet-5`. Override per-worker via `MANAGED_AGENT_MODEL`, or pe
 - **System prompt rides in the user message** with a `cache_control: { type: "ephemeral" }` breakpoint between the static prefix and the per-task body, so the static prefix is cache-hit across tasks for the same agent.
 - **Repo provisioning** uses `resources: [{ type: "github_repository", url, authorization_token, checkout: { type: "branch", name: "main" } }]` on `sessions.create` when the task carries `vcsRepo`. Anthropic clones into `/workspace/<repo-name>` server-side before the agent runs.
 
-For full provider design rationale (why we don't `agents.create` at runtime, the SDK shape deviations, the prompt-cache breakpoint decision), see [Adding a Harness Provider §12](/docs/guides/harness-providers#claude-managed-agents--pre-existing-agent--environment-pattern).
+For full provider design rationale (why we don't `agents.create` at runtime, the SDK shape deviations, the prompt-cache breakpoint decision), see [Adding a Harness Provider §12](/docs/guides/harness-providers#12-claude-managed-agents-pre-existing-agent-environment-pattern).
+
+---
+
+## Agent Client Protocol (ACP)
+
+`acp` drives any agent that speaks the [Agent Client Protocol](https://agentclientprotocol.com) — an open, editor-agnostic JSON-RPC protocol for driving coding agents over stdio. If your agent already has an ACP server mode (or you build one), you can run it as a swarm worker with no adapter code of your own. See the protocol's own [Get started → Agents](https://agentclientprotocol.com/get-started/agents) guide for what it takes for an agent to speak ACP.
+
+The dashboard offers a curated **OpenCode** preset and a free-form **Custom** target. ACP has no live steering (see the steering table in [Adding a Harness Provider](/docs/guides/harness-providers#live-task-steering) — ACP exposes a single in-flight `session/prompt` and the only interrupt is a full `session/cancel`).
+
+### How it works
+
+The `ACPAdapter` spawns the selected target as a subprocess and speaks ndjson ACP over its stdio using [`@agentclientprotocol/sdk`](https://www.npmjs.com/package/@agentclientprotocol/sdk)'s `ClientSideConnection`. On session start it calls `initialize` then `newSession`, passing the swarm MCP server (`{apiUrl}/mcp`, over HTTP with the standard `Authorization` / `X-Agent-ID` / `X-Source-Task-Id` headers) plus every other MCP server installed on the agent, translated into ACP's `McpServer` shape. It reads the returned `configOptions` and applies configured knobs with `session/set_config_option` before the first prompt. Missing or rejected options use the preset fallback and do not fail the session. Sanitized advertised options are reported to the dashboard. Session notifications (`session/update`) are translated into the swarm's normalized `ProviderEvent` stream the same way every other provider's events are.
+
+Because the target process owns its own model credentials, `acp` reports `ready: true` with no required env vars from the swarm's credential-wait gate, and its cost rows settle at `costSource: "unpriced"` — the swarm has no visibility into what the target agent is billed for a turn.
+
+### Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `HARNESS_PROVIDER` | Yes | — | Must be set to `acp` |
+| `ACP_TARGET` | No | `custom` | `opencode` for the curated OpenCode preset, or `custom` for an operator-supplied command |
+| `ACP_TARGET_COMMAND` | Custom only | — | Executable to spawn as the custom ACP agent (also accepts the shorter `ACP_COMMAND` alias). Must resolve on `$PATH` or be an absolute path |
+| `ACP_TARGET_ARGS` | No | — | Arguments to the target command. Accepts a JSON array (`["acp", "--flag"]`) or a plain whitespace-separated string |
+| `ACP_TARGET_ENV_KEYS` | No | `[]` | JSON array (or comma-separated list for hand-authored config) of environment/config keys explicitly allowed into a custom target process |
+| `ACP_MODEL_ENV_KEY` | No | — | Custom target environment variable that receives `MODEL_OVERRIDE` when the ACP `model` option is unavailable |
+| `ACP_CONFIG_OPTIONS` | No | `{}` | JSON object of additional string or boolean ACP option values to apply when advertised |
+| `ACP_SYSTEM_PROMPT_PATH` | No | — | Where to write the composed system prompt before spawning, for targets that read their prompt from a file instead of an ACP field. Relative paths resolve against the task `cwd`; absolute paths are used as-is |
+
+Use the dashboard runtime editor when possible. It updates the harness, `MODEL_OVERRIDE`, and ACP fields atomically. Selecting ACP from another harness defaults to OpenCode; existing ACP agents with no `ACP_TARGET` stay custom for backward compatibility.
+
+### Example targets
+
+Any ACP-speaking agent works. A few starting points:
+
+<Tabs items={["opencode", "claude-code-acp", "Gemini CLI", "Custom"]}>
+  <Tab value="opencode">
+    [opencode](https://opencode.ai) ships a built-in ACP server:
+
+    ```bash
+    HARNESS_PROVIDER=acp
+    ACP_TARGET=opencode
+    MODEL_OVERRIDE=opencode/big-pickle
+    ```
+
+    The adapter applies `MODEL_OVERRIDE` through ACP's advertised `model` option. It also merges the model into `OPENCODE_CONFIG_CONTENT` before spawn as a fallback. OpenCode resolves its own model credentials from `~/.local/share/opencode/auth.json` or the preset's allowlisted provider env vars (`OPENROUTER_API_KEY`, `OPENAI_API_KEY`, etc.).
+  </Tab>
+  <Tab value="claude-code-acp">
+    Zed's [`claude-code-acp`](https://github.com/zed-industries/claude-code-acp) bridges Claude Code to ACP:
+
+    ```bash
+    HARNESS_PROVIDER=acp
+    ACP_TARGET_COMMAND=npx
+    ACP_TARGET_ARGS=["-y", "@zed-industries/claude-code-acp"]
+    ```
+
+    Needs `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` in the worker env — the bridge process picks it up the same way the `claude` CLI does. This is a different code path from the swarm's native `HARNESS_PROVIDER=claude` adapter; prefer `claude` directly unless you specifically need the ACP transport.
+  </Tab>
+  <Tab value="Gemini CLI">
+    Gemini CLI has an experimental ACP mode:
+
+    ```bash
+    HARNESS_PROVIDER=acp
+    ACP_TARGET_COMMAND=gemini
+    ACP_TARGET_ARGS=["--experimental-acp"]
+    ```
+
+    Needs `GEMINI_API_KEY` (or whatever credential the installed Gemini CLI version expects) in the worker env.
+  </Tab>
+  <Tab value="Custom">
+    Any executable that speaks ACP over stdio (reads ndjson on stdin, writes ndjson on stdout) works without modification:
+
+    ```bash
+    HARNESS_PROVIDER=acp
+    ACP_TARGET_COMMAND=/usr/local/bin/my-acp-agent
+    ACP_TARGET_ARGS=["--stdio"]
+    ```
+
+    See [agentclientprotocol.com/get-started/agents](https://agentclientprotocol.com/get-started/agents) for what your agent needs to implement.
+  </Tab>
+</Tabs>
+
+### Tool availability
+
+An ACP agent's *own* tools (file edit, shell, etc.) are whatever the target process implements — the swarm doesn't grant or restrict them; that's between you and the target agent's build. What the swarm adapter does provide is the **swarm MCP server** (`store-progress`, `send-task`, `memory-search`, and the rest) plus every MCP server already installed on the calling agent, both passed into `newSession`'s `mcpServers` array. Whether the target agent actually calls them depends on the target honoring ACP's `mcpServers` field the same way opencode's and Zed's ACP servers do — check your target's docs if tool calls aren't appearing. There's no fallback path today if a target ignores `mcpServers`: unlike `claude`/`pi`/`codex`, which fail open and keep the harness usable without MCP, an ACP target that doesn't wire the passed servers into its own tool loop simply won't call swarm tools at all.
+
+### ACP Specifics
+
+- **The target receives the worker's swarm API key.** `newSession`'s swarm MCP server entry carries the worker's bearer as an `Authorization` header (see [How it works](#how-it-works) above) — the same credential every other spawned harness process receives (`claude`, `codex`, and the rest all pass their swarm bearer to the spawned CLI/subprocess the same way). `ACP_TARGET_COMMAND` is operator-configured and runs in the worker container as the worker; point it only at a binary you trust with that credential.
+- **No swarm-side credential gate.** The `acp` adapter has no `readyCheck` — the worker reports `ready: true` immediately. If `ACP_TARGET_COMMAND` is unset or unresolvable, the failure surfaces at session-spawn time (task fails with `ACP target failed during startup: ...`), not at boot.
+- **No live steering.** `deliverSteering` is not implemented; mid-run messages promote to follow-up tasks the same way an unsupported provider always handles them.
+- **No skill filesystem sync.** The generic worker image still seeds `~/.claude/skills`, `~/.opencode/skills`, etc. at boot, so a target that reads one of those directories natively (like opencode) still sees skills; a fully custom target sees whatever `ACP_SYSTEM_PROMPT_PATH` writes and nothing more.
+
+For full adapter internals (the `SwarmAcpClient`/`ACPSession` classes, MCP server translation, event mapping), see [`src/providers/acp-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/acp-adapter.ts) and [Adding a Harness Provider](/docs/guides/harness-providers).
 
 ---
 
 ## Choosing a Provider
 
-| Consideration | Claude Code | Codex | opencode | pi-mono | Claude Managed |
-|---------------|-------------|-------|----------|---------|----------------|
-| **Setup complexity** | Minimal — install CLI + OAuth token | Minimal — CLI plus API key or OAuth bootstrap | Minimal — CLI plus OpenRouter key | Requires API key(s) | One-time `claude-managed-setup` CLI; HTTPS-public `MCP_BASE_URL` |
-| **Billing model** | Uses Claude Pro/Max/Team subscription | OpenAI API billing or ChatGPT OAuth | Pay-per-token via OpenRouter/Anthropic/OpenAI | Pay-per-token via API | Anthropic API tokens + $0.08/session-hour runtime fee |
-| **Model flexibility** | Claude models only | Codex/OpenAI models | 100+ models via OpenRouter | Any provider via OpenRouter | Claude models only |
-| **Follow-up continuity** | DB-backed context preamble | DB-backed context preamble | DB-backed context preamble | DB-backed context preamble | DB-backed context preamble |
-| **MCP integration** | Native (`.mcp.json` config) | Native (`~/.codex/config.toml`) | Auto-wired per-task via config file | HTTP-based tool discovery | Server-side on the Anthropic Agent |
-| **Where session runs** | Worker container | Worker container | Worker container | Worker container | Anthropic's managed cloud sandbox |
-| **Maturity** | Production-grade, well-tested | Production-grade, well-tested | Early support (2026-05) | Community project, actively developed | Public beta (2026-04) |
+| Consideration | Claude Code | Codex | opencode | pi-mono | Claude Managed | ACP |
+|---------------|-------------|-------|----------|---------|----------------|-----|
+| **Setup complexity** | Minimal — install CLI + OAuth token | Minimal — CLI plus API key or OAuth bootstrap | Minimal — CLI plus OpenRouter key | Requires API key(s) | One-time `claude-managed-setup` CLI; HTTPS-public `MCP_BASE_URL` | Depends entirely on the target agent |
+| **Billing model** | Uses Claude Pro/Max/Team subscription | OpenAI API billing or ChatGPT OAuth | Pay-per-token via OpenRouter/Anthropic/OpenAI | Pay-per-token via API | Anthropic API tokens + $0.08/session-hour runtime fee | Owned by the target process; swarm reports `costSource: "unpriced"` |
+| **Model flexibility** | Claude models only | Codex/OpenAI models | 100+ models via OpenRouter | Any provider via OpenRouter | Claude models only | Whatever the target agent supports |
+| **Follow-up continuity** | DB-backed context preamble | DB-backed context preamble | DB-backed context preamble | DB-backed context preamble | DB-backed context preamble | DB-backed context preamble |
+| **MCP integration** | Native (`.mcp.json` config) | Native (`~/.codex/config.toml`) | Auto-wired per-task via config file | HTTP-based tool discovery | Server-side on the Anthropic Agent | Passed via ACP `newSession.mcpServers`; target must honor it |
+| **Where session runs** | Worker container | Worker container | Worker container | Worker container | Anthropic's managed cloud sandbox | Worker container (subprocess) |
+| **Maturity** | Production-grade, well-tested | Production-grade, well-tested | Early support (2026-05) | Community project, actively developed | Public beta (2026-04) | Experimental — one generic target, no named profiles |
 
-**Recommendation**: Use Claude Code with OAuth for most setups. Use Codex when you specifically want the OpenAI/Codex toolchain or ChatGPT OAuth-backed workers. Use opencode when you want a lightweight open-source runner with access to the full OpenRouter model catalog at low cost. Consider pi-mono when you need a library-based open-source runner. Choose `claude-managed` when you want managed sandboxing (faster cold-start, vault-based credential isolation) and don't need a local runtime.
+**Recommendation**: Use Claude Code with OAuth for most setups. Use Codex when you specifically want the OpenAI/Codex toolchain or ChatGPT OAuth-backed workers. Use opencode when you want a lightweight open-source runner with access to the full OpenRouter model catalog at low cost. Consider pi-mono when you need a library-based open-source runner. Choose `claude-managed` when you want managed sandboxing (faster cold-start, vault-based credential isolation) and don't need a local runtime. Choose `acp` when you already have (or are building) an ACP-speaking agent and want to run it as a swarm worker without writing a new adapter.
 
 ---
 
@@ -464,6 +565,14 @@ The `claude` binary must be in `$PATH` inside the Docker container. The worker D
 ### Wrong provider selected
 
 Check the startup logs — the entrypoint prints `Harness Provider: <value>`. If it says `claude` when you expected `pi`, ensure `HARNESS_PROVIDER=pi` is in your env file and not being overridden.
+
+### ACP: "ACP target failed during startup"
+
+`ACP_TARGET_COMMAND` didn't resolve, or the target process exited/errored during `initialize`/`newSession`. Confirm the binary is on `$PATH` inside the worker image (or use an absolute path), and that any args in `ACP_TARGET_ARGS` are valid for that target — try running the exact `ACP_TARGET_COMMAND` + `ACP_TARGET_ARGS` combination by hand first.
+
+### ACP: agent never calls swarm MCP tools
+
+The target agent has to honor ACP's `newSession.mcpServers` field itself; the swarm adapter passes the swarm MCP server and every other installed MCP server into that field, but whether the target *connects* to them is up to its own implementation. There's no swarm-side fallback here — check the target agent's ACP docs for its MCP support status.
 
 ## Related
 

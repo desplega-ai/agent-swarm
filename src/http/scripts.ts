@@ -166,7 +166,15 @@ const scriptRunResponseSchema = z.object({
   stderr: z.string(),
   exitCode: z.number(),
   error: z
-    .enum(["timeout", "oom", "killed", "import_violation", "eval_error", "executor_error"])
+    .enum([
+      "timeout",
+      "oom",
+      "killed",
+      "import_violation",
+      "eval_error",
+      "executor_error",
+      "capacity_exceeded",
+    ])
     .optional(),
   runtimeError: z
     .object({
@@ -809,6 +817,7 @@ export async function handleScripts(
       : scrubSecrets(
           [
             output.error,
+            output.stderr || undefined,
             output.runtimeError
               ? `${output.runtimeError.name}: ${output.runtimeError.message}`
               : undefined,
@@ -825,7 +834,7 @@ export async function handleScripts(
         // raw by GET /api/script-runs/{id} to the dashboard, so it needs the same
         // redaction guarantees as the scrubbed run response below.
         args: scrubObject(parsed.body.args ?? null),
-        scriptName: parsed.body.name,
+        scriptName: parsed.body.name ?? "(inline source)",
         status: ok ? "completed" : "failed",
         output: scrubObject(output.result),
         error: runError,

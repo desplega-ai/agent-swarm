@@ -25,11 +25,13 @@ import { runScript } from "../scripts-runtime/loader";
 import { SwarmConfig } from "../scripts-runtime/swarm-config";
 import { createSwarmSdk } from "../scripts-runtime/swarm-sdk";
 import { proxyScriptsApi } from "../tools/script-common";
+import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
 import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-scripts-runtime-identity.sqlite";
 let baseUrl = "";
 const API_KEY = "scripts-runtime-identity-key-1234567890";
+const spawnTest = test.skipIf(SKIP_SANDBOX_SPAWN_TESTS);
 
 const savedEnv = { ...process.env };
 const originalFetch = globalThis.fetch;
@@ -253,7 +255,7 @@ describe("swarm SDK emits the runtime header", () => {
 describe("script subprocess carries the invoking worker's identity", () => {
   const resources = { memoryMb: 2048, cpuTimeSec: 20, maxStdoutBytes: 1_048_576 };
 
-  test("ctx.swarm.task_poll() presents X-Runtime-Instance-ID from system config", async () => {
+  spawnTest("ctx.swarm.task_poll() presents X-Runtime-Instance-ID from system config", async () => {
     const seen: Array<string | null> = [];
     const stub = Bun.serve({
       port: 0,
@@ -284,7 +286,7 @@ describe("script subprocess carries the invoking worker's identity", () => {
     }
   });
 
-  test("without a runtime identity the subprocess sends none", async () => {
+  spawnTest("without a runtime identity the subprocess sends none", async () => {
     const seen: Array<string | null> = [];
     const stub = Bun.serve({
       port: 0,

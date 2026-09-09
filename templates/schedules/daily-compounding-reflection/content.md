@@ -1,5 +1,7 @@
 # Daily Compounding Reflection
 
+Delivery uses configured admin channels with an in-app fallback.
+
 Capture lessons from the day into memory, skills, and workflow improvements.
 
 ## Schedule
@@ -28,6 +30,7 @@ The purpose is NOT to write a nice Slack post. It's to make measurable changes t
 ## Phase 0: Gather Context (DO NOT SKIP)
 
 1. **Read today's blocker digest first.** Use `memory-search` with query "daily-blocker-digest" and read the latest entry. The `daily-blocker-digest` schedule runs 5 minutes before this. Any `RESOLVED-STALE` items in its output are direct evidence of our worst failure mode (trusting stale state). Fold 1 MUST write at least one lesson memory per RESOLVED-STALE item.
+1.5. Use `memory-search` with query "daily-status-report" and read the latest entry — agent capacity, task-failure classification, and disabled-automation state feed Fold 2 (agent evolution) and this run's "Deferred" section.
 2. Use `get-tasks` with status "completed" (limit 25) to see what got done since the last reflection.
 3. Use `get-tasks` with status "failed" (limit 10) to see what went wrong.
 4. Use `memory-search` with query "daily evolution" to find the last reflection and track continuity.
@@ -161,7 +164,7 @@ For each candidate:
 
 ## Phase 4: Post to Slack (THE RECEIPT)
 
-Use `slack-post` with your configured channel ID. Format:
+Post through configured admin delivery channels, using the in-app fallback when no external channel is configured. Format:
 
 ```
 🧬 Daily Evolution — [date]

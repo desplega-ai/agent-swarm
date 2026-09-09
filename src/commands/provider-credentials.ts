@@ -24,11 +24,24 @@ import { checkCodexCredentials } from "../providers/codex-adapter";
 import { checkDevinCredentials } from "../providers/devin-adapter";
 import { checkOpencodeCredentials } from "../providers/opencode-adapter";
 import type { CredCheckOptions, CredStatus } from "../providers/types";
-import type { AgentCredStatus, AgentLatestModel, ProviderName, ReasoningEffort } from "../types";
+import type {
+  AgentAcpStatus,
+  AgentCredStatus,
+  AgentLatestModel,
+  ProviderName,
+  ReasoningEffort,
+} from "../types";
 import { getOpenRouterBaseUrl } from "../utils/openrouter-base-url";
 import { scrubSecrets } from "../utils/secret-scrubber";
 
-export type SupportedProvider = "claude" | "claude-managed" | "codex" | "devin" | "opencode" | "pi";
+export type SupportedProvider =
+  | "claude"
+  | "claude-managed"
+  | "codex"
+  | "devin"
+  | "opencode"
+  | "pi"
+  | "acp";
 
 /**
  * True when the pi harness should use the AWS SDK Bedrock path: either an
@@ -65,6 +78,8 @@ export const REQUIRED_CRED_VARS_BY_PROVIDER: Record<SupportedProvider, readonly 
   devin: ["DEVIN_API_KEY", "DEVIN_ORG_ID"],
   opencode: ["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"],
   pi: ["ANTHROPIC_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY"],
+  // The ACP target process owns its own auth, so the swarm requires nothing.
+  acp: [],
 };
 
 /**
@@ -95,9 +110,11 @@ export async function checkProviderCredentials(
       const { checkPiMonoCredentials } = await import("../providers/pi-mono-adapter");
       return checkPiMonoCredentials(env, opts);
     }
+    case "acp":
+      return { ready: true, missing: [], satisfiedBy: "sdk-delegated" };
     default:
       throw new Error(
-        `checkProviderCredentials: unknown provider "${provider}". Supported: claude, claude-managed, codex, devin, opencode, pi.`,
+        `checkProviderCredentials: unknown provider "${provider}". Supported: claude, claude-managed, codex, devin, opencode, pi, acp.`,
       );
   }
 }
@@ -259,6 +276,7 @@ function parseCodexOAuthAccess(blob: string | undefined): string | null {
  * | `codex`          | `~/.codex/auth.json` (file) → `CODEX_OAUTH` (env OAuth) → `OPENAI_API_KEY` | OpenAI `/v1/models` (api-key path only) |
  * | `opencode`       | `OPENROUTER_API_KEY` → `ANTHROPIC_API_KEY` → `OPENAI_API_KEY` (pi-style) | matching provider's `/v1/models` |
  * | `pi`             | `OPENROUTER_API_KEY` → `ANTHROPIC_API_KEY` → `OPENAI_API_KEY`           | matching provider's `/v1/models` |
+ * | `acp`            | target-specific (the ACP target process owns its own auth)              | presence-only (validated by the target process) |
  * | `pi` (bedrock)   | `MODEL_OVERRIDE=amazon-bedrock/*` → AWS SDK default credential chain    | presence-only (real check is the worker-side Bedrock enumeration) |
  * | `devin`          | `DEVIN_API_KEY` (+ `DEVIN_API_BASE_URL` override)                       | `${baseUrl}/v3/self`            |
  *
@@ -365,10 +383,12 @@ export async function validateProviderCredentials(provider: string): Promise<Liv
           latency_ms: r.latency_ms,
         };
       }
+      case "acp":
+        return presenceCheckOk();
       default:
         return {
           ok: false,
-          error: `Unknown provider "${provider}". Supported: claude, claude-managed, codex, devin, opencode, pi.`,
+          error: `Unknown provider "${provider}". Supported: claude, claude-managed, codex, devin, opencode, pi, acp.`,
           latency_ms: Date.now() - startedAt,
         };
     }
@@ -440,6 +460,7 @@ export async function buildCredStatusReport(
     reportedAt: Date.now(),
     reportKind: kind,
     bedrock,
+    acp: null,
   };
 }
 
@@ -526,6 +547,27 @@ export async function reportLatestModel(
     });
   } catch (err) {
     console.warn(`[latest-model] POST failed (non-fatal): ${err}`);
+  }
+}
+
+export async function reportAcpStatus(
+  apiUrl: string,
+  apiKey: string,
+  agentId: string,
+  acp: AgentAcpStatus,
+): Promise<void> {
+  try {
+    await fetch(`${apiUrl}/api/agents/${encodeURIComponent(agentId)}/credential-status`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "X-Agent-ID": agentId,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ acp }),
+    });
+  } catch (err) {
+    console.warn(`[acp-status] POST failed (non-fatal): ${err}`);
   }
 }
 

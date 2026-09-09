@@ -61,6 +61,7 @@ New MCP tools: when adding a tool, register it in `SDK_TOOL_NAME_MAP` (`src/scri
 | `bun run lint:fix` | Lint & format with Biome |
 | `bun run tsc:check` | Type check |
 | `bun run test:root` | Run root unit tests (`bun run test:root -- src/tests/<file>.test.ts` for one) |
+| `bun run e2e:ui` | Playwright UI suite: builds `apps/ui`, one seeded API per worker (`-- --grep @smoke`, `-- --no-build`) |
 | `bun run pm2-{start,stop,restart,logs,status}` | All services (API 3013, UI 5274, lead 3201, worker 3202) |
 | `bun run docker:build:worker` | Build Docker worker image (full) |
 | `bun run docker:build:worker:slim` | Build slim worker image (`--target worker-slim`, for CI/E2E) |
@@ -135,13 +136,19 @@ File-based, forward-only SQL in `src/be/migrations/NNN_descriptive_name.sql`. Ru
 
 Test against a fresh DB (`rm agent-swarm-db.sqlite && bun run start:http`) **and** an existing one. Never modify an applied migration — create a new one. No `down` migrations (SQLite rollbacks flake). Keep `AgentTaskSourceSchema` in `src/types.ts` in sync with SQL CHECK constraints.
 
+Before adding a migration, check its ordinal against `main`'s tail and every other open PR that adds one; the conflict check only compares against `main`. A duplicate ordinal is applied once and silently skipped by the runner; a gap is harmless, but a duplicate is dangerous.
+
 </important>
 
-<important if="you are adding or editing an agent skill (templates/skills/ or src/be/seed-skills/)">
+<important if="you are adding or editing an agent skill (skills/, templates/skills/, or src/be/seed-skills/)">
 
-Full authoring guide, the three delivery paths, versioning semantics, and every enforced rule: [runbooks/skills.md](./runbooks/skills.md).
+Full authoring guide, the four delivery paths, versioning semantics, and every enforced rule: [runbooks/skills.md](./runbooks/skills.md).
 
 **The rule that matters: one skill name must not be both seeded and baked.** `templates/skills/<name>/` (DB-seeded) and an image-baked skill (such as a pinned `npx skills` install) both write `~/.claude/skills/<name>/SKILL.md`. The DB copy wins, the baked content is silently discarded, and the FS writer then prunes any bundled file with no `skill_files` row. That truncated `artifacts` / `kv-storage` / `pages` and deleted their examples in production. `plugin/skills/` is retired for skills; `plugin/commands/`, `plugin/agents/`, and `plugin/pi-skills/` remain baked.
+
+**Public operator skills use the fourth delivery path:** `skills/<name>/SKILL.md`, installed with `npx skills add desplega-ai/agent-swarm`. They guide the operator's coding agent. Never seed or bake them.
+
+Keep `skills/agent-swarm/SKILL.md` valid and `skills/` nonempty. Otherwise, the installer's fallback scan exposes internal skills. Keep maintainer skills canonical in `.claude/internal-skills/`, with symlinks in harness skill directories. Run `bun run check:operator-skill` after changing public skills or their referenced files.
 
 **Prefer `templates/skills/`** — seeded skills are live-updatable (no image rebuild), listed by the skills API, editable in the UI, per-agent toggleable, and version-tracked with user-edit preservation.
 
@@ -271,11 +278,12 @@ Operator-tunable env vars are surfaced on the dashboard **Settings → Configura
 
 <important if="you are writing or running tests, drafting a plan with verification / E2E / QA steps, or preparing a frontend PR (apps/ui/, apps/templates-ui/)">
 
-Hub: [runbooks/testing.md](./runbooks/testing.md) — routes to LOCAL_TESTING.md, qa-use, swarm-local-e2e skill, memory tests, Slack E2E.
+Hub: [runbooks/testing.md](./runbooks/testing.md) — routes to LOCAL_TESTING.md, agent-browser UI verification, swarm-local-e2e skill, memory tests, Slack E2E.
 
 Hard rules:
 - Plan-mode verification steps MUST copy real commands from LOCAL_TESTING.md; don't paraphrase.
-- Frontend PRs (`apps/ui/`, `apps/templates-ui/`) MUST include a `qa-use` session with screenshots — enforced by merge gate.
+- The black-box runner and optional `--harness` legs are documented in `LOCAL_TESTING.md` under `Black-box E2E`. The Playwright UI suite (`bun run e2e:ui`, `packages/ui-e2e`) is under `UI E2E`; its workflow `ui-e2e.yml` is informational.
+- Frontend PRs (`apps/ui/`, `apps/templates-ui/`) MUST include screenshots of the change running locally, captured with `agent-browser` and uploaded to agent-fs (signed URL in the PR body). Never `qa-use` unless explicitly asked. This is a reviewer convention; no CI job enforces it. Recipe: LOCAL_TESTING.md § When you need to verify a UI change.
 - E2E/test agents MUST use valid UUID agent IDs (e.g. `AGENT_ID=$(uuidgen)`), never slugs like `e2e-lead` — several MCP tool *output* schemas pin `yourAgentId`/`task.agentId` to UUID, so slug-ID agents get `MCP error -32602: Output validation error` on `get-tasks`/`get-task-details`/`store-progress`/`memory-search` **after the write already landed** (retrying double-writes).
 - Tests MUST NOT hard-code ports. CI runs `bun test --parallel=4` (one worker process per file), so two files with the same literal collide. Use `src/tests/test-net.ts`: `listenOnFreePort(server)` for in-process `node:http` servers, `port: 0` + `server.port` for `Bun.serve`, `getFreePort()` + `waitForServer()` for spawned `src/http.ts` children. No global test retry: a timing-sensitive test opts in with `test(name, fn, { retry: 2 })` plus a comment.
 
@@ -301,8 +309,11 @@ bun install --frozen-lockfile
 bun run lint           # NOT lint:fix — CI runs `lint` (read-only)
 bun run tsc:check
 bun run test:root -- --parallel=4     # CI: 2 shards x --parallel=4, balanced by cached --timings
+bun run e2e                          # black-box contract suite: boots the API on a free port, no Docker, no LLM
+bun run e2e:ui                       # Playwright UI suite: seeded API per worker, headless Chromium, needs Node 22+
 bun run check:bun-version             # Dockerfile oven/bun tags == package.json packageManager
 bash scripts/check-db-boundary.sh
+bash scripts/check-test-spawn-sync.sh # tests must use runChild(), never Bun.spawnSync
 bash scripts/check-audit-columns.sh   # new tables need created_by/updated_by or a .non-audit-tables entry
 bun run check:dep-graph
 ```
@@ -317,7 +328,7 @@ Drift checks — run only if you touched the trigger files, MUST commit any rege
 - Touched `apps/ui/` — or root `bun.lock`/`package.json`/`bunfig.toml` (ui deps resolve from the root lock)? → `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b` (CI uses `tsc -b`, not `--noEmit`)
 - Touched `Dockerfile` / `Dockerfile.worker` / `apps/evals/Dockerfile` / files they COPY (incl. `bunfig.toml`, member `package.json`s, `.dockerignore`)? → `docker build -f <Dockerfile> .` — CI builds all three images
 
-Frontend (`apps/ui/`, `apps/templates-ui/`) PRs additionally require a `qa-use` session with screenshots.
+Frontend (`apps/ui/`, `apps/templates-ui/`) PRs additionally require `agent-browser` screenshots uploaded to agent-fs (recipe: LOCAL_TESTING.md § When you need to verify a UI change).
 
 </important>
 
@@ -355,6 +366,7 @@ Full rulebook: [apps/evals/SCENARIO-AUTHORING.md](./apps/evals/SCENARIO-AUTHORIN
 
 ## Related
 
+- [runbooks/db-retention.md](./runbooks/db-retention.md) — opt-in retention for non-critical SQLite log tables
 - [runbooks/](./runbooks/) — ci, release, local-development, testing, workflows, skills, memory-system, secret-scrubbing, harness-providers, seed-scripts, heartbeat-crash-recovery
 - [LOCAL_TESTING.md](./LOCAL_TESTING.md) — unit / E2E / entrypoint / MCP / UI testing recipes
 - [BUSINESS_USE.md](./BUSINESS_USE.md) — flow diagrams and instrumentation

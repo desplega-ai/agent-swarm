@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlinkSync } from "node:fs";
 import {
   closeDb,
@@ -6,9 +6,12 @@ import {
   createTaskExtended,
   createUser,
   getLatestActiveTaskInThread,
+  getMostRecentTaskInThread,
+  getSlackTasksInThread,
   initDb,
 } from "../be/db";
 import { type IdentityActor, linkIdentity } from "../be/users";
+import { registerMessageHandler } from "../slack/handlers";
 import {
   bufferThreadMessage,
   getBufferMessageCount,
@@ -22,10 +25,41 @@ const SYSTEM_ACTOR: IdentityActor = { kind: "system", id: "test" };
 
 const TEST_DB_PATH = "./test-slack-thread-buffer.sqlite";
 
+let reactionCalls: Array<{ channel: string; name: string; timestamp: string }> = [];
+const reactionsAdd = async (args: { channel: string; name: string; timestamp: string }) => {
+  reactionCalls.push(args);
+  return { ok: true };
+};
+const handlerClient = {
+  auth: {
+    test: async () => ({ user_id: "U_THREAD_BUFFER_BOT", bot_id: "B_THREAD_BUFFER_BOT" }),
+  },
+  conversations: {
+    replies: async () => ({ messages: [], ok: true }),
+  },
+  reactions: { add: reactionsAdd },
+  users: {
+    info: async () => ({ ok: true, user: { profile: {} } }),
+  },
+};
+
+let messageHandler: ((args: Record<string, unknown>) => Promise<void>) | undefined;
+let leadAgent: Awaited<ReturnType<typeof createAgent>>;
+
 beforeAll(async () => {
   initDb(TEST_DB_PATH);
   // Create a lead agent for flush to assign tasks to
-  await createAgent({ name: "lead-agent", isLead: true, status: "idle", capabilities: [] });
+  leadAgent = await createAgent({
+    name: "lead-agent",
+    isLead: true,
+    status: "idle",
+    capabilities: [],
+  });
+  registerMessageHandler({
+    event: (eventType: string, handler: (args: Record<string, unknown>) => Promise<void>) => {
+      if (eventType === "message") messageHandler = handler;
+    },
+  } as never);
 });
 
 afterAll(() => {
@@ -40,6 +74,222 @@ afterAll(() => {
 });
 
 describe("Slack thread buffer", () => {
+  describe("ADDITIVE_SLACK thread ingress", () => {
+    const originalAdditiveSlack = process.env.ADDITIVE_SLACK;
+    const originalSteeringEnabled = process.env.STEERING_ENABLED;
+    const originalRequireMention = process.env.SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION;
+
+    beforeAll(() => {
+      process.env.ADDITIVE_SLACK = "true";
+      process.env.STEERING_ENABLED = "false";
+      // Pin explicitly rather than relying on it being unset — some environments
+      // export this at the OS level, which would silently disable the whole gate.
+      process.env.SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION = "false";
+    });
+
+    afterAll(() => {
+      if (originalAdditiveSlack === undefined) delete process.env.ADDITIVE_SLACK;
+      else process.env.ADDITIVE_SLACK = originalAdditiveSlack;
+      if (originalSteeringEnabled === undefined) delete process.env.STEERING_ENABLED;
+      else process.env.STEERING_ENABLED = originalSteeringEnabled;
+      if (originalRequireMention === undefined)
+        delete process.env.SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION;
+      else process.env.SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION = originalRequireMention;
+    });
+
+    beforeEach(() => {
+      reactionCalls = [];
+    });
+
+    test("does not create a task, buffer, or react for a human reply in a thread with no swarm activity", async () => {
+      expect(messageHandler).toBeDefined();
+      const channelId = "C_NO_SWARM_ACTIVITY";
+      const threadTs = "14000.0001";
+
+      await messageHandler!({
+        event: {
+          channel: channelId,
+          thread_ts: threadTs,
+          ts: "14000.0002",
+          text: "regular human reply",
+          user: "U_HUMAN_NO_SWARM_ACTIVITY",
+        },
+        body: { event_id: "evt_no_swarm_activity" },
+        client: handlerClient,
+        say: async () => {},
+      });
+
+      // Assert the gate immediately: no buffer entry, no :eyes: reaction —
+      // this is the user-visible symptom the fix targets.
+      expect(getBufferMessageCount(`${channelId}:${threadTs}`)).toBe(0);
+      expect(reactionCalls).toHaveLength(0);
+
+      await instantFlush(`${channelId}:${threadTs}`);
+
+      expect(await getMostRecentTaskInThread(channelId, threadTs)).toBeNull();
+    });
+
+    test("does not create a task, buffer, or react to a !now reply in a thread with no swarm activity", async () => {
+      expect(messageHandler).toBeDefined();
+      const channelId = "C_NOW_NO_SWARM_ACTIVITY";
+      const threadTs = "14005.0001";
+
+      await messageHandler!({
+        event: {
+          channel: channelId,
+          thread_ts: threadTs,
+          ts: "14005.0002",
+          text: "!now unsolicited work",
+          user: "U_HUMAN_NOW_NO_SWARM_ACTIVITY",
+        },
+        body: { event_id: "evt_now_no_swarm_activity" },
+        client: handlerClient,
+        say: async () => {},
+      });
+
+      // HEURISTICS.md: "!now" works only in a thread with swarm activity —
+      // an unrelated human reply must not buffer, react, or create a task.
+      expect(getBufferMessageCount(`${channelId}:${threadTs}`)).toBe(0);
+      expect(reactionCalls).toHaveLength(0);
+
+      await instantFlush(`${channelId}:${threadTs}`);
+
+      expect(await getMostRecentTaskInThread(channelId, threadTs)).toBeNull();
+    });
+
+    test("buffers and reacts to a human reply when the thread root was posted by the swarm bot (no task row yet)", async () => {
+      expect(messageHandler).toBeDefined();
+      const channelId = "C_SWARM_ROOT_NO_TASK";
+      const threadTs = "14003.0001";
+
+      const swarmRootClient = {
+        ...handlerClient,
+        conversations: {
+          replies: async () => ({
+            ok: true,
+            messages: [
+              { user: "U_THREAD_BUFFER_BOT", ts: threadTs, text: "proactive swarm message" },
+            ],
+          }),
+        },
+      };
+
+      await messageHandler!({
+        event: {
+          channel: channelId,
+          thread_ts: threadTs,
+          ts: "14003.0002",
+          text: "thanks, following up",
+          user: "U_HUMAN_SWARM_ROOT",
+        },
+        body: { event_id: "evt_swarm_root_no_task" },
+        client: swarmRootClient,
+        say: async () => {},
+      });
+
+      expect(getBufferMessageCount(`${channelId}:${threadTs}`)).toBe(1);
+      expect(reactionCalls).toHaveLength(1);
+      expect(reactionCalls[0]?.name).toBe("eyes");
+
+      await instantFlush(`${channelId}:${threadTs}`);
+
+      const followUp = await getMostRecentTaskInThread(channelId, threadTs);
+      expect(followUp).not.toBeNull();
+      expect(followUp!.task).toContain("thanks, following up");
+    });
+
+    test("does not buffer, react, or create a task for a threaded reply that mentions another user", async () => {
+      expect(messageHandler).toBeDefined();
+      const channelId = "C_OTHER_USER_MENTION";
+      const threadTs = "14004.0001";
+      const existingTask = await createTaskExtended("original swarm task", {
+        agentId: leadAgent.id,
+        source: "slack",
+        slackChannelId: channelId,
+        slackThreadTs: threadTs,
+      });
+
+      await messageHandler!({
+        event: {
+          channel: channelId,
+          thread_ts: threadTs,
+          ts: "14004.0002",
+          text: "<@UOTHERBOT> what do you think?",
+          user: "U_HUMAN_OTHER_MENTION",
+        },
+        body: { event_id: "evt_other_user_mention" },
+        client: handlerClient,
+        say: async () => {},
+      });
+
+      expect(getBufferMessageCount(`${channelId}:${threadTs}`)).toBe(0);
+      expect(reactionCalls).toHaveLength(0);
+
+      await instantFlush(`${channelId}:${threadTs}`);
+
+      // Still just the pre-existing task — the other-user mention must not
+      // create a new follow-up task.
+      const latest = await getMostRecentTaskInThread(channelId, threadTs);
+      expect(latest?.id).toBe(existingTask.id);
+    });
+
+    test("creates a follow-up task for a human reply in a thread with swarm activity", async () => {
+      expect(messageHandler).toBeDefined();
+      const channelId = "C_SWARM_ACTIVITY";
+      const threadTs = "14001.0001";
+      const existingTask = await createTaskExtended("original swarm task", {
+        agentId: leadAgent.id,
+        source: "slack",
+        slackChannelId: channelId,
+        slackThreadTs: threadTs,
+      });
+
+      await messageHandler!({
+        event: {
+          channel: channelId,
+          thread_ts: threadTs,
+          ts: "14001.0002",
+          text: "regular human follow-up",
+          user: "U_HUMAN_SWARM_ACTIVITY",
+        },
+        body: { event_id: "evt_swarm_activity" },
+        client: handlerClient,
+        say: async () => {},
+      });
+
+      await instantFlush(`${channelId}:${threadTs}`);
+
+      // Task creation can share a timestamp. Identify the new task by its ID.
+      const followUps = (await getSlackTasksInThread(channelId, threadTs)).filter(
+        (task) => task.id !== existingTask.id,
+      );
+      expect(followUps).toHaveLength(1);
+      const followUp = followUps[0];
+      expect(followUp!.task).toContain("[Thread follow-up — 1 message(s) buffered]");
+      expect(followUp!.task).toContain("regular human follow-up");
+    });
+
+    test("does not create a task for a top-level channel message without a mention", async () => {
+      expect(messageHandler).toBeDefined();
+      const channelId = "C_TOP_LEVEL_NO_MENTION";
+      const ts = "14002.0001";
+
+      await messageHandler!({
+        event: {
+          channel: channelId,
+          ts,
+          text: "regular top-level human message",
+          user: "U_HUMAN_TOP_LEVEL_NO_MENTION",
+        },
+        body: { event_id: "evt_top_level_no_mention" },
+        client: handlerClient,
+        say: async () => {},
+      });
+
+      expect(await getMostRecentTaskInThread(channelId, ts)).toBeNull();
+    });
+  });
+
   describe("buffer creation and message appending", () => {
     test("bufferThreadMessage creates a buffer entry", () => {
       bufferThreadMessage("C100", "1000.0001", "first message", "U1", "1000.0010");

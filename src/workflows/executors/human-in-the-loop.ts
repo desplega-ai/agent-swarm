@@ -1,6 +1,8 @@
 import { z } from "zod";
 import type { ExecutorMeta } from "../../types";
 import { getAppUrl } from "../../utils/constants";
+import { scrubSecrets } from "../../utils/secret-scrubber";
+import { postApprovalCancellationUpdates } from "../approval-notifications";
 import type { ExecutorResult } from "./base";
 import { BaseExecutor } from "./base";
 
@@ -111,6 +113,12 @@ export class HumanInTheLoopExecutor extends BaseExecutor<
     const existing = await db.getApprovalRequestByStepId(meta.stepId);
     if (existing) {
       if (existing.status !== "pending") {
+        if (existing.status === "cancelled") {
+          return {
+            status: "failed",
+            error: `Approval request was cancelled: ${existing.resolutionReason ?? "workflow run cancelled"}`,
+          };
+        }
         // Already resolved — return result
         const nextPort =
           existing.status === "timeout"
@@ -139,7 +147,7 @@ export class HumanInTheLoopExecutor extends BaseExecutor<
 
     // 2. Create the approval request
     const requestId = crypto.randomUUID();
-    await db.createApprovalRequest({
+    const created = await db.createApprovalRequest({
       id: requestId,
       title: config.title,
       questions: config.questions,
@@ -149,12 +157,25 @@ export class HumanInTheLoopExecutor extends BaseExecutor<
       timeoutSeconds: config.timeout?.seconds,
       notificationChannels: config.notifications,
       createdBy: meta.requestedByUserId,
+      requireActionableWorkflow: true,
     });
+
+    if (created.status === "cancelled") {
+      return {
+        status: "success",
+        async: true,
+        waitFor: "approval.resolved",
+        correlationId: requestId,
+      } as unknown as ExecutorResult<HITLOutput>;
+    }
 
     // 3. Dispatch notifications (fire-and-forget — failures must not block the workflow)
     if (config.notifications?.length) {
       this.dispatchNotifications(requestId, config, db).catch((err) => {
-        console.error("[HITL] Unexpected error dispatching notifications:", err);
+        console.error(
+          "[HITL] Unexpected error dispatching notifications:",
+          scrubSecrets(err instanceof Error ? err.message : String(err)),
+        );
       });
     }
 
@@ -252,7 +273,10 @@ export class HumanInTheLoopExecutor extends BaseExecutor<
             `[HITL] Slack notification sent to ${notification.target} for request ${requestId}`,
           );
         } catch (err) {
-          console.error(`[HITL] Failed to send Slack notification to ${notification.target}:`, err);
+          console.error(
+            `[HITL] Failed to send Slack notification to ${notification.target}:`,
+            scrubSecrets(err instanceof Error ? err.message : String(err)),
+          );
         }
       }
     }
@@ -261,8 +285,18 @@ export class HumanInTheLoopExecutor extends BaseExecutor<
     if (updated) {
       try {
         await db.updateApprovalRequestNotifications(requestId, updatedChannels);
+        const latest = await db.getApprovalRequestById(requestId);
+        if (latest?.status === "cancelled") {
+          await postApprovalCancellationUpdates(
+            [latest],
+            latest.resolutionReason ?? "Workflow run cancelled",
+          );
+        }
       } catch (err) {
-        console.error("[HITL] Failed to update notification channels in DB:", err);
+        console.error(
+          "[HITL] Failed to update notification channels in DB:",
+          scrubSecrets(err instanceof Error ? err.message : String(err)),
+        );
       }
     }
   }

@@ -279,7 +279,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
     id: "harness",
     title: "Harness & tools",
     description:
-      "The tool surface exposed to workers. Provider and model selection are configured per agent, not here — anything set globally would become the default for EVERY agent, so those knobs are deliberately left to each agent's own configuration.",
+      "The tool surface exposed to workers, plus the model gateway they route through. Provider and model selection are configured per agent, not here — anything set globally would become the default for EVERY agent, so those knobs are deliberately left to each agent's own configuration. The gateway base URL is the exception: it is a deployment-wide routing endpoint, not a model choice.",
     icon: Cpu,
     entries: [
       {
@@ -309,6 +309,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         placeholder: "core,tasks,scripts,memory,workflows",
       },
       {
+        key: "OPENROUTER_BASE_URL",
+        label: "OpenAI-compatible model gateway",
+        description:
+          "Base URL every OpenRouter consumer calls — the OpenCode and pi-mono harness sessions, model refreshes, and the internal summarizers. Point it at any gateway that serves OpenRouter-compatible GET /models and POST /chat/completions (OpenRouter itself, OrcaRouter, or a self-hosted proxy) to route model traffic through it. This is a deployment-wide routing endpoint, not a per-agent model choice: it changes where requests go, not which model is selected. The gateway's credential stays in OPENROUTER_API_KEY on the Secrets page. Leave blank for openrouter.ai. Takes effect on each worker's next task; no restart.",
+        kind: "string",
+        defaultValue: "https://openrouter.ai/api/v1",
+        placeholder: "https://openrouter.ai/api/v1",
+        docsUrl: `${DOCS}guides/provider-auth/model-gateways`,
+      },
+      {
         key: "WORKER_API_READY_TIMEOUT_SECONDS",
         label: "API readiness timeout (s)",
         description:
@@ -323,11 +333,77 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
   },
   {
     id: "database",
-    title: "Database queries",
+    title: "Database",
     description:
-      "Safety controls for the shared db-query path (HTTP debug route and the MCP tool) — the bounded child-process kill switch and its per-path timeout/row budgets.",
+      "Safety controls for database queries and opt-in retention of non-critical log tables.",
     icon: Database,
     entries: [
+      {
+        key: "SESSION_LOG_RETENTION_DAYS",
+        label: "Session log retention (days)",
+        description:
+          "Delete session_logs rows older than this many days. Leave unset to disable this table's sweep. Deletion permanently removes session transcripts.",
+        kind: "number",
+        placeholder: "30",
+        docsUrl: `${DOCS}guides/deployment#database-retention`,
+      },
+      {
+        key: "AGENT_LOG_RETENTION_DAYS",
+        label: "Agent log retention (days)",
+        description:
+          "Delete agent_log rows older than this many days. Leave unset to disable this table's sweep. Deletion permanently removes task and agent history.",
+        kind: "number",
+        placeholder: "30",
+        docsUrl: `${DOCS}guides/deployment#database-retention`,
+      },
+      {
+        key: "EVENTS_RETENTION_DAYS",
+        label: "Event retention (days)",
+        description:
+          "Delete events rows older than this many days. Leave unset to disable this table's sweep. Aggregate event totals become retention-window totals.",
+        kind: "number",
+        placeholder: "30",
+        docsUrl: `${DOCS}guides/deployment#database-retention`,
+      },
+      {
+        key: "DB_RETENTION_DRY_RUN",
+        label: "Database retention dry run",
+        description:
+          "Count rows that enabled retention policies would delete, without deleting them. Use this before the first production activation.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}guides/deployment#database-retention`,
+      },
+      {
+        key: "DB_RETENTION_TICK_BUDGET_MS",
+        label: "Retention tick budget (ms)",
+        description:
+          "Wall-clock budget for one retention sweep tick, shared evenly across enabled tables. Accepts 1000 to 300000.",
+        kind: "number",
+        defaultValue: "30000",
+        placeholder: "30000",
+        docsUrl: `${DOCS}guides/deployment#database-retention`,
+      },
+      {
+        key: "DB_RETENTION_CATCHUP_INTERVAL_MS",
+        label: "Retention catch-up interval (ms)",
+        description:
+          "Delay before the next retention tick when a table is still undrained. The normal cadence stays hourly once every enabled table is drained. Accepts 5000 to 3600000.",
+        kind: "number",
+        defaultValue: "60000",
+        placeholder: "60000",
+        docsUrl: `${DOCS}guides/deployment#database-retention`,
+      },
+      {
+        key: "DB_RETENTION_MAX_STATEMENT_MS",
+        label: "Retention statement target (ms)",
+        description:
+          "Target ceiling for one retention DELETE statement, measured as driver execution time. The adaptive batch sizer tunes its batch size against this. Accepts 25 to 5000.",
+        kind: "number",
+        defaultValue: "250",
+        placeholder: "250",
+        docsUrl: `${DOCS}guides/deployment#database-retention`,
+      },
       {
         key: "DB_QUERY_BOUNDED_ENABLED",
         label: "Bounded query execution",
@@ -397,7 +473,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
           "Stop the Slack handler from starting. Credentials stay untouched — manage them on the Integrations page.",
         kind: "boolean",
         defaultValue: "false",
-        docsUrl: `${DOCS}guides/slack-integration`,
+        docsUrl: `${DOCS}integrations/slack`,
+      },
+      {
+        key: "SLACK_ALLOW_DEV_SOCKET_MODE",
+        label: "Allow Slack in development",
+        description:
+          "Explicitly allow a development API process to open a Slack Socket Mode connection. Keep this off unless the development process must consume events from the configured Slack app.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}integrations/slack`,
       },
       {
         key: "SLACK_RENDER_V2",
@@ -406,7 +491,61 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
           "Opt in to preview one editable task tree per thread and immutable streamed outcome cards. Leave off to use the legacy per-task message renderer.",
         kind: "boolean",
         defaultValue: "false",
-        docsUrl: `${DOCS}guides/slack-integration`,
+        docsUrl: `${DOCS}integrations/slack`,
+      },
+      {
+        key: "SLACK_REACTION_ACCEPTED",
+        label: "Accepted-message reaction",
+        description:
+          "Slack emoji shortcode the bot adds when a task is accepted from a channel mention, thread reply, follow-up or assistant DM. Bare name or :name:. Lowercase letters, digits, _ + ' -. Custom workspace emoji work by name.",
+        kind: "string",
+        defaultValue: "eyes",
+        docsUrl: `${DOCS}integrations/slack`,
+      },
+      {
+        key: "SLACK_REACTION_BUFFERED",
+        label: "Buffered-message reaction",
+        description:
+          "Slack emoji shortcode the bot adds when message 2 and later arrive in an additive buffer window. Bare name or :name:. Lowercase letters, digits, _ + ' -. Custom workspace emoji work by name.",
+        kind: "string",
+        defaultValue: "heavy_plus_sign",
+        docsUrl: `${DOCS}integrations/slack`,
+      },
+      {
+        key: "SLACK_REACTION_NOW",
+        label: "Instant-flush reaction",
+        description:
+          "Slack emoji shortcode the bot adds when the !now command flushes the buffer. Bare name or :name:. Lowercase letters, digits, _ + ' -. Custom workspace emoji work by name.",
+        kind: "string",
+        defaultValue: "zap",
+        docsUrl: `${DOCS}integrations/slack`,
+      },
+      {
+        key: "SLACK_REACTION_STEERED",
+        label: "Steering-accepted reaction",
+        description:
+          "Slack emoji shortcode the bot adds when a thread message is accepted as steering for a running task. Bare name or :name:. Lowercase letters, digits, _ + ' -. Custom workspace emoji work by name.",
+        kind: "string",
+        defaultValue: "speech_balloon",
+        docsUrl: `${DOCS}integrations/slack`,
+      },
+      {
+        key: "SLACK_REACTION_COMPLETED",
+        label: "Completed-task reaction",
+        description:
+          "Slack emoji shortcode the bot adds when every task linked to the trigger message reached status completed. Bare name or :name:. Lowercase letters, digits, _ + ' -. Custom workspace emoji work by name. Change this when another tool in the workspace acts on the default emoji.",
+        kind: "string",
+        defaultValue: "white_check_mark",
+        docsUrl: `${DOCS}integrations/slack`,
+      },
+      {
+        key: "SLACK_REACTION_FAILED",
+        label: "Failed-task reaction",
+        description:
+          "Slack emoji shortcode the bot adds when any linked task reached failed, cancelled or superseded. Bare name or :name:. Lowercase letters, digits, _ + ' -. Custom workspace emoji work by name.",
+        kind: "string",
+        defaultValue: "x",
+        docsUrl: `${DOCS}integrations/slack`,
       },
       {
         key: "GITHUB_DISABLE",
@@ -415,7 +554,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
           "Stop the GitHub handler from starting. Credentials stay untouched — manage them on the Integrations page.",
         kind: "boolean",
         defaultValue: "false",
-        docsUrl: `${DOCS}guides/github-integration`,
+        docsUrl: `${DOCS}integrations/github`,
       },
       {
         key: "GITLAB_DISABLE",
@@ -424,7 +563,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
           "Stop the GitLab handler from starting. Credentials stay untouched — manage them on the Integrations page.",
         kind: "boolean",
         defaultValue: "false",
-        docsUrl: `${DOCS}guides/gitlab-integration`,
+        docsUrl: `${DOCS}integrations/gitlab`,
       },
       {
         key: "LINEAR_DISABLE",
@@ -442,7 +581,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
           "Stop the Jira handler from starting. Credentials stay untouched — manage them on the Integrations page.",
         kind: "boolean",
         defaultValue: "false",
-        docsUrl: `${DOCS}guides/jira-integration`,
+        docsUrl: `${DOCS}integrations/jira`,
       },
       {
         key: "AGENTMAIL_DISABLE",
@@ -451,7 +590,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
           "Stop the AgentMail handler from starting. Credentials stay untouched — manage them on the Integrations page.",
         kind: "boolean",
         defaultValue: "false",
-        docsUrl: `${DOCS}guides/agentmail-integration`,
+        docsUrl: `${DOCS}integrations/agentmail`,
       },
       {
         key: "ADDITIVE_SLACK",
@@ -460,7 +599,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
           "Batch consecutive messages in a Slack thread into a single task update instead of one per message.",
         kind: "boolean",
         defaultValue: "false",
-        docsUrl: `${DOCS}guides/slack-integration`,
+        docsUrl: `${DOCS}integrations/slack`,
       },
       {
         key: "SLACK_ALERTS_CHANNEL",
@@ -469,7 +608,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
           "Channel operational alerts are posted to. Accepts a channel ID or name; leave unset to disable alerting.",
         kind: "string",
         placeholder: "e.g. C0123456789",
-        docsUrl: `${DOCS}guides/slack-integration`,
+        docsUrl: `${DOCS}integrations/slack`,
       },
       {
         key: "SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION",
@@ -478,7 +617,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
           "Only treat a Slack thread reply as a follow-up when the bot is @-mentioned. Off means every reply in the thread is picked up.",
         kind: "boolean",
         defaultValue: "false",
-        docsUrl: `${DOCS}guides/slack-integration`,
+        docsUrl: `${DOCS}integrations/slack`,
       },
       {
         key: "LINEAR_ALLOWED_STATES",

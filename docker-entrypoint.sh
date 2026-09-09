@@ -745,7 +745,10 @@ if [ -n "$AGENT_ID" ]; then
                     | sed '/^# === Agent-managed setup (from DB) ===$/,/^# === End agent-managed setup ===$/d' \
                     >> "$TEMP_FILE"
                 mv "$TEMP_FILE" "$EXISTING_STARTUP"
-                chmod +x "$EXISTING_STARTUP"
+                # mktemp creates the temp file 0600; mv keeps that mode, and `chmod +x`
+                # would leave it 0711 (root-owned, unreadable by the worker uid that
+                # has to `head` and run it). Set the full mode explicitly.
+                chmod 755 "$EXISTING_STARTUP"
             elif [ -n "$AGENT_SCRIPT" ]; then
                 # Create new start-up.sh
                 echo "Creating /workspace/start-up.sh from agent setup script..."
@@ -753,7 +756,7 @@ if [ -n "$AGENT_ID" ]; then
                 echo "# === Agent-managed setup (from DB) ===" >> /workspace/start-up.sh
                 echo "$AGENT_SCRIPT" >> /workspace/start-up.sh
                 echo "# === End agent-managed setup ===" >> /workspace/start-up.sh
-                chmod +x /workspace/start-up.sh
+                chmod 755 /workspace/start-up.sh
             fi
             echo "Setup scripts prepared (global root hook: $([ -n "$GLOBAL_SCRIPT" ] && echo "yes" || echo "no"), agent worker hook: $([ -n "$AGENT_SCRIPT" ] && echo "yes" || echo "no"))"
         else
@@ -913,6 +916,12 @@ if [ "${SWARM_DEP_REDIS_ENABLED:-false}" = "true" ]; then
 fi
 
 WORKER_BOOTSTRAP="/tmp/agent-swarm-worker-entrypoint.sh"
+# Remove a stale copy from a previous start of this container first. The file is
+# chowned to `worker` below, and /tmp is a sticky world-writable directory, so on
+# hosts with fs.protected_regular=2 (Ubuntu 24.04 default, not namespaced) even
+# root cannot O_CREAT-open it again: the restart loops on "Permission denied".
+# Unlink is allowed, so regenerate from scratch on every start.
+rm -f "$WORKER_BOOTSTRAP"
 cat > "$WORKER_BOOTSTRAP" <<'EOF'
 #!/bin/bash
 set -e

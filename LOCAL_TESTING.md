@@ -5,6 +5,7 @@ Reference doc for everything Claude (or any agent) needs to test Agent Swarm loc
 Quick index:
 
 - [Unit tests](#unit-tests)
+- [Black-box E2E](#black-box-e2e-bun-run-e2e)
 - [E2E with Docker](#e2e-with-docker) — full flow lives in the `swarm-local-e2e` skill
 - [Docker entrypoint changes](#docker-entrypoint-changes)
 - [MCP tool testing over HTTP](#mcp-tool-testing-over-http)
@@ -26,6 +27,8 @@ bun run test:root -- --parallel=4 --shard=1/2                                   
 
 `--parallel=N` runs each test file in its own worker process (it implies `--isolate`), so files cannot see each other's module mocks, globals, or leaked handles. `--changed=<ref>` selects test files whose import graph touches files changed since `<ref>`; always pass the **merge-base**, not `origin/main` itself, or every upstream commit counts as a change (0 files on a docs-only branch, ~20 files for a leaf tool edit). `--shard=N/M` splits files by count; CI adds `--timings=<file>` entries restored from the actions cache (per-file durations written by the previous green run's `--update-timings`, merged by the `save-timings` job; the `restore-timings` job resolves the snapshot once and both shards download the same artifact, so they always split the same file list) so the split is by total time. Nothing is committed; the first run after a cache wipe splits by count. Locally you can do the same with `--update-timings --timings=/tmp/timings.json`.
 
+Before selecting tests, `scripts/pre-push-tests.sh` runs a file-backed Bun process through the production sandbox limits. When the probe exits 134, the hook sets `SWARM_SKIP_SANDBOX_SPAWN_TESTS=1` and skips only spawn-dependent tests in `scripts-runtime`, `script-workflows-runtime-e2e`, `scripts-mcp-e2e`, `sandboxed-process`, `scripts-runtime-identity`, and `slack-read-boundaries`; all other affected tests still run. `RLIMIT_NPROC` is enforced per UID, so even the sandbox's 4096-process ceiling can prevent Bun 1.4.0 from starting when host-wide swarm thread usage for the worker UID is already high. At runtime, an exit 134 before user code starts is classified as `capacity_exceeded` and retried twice with bounded backoff before it reaches the caller. CI does not set the skip variable and runs every sandbox test.
+
 Conventions:
 
 - Each test file uses an **isolated SQLite DB**: `./test-<name>.sqlite`. Call `initDb()` in `beforeAll`, `closeDb()` in `afterAll`. `src/tests/preload.ts` restores a pre-migrated template (cached under `$TMPDIR/agent-swarm-test-template/`, keyed by migrations + prompt registry + Bun version) so `initDb()` costs a file read, not 130 migrations. `AGENT_SWARM_TEST_TEMPLATE_CACHE=0` bypasses the cache for a run (no read, no write); entries untouched for a day are pruned.
@@ -33,7 +36,7 @@ Conventions:
 - **Never hard-code a port.** Helpers live in `src/tests/test-net.ts`: in-process `node:http` servers use `const port = await listenOnFreePort(server)`; `Bun.serve({ port: 0 })` servers read `server.port`; spawned `src/http.ts` children take `await getFreePort()` in `beforeAll` and wait with `waitForServer(url)` inside a hook given `SERVER_BOOT_HOOK_TIMEOUT_MS`. Under `--parallel` two files with the same literal collide and one of them hits "Server did not start within 60000ms".
 - In `afterAll`, clean up the `.sqlite`, `-wal`, and `-shm` files — or the next run inherits stale state.
 - **No global retry.** `bunfig.toml` does not set `retry`; a test that is timing-sensitive by design opts in with `test(name, fn, { retry: 2 })` and a comment saying why, so flakes stay visible.
-- The pre-push hook (`prek.toml` -> `scripts/pre-push-tests.sh`) runs the `--changed` form, or the full `--parallel=4` suite when migrations, `templates/`, `bunfig.toml`, `package.json`, or `bun.lock` changed (or `origin/main` is missing). Blocking; CI remains authoritative.
+- The pre-push hook (`prek.toml` -> `scripts/pre-push-tests.sh`) runs the `--changed` form, or the full `--parallel=4` suite when migrations, `templates/`, `bunfig.toml`, `package.json`, or `bun.lock` changed (or `origin/main` is missing). If its sandbox spawn probe exits 134, it skips the spawn-dependent tests described above. Blocking; CI remains authoritative.
 
 Memory-system tests have their own required suite (see `src/be/memory/` changes in the root `CLAUDE.md`).
 
@@ -41,6 +44,249 @@ Two RBAC suites spawn the **real** server as a subprocess (exception to the mini
 
 - `bun run test:root -- src/tests/rbac-wire-e2e.test.ts` — gate matrix over a real MCP handshake + HTTP, plus audit-trail fidelity. Runs in the default root test command (CI).
 - `RBAC_LIFECYCLE_E2E=1 bun run test:root -- src/tests/rbac-lifecycle-e2e.test.ts` — audit lifecycle (burst flush, SIGTERM drain, kill-switch, retention purge, boot-race, stdio). Env-gated, ~20s, multiple server boots; run on demand / pre-release. Skipped without the flag.
+
+## Black-box E2E (bun run e2e)
+
+`bun run e2e` starts the real API on a free port with a fresh SQLite database.
+It runs deterministic HTTP and MCP scenarios with simulated agents. It does not use Docker or an LLM.
+The runner discovers route and MCP tool coverage from the running server.
+It writes `./e2e-results.json` by default.
+
+Every run also boots an in-process `@desplega.ai/slack-mock` before the API and starts the server with `NODE_ENV=test`,
+so Bolt connects to the mock over Socket Mode (the socket-mode guard refuses `NODE_ENV=development`).
+Scenarios drive that Slack workspace through `ctx.slack`.
+The Slack scenarios are `slack-mention`, `slack-follow-up`, `slack-failed-task`, and
+`slack-relay-restart`. They cover a mention, a thread follow-up, a failed task outcome,
+and exactly-once terminal relay delivery across an API-process restart. The restart
+reuses the run's database, port, API key, secrets, agent-fs directory, and Slack mock.
+`ctx.db` is a read-only SQLite handle on the SUT database for assertions only; seed every fixture through the API.
+
+```bash
+bun run e2e
+bun run e2e --list
+bun run e2e --only health,auth
+bun run e2e --only slack-mention
+bun run e2e --only slack-relay-restart
+bun run e2e --skip workflow-script-node
+bun run e2e --json /tmp/e2e.json --summary-md /tmp/e2e.md
+bun run e2e --min-route-coverage 4 --min-tool-coverage 3
+bun run e2e --keep
+```
+
+### Harness legs (`--harness`)
+
+A harness leg registers a worker agent, creates one task, and boots a real worker process for one provider.
+The task runs in a workspace directory under the leg's temporary HOME, never in the repository checkout.
+Defaults: claude `claude-sonnet-5`, codex `gpt-5.6-luna`, pi and opencode `openrouter/deepseek/deepseek-v4-flash`.
+Override with `E2E_MODEL_<PROVIDER>`. Each leg needs its provider credential in the environment.
+
+```bash
+bun run e2e --only health --harness claude
+bun run e2e --only health --harness claude,pi --harness-attempts 2
+E2E_MODEL_CLAUDE=claude-haiku-4-5 bun run e2e --only health --harness claude
+```
+
+When the runner is root and `gosu` exists (the nightly container job), the worker starts as `gosu worker env HOME=<temp HOME> ...`.
+gosu resets HOME to `/home/worker`, which would hide the seeded auth.json and skills; file-based credentials such as the
+chatgpt-mode codex auth.json then fail with `401 Missing bearer or basic authentication in header`.
+
+`--harness-attempts N` runs a failed leg again, N attempts in total. Every attempt lands in the JSON
+result with its duration, its cost, and the last 60 lines of the worker log on failure. After the task
+turns terminal the leg polls `/api/session-costs` for up to 15 seconds (`E2E_COST_TIMEOUT_MS`) and records
+the USD total, token counts, and `costSource`. A passing task with no cost row is reported as `no record`.
+Log tails and error messages pass through `scripts/e2e/redact.ts` (exact credential values from the
+environment plus common token shapes) before they enter the result file or the console.
+
+### Nightly E2E workflow
+
+`.github/workflows/nightly-e2e.yml` runs the contract scenarios once on plain Ubuntu, then one harness
+leg per provider inside the `worker:slim` image, then a `report` job that merges every result file with
+`scripts/e2e/nightly-report.ts` into one step summary and the `nightly-e2e-report` artifact. The report
+lists cost per leg, the cost trend over earlier runs, warnings (retries, missing cost rows, an expiring
+Codex OAuth blob), and the worker log tail of every failed attempt. While the nightly fails, one sticky
+issue (body starts with `<!-- nightly-e2e -->`) stays open; the first green run closes it. The issue body
+omits the log tails, and the uploaded log files are redacted copies, because both are public.
+
+Rebuild a report locally from downloaded artifacts:
+
+```bash
+gh run download <run-id> -p 'nightly-e2e-*' -D /tmp/nightly/results
+bun scripts/e2e/nightly-report.ts --results /tmp/nightly/results --out /tmp/nightly/summary.md --json /tmp/nightly/report.json
+```
+
+Use repeatable `--sut-env KEY=VALUE` flags to override environment variables for the spawned API server.
+Use `--visuals <dir>` to retain the Slack journal and write its `manifest.json` file.
+Render the journal with `bun run e2e:visuals <dir>`.
+
+Run both Slack rendering profiles locally:
+
+```bash
+env -u ANTHROPIC_API_KEY bun run e2e --only slack-mention,slack-follow-up,slack-failed-task --visuals /tmp/vis/legacy
+env -u ANTHROPIC_API_KEY bun run e2e --only slack-mention,slack-follow-up,slack-failed-task --sut-env SLACK_RENDER_V2=true --visuals /tmp/vis/v2
+```
+
+Then render both profiles:
+
+```bash
+bun run e2e:visuals /tmp/vis/legacy && bun run e2e:visuals /tmp/vis/v2
+```
+
+Use `--harness claude,codex,pi,opencode` to add real worker legs after the contract layer.
+Claude needs `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`.
+Codex needs `CODEX_OAUTH` or `OPENAI_API_KEY`. Pi needs `OPENROUTER_API_KEY` or `ANTHROPIC_API_KEY`.
+Opencode needs `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, or `OPENAI_API_KEY`.
+Override models with `E2E_MODEL_CLAUDE`, `E2E_MODEL_CODEX`, `E2E_MODEL_PI`, or `E2E_MODEL_OPENCODE`.
+Create a Codex blob with `bun scripts/e2e/codex-oauth-blob.ts /path/to/.codex/auth.json | gh secret set E2E_CODEX_OAUTH`.
+Use a dedicated Codex login for that blob. CI refresh rotates the token and can break a main login.
+The blob goes stale after its first refresh, about ten days after issue.
+Set `E2E_HARNESS_TIMEOUT_MS` to change the five-minute harness timeout.
+
+The same command runs locally, in GitHub Actions, and inside a swarm worker container.
+Coverage only includes traffic sent through the runner's recording client.
+Worker traffic from harness legs does not increase the MVP coverage numbers.
+
+## UI E2E (bun run e2e:ui)
+
+`bun run e2e:ui` drives the dashboard in headless Chromium with Playwright (`packages/ui-e2e`).
+It builds `apps/ui` once with no deployment config, serves `apps/ui/dist` from a static server on a free port,
+and boots one fresh API per Playwright worker (`scripts/e2e/sut.ts` through `packages/ui-e2e/boot/sut.ts`).
+Each API gets a temp SQLite file and the seed from `packages/ui-e2e/boot/seed.ts`:
+three agents, eight tasks across every status, session logs, a cost row, two pages, one memory, and the `e2e-user` identity.
+The browser context starts with the connection, the identity, and a dismissed feedback dialog in `localStorage`, so no dialog blocks the dashboard.
+Specs live in `packages/ui-e2e/specs/`: a route smoke over every sidebar route (`smoke.spec.ts` + `routes.ts`) and three flows (`tasks`, `configuration`, `pages`).
+Every test fails on a browser console error or an `/api` response with status 400 or higher.
+
+Requirements: Node 22 or newer on `PATH` (Playwright runs under Node) and the Chromium build for the pinned `@playwright/test`
+(`cd packages/ui-e2e && npx playwright install chromium`, once per machine).
+
+```bash
+bun run e2e:ui                                   # build the UI, then run everything
+bun run e2e:ui -- --no-build                     # reuse apps/ui/dist
+bun run e2e:ui -- --grep @smoke                  # the route smoke only
+bun run e2e:ui -- --grep "smoke /tasks @smoke$"  # one route (the tag is part of the grep text)
+bun run e2e:ui -- --headed specs/pages.spec.ts   # watch one spec
+bun run e2e:ui -- --ui                           # Playwright UI mode
+bun run e2e:ui -- --no-build --repeat-each=3 specs/tasks.spec.ts
+E2E_DEBUG=1 bun run e2e:ui -- --no-build         # print the worker API port and every /api response
+E2E_KEEP=1 bun run e2e:ui -- --no-build          # keep /tmp/e2e-*.sqlite, its log, and <db>.seed.json
+bun run e2e:ui:tsc                               # typecheck the package (Node and Bun halves)
+```
+
+Reports: `packages/ui-e2e/playwright-report/index.html` (open it with `cd packages/ui-e2e && npx playwright show-report`),
+per-test screenshots and traces under `packages/ui-e2e/test-results/`, and `packages/ui-e2e/test-results/summary.json`
+(the file CI turns into the PR comment).
+
+### Remote mode
+
+Set `E2E_API_URL` and `E2E_API_KEY` to skip the per-worker boot and target a running API.
+The static UI build still serves the dashboard unless `E2E_UI_URL` points at a deployed one.
+
+| Variable | Effect |
+|---|---|
+| `E2E_API_URL` | Target API. Production hosts (`api.desplega.agent-swarm.dev`, `cloud.agent-swarm.dev`) are refused before anything starts. |
+| `E2E_API_KEY` | Bearer for that API. Required with `E2E_API_URL`. |
+| `E2E_UI_URL` | Deployed dashboard to drive instead of the static build. Its origin must be on the API's `APP_URL` for the page preview iframe. |
+| `E2E_REMOTE_SEED=1` | Run the seed once against the remote API (idempotent, every name `e2e-` prefixed). Without it, seeded specs and id routes are skipped. |
+| `E2E_DEBUG=1` | Log the worker API and every `/api` response. |
+| `E2E_KEEP=1` | Local mode only: keep the DB, the log, and the seed manifest. |
+
+Specs tagged `@local` (none today) run only in local mode. They are for assertions on escape-hatch state such as stalled tasks.
+
+```bash
+PORT=3999 DATABASE_PATH=/tmp/e2e-remote.sqlite AGENT_SWARM_API_KEY=remotekey NODE_ENV=test \
+  GITHUB_DISABLE=true LINEAR_DISABLE=true JIRA_DISABLE=true SLACK_DISABLE=true bun run src/http.ts &
+E2E_API_URL=http://127.0.0.1:3999 E2E_API_KEY=remotekey E2E_REMOTE_SEED=1 bun run e2e:ui
+```
+
+### Adding a route or a spec
+
+- Route smoke: add `{ path, name, needs? }` to `packages/ui-e2e/specs/routes.ts`. `needs` picks the seeded id (`agent`, `task`, `page`). Use `skip: "<reason>"` when no seed entity exists yet, so the gap stays visible in the report.
+- Flow spec: import `test` and `expect` from `../fixtures`. Fixtures: `page` (dashboard with connection and identity), `seed` (the manifest, `null` in an unseeded remote run, so guard with `test.skip(!seed, ...)`), `api` (bearer fetch), `swarm` (`apiUrl`, `apiKey`), `clean.assertClean()`.
+- Selectors: roles and text (`getByRole`, `getByText`). The tasks, pages, and settings pages carry no `data-testid`.
+- Seed data: extend `packages/ui-e2e/boot/seed.ts` and the `SeedManifest` type in `boot/manifest.ts`. Keep every name `e2e-` prefixed and every step idempotent.
+
+Package layout, the boot handshake, and the fixture contract: `packages/ui-e2e/README.md`.
+
+### CI
+
+`.github/workflows/ui-e2e.yml` runs the suite in two shards on pull requests that touch the UI, the API, or the package, and on pushes to `main`.
+It is informational: it is not a required check. It merges the shard reports into the `ui-e2e-html-report` artifact and upserts one sticky PR comment (`<!-- ui-e2e -->`) with per-spec results.
+Screenshot links in the comment need the `E2E_AGENT_FS_*` repository secrets. Without them the comment carries the text table only.
+
+### Tracker ingest and artifacts
+
+After a run, the `report` job in `.github/workflows/ui-e2e.yml` uploads artifacts to agent-fs and posts one payload per shard to the UI E2E tracker.
+
+Screenshots, traces, and each shard's `summary.json` go to agent-fs under `e2e/desplega-ai__agent-swarm/<pr-N|main>/<sha>/<shard>/`. The publish step writes `artifacts.json` (agent-fs paths, kinds, spec ids, sizes) and `images.json` (7-day signed URLs for the comment, failures first, capped at 24).
+
+The ingest step reads every shard's `summary.json` and `artifacts.json`. It builds one v1 payload per shard, writes each to disk, then posts it to `UI_E2E_INGEST_URL`.
+
+Run the three reporter scripts by hand against a copied `all-results` directory. Add `--dry-run` where the script supports it. Each script only writes local files then. It never calls agent-fs or the tracker.
+
+```bash
+# 1. Plan the agent-fs upload. Writes artifacts.json and images.json, no network calls.
+node --experimental-strip-types packages/ui-e2e/reporter/publish-artifacts.ts \
+  --results /tmp/ui-e2e-p2/all-results \
+  --prefix "e2e/desplega-ai__agent-swarm/pr-9999/$(git rev-parse HEAD)" \
+  --artifacts-out /tmp/ui-e2e-p2/artifacts.json \
+  --images-out /tmp/ui-e2e-p2/images.json \
+  --dry-run
+
+# 2. Build the tracker payloads. Writes ingest-payloads/, does not POST.
+GITHUB_REPOSITORY=desplega-ai/agent-swarm UI_E2E_TRIGGER=pr UI_E2E_PR_NUMBER=9999 \
+UI_E2E_SHA=$(git rev-parse HEAD) UI_E2E_REF=ui-e2e-p2 \
+  node --experimental-strip-types packages/ui-e2e/reporter/ingest.ts \
+  --summaries /tmp/ui-e2e-p2/all-results \
+  --artifacts /tmp/ui-e2e-p2/artifacts.json \
+  --out /tmp/ui-e2e-p2/ingest-payloads \
+  --dry-run
+
+# 3. Render the PR comment. Always local. The script has no --dry-run flag.
+node --experimental-strip-types packages/ui-e2e/reporter/comment.ts \
+  --summaries /tmp/ui-e2e-p2/all-results \
+  --images /tmp/ui-e2e-p2/images.json \
+  --run-url https://github.com/desplega-ai/agent-swarm/actions/runs/0 \
+  --report-artifact ui-e2e-html-report \
+  --out /tmp/ui-e2e-p2/comment.md
+```
+
+In CI the working directory is `packages/ui-e2e`. The same three steps land there: `artifacts.json`, `images.json`, and `ingest-payloads/shard-<n>.json`. The `ui-e2e-ingest-payloads` artifact carries `ingest-payloads/` and `artifacts.json` for review.
+
+| Variable | Read by | Meaning |
+|---|---|---|
+| `UI_E2E_INGEST_URL` | `ingest.ts` | Tracker endpoint. Missing it skips the POST. |
+| `UI_E2E_INGEST_BEARER` | `ingest.ts` | Bearer for the endpoint. Missing it skips the POST. |
+| `UI_E2E_TRIGGER` | `ingest.ts` | One of `pr`, `main`, `nightly`, `manual`. |
+| `UI_E2E_SHA` | `ingest.ts` | 7 to 40 lowercase hex characters. |
+| `UI_E2E_REF` | `ingest.ts` | Git ref for the run. |
+| `UI_E2E_PR_NUMBER` | `ingest.ts` | PR number. Set when the trigger is `pr`, or resolved for `manual` when an open PR exists for the ref. |
+| `GITHUB_REPOSITORY` | `ingest.ts` | `owner/repo`, exactly one slash. |
+| `AGENT_FS_API_URL` | `publish-artifacts.ts` | agent-fs API base URL. |
+| `AGENT_FS_API_KEY` | `publish-artifacts.ts` | agent-fs API key. |
+| `AGENT_FS_DEFAULT_ORG_ID` | `publish-artifacts.ts` | Org id for the upload. |
+| `AGENT_FS_DEFAULT_DRIVE_ID` | `publish-artifacts.ts` | Drive id for the upload. |
+
+Posture: `ingest.ts` skips the POST and exits 0 when `UI_E2E_INGEST_URL` or `UI_E2E_INGEST_BEARER` is absent. It fails the step when both are set and the endpoint answers anything but `200 { ok: true }`. `publish-artifacts.ts` follows the same rule for the four `AGENT_FS_*` variables. It throws instead of skipping when every upload fails.
+
+The workflow maps its trigger to the tracker's trigger field:
+
+| GitHub event | Tracker trigger |
+|---|---|
+| `pull_request` | `pr` |
+| `push` to `main` | `main` |
+| `schedule` (nightly cron) | `nightly` |
+| `workflow_dispatch` | `manual`. The open PR for the branch is resolved, if one exists. |
+
+Local install of the tracker: the template lives at `desplega-ai/agent-work`, `workflows/ui-e2e-tracker/`. Follow its README for the install steps. Boot a local API with `MCP_BASE_URL` on its own port, since the scripts runtime calls back through that variable. `--no-env-file` stops a repo `.env` from overriding `PORT`.
+
+```bash
+PORT=3998 MCP_BASE_URL=http://127.0.0.1:3998 DATABASE_PATH=/tmp/ui-e2e-p2/tracker.sqlite \
+  AGENT_SWARM_API_KEY=localkey API_KEY=localkey GITHUB_DISABLE=true LINEAR_DISABLE=true \
+  JIRA_DISABLE=true SLACK_DISABLE=true HEARTBEAT_DISABLE=true \
+  bun --no-env-file run src/http.ts
+```
+
+Once the endpoint exists, it answers `401` to a POST without the bearer and `200 { ok: true }` with it.
 
 ## E2E with Docker
 
@@ -68,7 +314,7 @@ bun run start:http &
 
 # 2. Build worker image (slim is faster and sufficient for smoke tests;
 #    use `bun run docker:build:worker` + :latest when the test needs
-#    playwright/qa-use, postgres/redis, or glab)
+#    playwright/agent-browser, postgres/redis, or glab)
 bun run docker:build:worker:slim
 
 # 3. Start lead + worker (use branch-specific names to avoid worktree collisions)
@@ -149,22 +395,39 @@ Required headers on every call:
 
 ## Dashboard UI
 
-Defaults: UI on `APP_URL` (port 5274), API on `http://localhost:3013` (overridable via `VITE_API_URL`).
+Defaults: UI on `APP_URL` (port 5274), API proxy on `http://localhost:3013`. Set
+`VITE_PROXY_TARGET` to use another development API. See `apps/ui/README.md` for fixed deployments.
 
 ```bash
 cd apps/ui && bun run dev   # port 5274
 cd apps/ui && bun run dev --port 5275   # if 5274 is taken
 ```
 
+Automated browser coverage lives in [UI E2E (bun run e2e:ui)](#ui-e2e-bun-run-e2eui).
+
 ### When you need to verify a UI change
 
-Use the `qa-use` tool family:
+Use `agent-browser` (never `qa-use` unless explicitly asked):
 
-- `/qa-use:explore <url>` — quick walkthrough, AI-powered element discovery
-- `/qa-use:verify` — verify a defined feature
-- `/qa-use:test-run` — run existing E2E tests
+```bash
+agent-browser skills get core                 # version-matched usage guide, once per session
+agent-browser open http://localhost:5274/tasks
+agent-browser snapshot                        # accessibility tree with @eN refs
+agent-browser click @e12                      # act on refs from the snapshot
+agent-browser screenshot /tmp/ui-tasks.png
+agent-browser close
+```
 
-**PR requirement**: any PR touching `apps/ui/` or `apps/templates-ui/` must include a `qa-use` session with screenshots of the change running locally. Merge-gate enforces this.
+To share a screenshot (PR body, review comment, Slack), upload it to agent-fs and paste the signed URL:
+
+```bash
+agent-fs write qa/agent-swarm/$(date +%F)-<topic>/ui-tasks.png --file /tmp/ui-tasks.png -m "<what it shows>"
+agent-fs signed-url qa/agent-swarm/$(date +%F)-<topic>/ui-tasks.png --json   # 24h default, --expires-in up to 7d
+```
+
+`agent-fs write --file` (or piped stdin) is the binary-safe path (CLI >= 0.7.1). `--content` is text-only and mangles PNGs.
+
+**PR requirement**: any PR touching `apps/ui/` or `apps/templates-ui/` must include `agent-browser` screenshots of the change running locally, embedded as `![caption](<signed-url>)`. This is a reviewer convention. No job in `.github/workflows/merge-gate.yml` checks it.
 
 ### Port-conflict resolution
 
@@ -173,7 +436,8 @@ lsof -i :5274          # what's on the UI port
 lsof -i :3013          # what's on the API port
 ```
 
-If another worktree holds the port, either stop it or pick alternates and update `APP_URL` / `VITE_API_URL` accordingly.
+If another worktree holds the port, stop it or pick alternates. Update `APP_URL` and
+`VITE_PROXY_TARGET` accordingly.
 
 ## Port-conflict resolution
 

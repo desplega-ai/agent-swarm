@@ -68,17 +68,29 @@ export function NewSessionView() {
     }) => {
       setAttachmentError(null);
       setUploadedCount(0);
+      // Create as a `draft` (#1240) whenever there are attachments to upload
+      // — a draft is invisible to dispatch, closing the window where a
+      // worker could claim the task and see zero/partial attachments. No
+      // attachments means nothing to race, so skip the extra round trip.
+      const isDraft = input.attachments.length > 0;
       const created = await api.createTask({
         task: input.task,
         requestedByUserId: input.requestedByUserId,
         source: "ui",
+        draft: isDraft,
       });
-      const uploadResult = await uploadComposeAttachments({
-        taskId: created.id,
-        files: input.attachments,
-        onUploaded: setUploadedCount,
-      });
-      return { created, uploadResult };
+      try {
+        const uploadResult = await uploadComposeAttachments({
+          taskId: created.id,
+          files: input.attachments,
+          onUploaded: setUploadedCount,
+        });
+        return { created, uploadResult };
+      } finally {
+        // Always promote — success, partial failure, or an unexpected throw
+        // out of the upload batch must never strand the task in draft.
+        if (isDraft) await api.promoteDraftTask(created.id);
+      }
     },
     onSuccess: ({ created, uploadResult }) => {
       const uploadError = formatComposeAttachmentUploadError(uploadResult.failed);

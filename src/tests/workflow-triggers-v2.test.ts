@@ -16,6 +16,7 @@ import { startWorkflowExecution } from "../workflows/engine";
 import { BaseExecutor, type ExecutorResult } from "../workflows/executors/base";
 import { ExecutorRegistry } from "../workflows/executors/registry";
 import {
+  handleEventTrigger,
   handleWebhookTrigger,
   logOpenWebhookTriggers,
   verifyHmacSignature,
@@ -832,6 +833,16 @@ describe("cooldown", () => {
 // ─── TriggerConfigSchema validation ──────────────────────────
 
 describe("TriggerConfigSchema", () => {
+  test("accepts the wired Slack event and rejects unsupported event names", () => {
+    expect(
+      TriggerConfigSchema.safeParse({ type: "event", eventName: "slack.message" }).success,
+    ).toBe(true);
+    expect(TriggerConfigSchema.safeParse({ type: "event", eventName: "" }).success).toBe(false);
+    expect(
+      TriggerConfigSchema.safeParse({ type: "event", eventName: "github.issue.opened" }).success,
+    ).toBe(false);
+  });
+
   test("rejects verification configured without hmacSecret", () => {
     const result = TriggerConfigSchema.safeParse({
       type: "webhook",
@@ -858,6 +869,26 @@ describe("TriggerConfigSchema", () => {
     const result = TriggerConfigSchema.safeParse({ type: "webhook" });
 
     expect(result.success).toBe(true);
+  });
+});
+
+describe("handleEventTrigger", () => {
+  test("starts only enabled workflows subscribed to the Slack event", async () => {
+    const matching = await makeWorkflow({
+      triggers: [{ type: "event", eventName: "slack.message" }],
+    });
+    const disabled = await makeWorkflow({
+      triggers: [{ type: "event", eventName: "slack.message" }],
+    });
+    await updateWorkflow(disabled.id, { enabled: false });
+
+    const payload = { channel: "C123", text: "service is down", ts: "123.456" };
+    const runIds = await handleEventTrigger("slack.message", payload, registry);
+
+    expect(runIds).toHaveLength(1);
+    const run = await getWorkflowRun(runIds[0]!);
+    expect(run?.workflowId).toBe(matching.id);
+    expect(run?.triggerData).toEqual(payload);
   });
 });
 

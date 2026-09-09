@@ -1,10 +1,12 @@
 import { Suspense } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { StatusProvider } from "@/app/status-context";
+import { FeedbackDialog } from "@/components/feedback/feedback-dialog";
 import { CommandMenu } from "@/components/shared/command-menu";
 import { ErrorBoundary } from "@/components/shared/error-boundary";
 import { HiveLoadingScreen } from "@/components/shared/hive-loading-screen";
 import { NameConnectionModal } from "@/components/shared/name-connection-modal";
+import { LeadCredentialDialog } from "@/components/support/lead-credential-dialog";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { useConfig } from "@/hooks/use-config";
 import { cn } from "@/lib/utils";
@@ -16,7 +18,7 @@ import { ConfigGuard } from "./config-guard";
 
 export function RootLayout() {
   const { pathname } = useLocation();
-  const { isConfigured } = useConfig();
+  const { config, isConfigured } = useConfig();
   // The unified Home (`/`) owns its own internal padding so the full-bleed
   // canvas can reach the content-area edges; every other route gets the
   // standard gutter.
@@ -60,6 +62,8 @@ export function RootLayout() {
         </SidebarProvider>
         <CommandMenu />
         <NameConnectionModal />
+        <LeadCredentialDialog key={config.apiUrl} />
+        <FeedbackDialog key={`feedback:${config.apiUrl}`} />
       </StatusProvider>
     </ConfigGuard>
   );

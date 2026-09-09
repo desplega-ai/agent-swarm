@@ -152,6 +152,15 @@ export const DEFAULT_MODEL_TIER_MAP: Record<ProviderName, Record<ModelTier, stri
     smart: "devin",
     ultra: "devin",
   },
+  // ACP has no portable tier-to-model mapping. Operators may set an explicit
+  // MODEL_OVERRIDE, which the adapter applies through an advertised `model`
+  // config option with a target-specific startup fallback.
+  acp: {
+    smol: "",
+    regular: "",
+    smart: "",
+    ultra: "",
+  },
 };
 
 export function parseModelTier(value: string | null | undefined): ModelTier | undefined {
@@ -237,6 +246,7 @@ export function resolveTaskModelSelection(opts: {
 
 // Task status - includes new unassigned and offered states
 export const AgentTaskStatusSchema = z.enum([
+  "draft", // Created but not yet dispatch-eligible (UI attachments still uploading, #1240); promoted to pending/offered/unassigned once the upload batch settles or times out
   "backlog", // Task is in backlog, not yet ready for pool
   "unassigned", // Task pool - no owner yet
   "offered", // Offered to agent, awaiting accept/reject
@@ -343,6 +353,7 @@ export const ProviderNameSchema = z.enum([
   "devin",
   "claude-managed",
   "opencode",
+  "acp",
 ]);
 export type ProviderName = z.infer<typeof ProviderNameSchema>;
 
@@ -425,13 +436,12 @@ export const PROVIDER_STEER_CAPABILITIES: Record<ProviderName, SteerMode[]> = {
   // only what we can honor; revisit if the abort+prompt path is fixed.
   opencode: ["queue"],
   claude: ["queue"],
-  // Codex has no in-process delivery primitive (`@openai/codex-sdk` drives
-  // `codex exec` with stdin closed; `turn/steer` is app-server-only, see
-  // issue #1034). Delivery happens harness-side instead: the codex-hook
-  // (SessionStart/PostToolUse/Stop) polls pending rows and injects them as
-  // hook `additionalContext`, so the runner must leave codex rows `pending`
-  // (`ProviderSession.steeringDeliveredExternally`).
-  codex: ["queue"],
+  // App-server steers the active turn and starts queued prompts in later turns.
+  codex: ["steer", "queue"],
+  // The ACP adapter implements no steering primitive: `session/prompt` is a
+  // single in-flight turn and the only interrupt is `session/cancel` (abort).
+  // Advertise nothing rather than promise semantics we can't honor.
+  acp: [],
 };
 
 export type DevinProviderMeta = {
@@ -450,6 +460,7 @@ export type ProviderMetaMap = {
   pi: NoProviderMeta;
   "claude-managed": NoProviderMeta;
   opencode: NoProviderMeta;
+  acp: NoProviderMeta;
 };
 
 export const FollowUpConfigSchema = z
@@ -474,6 +485,8 @@ export const RoutingAffinitySchema = z
     role: z.string().max(100).optional(),
     harnessProvider: ProviderNameSchema.optional(),
     capabilities: z.array(z.string()).default([]),
+    /** Explicit authorization boundary for merge and other control-plane work. */
+    leadOnly: z.boolean().optional(),
   })
   .openapi("RoutingAffinity");
 export type RoutingAffinity = z.infer<typeof RoutingAffinitySchema>;
@@ -630,6 +643,9 @@ export const AgentTaskSchema = z
     // behavior. Inherited from parentTaskId when not explicitly set (see
     // `createTaskExtended` in src/be/db.ts). See `isAgentEligibleForTask`.
     routingAffinity: RoutingAffinitySchema.optional(),
+    // Stored affinity that fails validation is quarantined rather than silently
+    // treated as an ordinary, claimable task. Internal read-path signal.
+    routingAffinityInvalid: z.boolean().optional(),
   })
   .openapi("AgentTask");
 
@@ -654,7 +670,7 @@ export const CreateTaskOptionsSchema = z.object({
   dependsOn: z.array(z.string()).optional(),
   offeredTo: z.string().optional(),
   /** Explicitly set initial status. */
-  status: z.enum(["backlog", "unassigned"]).optional(),
+  status: z.enum(["draft", "backlog", "unassigned"]).optional(),
   slackChannelId: z.string().optional(),
   slackThreadTs: z.string().optional(),
   /** Exact Slack message that directly triggered this task; never inherited. */
@@ -711,6 +727,11 @@ export const CreateTaskOptionsSchema = z.object({
    * contract on completion (which would block the control task — DES-523).
    */
   inheritParentOutputSchema: z.boolean().optional(),
+  /**
+   * Skip parent routing requirements only for a child with its own explicit
+   * Lead-only control-plane authorization.
+   */
+  inheritParentRoutingAffinity: z.boolean().optional(),
   followUpConfig: FollowUpConfigSchema.optional(),
   requestedByUserId: z.string().optional(),
   contextKey: z.string().optional(),
@@ -721,9 +742,11 @@ export const CreateTaskOptionsSchema = z.object({
    */
   bypassTrackerContextDedup: z.boolean().optional(),
   /**
-   * Routing-affinity snapshot gating pool eligibility (see
-   * `isAgentEligibleForTask`). Inherited from the parent (via `parentTaskId`)
-   * when not explicitly set — same treatment as `vcsRepo`/`contextKey`.
+   * Routing-affinity snapshot gating task authorization (see
+   * `isAgentEligibleForTask`). `leadOnly: true` is an explicit, structured
+   * constraint: only an agent with `isLead` may be assigned, offered, claim,
+   * or recover this task. It is never inferred from task text. Inherited from
+   * the parent unless a control-plane child explicitly opts out.
    */
   routingAffinity: RoutingAffinitySchema.optional(),
 });
@@ -1141,6 +1164,50 @@ export const AgentBedrockStatusSchema = z
   .openapi("AgentBedrockStatus");
 export type AgentBedrockStatus = z.infer<typeof AgentBedrockStatusSchema>;
 
+const AcpSessionConfigSelectValueSchema = z.object({
+  value: z.string(),
+  name: z.string(),
+  description: z.string().nullable().optional(),
+});
+
+const AcpSessionConfigSelectGroupSchema = z.object({
+  group: z.string(),
+  name: z.string(),
+  options: z.array(AcpSessionConfigSelectValueSchema),
+});
+
+export const AcpSessionConfigOptionSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("select"),
+    id: z.string(),
+    name: z.string(),
+    description: z.string().nullable().optional(),
+    category: z.string().nullable().optional(),
+    currentValue: z.string(),
+    options: z.array(
+      z.union([AcpSessionConfigSelectValueSchema, AcpSessionConfigSelectGroupSchema]),
+    ),
+  }),
+  z.object({
+    type: z.literal("boolean"),
+    id: z.string(),
+    name: z.string(),
+    description: z.string().nullable().optional(),
+    category: z.string().nullable().optional(),
+    currentValue: z.boolean(),
+  }),
+]);
+export type AcpSessionConfigOption = z.infer<typeof AcpSessionConfigOptionSchema>;
+
+export const AgentAcpStatusSchema = z
+  .object({
+    target: z.enum(["opencode", "custom"]),
+    configOptions: z.array(AcpSessionConfigOptionSchema),
+    reportedAt: z.number(),
+  })
+  .openapi("AgentAcpStatus");
+export type AgentAcpStatus = z.infer<typeof AgentAcpStatusSchema>;
+
 export const AgentCredStatusSchema = z
   .object({
     ready: z.boolean(),
@@ -1156,6 +1223,8 @@ export const AgentCredStatusSchema = z
     reportKind: z.enum(["boot", "post_task"]).default("boot"),
     /** Pi-mono Bedrock enumeration block — null when not in Bedrock mode. */
     bedrock: AgentBedrockStatusSchema.nullable().default(null),
+    /** ACP options advertised by the most recently created session. */
+    acp: AgentAcpStatusSchema.nullable().default(null),
   })
   .openapi("AgentCredStatus");
 export type AgentCredStatus = z.infer<typeof AgentCredStatusSchema>;
@@ -1295,6 +1364,9 @@ export const AgentLogEventTypeSchema = z.enum([
   "task_rejected",
   "task_claimed",
   "task_claim_rejected_affinity",
+  "task_dispatch_rejected_affinity",
+  "task_authorization_rejected",
+  "task_recovery_authorization",
   "task_released",
   "channel_message",
   // Service registry events
@@ -1494,6 +1566,17 @@ export type SwarmEvent = z.infer<typeof SwarmEventSchema>;
 // Scheduled Task Types
 // ============================================================================
 
+export const AutomationIntegrationIdSchema = z.enum([
+  "slack",
+  "github",
+  "linear",
+  "jira",
+  "gsc",
+  "agentmail",
+  "agentfs",
+]);
+export type AutomationIntegrationId = z.infer<typeof AutomationIntegrationIdSchema>;
+
 export const ScheduledTaskTargetTypeSchema = z.enum(["agent-task", "workflow", "script"]);
 export type ScheduledTaskTargetType = z.infer<typeof ScheduledTaskTargetTypeSchema>;
 
@@ -1528,6 +1611,9 @@ export const ScheduledTaskSchema = z
     workflowId: z.uuid().optional(),
     scriptName: z.string().optional(),
     scriptArgs: z.record(z.string(), z.unknown()).optional(),
+    params: z.record(z.string(), z.unknown()).optional(),
+    requiredParams: z.array(z.string()).optional(),
+    requires: z.array(AutomationIntegrationIdSchema).optional(),
     createdAt: z.iso.datetime(),
     lastUpdatedAt: z.iso.datetime(),
     createdBy: z.string().optional(),
@@ -1941,6 +2027,9 @@ export const WorkflowPatchSchema = z
           "Validator subset: type, required, properties, enum, const, items. " +
           "Other JSON-Schema keywords are silently ignored.",
       ),
+    params: z.record(z.string(), z.unknown()).optional(),
+    requiredParams: z.array(z.string()).optional(),
+    requires: z.array(AutomationIntegrationIdSchema).optional(),
   })
   .openapi("WorkflowPatch");
 export type WorkflowPatch = z.infer<typeof WorkflowPatchSchema>;
@@ -2011,6 +2100,10 @@ export const TriggerConfigSchema = z
       type: z.literal("schedule"),
       scheduleId: z.string().uuid(),
     }),
+    z.object({
+      type: z.literal("event"),
+      eventName: z.literal("slack.message"),
+    }),
   ])
   .superRefine((trigger, ctx) => {
     if (trigger.type === "webhook" && trigger.verification && !trigger.hmacSecret) {
@@ -2078,6 +2171,9 @@ export const WorkflowSnapshotSchema = z
     cooldown: CooldownConfigSchema.optional(),
     input: z.record(z.string(), InputValueSchema).optional(),
     triggerSchema: z.record(z.string(), z.unknown()).optional(),
+    params: z.record(z.string(), z.unknown()).optional(),
+    requiredParams: z.array(z.string()).optional(),
+    requires: z.array(AutomationIntegrationIdSchema).optional(),
     dir: z.string().min(1).startsWith("/").optional(),
     vcsRepo: z.string().min(1).optional(),
     enabled: z.boolean(),
@@ -2099,6 +2195,9 @@ export const WorkflowSchema = z
     cooldown: CooldownConfigSchema.optional(),
     input: z.record(z.string(), InputValueSchema).optional(),
     triggerSchema: z.record(z.string(), z.unknown()).optional(),
+    params: z.record(z.string(), z.unknown()).optional(),
+    requiredParams: z.array(z.string()).optional(),
+    requires: z.array(AutomationIntegrationIdSchema).optional(),
     dir: z.string().min(1).startsWith("/").optional(),
     vcsRepo: z.string().min(1).optional(),
     createdByAgentId: z.string().optional(),
@@ -2914,6 +3013,10 @@ export const PricingProviderSchema = z.enum([
   "opencode",
   "devin",
   "gemini",
+  // No seeded rate rows: a generic ACP target owns its own billing and the
+  // adapter reports `totalCostUsd: 0`, so these rows settle at
+  // `costSource: 'unpriced'`. Accepted here so the row is recorded at all.
+  "acp",
 ]);
 export type PricingProvider = z.infer<typeof PricingProviderSchema>;
 

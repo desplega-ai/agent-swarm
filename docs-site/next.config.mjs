@@ -6,11 +6,62 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const withMDX = createMDX();
 
+const legacyIntegrationRedirects = [
+  ["linear-integration", "linear"],
+  ["slack-integration", "slack"],
+  ["github-integration", "github"],
+  ["gitlab-integration", "gitlab"],
+  ["agentmail-integration", "agentmail"],
+  ["sentry-integration", "sentry"],
+  ["jira-integration", "jira"],
+].flatMap(([oldSlug, newSlug]) =>
+  ["", ".md", ".mdx"].map((extension) => ({
+    source: `/docs/guides/${oldSlug}${extension}`,
+    destination: `/docs/integrations/${newSlug}${extension}`,
+    statusCode: 301,
+  })),
+);
+
 /** @type {import('next').NextConfig} */
 const config = {
   reactStrictMode: true,
   turbopack: {
     root: __dirname,
+  },
+  async redirects() {
+    return [
+      ...legacyIntegrationRedirects,
+      {
+        source: "/docs/api-reference/workflowevents",
+        destination: "/docs/api-reference/workflows",
+        statusCode: 301,
+      },
+      {
+        source: "/docs/api-reference/task-templates",
+        destination: "/docs/api-reference/tasks",
+        statusCode: 301,
+      },
+      {
+        source: "/docs/api-reference/workflowevents.md",
+        destination: "/docs/api-reference/workflows.md",
+        statusCode: 301,
+      },
+      {
+        source: "/docs/api-reference/workflowevents.mdx",
+        destination: "/docs/api-reference/workflows.mdx",
+        statusCode: 301,
+      },
+      {
+        source: "/docs/api-reference/task-templates.md",
+        destination: "/docs/api-reference/tasks.md",
+        statusCode: 301,
+      },
+      {
+        source: "/docs/api-reference/task-templates.mdx",
+        destination: "/docs/api-reference/tasks.mdx",
+        statusCode: 301,
+      },
+    ];
   },
   async rewrites() {
     return [

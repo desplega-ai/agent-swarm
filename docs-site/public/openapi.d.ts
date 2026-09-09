@@ -1863,7 +1863,7 @@ export interface paths {
                             ok: true;
                             taskId: string;
                             /** @enum {string} */
-                            status: "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+                            status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
                         } | {
                             ok: boolean;
                             result: {
@@ -2085,6 +2085,8 @@ export interface paths {
                             rows: unknown[][];
                             elapsed: number;
                             total: number;
+                            truncated: boolean;
+                            rowLimit: number | null;
                         };
                     };
                 };
@@ -2186,9 +2188,9 @@ export interface paths {
                         capabilities?: string[];
                         maxTasks?: number;
                         /** @enum {string} */
-                        provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode";
+                        provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp";
                         /** @enum {string} */
-                        harness_provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode";
+                        harness_provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp";
                         runtimeInstanceId?: string;
                     };
                 };
@@ -2263,7 +2265,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        harness_provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode";
+                        harness_provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp";
                     };
                 };
             };
@@ -2335,12 +2337,23 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        harness_provider: "claude" | "codex" | "pi" | "opencode";
+                        harness_provider: "claude" | "codex" | "pi" | "opencode" | "acp";
                         model?: string | null;
                         /** @default false */
                         allow_custom_model?: boolean;
                         /** @enum {string|null} */
                         reasoning_effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max" | null;
+                        acp?: {
+                            /** @enum {string} */
+                            target: "opencode" | "custom";
+                            command?: string | null;
+                            args?: string[];
+                            envKeys?: string[];
+                            modelEnvKey?: string | null;
+                            options?: {
+                                [key: string]: string | boolean;
+                            };
+                        };
                     };
                 };
             };
@@ -2788,9 +2801,9 @@ export interface paths {
                             status: "idle" | "busy" | "offline" | "waiting_for_credentials";
                             missing: string[];
                             /** @enum {string|null} */
-                            provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | null;
+                            provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | null;
                             /** @enum {string|null} */
-                            harnessProvider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | null;
+                            harnessProvider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | null;
                             credStatus: components["schemas"]["AgentCredStatus"] | null;
                             lastCheckedAt: string;
                         };
@@ -2827,6 +2840,7 @@ export interface paths {
                         missing?: string[] | null;
                         cred_status?: components["schemas"]["AgentCredStatus"] | null;
                         latest_model?: components["schemas"]["AgentLatestModel"];
+                        acp?: components["schemas"]["AgentAcpStatus"];
                     };
                 };
             };
@@ -2906,9 +2920,9 @@ export interface paths {
                                 status: "idle" | "busy" | "offline" | "waiting_for_credentials";
                                 missing: string[];
                                 /** @enum {string|null} */
-                                provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | null;
+                                provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | null;
                                 /** @enum {string|null} */
-                                harnessProvider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | null;
+                                harnessProvider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | null;
                                 credStatus: components["schemas"]["AgentCredStatus"] | null;
                                 lastCheckedAt: string;
                             }[];
@@ -2985,12 +2999,13 @@ export interface paths {
                                     };
                                 };
                                 /** @enum {string} */
-                                status: "pending" | "approved" | "rejected" | "timeout";
+                                status: "pending" | "approved" | "rejected" | "timeout" | "cancelled";
                                 responses: {
                                     [key: string]: unknown;
                                 } | null;
                                 resolvedBy: string | null;
                                 resolvedAt: string | null;
+                                resolutionReason: string | null;
                                 timeoutSeconds: number | null;
                                 expiresAt: string | null;
                                 notificationChannels: {
@@ -3101,12 +3116,13 @@ export interface paths {
                                     };
                                 };
                                 /** @enum {string} */
-                                status: "pending" | "approved" | "rejected" | "timeout";
+                                status: "pending" | "approved" | "rejected" | "timeout" | "cancelled";
                                 responses: {
                                     [key: string]: unknown;
                                 } | null;
                                 resolvedBy: string | null;
                                 resolvedAt: string | null;
+                                resolutionReason: string | null;
                                 timeoutSeconds: number | null;
                                 expiresAt: string | null;
                                 notificationChannels: {
@@ -3197,12 +3213,13 @@ export interface paths {
                                     };
                                 };
                                 /** @enum {string} */
-                                status: "pending" | "approved" | "rejected" | "timeout";
+                                status: "pending" | "approved" | "rejected" | "timeout" | "cancelled";
                                 responses: {
                                     [key: string]: unknown;
                                 } | null;
                                 resolvedBy: string | null;
                                 resolvedAt: string | null;
+                                resolutionReason: string | null;
                                 timeoutSeconds: number | null;
                                 expiresAt: string | null;
                                 notificationChannels: {
@@ -3306,12 +3323,13 @@ export interface paths {
                                     };
                                 };
                                 /** @enum {string} */
-                                status: "pending" | "approved" | "rejected" | "timeout";
+                                status: "pending" | "approved" | "rejected" | "timeout" | "cancelled";
                                 responses: {
                                     [key: string]: unknown;
                                 } | null;
                                 resolvedBy: string | null;
                                 resolvedAt: string | null;
+                                resolutionReason: string | null;
                                 timeoutSeconds: number | null;
                                 expiresAt: string | null;
                                 notificationChannels: {
@@ -7002,6 +7020,7 @@ export interface paths {
                                 /** @enum {string} */
                                 scope: "agent" | "swarm";
                                 tags: string[];
+                                accessCount: number;
                             }[];
                         };
                     };
@@ -10503,7 +10522,7 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini";
+                    provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp";
                     model: string;
                     tokenClass: "input" | "cached_input" | "output" | "cache_write" | "cache_write_1h" | "web_search" | "runtime_hour" | "acu";
                 };
@@ -10531,7 +10550,7 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini";
+                    provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp";
                     model: string;
                     tokenClass: "input" | "cached_input" | "output" | "cache_write" | "cache_write_1h" | "web_search" | "runtime_hour" | "acu";
                 };
@@ -10594,7 +10613,7 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini";
+                    provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp";
                     model: string;
                     tokenClass: "input" | "cached_input" | "output" | "cache_write" | "cache_write_1h" | "web_search" | "runtime_hour" | "acu";
                 };
@@ -10646,7 +10665,7 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini";
+                    provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp";
                     model: string;
                     tokenClass: "input" | "cached_input" | "output" | "cache_write" | "cache_write_1h" | "web_search" | "runtime_hour" | "acu";
                     effectiveFrom: string;
@@ -11004,6 +11023,11 @@ export interface paths {
                                 scriptArgs?: {
                                     [key: string]: unknown;
                                 };
+                                params?: {
+                                    [key: string]: unknown;
+                                };
+                                requiredParams?: string[];
+                                requires?: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
                                 /** Format: date-time */
                                 createdAt: string;
                                 /** Format: date-time */
@@ -11062,6 +11086,11 @@ export interface paths {
                                 scriptArgs?: {
                                     [key: string]: unknown;
                                 };
+                                params?: {
+                                    [key: string]: unknown;
+                                };
+                                requiredParams?: string[];
+                                requires?: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
                                 /** Format: date-time */
                                 createdAt: string;
                                 /** Format: date-time */
@@ -11114,6 +11143,11 @@ export interface paths {
                         scriptArgs?: {
                             [key: string]: unknown;
                         };
+                        params?: {
+                            [key: string]: unknown;
+                        };
+                        requiredParams?: string[];
+                        requires?: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
                         delayMs?: number;
                         runAt?: string;
                     };
@@ -11176,6 +11210,11 @@ export interface paths {
                             scriptArgs?: {
                                 [key: string]: unknown;
                             };
+                            params?: {
+                                [key: string]: unknown;
+                            };
+                            requiredParams?: string[];
+                            requires?: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
                             /** Format: date-time */
                             createdAt: string;
                             /** Format: date-time */
@@ -11290,6 +11329,11 @@ export interface paths {
                                 scriptArgs?: {
                                     [key: string]: unknown;
                                 };
+                                params?: {
+                                    [key: string]: unknown;
+                                };
+                                requiredParams?: string[];
+                                requires?: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
                                 /** Format: date-time */
                                 createdAt: string;
                                 /** Format: date-time */
@@ -11404,6 +11448,11 @@ export interface paths {
                             scriptArgs?: {
                                 [key: string]: unknown;
                             };
+                            params?: {
+                                [key: string]: unknown;
+                            };
+                            requiredParams?: string[];
+                            requires?: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
                             /** Format: date-time */
                             createdAt: string;
                             /** Format: date-time */
@@ -11463,6 +11512,11 @@ export interface paths {
                         scriptArgs?: {
                             [key: string]: unknown;
                         } | null;
+                        params?: {
+                            [key: string]: unknown;
+                        };
+                        requiredParams?: string[];
+                        requires?: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
                     };
                 };
             };
@@ -11523,6 +11577,11 @@ export interface paths {
                             scriptArgs?: {
                                 [key: string]: unknown;
                             };
+                            params?: {
+                                [key: string]: unknown;
+                            };
+                            requiredParams?: string[];
+                            requires?: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
                             /** Format: date-time */
                             createdAt: string;
                             /** Format: date-time */
@@ -11641,6 +11700,11 @@ export interface paths {
                         scriptArgs?: {
                             [key: string]: unknown;
                         } | null;
+                        params?: {
+                            [key: string]: unknown;
+                        };
+                        requiredParams?: string[];
+                        requires?: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
                     };
                 };
             };
@@ -11701,6 +11765,11 @@ export interface paths {
                             scriptArgs?: {
                                 [key: string]: unknown;
                             };
+                            params?: {
+                                [key: string]: unknown;
+                            };
+                            requiredParams?: string[];
+                            requires?: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
                             /** Format: date-time */
                             createdAt: string;
                             /** Format: date-time */
@@ -12460,7 +12529,7 @@ export interface paths {
                         }[];
                         isError?: boolean;
                         /** @enum {string} */
-                        provider?: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini";
+                        provider?: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp";
                         createdAt?: number;
                     };
                 };
@@ -12718,7 +12787,7 @@ export interface paths {
                                     task: string;
                                     title?: string;
                                     /** @enum {string} */
-                                    status: "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+                                    status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
                                     /**
                                      * @default mcp
                                      * @enum {string}
@@ -12742,7 +12811,7 @@ export interface paths {
                                     /** @enum {string} */
                                     effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
                                     /** @enum {string} */
-                                    provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode";
+                                    provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp";
                                     requestedByUserId?: string;
                                     progress?: string;
                                     /** Format: date-time */
@@ -12757,7 +12826,7 @@ export interface paths {
                                 chainTaskCount: number;
                                 lastActivityAt: string;
                                 /** @enum {string} */
-                                latestStatus: "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+                                latestStatus: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
                             }[];
                             total: number;
                             limit: number;
@@ -14430,6 +14499,7 @@ export interface paths {
                                 failed: number | null;
                             };
                             steeringEnabled: boolean;
+                            multiRuntimeEnabled: boolean;
                         };
                     };
                 };
@@ -14494,6 +14564,59 @@ export interface paths {
                             };
                             skills: {
                                 total: number;
+                            };
+                            retention: {
+                                sessionLogs?: {
+                                    at: string;
+                                    rowsDeleted: number;
+                                    batches: number;
+                                    durationMs: number;
+                                    dryRun: boolean;
+                                    cumulativeRowsDeleted: number;
+                                    /** @enum {string} */
+                                    outcome: "converged" | "budget_exhausted" | "error";
+                                    drained: boolean;
+                                    backlogRemaining: number;
+                                    batchSize: number;
+                                    slowestStatementMs: number;
+                                    lastError?: string;
+                                    lastErrorAt?: string;
+                                    lastSuccessAt?: string;
+                                };
+                                agentLog?: {
+                                    at: string;
+                                    rowsDeleted: number;
+                                    batches: number;
+                                    durationMs: number;
+                                    dryRun: boolean;
+                                    cumulativeRowsDeleted: number;
+                                    /** @enum {string} */
+                                    outcome: "converged" | "budget_exhausted" | "error";
+                                    drained: boolean;
+                                    backlogRemaining: number;
+                                    batchSize: number;
+                                    slowestStatementMs: number;
+                                    lastError?: string;
+                                    lastErrorAt?: string;
+                                    lastSuccessAt?: string;
+                                };
+                                events?: {
+                                    at: string;
+                                    rowsDeleted: number;
+                                    batches: number;
+                                    durationMs: number;
+                                    dryRun: boolean;
+                                    cumulativeRowsDeleted: number;
+                                    /** @enum {string} */
+                                    outcome: "converged" | "budget_exhausted" | "error";
+                                    drained: boolean;
+                                    backlogRemaining: number;
+                                    batchSize: number;
+                                    slowestStatementMs: number;
+                                    lastError?: string;
+                                    lastErrorAt?: string;
+                                    lastSuccessAt?: string;
+                                };
                             };
                         };
                     };
@@ -14632,6 +14755,11 @@ export interface paths {
                                 scriptArgs?: {
                                     [key: string]: unknown;
                                 };
+                                params?: {
+                                    [key: string]: unknown;
+                                };
+                                requiredParams?: string[];
+                                requires?: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
                                 /** Format: date-time */
                                 createdAt: string;
                                 /** Format: date-time */
@@ -14725,7 +14853,7 @@ export interface paths {
         };
         /**
          * Identity + setup readiness + live activity for the swarm dashboard
-         * @description Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; the 7 setup milestones each emit `unverified | configured | verified`; activity counts agents alive in the last 5 min and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set.
+         * @description Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set.
          */
         get: {
             parameters: {
@@ -14754,17 +14882,17 @@ export interface paths {
                             };
                             setup: {
                                 /** @enum {string} */
-                                id: "harness" | "slack" | "github" | "linear" | "jira" | "workers" | "first_task";
+                                id: "harness" | "embeddings" | "slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs" | "workers" | "first_task";
                                 label: string;
                                 /** @enum {string} */
                                 state: "unverified" | "configured" | "verified";
                                 hint?: string;
                                 action_url?: string;
                                 /** @enum {string} */
-                                provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode";
+                                provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp";
                                 providers?: {
                                     /** @enum {string} */
-                                    provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode";
+                                    provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp";
                                     /** @enum {string} */
                                     state: "unverified" | "configured" | "verified";
                                     workers: number;
@@ -14783,6 +14911,31 @@ export interface paths {
                                     [key: string]: unknown;
                                 };
                             };
+                            automations: {
+                                id: string;
+                                name: string;
+                                /** @enum {string} */
+                                kind: "schedule" | "workflow";
+                                /** @enum {string} */
+                                state: "running" | "needs_setup";
+                                missing: {
+                                    params: string[];
+                                    integrations: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
+                                };
+                                fixes: ({
+                                    /** @enum {string} */
+                                    type: "param";
+                                    key: string;
+                                    url: string;
+                                } | {
+                                    /** @enum {string} */
+                                    type: "integration";
+                                    /** @enum {string} */
+                                    key: "slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs";
+                                    url: string;
+                                })[];
+                                fixUrl: string;
+                            }[];
                             /** @enum {string} */
                             health: "ok" | "degraded" | "broken";
                         };
@@ -14831,7 +14984,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode";
+                        provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp";
                     };
                 };
             };
@@ -14930,7 +15083,7 @@ export interface paths {
                                 task: string;
                                 title?: string;
                                 /** @enum {string} */
-                                status: "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+                                status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
                                 /**
                                  * @default mcp
                                  * @enum {string}
@@ -14954,7 +15107,7 @@ export interface paths {
                                 /** @enum {string} */
                                 effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
                                 /** @enum {string} */
-                                provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode";
+                                provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp";
                                 requestedByUserId?: string;
                                 progress?: string;
                                 /** Format: date-time */
@@ -15016,6 +15169,7 @@ export interface paths {
                         modelTier?: "smol" | "regular" | "smart" | "ultra";
                         /** @enum {string} */
                         effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
+                        draft?: boolean;
                     };
                 };
             };
@@ -15031,6 +15185,65 @@ export interface paths {
                 };
                 /** @description Validation error */
                 400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{id}/promote-draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Promote a draft task out of the pre-dispatch draft state
+         * @description Transitions a `draft` task (#1240 — created with attachments still uploading) to its normal dispatch-eligible status: `offered` if it was offered to an agent, `pending` if it has an owning agent (the common case — UI-composer tasks default to Lead), otherwise `unassigned`. Called by the UI composer once its attachment upload batch settles, whether every file uploaded, some failed, or all failed — a draft must never be stranded by an upload error. Idempotent: calling it on a task that already left `draft` returns the current task unchanged rather than erroring, so a retried request is safe.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Task promoted (or already out of draft) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AgentTask"];
+                    };
+                };
+                /** @description Caller does not own this task */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Task not found */
+                404: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -15079,7 +15292,7 @@ export interface paths {
                     } | {
                         claudeSessionId: string;
                         /** @enum {string} */
-                        provider?: "claude" | "codex" | "pi" | "claude-managed" | "opencode";
+                        provider?: "claude" | "codex" | "pi" | "claude-managed" | "opencode" | "acp";
                         model?: string;
                         providerMeta?: Record<string, never>;
                         harnessVariant?: string;
@@ -16031,7 +16244,7 @@ export interface paths {
                             task: components["schemas"]["AgentTask"] | null;
                             resumeTaskId: string | null;
                             /** @enum {string} */
-                            resumeTaskStatus?: "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+                            resumeTaskStatus?: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
                         };
                     };
                 };
@@ -18518,6 +18731,11 @@ export interface paths {
                             name: string;
                             description?: string;
                             enabled: boolean;
+                            params?: {
+                                [key: string]: unknown;
+                            };
+                            requiredParams?: string[];
+                            requires?: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
                             dir?: string;
                             vcsRepo?: string;
                             createdByAgentId?: string;
@@ -18598,6 +18816,11 @@ export interface paths {
                             type: "schedule";
                             /** Format: uuid */
                             scheduleId: string;
+                        } | {
+                            /** @enum {string} */
+                            type: "event";
+                            /** @enum {string} */
+                            eventName: "slack.message";
                         })[];
                         cooldown?: {
                             hours?: number;
@@ -18610,6 +18833,11 @@ export interface paths {
                         triggerSchema?: {
                             [key: string]: unknown;
                         };
+                        params?: {
+                            [key: string]: unknown;
+                        };
+                        requiredParams?: string[];
+                        requires?: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
                         dir?: string;
                         vcsRepo?: string;
                     };
@@ -18750,6 +18978,11 @@ export interface paths {
                             type: "schedule";
                             /** Format: uuid */
                             scheduleId: string;
+                        } | {
+                            /** @enum {string} */
+                            type: "event";
+                            /** @enum {string} */
+                            eventName: "slack.message";
                         })[];
                         cooldown?: {
                             hours?: number;
@@ -18762,6 +18995,11 @@ export interface paths {
                         triggerSchema?: {
                             [key: string]: unknown;
                         } | null;
+                        params?: {
+                            [key: string]: unknown;
+                        };
+                        requiredParams?: string[];
+                        requires?: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
                         dir?: string | null;
                         vcsRepo?: string | null;
                         enabled?: boolean;
@@ -19620,7 +19858,7 @@ export interface components {
             task: string;
             title?: string;
             /** @enum {string} */
-            status: "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+            status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
             /**
              * @default mcp
              * @enum {string}
@@ -19702,7 +19940,7 @@ export interface components {
             requestedByUserId?: string;
             swarmVersion?: string;
             /** @enum {string} */
-            provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode";
+            provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp";
             providerMeta?: {
                 [key: string]: unknown;
             };
@@ -19712,6 +19950,7 @@ export interface components {
             };
             totalCostUsd?: number;
             routingAffinity?: components["schemas"]["RoutingAffinity"];
+            routingAffinityInvalid?: boolean;
         };
         FollowUpConfig: {
             disabled?: boolean;
@@ -19722,9 +19961,10 @@ export interface components {
             sourceAgentId?: string;
             role?: string;
             /** @enum {string} */
-            harnessProvider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode";
+            harnessProvider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp";
             /** @default [] */
             capabilities: string[];
+            leadOnly?: boolean;
         };
         AgentCredStatus: {
             ready: boolean;
@@ -19746,6 +19986,7 @@ export interface components {
              */
             reportKind: "boot" | "post_task";
             bedrock?: components["schemas"]["AgentBedrockStatus"];
+            acp?: components["schemas"]["AgentAcpStatus"];
         };
         /** @default null */
         AgentCredStatusLiveTest: {
@@ -19766,7 +20007,7 @@ export interface components {
              * @default null
              * @enum {string|null}
              */
-            harnessProvider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | null;
+            harnessProvider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | null;
             reportedAt: number;
             /** @enum {string} */
             reasoningEffort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
@@ -19782,6 +20023,42 @@ export interface components {
                 name: string;
             }[];
             error?: string;
+        } | null;
+        /** @default null */
+        AgentAcpStatus: {
+            /** @enum {string} */
+            target: "opencode" | "custom";
+            configOptions: ({
+                /** @enum {string} */
+                type: "select";
+                id: string;
+                name: string;
+                description?: string | null;
+                category?: string | null;
+                currentValue: string;
+                options: ({
+                    value: string;
+                    name: string;
+                    description?: string | null;
+                } | {
+                    group: string;
+                    name: string;
+                    options: {
+                        value: string;
+                        name: string;
+                        description?: string | null;
+                    }[];
+                })[];
+            } | {
+                /** @enum {string} */
+                type: "boolean";
+                id: string;
+                name: string;
+                description?: string | null;
+                category?: string | null;
+                currentValue: boolean;
+            })[];
+            reportedAt: number;
         } | null;
         Agent: {
             id: string;
@@ -19805,9 +20082,9 @@ export interface components {
             /** Format: date-time */
             lastActivityAt?: string;
             /** @enum {string} */
-            provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode";
+            provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp";
             /** @enum {string|null} */
-            harnessProvider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | null;
+            harnessProvider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | null;
             credentialMissing?: string[] | null;
             credStatus?: components["schemas"]["AgentCredStatus"] | null;
             avatar?: {
@@ -20207,7 +20484,7 @@ export interface components {
         };
         PricingRow: {
             /** @enum {string} */
-            provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini";
+            provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp";
             model: string;
             /** @enum {string} */
             tokenClass: "input" | "cached_input" | "output" | "cache_write" | "cache_write_1h" | "web_search" | "runtime_hour" | "acu";
@@ -20463,7 +20740,7 @@ export interface components {
             /** Format: uuid */
             id: string;
             /** @enum {string} */
-            eventType: "agent_joined" | "agent_status_change" | "agent_left" | "task_created" | "task_status_change" | "task_progress" | "task_steering" | "task_offered" | "task_accepted" | "task_rejected" | "task_claimed" | "task_claim_rejected_affinity" | "task_released" | "channel_message" | "service_registered" | "service_unregistered" | "service_status_change" | "budget.upserted" | "budget.deleted" | "pricing.inserted" | "pricing.deleted" | "pricing.refresh" | "pricing.refresh.failed" | "task_superseded";
+            eventType: "agent_joined" | "agent_status_change" | "agent_left" | "task_created" | "task_status_change" | "task_progress" | "task_steering" | "task_offered" | "task_accepted" | "task_rejected" | "task_claimed" | "task_claim_rejected_affinity" | "task_dispatch_rejected_affinity" | "task_authorization_rejected" | "task_recovery_authorization" | "task_released" | "channel_message" | "service_registered" | "service_unregistered" | "service_status_change" | "budget.upserted" | "budget.deleted" | "pricing.inserted" | "pricing.deleted" | "pricing.refresh" | "pricing.refresh.failed" | "task_superseded";
             agentId?: string;
             taskId?: string;
             oldValue?: string;
@@ -20710,6 +20987,11 @@ export interface components {
                 type: "schedule";
                 /** Format: uuid */
                 scheduleId: string;
+            } | {
+                /** @enum {string} */
+                type: "event";
+                /** @enum {string} */
+                eventName: "slack.message";
             })[];
             cooldown?: {
                 hours?: number;
@@ -20722,6 +21004,11 @@ export interface components {
             triggerSchema?: {
                 [key: string]: unknown;
             };
+            params?: {
+                [key: string]: unknown;
+            };
+            requiredParams?: string[];
+            requires?: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
             dir?: string;
             vcsRepo?: string;
             createdByAgentId?: string;
@@ -20785,6 +21072,11 @@ export interface components {
             triggerSchema?: {
                 [key: string]: unknown;
             } | null;
+            params?: {
+                [key: string]: unknown;
+            };
+            requiredParams?: string[];
+            requires?: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
         };
         WorkflowRun: {
             /** Format: uuid */
@@ -20889,6 +21181,11 @@ export interface components {
                 type: "schedule";
                 /** Format: uuid */
                 scheduleId: string;
+            } | {
+                /** @enum {string} */
+                type: "event";
+                /** @enum {string} */
+                eventName: "slack.message";
             })[];
             cooldown?: {
                 hours?: number;
@@ -20901,6 +21198,11 @@ export interface components {
             triggerSchema?: {
                 [key: string]: unknown;
             };
+            params?: {
+                [key: string]: unknown;
+            };
+            requiredParams?: string[];
+            requires?: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
             dir?: string;
             vcsRepo?: string;
             enabled: boolean;
@@ -23055,7 +23357,7 @@ export interface operations {
                     "application/json": {
                         taskId: string;
                         /** @enum {string} */
-                        status: "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+                        status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
                     };
                 };
             };
@@ -23188,7 +23490,7 @@ export interface operations {
                         stderr: string;
                         exitCode: number;
                         /** @enum {string} */
-                        error?: "timeout" | "oom" | "killed" | "import_violation" | "eval_error" | "executor_error";
+                        error?: "timeout" | "oom" | "killed" | "import_violation" | "eval_error" | "executor_error" | "capacity_exceeded";
                         runtimeError?: {
                             name: string;
                             message: string;

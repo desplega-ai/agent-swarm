@@ -1,4 +1,5 @@
 import {
+  cancelPendingApprovalRequestsForRun,
   cancelTask,
   getCompletedStepNodeIds,
   getDbClient,
@@ -10,12 +11,20 @@ import {
   getWorkflowRun,
   getWorkflowRunStep,
   getWorkflowRunStepsByRunId,
+  listCancelledApprovalRequestsForRun,
+  listCancelledApprovalRequestsForStep,
   resolveWaitState,
   updateWorkflowRun,
   updateWorkflowRunStep,
 } from "../be/db";
 import { scrubSecrets } from "../utils/secret-scrubber";
+import {
+  type ApprovalSlackClient,
+  postApprovalCancellationUpdates,
+} from "./approval-notifications";
+import { loadCompletedStepRouting } from "./completed-step-routing";
 import { FAILED_TASK_OUTPUT_PREFIX } from "./constants";
+import { getNextTargets } from "./definition";
 import { findReadyNodes, walkGraph } from "./engine";
 import type { WorkflowEventBus } from "./event-bus";
 import { workflowEventBus } from "./event-bus";
@@ -308,6 +317,23 @@ export async function retryFailedRun(runId: string, registry: ExecutorRegistry):
   const failedStep = steps.find((s) => s.status === "failed");
   if (!failedStep) throw new Error("No failed step found");
 
+  const completedNodeIds = new Set(await getCompletedStepNodeIds(runId));
+  const { activeEdges } = await loadCompletedStepRouting(
+    workflow.definition,
+    runId,
+    completedNodeIds,
+  );
+  const foreachParent = resolveForeachParent(workflow.definition, failedStep.nodeId);
+  const failedNode =
+    foreachParent ?? workflow.definition.nodes.find((n) => n.id === failedStep.nodeId);
+  if (!failedNode) throw new Error(`Node ${failedStep.nodeId} not found in workflow definition`);
+  const hasStructuralPredecessor = workflow.definition.nodes.some(
+    (node) => node.next && getNextTargets(node.next).includes(failedNode.id),
+  );
+  const hasActivePredecessor = [...activeEdges].some((edge) => edge.endsWith(`→${failedNode.id}`));
+  const shouldRetryFailedNode =
+    foreachParent != null || !hasStructuralPredecessor || hasActivePredecessor;
+
   // Reset step and run. Claimed inside a transaction: two concurrent retries
   // (HTTP route + MCP tool) both pass the guard above, and a double reset
   // walks the same failed node twice.
@@ -315,24 +341,24 @@ export async function retryFailedRun(runId: string, registry: ExecutorRegistry):
   const claimed = await getDbClient().transaction(async () => {
     const current = await getWorkflowRun(runId);
     if (!current || current.status !== "failed") return false;
-    await updateWorkflowRunStep(failedStep.id, { status: "pending", error: null });
+    await updateWorkflowRunStep(failedStep.id, {
+      status: shouldRetryFailedNode ? "pending" : "cancelled",
+      error: shouldRetryFailedNode ? null : "Skipped on retry because its branch was not active",
+    });
     await updateWorkflowRun(runId, { status: "running", error: null, context: ctx });
     return true;
   });
   if (!claimed) throw new Error("Run is not in failed state");
 
-  // Resume from the failed node — use findReadyNodes for convergence safety
-  const completedNodeIds = new Set(await getCompletedStepNodeIds(runId));
-  const readyNodes = findReadyNodes(workflow.definition, completedNodeIds);
-  const failedNode =
-    resolveForeachParent(workflow.definition, failedStep.nodeId) ??
-    workflow.definition.nodes.find((n) => n.id === failedStep.nodeId);
-  if (!failedNode) throw new Error(`Node ${failedStep.nodeId} not found in workflow definition`);
+  // Resume from the failed node — use findReadyNodes for convergence safety.
+  const readyNodes = findReadyNodes(workflow.definition, completedNodeIds, activeEdges);
 
-  // Include the failed node if it's not already in ready nodes
-  const nodesToRun = readyNodes.some((n) => n.id === failedNode.id)
-    ? readyNodes
-    : [failedNode, ...readyNodes];
+  // Loop and foreach retry targets can be absent from readyNodes even when
+  // active; include them explicitly, but never revive an untaken branch.
+  const nodesToRun =
+    !shouldRetryFailedNode || readyNodes.some((n) => n.id === failedNode.id)
+      ? readyNodes
+      : [failedNode, ...readyNodes];
   const secretKeys = getSecretInputKeys(workflow.input);
   await walkGraph(workflow.definition, runId, ctx, nodesToRun, registry, workflow.id, secretKeys);
 }
@@ -346,12 +372,13 @@ export async function cancelWorkflowRun(runId: string, reason?: string): Promise
   if (!run) throw new Error("Workflow run not found");
 
   const terminalStatuses = ["completed", "failed", "cancelled", "skipped"];
-  if (terminalStatuses.includes(run.status)) {
+  if (terminalStatuses.includes(run.status) && run.status !== "cancelled") {
     throw new Error(`Cannot cancel run in '${run.status}' state`);
   }
 
   const now = new Date().toISOString();
   const cancelReason = reason ?? "Cancelled by user";
+  let applied = false;
 
   // Step snapshot, task cancels, and both status writes commit together so a
   // step created after the snapshot cannot survive the cancel and a
@@ -360,6 +387,7 @@ export async function cancelWorkflowRun(runId: string, reason?: string): Promise
   await getDbClient().transaction(async () => {
     const current = await getWorkflowRun(runId);
     if (!current || terminalStatuses.includes(current.status)) return;
+    applied = true;
 
     // Cancel non-terminal steps and their associated tasks
     const steps = await getWorkflowRunStepsByRunId(runId);
@@ -379,6 +407,8 @@ export async function cancelWorkflowRun(runId: string, reason?: string): Promise
       });
     }
 
+    await cancelPendingApprovalRequestsForRun(runId, cancelReason);
+
     // Mark the run itself as cancelled
     await updateWorkflowRun(runId, {
       status: "cancelled",
@@ -386,6 +416,53 @@ export async function cancelWorkflowRun(runId: string, reason?: string): Promise
       finishedAt: now,
     });
   });
+
+  // The migration trigger also catches direct step cancellation. Re-read after
+  // commit so its rows are included alongside the run-wide sweep.
+  const cancelledApprovals = await listCancelledApprovalRequestsForRun(runId);
+  const latestRun = await getWorkflowRun(runId);
+  if (!applied && latestRun?.status !== "cancelled") {
+    throw new Error(`Cannot cancel run in '${latestRun?.status ?? "missing"}' state`);
+  }
+  await postApprovalCancellationUpdates(
+    cancelledApprovals,
+    applied ? cancelReason : (latestRun?.error ?? cancelReason),
+  );
+}
+
+/** Cancel one HITL step and close any approval request it gates. */
+export async function cancelWorkflowRunStep(
+  stepId: string,
+  reason = "Cancelled by user",
+  slackClient?: ApprovalSlackClient,
+): Promise<void> {
+  const now = new Date().toISOString();
+  let persistedReason = reason;
+  await getDbClient().transaction(async () => {
+    const step = await getWorkflowRunStep(stepId);
+    if (!step) throw new Error("Workflow run step not found");
+    if (step.nodeType !== "human-in-the-loop") {
+      throw new Error("Only human-in-the-loop steps have an approval cancellation lifecycle");
+    }
+    if (["completed", "failed", "skipped"].includes(step.status)) {
+      throw new Error(`Cannot cancel step in '${step.status}' state`);
+    }
+    if (step.status === "cancelled") {
+      persistedReason = step.error ?? reason;
+      return;
+    }
+
+    const task = await getTaskByWorkflowRunStepId(stepId);
+    if (task) await cancelTask(task.id, reason);
+    await updateWorkflowRunStep(stepId, {
+      status: "cancelled",
+      error: reason,
+      finishedAt: now,
+    });
+  });
+
+  const approvals = await listCancelledApprovalRequestsForStep(stepId);
+  await postApprovalCancellationUpdates(approvals, persistedReason, slackClient);
 }
 
 /**

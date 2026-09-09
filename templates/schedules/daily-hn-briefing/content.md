@@ -1,5 +1,7 @@
 # Daily Hacker News Briefing
 
+Template parameters: {{REPORT_EMAIL}}
+
 Demonstrate web research automation by summarizing relevant technology discussion.
 
 ## Schedule
@@ -22,7 +24,7 @@ Goal: Daily Hacker News briefing — scrape HN using browser automation, email t
 
 Instructions:
 
-1. Use qa-use browser commands (e.g., `/qa-use:explore`) to scrape the following HN pages **ONE AT A TIME, STRICTLY SEQUENTIAL**.
+1. Use the `agent-browser` CLI (load its guide with `agent-browser skills get core`; see the `agent-browser` skill) to scrape the following HN pages **ONE AT A TIME, STRICTLY SEQUENTIAL**.
 
    **CRITICAL — DO NOT PARALLELIZE.** Do NOT fan out parallel browser sessions, do NOT launch multiple Browser Use SDK flows concurrently, do NOT batch the URLs into a single multi-target call. Browser-heavy runs can cross the heartbeat-stale watchdog threshold when several pages are scraped in parallel. Strict serial execution is required.
 
@@ -72,8 +74,8 @@ Instructions:
    This creates a persistent archive we can reference later.
 
 6. SEND EMAIL: Use AgentMail MCP tools to send the report as an email:
-   - From inbox: lead@agent-swarm.dev
-   - To: the configured recipient list for this briefing
+   - From inbox: the configured reporting inbox
+   - To: {{REPORT_EMAIL}}
    - Subject: "HN Briefing — [TODAY'S DATE, e.g. Feb 25, 2026]"
    - Body: Send as HTML email. Format the briefing nicely with:
      - A header: "HN Briefing — [DATE]"
@@ -86,12 +88,12 @@ Instructions:
 7. Call `store-progress` when done with the formatted briefing as output.
 
 IMPORTANT:
-- Use qa-use browser automation to browse HN, don't use web search
+- Use agent-browser to browse HN, don't use web search
 - **Scrape URLs SERIALLY (one at a time) and call `store-progress` between every URL** — never parallelize, never fan-out. This prevents heartbeat-stale auto-fails.
 - Only include stories from the last ~24 hours
 - ALWAYS include the post date on each story — this is required
 - Keep it scannable — clickable links, not walls of text
 - Target 5-20 relevant stories (quality over quantity)
 - You MUST scrape all 5 URLs (3 main pages + new + show) — this is required, but ONE AT A TIME
-- The email is sent from lead@agent-swarm.dev using AgentMail MCP `send_message` tool
-- Recipients: use the configured recipient list for this briefing
+- The email is sent using AgentMail MCP `send_message`.
+- Recipients: {{REPORT_EMAIL}}

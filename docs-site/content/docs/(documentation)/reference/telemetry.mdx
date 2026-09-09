@@ -12,7 +12,7 @@ Telemetry tracks high-level lifecycle and operational events — no task content
 | Event | When it fires | Properties |
 |---|---|---|
 | `server.started` | API server boots | — |
-| `task.created` | A new task is created | source, tags, hasParent, priority |
+| `task.created` | A new task is created | source, hasParent, has_repo, priority |
 | `task.started` | A task is assigned to an agent | source, agentId |
 | `task.claimed` | An agent auto-claims a task from the pool | source, agentId |
 | `task.completed` | A task finishes successfully | agentId, durationMs |
@@ -25,6 +25,7 @@ Telemetry tracks high-level lifecycle and operational events — no task content
 | `session.failure` | A provider session ends with an error | agentId, provider, model, errorCategory, durationMs, wasRateLimited |
 | `schedule.executed` | A schedule run completes | scheduleType, triggeredWorkflows, wasRecovered |
 | `schedule.error` | A schedule run errors | scheduleType, triggeredWorkflows, wasRecovered, consecutiveErrors |
+| `integration.connected` | An integration is connected | type, provider?, first_of_type |
 | `workflow.created` | A workflow definition is created | workflowId, nodeCount, source (when known) |
 | `workflow.deleted` | A workflow definition is deleted | workflowId, source (when known) |
 | `workflow.started` / `workflow.completed` / `workflow.failed` | Workflow lifecycle transitions | runId, workflowId, durationMs, executor metadata |
@@ -41,7 +42,7 @@ Every event also includes:
 - `has_embedding_key` — boolean, whether an embedding-capable key (`EMBEDDING_API_KEY` or `OPENAI_API_KEY`) is configured, i.e. whether semantic memory search is likely enabled.
 - `has_slack_channel` / `has_email_channel` / `has_notification_channel` — booleans indicating whether an outbound notification channel (Slack, AgentMail email, or either) is configured. Presence only — never a token, channel ID, or address.
 - `install_method` — enum: `onboard_interactive`, `onboard_noninteractive`, `e2b`, or `manual`. Which entry point produced this install.
-- `install_preset` (metadata, optional) — the onboard wizard preset used (`dev`, `content`, `research`, `solo`, or `custom`), when the install went through the wizard. Allow-listed against the wizard's known preset IDs — any other value (including free text accidentally placed in `INSTALL_PRESET`) is omitted rather than forwarded.
+- `install_preset` (metadata, optional) — the onboard wizard preset used (`full`, `dev`, `content`, `research`, `solo`, or `custom`), when the install went through the wizard. Allow-listed against the wizard's known preset IDs — any other value (including free text accidentally placed in `INSTALL_PRESET`) is omitted rather than forwarded.
 - `install_created_at` (metadata, optional) — ISO timestamp of when this install's identity was first minted, persisted once alongside the installation ID. Only set when this process genuinely mints a new installation ID; an existing installation ID with no stored anchor emits this field as **absent**, not back-filled with the current time — absence means "pre-existing install, anchor unknown". Use `min(occurred_at)` per `installation_id` in ClickHouse as the real anchor for that population.
 
 ## How it's anonymized

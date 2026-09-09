@@ -1,5 +1,7 @@
 # Weekly DORA Metrics
 
+Template parameters: {{REPO_URL}}, {{BRANCH}}, {{TAG_PATTERN}}, {{REPORT_NAME}}, {{PAGE_ID}}
+
 Run a recurring DORA metrics report for a repository and update the same stable report page in place.
 
 This schedule is the templates gallery entry point for the community package in `templates/community/dora-metrics/`. The package itself is intentionally not an agent-template config; it is a runnable playbook bundle (`PLAYBOOK.md`, `run.sh`, `report.mjs`, and `lead-prompt.md`) used by this schedule.
@@ -21,11 +23,11 @@ This is a reusable starting prompt. Before enabling it, replace the repository, 
 
 Task Type: Weekly DORA Metrics
 
-Repository: `https://github.com/OWNER/REPO.git`
-Default branch: `main`
-Release tag pattern: `v*`
-Report name: `my-repo`
-Stable page ID: `<PAGE_ID>`
+Repository: `{{REPO_URL}}`
+Default branch: `{{BRANCH}}`
+Release tag pattern: `{{TAG_PATTERN}}`
+Report name: `{{REPORT_NAME}}`
+Stable page ID: `{{PAGE_ID}}`
 
 ## Instructions
 
@@ -38,15 +40,15 @@ Stable page ID: `<PAGE_ID>`
 
    ```bash
    BASE_DIR=/workspace/dora-metrics \
-   REPO_NAME=my-repo \
-   REPO_URL=https://github.com/OWNER/REPO.git \
-   BRANCH=main \
-   TAG_PATTERN='v*' \
+   REPO_NAME='{{REPORT_NAME}}' \
+   REPO_URL='{{REPO_URL}}' \
+   BRANCH='{{BRANCH}}' \
+   TAG_PATTERN='{{TAG_PATTERN}}' \
    WINDOW_DAYS=90 \
    bash /workspace/dora-metrics/run.sh
    ```
 
-4. Publish `/workspace/dora-metrics/out/my-repo/latest.html` to the existing stable page ID. Do not create a new page for routine refreshes.
+4. Publish `/workspace/dora-metrics/out/{{REPORT_NAME}}/latest.html` to the existing stable page ID. Do not create a new page for routine refreshes.
 5. Verify the rendered page loads, D3 charts are not blank, and the exact/proxy labels are visible.
 6. If the run fails because of a local runner, dependency, branch, tag-pattern, or report-generator issue, diagnose and fix it before reporting failure.
 

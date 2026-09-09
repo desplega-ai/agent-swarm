@@ -197,4 +197,26 @@ describe("ownership-gated task tools", () => {
       "unassigned",
     );
   });
+
+  test("task-action records capability-only pool requirements for Lead escalation", async () => {
+    const worker = await createAgent({
+      name: "task-action creator",
+      isLead: false,
+      status: "idle",
+      maxTasks: 1,
+    });
+    const result = await callTaskAction(ownerCtx({ agentId: worker.id }), {
+      action: "create",
+      task: "capability constrained task-action work",
+      requiredCapabilities: ["rare-capability"],
+      leadOnly: false,
+    });
+
+    expect((result.structuredContent as { success: boolean }).success).toBe(true);
+    const task = (result.structuredContent as { task?: { id: string } }).task;
+    expect((await getTaskById(task!.id))?.routingAffinity).toEqual({
+      leadOnly: false,
+      capabilities: ["rare-capability"],
+    });
+  });
 });

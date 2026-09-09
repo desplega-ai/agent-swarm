@@ -1,6 +1,7 @@
 // Backend types (mirrored from agent-swarm backend)
 export type AgentStatus = "idle" | "busy" | "offline" | "waiting_for_credentials";
 export type AgentTaskStatus =
+  | "draft"
   | "backlog"
   | "unassigned"
   | "offered"
@@ -30,6 +31,49 @@ export type ModelTier = "smol" | "regular" | "smart" | "ultra";
 /** Mirrors `REASONING_EFFORT_LEVELS` in `src/providers/reasoning-effort.ts` (backend). */
 export const REASONING_EFFORT_LEVELS = ["off", "low", "medium", "high", "xhigh", "max"] as const;
 export type ReasoningEffortLevel = (typeof REASONING_EFFORT_LEVELS)[number];
+
+export type AcpTarget = "opencode" | "custom";
+
+export interface AcpRuntimeConfig {
+  target: AcpTarget;
+  command?: string | null;
+  args?: string[];
+  envKeys?: string[];
+  modelEnvKey?: string | null;
+  options?: Record<string, string | boolean>;
+}
+
+export type AcpSessionConfigOption =
+  | {
+      type: "select";
+      id: string;
+      name: string;
+      description?: string | null;
+      category?: string | null;
+      currentValue: string;
+      options: Array<
+        | { value: string; name: string; description?: string | null }
+        | {
+            group: string;
+            name: string;
+            options: Array<{ value: string; name: string; description?: string | null }>;
+          }
+      >;
+    }
+  | {
+      type: "boolean";
+      id: string;
+      name: string;
+      description?: string | null;
+      category?: string | null;
+      currentValue: boolean;
+    };
+
+export interface AgentAcpStatus {
+  target: AcpTarget;
+  configOptions: AcpSessionConfigOption[];
+  reportedAt: number;
+}
 
 /** Mirrors `AgentAvatarSchema` (backend `src/types.ts`). Discriminated union so
  * future avatar types (emoji, image, ...) can be added with no migration —
@@ -132,6 +176,8 @@ export interface AgentCredStatus {
   reportKind?: "boot" | "post_task";
   /** Pi-mono Bedrock enumeration block. Null when not in Bedrock mode. */
   bedrock?: AgentBedrockStatus | null;
+  /** ACP session options most recently advertised by the target. */
+  acp?: AgentAcpStatus | null;
 }
 
 export interface AgentLatestModel {
@@ -218,7 +264,14 @@ export interface AgentTask {
   supportedSteerModes?: SteerMode[];
 }
 
-export type ProviderName = "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode";
+export type ProviderName =
+  | "claude"
+  | "codex"
+  | "pi"
+  | "devin"
+  | "claude-managed"
+  | "opencode"
+  | "acp";
 export type DevinProviderMeta = {
   sessionUrl: string;
   maxAcuLimit?: number;
@@ -960,6 +1013,14 @@ export interface AgentUsageSummary {
 }
 
 export type ScheduledTaskTargetType = "agent-task" | "workflow" | "script";
+export type AutomationIntegrationId =
+  | "slack"
+  | "github"
+  | "linear"
+  | "jira"
+  | "gsc"
+  | "agentmail"
+  | "agentfs";
 
 export interface ScheduledTask {
   id: string;
@@ -985,6 +1046,12 @@ export interface ScheduledTask {
   workflowId?: string;
   scriptName?: string;
   scriptArgs?: Record<string, unknown>;
+  /** Setup values injected into the automation template at run time. */
+  params?: Record<string, unknown>;
+  /** Parameter names which must be set before the automation can run. */
+  requiredParams?: string[];
+  /** Integrations that must be verified before the automation can run. */
+  requires?: AutomationIntegrationId[];
   createdAt: string;
   lastUpdatedAt: string;
   favorite?: boolean;
@@ -1139,6 +1206,12 @@ export interface Workflow {
   createdAt: string;
   lastUpdatedAt: string;
   favorite?: boolean;
+  /** Setup values injected into the workflow at trigger time. */
+  params?: Record<string, unknown>;
+  /** Parameter names which must be set before the workflow can run. */
+  requiredParams?: string[];
+  /** Integrations that must be verified before the workflow can run. */
+  requires?: AutomationIntegrationId[];
 }
 
 export type WorkflowRunStatus = "running" | "waiting" | "completed" | "failed" | "skipped";
@@ -1824,7 +1897,7 @@ export interface RenderResponse {
 
 // Approval Requests
 
-export type ApprovalRequestStatus = "pending" | "approved" | "rejected" | "timeout";
+export type ApprovalRequestStatus = "pending" | "approved" | "rejected" | "timeout" | "cancelled";
 
 export interface ApprovalQuestion {
   id: string;
@@ -1853,6 +1926,7 @@ export interface ApprovalRequest {
   responses: Record<string, unknown> | null;
   resolvedBy: string | null;
   resolvedAt: string | null;
+  resolutionReason: string | null;
   workflowRunId: string | null;
   workflowRunStepId: string | null;
   sourceTaskId: string | null;
@@ -2286,10 +2360,14 @@ export type SetupMilestoneState = "unverified" | "configured" | "verified";
 
 export type MilestoneId =
   | "harness"
+  | "embeddings"
   | "slack"
   | "github"
   | "linear"
   | "jira"
+  | "gsc"
+  | "agentmail"
+  | "agentfs"
   | "workers"
   | "first_task";
 
@@ -2318,6 +2396,21 @@ export interface StatusIdentity {
   org_id: string | null;
 }
 
+export interface FeedbackInput {
+  submission_id: string;
+  user_id: string;
+  install_id: string | null;
+  installed_at: string | null;
+  org_name: string;
+  swarm_version: string;
+  name?: string;
+  email?: string;
+  newsletter_consent: boolean;
+  nps?: 1 | 2 | 3 | 4 | 5;
+  message?: string;
+  submitted_at: string;
+}
+
 export interface StatusActivity {
   agents_online: number;
   leads_online: number;
@@ -2331,6 +2424,21 @@ export interface StatusAgentFs {
   capabilities: Record<string, unknown>;
 }
 
+export interface StatusAutomation {
+  id: string;
+  name: string;
+  kind: "schedule" | "workflow";
+  state: "running" | "needs_setup";
+  missing: {
+    params: string[];
+    integrations: string[];
+  };
+  fixes: Array<
+    { type: "param"; key: string; url: string } | { type: "integration"; key: string; url: string }
+  >;
+  fixUrl: string;
+}
+
 /**
  * Phase 2: Aggregate health rolled up server-side from the setup milestones.
  * Drives the always-on header badge color.
@@ -2342,6 +2450,11 @@ export interface StatusResponse {
   setup: SetupMilestone[];
   activity: StatusActivity;
   agent_fs: StatusAgentFs;
+  /**
+   * Added in v1.142.0 (#1330). Absent when the dashboard talks to an older API,
+   * so every consumer must treat it as optional.
+   */
+  automations?: StatusAutomation[];
   /** Phase 2: rolled-up health for the always-on header badge. */
   health: StatusHealth;
 }

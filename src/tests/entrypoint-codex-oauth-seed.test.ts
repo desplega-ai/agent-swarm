@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { CHILD_PROCESS_TEST_BUDGET_MS, expectChildOk, runChild } from "./test-proc";
 
 /**
  * Regression test for the codex_oauth boot-seed jq transform in
@@ -59,104 +60,32 @@ function extractCodexOauthSeedFilter(): string {
 }
 
 /**
- * Async `Bun.spawn` on purpose, not `Bun.spawnSync`. On the 4-vCPU CI runners
+ * Async `runChild` on purpose, not `Bun.spawnSync`. On the 4-vCPU CI runners
  * under `--parallel=4`, two consecutive `spawnSync` calls here (stdin Buffer
  * into `jq`) sat for the full 10 s test budget with the child still alive and
  * got reaped as "dangling" (gate run 32474909606); the same 400-call loop is
  * 1.5 s on macOS. jq only blocks on stdin EOF, so the sync spawn loop either
  * never closed the pipe or lost the exit. The async path uses the regular
  * event loop, writes + closes stdin explicitly, and a hard per-spawn timeout
- * turns a hang into a fast, readable failure instead of a silent 10 s stall.
+ * (`runChild`'s `CHILD_PROCESS_TIMEOUT_MS`) turns a hang into a fast,
+ * readable failure instead of a silent 10 s stall.
  */
-const JQ_TIMEOUT_MS = 5_000;
-
 async function runJqFilter(filter: string, input: unknown, standalone = false): Promise<unknown> {
-  const proc = Bun.spawn(["jq", filter], {
+  const result = await runChild(["jq", filter], {
     env: { ...process.env, CODEX_OAUTH_SEED_STANDALONE: standalone ? "true" : "false" },
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    timeout: JQ_TIMEOUT_MS,
-    killSignal: "SIGKILL",
+    stdin: JSON.stringify(input),
   });
-  proc.stdin.write(JSON.stringify(input));
-  await proc.stdin.end();
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
-  if (exitCode !== 0) {
-    const why = proc.signalCode ? `signal ${proc.signalCode} (timeout ${JQ_TIMEOUT_MS} ms?)` : "";
-    throw new Error(`jq failed (exit ${exitCode}) ${why}: ${stderr}`);
-  }
-  return JSON.parse(stdout);
+  expectChildOk(result, "jq");
+  return JSON.parse(result.stdout);
 }
 
 describe("docker-entrypoint.sh: codex_oauth boot-seed jq transform", () => {
   const filter = extractCodexOauthSeedFilter();
 
-  test("blanks refresh_token for an auth.json-shaped (chatgpt) input", async () => {
-    const result = (await runJqFilter(filter, {
-      auth_mode: "chatgpt",
-      OPENAI_API_KEY: null,
-      tokens: {
-        id_token: "id-tok",
-        access_token: "access-tok",
-        refresh_token: "live-refresh-tok",
-        account_id: "acct-123",
-      },
-      last_refresh: "2026-07-01T00:00:00.000Z",
-    })) as {
-      auth_mode: string;
-      tokens: {
-        id_token: string;
-        access_token: string;
-        refresh_token: string;
-        account_id: string;
-      };
-      last_refresh: string;
-    };
-
-    expect(result.tokens.refresh_token).toBe("");
-    expect(result.auth_mode).toBe("chatgpt");
-    expect(result.tokens.id_token).toBe("id-tok");
-    expect(result.tokens.access_token).toBe("access-tok");
-    expect(result.tokens.account_id).toBe("acct-123");
-    expect(result.last_refresh).toBe("2026-07-01T00:00:00.000Z");
-  });
-
-  test("blanks refresh_token for a flat {access,refresh,accountId,expires} input", async () => {
-    const result = (await runJqFilter(filter, {
-      access: "access-tok",
-      refresh: "live-refresh-tok",
-      accountId: "acct-456",
-      expires: 1_800_000_000_000,
-    })) as {
-      auth_mode: string;
-      tokens: {
-        id_token: string;
-        access_token: string;
-        refresh_token: string;
-        account_id: string;
-      };
-    };
-
-    expect(result.tokens.refresh_token).toBe("");
-    expect(result.auth_mode).toBe("chatgpt");
-    expect(result.tokens.id_token).toBe("access-tok");
-    expect(result.tokens.access_token).toBe("access-tok");
-    expect(result.tokens.account_id).toBe("acct-456");
-  });
-
-  test("errors on a value matching neither accepted shape", async () => {
-    await expect(runJqFilter(filter, { foo: "bar" })).rejects.toThrow(/neither auth\.json format/);
-  });
-
-  test("preserves refresh_token for an auth.json-shaped (chatgpt) input on the standalone path", async () => {
-    const result = (await runJqFilter(
-      filter,
-      {
+  test(
+    "blanks refresh_token for an auth.json-shaped (chatgpt) input",
+    async () => {
+      const result = (await runJqFilter(filter, {
         auth_mode: "chatgpt",
         OPENAI_API_KEY: null,
         tokens: {
@@ -166,29 +95,108 @@ describe("docker-entrypoint.sh: codex_oauth boot-seed jq transform", () => {
           account_id: "acct-123",
         },
         last_refresh: "2026-07-01T00:00:00.000Z",
-      },
-      true,
-    )) as {
-      tokens: { refresh_token: string };
-    };
+      })) as {
+        auth_mode: string;
+        tokens: {
+          id_token: string;
+          access_token: string;
+          refresh_token: string;
+          account_id: string;
+        };
+        last_refresh: string;
+      };
 
-    expect(result.tokens.refresh_token).toBe("live-refresh-tok");
-  });
+      expect(result.tokens.refresh_token).toBe("");
+      expect(result.auth_mode).toBe("chatgpt");
+      expect(result.tokens.id_token).toBe("id-tok");
+      expect(result.tokens.access_token).toBe("access-tok");
+      expect(result.tokens.account_id).toBe("acct-123");
+      expect(result.last_refresh).toBe("2026-07-01T00:00:00.000Z");
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
 
-  test("preserves refresh_token (from the flat `refresh` field) for a flat input on the standalone path", async () => {
-    const result = (await runJqFilter(
-      filter,
-      {
+  test(
+    "blanks refresh_token for a flat {access,refresh,accountId,expires} input",
+    async () => {
+      const result = (await runJqFilter(filter, {
         access: "access-tok",
         refresh: "live-refresh-tok",
         accountId: "acct-456",
         expires: 1_800_000_000_000,
-      },
-      true,
-    )) as {
-      tokens: { refresh_token: string };
-    };
+      })) as {
+        auth_mode: string;
+        tokens: {
+          id_token: string;
+          access_token: string;
+          refresh_token: string;
+          account_id: string;
+        };
+      };
 
-    expect(result.tokens.refresh_token).toBe("live-refresh-tok");
-  });
+      expect(result.tokens.refresh_token).toBe("");
+      expect(result.auth_mode).toBe("chatgpt");
+      expect(result.tokens.id_token).toBe("access-tok");
+      expect(result.tokens.access_token).toBe("access-tok");
+      expect(result.tokens.account_id).toBe("acct-456");
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  test(
+    "errors on a value matching neither accepted shape",
+    async () => {
+      await expect(runJqFilter(filter, { foo: "bar" })).rejects.toThrow(
+        /neither auth\.json format/,
+      );
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  test(
+    "preserves refresh_token for an auth.json-shaped (chatgpt) input on the standalone path",
+    async () => {
+      const result = (await runJqFilter(
+        filter,
+        {
+          auth_mode: "chatgpt",
+          OPENAI_API_KEY: null,
+          tokens: {
+            id_token: "id-tok",
+            access_token: "access-tok",
+            refresh_token: "live-refresh-tok",
+            account_id: "acct-123",
+          },
+          last_refresh: "2026-07-01T00:00:00.000Z",
+        },
+        true,
+      )) as {
+        tokens: { refresh_token: string };
+      };
+
+      expect(result.tokens.refresh_token).toBe("live-refresh-tok");
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  test(
+    "preserves refresh_token (from the flat `refresh` field) for a flat input on the standalone path",
+    async () => {
+      const result = (await runJqFilter(
+        filter,
+        {
+          access: "access-tok",
+          refresh: "live-refresh-tok",
+          accountId: "acct-456",
+          expires: 1_800_000_000_000,
+        },
+        true,
+      )) as {
+        tokens: { refresh_token: string };
+      };
+
+      expect(result.tokens.refresh_token).toBe("live-refresh-tok");
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
 });

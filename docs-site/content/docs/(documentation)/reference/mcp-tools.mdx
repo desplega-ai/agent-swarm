@@ -99,6 +99,8 @@ Send a task to a specific agent, create an unassigned task, or offer a task for 
 | `tags` | array | No | Tags for filtering |
 | `taskType` | string | No | Task type classification |
 | `dependsOn` | array | No | Task IDs this depends on |
+| `requiredCapabilities` | array | No | Capabilities required for task routing |
+| `leadOnly` | boolean | No | Structured authorization constraint for privileged work. Only Lead agents may be assigned, offered, or claim the task; the platform never infers this from task text. |
 | `parentTaskId` | uuid | No | Parent task for session continuity |
 | `key` | string | No | Logical asset namespace. Child tasks inherit their parent's namespace when provided |
 | `dir` | string | No | Working directory (absolute path) for the agent to start in |
@@ -133,7 +135,7 @@ Store task progress, or mark a task as completed or failed.
 | `status` | string | No | Set to `completed` or `failed` |
 | `output` | string | No | Output (for completion). Validated against `outputSchema` if the task defines one |
 | `failureReason` | string | No | Reason (for failure) |
-| `attachments` | array | No | Pointer-based artifacts to attach to the task (max 20 per call). Each entry is one of: `{kind: "agent-fs", path, name, orgId?, driveId?, ...}`, `{kind: "url", url, name, ...}`, `{kind: "shared-fs", path, name, ...}`, `{kind: "page", pageId, name, ...}`. May be sent on any call (progress or completion); accumulates across calls; deduped by `sha256` when present, else by `(kind, pointer, name)`. No inline file data — upload to agent-fs first and attach by path. |
+| `attachments` | array | No | Pointer-based artifacts to attach to the task (max 20 per call). Each entry is one of: `{kind: "agent-fs", path, name, orgId?, driveId?, ...}`, `{kind: "url", url, name, ...}`, `{kind: "shared-fs", path, name, ...}`, `{kind: "page", pageId, name, ...}`. Agent-fs pointers are verified before task state changes using the explicit org/drive pair or the registering agent's configured defaults. May be sent on any call (progress or completion); accumulates across calls; deduped by `sha256` when present, else by `(kind, pointer, name)`. No inline file data — upload to agent-fs first and attach by path. |
 | `persistMemory` | boolean | No | Opt in to task-completion memory persistence for automatic or recurring tasks. Manual tasks persist by default; scheduled, system, heartbeat, monitor, and digest tasks are skipped unless this is `true`. |
 | `force` | boolean | No | On an already-terminal task, replace only the explicitly supplied `output` and/or `failureReason`. Status, `finishedAt`, completion events, memories, follow-ups, and capacity updates are preserved rather than replayed. |
 
@@ -350,7 +352,7 @@ Download a file from Slack by file ID or URL.
 
 Register an AgentMail inbox ID to route incoming emails to this agent.
 
-Requires the `agentmail` capability (**disabled by default**). See the [AgentMail integration guide](/docs/guides/agentmail-integration) for credentials and setup.
+Requires the `agentmail` capability (**disabled by default**). See the [AgentMail integration guide](/docs/integrations/agentmail) for credentials and setup.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -458,7 +460,8 @@ Manage tasks in the pool: create, claim, release, accept, reject, or move to/fro
 | `model` | string | No | Concrete model override for the created task (only used with `create` action) |
 | `modelTier` | string | No | Portable model tier for the created task: `smol`, `regular`, `smart`, or `ultra` (only used with `create` action) |
 | `effort` | string | No | Reasoning effort for the created task: `off`, `low`, `medium`, `high`, `xhigh`, or Codex-only `max` when supported |
-| `requiredCapabilities` | array | No | Capability requirements recorded on a newly pooled task for routing-affinity triage |
+| `requiredCapabilities` | array | No | Capabilities required for routing the newly created task |
+| `leadOnly` | boolean | No | Structured authorization constraint for a newly created privileged task. Only Lead agents may claim it. |
 
 ## Messaging Tools
 
@@ -554,12 +557,14 @@ Create a new automation workflow with a DAG definition.
 
 Upstream outputs require an `inputs` mapping. Agent-task templates may interpolate declared aliases, but executable source uses a stricter security boundary: inline `script` source allows only `input`, `workflow`, `swarm`, and `run` values, while named `swarm-script` source is never workflow-interpolated. Pass trigger and upstream values through `config.args`; unresolved source tokens fail the node before execution.
 
+Workflow triggers can use `webhook`, `schedule`, `manual`, or the internal event form `{ "type": "event", "eventName": "slack.message" }`.
+
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `name` | string | Yes | Unique workflow name |
 | `description` | string | No | What the workflow does |
 | `definition` | object | Yes | DAG definition with `nodes` array |
-| `triggers` | array | No | Trigger configs: `webhook`, `schedule`, or `manual` |
+| `triggers` | array | No | Trigger configs: `webhook`, `schedule`, `manual`, or `event` |
 | `cooldown` | object | No | Cooldown period: `{ hours, minutes, seconds }` |
 | `input` | object | No | Workflow-level input values (env vars, secrets, or literals) |
 | `key` | string | No | Logical asset namespace inherited by tasks created from this workflow |
@@ -707,6 +712,8 @@ DB-backed pages let agents publish static reports, dashboards, and JSON action s
 ### create_page
 
 Stores an HTML or JSON page in the swarm and returns shareable URLs. Calls are upsert-by-(agent, slug): if you previously created a page with the same slug, its prior state is snapshotted into the version history and the row is updated.
+
+HTML pages receive fonts, basic layout styles, and Tailwind utilities when served. Tailwind Preflight is disabled so it does not reset authored headings, spacing, or lists. These defaults apply to existing pages without regenerating their stored HTML. A page can still use explicit Tailwind utilities to override individual styles.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -1117,13 +1124,15 @@ List durable script workflow runs, optionally filtered by status or agent ID.
 
 ### db-query
 
-Execute a read-only SQL query against the swarm database. Available to all authenticated agents — be aware results may include secrets (`oauth_tokens`, `configs`). Results capped at 100 rows.
+Execute a read-only SQL query against the swarm database. Available to all authenticated agents — be aware results may include secrets (`oauth_tokens`, `configs`). Results are capped by the operator-configurable `DB_QUERY_MCP_MAX_ROWS` limit.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `sql` | string | Conditional | SQL query (read-only only — writes are rejected). Required unless the deprecated `query` alias is provided |
 | `query` | string | Conditional | Deprecated runtime alias for `sql` |
 | `params` | array | No | Query parameters |
+
+Responses include `total`, `truncated`, and `rowLimit` so callers can distinguish a complete result set from one capped by the configured row limit.
 
 ### get-oauth-access-token
 

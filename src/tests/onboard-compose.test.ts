@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { generateCompose as generateTemplateCompose } from "../../apps/templates-ui/src/lib/compose-generator.ts";
 import { generateCompose } from "../commands/onboard/compose-generator.ts";
+import { getPresetById, PRESETS } from "../commands/onboard/presets.ts";
 import { INITIAL_STATE, type OnboardState } from "../commands/onboard/types.ts";
 
 function makeState(overrides: Partial<OnboardState>): OnboardState {
@@ -7,6 +9,26 @@ function makeState(overrides: Partial<OnboardState>): OnboardState {
 }
 
 describe("generateCompose", () => {
+  test("uses the full preset by default and includes every official template once", () => {
+    const full = getPresetById("full");
+
+    expect(PRESETS[0]).toBe(full);
+    expect(full?.services).toHaveLength(11);
+    expect(full?.services.map((service) => service.template)).toEqual([
+      "official/lead",
+      "official/coder",
+      "official/content-reviewer",
+      "official/content-strategist",
+      "official/content-writer",
+      "official/discoverability-optimizer",
+      "official/forward-deployed-engineer",
+      "official/researcher",
+      "official/reviewer",
+      "official/tester",
+      "official/ux-principles",
+    ]);
+  });
+
   // ── Dev preset: 1 lead + 2 coders ──
 
   const devState = makeState({
@@ -24,6 +46,47 @@ describe("generateCompose", () => {
     claudeOAuthToken: "test-oauth",
   });
 
+  test("static example passes every supported provider variable to all agents", async () => {
+    const yaml = await Bun.file(
+      new URL("../../docker-compose.example.yml", import.meta.url),
+    ).text();
+    const agentServices = `  lead:${yaml.split("\n  lead:")[1]}`;
+
+    for (const variable of [
+      "HARNESS_PROVIDER",
+      "MODEL_OVERRIDE",
+      "CLAUDE_CODE_OAUTH_TOKEN",
+      "ANTHROPIC_API_KEY",
+      "OPENAI_API_KEY",
+      "OPENROUTER_API_KEY",
+      "OPENROUTER_BASE_URL",
+      "BEDROCK_AUTH_MODE",
+      "AWS_REGION",
+      "AWS_ACCESS_KEY_ID",
+      "AWS_SECRET_ACCESS_KEY",
+      "AWS_SESSION_TOKEN",
+      "AWS_PROFILE",
+    ]) {
+      expect(agentServices.match(new RegExp(`^ {6}- ${variable}=`, "gm"))).toHaveLength(8);
+    }
+  });
+
+  test("uses the always pull policy by default for every service", () => {
+    const yaml = generateCompose(devState);
+
+    expect(yaml.match(/pull_policy: always/g)).toHaveLength(4);
+  });
+
+  test.each([
+    "missing",
+    "never",
+  ] as const)("uses the %s pull policy for every service", (pullPolicy) => {
+    const yaml = generateCompose({ ...devState, pullPolicy });
+
+    expect(yaml.match(new RegExp(`pull_policy: ${pullPolicy}`, "g"))).toHaveLength(4);
+    expect(yaml).not.toContain("pull_policy: always");
+  });
+
   test("dev preset produces 3 agent services + 1 API service", () => {
     const yaml = generateCompose(devState);
     // Only count service definitions in the services section (before volumes:)
@@ -35,6 +98,90 @@ describe("generateCompose", () => {
     expect(yaml).toContain("  lead:");
     expect(yaml).toContain("  worker-coder-1:");
     expect(yaml).toContain("  worker-coder-2:");
+  });
+
+  test.each([
+    {
+      provider: "claude" as const,
+      harness: "claude" as const,
+      expected: ["HARNESS_PROVIDER=", "CLAUDE_CODE_OAUTH_TOKEN"],
+    },
+    {
+      provider: "openai" as const,
+      harness: "codex" as const,
+      expected: ["HARNESS_PROVIDER=", "OPENAI_API_KEY"],
+    },
+    {
+      provider: "openrouter" as const,
+      harness: "pi" as const,
+      expected: ["HARNESS_PROVIDER=", "OPENROUTER_API_KEY", "MODEL_OVERRIDE"],
+    },
+  ])("passes $provider runtime variables to every agent service", ({
+    provider,
+    harness,
+    expected,
+  }) => {
+    const yaml = generateCompose({ ...devState, provider, harness });
+    const agentServices = `  lead:${yaml.split("\n  lead:")[1]}`;
+    for (const variable of expected) {
+      expect(agentServices.split("\n").filter((line) => line.includes(variable))).toHaveLength(3);
+    }
+  });
+
+  test("passes AWS profile configuration and mount only to Bedrock agents", () => {
+    const yaml = generateCompose({
+      ...devState,
+      provider: "bedrock",
+      harness: "pi",
+      awsProfile: "swarm",
+      awsRegion: "us-east-1",
+      modelOverride: "amazon-bedrock/anthropic.claude-sonnet-4-20250514-v1:0",
+    });
+    expect(yaml.match(/HARNESS_PROVIDER=\$\{HARNESS_PROVIDER\}/g)).toHaveLength(3);
+    expect(yaml.match(/AWS_PROFILE=\$\{AWS_PROFILE\}/g)).toHaveLength(3);
+    expect(yaml.match(/BEDROCK_AUTH_MODE=\$\{BEDROCK_AUTH_MODE\}/g)).toHaveLength(3);
+    expect(yaml.match(/\$\{HOME\}\/\.aws:\/home\/worker\/\.aws:ro/g)).toHaveLength(3);
+    expect(yaml.match(/Alpha: session summaries/g)).toHaveLength(3);
+    expect(yaml.split("\n  lead:")[0]).not.toContain("AWS_PROFILE");
+  });
+
+  test.each([
+    { provider: "openai" as const, harness: "codex" as const, variable: "OPENAI_API_KEY" },
+    { provider: "openrouter" as const, harness: "pi" as const, variable: "OPENROUTER_API_KEY" },
+  ])("passes $provider credentials to the API for workflow LLM nodes", ({
+    provider,
+    harness,
+    variable,
+  }) => {
+    const yaml = generateCompose({ ...devState, provider, harness });
+    const apiService = yaml.split("\n  lead:")[0];
+    expect(apiService).toContain(variable);
+  });
+
+  test("sets the install-safe concurrency for each agent role", () => {
+    const yaml = generateCompose(devState);
+
+    expect(yaml.match(/MAX_CONCURRENT_TASKS=2/g)).toHaveLength(1);
+    expect(yaml.match(/MAX_CONCURRENT_TASKS=1/g)).toHaveLength(2);
+  });
+
+  test("applies an explicit concurrency override to every agent", () => {
+    const yaml = generateCompose({ ...devState, maxConcurrentTasks: 4 });
+
+    expect(yaml.match(/MAX_CONCURRENT_TASKS=4/g)).toHaveLength(3);
+  });
+
+  test("templates builder uses the same conservative role defaults", () => {
+    const yaml = generateTemplateCompose({
+      services: devState.services,
+      apiImage: "api",
+      workerImage: "worker",
+      startingPort: 3201,
+      integrations: devState.integrations,
+    });
+
+    expect(yaml.match(/MAX_CONCURRENT_TASKS=2/g)).toHaveLength(1);
+    expect(yaml.match(/MAX_CONCURRENT_TASKS=1/g)).toHaveLength(2);
   });
 
   // ── Solo preset: 1 coder, no lead ──

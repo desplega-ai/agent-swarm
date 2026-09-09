@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "1.134.0",
+    "version": "1.143.0",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -142,6 +142,7 @@
           "status": {
             "type": "string",
             "enum": [
+              "draft",
               "backlog",
               "unassigned",
               "offered",
@@ -405,7 +406,8 @@
               "pi",
               "devin",
               "claude-managed",
-              "opencode"
+              "opencode",
+              "acp"
             ]
           },
           "providerMeta": {
@@ -425,6 +427,9 @@
           },
           "routingAffinity": {
             "$ref": "#/components/schemas/RoutingAffinity"
+          },
+          "routingAffinityInvalid": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -471,7 +476,8 @@
               "pi",
               "devin",
               "claude-managed",
-              "opencode"
+              "opencode",
+              "acp"
             ]
           },
           "capabilities": {
@@ -480,6 +486,9 @@
               "type": "string"
             },
             "default": []
+          },
+          "leadOnly": {
+            "type": "boolean"
           }
         }
       },
@@ -536,6 +545,9 @@
           },
           "bedrock": {
             "$ref": "#/components/schemas/AgentBedrockStatus"
+          },
+          "acp": {
+            "$ref": "#/components/schemas/AgentAcpStatus"
           }
         },
         "required": [
@@ -611,6 +623,7 @@
               "devin",
               "claude-managed",
               "opencode",
+              "acp",
               null
             ],
             "default": null
@@ -680,6 +693,182 @@
           "region",
           "probedAt",
           "ready"
+        ]
+      },
+      "AgentAcpStatus": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "target": {
+            "type": "string",
+            "enum": [
+              "opencode",
+              "custom"
+            ]
+          },
+          "configOptions": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "select"
+                      ]
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "category": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "currentValue": {
+                      "type": "string"
+                    },
+                    "options": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "value": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "description": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "value",
+                              "name"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "group": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "options": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "value": {
+                                      "type": "string"
+                                    },
+                                    "name": {
+                                      "type": "string"
+                                    },
+                                    "description": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "value",
+                                    "name"
+                                  ]
+                                }
+                              }
+                            },
+                            "required": [
+                              "group",
+                              "name",
+                              "options"
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "id",
+                    "name",
+                    "currentValue",
+                    "options"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "boolean"
+                      ]
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "category": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "currentValue": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "id",
+                    "name",
+                    "currentValue"
+                  ]
+                }
+              ]
+            }
+          },
+          "reportedAt": {
+            "type": "number"
+          }
+        },
+        "default": null,
+        "required": [
+          "target",
+          "configOptions",
+          "reportedAt"
         ]
       },
       "Agent": {
@@ -764,7 +953,8 @@
               "pi",
               "devin",
               "claude-managed",
-              "opencode"
+              "opencode",
+              "acp"
             ]
           },
           "harnessProvider": {
@@ -779,6 +969,7 @@
               "devin",
               "claude-managed",
               "opencode",
+              "acp",
               null
             ]
           },
@@ -2426,7 +2617,8 @@
               "pi",
               "opencode",
               "devin",
-              "gemini"
+              "gemini",
+              "acp"
             ]
           },
           "model": {
@@ -3444,6 +3636,9 @@
               "task_rejected",
               "task_claimed",
               "task_claim_rejected_affinity",
+              "task_dispatch_rejected_affinity",
+              "task_authorization_rejected",
+              "task_recovery_authorization",
               "task_released",
               "channel_message",
               "service_registered",
@@ -4119,6 +4314,27 @@
                     "type",
                     "scheduleId"
                   ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "event"
+                      ]
+                    },
+                    "eventName": {
+                      "type": "string",
+                      "enum": [
+                        "slack.message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "eventName"
+                  ]
                 }
               ]
             },
@@ -4162,6 +4378,31 @@
           "triggerSchema": {
             "type": "object",
             "additionalProperties": {}
+          },
+          "params": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "requiredParams": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "requires": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "slack",
+                "github",
+                "linear",
+                "jira",
+                "gsc",
+                "agentmail",
+                "agentfs"
+              ]
+            }
           },
           "dir": {
             "type": "string",
@@ -4334,6 +4575,31 @@
             ],
             "additionalProperties": {},
             "description": "Optional JSON-Schema describing the expected trigger payload shape. Pass an object to set/replace; pass null to clear; omit to leave unchanged. Validator subset: type, required, properties, enum, const, items. Other JSON-Schema keywords are silently ignored."
+          },
+          "params": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "requiredParams": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "requires": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "slack",
+                "github",
+                "linear",
+                "jira",
+                "gsc",
+                "agentmail",
+                "agentfs"
+              ]
+            }
           }
         }
       },
@@ -4629,6 +4895,27 @@
                     "type",
                     "scheduleId"
                   ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "event"
+                      ]
+                    },
+                    "eventName": {
+                      "type": "string",
+                      "enum": [
+                        "slack.message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "eventName"
+                  ]
                 }
               ]
             }
@@ -4671,6 +4958,31 @@
           "triggerSchema": {
             "type": "object",
             "additionalProperties": {}
+          },
+          "params": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "requiredParams": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "requires": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "slack",
+                "github",
+                "linear",
+                "jira",
+                "gsc",
+                "agentmail",
+                "agentfs"
+              ]
+            }
           },
           "dir": {
             "type": "string",
@@ -8123,6 +8435,7 @@
                         "status": {
                           "type": "string",
                           "enum": [
+                            "draft",
                             "backlog",
                             "unassigned",
                             "offered",
@@ -8551,13 +8864,24 @@
                     },
                     "total": {
                       "type": "number"
+                    },
+                    "truncated": {
+                      "type": "boolean"
+                    },
+                    "rowLimit": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
                     }
                   },
                   "required": [
                     "columns",
                     "rows",
                     "elapsed",
-                    "total"
+                    "total",
+                    "truncated",
+                    "rowLimit"
                   ]
                 }
               }
@@ -8643,7 +8967,8 @@
                       "pi",
                       "devin",
                       "claude-managed",
-                      "opencode"
+                      "opencode",
+                      "acp"
                     ]
                   },
                   "harness_provider": {
@@ -8654,7 +8979,8 @@
                       "pi",
                       "devin",
                       "claude-managed",
-                      "opencode"
+                      "opencode",
+                      "acp"
                     ]
                   },
                   "runtimeInstanceId": {
@@ -8921,7 +9247,8 @@
                       "pi",
                       "devin",
                       "claude-managed",
-                      "opencode"
+                      "opencode",
+                      "acp"
                     ]
                   }
                 },
@@ -9031,7 +9358,8 @@
                       "claude",
                       "codex",
                       "pi",
-                      "opencode"
+                      "opencode",
+                      "acp"
                     ]
                   },
                   "model": {
@@ -9058,6 +9386,61 @@
                       "xhigh",
                       "max",
                       null
+                    ]
+                  },
+                  "acp": {
+                    "type": "object",
+                    "properties": {
+                      "target": {
+                        "type": "string",
+                        "enum": [
+                          "opencode",
+                          "custom"
+                        ]
+                      },
+                      "command": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "minLength": 1
+                      },
+                      "args": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "envKeys": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                        }
+                      },
+                      "modelEnvKey": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                      },
+                      "options": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "boolean"
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "required": [
+                      "target"
                     ]
                   }
                 },
@@ -9808,6 +10191,9 @@
                   },
                   "latest_model": {
                     "$ref": "#/components/schemas/AgentLatestModel"
+                  },
+                  "acp": {
+                    "$ref": "#/components/schemas/AgentAcpStatus"
                   }
                 }
               }
@@ -9939,6 +10325,7 @@
                         "devin",
                         "claude-managed",
                         "opencode",
+                        "acp",
                         null
                       ]
                     },
@@ -9954,6 +10341,7 @@
                         "devin",
                         "claude-managed",
                         "opencode",
+                        "acp",
                         null
                       ]
                     },
@@ -10071,6 +10459,7 @@
                               "devin",
                               "claude-managed",
                               "opencode",
+                              "acp",
                               null
                             ]
                           },
@@ -10086,6 +10475,7 @@
                               "devin",
                               "claude-managed",
                               "opencode",
+                              "acp",
                               null
                             ]
                           },
@@ -10479,7 +10869,8 @@
                             "pending",
                             "approved",
                             "rejected",
-                            "timeout"
+                            "timeout",
+                            "cancelled"
                           ]
                         },
                         "responses": {
@@ -10496,6 +10887,12 @@
                           ]
                         },
                         "resolvedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "resolutionReason": {
                           "type": [
                             "string",
                             "null"
@@ -10563,6 +10960,7 @@
                         "responses",
                         "resolvedBy",
                         "resolvedAt",
+                        "resolutionReason",
                         "timeoutSeconds",
                         "expiresAt",
                         "notificationChannels",
@@ -10793,7 +11191,8 @@
                               "pending",
                               "approved",
                               "rejected",
-                              "timeout"
+                              "timeout",
+                              "cancelled"
                             ]
                           },
                           "responses": {
@@ -10810,6 +11209,12 @@
                             ]
                           },
                           "resolvedAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "resolutionReason": {
                             "type": [
                               "string",
                               "null"
@@ -10877,6 +11282,7 @@
                           "responses",
                           "resolvedBy",
                           "resolvedAt",
+                          "resolutionReason",
                           "timeoutSeconds",
                           "expiresAt",
                           "notificationChannels",
@@ -11080,7 +11486,8 @@
                             "pending",
                             "approved",
                             "rejected",
-                            "timeout"
+                            "timeout",
+                            "cancelled"
                           ]
                         },
                         "responses": {
@@ -11097,6 +11504,12 @@
                           ]
                         },
                         "resolvedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "resolutionReason": {
                           "type": [
                             "string",
                             "null"
@@ -11164,6 +11577,7 @@
                         "responses",
                         "resolvedBy",
                         "resolvedAt",
+                        "resolutionReason",
                         "timeoutSeconds",
                         "expiresAt",
                         "notificationChannels",
@@ -11397,7 +11811,8 @@
                             "pending",
                             "approved",
                             "rejected",
-                            "timeout"
+                            "timeout",
+                            "cancelled"
                           ]
                         },
                         "responses": {
@@ -11414,6 +11829,12 @@
                           ]
                         },
                         "resolvedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "resolutionReason": {
                           "type": [
                             "string",
                             "null"
@@ -11481,6 +11902,7 @@
                         "responses",
                         "resolvedBy",
                         "resolvedAt",
+                        "resolutionReason",
                         "timeoutSeconds",
                         "expiresAt",
                         "notificationChannels",
@@ -17275,6 +17697,9 @@
                             "items": {
                               "type": "string"
                             }
+                          },
+                          "accessCount": {
+                            "type": "number"
                           }
                         },
                         "required": [
@@ -17284,7 +17709,8 @@
                           "similarity",
                           "source",
                           "scope",
-                          "tags"
+                          "tags",
+                          "accessCount"
                         ]
                       }
                     }
@@ -23169,7 +23595,8 @@
                 "pi",
                 "opencode",
                 "devin",
-                "gemini"
+                "gemini",
+                "acp"
               ]
             },
             "required": true,
@@ -23249,7 +23676,8 @@
                 "pi",
                 "opencode",
                 "devin",
-                "gemini"
+                "gemini",
+                "acp"
               ]
             },
             "required": true,
@@ -23362,7 +23790,8 @@
                 "pi",
                 "opencode",
                 "devin",
-                "gemini"
+                "gemini",
+                "acp"
               ]
             },
             "required": true,
@@ -23443,7 +23872,8 @@
                 "pi",
                 "opencode",
                 "devin",
-                "gemini"
+                "gemini",
+                "acp"
               ]
             },
             "required": true,
@@ -23983,6 +24413,31 @@
                     "type": "object",
                     "additionalProperties": {}
                   },
+                  "params": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  "requiredParams": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "requires": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "slack",
+                        "github",
+                        "linear",
+                        "jira",
+                        "gsc",
+                        "agentmail",
+                        "agentfs"
+                      ]
+                    }
+                  },
                   "delayMs": {
                     "type": "integer"
                   },
@@ -24126,6 +24581,31 @@
                     "scriptArgs": {
                       "type": "object",
                       "additionalProperties": {}
+                    },
+                    "params": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    "requiredParams": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "requires": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "slack",
+                          "github",
+                          "linear",
+                          "jira",
+                          "gsc",
+                          "agentmail",
+                          "agentfs"
+                        ]
+                      }
                     },
                     "createdAt": {
                       "type": "string",
@@ -24459,6 +24939,31 @@
                                 "type": "object",
                                 "additionalProperties": {}
                               },
+                              "params": {
+                                "type": "object",
+                                "additionalProperties": {}
+                              },
+                              "requiredParams": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "requires": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "enum": [
+                                    "slack",
+                                    "github",
+                                    "linear",
+                                    "jira",
+                                    "gsc",
+                                    "agentmail",
+                                    "agentfs"
+                                  ]
+                                }
+                              },
                               "createdAt": {
                                 "type": "string",
                                 "format": "date-time"
@@ -24617,6 +25122,31 @@
                               "scriptArgs": {
                                 "type": "object",
                                 "additionalProperties": {}
+                              },
+                              "params": {
+                                "type": "object",
+                                "additionalProperties": {}
+                              },
+                              "requiredParams": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "requires": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "enum": [
+                                    "slack",
+                                    "github",
+                                    "linear",
+                                    "jira",
+                                    "gsc",
+                                    "agentmail",
+                                    "agentfs"
+                                  ]
+                                }
                               },
                               "createdAt": {
                                 "type": "string",
@@ -24819,6 +25349,31 @@
                         "scriptArgs": {
                           "type": "object",
                           "additionalProperties": {}
+                        },
+                        "params": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requiredParams": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "requires": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "slack",
+                              "github",
+                              "linear",
+                              "jira",
+                              "gsc",
+                              "agentmail",
+                              "agentfs"
+                            ]
+                          }
                         },
                         "createdAt": {
                           "type": "string",
@@ -25037,6 +25592,31 @@
                       "type": "object",
                       "additionalProperties": {}
                     },
+                    "params": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    "requiredParams": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "requires": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "slack",
+                          "github",
+                          "linear",
+                          "jira",
+                          "gsc",
+                          "agentmail",
+                          "agentfs"
+                        ]
+                      }
+                    },
                     "createdAt": {
                       "type": "string",
                       "format": "date-time"
@@ -25210,6 +25790,31 @@
                       "null"
                     ],
                     "additionalProperties": {}
+                  },
+                  "params": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  "requiredParams": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "requires": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "slack",
+                        "github",
+                        "linear",
+                        "jira",
+                        "gsc",
+                        "agentmail",
+                        "agentfs"
+                      ]
+                    }
                   }
                 }
               }
@@ -25348,6 +25953,31 @@
                     "scriptArgs": {
                       "type": "object",
                       "additionalProperties": {}
+                    },
+                    "params": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    "requiredParams": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "requires": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "slack",
+                          "github",
+                          "linear",
+                          "jira",
+                          "gsc",
+                          "agentmail",
+                          "agentfs"
+                        ]
+                      }
                     },
                     "createdAt": {
                       "type": "string",
@@ -25543,6 +26173,31 @@
                       "null"
                     ],
                     "additionalProperties": {}
+                  },
+                  "params": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  "requiredParams": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "requires": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "slack",
+                        "github",
+                        "linear",
+                        "jira",
+                        "gsc",
+                        "agentmail",
+                        "agentfs"
+                      ]
+                    }
                   }
                 }
               }
@@ -25681,6 +26336,31 @@
                     "scriptArgs": {
                       "type": "object",
                       "additionalProperties": {}
+                    },
+                    "params": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    "requiredParams": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "requires": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "slack",
+                          "github",
+                          "linear",
+                          "jira",
+                          "gsc",
+                          "agentmail",
+                          "agentfs"
+                        ]
+                      }
                     },
                     "createdAt": {
                       "type": "string",
@@ -31622,6 +32302,7 @@
                     "status": {
                       "type": "string",
                       "enum": [
+                        "draft",
                         "backlog",
                         "unassigned",
                         "offered",
@@ -32120,7 +32801,8 @@
                       "pi",
                       "opencode",
                       "devin",
-                      "gemini"
+                      "gemini",
+                      "acp"
                     ]
                   },
                   "createdAt": {
@@ -32746,6 +33428,7 @@
                                   "status": {
                                     "type": "string",
                                     "enum": [
+                                      "draft",
                                       "backlog",
                                       "unassigned",
                                       "offered",
@@ -32845,7 +33528,8 @@
                                       "pi",
                                       "devin",
                                       "claude-managed",
-                                      "opencode"
+                                      "opencode",
+                                      "acp"
                                     ]
                                   },
                                   "requestedByUserId": {
@@ -32897,6 +33581,7 @@
                           "latestStatus": {
                             "type": "string",
                             "enum": [
+                              "draft",
                               "backlog",
                               "unassigned",
                               "offered",
@@ -34562,7 +35247,8 @@
                         "killed",
                         "import_violation",
                         "eval_error",
-                        "executor_error"
+                        "executor_error",
+                        "capacity_exceeded"
                       ]
                     },
                     "runtimeError": {
@@ -36667,12 +37353,16 @@
                     },
                     "steeringEnabled": {
                       "type": "boolean"
+                    },
+                    "multiRuntimeEnabled": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
                     "agents",
                     "tasks",
-                    "steeringEnabled"
+                    "steeringEnabled",
+                    "multiRuntimeEnabled"
                   ]
                 }
               }
@@ -36784,6 +37474,206 @@
                       "required": [
                         "total"
                       ]
+                    },
+                    "retention": {
+                      "type": "object",
+                      "properties": {
+                        "sessionLogs": {
+                          "type": "object",
+                          "properties": {
+                            "at": {
+                              "type": "string"
+                            },
+                            "rowsDeleted": {
+                              "type": "number"
+                            },
+                            "batches": {
+                              "type": "number"
+                            },
+                            "durationMs": {
+                              "type": "number"
+                            },
+                            "dryRun": {
+                              "type": "boolean"
+                            },
+                            "cumulativeRowsDeleted": {
+                              "type": "number"
+                            },
+                            "outcome": {
+                              "type": "string",
+                              "enum": [
+                                "converged",
+                                "budget_exhausted",
+                                "error"
+                              ]
+                            },
+                            "drained": {
+                              "type": "boolean"
+                            },
+                            "backlogRemaining": {
+                              "type": "number"
+                            },
+                            "batchSize": {
+                              "type": "number"
+                            },
+                            "slowestStatementMs": {
+                              "type": "number"
+                            },
+                            "lastError": {
+                              "type": "string"
+                            },
+                            "lastErrorAt": {
+                              "type": "string"
+                            },
+                            "lastSuccessAt": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "at",
+                            "rowsDeleted",
+                            "batches",
+                            "durationMs",
+                            "dryRun",
+                            "cumulativeRowsDeleted",
+                            "outcome",
+                            "drained",
+                            "backlogRemaining",
+                            "batchSize",
+                            "slowestStatementMs"
+                          ]
+                        },
+                        "agentLog": {
+                          "type": "object",
+                          "properties": {
+                            "at": {
+                              "type": "string"
+                            },
+                            "rowsDeleted": {
+                              "type": "number"
+                            },
+                            "batches": {
+                              "type": "number"
+                            },
+                            "durationMs": {
+                              "type": "number"
+                            },
+                            "dryRun": {
+                              "type": "boolean"
+                            },
+                            "cumulativeRowsDeleted": {
+                              "type": "number"
+                            },
+                            "outcome": {
+                              "type": "string",
+                              "enum": [
+                                "converged",
+                                "budget_exhausted",
+                                "error"
+                              ]
+                            },
+                            "drained": {
+                              "type": "boolean"
+                            },
+                            "backlogRemaining": {
+                              "type": "number"
+                            },
+                            "batchSize": {
+                              "type": "number"
+                            },
+                            "slowestStatementMs": {
+                              "type": "number"
+                            },
+                            "lastError": {
+                              "type": "string"
+                            },
+                            "lastErrorAt": {
+                              "type": "string"
+                            },
+                            "lastSuccessAt": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "at",
+                            "rowsDeleted",
+                            "batches",
+                            "durationMs",
+                            "dryRun",
+                            "cumulativeRowsDeleted",
+                            "outcome",
+                            "drained",
+                            "backlogRemaining",
+                            "batchSize",
+                            "slowestStatementMs"
+                          ]
+                        },
+                        "events": {
+                          "type": "object",
+                          "properties": {
+                            "at": {
+                              "type": "string"
+                            },
+                            "rowsDeleted": {
+                              "type": "number"
+                            },
+                            "batches": {
+                              "type": "number"
+                            },
+                            "durationMs": {
+                              "type": "number"
+                            },
+                            "dryRun": {
+                              "type": "boolean"
+                            },
+                            "cumulativeRowsDeleted": {
+                              "type": "number"
+                            },
+                            "outcome": {
+                              "type": "string",
+                              "enum": [
+                                "converged",
+                                "budget_exhausted",
+                                "error"
+                              ]
+                            },
+                            "drained": {
+                              "type": "boolean"
+                            },
+                            "backlogRemaining": {
+                              "type": "number"
+                            },
+                            "batchSize": {
+                              "type": "number"
+                            },
+                            "slowestStatementMs": {
+                              "type": "number"
+                            },
+                            "lastError": {
+                              "type": "string"
+                            },
+                            "lastErrorAt": {
+                              "type": "string"
+                            },
+                            "lastSuccessAt": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "at",
+                            "rowsDeleted",
+                            "batches",
+                            "durationMs",
+                            "dryRun",
+                            "cumulativeRowsDeleted",
+                            "outcome",
+                            "drained",
+                            "backlogRemaining",
+                            "batchSize",
+                            "slowestStatementMs"
+                          ]
+                        }
+                      }
                     }
                   },
                   "required": [
@@ -36792,7 +37682,8 @@
                     "workflows",
                     "pages",
                     "sessions",
-                    "skills"
+                    "skills",
+                    "retention"
                   ]
                 }
               }
@@ -37085,6 +37976,31 @@
                             "type": "object",
                             "additionalProperties": {}
                           },
+                          "params": {
+                            "type": "object",
+                            "additionalProperties": {}
+                          },
+                          "requiredParams": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "requires": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "slack",
+                                "github",
+                                "linear",
+                                "jira",
+                                "gsc",
+                                "agentmail",
+                                "agentfs"
+                              ]
+                            }
+                          },
                           "createdAt": {
                             "type": "string",
                             "format": "date-time"
@@ -37292,7 +38208,7 @@
     "/status": {
       "get": {
         "summary": "Identity + setup readiness + live activity for the swarm dashboard",
-        "description": "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; the 7 setup milestones each emit `unverified | configured | verified`; activity counts agents alive in the last 5 min and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set.",
+        "description": "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set.",
         "tags": [
           "Status"
         ],
@@ -37365,10 +38281,14 @@
                             "type": "string",
                             "enum": [
                               "harness",
+                              "embeddings",
                               "slack",
                               "github",
                               "linear",
                               "jira",
+                              "gsc",
+                              "agentmail",
+                              "agentfs",
                               "workers",
                               "first_task"
                             ]
@@ -37398,7 +38318,8 @@
                               "pi",
                               "devin",
                               "claude-managed",
-                              "opencode"
+                              "opencode",
+                              "acp"
                             ]
                           },
                           "providers": {
@@ -37414,7 +38335,8 @@
                                     "pi",
                                     "devin",
                                     "claude-managed",
-                                    "opencode"
+                                    "opencode",
+                                    "acp"
                                   ]
                                 },
                                 "state": {
@@ -37494,6 +38416,136 @@
                         "capabilities"
                       ]
                     },
+                    "automations": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "schedule",
+                              "workflow"
+                            ]
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "running",
+                              "needs_setup"
+                            ]
+                          },
+                          "missing": {
+                            "type": "object",
+                            "properties": {
+                              "params": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "integrations": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "enum": [
+                                    "slack",
+                                    "github",
+                                    "linear",
+                                    "jira",
+                                    "gsc",
+                                    "agentmail",
+                                    "agentfs"
+                                  ]
+                                }
+                              }
+                            },
+                            "required": [
+                              "params",
+                              "integrations"
+                            ]
+                          },
+                          "fixes": {
+                            "type": "array",
+                            "items": {
+                              "oneOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "enum": [
+                                        "param"
+                                      ]
+                                    },
+                                    "key": {
+                                      "type": "string"
+                                    },
+                                    "url": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "type",
+                                    "key",
+                                    "url"
+                                  ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "enum": [
+                                        "integration"
+                                      ]
+                                    },
+                                    "key": {
+                                      "type": "string",
+                                      "enum": [
+                                        "slack",
+                                        "github",
+                                        "linear",
+                                        "jira",
+                                        "gsc",
+                                        "agentmail",
+                                        "agentfs"
+                                      ]
+                                    },
+                                    "url": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "type",
+                                    "key",
+                                    "url"
+                                  ]
+                                }
+                              ]
+                            }
+                          },
+                          "fixUrl": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "kind",
+                          "state",
+                          "missing",
+                          "fixes",
+                          "fixUrl"
+                        ]
+                      }
+                    },
                     "health": {
                       "type": "string",
                       "enum": [
@@ -37508,6 +38560,7 @@
                     "setup",
                     "activity",
                     "agent_fs",
+                    "automations",
                     "health"
                   ]
                 }
@@ -37553,7 +38606,8 @@
                       "pi",
                       "devin",
                       "claude-managed",
-                      "opencode"
+                      "opencode",
+                      "acp"
                     ]
                   }
                 },
@@ -37827,6 +38881,7 @@
                               "status": {
                                 "type": "string",
                                 "enum": [
+                                  "draft",
                                   "backlog",
                                   "unassigned",
                                   "offered",
@@ -37926,7 +38981,8 @@
                                   "pi",
                                   "devin",
                                   "claude-managed",
-                                  "opencode"
+                                  "opencode",
+                                  "acp"
                                 ]
                               },
                               "requestedByUserId": {
@@ -38101,6 +39157,9 @@
                       "xhigh",
                       "max"
                     ]
+                  },
+                  "draft": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -38123,6 +39182,62 @@
           },
           "400": {
             "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{id}/promote-draft": {
+      "post": {
+        "summary": "Promote a draft task out of the pre-dispatch draft state",
+        "description": "Transitions a `draft` task (#1240 — created with attachments still uploading) to its normal dispatch-eligible status: `offered` if it was offered to an agent, `pending` if it has an owning agent (the common case — UI-composer tasks default to Lead), otherwise `unassigned`. Called by the UI composer once its attachment upload batch settles, whether every file uploaded, some failed, or all failed — a draft must never be stranded by an upload error. Idempotent: calling it on a task that already left `draft` returns the current task unchanged rather than erroring, so a retried request is safe.",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Task promoted (or already out of draft)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentTask"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller does not own this task",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -38214,7 +39329,8 @@
                           "codex",
                           "pi",
                           "claude-managed",
-                          "opencode"
+                          "opencode",
+                          "acp"
                         ]
                       },
                       "model": {
@@ -39462,6 +40578,7 @@
                     "resumeTaskStatus": {
                       "type": "string",
                       "enum": [
+                        "draft",
                         "backlog",
                         "unassigned",
                         "offered",
@@ -39678,7 +40795,7 @@
       "get": {
         "summary": "List task templates ('To start' bucket)",
         "tags": [
-          "Task Templates"
+          "Tasks"
         ],
         "security": [
           {
@@ -43264,7 +44381,7 @@
         "summary": "Fire a run-scoped event signal",
         "description": "Emits an event onto the workflow event bus with `_runId` injected. Used by wait nodes in `event` mode with `scope: 'run'`. The body's `name` is the bus event name; `payload` is forwarded as-is plus `_runId`.",
         "tags": [
-          "WorkflowEvents"
+          "Workflows"
         ],
         "security": [
           {
@@ -43362,7 +44479,7 @@
         "summary": "Fire a global workflow event signal",
         "description": "Emits an event onto the workflow event bus. Wait-states with `scope: 'global'` may match. Run-scoped waits will NOT match this broadcast unless the payload carries a matching `workflowRunId`.",
         "tags": [
-          "WorkflowEvents"
+          "Workflows"
         ],
         "security": [
           {
@@ -43550,6 +44667,31 @@
                           },
                           "enabled": {
                             "type": "boolean"
+                          },
+                          "params": {
+                            "type": "object",
+                            "additionalProperties": {}
+                          },
+                          "requiredParams": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "requires": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "slack",
+                                "github",
+                                "linear",
+                                "jira",
+                                "gsc",
+                                "agentmail",
+                                "agentfs"
+                              ]
+                            }
                           },
                           "dir": {
                             "type": "string",
@@ -43773,6 +44915,27 @@
                             "type",
                             "scheduleId"
                           ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "event"
+                              ]
+                            },
+                            "eventName": {
+                              "type": "string",
+                              "enum": [
+                                "slack.message"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "eventName"
+                          ]
                         }
                       ]
                     }
@@ -43815,6 +44978,31 @@
                   "triggerSchema": {
                     "type": "object",
                     "additionalProperties": {}
+                  },
+                  "params": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  "requiredParams": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "requires": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "slack",
+                        "github",
+                        "linear",
+                        "jira",
+                        "gsc",
+                        "agentmail",
+                        "agentfs"
+                      ]
+                    }
                   },
                   "dir": {
                     "type": "string",
@@ -44084,6 +45272,27 @@
                             "type",
                             "scheduleId"
                           ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "event"
+                              ]
+                            },
+                            "eventName": {
+                              "type": "string",
+                              "enum": [
+                                "slack.message"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "eventName"
+                          ]
                         }
                       ]
                     }
@@ -44135,6 +45344,31 @@
                       "null"
                     ],
                     "additionalProperties": {}
+                  },
+                  "params": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  "requiredParams": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "requires": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "slack",
+                        "github",
+                        "linear",
+                        "jira",
+                        "gsc",
+                        "agentmail",
+                        "agentfs"
+                      ]
+                    }
                   },
                   "dir": {
                     "type": [

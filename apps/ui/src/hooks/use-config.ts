@@ -15,6 +15,7 @@ import {
   setEmbedConnection,
   updateConnection as updateStoredConnection,
 } from "@/lib/config";
+import { uiDeploymentConfig } from "@/lib/deployment-config";
 
 export interface PendingConnection {
   apiUrl: string;
@@ -47,6 +48,8 @@ interface ConfigContextValue {
   resetConfig: () => void;
   /** True if active connection has an apiKey */
   isConfigured: boolean;
+  /** True when build-time settings own the only available connection */
+  connectionLocked: boolean;
   /** Pending connection from URL params (not yet saved) */
   pendingConnection: PendingConnection | null;
   /** Clear the pending connection state */
@@ -93,6 +96,13 @@ function extractUrlParams(
           ...(name ? { name } : {}),
         }
       : null;
+
+  if (uiDeploymentConfig.apiUrl) {
+    return {
+      pendingConnection: null,
+      pendingIdentity: uiDeploymentConfig.userId ? null : pendingIdentity,
+    };
+  }
 
   if (!apiUrl || !apiKey) {
     return { pendingConnection: null, pendingIdentity };
@@ -234,6 +244,7 @@ export function useConfigProvider() {
   }, [refreshState]);
 
   const isConfigured = !!config.apiKey;
+  const connectionLocked = Boolean(uiDeploymentConfig.apiUrl);
 
   return {
     connections: state.connections,
@@ -246,6 +257,7 @@ export function useConfigProvider() {
     setConfig,
     resetConfig,
     isConfigured,
+    connectionLocked,
     pendingConnection,
     clearPendingConnection,
     pendingIdentity,

@@ -9,6 +9,8 @@ import {
 
 describe("getContextWindowSize", () => {
   test("returns 1M for fable and mythos models", () => {
+    expect(getContextWindowSize("claude-fable-5-1")).toBe(1_000_000);
+    expect(getContextWindowSize("claude-mythos-5-1")).toBe(1_000_000);
     expect(getContextWindowSize("claude-fable-5")).toBe(1_000_000);
     expect(getContextWindowSize("claude-mythos-5")).toBe(1_000_000);
     expect(getContextWindowSize("fable")).toBe(1_000_000);

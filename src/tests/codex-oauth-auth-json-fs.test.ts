@@ -1,4 +1,7 @@
 import { describe, expect, it } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import { join } from "node:path";
 import { materializeCodexAuthJson } from "../providers/codex-oauth/auth-json-fs.js";
 import type { CodexOAuthCredentials } from "../providers/codex-oauth/types.js";
 
@@ -107,6 +110,22 @@ describe("materializeCodexAuthJson", () => {
         },
       });
       expect(paths[0]).toBe("/home/w/.codex/auth.json.tmp");
+    }
+  });
+
+  it("honours a runtime HOME override instead of the cached os.homedir()", async () => {
+    // Bun resolves os.homedir() once at process start. Tests and harness
+    // sandboxes isolate via process.env.HOME, so the writer must read that.
+    const originalHome = process.env.HOME;
+    const tmpHome = await mkdtemp(join(os.tmpdir(), "codex-auth-json-home-"));
+    process.env.HOME = tmpHome;
+    try {
+      await materializeCodexAuthJson(0, mockCreds);
+      expect(await Bun.file(join(tmpHome, ".codex", "auth.json")).exists()).toBe(true);
+      expect(tmpHome).not.toBe(os.homedir());
+    } finally {
+      process.env.HOME = originalHome;
+      await rm(tmpHome, { recursive: true, force: true });
     }
   });
 });

@@ -18,9 +18,15 @@ export type SiblingTaskInfo = {
   agentId: string | null;
   agentName: string | null;
   description: string;
-  // Most recent change timestamp (ISO string). Used for relative-time render
-  // and for picking the "best" sibling to wire as parent.
+  // Most recent change timestamp (ISO string). Used for the "last active"
+  // relative-time render and for picking the "best" sibling to wire as parent.
+  // NOTE: this ticks on every progress event, so it is NOT a proxy for when
+  // the sibling (or the user input behind it) started.
   updatedAt: string;
+  // Creation timestamp (ISO string) — when the user input behind this sibling
+  // actually arrived. Optional so existing callers keep compiling; when it is
+  // absent we omit the "started" clause rather than guess from `updatedAt`.
+  createdAt?: string;
 };
 
 const DESCRIPTION_TRUNCATE = 200;
@@ -100,8 +106,15 @@ export function renderSiblingBlock(
       : s.agentId
         ? `agent:${s.agentId}`
         : "agent:unassigned";
-    const rel = formatRelativeTime(s.updatedAt, now);
-    lines.push(`- [${s.status}] task:${s.id} — ${agentLabel} — started ${rel} ago`);
+    // `updatedAt` advances on every progress event, so rendering it as
+    // "started" made a minutes-old sibling look seconds-old and invited the
+    // reader to conclude two unrelated user inputs were a double-submit.
+    // Report each timestamp under its own name instead.
+    const lastActive = `last active ${formatRelativeTime(s.updatedAt, now)} ago`;
+    const timing = s.createdAt
+      ? `started ${formatRelativeTime(s.createdAt, now)} ago, ${lastActive}`
+      : lastActive;
+    lines.push(`- [${s.status}] task:${s.id} — ${agentLabel} — ${timing}`);
     lines.push(`  "${truncateForBlock(s.description)}"`);
   }
   lines.push("</sibling_tasks_in_progress>");

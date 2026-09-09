@@ -24,6 +24,7 @@ import {
   markSteeringDelivered,
   markSteeringHandled,
   pauseTask,
+  promoteDraftTask,
   resumeTask,
   supersedeTask,
   updateAgentStatusFromCapacity,
@@ -233,10 +234,35 @@ const createTask = route({
     model: z.string().optional(),
     modelTier: ModelTierSchema.optional(),
     effort: ReasoningEffortSchema.optional(),
+    /**
+     * Create in `draft` status instead of the normal pending/unassigned/offered
+     * status (#1240) — the task exists and is visible to its owner, but is not
+     * dispatch-eligible. Used by the UI composer while attachments are still
+     * uploading; the caller MUST promote it via `POST /api/tasks/{id}/promote-draft`
+     * once the upload batch settles (or it self-promotes on a timeout).
+     */
+    draft: z.boolean().optional(),
   }),
   responses: {
     201: { description: "Task created", schema: AgentTaskSchema },
     400: { description: "Validation error" },
+  },
+});
+
+const promoteDraftTaskRoute = route({
+  method: "post",
+  path: "/api/tasks/{id}/promote-draft",
+  pattern: ["api", "tasks", null, "promote-draft"],
+  summary: "Promote a draft task out of the pre-dispatch draft state",
+  description:
+    "Transitions a `draft` task (#1240 — created with attachments still uploading) to its normal dispatch-eligible status: `offered` if it was offered to an agent, `pending` if it has an owning agent (the common case — UI-composer tasks default to Lead), otherwise `unassigned`. Called by the UI composer once its attachment upload batch settles, whether every file uploaded, some failed, or all failed — a draft must never be stranded by an upload error. Idempotent: calling it on a task that already left `draft` returns the current task unchanged rather than erroring, so a retried request is safe.",
+  tags: ["Tasks"],
+  params: z.object({ id: z.string() }),
+  rbac: { permission: "task.action.own" },
+  responses: {
+    200: { description: "Task promoted (or already out of draft)", schema: AgentTaskSchema },
+    403: { description: "Caller does not own this task" },
+    404: { description: "Task not found" },
   },
 });
 
@@ -621,6 +647,42 @@ async function canSteerTask(
   return can({ principal, verb, resource, source: "http" }).allow;
 }
 
+/**
+ * Ownership gate for `task.action.own` — single verb, no `.any` counterpart:
+ * the underlying `requester-owns-task` policy already lets any non-user
+ * principal (agent/operator) through, so agent-side callers never need a
+ * separate escalated verb. User principals must match the task's
+ * `requestedByUserId`. Used by `POST /api/tasks/{id}/promote-draft`.
+ */
+async function canActOnOwnTask(
+  req: IncomingMessage,
+  myAgentId: string | undefined,
+  task: AgentTask,
+): Promise<boolean> {
+  const resource: RbacResource = {
+    kind: "task",
+    taskId: task.id,
+    requestedByUserId: task.requestedByUserId,
+    creatorAgentId: task.creatorAgentId,
+    agentId: task.agentId,
+  };
+  let principal: RbacPrincipal;
+
+  const auth = getRequestAuth(req);
+  if (auth?.kind === "operator") {
+    principal = { kind: "operator" };
+  } else if (auth?.kind === "user") {
+    principal = { kind: "user", userId: auth.userId };
+  } else {
+    if (!myAgentId) return false;
+    const agent = await getAgentById(myAgentId);
+    if (!agent) return false;
+    principal = { kind: "agent", agentId: myAgentId, isLead: agent.isLead };
+  }
+
+  return can({ principal, verb: "task.action.own", resource, source: "http" }).allow;
+}
+
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
 export async function handleTasks(
@@ -773,6 +835,7 @@ export async function handleTasks(
         outputSchema: parsed.body.outputSchema || undefined,
         contextKey: parsed.body.contextKey || undefined,
         requestedByUserId,
+        status: parsed.body.draft ? "draft" : undefined,
         ...splitLegacyModelAlias({
           model: parsed.body.model,
           modelTier: parsed.body.modelTier,
@@ -801,6 +864,36 @@ export async function handleTasks(
       console.error("[HTTP] Failed to create task:", error);
       jsonError(res, "Failed to create task", 500);
     }
+    return true;
+  }
+
+  if (promoteDraftTaskRoute.match(req.method, pathSegments)) {
+    const parsed = await promoteDraftTaskRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+
+    const existingTask = await getTaskById(parsed.params.id);
+    if (!existingTask) {
+      jsonError(res, "Task not found", 404);
+      return true;
+    }
+
+    const allowed = await canActOnOwnTask(req, myAgentId, existingTask);
+    if (!allowed) {
+      jsonError(res, "Not authorized to act on this task", 403);
+      return true;
+    }
+
+    // Idempotent: a task already out of `draft` (already promoted, or a
+    // retried request) is returned as-is rather than erroring — the UI calls
+    // this exactly once per upload batch but must stay safe under retry.
+    const promoted =
+      existingTask.status === "draft" ? await promoteDraftTask(parsed.params.id) : existingTask;
+    if (!promoted) {
+      jsonError(res, "Task not found", 404);
+      return true;
+    }
+
+    promoteDraftTaskRoute.respond(res, 200, promoted);
     return true;
   }
 

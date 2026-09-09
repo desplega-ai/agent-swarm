@@ -118,6 +118,7 @@ export function createUserServer(user: User): McpServer {
     if (denied) return denied;
     return sendTaskHandler(userCtx(user, info.sessionId), {
       offerMode: false,
+      leadOnly: false,
       allowDuplicate: false,
       overrideSlackContext: false,
       ...args,

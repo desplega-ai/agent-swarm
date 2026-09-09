@@ -1,0 +1,137 @@
+---
+title: Microsoft Graph
+description: Connect Microsoft 365 to Agent Swarm through the blessed Microsoft Graph OpenAPI client and delegated OAuth.
+---
+
+Agent Swarm includes a narrow, reviewed [Microsoft Graph v1.0](https://learn.microsoft.com/en-us/graph/overview) connection for Microsoft 365. It exposes typed script methods for user profiles, Teams channels and messages, Outlook mail, and OneDrive folder listings.
+
+<Callout type="warn">
+This connection supports **delegated access only**: a signed-in work or school user authorizes the swarm to act on their behalf through the [OAuth 2.0 authorization code flow](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-auth-code-flow). App-only access is not available until Agent Swarm supports the `client_credentials` grant.
+</Callout>
+
+## What it does
+
+- **Microsoft Teams:** list [team channels](https://learn.microsoft.com/en-us/graph/api/channel-list?view=graph-rest-1.0), read [channel messages](https://learn.microsoft.com/en-us/graph/api/channel-list-messages?view=graph-rest-1.0) and [chat messages](https://learn.microsoft.com/en-us/graph/api/chat-list-messages?view=graph-rest-1.0), and [send channel messages, replies, and chat messages](https://learn.microsoft.com/en-us/graph/api/chatmessage-post?view=graph-rest-1.0).
+- **Outlook:** list the signed-in user's [mail messages](https://learn.microsoft.com/en-us/graph/api/user-list-messages?view=graph-rest-1.0) and [send mail](https://learn.microsoft.com/en-us/graph/api/user-sendmail?view=graph-rest-1.0).
+- **OneDrive:** [list items in the signed-in user's root folder](https://learn.microsoft.com/en-us/graph/api/driveitem-list-children?view=graph-rest-1.0).
+- **Users:** [read the signed-in profile or another directory user's basic profile](https://learn.microsoft.com/en-us/graph/api/user-get?view=graph-rest-1.0).
+
+The reviewed spec intentionally exposes only these operations. Scripts call them through `ctx.api.microsoftGraph` after a lead registers the blessed connection.
+
+## Setup
+
+### 1. Register a Microsoft Entra application
+
+In the Microsoft Entra admin center, open **Entra ID → App registrations → New registration**. Choose the account type that matches your organization and record the **Application (client) ID**. Microsoft recommends single-tenant registration for most internal applications; see [Register an application in Microsoft Entra ID](https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-register-app).
+
+### 2. Add the OAuth redirect URI
+
+Under **Authentication**, add a **Web** redirect URI that exactly matches the static callback shown in Agent Swarm's OAuth app dialog:
+
+```
+https://<your-swarm-api-host>/api/oauth/callback
+```
+
+Microsoft Entra only redirects to registered reply URLs, and production web redirect URIs must use HTTPS. See [Redirect URI restrictions](https://learn.microsoft.com/en-us/entra/identity-platform/reply-url).
+
+### 3. Add delegated Microsoft Graph permissions
+
+Under **API permissions → Add a permission → Microsoft Graph → Delegated permissions**, add the scopes used by the blessed operations:
+
+- `User.Read`
+- `User.ReadBasic.All`
+- `Channel.ReadBasic.All`
+- `ChannelMessage.Read.All`
+- `ChannelMessage.Send`
+- `Chat.ReadWrite`
+- `Mail.Read`
+- `Mail.Send`
+- `Files.Read`
+
+The OAuth preset also requests `openid`, `profile`, and `offline_access`. Microsoft Entra only returns a refresh token when `offline_access` is requested. Some Teams permissions require an administrator to grant consent; verify each permission in the [Microsoft Graph permissions reference](https://learn.microsoft.com/en-us/graph/permissions-reference) and use **Grant admin consent** when your tenant requires it.
+
+### 4. Create a client secret
+
+Under **Certificates & secrets → Client secrets**, create a secret and copy its **Value** immediately. Microsoft Entra does not display the value again after you leave the page. See [Add and manage application credentials](https://learn.microsoft.com/en-us/entra/identity-platform/how-to-add-credentials).
+
+Store the value only in Agent Swarm's OAuth app form. Do not place it in a script, a connection spec, or source control.
+
+### 5. Create and authorize the OAuth app
+
+In the Agent Swarm dashboard, open **Connections → OAuth Apps**, add an app, and select the **Microsoft 365 (Graph)** preset. Paste the client ID and client secret, then save and authorize it.
+
+The preset uses these Microsoft identity platform endpoints:
+
+```
+https://login.microsoftonline.com/common/oauth2/v2.0/authorize
+https://login.microsoftonline.com/common/oauth2/v2.0/token
+```
+
+For a single-tenant registration, override both URLs and replace `common` with the tenant ID or verified tenant domain. Microsoft documents `common`, `organizations`, `consumers`, and tenant identifiers as supported issuer segments in [OAuth 2.0 and OpenID Connect protocols](https://learn.microsoft.com/en-us/entra/identity-platform/v2-protocols).
+
+### 6. Register the blessed connection
+
+In **Connections**, add a connection from the catalog and choose **Microsoft Graph**. Keep the generated `microsoftGraph` slug, select the Microsoft OAuth authorization, and save. The blessed entry supplies the reviewed spec and the `https://graph.microsoft.com/v1.0` base URL; the OAuth binding is restricted to `graph.microsoft.com`.
+
+A lead can register the same connection with the `script-connections` tool. Use the authorization ID returned by the OAuth flow:
+
+```jsonc
+{
+  "action": "upsert-openapi",
+  "slug": "microsoftGraph",
+  "displayName": "Microsoft Graph",
+  "specSource": {
+    "kind": "vendored",
+    "slug": "microsoft-graph"
+  },
+  "auth": {
+    "type": "oauth",
+    "authorizationId": "<microsoft-authorization-id>",
+    "hosts": ["graph.microsoft.com"]
+  }
+}
+```
+
+The catalog slug contains a hyphen, but script connection slugs are normalized to camel case. Use `ctx.api.microsoftGraph`, not `ctx.api.microsoft-graph`.
+
+### 7. Verify from a script
+
+This example posts a delegated-user message to a Teams channel:
+
+```ts
+export default async function (args, ctx) {
+  return ctx.api.microsoftGraph.sendChannelMessage({
+    path: {
+      "team-id": args.teamId,
+      "channel-id": args.channelId,
+    },
+    body: {
+      body: {
+        contentType: "text",
+        content: args.message,
+      },
+    },
+  });
+}
+```
+
+The generated client also includes `getCurrentUser`, `getUser`, `listTeamChannels`, `listChannelMessages`, `replyToChannelMessage`, `listChatMessages`, `sendChatMessage`, `listMailMessages`, `sendMail`, and `listDriveRootChildren`.
+
+## How it works
+
+The `microsoft-graph` catalog entry points at a narrow, operator-reviewed OpenAPI façade. The connection generator turns each operation ID into a typed method under `ctx.api.microsoftGraph`. The credential broker resolves the selected OAuth authorization only at network egress and inserts it as an `Authorization: Bearer ...` header for `graph.microsoft.com`.
+
+Microsoft Entra issues the access token after the user completes the authorization code flow. The included `offline_access` scope allows Agent Swarm to refresh the delegated authorization when it expires. See the [Microsoft identity platform authorization code flow](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-auth-code-flow).
+
+## Limitations
+
+- **Delegated authorization only.** Microsoft documents client credentials for background services and daemons, but Agent Swarm's generic OAuth wrapper does not implement that grant yet. App-only Microsoft Graph access remains out of scope; see [Microsoft identity platform client credentials flow](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-client-creds-grant-flow).
+- **Teams application posting is migration-only.** Microsoft lists `ChannelMessage.Send` for delegated channel posting. The application permission is `Teamwork.Migrate.All`, which is limited to importing messages into teams and channels in migration mode. See [Send a channel message](https://learn.microsoft.com/en-us/graph/api/channel-post-messages?view=graph-rest-1.0) and [send a chat message](https://learn.microsoft.com/en-us/graph/api/chat-post-messages?view=graph-rest-1.0).
+- **No Teams bot identity or inbound mentions.** This is a Microsoft Graph data connection, not a native Teams bot or chat surface.
+- **No binary file transfer.** The first reviewed spec exposes OneDrive folder listings, but not upload/download content operations, because the current typed script client is JSON/text-oriented.
+
+## Related docs
+
+- [Script connections](/docs/guides/script-connections) — connection registration, generated clients, and OAuth bindings
+- [Scripts credential broker](/docs/guides/scripts-credential-broker) — egress allowlists and secret substitution
+- [OAuth callback migration](/docs/guides/oauth-callback-migration) — the static callback URL used by generic OAuth apps

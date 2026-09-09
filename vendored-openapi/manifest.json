@@ -122,6 +122,39 @@
       "specSha256": "780dac30c4c0bd4346626666d958b5fd63071f39b06f9c0b0273a4a1bb878977",
       "specSourceUrl": "https://www.googleapis.com/discovery/v1/apis/gmail/v1/rest",
       "specVersionPin": "gmail-discovery-v1-2026-07-22"
+    },
+    {
+      "baseUrl": "https://graph.microsoft.com/v1.0",
+      "blessedOperations": [
+        "GET /me",
+        "GET /users/{user-id}",
+        "GET /teams/{team-id}/channels",
+        "GET /teams/{team-id}/channels/{channel-id}/messages",
+        "POST /teams/{team-id}/channels/{channel-id}/messages",
+        "POST /teams/{team-id}/channels/{channel-id}/messages/{chatMessage-id}/replies",
+        "GET /chats/{chat-id}/messages",
+        "POST /chats/{chat-id}/messages",
+        "GET /me/messages",
+        "POST /me/sendMail",
+        "GET /me/drive/root/children"
+      ],
+      "categories": [
+        "communication",
+        "collaboration",
+        "email",
+        "file-storage"
+      ],
+      "docsUrl": "https://learn.microsoft.com/en-us/graph/overview",
+      "domain": "graph.microsoft.com",
+      "name": "Microsoft Graph",
+      "presetId": "microsoft",
+      "refreshMode": "operator-review",
+      "slug": "microsoft-graph",
+      "sourceSemantics": "operator-reference",
+      "specFile": "microsoft-graph.json",
+      "specSha256": "fd98713f87d5df3f0dfc15ed565fa9496ea4d818e726fc8e680e2b66de46c077",
+      "specSourceUrl": "https://github.com/microsoftgraph/msgraph-metadata/blob/0d13ff1c5e4c8e5e3acc8200de615dfb36233395/openapi/v1.0/openapi.yaml",
+      "specVersionPin": "0d13ff1c5e4c8e5e3acc8200de615dfb36233395"
     }
   ],
   "version": 1

@@ -2,9 +2,15 @@ import { Database } from "bun:sqlite";
 import { parseProviderMeta } from "@/utils/provider-metadata.ts";
 import pkg from "../../package.json";
 import { defaultAssetKey, normalizeAssetKey } from "../assets/key";
+import {
+  generateDefaultClaudeMd,
+  generateDefaultIdentityMd,
+  matchesDefaultClaudeMd,
+  matchesDefaultIdentityMd,
+} from "../prompts/defaults";
 import { configureDbResolver } from "../prompts/resolver";
 import { slackChannelFromContextKey } from "../tasks/slack-routing";
-import { telemetry } from "../telemetry";
+import { _resolveIntegrationType, emitIntegrationConnected, telemetry } from "../telemetry";
 import type {
   ActiveSession,
   Agent,
@@ -23,6 +29,7 @@ import type {
   AssetEntityType,
   AssetKeyMapping,
   AssetSummary,
+  AutomationIntegrationId,
   Budget,
   BudgetRefusalCause,
   BudgetRefusalNotification,
@@ -521,6 +528,24 @@ const BUDGETED_IDENTITY_FIELDS: BudgetedIdentityField[] = [
 ];
 
 function ensureAgentProfileColumns(database: Database): void {
+  // `PRAGMA table_info` on a nonexistent table returns an empty result set
+  // rather than erroring, which used to make every column below look
+  // "missing" on a table that was never created and throw `no such table:
+  // agents` from the ALTER below. This is a legacy-compat shim for
+  // pre-migration-system databases; runMigrations() (and its own
+  // assertNotEmptyDatabase guard) is what's responsible for the `agents`
+  // table existing at all, and already fails loudly if it doesn't. This
+  // function must never be the thing that crashes startup instead.
+  const agentsTableExists = database
+    .prepare<{ name: string }, []>(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='agents'",
+    )
+    .get();
+  if (!agentsTableExists) {
+    console.warn("[Migration] agents table does not exist yet — skipping profile column backfill");
+    return;
+  }
+
   const existingColumns = new Set(
     database
       .prepare<{ name: string }, []>("PRAGMA table_info(agents)")
@@ -1184,29 +1209,39 @@ export async function buildRoutingAffinityFromAgent(
  * either side is treated as INELIGIBLE — never fail-open to "anyone" — so a
  * capability-only requirement (no `role` set) can only ever be claimed by
  * its `sourceAgentId`, and otherwise queues until the starvation escalation
- * hands it to the Lead.
+ * hands it to the Lead. Lead-only work is different: any Lead may claim it
+ * (subject to explicitly required capabilities), because its source/role is
+ * only recovery provenance and must not turn a worker's old role into a
+ * constraint on the Lead pool.
  */
 export function isAgentEligibleForTask(
-  agent: Pick<Agent, "id" | "role" | "capabilities">,
-  task: Pick<AgentTask, "routingAffinity">,
+  agent: Pick<Agent, "id" | "isLead" | "role" | "capabilities">,
+  task: Pick<AgentTask, "routingAffinity" | "routingAffinityInvalid">,
 ): boolean {
-  if (!isPoolAffinityEnforcementEnabled()) return true;
-
   const affinity = task.routingAffinity;
+  // A malformed persisted blob is a security boundary failure, not an
+  // untagged task. Quarantine it from every assignment/claim path.
+  if (task.routingAffinityInvalid) return false;
   if (!affinity) return true; // Untagged task — unchanged behavior.
+
+  const requiredCapabilities = affinity.capabilities ?? [];
+  const hasRequiredCapabilities = () => {
+    const agentCapabilities = new Set(agent.capabilities ?? []);
+    return requiredCapabilities.every((cap) => agentCapabilities.has(cap));
+  };
+  // Lead-only is an authorization boundary, never a best-effort pool hint or
+  // a source-agent exception. Its explicit capability requirements remain
+  // enforced even if the role/capability affinity kill-switch is enabled.
+  // Do not require an unrelated worker role/source to match a Lead-only task.
+  if (affinity.leadOnly) return agent.isLead && hasRequiredCapabilities();
+  if (!isPoolAffinityEnforcementEnabled()) return true;
 
   if (affinity.sourceAgentId && affinity.sourceAgentId === agent.id) return true; // Own work.
 
   if (!agent.role || !affinity.role) return false; // Missing role data — no fail-open.
   if (agent.role !== affinity.role) return false;
 
-  const requiredCapabilities = affinity.capabilities ?? [];
-  if (requiredCapabilities.length > 0) {
-    const agentCapabilities = new Set(agent.capabilities ?? []);
-    if (!requiredCapabilities.every((cap) => agentCapabilities.has(cap))) return false;
-  }
-
-  return true;
+  return hasRequiredCapabilities();
 }
 
 // ============================================================================
@@ -1311,20 +1346,23 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
   }
 
   let routingAffinity: RoutingAffinity | undefined;
+  let routingAffinityInvalid = false;
   if (row.routingAffinity) {
     try {
       const parsed = RoutingAffinitySchema.safeParse(JSON.parse(row.routingAffinity));
       if (parsed.success) {
         routingAffinity = parsed.data;
       } else {
+        routingAffinityInvalid = true;
         console.warn(
-          `[db] Ignoring invalid agent_tasks.routingAffinity for task ${row.id}:`,
+          `[db] Quarantining invalid agent_tasks.routingAffinity for task ${row.id}:`,
           parsed.error.message,
         );
       }
     } catch (error) {
+      routingAffinityInvalid = true;
       console.warn(
-        `[db] Ignoring malformed agent_tasks.routingAffinity for task ${row.id}:`,
+        `[db] Quarantining malformed agent_tasks.routingAffinity for task ${row.id}:`,
         error instanceof Error ? error.message : String(error),
       );
     }
@@ -1404,6 +1442,7 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     harnessVariantMeta: row.harnessVariantMeta ? JSON.parse(row.harnessVariantMeta) : undefined,
     totalCostUsd: row.totalCostUsd ?? undefined,
     routingAffinity,
+    routingAffinityInvalid: routingAffinityInvalid || undefined,
   };
 }
 
@@ -1488,6 +1527,44 @@ export async function createTask(
   return rowToAgentTask(row);
 }
 
+/**
+ * In-process dedup for `task_dispatch_rejected_affinity` logging in
+ * `getPendingTaskForAgent` below — that function runs on every poll tick for
+ * every agent with a directly-assigned pending task, so an unresolved skip
+ * (e.g. a corrupt/misassigned legacy row) would otherwise write one log row
+ * per poll forever. Keyed by taskId; per-process, like `alarmActive` in
+ * `queue-stall-alarm.ts` — an API restart re-arms it, which is fine since the
+ * point is "don't spam," not "log exactly once ever."
+ */
+const AFFINITY_DISPATCH_SKIP_LOG_COOLDOWN_MS = 5 * 60 * 1000;
+const lastAffinityDispatchSkipLoggedAt = new Map<string, number>();
+
+async function logAffinityDispatchSkip(
+  agent: Pick<Agent, "id" | "isLead" | "role">,
+  task: Pick<AgentTask, "id" | "routingAffinity" | "routingAffinityInvalid">,
+): Promise<void> {
+  const now = Date.now();
+  const lastLoggedAt = lastAffinityDispatchSkipLoggedAt.get(task.id);
+  if (lastLoggedAt !== undefined && now - lastLoggedAt < AFFINITY_DISPATCH_SKIP_LOG_COOLDOWN_MS) {
+    return;
+  }
+  lastAffinityDispatchSkipLoggedAt.set(task.id, now);
+  try {
+    await createLogEntry({
+      eventType: "task_dispatch_rejected_affinity",
+      agentId: agent.id,
+      taskId: task.id,
+      metadata: {
+        agentRole: agent.role ?? null,
+        requiredRole: task.routingAffinity?.role ?? null,
+        leadOnly: task.routingAffinity?.leadOnly === true,
+        agentIsLead: agent.isLead ?? false,
+        routingAffinityInvalid: task.routingAffinityInvalid === true,
+      },
+    });
+  } catch {}
+}
+
 export async function getPendingTaskForAgent(agentId: string): Promise<AgentTask | null> {
   // Get all pending tasks for this agent, ordered by priority (desc) then creation time (asc)
   const rows = await getDbClient().query<AgentTaskRow>(
@@ -1495,13 +1572,39 @@ export async function getPendingTaskForAgent(agentId: string): Promise<AgentTask
     [agentId],
   );
 
-  // Find the first task whose dependencies are met
+  const agent = await getAgentById(agentId);
+  if (!agent) return null;
+
   for (const row of rows) {
     const task = rowToAgentTask(row);
-    const { ready } = await checkDependencies(task.id);
-    if (ready) {
-      return task;
+    // `task.agentId` (the WHERE clause above) is a direct-assignment decision
+    // already made by the task's creator — `createTaskExtended` enforces a
+    // caller-declared requirement at creation time (see
+    // `routingAffinityIsInheritedProvenance` there). Re-running the FULL
+    // role/capability match here re-litigates that decision using metadata
+    // that may be pure inherited PROVENANCE (e.g. a Lead-routed
+    // worker-completion follow-up that inherits the finishing worker's
+    // role/capabilities as lineage, not a requirement anyone declared) —
+    // which permanently stalls dispatch to the agent the task is already
+    // pinned to (the #1276-regression this fixes; see PR body). Mirror the
+    // convention `acceptTask`/`claimOfferedTask` already use for an
+    // established offer: only `leadOnly` (a real authorization boundary) and
+    // `routingAffinityInvalid` (quarantined corrupt data) still veto a
+    // directly-assigned task. Pool-claim paths (`claimTask`,
+    // `assignUnassignedTaskPending`) are untouched and keep the full gate —
+    // they are deciding "who gets this" from the pool, not redispatching an
+    // assignment that was already authorized (or, for provenance, never a
+    // requirement) at creation time.
+    if (task.routingAffinityInvalid) {
+      await logAffinityDispatchSkip(agent, task);
+      continue;
     }
+    if (task.routingAffinity?.leadOnly && !isAgentEligibleForTask(agent, task)) {
+      await logAffinityDispatchSkip(agent, task);
+      continue;
+    }
+    const { ready } = await checkDependencies(task.id);
+    if (ready) return task;
   }
 
   return null;
@@ -1511,22 +1614,22 @@ export async function assignUnassignedTaskPending(
   taskId: string,
   agentId: string,
 ): Promise<AgentTask | null> {
-  // Eligibility pre-check (routing affinity) — defense in depth for the
-  // heartbeat's `autoAssignPoolTasks`, which already filters candidates via
-  // `isAgentEligibleForTask` before calling this, but any other caller gets
-  // the same guard for free.
-  if (isPoolAffinityEnforcementEnabled()) {
+  // This guard is always needed for lead-only tasks; the predicate itself
+  // handles the optional role/capability kill-switch.
+  {
     const task = await getTaskById(taskId);
     const agent = await getAgentById(agentId);
-    if (task && agent && !isAgentEligibleForTask(agent, task)) {
+    if (task && (!agent || !isAgentEligibleForTask(agent, task))) {
       try {
         await createLogEntry({
           eventType: "task_claim_rejected_affinity",
           agentId,
           taskId,
           metadata: {
-            agentRole: agent.role ?? null,
+            agentRole: agent?.role ?? null,
             requiredRole: task.routingAffinity?.role ?? null,
+            leadOnly: task.routingAffinity?.leadOnly === true,
+            agentIsLead: agent?.isLead ?? false,
           },
         });
       } catch {}
@@ -2528,6 +2631,69 @@ export async function getCompletedSlackTasks(): Promise<AgentTask[]> {
        LIMIT 200`,
   );
   return rows.map(rowToAgentTask);
+}
+
+/**
+ * Return terminal Slack-rooted tasks whose durable relay obligation is pending.
+ * The obligation is inserted by a DB trigger in the same transaction as the
+ * terminal status transition, so a process restart cannot lose the send.
+ */
+export async function getPendingSlackRelayTasks(): Promise<AgentTask[]> {
+  const rows = await getDbClient().query<AgentTaskRow>(
+    `SELECT task.* FROM slack_relay_obligations obligation
+       JOIN agent_tasks task ON task.id = obligation.task_id
+       WHERE obligation.delivered_at IS NULL
+       AND task.status IN ('completed', 'failed', 'cancelled')
+       ORDER BY obligation.last_attempt_at IS NOT NULL,
+                obligation.last_attempt_at ASC,
+                obligation.created_at ASC
+       LIMIT 200`,
+  );
+  return rows.map(rowToAgentTask);
+}
+
+/** Rotate attempted rows behind fresh obligations so poison rows cannot starve the queue. */
+export async function markSlackRelayAttempted(taskId: string): Promise<boolean> {
+  const now = new Date().toISOString();
+  const result = await getDbClient().run(
+    `UPDATE slack_relay_obligations
+       SET attempt_count = attempt_count + 1,
+           last_attempt_at = ?,
+           updated_at = ?
+       WHERE task_id = ? AND delivered_at IS NULL`,
+    [now, now, taskId],
+  );
+  return result.changes > 0;
+}
+
+/** Mark a relay obligation delivered only after Slack accepted the final result. */
+export async function markSlackRelayDelivered(taskId: string): Promise<boolean> {
+  const now = new Date().toISOString();
+  const result = await getDbClient().run(
+    `UPDATE slack_relay_obligations
+       SET delivered_at = ?, updated_at = ?
+       WHERE task_id = ? AND delivered_at IS NULL`,
+    [now, now, taskId],
+  );
+  return result.changes > 0;
+}
+
+/** Discharge obligations already fulfilled by renderer v2's durable outcome record. */
+export async function markFinalizedSlackRelaysDelivered(): Promise<number> {
+  const now = new Date().toISOString();
+  const result = await getDbClient().run(
+    `UPDATE slack_relay_obligations AS obligation
+       SET delivered_at = ?, updated_at = ?
+       WHERE obligation.delivered_at IS NULL
+       AND EXISTS (
+         SELECT 1 FROM slack_messages message
+         WHERE message.kind = 'outcome'
+         AND message.task_id = obligation.task_id
+         AND message.finalized_at IS NOT NULL
+       )`,
+    [now, now],
+  );
+  return result.changes;
 }
 
 /**
@@ -4761,16 +4927,43 @@ export async function createTaskExtended(
   // coerce: a bad shape throws before anything reaches the INSERT; absent
   // fields keep the `??` defaults at the bind site below.
   options = CreateTaskOptionsSchema.parse(options ?? {});
+  if (
+    options.inheritParentRoutingAffinity === false &&
+    options.routingAffinity?.leadOnly !== true
+  ) {
+    throw new Error(
+      "Disabling parent routing-affinity inheritance requires an explicit Lead-only control-plane affinity.",
+    );
+  }
   let requestedByUserIdInherited = false;
+  // True only when `options.routingAffinity` ends up populated purely via
+  // the plain parent-fallback inherit below (child declared no affinity of
+  // its own, the parent wasn't lead-only, AND the parent's affinity actually
+  // carries a `sourceAgentId`/`role` identity — the shape only
+  // `buildRoutingAffinityFromAgent` produces). That shape is PROVENANCE — a
+  // record of where the continuation came from — not a requirement any
+  // caller declared. It must never gate the direct-assignment/offer
+  // enforcement further down; only an explicit caller-declared requirement
+  // (`send-task`/`task-action`'s `{ leadOnly, capabilities }`, which never
+  // carries `sourceAgentId`/`role`), or a lead-only ratchet, does. See #1276
+  // (3c857542) for the ratchet this must NOT weaken, and the Superagent P1
+  // finding on #1340 for why `leadOnly` alone isn't a sufficient gate.
+  let routingAffinityIsInheritedProvenance = false;
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
-  const status: AgentTaskStatus = options?.offeredTo
-    ? "offered"
-    : options?.agentId
-      ? "pending"
-      : options?.status === "backlog"
-        ? "backlog"
-        : "unassigned";
+  // `status: "draft"` wins over offeredTo/agentId — a draft task keeps its
+  // intended owner/offer for when it's promoted (#1240), but must not be
+  // dispatch-eligible while attachments are still uploading.
+  const status: AgentTaskStatus =
+    options?.status === "draft"
+      ? "draft"
+      : options?.offeredTo
+        ? "offered"
+        : options?.agentId
+          ? "pending"
+          : options?.status === "backlog"
+            ? "backlog"
+            : "unassigned";
 
   // Inherit Slack/AgentMail metadata from parent task (unless explicitly overridden)
   if (options?.parentTaskId) {
@@ -4908,8 +5101,54 @@ export async function createTaskExtended(
       if (parent.followUpConfig && !options.followUpConfig) {
         options.followUpConfig = parent.followUpConfig;
       }
-      if (parent.routingAffinity && !options.routingAffinity) {
-        options.routingAffinity = parent.routingAffinity;
+      if (parent.routingAffinityInvalid && options.inheritParentRoutingAffinity !== false) {
+        // Never let a corrupt parent affinity create an apparently untagged
+        // continuation. This is a fail-closed quarantine, including recovery.
+        throw new Error(`Cannot continue task ${parent.id}: routing affinity is invalid.`);
+      }
+      if (parent.routingAffinity && options.inheritParentRoutingAffinity !== false) {
+        // Privilege cannot be shed by a continuation. A child can narrow or
+        // replace ordinary routing provenance, but a Lead-only parent always
+        // stamps Lead-only onto the child (including callers that supplied
+        // requiredCapabilities and therefore built a fresh affinity object).
+        if (!options.routingAffinity) {
+          options.routingAffinity = parent.routingAffinity;
+          // A non-lead-only parent's affinity, inherited here only because
+          // the child supplied nothing of its own, is provenance — not a
+          // requirement — ONLY when it actually IS a provenance snapshot.
+          // `buildRoutingAffinityFromAgent` (session-resume) always stamps
+          // `sourceAgentId` and `role` together; neither `send-task` nor
+          // `task-action`'s `requiredCapabilities`/`leadOnly` requirement
+          // ever exposes either field to a caller (see their zod schemas —
+          // both build `{ leadOnly, capabilities }` only). So a caller can
+          // declare a non-lead-only capability requirement (`leadOnly:
+          // false, capabilities: [...]`) with neither `sourceAgentId` nor
+          // `role` set, and that must keep gating direct assignment/offer on
+          // a continuation exactly as it did on the parent — see the
+          // Superagent P1 finding on PR #1340 (inherited-affinity
+          // provenance-vs-requirement confusion). Gate on the presence of
+          // either identity field, not on `leadOnly` alone. A lead-only
+          // parent's affinity is always a requirement (the ratchet), so it's
+          // excluded below regardless.
+          routingAffinityIsInheritedProvenance =
+            !parent.routingAffinity.leadOnly &&
+            (!!parent.routingAffinity.sourceAgentId || !!parent.routingAffinity.role);
+        } else if (parent.routingAffinity.leadOnly) {
+          // Child-supplied affinity may add requirements, but never remove an
+          // authorization-affecting requirement inherited from a Lead-only
+          // parent. This includes public continuations that default their
+          // requiredCapabilities to an empty array.
+          options.routingAffinity = {
+            ...options.routingAffinity,
+            capabilities: [
+              ...new Set([
+                ...(parent.routingAffinity.capabilities ?? []),
+                ...(options.routingAffinity.capabilities ?? []),
+              ]),
+            ],
+            leadOnly: true,
+          };
+        }
       }
     }
   }
@@ -4988,6 +5227,39 @@ export async function createTaskExtended(
         );
         options.slackThreadTs = finalSlackContext.threadTs;
       }
+    }
+  }
+
+  // Direct assignment and offers bypass the pool claim gate, so enforce the
+  // complete structured affinity here. This is after parent inheritance so
+  // continuations cannot shed a Lead-only boundary or its capabilities.
+  // Exception: an affinity that is pure inherited PROVENANCE (see
+  // `routingAffinityIsInheritedProvenance` above) describes where this
+  // continuation came from, not a requirement anyone declared for it — an
+  // explicit direct assignment/offer is the caller overriding routing, and
+  // provenance must not veto that override. A caller-declared requirement
+  // (explicit `leadOnly`/`capabilities`, or a lead-only ratchet) still gates
+  // as before.
+  const targetAgentId = options.agentId ?? options.offeredTo;
+  if (options.routingAffinity && targetAgentId && !routingAffinityIsInheritedProvenance) {
+    const target = await getAgentById(targetAgentId);
+    if (!target || !isAgentEligibleForTask(target, { routingAffinity: options.routingAffinity })) {
+      try {
+        await createLogEntry({
+          eventType: "task_authorization_rejected",
+          agentId: options.creatorAgentId,
+          metadata: {
+            leadOnly: options.routingAffinity.leadOnly === true,
+            targetAgentId,
+            decision: "reject_ineligible_assignment",
+          },
+        });
+      } catch {}
+      throw new Error(
+        options.routingAffinity.leadOnly
+          ? `Lead-only task routing affinity does not authorize assignment or offer to agent "${targetAgentId}".`
+          : `Task routing affinity does not authorize assignment or offer to agent "${targetAgentId}".`,
+      );
     }
   }
 
@@ -5091,7 +5363,13 @@ export async function createTaskExtended(
       agentId: options?.creatorAgentId,
       taskId: id,
       newValue: status,
-      metadata: { source: options?.source ?? "mcp" },
+      metadata: {
+        source: options?.source ?? "mcp",
+        leadOnly: options?.routingAffinity?.leadOnly === true,
+        authorization: options?.routingAffinity?.leadOnly
+          ? { decision: "authorized", targetAgentId: options.agentId ?? options.offeredTo ?? null }
+          : undefined,
+      },
     });
   } catch {}
 
@@ -5102,6 +5380,7 @@ export async function createTaskExtended(
       source: row.source,
       ...taskContextForTelemetry(rowToAgentTask(row)),
       hasParent: !!row.parentTaskId,
+      has_repo: !!row.vcsRepo,
       priority: row.priority,
     },
     (task) => task !== null,
@@ -5132,21 +5411,22 @@ export async function createTaskExtended(
 }
 
 export async function claimTask(taskId: string, agentId: string): Promise<AgentTask | null> {
-  // Eligibility pre-check (routing affinity): static per (agent, task), so
-  // pre-filtering here does NOT reopen the claim race — the atomic UPDATE
-  // below still arbitrates concurrent claims by eligible agents.
-  if (isPoolAffinityEnforcementEnabled()) {
+  // Static per (agent, task), so this pre-check does not reopen the atomic
+  // claim race. It always applies to lead-only authorization.
+  {
     const task = await getTaskById(taskId);
     const agent = await getAgentById(agentId);
-    if (task && agent && !isAgentEligibleForTask(agent, task)) {
+    if (task && (!agent || !isAgentEligibleForTask(agent, task))) {
       try {
         await createLogEntry({
           eventType: "task_claim_rejected_affinity",
           agentId,
           taskId,
           metadata: {
-            agentRole: agent.role ?? null,
+            agentRole: agent?.role ?? null,
             requiredRole: task.routingAffinity?.role ?? null,
+            leadOnly: task.routingAffinity?.leadOnly === true,
+            agentIsLead: agent?.isLead ?? false,
           },
         });
       } catch {}
@@ -5216,6 +5496,25 @@ export async function releaseTask(taskId: string): Promise<AgentTask | null> {
 export async function acceptTask(taskId: string, agentId: string): Promise<AgentTask | null> {
   const task = await getTaskById(taskId);
   if (!task) return null;
+  const agent = await getAgentById(agentId);
+  if (
+    (task.routingAffinity?.leadOnly || task.routingAffinityInvalid) &&
+    (!agent || !isAgentEligibleForTask(agent, task))
+  ) {
+    try {
+      await createLogEntry({
+        eventType: "task_claim_rejected_affinity",
+        agentId,
+        taskId,
+        metadata: {
+          leadOnly: true,
+          agentIsLead: agent?.isLead ?? false,
+          decision: "reject_offer_accept",
+        },
+      });
+    } catch {}
+    return null;
+  }
   // Accept both 'offered' and 'reviewing' statuses
   if (!(task.status === "offered" || task.status === "reviewing") || task.offeredTo !== agentId)
     return null;
@@ -5338,6 +5637,75 @@ export async function moveTaskFromBacklog(taskId: string): Promise<AgentTask | n
 }
 
 /**
+ * Promote a task out of `draft` status into whichever status it should have
+ * had at creation time — `offered` if it was offered to an agent, `pending`
+ * if it has an owning agent (the common UI-composer case, which defaults to
+ * Lead), otherwise `unassigned`. `draft` exists solely to keep a task
+ * dispatch-ineligible while its UI-uploaded attachments are still in flight
+ * (#1240); this is the promote half of that window. Called once the upload
+ * batch settles — success, partial failure, or total failure all promote, a
+ * draft is never left stranded by upload errors — or by
+ * `promoteAbandonedDraftTasks` for drafts nobody ever promoted.
+ */
+export async function promoteDraftTask(taskId: string): Promise<AgentTask | null> {
+  const now = new Date().toISOString();
+  const row = await getDbClient().get<AgentTaskRow>(
+    `UPDATE agent_tasks
+       SET status = CASE
+           WHEN offeredTo IS NOT NULL THEN 'offered'
+           WHEN agentId IS NOT NULL THEN 'pending'
+           ELSE 'unassigned'
+         END,
+         lastUpdatedAt = ?
+       WHERE id = ? AND status = 'draft'
+       RETURNING *`,
+    [now, taskId],
+  );
+
+  if (row) {
+    try {
+      await createLogEntry({
+        eventType: "task_status_change",
+        taskId,
+        agentId: row.agentId ?? undefined,
+        oldValue: "draft",
+        newValue: row.status,
+      });
+    } catch {}
+  }
+
+  return row ? rowToAgentTask(row) : null;
+}
+
+/**
+ * Heartbeat sweep: promote drafts abandoned mid-upload (tab closed, network
+ * dropped) instead of leaving them permanently dispatch-ineligible — the
+ * composer's UI-driven promote (`promoteDraftTask`) never fires if the user
+ * never comes back. Same target-status logic, applied in bulk by elapsed
+ * time. Default 5 minutes is well above the tens-of-seconds worst-case
+ * upload-batch duration seen against slow storage (#1226) while still
+ * surfacing an abandoned session to its owner promptly.
+ */
+export async function promoteAbandonedDraftTasks(timeoutMinutes: number = 5): Promise<number> {
+  const cutoffTime = new Date(Date.now() - timeoutMinutes * 60 * 1000).toISOString();
+  const now = new Date().toISOString();
+
+  const result = await getDbClient().run(
+    `UPDATE agent_tasks
+       SET status = CASE
+           WHEN offeredTo IS NOT NULL THEN 'offered'
+           WHEN agentId IS NOT NULL THEN 'pending'
+           ELSE 'unassigned'
+         END,
+         lastUpdatedAt = ?
+       WHERE status = 'draft' AND lastUpdatedAt < ?`,
+    [now, cutoffTime],
+  );
+
+  return result.changes;
+}
+
+/**
  * Release tasks that have been in 'reviewing' status for too long.
  * Returns them to 'offered' status for retry.
  */
@@ -5406,6 +5774,25 @@ export async function claimOfferedTask(taskId: string, agentId: string): Promise
   const task = await getTaskById(taskId);
   if (!task) return null;
   if (task.status !== "offered" || task.offeredTo !== agentId) return null;
+  const agent = await getAgentById(agentId);
+  if (
+    (task.routingAffinity?.leadOnly || task.routingAffinityInvalid) &&
+    (!agent || !isAgentEligibleForTask(agent, task))
+  ) {
+    try {
+      await createLogEntry({
+        eventType: "task_claim_rejected_affinity",
+        agentId,
+        taskId,
+        metadata: {
+          leadOnly: true,
+          agentIsLead: agent?.isLead ?? false,
+          decision: "reject_offer_claim",
+        },
+      });
+    } catch {}
+    return null;
+  }
 
   const now = new Date().toISOString();
   const row = await getDbClient().get<AgentTaskRow>(
@@ -5626,6 +6013,38 @@ export async function updateAgentProfile(
     // Get current agent state for version comparison
     const current = await tx.get<AgentRow>("SELECT * FROM agents WHERE id = ?", [id]);
     if (!current) return null;
+
+    // Compare with the old metadata before replacing it. Persist refreshed defaults
+    // atomically so both running workers and restarted workers see matching blobs.
+    const previous = rowToAgent(current);
+    const next = {
+      name: updates.name ?? previous.name,
+      description: updates.description ?? previous.description,
+      role: updates.role ?? previous.role,
+      capabilities: updates.capabilities ?? previous.capabilities,
+    };
+    const metadataChanged =
+      next.name !== previous.name ||
+      next.description !== previous.description ||
+      next.role !== previous.role ||
+      JSON.stringify(next.capabilities) !== JSON.stringify(previous.capabilities);
+    if (metadataChanged) {
+      updates = { ...updates };
+      if (
+        updates.identityMd === undefined &&
+        previous.identityMd &&
+        matchesDefaultIdentityMd(previous.identityMd, previous)
+      ) {
+        updates.identityMd = generateDefaultIdentityMd(next);
+      }
+      if (
+        updates.claudeMd === undefined &&
+        previous.claudeMd &&
+        matchesDefaultClaudeMd(previous.claudeMd, previous)
+      ) {
+        updates.claudeMd = generateDefaultClaudeMd(next);
+      }
+    }
 
     for (const field of BUDGETED_IDENTITY_FIELDS) {
       const nextValue = updates[field];
@@ -7259,37 +7678,45 @@ export async function getAttributionByPerson(opts: {
         SELECT tree.rootId, child.id, child.output
         FROM agent_tasks child
         JOIN task_tree tree ON child.parentTaskId = tree.taskId
+      ),
+      -- Every root with shippable evidence anywhere in its tree, computed ONCE for
+      -- the whole window. The old form asked the same question with 3 CORRELATED
+      -- EXISTS subqueries, which SQLite re-entered once per root: 2 of them scanned
+      -- task_attachments whole and the third scanned the whole tree with two
+      -- leading-wildcard LIKEs. That is the O(R x T) shape that took 60 s.
+      --
+      -- Two rules keep this fast and correct, and both are load-bearing:
+      --   1. UNION, never UNION ALL. It makes rootId unique, so the LEFT JOIN below
+      --      cannot duplicate a root and COUNT(*) stays exact.
+      --   2. LEFT JOIN, never a correlated EXISTS against this CTE. The EXISTS form
+      --      returns the same answer but SQLite re-enters the CTE per root:
+      --      measured 4,189 ms for a 2-day window against 460 ms for 30 days.
+      shipped_roots(rootId) AS (
+        SELECT tree.rootId
+        FROM task_tree tree
+        JOIN task_attachments ta ON ta.task_id = tree.taskId
+        WHERE ta.kind = 'page'
+           OR (
+             ta.kind = 'url'
+             AND (
+               ta.url LIKE '%github.com/%/pull/%'
+               OR ta.url LIKE '%/-/merge_requests/%'
+             )
+           )
+
+        UNION
+
+        SELECT tree.rootId
+        FROM task_tree tree
+        WHERE tree.output LIKE '%github.com/%/pull/%'
+           OR tree.output LIKE '%/-/merge_requests/%'
       )
       SELECT
         t.requestedByUserId as userId,
         COUNT(*) as initiated,
-        SUM(CASE WHEN t.status = 'completed' AND (
-          EXISTS (
-            SELECT 1
-            FROM task_tree tree
-            JOIN task_attachments ta ON ta.task_id = tree.taskId
-            WHERE tree.rootId = t.id
-              AND ta.kind = 'url'
-              AND (
-                ta.url LIKE '%github.com/%/pull/%'
-                OR ta.url LIKE '%/-/merge_requests/%'
-              )
-          )
-          OR EXISTS (
-            SELECT 1 FROM task_attachments ta
-            JOIN task_tree tree ON tree.taskId = ta.task_id
-            WHERE tree.rootId = t.id AND ta.kind = 'page'
-          )
-          OR EXISTS (
-            SELECT 1 FROM task_tree tree
-            WHERE tree.rootId = t.id
-              AND (
-                tree.output LIKE '%github.com/%/pull/%'
-                OR tree.output LIKE '%/-/merge_requests/%'
-              )
-          )
-        ) THEN 1 ELSE 0 END) as shipped
+        SUM(CASE WHEN t.status = 'completed' AND s.rootId IS NOT NULL THEN 1 ELSE 0 END) as shipped
       FROM selected_roots t
+      LEFT JOIN shipped_roots s ON s.rootId = t.id
       GROUP BY t.requestedByUserId`,
     params,
   );
@@ -7741,6 +8168,9 @@ type ScheduledTaskRow = {
   workflowId: string | null;
   scriptName: string | null;
   scriptArgs: string | null;
+  params: string;
+  requiredParams: string;
+  requires: string;
   createdAt: string;
   lastUpdatedAt: string;
   created_by: string | null;
@@ -7791,6 +8221,9 @@ function rowToScheduledTask(row: ScheduledTaskRow): ScheduledTask {
     workflowId: row.workflowId ?? undefined,
     scriptName: row.scriptName ?? undefined,
     scriptArgs: row.scriptArgs ? JSON.parse(row.scriptArgs) : undefined,
+    params: JSON.parse(row.params) as Record<string, unknown>,
+    requiredParams: JSON.parse(row.requiredParams) as string[],
+    requires: JSON.parse(row.requires) as AutomationIntegrationId[],
     createdAt: normalizeDateRequired(row.createdAt),
     lastUpdatedAt: normalizeDateRequired(row.lastUpdatedAt),
     createdBy: row.created_by ?? undefined,
@@ -7936,6 +8369,9 @@ export interface CreateScheduledTaskData {
   workflowId?: string;
   scriptName?: string;
   scriptArgs?: Record<string, unknown>;
+  params?: Record<string, unknown>;
+  requiredParams?: string[];
+  requires?: AutomationIntegrationId[];
   createdBy?: string;
 }
 
@@ -7948,9 +8384,10 @@ export async function createScheduledTask(data: CreateScheduledTaskData): Promis
         id, "key", name, description, cronExpression, intervalMs, taskTemplate,
         taskType, tags, priority, targetAgentId, enabled, nextRunAt,
         createdByAgentId, parentTaskId, timezone, model, modelTier, scheduleType,
-        targetType, workflowId, scriptName, scriptArgs, createdAt, lastUpdatedAt,
+        targetType, workflowId, scriptName, scriptArgs, params, requiredParams, requires,
+        createdAt, lastUpdatedAt,
         created_by, updated_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     [
       id,
       normalizeAssetKey(data.key ?? defaultAssetKey("schedule", id)),
@@ -7975,6 +8412,9 @@ export async function createScheduledTask(data: CreateScheduledTaskData): Promis
       data.workflowId ?? null,
       data.scriptName ?? null,
       data.scriptArgs !== undefined ? JSON.stringify(data.scriptArgs) : "{}",
+      JSON.stringify(data.params ?? {}),
+      JSON.stringify(data.requiredParams ?? []),
+      JSON.stringify(data.requires ?? []),
       now,
       now,
       data.createdBy ?? null,
@@ -8011,6 +8451,9 @@ export interface UpdateScheduledTaskData {
   workflowId?: string | null;
   scriptName?: string | null;
   scriptArgs?: Record<string, unknown> | null;
+  params?: Record<string, unknown>;
+  requiredParams?: string[];
+  requires?: AutomationIntegrationId[];
   lastUpdatedAt?: string;
   updatedBy?: string;
 }
@@ -8118,6 +8561,18 @@ export async function updateScheduledTask(
   if (data.scriptArgs !== undefined) {
     updates.push("scriptArgs = ?");
     params.push(data.scriptArgs === null ? null : JSON.stringify(data.scriptArgs));
+  }
+  if (data.params !== undefined) {
+    updates.push("params = ?");
+    params.push(JSON.stringify(data.params));
+  }
+  if (data.requiredParams !== undefined) {
+    updates.push("requiredParams = ?");
+    params.push(JSON.stringify(data.requiredParams));
+  }
+  if (data.requires !== undefined) {
+    updates.push("requires = ?");
+    params.push(JSON.stringify(data.requires));
   }
   if (data.updatedBy !== undefined) {
     updates.push("updated_by = ?");
@@ -8523,6 +8978,20 @@ export async function upsertSwarmConfig(data: {
   }
 
   return config;
+}
+
+/** Emit a built-in integration only once for this persisted installation. */
+export async function emitBuiltInIntegrationConnectedOnce(
+  provider: "github" | "slack",
+): Promise<void> {
+  try {
+    const key = `telemetry.integration.${provider}.emitted`;
+    if ((await getSwarmConfigs({ scope: "global", key })).length > 0) return;
+    if (!emitIntegrationConnected(_resolveIntegrationType(provider), provider, true)) return;
+    await upsertSwarmConfig({ scope: "global", key, value: "true" });
+  } catch {
+    // Telemetry must never break integration startup.
+  }
 }
 
 /**
@@ -9186,6 +9655,9 @@ type WorkflowRow = {
   cooldown: string | null;
   input: string | null;
   triggerSchema: string | null;
+  params: string;
+  requiredParams: string;
+  requires: string;
   dir: string | null;
   vcs_repo: string | null;
   createdByAgentId: string | null;
@@ -9209,6 +9681,9 @@ function rowToWorkflow(row: WorkflowRow): Workflow {
     triggerSchema: row.triggerSchema
       ? (JSON.parse(row.triggerSchema) as Record<string, unknown>)
       : undefined,
+    params: JSON.parse(row.params) as Record<string, unknown>,
+    requiredParams: JSON.parse(row.requiredParams) as string[],
+    requires: JSON.parse(row.requires) as AutomationIntegrationId[],
     dir: row.dir ?? undefined,
     vcsRepo: row.vcs_repo ?? undefined,
     createdByAgentId: row.createdByAgentId ?? undefined,
@@ -9229,6 +9704,9 @@ export async function createWorkflow(
     cooldown?: CooldownConfig;
     input?: Record<string, InputValue>;
     triggerSchema?: Record<string, unknown>;
+    params?: Record<string, unknown>;
+    requiredParams?: string[];
+    requires?: AutomationIntegrationId[];
     dir?: string;
     vcsRepo?: string;
     createdByAgentId?: string;
@@ -9238,8 +9716,8 @@ export async function createWorkflow(
 ): Promise<Workflow> {
   const id = crypto.randomUUID();
   const row = await getDbClient().get<WorkflowRow>(
-    `INSERT INTO workflows (id, "key", name, description, definition, triggers, cooldown, input, triggerSchema, dir, vcs_repo, createdByAgentId, created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    `INSERT INTO workflows (id, "key", name, description, definition, triggers, cooldown, input, triggerSchema, params, requiredParams, requires, dir, vcs_repo, createdByAgentId, created_by, updated_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     [
       id,
       normalizeAssetKey(data.key ?? defaultAssetKey("workflow", id)),
@@ -9250,6 +9728,9 @@ export async function createWorkflow(
       data.cooldown ? JSON.stringify(data.cooldown) : null,
       data.input ? JSON.stringify(data.input) : null,
       data.triggerSchema ? JSON.stringify(data.triggerSchema) : null,
+      JSON.stringify(data.params ?? {}),
+      JSON.stringify(data.requiredParams ?? []),
+      JSON.stringify(data.requires ?? []),
       data.dir ?? null,
       data.vcsRepo ?? null,
       data.createdByAgentId ?? null,
@@ -9369,6 +9850,9 @@ export async function updateWorkflow(
     cooldown?: CooldownConfig | null;
     input?: Record<string, InputValue> | null;
     triggerSchema?: Record<string, unknown> | null;
+    params?: Record<string, unknown>;
+    requiredParams?: string[];
+    requires?: AutomationIntegrationId[];
     dir?: string | null;
     vcsRepo?: string | null;
     updatedBy?: string;
@@ -9411,6 +9895,18 @@ export async function updateWorkflow(
   if (data.triggerSchema !== undefined) {
     updates.push("triggerSchema = ?");
     params.push(data.triggerSchema ? JSON.stringify(data.triggerSchema) : null);
+  }
+  if (data.params !== undefined) {
+    updates.push("params = ?");
+    params.push(JSON.stringify(data.params));
+  }
+  if (data.requiredParams !== undefined) {
+    updates.push("requiredParams = ?");
+    params.push(JSON.stringify(data.requiredParams));
+  }
+  if (data.requires !== undefined) {
+    updates.push("requires = ?");
+    params.push(JSON.stringify(data.requires));
   }
   if (data.dir !== undefined) {
     updates.push("dir = ?");
@@ -11261,10 +11757,11 @@ export interface ApprovalRequest {
   workflowRunStepId: string | null;
   sourceTaskId: string | null;
   approvers: unknown;
-  status: "pending" | "approved" | "rejected" | "timeout";
+  status: "pending" | "approved" | "rejected" | "timeout" | "cancelled";
   responses: unknown | null;
   resolvedBy: string | null;
   resolvedAt: string | null;
+  resolutionReason: string | null;
   timeoutSeconds: number | null;
   expiresAt: string | null;
   notificationChannels: unknown[] | null;
@@ -11285,6 +11782,8 @@ interface ApprovalRequestRow {
   responses: string | null;
   resolvedBy: string | null;
   resolvedAt: string | null;
+  resolutionReason: string | null;
+  cancellationNotificationClaims: string | null;
   timeoutSeconds: number | null;
   expiresAt: string | null;
   notificationChannels: string | null;
@@ -11306,6 +11805,7 @@ function rowToApprovalRequest(row: ApprovalRequestRow): ApprovalRequest {
     responses: row.responses ? JSON.parse(row.responses) : null,
     resolvedBy: row.resolvedBy,
     resolvedAt: normalizeDate(row.resolvedAt),
+    resolutionReason: row.resolutionReason,
     timeoutSeconds: row.timeoutSeconds,
     expiresAt: normalizeDate(row.expiresAt),
     notificationChannels: row.notificationChannels ? JSON.parse(row.notificationChannels) : null,
@@ -11326,32 +11826,55 @@ export async function createApprovalRequest(data: {
   timeoutSeconds?: number;
   notificationChannels?: unknown[];
   createdBy?: string;
+  requireActionableWorkflow?: boolean;
 }): Promise<ApprovalRequest> {
   const now = new Date().toISOString();
   const expiresAt = data.timeoutSeconds
     ? new Date(Date.now() + data.timeoutSeconds * 1000).toISOString()
     : null;
 
-  const row = await getDbClient().get<ApprovalRequestRow>(
-    `INSERT INTO approval_requests (id, title, questions, workflowRunId, workflowRunStepId, sourceTaskId, approvers, timeoutSeconds, expiresAt, notificationChannels, created_by, createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  const row = await getDbClient().transaction(async () => {
+    let status: ApprovalRequest["status"] = "pending";
+    let resolutionReason: string | null = null;
+    if (data.requireActionableWorkflow && data.workflowRunId && data.workflowRunStepId) {
+      const run = await getWorkflowRun(data.workflowRunId);
+      const step = await getWorkflowRunStep(data.workflowRunStepId);
+      if (!run || (run.status !== "running" && run.status !== "waiting")) {
+        status = "cancelled";
+        resolutionReason = run?.error ?? `Workflow run is ${run?.status ?? "missing"}`;
+      } else if (!step || step.runId !== run.id || step.status !== "running") {
+        status = "cancelled";
+        resolutionReason = `Human-in-the-loop step is ${step?.status ?? "missing"}`;
+      }
+    }
+
+    return getDbClient().get<ApprovalRequestRow>(
+      `INSERT INTO approval_requests
+         (id, title, questions, workflowRunId, workflowRunStepId, sourceTaskId,
+          approvers, status, resolutionReason, resolvedAt, timeoutSeconds, expiresAt,
+          notificationChannels, created_by, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING *`,
-    [
-      data.id,
-      data.title,
-      JSON.stringify(data.questions),
-      data.workflowRunId ?? null,
-      data.workflowRunStepId ?? null,
-      data.sourceTaskId ?? null,
-      JSON.stringify(data.approvers),
-      data.timeoutSeconds ?? null,
-      expiresAt,
-      data.notificationChannels ? JSON.stringify(data.notificationChannels) : null,
-      data.createdBy ?? null,
-      now,
-      now,
-    ],
-  );
+      [
+        data.id,
+        data.title,
+        JSON.stringify(data.questions),
+        data.workflowRunId ?? null,
+        data.workflowRunStepId ?? null,
+        data.sourceTaskId ?? null,
+        JSON.stringify(data.approvers),
+        status,
+        resolutionReason,
+        status === "cancelled" ? now : null,
+        data.timeoutSeconds ?? null,
+        expiresAt,
+        data.notificationChannels ? JSON.stringify(data.notificationChannels) : null,
+        data.createdBy ?? null,
+        now,
+        now,
+      ],
+    );
+  });
 
   return rowToApprovalRequest(row!);
 }
@@ -11371,12 +11894,32 @@ export async function resolveApprovalRequest(
     responses?: unknown;
     resolvedBy?: string;
   },
+  options?: { requireActionableWorkflow?: boolean },
 ): Promise<ApprovalRequest | null> {
   const now = new Date().toISOString();
+  const actionableWorkflowClause = options?.requireActionableWorkflow
+    ? `AND (
+         workflowRunId IS NULL
+         OR (
+           EXISTS (
+             SELECT 1 FROM workflow_runs
+             WHERE id = approval_requests.workflowRunId
+               AND status IN ('running', 'waiting')
+           )
+           AND EXISTS (
+           SELECT 1 FROM workflow_run_steps
+             WHERE id = approval_requests.workflowRunStepId
+               AND runId = approval_requests.workflowRunId
+               AND status = 'waiting'
+           )
+         )
+       )`
+    : "";
   const row = await getDbClient().get<ApprovalRequestRow>(
     `UPDATE approval_requests
        SET status = ?, responses = ?, resolvedBy = ?, resolvedAt = ?, updatedAt = ?
        WHERE id = ? AND status = 'pending'
+         ${actionableWorkflowClause}
        RETURNING *`,
     [
       data.status,
@@ -11388,6 +11931,130 @@ export async function resolveApprovalRequest(
     ],
   );
   return row ? rowToApprovalRequest(row) : null;
+}
+
+export async function cancelPendingApprovalRequestsForRun(
+  workflowRunId: string,
+  reason: string,
+): Promise<ApprovalRequest[]> {
+  const now = new Date().toISOString();
+  const rows = await getDbClient().query<ApprovalRequestRow>(
+    `UPDATE approval_requests
+       SET status = 'cancelled', resolutionReason = ?, resolvedAt = ?, updatedAt = ?
+       WHERE workflowRunId = ? AND status = 'pending'
+       RETURNING *`,
+    [reason, now, now, workflowRunId],
+  );
+  return rows.map(rowToApprovalRequest);
+}
+
+export async function listCancelledApprovalRequestsForRun(
+  workflowRunId: string,
+): Promise<ApprovalRequest[]> {
+  const rows = await getDbClient().query<ApprovalRequestRow>(
+    `SELECT * FROM approval_requests
+       WHERE workflowRunId = ? AND status = 'cancelled'`,
+    [workflowRunId],
+  );
+  return rows.map(rowToApprovalRequest);
+}
+
+export async function listCancelledApprovalRequestsForStep(
+  workflowRunStepId: string,
+): Promise<ApprovalRequest[]> {
+  const rows = await getDbClient().query<ApprovalRequestRow>(
+    `SELECT * FROM approval_requests
+       WHERE workflowRunStepId = ? AND status = 'cancelled'`,
+    [workflowRunStepId],
+  );
+  return rows.map(rowToApprovalRequest);
+}
+
+export async function claimApprovalCancellationNotification(
+  id: string,
+  notificationKey: string,
+): Promise<{ approval: ApprovalRequest; leaseToken: string } | null> {
+  return getDbClient().transaction(async () => {
+    const row = await getDbClient().get<ApprovalRequestRow>(
+      "SELECT * FROM approval_requests WHERE id = ? AND status = 'cancelled'",
+      [id],
+    );
+    if (!row) return null;
+    const claims = row.cancellationNotificationClaims
+      ? (JSON.parse(row.cancellationNotificationClaims) as Record<
+          string,
+          "delivered" | { claimedAt: string; leaseToken: string }
+        >)
+      : {};
+    const existing = claims[notificationKey];
+    if (existing === "delivered") return null;
+    if (
+      existing &&
+      typeof existing !== "string" &&
+      Date.now() - new Date(existing.claimedAt).getTime() < 60_000
+    ) {
+      return null;
+    }
+
+    const now = new Date().toISOString();
+    const leaseToken = crypto.randomUUID();
+    claims[notificationKey] = { claimedAt: now, leaseToken };
+    await getDbClient().run(
+      `UPDATE approval_requests
+         SET cancellationNotificationClaims = ?, updatedAt = ?
+         WHERE id = ? AND status = 'cancelled'`,
+      [JSON.stringify(claims), now, id],
+    );
+    return { approval: rowToApprovalRequest(row), leaseToken };
+  });
+}
+
+export async function completeApprovalCancellationNotificationClaim(
+  id: string,
+  notificationKey: string,
+  leaseToken: string,
+): Promise<void> {
+  await updateApprovalCancellationNotificationClaim(id, notificationKey, leaseToken, "delivered");
+}
+
+export async function releaseApprovalCancellationNotificationClaim(
+  id: string,
+  notificationKey: string,
+  leaseToken: string,
+): Promise<void> {
+  await updateApprovalCancellationNotificationClaim(id, notificationKey, leaseToken, null);
+}
+
+async function updateApprovalCancellationNotificationClaim(
+  id: string,
+  notificationKey: string,
+  leaseToken: string,
+  value: "delivered" | null,
+): Promise<void> {
+  await getDbClient().transaction(async () => {
+    const row = await getDbClient().get<{ claims: string | null }>(
+      "SELECT cancellationNotificationClaims AS claims FROM approval_requests WHERE id = ?",
+      [id],
+    );
+    const claims = row?.claims
+      ? (JSON.parse(row.claims) as Record<
+          string,
+          "delivered" | { claimedAt: string; leaseToken: string }
+        >)
+      : {};
+    const current = claims[notificationKey];
+    if (!current || typeof current === "string" || current.leaseToken !== leaseToken) {
+      return;
+    }
+    if (value === null) delete claims[notificationKey];
+    else claims[notificationKey] = value;
+    await getDbClient().run(
+      `UPDATE approval_requests
+         SET cancellationNotificationClaims = ?, updatedAt = ?
+         WHERE id = ? AND status = 'cancelled'`,
+      [JSON.stringify(claims), new Date().toISOString(), id],
+    );
+  });
 }
 
 export async function updateApprovalRequestNotifications(
@@ -12331,11 +12998,16 @@ export async function searchSkills(
   limit = 20,
   includeContent = true,
 ): Promise<Skill[]> {
-  const term = `%${query}%`;
+  const tokens = query.split(/\s+/).filter(Boolean);
   const columns = includeContent === false ? SKILL_SLIM_COLUMNS : "*";
+  const searchClauses = tokens.map(() => "(name LIKE ? OR description LIKE ? OR content LIKE ?)");
+  const params = tokens.flatMap((token) => {
+    const term = `%${token}%`;
+    return [term, term, term];
+  });
   const rows = await getDbClient().query<SkillRow>(
-    `SELECT ${columns} FROM skills WHERE (name LIKE ? OR description LIKE ?) AND isEnabled = 1 ORDER BY name ASC LIMIT ?`,
-    [term, term, limit],
+    `SELECT ${columns} FROM skills WHERE ${[...searchClauses, "isEnabled = 1"].join(" AND ")} ORDER BY name ASC LIMIT ?`,
+    [...params, limit],
   );
   return rows.map(rowToSkill);
 }
@@ -12550,6 +13222,18 @@ export async function createMcpServer(data: McpServerInsert): Promise<McpServer>
 
   if (!row) throw new Error("Failed to create MCP server");
   return rowToMcpServer(row);
+}
+
+/** Shared by HTTP and MCP-tool creation paths so each new server emits once. */
+export async function emitMcpServerConnectedTelemetry(): Promise<void> {
+  try {
+    const row = await getDbClient().get<{ count: number }>(
+      "SELECT COUNT(*) as count FROM mcp_servers",
+    );
+    emitIntegrationConnected("other", undefined, row?.count === 1);
+  } catch {
+    // Telemetry must never break MCP server creation.
+  }
 }
 
 export async function updateMcpServer(

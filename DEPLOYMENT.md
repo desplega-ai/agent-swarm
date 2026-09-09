@@ -36,7 +36,7 @@ The easiest way to deploy a full swarm with API, workers, and lead agent.
 ### Prerequisites
 
 - Docker & Docker Compose installed
-- A Claude Code OAuth token (run `claude setup-token` to get one)
+- One supported harness credential from the table below
 - An API key (any secret string you choose — all services share this key)
 
 ### Quick Start
@@ -52,7 +52,8 @@ cp docker-compose.example.yml docker-compose.yml
 ```bash
 # ---- Required ----
 API_KEY=your-secret-api-key
-CLAUDE_CODE_OAUTH_TOKEN=your-oauth-token   # Run `claude setup-token` to get this
+HARNESS_PROVIDER=claude
+CLAUDE_CODE_OAUTH_TOKEN=your-oauth-token   # Or configure another provider below
 
 # ---- Optional ----
 GITHUB_TOKEN=your-github-token             # For git operations inside agents
@@ -61,7 +62,18 @@ GITHUB_NAME=Your Name
 SWARM_URL=localhost                         # Base domain for service discovery
 ```
 
-> **Tip:** You can pass multiple OAuth tokens for load balancing: `CLAUDE_CODE_OAUTH_TOKEN=token1,token2,token3`
+Choose one provider for the whole example fleet:
+
+| Provider | `HARNESS_PROVIDER` | Credential/configuration |
+| --- | --- | --- |
+| Claude Code | `claude` | `CLAUDE_CODE_OAUTH_TOKEN` (run `claude setup-token`) or `ANTHROPIC_API_KEY` |
+| OpenAI | `codex` | `OPENAI_API_KEY` |
+| OpenRouter | `pi` | `OPENROUTER_API_KEY` and a `MODEL_OVERRIDE` such as `openrouter/anthropic/claude-sonnet-4-5` |
+| AWS Bedrock (alpha) | `pi` | `AWS_REGION`, `MODEL_OVERRIDE=amazon-bedrock/<model-id>`, and AWS access keys or `AWS_PROFILE` |
+
+Alpha: session summaries, memory rating, spend tracking and model tiers may be missing on Bedrock. See [model providers and gateways](https://docs.agent-swarm.dev/docs/guides/provider-auth/model-gateways) and [what each provider supports](https://docs.agent-swarm.dev/docs/guides/harness-configuration#supported-providers).
+
+> **Tip:** Claude users can pass multiple OAuth tokens for load balancing: `CLAUDE_CODE_OAUTH_TOKEN=token1,token2,token3`.
 
 **Step 3:** Generate stable UUIDs for each agent. The example compose file has placeholder UUIDs — replace them with your own so that agent identity persists across restarts.
 
@@ -103,7 +115,7 @@ The example `docker-compose.yml` sets up:
 
 - **API service** (port 3013) — MCP HTTP server with SQLite database
 - **1 Lead agent** — Coordinator that delegates tasks to workers
-- **2 Worker agents** — Claude-powered agents that execute tasks
+- **2 Worker agents** — Provider-powered agents that execute tasks
 - **3 Content agents** (optional) — Specialized workers for content writing, reviewing, and strategy, each bootstrapped from a template via `TEMPLATE_ID`
 
 ### Volumes & Persistence
@@ -138,6 +150,12 @@ swarm_content_strategist → /workspace/personal   → Content strategist's priv
 docker run --rm -v swarm_api:/app -v $(pwd):/backup alpine \
   sh -c 'cp /app/agent-swarm-db.sqlite /backup/agent-swarm-db-backup.sqlite && if [ -f /app/.page-session-secret ]; then cp /app/.page-session-secret /backup/page-session-secret.backup; fi'
 ```
+
+### Database retention
+
+`SESSION_LOG_RETENTION_DAYS`, `AGENT_LOG_RETENTION_DAYS`, and `EVENTS_RETENTION_DAYS` are disabled until you set them. Each value permanently deletes rows older than its window. Start with `DB_RETENTION_DRY_RUN=true`, confirm the exact would-delete count through the `agentswarm.db.retention.backlog` metric and `GET /api/metrics`, then enable one table at a time.
+
+The sweep reads three tuning values on every tick: `DB_RETENTION_TICK_BUDGET_MS` (default `30000`, range `1000`–`300000`), `DB_RETENTION_CATCHUP_INTERVAL_MS` (default `60000`, range `5000`–`3600000`), and `DB_RETENTION_MAX_STATEMENT_MS` (default `250`, range `25`–`5000`). See [runbooks/db-retention.md](./runbooks/db-retention.md) before activation.
 
 ### Adding More Workers
 
@@ -189,23 +207,23 @@ bun run docker:build:worker
 # Slim variant (CI/E2E)
 bun run docker:build:worker:slim
 
-# Override the pinned Claude Code version (default: 2.1.235)
+# Override the pinned Claude Code version (default: 2.1.246)
 docker build -f Dockerfile.worker --build-arg CLAUDE_CODE_VERSION=2.2.0 -t agent-swarm-worker .
 ```
 
 Current worker-image defaults in `Dockerfile.worker`:
 
-- `CLAUDE_CODE_VERSION=2.1.235`
-- `PI_CODING_AGENT_VERSION=0.84.2`
-- `CODEX_VERSION=0.148.0`
-- `OPENCODE_VERSION=1.18.18`
-- `OPENCODE_SDK_VERSION=1.18.18`
+- `CLAUDE_CODE_VERSION=2.1.246`
+- `PI_CODING_AGENT_VERSION=0.84.3`
+- `CODEX_VERSION=0.149.1`
+- `OPENCODE_VERSION=1.18.23`
+- `OPENCODE_SDK_VERSION=1.18.23`
 
 The image also sets `DISABLE_AUTOUPDATER=1` so Claude Code stays on the pinned version instead of self-updating at runtime.
 
 The worker image now also ships PostgreSQL 16 server binaries (`initdb`, `pg_ctl`, `psql`, `pg_stat_statements`) for local backend or integration-style test setups. They stay dormant unless you opt in with `SWARM_DEP_POSTGRES_ENABLED=true`, which runs [`scripts/init-local-postgres.sh`](./scripts/init-local-postgres.sh) from the entrypoint. The helper defaults to `localhost:5433` and can be tuned with `LOCAL_POSTGRES_DATA_DIR`, `LOCAL_POSTGRES_PORT`, `LOCAL_POSTGRES_USER`, `LOCAL_POSTGRES_PASSWORD`, and `LOCAL_POSTGRES_DB`.
 
-The worker image also now bundles the Ubuntu runtime libraries Playwright's Chromium binary needs at launch time, so `qa-use` / browser-automation tasks no longer need an extra per-agent `apt` bootstrap just to start the bundled browser.
+The worker image also now bundles the Ubuntu runtime libraries Playwright's Chromium binary needs at launch time, so `agent-browser` / browser-automation tasks no longer need an extra per-agent `apt` bootstrap just to start the bundled browser.
 
 Both `Dockerfile` and `Dockerfile.worker` now copy the repository `templates/` directory into the image, so system-default skills and templates are available inside compiled deployments without an extra post-build sync step.
 
@@ -269,7 +287,7 @@ The Docker worker image uses a multi-stage build with two publishable targets:
 
 1. **Builder stage**: Compiles `src/cli.tsx` into a standalone binary
 2. **`worker-slim` target** (`:slim` tag): Ubuntu 24.04 with all four harness CLIs and the core agent tooling — for CI and E2E
-3. **`worker-full` target** (default, `:latest` tag): adds the full development environment below (build toolchain, Playwright/qa-use, postgres/redis servers, glab)
+3. **`worker-full` target** (default, `:latest` tag): adds the full development environment below (build toolchain, Playwright Chromium + `agent-browser`, postgres/redis servers, glab)
 
 **Pre-installed tools** (full image; `:slim` drops build tools, `glab`, `vim`, `fuse3`, Playwright, and the postgres/redis servers):
 
@@ -445,7 +463,12 @@ When a worker starts, it:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `CLAUDE_CODE_OAUTH_TOKEN` | Yes | OAuth token for Claude CLI (run `claude setup-token`). Supports comma-separated values for [multi-credential load balancing](./docs/ENVS.md#multi-credential-support). |
+| `HARNESS_PROVIDER` | No | Fleet harness: `claude` (default), `codex` for OpenAI, or `pi` for OpenRouter and AWS Bedrock (alpha). |
+| `CLAUDE_CODE_OAUTH_TOKEN` | One of four | Claude Code OAuth token (run `claude setup-token`). Supports comma-separated values for [multi-credential load balancing](./docs/ENVS.md#multi-credential-support). `ANTHROPIC_API_KEY` is also accepted for Claude. |
+| `OPENAI_API_KEY` | One of four | OpenAI credential for the `codex` harness. Also enables workflow LLM nodes and optional memory embeddings. |
+| `OPENROUTER_API_KEY` | One of four | OpenRouter credential for the `pi` harness and workflow LLM nodes. Use `OPENROUTER_BASE_URL` for a compatible gateway. |
+| `AWS_REGION` | One of four | Region for AWS Bedrock (alpha). Also set `MODEL_OVERRIDE=amazon-bedrock/<model-id>` and provide the standard AWS credential chain. Alpha: session summaries, memory rating, spend tracking and model tiers may be missing on Bedrock. |
+| `MODEL_OVERRIDE` | Provider-specific | OpenRouter model slug or `amazon-bedrock/<model-id>` for Bedrock. Leave empty for provider defaults. |
 | `API_KEY` | Yes | API key for MCP server |
 | `AGENT_ID` | No | Agent UUID (assigned on join if not set). **Keep stable for task resume.** |
 | `AGENT_ROLE` | No | Role: `worker` (default) or `lead` |
@@ -486,6 +509,7 @@ When a worker starts, it:
 | `MULTI_RUNTIME_ENABLED` | Track multiple worker runtime instances independently for one logical agent. Set consistently on the API server and every worker. | `false` |
 | `RUNTIME_STALE_THRESHOLD_MIN` | Minutes without runtime traffic before an active runtime stops counting and the heartbeat sweep retires it. | `5` |
 | `DATABASE_PATH` | SQLite database file path | `./agent-swarm-db.sqlite` |
+| `MIGRATIONS_DIR` | Directory for packaged `.sql` migrations in compiled-binary deployments. Bun virtual-filesystem paths select this directory explicitly; a missing or empty directory stops a fresh database from booting without its baseline schema. Docker sets it to `/app/migrations`. | - |
 | `PAGE_SESSION_SECRET` | HMAC secret for authenticated page-session cookies; never falls back to `API_KEY` | Persisted in `<data-dir>/.page-session-secret` when unset |
 | `PAGE_SESSION_SECRET_FILE` | Absolute path to a file containing the page-session secret (Docker/k8s secret mount) | - |
 | `OPENAI_API_KEY` | OpenAI key for memory embeddings (optional) | - |
@@ -522,27 +546,24 @@ Worker requirements for this path:
 
 Your laptop can use a public API URL while containers use an internal one, as long as both point to the same swarm API and database.
 
-#### Managed Codex steering hooks
+#### Codex app-server steering
 
-Queued steering for Codex depends on lifecycle hooks installed at image build
-time. The official worker image writes a root-owned
-`/etc/codex/requirements.toml` that enables hooks and registers
-`agent-swarm codex-hook` for `SessionStart`, `PostToolUse`, and `Stop`.
-Requirements-managed hooks are trusted by policy, which avoids an interactive
-hook-trust prompt in headless workers. `PreToolUse` is deliberately omitted
-because Codex does not apply its `additionalContext`.
+Each task starts a fresh `codex app-server` inside its isolated task runner.
+The official worker image sets `CODEX_PATH_OVERRIDE=/usr/bin/codex` to select
+the installed CLI. Custom images must provide a CLI with app-server support.
 
-The hook requires the same `API_KEY`, `MCP_BASE_URL`, and stable `AGENT_ID` as
-the worker, and it is active only when `STEERING_ENABLED=true` (or `1`). It
-polls pending messages, marks each one delivered before injecting it, and
-silently leaves messages pending for a later lifecycle event if the API cannot
-be reached.
+With `STEERING_ENABLED=true` (or `1`), `steer` sends native `turn/steer` input
+to the active turn. `queue` holds input until the current turn ends and marks
+it delivered only when Codex accepts the next turn. Messages left pending when
+the session ends remain eligible for promotion to follow-up tasks. Cancellation
+uses the native turn interrupt request, with process-group termination if the
+request cannot finish within the grace period.
 
-If you build your own worker image, rebuild it from the current
-`Dockerfile.worker` or reproduce this managed requirements file. Restarting an
-older container alone does not add the build-time hook configuration; without
-it, Codex queue messages remain pending until the terminal sweep promotes them
-to follow-up tasks.
+The image still registers `agent-swarm codex-hook` for `SessionStart`,
+`PostToolUse`, and `Stop` in `/etc/codex/requirements.toml` for legacy
+`codex exec` sessions. App-server sessions disable that hook to avoid duplicate
+steering delivery. No shared app-server daemon is required; task continuity
+uses the swarm context preamble.
 
 ---
 

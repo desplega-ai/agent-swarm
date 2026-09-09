@@ -7,6 +7,8 @@ import {
   createTaskExtended,
   getApprovalRequestById,
   getTaskById,
+  getWorkflowRun,
+  getWorkflowRunStep,
   listApprovalRequests,
   resolveApprovalRequest,
 } from "../be/db";
@@ -75,10 +77,11 @@ const ApprovalRequestSchema = z.object({
   workflowRunStepId: z.string().nullable(),
   sourceTaskId: z.string().nullable(),
   approvers: ApproversSchema,
-  status: z.enum(["pending", "approved", "rejected", "timeout"]),
+  status: z.enum(["pending", "approved", "rejected", "timeout", "cancelled"]),
   responses: z.record(z.string(), z.unknown()).nullable(),
   resolvedBy: z.string().nullable(),
   resolvedAt: z.string().nullable(),
+  resolutionReason: z.string().nullable(),
   timeoutSeconds: z.number().nullable(),
   expiresAt: z.string().nullable(),
   notificationChannels: z.array(NotificationChannelSchema).nullable(),
@@ -103,6 +106,28 @@ function toApprovalRequestResponse(
     responses: request.responses as Record<string, unknown> | null,
     notificationChannels: request.notificationChannels as NotificationChannelShape[] | null,
   };
+}
+
+export async function getWorkflowApprovalUnavailableReason(
+  request: ApprovalRequest,
+): Promise<string | null> {
+  if (!request.workflowRunId || !request.workflowRunStepId) return null;
+
+  const run = await getWorkflowRun(request.workflowRunId);
+  if (!run) return "The workflow run no longer exists";
+  if (run.status !== "running" && run.status !== "waiting") {
+    return `The workflow run is ${run.status} and this approval is no longer actionable`;
+  }
+
+  const step = await getWorkflowRunStep(request.workflowRunStepId);
+  if (!step) return "The human-in-the-loop step no longer exists";
+  if (step.runId !== run.id) {
+    return "The human-in-the-loop step belongs to a different workflow run";
+  }
+  if (step.status !== "waiting") {
+    return `The human-in-the-loop step is ${step.status} and this approval is no longer actionable`;
+  }
+  return null;
 }
 
 function hasRequiredResponse(question: ApprovalQuestion, response: unknown): boolean {
@@ -271,7 +296,18 @@ export async function handleApprovalRequests(
     }
 
     if (existing.status !== "pending") {
-      jsonError(res, `Approval request already resolved with status: ${existing.status}`, 409);
+      const reason = existing.resolutionReason ? `: ${existing.resolutionReason}` : "";
+      jsonError(
+        res,
+        `Approval request already resolved with status: ${existing.status}${reason}`,
+        409,
+      );
+      return true;
+    }
+
+    const unavailableReason = await getWorkflowApprovalUnavailableReason(existing);
+    if (unavailableReason) {
+      jsonError(res, unavailableReason, 409);
       return true;
     }
 
@@ -294,16 +330,25 @@ export async function handleApprovalRequests(
       }
     }
 
-    const updated = await resolveApprovalRequest(parsed.params.id, {
-      status,
-      responses: parsed.body.responses,
-      resolvedBy: parsed.body.respondedBy,
-    });
+    const updated = await resolveApprovalRequest(
+      parsed.params.id,
+      {
+        status,
+        responses: parsed.body.responses,
+        resolvedBy: parsed.body.respondedBy,
+      },
+      { requireActionableWorkflow: true },
+    );
 
     if (!updated) {
+      const latest = await getApprovalRequestById(parsed.params.id);
+      const unavailableAfterRace = latest
+        ? await getWorkflowApprovalUnavailableReason(latest)
+        : null;
       jsonError(
         res,
-        "Failed to resolve approval request (may have been resolved concurrently)",
+        unavailableAfterRace ??
+          `Failed to resolve approval request (status: ${latest?.status ?? "unknown"})`,
         409,
       );
       return true;

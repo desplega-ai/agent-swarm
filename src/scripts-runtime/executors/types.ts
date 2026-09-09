@@ -49,7 +49,20 @@ export type ScriptExecutorError =
   | "killed"
   | "import_violation"
   | "eval_error"
-  | "executor_error";
+  | "executor_error"
+  /**
+   * The sandboxed process aborted (SIGABRT / exit 134) before user-authored
+   * code got control, because the host-wide RLIMIT_NPROC budget it shares
+   * with every other process running under the same UID was already
+   * exhausted — not because the script itself is broken. A SIGABRT that
+   * happens AFTER user code starts running is classified `eval_error`
+   * instead (see `classifyExit` in `./native.ts`), since the script may
+   * already have caused a side effect that a retry must not replay.
+   * Transient and independent of any concurrency limiter this process
+   * holds; `runScript` in `../loader.ts` retries it a bounded number of
+   * times before giving up.
+   */
+  | "capacity_exceeded";
 
 export type ScriptStackFrame = {
   file: string;

@@ -12,9 +12,10 @@ kubectl create secret generic agent-swarm-secrets \
 
 # 2. Install.
 helm install swarm oci://ghcr.io/desplega-ai/charts/agent-swarm \
-  --version 0.1.0 \
   --set auth.existingSecret=agent-swarm-secrets
 ```
+
+Omit `--version` for latest, or pin the release you want.
 
 That's a minimal install: API + lead + 1 coder pool, no agent-fs, no litestream. Override `pools` in your own values to size the swarm.
 
@@ -78,7 +79,7 @@ Deploys the [agent-fs](https://github.com/desplega-ai/agent-fs) HTTP service alo
 agentFs:
   enabled: true
   image:
-    tag: 0.13.1
+    tag: 0.13.5
   bucket: my-agent-fs-bucket
   # Optional. When blank, the API boot seeder registers a service user with
   # agent-fs and stores the generated bootstrap key in encrypted swarm_config.
@@ -151,6 +152,24 @@ litestream:
 ```
 
 Restore procedure: see the [litestream docs](https://litestream.io/guides/restore/).
+
+## Sandboxed-script pids containment
+
+The API pod (not a pool pod — see "What this chart deploys") spawns a subprocess sandbox for every script/workflow run (`src/utils/sandboxed-process.ts`). That sandbox's own `ulimit -u` (`JAVASCRIPT_RUNTIME_SANDBOX_MAX_PROCS`, 4096) is a per-real-UID limit shared by the API process itself *and* every concurrently running sandboxed script in that pod — it is headroom for an interpreter's own thread-pool startup, not independent containment against a runaway or malicious script exhausting that shared budget ([issue #1332](https://github.com/desplega-ai/agent-swarm/issues/1332)).
+
+Kubernetes' native pod spec has no per-pod pids field — `resources.limits` only supports `cpu`/`memory`/`ephemeral-storage`. The [RuntimeClass API](https://kubernetes.io/docs/concepts/containers/runtime-class/) doesn't fill that gap either: a `RuntimeClass` object only selects a CRI runtime handler by name and optionally sets `overhead`/`scheduling` — it has no field for OCI PID resources, so pointing a pod at *any* RuntimeClass (an ordinary `runc` one included, and gVisor/Kata by default) applies no `pids.max` on its own. Two ways to add independent containment, neither of which this chart can fully own:
+
+1. **Cluster-wide (works today, no chart change needed):** set the kubelet flag `--pod-max-pids` on the nodes that run the API pod (GA since Kubernetes 1.20, feature gate `SupportPodPidsLimit`). This caps every pod on that node, not just the API pod — coordinate with whoever owns your node pools/kubelet config, since it's out of this chart's control. This is the mechanism to reach for; it demonstrably works with no further provisioning.
+2. **Per-pod, via `api.runtimeClassName`:** this field only wires the pod spec to reference a RuntimeClass by name — it does not, by itself, apply any pids ceiling. It's a containment mechanism only if the cluster administrator provisions a **specifically customized runtime handler that demonstrably injects `pids.max`** — e.g. a `runc` handler whose `config.toml` sets `[runtimes.<name>.options] SystemdCgroup` resources with a `pids.max`, or an equivalently configured gVisor/Kata handler — and confirms it (`cat /sys/fs/cgroup/.../pids.max` inside a pod using that handler). A stock/default handler under any of these runtimes gives you none of this:
+
+   ```yaml
+   api:
+     runtimeClassName: swarm-api-pids-limited
+   ```
+
+   Empty (the default) sets no `runtimeClassName` — zero behavior change from before this field existed.
+
+Docker Compose deployments get `pids_limit` directly on the `api` service — see the sizing arithmetic in `docker-compose.example.yml`'s `api.pids_limit` comment. That number was derived from process/thread measurements in a container, not validated against a live compose stack under real load; treat it as a documented starting point and tune it against your own traffic.
 
 ## Configuration
 

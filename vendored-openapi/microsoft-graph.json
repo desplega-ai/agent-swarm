@@ -1,0 +1,781 @@
+{
+  "components": {
+    "schemas": {
+      "Channel": {
+        "properties": {
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "membershipType": {
+            "type": "string"
+          },
+          "webUrl": {
+            "format": "uri",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ChannelCollectionResponse": {
+        "properties": {
+          "@odata.nextLink": {
+            "format": "uri",
+            "type": "string"
+          },
+          "value": {
+            "items": {
+              "$ref": "#/components/schemas/Channel"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "ChatMessage": {
+        "properties": {
+          "body": {
+            "$ref": "#/components/schemas/ItemBody"
+          },
+          "createdDateTime": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "lastModifiedDateTime": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "replyToId": {
+            "nullable": true,
+            "type": "string"
+          },
+          "subject": {
+            "nullable": true,
+            "type": "string"
+          },
+          "webUrl": {
+            "format": "uri",
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ChatMessageCollectionResponse": {
+        "properties": {
+          "@odata.nextLink": {
+            "format": "uri",
+            "type": "string"
+          },
+          "value": {
+            "items": {
+              "$ref": "#/components/schemas/ChatMessage"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "ChatMessageRequest": {
+        "properties": {
+          "body": {
+            "$ref": "#/components/schemas/ItemBody"
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "type": "object"
+      },
+      "DriveItem": {
+        "properties": {
+          "createdDateTime": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "file": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "folder": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "id": {
+            "type": "string"
+          },
+          "lastModifiedDateTime": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "size": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "webUrl": {
+            "format": "uri",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "DriveItemCollectionResponse": {
+        "properties": {
+          "@odata.nextLink": {
+            "format": "uri",
+            "type": "string"
+          },
+          "value": {
+            "items": {
+              "$ref": "#/components/schemas/DriveItem"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "EmailAddress": {
+        "properties": {
+          "address": {
+            "format": "email",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "address"
+        ],
+        "type": "object"
+      },
+      "ItemBody": {
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "contentType": {
+            "enum": [
+              "html",
+              "text"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "MailMessage": {
+        "properties": {
+          "body": {
+            "$ref": "#/components/schemas/ItemBody"
+          },
+          "bodyPreview": {
+            "type": "string"
+          },
+          "from": {
+            "$ref": "#/components/schemas/Recipient"
+          },
+          "id": {
+            "type": "string"
+          },
+          "isRead": {
+            "type": "boolean"
+          },
+          "receivedDateTime": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "subject": {
+            "nullable": true,
+            "type": "string"
+          },
+          "toRecipients": {
+            "items": {
+              "$ref": "#/components/schemas/Recipient"
+            },
+            "type": "array"
+          },
+          "webLink": {
+            "format": "uri",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "MailMessageCollectionResponse": {
+        "properties": {
+          "@odata.nextLink": {
+            "format": "uri",
+            "type": "string"
+          },
+          "value": {
+            "items": {
+              "$ref": "#/components/schemas/MailMessage"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "Recipient": {
+        "properties": {
+          "emailAddress": {
+            "$ref": "#/components/schemas/EmailAddress"
+          }
+        },
+        "required": [
+          "emailAddress"
+        ],
+        "type": "object"
+      },
+      "SendMailMessage": {
+        "properties": {
+          "bccRecipients": {
+            "items": {
+              "$ref": "#/components/schemas/Recipient"
+            },
+            "type": "array"
+          },
+          "body": {
+            "$ref": "#/components/schemas/ItemBody"
+          },
+          "ccRecipients": {
+            "items": {
+              "$ref": "#/components/schemas/Recipient"
+            },
+            "type": "array"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "toRecipients": {
+            "items": {
+              "$ref": "#/components/schemas/Recipient"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "subject",
+          "body",
+          "toRecipients"
+        ],
+        "type": "object"
+      },
+      "SendMailRequest": {
+        "properties": {
+          "message": {
+            "$ref": "#/components/schemas/SendMailMessage"
+          },
+          "saveToSentItems": {
+            "default": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "type": "object"
+      },
+      "User": {
+        "properties": {
+          "displayName": {
+            "type": "string"
+          },
+          "givenName": {
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "mail": {
+            "nullable": true,
+            "type": "string"
+          },
+          "surname": {
+            "nullable": true,
+            "type": "string"
+          },
+          "userPrincipalName": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "Microsoft Graph v1.0 operator-reviewed facade",
+    "version": "v1.0-2026-09-03"
+  },
+  "openapi": "3.0.3",
+  "paths": {
+    "/chats/{chat-id}/messages": {
+      "get": {
+        "operationId": "listChatMessages",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chat-id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "$top",
+            "schema": {
+              "maximum": 50,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "$orderby",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatMessageCollectionResponse"
+                }
+              }
+            },
+            "description": "Messages in the chat"
+          }
+        }
+      },
+      "post": {
+        "operationId": "sendChatMessage",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chat-id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatMessageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatMessage"
+                }
+              }
+            },
+            "description": "Created chat message"
+          }
+        }
+      }
+    },
+    "/me": {
+      "get": {
+        "operationId": "getCurrentUser",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "$select",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            },
+            "description": "The signed-in user"
+          }
+        }
+      }
+    },
+    "/me/drive/root/children": {
+      "get": {
+        "operationId": "listDriveRootChildren",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "$orderby",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "$select",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "$skipToken",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "$top",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DriveItemCollectionResponse"
+                }
+              }
+            },
+            "description": "Children of the signed-in user's drive root"
+          }
+        }
+      }
+    },
+    "/me/messages": {
+      "get": {
+        "operationId": "listMailMessages",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "$filter",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "$orderby",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "$search",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "$select",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "$skip",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "$top",
+            "schema": {
+              "maximum": 1000,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailMessageCollectionResponse"
+                }
+              }
+            },
+            "description": "Messages in the signed-in user's mailbox"
+          }
+        }
+      }
+    },
+    "/me/sendMail": {
+      "post": {
+        "operationId": "sendMail",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendMailRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Mail send request accepted"
+          }
+        }
+      }
+    },
+    "/teams/{team-id}/channels": {
+      "get": {
+        "operationId": "listTeamChannels",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team-id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "$filter",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "$select",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelCollectionResponse"
+                }
+              }
+            },
+            "description": "Channels in the team"
+          }
+        }
+      }
+    },
+    "/teams/{team-id}/channels/{channel-id}/messages": {
+      "get": {
+        "operationId": "listChannelMessages",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team-id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "channel-id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "$top",
+            "schema": {
+              "maximum": 50,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatMessageCollectionResponse"
+                }
+              }
+            },
+            "description": "Messages in the channel"
+          }
+        }
+      },
+      "post": {
+        "operationId": "sendChannelMessage",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team-id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "channel-id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatMessageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatMessage"
+                }
+              }
+            },
+            "description": "Created channel message"
+          }
+        }
+      }
+    },
+    "/teams/{team-id}/channels/{channel-id}/messages/{chatMessage-id}/replies": {
+      "post": {
+        "operationId": "replyToChannelMessage",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team-id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "channel-id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "chatMessage-id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatMessageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatMessage"
+                }
+              }
+            },
+            "description": "Created channel message reply"
+          }
+        }
+      }
+    },
+    "/users/{user-id}": {
+      "get": {
+        "operationId": "getUser",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user-id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "$select",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            },
+            "description": "The requested user"
+          }
+        }
+      }
+    }
+  },
+  "servers": [
+    {
+      "url": "https://graph.microsoft.com/v1.0"
+    }
+  ]
+}

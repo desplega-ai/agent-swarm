@@ -44,6 +44,7 @@ import {
 } from "@/components/ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatCost } from "@/lib/cost-format";
+import { isDemoMode } from "@/lib/deployment-config";
 import { cn, formatCompactNumber } from "@/lib/utils";
 import { SwarmSwitcher } from "./swarm-switcher";
 
@@ -116,6 +117,12 @@ const navGroups: NavGroup[] = [
         gate: { minVersion: "1.76.0" },
       },
       {
+        title: "Pages",
+        path: "/pages",
+        icon: GlobeIcon,
+        gate: { minVersion: "1.79.0" },
+      },
+      {
         title: "Apps",
         path: "/apps",
         icon: LayoutGridIcon,
@@ -143,12 +150,6 @@ const navGroups: NavGroup[] = [
       { title: "MCP Servers", path: "/mcp-servers", icon: CableIcon },
       { title: "Connections", path: "/connections", icon: Link2Icon },
       { title: "Memory", path: "/memory", icon: BrainIcon },
-      {
-        title: "Pages",
-        path: "/pages",
-        icon: GlobeIcon,
-        gate: { minVersion: "1.79.0" },
-      },
       { title: "Templates", path: "/templates", icon: FileTextIcon },
     ],
   },
@@ -400,7 +401,10 @@ export function AppSidebar() {
       <SidebarHeader className="border-b border-sidebar-border">
         <NavLink
           to="/"
-          className="flex h-10 items-center gap-2 group-data-[collapsible=icon]:justify-center"
+          className={cn(
+            "flex h-10 items-center gap-2 group-data-[collapsible=icon]:justify-center",
+            isDemoMode && "pl-20 group-data-[collapsible=icon]:pl-0",
+          )}
         >
           <img
             src={identityLogo}

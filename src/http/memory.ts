@@ -9,7 +9,11 @@ import { expandCandidatesWithGraph } from "../be/memory/graph-expansion";
 import { indexMemoryContent } from "../be/memory/index-content";
 import { refreshLinks } from "../be/memory/link-resolver";
 import { getLinksForMemory, type MemoryLinksResult } from "../be/memory/links-store";
-import { recordRetrievals } from "../be/memory/raters/retrieval";
+import {
+  dedupeMemoryDocumentIds,
+  recordMemoryAccesses,
+  recordRetrievals,
+} from "../be/memory/raters/retrieval";
 import { applyRating, ExplicitSelfDuplicateError } from "../be/memory/raters/store";
 import {
   type RatingEvent,
@@ -20,6 +24,7 @@ import { rerank } from "../be/memory/reranker";
 import { getRetrievalsForAgent, hasRetrievalForTask } from "../be/memory/retrieval-store";
 import { getUsefulnessStats } from "../be/memory/usefulness-stats";
 import { shouldPersistAutomaticTaskMemory } from "../memory/automatic-task-gate";
+import { SIMILARITY_THRESHOLD } from "../prompts/memories";
 import { AgentMemorySchema, AgentMemoryScopeSchema, AgentMemorySourceSchema } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { route } from "./route-def";
@@ -77,6 +82,7 @@ const MemorySearchResultItemSchema = z.object({
   source: AgentMemorySourceSchema,
   scope: AgentMemoryScopeSchema,
   tags: z.array(z.string()),
+  accessCount: z.number(),
 });
 
 const searchMemory = route({
@@ -689,6 +695,10 @@ export async function handleMemory(
         : sourceTaskIdHeader;
       const contextKeyHeader = req.headers["x-context-key"];
       const contextKey = Array.isArray(contextKeyHeader) ? contextKeyHeader[0] : contextKeyHeader;
+      const consumptionHeader = req.headers["x-memory-consumption"];
+      const consumptionMode = Array.isArray(consumptionHeader)
+        ? consumptionHeader[0]
+        : consumptionHeader;
       if (sourceTaskId && intent) {
         try {
           await recordRetrievals(
@@ -707,6 +717,21 @@ export async function handleMemory(
         }
       }
 
+      let consumedIds: string[] = [];
+      if (intent) {
+        const consumed =
+          consumptionMode === "prompt"
+            ? ranked.filter((r) => r.similarity > SIMILARITY_THRESHOLD)
+            : ranked;
+        consumedIds = dedupeMemoryDocumentIds(consumed);
+        try {
+          await recordMemoryAccesses(consumedIds);
+        } catch (err) {
+          console.error("[memory-search] recordMemoryAccesses failed:", (err as Error).message);
+        }
+      }
+      const consumedIdSet = new Set(consumedIds);
+
       searchMemory.respond(res, 200, {
         results: ranked.map((r) => ({
           id: r.id,
@@ -719,6 +744,7 @@ export async function handleMemory(
           source: r.source,
           scope: r.scope,
           tags: r.tags,
+          accessCount: (r.accessCount ?? 0) + (consumedIdSet.has(r.id) ? 1 : 0),
         })),
       });
     } catch (err) {

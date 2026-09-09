@@ -85,6 +85,24 @@ describe("db-client SQLITE_BUSY retry", () => {
     expect(rows.map((r) => r.name)).toEqual(["bridged", "locker"]);
   });
 
+  test("runTimed excludes the async backoff sleeps a bridged statement waited out", async () => {
+    // The retry path releases the FIFO lock and sleeps between attempts, so
+    // nothing is executing for most of the bridge. Only the driver attempts
+    // count: each is capped at attemptSpinMs (25ms) by the short busy_timeout,
+    // and the attempt count is capped at backoffMs.length + 1 (6), so
+    // executionMs cannot structurally exceed ~150ms however long the hold is.
+    const released = holdWriteLock(400);
+    const startedAt = performance.now();
+    const timed = await client.runTimed("INSERT INTO items (name) VALUES (?)", ["bridged-timed"]);
+    const wallMs = performance.now() - startedAt;
+    await released;
+
+    expect(timed.changes).toBe(1);
+    expect(wallMs).toBeGreaterThan(400);
+    expect(timed.executionMs).toBeLessThan(300);
+    expect(timed.executionMs).toBeLessThan(wallMs);
+  });
+
   test("transaction BEGIN IMMEDIATE bridges an external write lock", async () => {
     const released = holdWriteLock(150);
     await client.transaction(async (tx) => {

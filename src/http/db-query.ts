@@ -40,6 +40,11 @@ export const DbQueryInputSchema = z
 
 export type DbQueryInput = z.infer<typeof DbQueryInputSchema>;
 
+export interface DbQueryResponse extends DbQueryResult {
+  truncated: boolean;
+  rowLimit: number | null;
+}
+
 export function resolveDbQuerySql(input: Pick<DbQueryInput, "sql" | "query">): string {
   return input.sql ?? input.query ?? "";
 }
@@ -64,12 +69,20 @@ export async function executeReadOnlyQueryGated(
   params: unknown[] = [],
   budgetMs: number,
   maxRows?: number,
-): Promise<DbQueryResult> {
+): Promise<DbQueryResponse> {
+  let result: DbQueryResult;
   if (isDbQueryBoundedEnabled()) {
-    return executeReadOnlyQueryBounded(sql, params, budgetMs, maxRows);
+    result = await executeReadOnlyQueryBounded(sql, params, budgetMs, maxRows);
+  } else {
+    warnDbQueryBoundedDisabledOnce();
+    result = executeReadOnlyQuery(sql, params, maxRows);
   }
-  warnDbQueryBoundedDisabledOnce();
-  return executeReadOnlyQuery(sql, params, maxRows);
+
+  return {
+    ...result,
+    truncated: maxRows !== undefined && result.total > maxRows,
+    rowLimit: maxRows ?? null,
+  };
 }
 
 const dbQueryRoute = route({
@@ -87,6 +100,8 @@ const dbQueryRoute = route({
         rows: z.array(z.array(z.any())),
         elapsed: z.number(),
         total: z.number(),
+        truncated: z.boolean(),
+        rowLimit: z.number().nullable(),
       }),
     },
     400: { description: "Invalid or disallowed SQL" },
@@ -116,7 +131,7 @@ export async function handleDbQuery(
       getDbQueryHttpBudgetMs(),
       getDbQueryHttpMaxRows(),
     );
-    json(res, result);
+    dbQueryRoute.respond(res, 200, result);
   } catch (err: unknown) {
     if (err instanceof DbQueryConcurrencyCapError) {
       // Machine-readable code + Retry-After so a caller can back off instead

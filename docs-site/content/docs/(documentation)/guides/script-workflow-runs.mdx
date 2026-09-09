@@ -7,6 +7,8 @@ One-off Script Workflow runs give agents a workflow-shaped execution surface for
 
 They run TypeScript source, persist a `script_runs` row, execute in the background through the script-workflow supervisor, and journal each durable step in `script_run_journal`. The journal is the contract: if the process restarts or the source is re-executed from the top, completed steps are replayed by label instead of run again.
 
+The user module runs in a credential-free guest process. Calls through `ctx.step.*` and the allowlisted `ctx.swarm.*` surface cross a bounded, authenticated capability bridge to the trusted host, which keeps the swarm bearer and performs the HTTP requests. Replacing `globalThis.fetch` inside user code therefore cannot observe authenticated host traffic. Capability results keep the same 64 MiB response guard as the script SDK.
+
 ## When to use this
 
 Use a one-off Script Workflow run when the job has more shape than a single `script-run`, for example:

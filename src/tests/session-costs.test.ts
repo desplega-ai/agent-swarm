@@ -1610,4 +1610,418 @@ describe("Session Costs API", () => {
       }
     });
   });
+
+  describe("Database: getAttributionByPerson — old/new SQL parity", () => {
+    // Test-only copy of the pre-rewrite `rootRows` statement (src/be/db.ts,
+    // the "Old" SQL in the perf plan). ROOT_HUMAN_FREE_SQL is inlined verbatim
+    // because the production constant is module-private. Kept here so this
+    // suite pins the OLD semantics as an independent oracle: it must agree
+    // with `getAttributionByPerson` both before the GROUP BY rewrite (where
+    // the two are byte-identical) and after (where they must stay
+    // equivalent), so a future edit that drifts the SQL's meaning fails here.
+    function oldRootRowsSql(extraCondition?: string): string {
+      return `WITH RECURSIVE selected_roots(id, requestedByUserId, status, output) AS (
+    SELECT t.id, t.requestedByUserId, t.status, t.output
+    FROM agent_tasks t
+    WHERE t.requestedByUserId IS NOT NULL${extraCondition ? ` ${extraCondition}` : ""} AND t.parentTaskId IS NULL AND NOT (
+        COALESCE(t.taskType, '') IN ('heartbeat', 'heartbeat-checklist', 'boot-triage')
+        OR COALESCE(t.tags, '[]') LIKE '%"heartbeat"%'
+        OR (COALESCE(t.source, '') = 'schedule' AND t.requestedByUserId IS NULL)
+        OR (
+          COALESCE(t.source, '') = 'workflow'
+          AND t.requestedByUserId IS NULL
+          AND EXISTS (
+            SELECT 1
+            FROM workflow_runs run
+            WHERE run.id = t.workflowRunId
+              AND run.triggerType = 'schedule'
+              AND run.created_by IS NULL
+          )
+        )
+      )
+  ),
+  task_tree(rootId, taskId, output) AS (
+    SELECT id, id, output
+    FROM selected_roots
+
+    UNION ALL
+
+    SELECT tree.rootId, child.id, child.output
+    FROM agent_tasks child
+    JOIN task_tree tree ON child.parentTaskId = tree.taskId
+  )
+  SELECT
+    t.requestedByUserId as userId,
+    COUNT(*) as initiated,
+    SUM(CASE WHEN t.status = 'completed' AND (
+      EXISTS (
+        SELECT 1
+        FROM task_tree tree
+        JOIN task_attachments ta ON ta.task_id = tree.taskId
+        WHERE tree.rootId = t.id
+          AND ta.kind = 'url'
+          AND (
+            ta.url LIKE '%github.com/%/pull/%'
+            OR ta.url LIKE '%/-/merge_requests/%'
+          )
+      )
+      OR EXISTS (
+        SELECT 1 FROM task_attachments ta
+        JOIN task_tree tree ON tree.taskId = ta.task_id
+        WHERE tree.rootId = t.id AND ta.kind = 'page'
+      )
+      OR EXISTS (
+        SELECT 1 FROM task_tree tree
+        WHERE tree.rootId = t.id
+          AND (
+            tree.output LIKE '%github.com/%/pull/%'
+            OR tree.output LIKE '%/-/merge_requests/%'
+          )
+      )
+    ) THEN 1 ELSE 0 END) as shipped
+  FROM selected_roots t
+  GROUP BY t.requestedByUserId`;
+    }
+
+    type OldRootRow = { userId: string; initiated: number; shipped: number };
+
+    async function oldRowForUser(
+      userId: string,
+      extraCondition?: string,
+      extraParams: string[] = [],
+    ): Promise<OldRootRow | undefined> {
+      const rows = await getDbClient().query<OldRootRow>(
+        oldRootRowsSql(extraCondition),
+        extraParams,
+      );
+      return rows.find((r) => r.userId === userId);
+    }
+
+    test("case 1: root with no descendants and no evidence is not shipped", async () => {
+      const user = await createUser({ name: "Parity Case 1" });
+      const root = await createTaskExtended("Lonely root", { requestedByUserId: user.id });
+      await completeTask(root.id);
+
+      const oldRow = await oldRowForUser(user.id);
+      const newRow = (await getAttributionByPerson({})).find((r) => r.userId === user.id);
+
+      expect(oldRow?.initiated).toBe(1);
+      expect(oldRow?.shipped).toBe(0);
+      expect(newRow?.problemsInitiated).toBe(oldRow?.initiated);
+      expect(newRow?.problemsShipped).toBe(oldRow?.shipped);
+    });
+
+    test("case 2: root whose grandchild carries a GitHub PR url attachment is shipped", async () => {
+      const agent = await createAgent({ name: "Parity Agent 2", isLead: false, status: "idle" });
+      const user = await createUser({ name: "Parity Case 2" });
+      const root = await createTaskExtended("Root", { requestedByUserId: user.id });
+      const child = await createTaskExtended("Child", {
+        parentTaskId: root.id,
+        requestedByUserId: user.id,
+      });
+      const grandchild = await createTaskExtended("Grandchild", {
+        parentTaskId: child.id,
+        requestedByUserId: user.id,
+      });
+      await insertTaskAttachment({
+        taskId: grandchild.id,
+        agentId: agent.id,
+        name: "PR",
+        kind: "url",
+        url: "https://github.com/desplega-ai/agent-swarm/pull/9001",
+      });
+      await completeTask(root.id);
+
+      const oldRow = await oldRowForUser(user.id);
+      const newRow = (await getAttributionByPerson({})).find((r) => r.userId === user.id);
+
+      expect(oldRow?.shipped).toBe(1);
+      expect(newRow?.problemsShipped).toBe(oldRow?.shipped);
+      expect(newRow?.problemsInitiated).toBe(oldRow?.initiated);
+    });
+
+    test("case 3: root whose child carries a page attachment is shipped", async () => {
+      const agent = await createAgent({ name: "Parity Agent 3", isLead: false, status: "idle" });
+      const user = await createUser({ name: "Parity Case 3" });
+      const root = await createTaskExtended("Root", { requestedByUserId: user.id });
+      const child = await createTaskExtended("Child", {
+        parentTaskId: root.id,
+        requestedByUserId: user.id,
+      });
+      await insertTaskAttachment({
+        taskId: child.id,
+        agentId: agent.id,
+        name: "Published page",
+        kind: "page",
+        pageId: crypto.randomUUID(),
+      });
+      await completeTask(root.id);
+
+      const oldRow = await oldRowForUser(user.id);
+      const newRow = (await getAttributionByPerson({})).find((r) => r.userId === user.id);
+
+      expect(oldRow?.shipped).toBe(1);
+      expect(newRow?.problemsShipped).toBe(oldRow?.shipped);
+      expect(newRow?.problemsInitiated).toBe(oldRow?.initiated);
+    });
+
+    test("case 4: root whose own output holds a self-hosted GitLab MR URL is shipped", async () => {
+      const user = await createUser({ name: "Parity Case 4" });
+      const root = await createTaskExtended("Root", { requestedByUserId: user.id });
+      await completeTask(
+        root.id,
+        "Opened https://gitlab.internal.example.com/team/proj/-/merge_requests/42",
+      );
+
+      const oldRow = await oldRowForUser(user.id);
+      const newRow = (await getAttributionByPerson({})).find((r) => r.userId === user.id);
+
+      expect(oldRow?.shipped).toBe(1);
+      expect(newRow?.problemsShipped).toBe(oldRow?.shipped);
+      expect(newRow?.problemsInitiated).toBe(oldRow?.initiated);
+    });
+
+    test("case 5: root whose child's output holds a GitHub PR URL is shipped", async () => {
+      const user = await createUser({ name: "Parity Case 5" });
+      const root = await createTaskExtended("Root", { requestedByUserId: user.id });
+      const child = await createTaskExtended("Child", {
+        parentTaskId: root.id,
+        requestedByUserId: user.id,
+      });
+      await completeTask(child.id, "Opened https://github.com/desplega-ai/agent-swarm/pull/9002");
+      await completeTask(root.id);
+
+      const oldRow = await oldRowForUser(user.id);
+      const newRow = (await getAttributionByPerson({})).find((r) => r.userId === user.id);
+
+      expect(oldRow?.shipped).toBe(1);
+      expect(newRow?.problemsShipped).toBe(oldRow?.shipped);
+      expect(newRow?.problemsInitiated).toBe(oldRow?.initiated);
+    });
+
+    test("case 6: two qualifying attachments on the same task keep problemsInitiated at 1", async () => {
+      const agent = await createAgent({ name: "Parity Agent 6", isLead: false, status: "idle" });
+      const user = await createUser({ name: "Parity Case 6" });
+      const root = await createTaskExtended("Root", { requestedByUserId: user.id });
+      await insertTaskAttachment({
+        taskId: root.id,
+        agentId: agent.id,
+        name: "PR",
+        kind: "url",
+        url: "https://github.com/desplega-ai/agent-swarm/pull/9003",
+      });
+      await insertTaskAttachment({
+        taskId: root.id,
+        agentId: agent.id,
+        name: "Published page",
+        kind: "page",
+        pageId: crypto.randomUUID(),
+      });
+      await completeTask(root.id);
+
+      const oldRow = await oldRowForUser(user.id);
+      const newRow = (await getAttributionByPerson({})).find((r) => r.userId === user.id);
+
+      expect(oldRow?.initiated).toBe(1);
+      expect(oldRow?.shipped).toBe(1);
+      expect(newRow?.problemsInitiated).toBe(1);
+      expect(newRow?.problemsShipped).toBe(1);
+    });
+
+    test("case 7: qualifying evidence on two different descendants of one root keeps problemsInitiated at 1", async () => {
+      const agent = await createAgent({ name: "Parity Agent 7", isLead: false, status: "idle" });
+      const user = await createUser({ name: "Parity Case 7" });
+      const root = await createTaskExtended("Root", { requestedByUserId: user.id });
+      const childA = await createTaskExtended("Child A", {
+        parentTaskId: root.id,
+        requestedByUserId: user.id,
+      });
+      const childB = await createTaskExtended("Child B", {
+        parentTaskId: root.id,
+        requestedByUserId: user.id,
+      });
+      await insertTaskAttachment({
+        taskId: childA.id,
+        agentId: agent.id,
+        name: "PR",
+        kind: "url",
+        url: "https://github.com/desplega-ai/agent-swarm/pull/9004",
+      });
+      await completeTask(childB.id, "Opened https://github.com/desplega-ai/agent-swarm/pull/9005");
+      await completeTask(root.id);
+
+      const oldRow = await oldRowForUser(user.id);
+      const newRow = (await getAttributionByPerson({})).find((r) => r.userId === user.id);
+
+      expect(oldRow?.initiated).toBe(1);
+      expect(oldRow?.shipped).toBe(1);
+      expect(newRow?.problemsInitiated).toBe(1);
+      expect(newRow?.problemsShipped).toBe(1);
+    });
+
+    test("case 8: a url attachment matching neither PR nor MR pattern is not shipped", async () => {
+      const agent = await createAgent({ name: "Parity Agent 8", isLead: false, status: "idle" });
+      const user = await createUser({ name: "Parity Case 8" });
+      const root = await createTaskExtended("Root", { requestedByUserId: user.id });
+      await insertTaskAttachment({
+        taskId: root.id,
+        agentId: agent.id,
+        name: "Not a PR",
+        kind: "url",
+        url: "https://example.com/not-a-pr",
+      });
+      await completeTask(root.id);
+
+      const oldRow = await oldRowForUser(user.id);
+      const newRow = (await getAttributionByPerson({})).find((r) => r.userId === user.id);
+
+      expect(oldRow?.shipped).toBe(0);
+      expect(newRow?.problemsShipped).toBe(0);
+    });
+
+    test("case 9: an agent-fs attachment only is not shipped", async () => {
+      const agent = await createAgent({ name: "Parity Agent 9", isLead: false, status: "idle" });
+      const user = await createUser({ name: "Parity Case 9" });
+      const root = await createTaskExtended("Root", { requestedByUserId: user.id });
+      await insertTaskAttachment({
+        taskId: root.id,
+        agentId: agent.id,
+        name: "Artifact",
+        kind: "agent-fs",
+        path: "reports/artifact.md",
+      });
+      await completeTask(root.id);
+
+      const oldRow = await oldRowForUser(user.id);
+      const newRow = (await getAttributionByPerson({})).find((r) => r.userId === user.id);
+
+      expect(oldRow?.shipped).toBe(0);
+      expect(newRow?.problemsShipped).toBe(0);
+    });
+
+    test("case 10: evidence present but status is not completed is not shipped", async () => {
+      const agent = await createAgent({ name: "Parity Agent 10", isLead: false, status: "idle" });
+      const user = await createUser({ name: "Parity Case 10" });
+      const root = await createTaskExtended("Root", { requestedByUserId: user.id });
+      await insertTaskAttachment({
+        taskId: root.id,
+        agentId: agent.id,
+        name: "PR",
+        kind: "url",
+        url: "https://github.com/desplega-ai/agent-swarm/pull/9006",
+      });
+      // Deliberately left in its default (non-completed) status.
+
+      const oldRow = await oldRowForUser(user.id);
+      const newRow = (await getAttributionByPerson({})).find((r) => r.userId === user.id);
+
+      expect(oldRow?.initiated).toBe(1);
+      expect(oldRow?.shipped).toBe(0);
+      expect(newRow?.problemsShipped).toBe(0);
+    });
+
+    test("case 11: output IS NULL is not shipped and raises no error", async () => {
+      const user = await createUser({ name: "Parity Case 11" });
+      const root = await createTaskExtended("Root", { requestedByUserId: user.id });
+      await completeTask(root.id);
+
+      const oldRow = await oldRowForUser(user.id);
+      const newRow = (await getAttributionByPerson({})).find((r) => r.userId === user.id);
+
+      expect(oldRow?.shipped).toBe(0);
+      expect(newRow?.problemsShipped).toBe(0);
+    });
+
+    test("case 12: two roots for the same user, one shipped and one not — initiated 2, shipped 1", async () => {
+      const user = await createUser({ name: "Parity Case 12" });
+      const shippedRoot = await createTaskExtended("Shipped root", {
+        requestedByUserId: user.id,
+      });
+      await completeTask(
+        shippedRoot.id,
+        "Opened https://github.com/desplega-ai/agent-swarm/pull/9007",
+      );
+      const unshippedRoot = await createTaskExtended("Unshipped root", {
+        requestedByUserId: user.id,
+      });
+      await completeTask(unshippedRoot.id);
+
+      const oldRow = await oldRowForUser(user.id);
+      const newRow = (await getAttributionByPerson({})).find((r) => r.userId === user.id);
+
+      expect(oldRow?.initiated).toBe(2);
+      expect(oldRow?.shipped).toBe(1);
+      expect(newRow?.problemsInitiated).toBe(2);
+      expect(newRow?.problemsShipped).toBe(1);
+    });
+
+    test("case 13: evidence on a child created after endDate still ships the root — the walk has no date filter", async () => {
+      const agent = await createAgent({ name: "Parity Agent 13", isLead: false, status: "idle" });
+      const user = await createUser({ name: "Parity Case 13" });
+      const root = await createTaskExtended("Root", { requestedByUserId: user.id });
+      await getDbClient().run("UPDATE agent_tasks SET createdAt = ? WHERE id = ?", [
+        "2026-08-10T00:00:00.000Z",
+        root.id,
+      ]);
+      const child = await createTaskExtended("Child after window", {
+        parentTaskId: root.id,
+        requestedByUserId: user.id,
+      });
+      await getDbClient().run("UPDATE agent_tasks SET createdAt = ? WHERE id = ?", [
+        "2026-08-25T00:00:00.000Z",
+        child.id,
+      ]);
+      await insertTaskAttachment({
+        taskId: child.id,
+        agentId: agent.id,
+        name: "PR",
+        kind: "url",
+        url: "https://github.com/desplega-ai/agent-swarm/pull/9008",
+      });
+      await completeTask(root.id);
+
+      const endDate = "2026-08-20T23:59:59.999Z";
+      const oldRow = await oldRowForUser(user.id, "AND t.createdAt <= ?", [endDate]);
+      const newRow = (await getAttributionByPerson({ endDate })).find((r) => r.userId === user.id);
+
+      expect(oldRow?.shipped).toBe(1);
+      expect(newRow?.problemsShipped).toBe(1);
+      expect(newRow?.problemsInitiated).toBe(oldRow?.initiated);
+    });
+
+    test("shape guard: shipped_roots stays a non-correlated LEFT JOIN deduped with UNION", async () => {
+      const querySpy = spyOn(getDbClient(), "query");
+      try {
+        await getAttributionByPerson({});
+        const call = querySpy.mock.calls.find(([sql]) =>
+          String(sql).includes("task_tree(rootId, taskId, output)"),
+        );
+        const sql = String(call?.[0] ?? "");
+
+        // Rule 2: LEFT JOIN, never a correlated EXISTS against shipped_roots.
+        // Measured regression if this reverts: 4,189 ms for a 2-day window.
+        expect(sql).toContain("LEFT JOIN shipped_roots s ON s.rootId = t.id");
+        expect(sql).not.toMatch(/EXISTS\s*\(\s*SELECT[^)]*FROM\s+shipped_roots/);
+
+        // Rule 1: UNION, never UNION ALL, inside shipped_roots — the only
+        // UNION ALL in this statement belongs to the task_tree recursion.
+        // Strip `--` comments first: the explanatory comment above
+        // shipped_roots mentions "UNION ALL" in prose.
+        const sqlWithoutComments = sql.replace(/--[^\n]*/g, "");
+        expect((sqlWithoutComments.match(/UNION ALL/g) ?? []).length).toBe(1);
+        const shippedRootsIdx = sqlWithoutComments.indexOf("shipped_roots(rootId) AS (");
+        expect(shippedRootsIdx).toBeGreaterThan(-1);
+        const afterShippedRoots = sqlWithoutComments.slice(shippedRootsIdx);
+        const finalSelectIdx = afterShippedRoots.indexOf(
+          "SELECT\n        t.requestedByUserId as userId,",
+        );
+        expect(finalSelectIdx).toBeGreaterThan(-1);
+        const shippedRootsBody = afterShippedRoots.slice(0, finalSelectIdx);
+        expect(shippedRootsBody).toMatch(/\bUNION\b(?!\s*ALL)/);
+        expect(shippedRootsBody).not.toContain("UNION ALL");
+      } finally {
+        querySpy.mockRestore();
+      }
+    });
+  });
 });

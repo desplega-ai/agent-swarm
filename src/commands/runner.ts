@@ -57,6 +57,7 @@ import {
 } from "../utils/error-tracker.ts";
 import { resolveHarnessProvider } from "../utils/harness-provider.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
+import { terminateRegisteredProcessGroups } from "../utils/process-group.ts";
 import { resolveScriptsOnlyMode } from "../utils/scripts-only-mode.ts";
 import { scrubSecrets } from "../utils/secret-scrubber.ts";
 import { refreshSkillsIfChanged } from "../utils/skills-refresh.ts";
@@ -71,6 +72,7 @@ import {
   EX_CONFIG,
   retryBootStep,
 } from "./credential-wait.ts";
+import { refreshIdentityIfChanged } from "./identity-refresh.ts";
 import {
   contentSha256,
   prependProfileSyncRejectionBanner,
@@ -84,6 +86,7 @@ import {
   buildLatestModelReport,
   isBedrockSdkMode,
   isCredCheckDisabled,
+  reportAcpStatus,
   reportCredStatus,
   reportLatestModel,
   sendCredStatusReport,
@@ -507,12 +510,16 @@ export interface ApiConfig {
 export interface SteeringDispatchState {
   dispatchedIds: Set<string>;
   outcomes: Map<string, SteerDeliveryResult>;
+  pollingTaskIds: Set<string>;
+  inFlightMessageIds: Set<string>;
 }
 
 export function createSteeringDispatchState(): SteeringDispatchState {
   return {
     dispatchedIds: new Set(),
     outcomes: new Map(),
+    pollingTaskIds: new Set(),
+    inFlightMessageIds: new Set(),
   };
 }
 
@@ -528,13 +535,30 @@ export async function pollAndDispatchSteering(
   state: SteeringDispatchState,
   fetchImpl: typeof fetch = fetch,
 ): Promise<void> {
-  if (!isSteeringEnabled()) return;
+  const dispatches = await pollAndStartSteeringDispatches(
+    config,
+    taskId,
+    session,
+    state,
+    fetchImpl,
+  );
+  await Promise.all(dispatches);
+}
+
+async function pollAndStartSteeringDispatches(
+  config: ApiConfig,
+  taskId: string,
+  session: ProviderSession,
+  state: SteeringDispatchState,
+  fetchImpl: typeof fetch,
+): Promise<Array<Promise<void>>> {
+  if (!isSteeringEnabled()) return [];
   // Harness-side delivery (codex hooks): the hook polls pending rows and
   // injects them itself. Dispatching here would race it into a false
   // "Provider session does not support live steering" undeliverable →
   // premature promotion. Leave the rows pending; the terminal sweep still
   // promotes anything the hook never delivered.
-  if (session.steeringDeliveredExternally) return;
+  if (session.steeringDeliveredExternally) return [];
 
   const headers = {
     Authorization: `Bearer ${config.apiKey}`,
@@ -549,57 +573,103 @@ export async function pollAndDispatchSteering(
   }
 
   const data = (await response.json()) as { messages?: SteeringMessage[] };
-  for (const message of data.messages ?? []) {
-    if (message.status !== "pending") continue;
-
-    let outcome = state.dispatchedIds.has(message.id) ? state.outcomes.get(message.id) : undefined;
-    if (!outcome) {
-      try {
-        outcome = session.deliverSteering
-          ? await session.deliverSteering({
-              mode: message.mode,
-              // Wrap the body so it carries its own ID — the agent needs it to
-              // call `accept-steer`, which is the only path to `handled`.
-              text: await renderSteeringDelivery(message.id, message.body),
-            })
-          : {
-              delivered: false,
-              reason: "Provider session does not support live steering",
-            };
-      } catch (error) {
-        outcome = {
-          delivered: false,
-          reason: scrubSecrets(`Provider steering failed: ${(error as Error).message}`),
-        };
-      }
-      if (!outcome.delivered) {
-        outcome = {
-          delivered: false,
-          reason:
-            scrubSecrets(outcome.reason).trim() || "Provider rejected steering without a reason",
-        };
-      }
-      state.dispatchedIds.add(message.id);
-      state.outcomes.set(message.id, outcome);
+  const prepared: Array<{ message: SteeringMessage; text?: string }> = [];
+  try {
+    for (const message of data.messages ?? []) {
+      if (message.status !== "pending") continue;
+      if (state.inFlightMessageIds.has(message.id)) continue;
+      state.inFlightMessageIds.add(message.id);
+      const item: { message: SteeringMessage; text?: string } = { message };
+      prepared.push(item);
+      item.text =
+        session.deliverSteering && !state.outcomes.has(message.id)
+          ? await renderSteeringDelivery(message.id, message.body)
+          : undefined;
     }
-
-    const endpoint = outcome.delivered ? "delivered" : "undeliverable";
-    const body = outcome.delivered ? { mode: outcome.mode } : { reason: outcome.reason };
-    const reportResponse = await fetchImpl(
-      `${config.apiUrl}/api/steering-messages/${encodeURIComponent(message.id)}/${endpoint}`,
-      {
-        method: "POST",
-        headers: {
-          ...headers,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(body),
-      },
-    );
-    if (!reportResponse.ok) {
-      throw new Error(`Steering ${endpoint} report failed (HTTP ${reportResponse.status})`);
-    }
+  } catch (error) {
+    for (const { message } of prepared) state.inFlightMessageIds.delete(message.id);
+    throw error;
   }
+  return prepared.map(({ message, text }) =>
+    dispatchSteeringMessage(config, message, text, session, state, fetchImpl).finally(() =>
+      state.inFlightMessageIds.delete(message.id),
+    ),
+  );
+}
+
+async function dispatchSteeringMessage(
+  config: ApiConfig,
+  message: SteeringMessage,
+  text: string | undefined,
+  session: ProviderSession,
+  state: SteeringDispatchState,
+  fetchImpl: typeof fetch,
+): Promise<void> {
+  let outcome = state.dispatchedIds.has(message.id) ? state.outcomes.get(message.id) : undefined;
+  if (!outcome) {
+    state.dispatchedIds.add(message.id);
+    try {
+      outcome = session.deliverSteering
+        ? await session.deliverSteering({
+            mode: message.mode,
+            text: text ?? message.body,
+          })
+        : {
+            delivered: false,
+            reason: "Provider session does not support live steering",
+          };
+    } catch (error) {
+      outcome = {
+        delivered: false,
+        reason: scrubSecrets(`Provider steering failed: ${(error as Error).message}`),
+      };
+    }
+    if (!outcome.delivered) {
+      outcome = {
+        delivered: false,
+        reason:
+          scrubSecrets(outcome.reason).trim() || "Provider rejected steering without a reason",
+      };
+    }
+    state.outcomes.set(message.id, outcome);
+  }
+
+  const endpoint = outcome.delivered ? "delivered" : "undeliverable";
+  const body = outcome.delivered ? { mode: outcome.mode } : { reason: outcome.reason };
+  const reportResponse = await fetchImpl(
+    `${config.apiUrl}/api/steering-messages/${encodeURIComponent(message.id)}/${endpoint}`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${config.apiKey}`,
+        "X-Agent-ID": config.agentId,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    },
+  );
+  if (!reportResponse.ok) {
+    throw new Error(`Steering ${endpoint} report failed (HTTP ${reportResponse.status})`);
+  }
+}
+
+export function scheduleSteeringDispatch(
+  config: ApiConfig,
+  taskId: string,
+  session: ProviderSession,
+  state: SteeringDispatchState,
+  onError: (error: unknown) => void,
+  fetchImpl: typeof fetch = fetch,
+): boolean {
+  if (state.pollingTaskIds.has(taskId)) return false;
+  state.pollingTaskIds.add(taskId);
+  void pollAndStartSteeringDispatches(config, taskId, session, state, fetchImpl)
+    .then((dispatches) => {
+      for (const dispatch of dispatches) void dispatch.catch(onError);
+    })
+    .catch(onError)
+    .finally(() => state.pollingTaskIds.delete(taskId));
+  return true;
 }
 
 /** Ping the server to indicate activity and update status */
@@ -759,12 +829,31 @@ export async function fetchResolvedEnv(
   return { env, credentialSelections, resolvedProvider, scriptsOnlyConfigValue };
 }
 
-async function ensureAgentFsCredentials(
+/**
+ * Ask the API to provision this agent's agent-fs credentials.
+ *
+ * Returns true when the API reached a verdict: the agent-scoped
+ * `AGENT_FS_API_KEY` row (plus the global `AGENT_FS_DEFAULT_*` rows) now
+ * exist, or agent-fs is not configured for this deployment
+ * (`enabled: false`). Both outcomes are terminal, so a retry cannot help.
+ *
+ * Returns false when the attempt reached no verdict (HTTP error, network
+ * failure, or no agent identity yet). The common case is a brand-new
+ * `AGENT_ID` against a fresh API database: this call runs before
+ * `registerAgent` (the boot `fetchResolvedEnv` right after it resolves the
+ * provider that registration needs), so the agent row does not exist yet and
+ * the route answers `500 Agent not found`. Nothing gets written, and every
+ * later `agent-fs` call in that container fails with "Not logged in".
+ * {@link provisionAgentFsAfterRegistration} retries once after registration.
+ *
+ * Never throws: provisioning is best-effort and must not wedge boot.
+ */
+export async function ensureAgentFsCredentials(
   apiUrl: string,
   apiKey: string,
   agentId: string,
-): Promise<void> {
-  if (!apiUrl || !apiKey || !agentId || agentId === "unknown") return;
+): Promise<boolean> {
+  if (!apiUrl || !apiKey || !agentId || agentId === "unknown") return false;
 
   try {
     const response = await fetch(`${apiUrl}/api/fs/agent-credentials`, {
@@ -784,7 +873,7 @@ async function ensureAgentFsCredentials(
           `[agent-fs] credential provisioning skipped: HTTP ${response.status}${text ? ` ${text}` : ""}`,
         ),
       );
-      return;
+      return false;
     }
     const result = (await response.json().catch(() => ({}))) as {
       enabled?: boolean;
@@ -795,9 +884,54 @@ async function ensureAgentFsCredentials(
         `[agent-fs] ${result.created ? "created" : "confirmed"} agent-scoped credentials`,
       );
     }
+    return true;
   } catch (error) {
     console.warn(scrubSecrets(`[agent-fs] credential provisioning skipped: ${error}`));
+    return false;
   }
+}
+
+/**
+ * Second and final agent-fs provisioning attempt, run right after the boot
+ * registration succeeds.
+ *
+ * `alreadyProvisioned` carries the result of the pre-registration attempt.
+ * When it is true this is a no-op. When it is false the agent row exists by
+ * now, so the same request that failed with `500 Agent not found` can
+ * succeed. One retry, no polling loop: registration is the only precondition
+ * the first attempt was missing.
+ *
+ * On success the resolved env is fetched again and re-applied, because the
+ * boot snapshot was taken before provisioning wrote its rows. Only the
+ * live-apply allowlist (`RELOADABLE_ENV_KEYS`, which carries
+ * `AGENT_FS_SHARED_ORG_ID`) is mutated. The harness does not depend on this
+ * refresh: every task spawn re-resolves the env, so the first task already
+ * receives `AGENT_FS_API_KEY`, `AGENT_FS_DEFAULT_ORG_ID`, and
+ * `AGENT_FS_DEFAULT_DRIVE_ID` once the rows exist.
+ *
+ * Never throws. Returns whether credentials are settled.
+ */
+export async function provisionAgentFsAfterRegistration(opts: {
+  apiUrl: string;
+  apiKey: string;
+  agentId: string;
+  alreadyProvisioned: boolean;
+}): Promise<boolean> {
+  if (opts.alreadyProvisioned) return true;
+
+  const provisioned = await ensureAgentFsCredentials(opts.apiUrl, opts.apiKey, opts.agentId);
+  if (!provisioned) return false;
+
+  try {
+    const refreshed = await fetchResolvedEnv(opts.apiUrl, opts.apiKey, opts.agentId);
+    const changed = applyResolvedEnvToProcessEnv(refreshed.env);
+    if (changed.length > 0) {
+      console.log(`[agent-fs] Applied resolved swarm config after retry: ${changed.join(", ")}`);
+    }
+  } catch (error) {
+    console.warn(scrubSecrets(`[agent-fs] post-provisioning env refresh skipped: ${error}`));
+  }
+  return true;
 }
 
 /**
@@ -1965,7 +2099,10 @@ function setupShutdownHandlers(
   apiConfig?: ApiConfig,
   getRunnerState?: () => RunnerState | undefined,
 ): void {
-  const shutdown = async (signal: string) => {
+  let shutdownInProgress = false;
+  const shutdown = async (signal: string, exitCode = 0) => {
+    if (shutdownInProgress) return;
+    shutdownInProgress = true;
     console.log(`\n[${role}] Received ${signal}, shutting down...`);
 
     // Wait for active tasks with timeout
@@ -2029,6 +2166,8 @@ function setupShutdownHandlers(
       }
     }
 
+    await terminateRegisteredProcessGroups();
+
     if (apiConfig) {
       telemetry.session("ended", {
         agentId: apiConfig.agentId,
@@ -2038,11 +2177,32 @@ function setupShutdownHandlers(
       await closeAgent(apiConfig, role);
     }
     await savePm2State(role);
-    process.exit(0);
+    process.exit(exitCode);
   };
 
-  process.on("SIGINT", () => shutdown("SIGINT"));
-  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  const beginShutdown = (signal: string, exitCode = 0) => {
+    void shutdown(signal, exitCode).catch(async (error) => {
+      console.error(`[${role}] Shutdown failed after ${signal}:`, error);
+      await terminateRegisteredProcessGroups();
+      process.exit(1);
+    });
+  };
+
+  process.on("SIGINT", () => beginShutdown("SIGINT"));
+  process.on("SIGTERM", () => beginShutdown("SIGTERM"));
+  let fatalShutdownInProgress = false;
+  const fatalShutdown = (kind: string, error: unknown) => {
+    if (fatalShutdownInProgress) return;
+    fatalShutdownInProgress = true;
+    console.error(`[${role}] ${kind}:`, error);
+    void terminateRegisteredProcessGroups().finally(() => process.exit(1));
+  };
+  process.on("uncaughtException", (error) => {
+    fatalShutdown("Uncaught exception", error);
+  });
+  process.on("unhandledRejection", (reason) => {
+    fatalShutdown("Unhandled rejection", reason);
+  });
 }
 
 /** Configuration for a runner role (worker or lead) */
@@ -2657,8 +2817,8 @@ export async function buildRequesterProfilePrompt(
   return result.skipped ? "" : result.text.trim();
 }
 
-/** Register agent via HTTP API */
-async function registerAgent(opts: {
+/** Register agent via HTTP API. Exported so tests can exercise the real boot ordering. */
+export async function registerAgent(opts: {
   apiUrl: string;
   apiKey: string;
   agentId: string;
@@ -2990,6 +3150,7 @@ async function fetchRelevantMemories(
     // Plan: thoughts/taras/plans/2026-05-05-memory-rater-v1.5/step-2.md §2
     if (taskId) headers["X-Source-Task-ID"] = taskId;
     if (contextKey) headers["X-Context-Key"] = contextKey;
+    headers["X-Memory-Consumption"] = "prompt";
 
     const response = await fetch(`${apiUrl}/api/memory/search`, {
       method: "POST",
@@ -3329,7 +3490,20 @@ async function spawnProviderProcess(
     const oauthInfo = await resolveCodexOAuthCredentialInfo(opts.apiUrl, opts.apiKey);
     oauthSelection = oauthInfo?.selection;
     oauthIsPoolBacked = oauthInfo?.isPoolBacked ?? false;
+    // A resolved config-store pool slot always wins over OPENAI_API_KEY at
+    // runtime — `resolveCodexAuthMode` in codex-adapter.ts revalidates and
+    // writes chatgpt-mode auth.json whenever `codexSlot` is set, and OPENAI_API_KEY
+    // is only forwarded to the spawned CLI when auth.json is NOT in chatgpt
+    // mode. Gating this on `credentialSelections[0]`'s rate-limit status
+    // (the old behavior) reported OPENAI_API_KEY as the credential used on
+    // every task as long as OPENAI_API_KEY itself wasn't rate-limited — even
+    // when a healthy CODEX_OAUTH pool slot was the credential actually
+    // authenticating the session (issue: credentialKeyType mislabeled
+    // OPENAI_API_KEY, and CODEX_OAUTH usage never reported to
+    // /api/keys/report-usage so no api_key_status row was ever created for
+    // the pool slot).
     const oauthIsPrimary =
+      oauthIsPoolBacked ||
       credentialSelections.length === 0 ||
       (credentialSelections[0]?.isRateLimitFallback &&
         oauthSelection &&
@@ -3487,6 +3661,7 @@ async function spawnProviderProcess(
   let providerSessionId = session.sessionId;
   let pendingHarnessVariant: string | undefined;
   let pendingHarnessVariantMeta: Record<string, unknown> | undefined;
+  let acpStatusReport: Promise<void> | undefined;
   let runningTaskForSessionInit: RunningTask | undefined;
   const activeToolSpans = new Map<
     string,
@@ -3552,6 +3727,18 @@ async function spawnProviderProcess(
             "agentswarm.provider.name": event.provider,
             "agentswarm.provider.meta_preview": telemetryPreview(event.providerMeta),
           });
+          if (
+            event.provider === "acp" &&
+            (event.providerMeta?.target === "opencode" ||
+              event.providerMeta?.target === "custom") &&
+            Array.isArray(event.providerMeta.configOptions)
+          ) {
+            acpStatusReport = reportAcpStatus(opts.apiUrl, opts.apiKey, opts.agentId, {
+              target: event.providerMeta.target,
+              configOptions: event.providerMeta.configOptions,
+              reportedAt: Date.now(),
+            }).catch((err) => console.warn(`[runner] Failed to report ACP options: ${err}`));
+          }
           if (realTaskId) {
             saveProviderSessionId(
               opts.apiUrl,
@@ -3875,6 +4062,9 @@ async function spawnProviderProcess(
         // Stop event flush timer and do a final flush
         clearInterval(eventFlushTimer);
         await flushEvents();
+        // Keep the agent-level ACP option snapshot ordered before the poll
+        // loop can publish a post-task credential snapshot for a harness swap.
+        await acpStatusReport;
 
         // Final log flush
         if (shouldStream && logBuffer.lines.length > 0) {
@@ -4024,11 +4214,17 @@ async function spawnProviderProcess(
     );
 
   // Build credential info for rate limit tracking.
-  // For codex: when OPENAI_API_KEY is rate-limited but CODEX_OAUTH has
-  // available slots (or vice versa), prefer the healthy credential.
+  // For codex: a resolved CODEX_OAUTH pool slot (oauthIsPoolBacked) is always
+  // the credential actually used at runtime (see resolveCodexAuthMode in
+  // codex-adapter.ts — config store beats OPENAI_API_KEY whenever both
+  // exist), so it must win here too, independent of OPENAI_API_KEY's
+  // rate-limit status. Otherwise fall back to the OPENAI_API_KEY-rate-limited
+  // cross-keyType failover this block already handled.
   let primarySelection: CredentialSelection | undefined;
   const firstCred = credentialSelections[0];
-  if (firstCred && oauthSelection) {
+  if (oauthSelection && oauthIsPoolBacked) {
+    primarySelection = oauthSelection;
+  } else if (firstCred && oauthSelection) {
     if (firstCred.isRateLimitFallback && !oauthSelection.isRateLimitFallback) {
       primarySelection = oauthSelection;
       console.log(
@@ -4486,8 +4682,13 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // boot-fetch failure it stays at the default. Reconciled live thereafter by
   // `applySwarmConfigDrift`.
   let bootCooldownMs = resolveCodexCreditsExhaustedCooldownMs(undefined);
+  // Tracks whether agent-fs credentials are settled. A brand-new AGENT_ID has
+  // no agent row yet at this point, so this first attempt gets
+  // `500 Agent not found` and returns false. The retry runs right after
+  // registration below.
+  let agentFsProvisioned = false;
   try {
-    await ensureAgentFsCredentials(apiUrl, apiKey, agentId);
+    agentFsProvisioned = await ensureAgentFsCredentials(apiUrl, apiKey, agentId);
     const bootEnv = await fetchResolvedEnv(apiUrl, apiKey, agentId);
     bootProvider = bootEnv.resolvedProvider;
     resolvedScriptsOnly = resolveScriptsOnlyMode({
@@ -4951,6 +5152,16 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     console.error(`[${role}] Failed to register: ${error}`);
     process.exit(1);
   }
+
+  // The agent row exists now, so a first attempt that failed with
+  // `500 Agent not found` can succeed. Still best-effort: a failure here only
+  // means agent-fs stays unavailable, it must not stop the worker.
+  await provisionAgentFsAfterRegistration({
+    apiUrl,
+    apiKey,
+    agentId,
+    alreadyProvisioned: agentFsProvisioned,
+  });
 
   // Block until harness credentials are present in env. This loop replaces
   // the old bash-level fail-fast in `docker-entrypoint.sh` — the worker is
@@ -5525,6 +5736,16 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         // Per-task runner session ID so session logs are scoped to this task
         const resumeRunnerSessionId = crypto.randomUUID();
 
+        // Register the active session BEFORE the provider spawn so the API's
+        // sweeps never see this in_progress task without a session row (see
+        // the main task path for the full rationale).
+        await registerActiveSession(apiConfig, {
+          taskId: task.id,
+          triggerType: "task_resumed",
+          taskDescription: task.task?.slice(0, 200),
+          runnerSessionId: resumeRunnerSessionId,
+        });
+
         let runningTask: RunningTask;
         try {
           runningTask = await spawnProviderProcess(
@@ -5570,21 +5791,11 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             undefined,
             state.harnessProvider,
           );
+          await removeActiveSession(apiConfig, task.id);
           continue;
         }
 
         state.activeTasks.set(task.id, runningTask);
-        registerActiveSession(apiConfig, {
-          taskId: task.id,
-          triggerType: "task_resumed",
-          taskDescription: task.task?.slice(0, 200),
-          runnerSessionId: resumeRunnerSessionId,
-        }).catch((err) =>
-          console.error(
-            "[runner] active-session registration failed:",
-            scrubSecrets(err instanceof Error ? err.message : String(err)),
-          ),
-        );
         console.log(
           `[${role}] Resumed task ${task.id.slice(0, 8)} (${state.activeTasks.size}/${state.maxConcurrent} active)`,
         );
@@ -5756,15 +5967,13 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     if (steeringDispatchState && state.activeTasks.size > 0) {
       const dispatchState = steeringDispatchState;
       for (const [taskId, task] of state.activeTasks) {
-        try {
-          await pollAndDispatchSteering(apiConfig, taskId, task.session, dispatchState);
-        } catch (error) {
+        scheduleSteeringDispatch(apiConfig, taskId, task.session, dispatchState, (error) => {
           console.warn(
             `[${role}] Steering dispatch failed for task ${taskId.slice(0, 8)} (non-fatal): ${scrubSecrets(
               (error as Error).message,
             )}`,
           );
-        }
+        });
       }
     }
 
@@ -6039,6 +6248,33 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           }
         }
 
+        // Refresh prompt inputs per task without rewriting files shared with
+        // active sessions. A failed or bounded-out /me read keeps the cache.
+        const identityResult = await refreshIdentityIfChanged(
+          { apiUrl, apiKey, agentId, role },
+          {
+            soulMd: agentSoulMd,
+            identityMd: agentIdentityMd,
+            toolsMd: agentToolsMd,
+            claudeMd: agentClaudeMd,
+            heartbeatMd: agentHeartbeatMd,
+            name: agentProfileName,
+            description: agentDescription,
+          },
+        );
+        if (identityResult.changed) {
+          agentSoulMd = identityResult.fields.soulMd;
+          agentIdentityMd = identityResult.fields.identityMd;
+          agentToolsMd = identityResult.fields.toolsMd;
+          agentClaudeMd = identityResult.fields.claudeMd;
+          agentHeartbeatMd = identityResult.fields.heartbeatMd;
+          agentProfileName = identityResult.fields.name;
+          agentDescription = identityResult.fields.description;
+          console.log(
+            `[${role}] Identity changed — refreshing system prompt (${identityResult.changedFields.join(", ")})`,
+          );
+        }
+
         // Rebuild system prompt with per-task repo context
         const taskBasePrompt = await buildSystemPrompt();
         const requesterProfilePrompt = await buildRequesterProfilePrompt(trigger.requestedBy);
@@ -6072,6 +6308,25 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
         // Per-task runner session ID so session logs are scoped to this task
         const taskRunnerSessionId = crypto.randomUUID();
+
+        // Register the active session BEFORE the provider spawn. The API's
+        // reboot sweep and stalled-task sweeps treat an in_progress task with
+        // no session row as orphaned, and a cold opencode spawn can take
+        // longer than the 5s post-boot sweep delay. The provider session id is
+        // filled in on `session_init` (saveProviderSessionId). Pool triggers
+        // with no task id get their synthetic session after the spawn below.
+        const taskDesc =
+          trigger.task && typeof trigger.task === "object" && "task" in trigger.task
+            ? String((trigger.task as { task: string }).task).slice(0, 200)
+            : undefined;
+        if (trigger.taskId) {
+          await registerActiveSession(apiConfig, {
+            taskId: trigger.taskId,
+            triggerType: trigger.type,
+            taskDescription: taskDesc,
+            runnerSessionId: taskRunnerSessionId,
+          });
+        }
 
         // Spawn without blocking (await to set up session, but process runs async)
         let runningTask: RunningTask;
@@ -6117,6 +6372,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               undefined,
               state.harnessProvider,
             );
+            await removeActiveSession(apiConfig, trigger.taskId);
           }
           continue;
         }
@@ -6151,22 +6407,21 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
         state.activeTasks.set(runningTask.taskId, runningTask);
 
-        // Register active session for concurrency awareness
-        const taskDesc =
-          trigger.task && typeof trigger.task === "object" && "task" in trigger.task
-            ? String((trigger.task as { task: string }).task).slice(0, 200)
-            : undefined;
-        registerActiveSession(apiConfig, {
-          taskId: runningTask.taskId,
-          triggerType: trigger.type,
-          taskDescription: taskDesc,
-          runnerSessionId: taskRunnerSessionId,
-        }).catch((err) =>
-          console.error(
-            "[runner] active-session registration failed:",
-            scrubSecrets(err instanceof Error ? err.message : String(err)),
-          ),
-        );
+        // Pool triggers have no task id before the spawn; their session is
+        // keyed on the synthetic id `spawnProviderProcess` minted.
+        if (!trigger.taskId) {
+          registerActiveSession(apiConfig, {
+            taskId: runningTask.taskId,
+            triggerType: trigger.type,
+            taskDescription: taskDesc,
+            runnerSessionId: taskRunnerSessionId,
+          }).catch((err) =>
+            console.error(
+              "[runner] active-session registration failed:",
+              scrubSecrets(err instanceof Error ? err.message : String(err)),
+            ),
+          );
+        }
 
         console.log(
           `[${role}] Started task ${runningTask.taskId.slice(0, 8)} (${state.activeTasks.size}/${state.maxConcurrent} active, trigger: ${trigger.type})`,

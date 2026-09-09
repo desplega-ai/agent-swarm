@@ -28,15 +28,44 @@ export interface LogLine {
   text: string;
 }
 
+export type InstallProvider = "claude" | "openai" | "openrouter" | "bedrock";
+export type HarnessProvider = "claude" | "codex" | "pi" | "opencode";
+
+export const PROVIDER_HARNESS: Record<InstallProvider, HarnessProvider> = {
+  claude: "claude",
+  openai: "codex",
+  openrouter: "pi",
+  bedrock: "pi",
+};
+
+export const PROVIDER_LABELS: Record<InstallProvider, string> = {
+  claude: "Claude Code",
+  openai: "OpenAI",
+  openrouter: "OpenRouter",
+  bedrock: "AWS Bedrock (alpha)",
+};
+
+export const BEDROCK_ALPHA_NOTICE =
+  "Alpha: session summaries, memory rating, spend tracking and model tiers may be missing on Bedrock.";
+
 export interface OnboardState {
   step: OnboardStep;
   deployType: "local" | "remote";
   presetId: string | null;
   services: ServiceEntry[];
-  harness: "claude" | "pi";
+  provider: InstallProvider;
+  harness: HarnessProvider;
   claudeOAuthToken: string;
   anthropicApiKey: string;
   credentialType: "oauth" | "api_key";
+  openaiApiKey: string;
+  openrouterApiKey: string;
+  modelOverride: string;
+  awsRegion: string;
+  awsAccessKeyId: string;
+  awsSecretAccessKey: string;
+  awsSessionToken: string;
+  awsProfile: string;
   apiKey: string;
   agentIds: Record<string, string>;
   integrations: {
@@ -55,6 +84,8 @@ export interface OnboardState {
   sentryToken: string;
   sentryOrg: string;
   apiPort: number;
+  maxConcurrentTasks: number | null;
+  pullPolicy: PullPolicy;
   outputDir: string;
   nonInteractive: boolean;
   error: string | null;
@@ -73,6 +104,14 @@ export interface OnboardProps {
   dryRun?: boolean;
   yes?: boolean;
   preset?: string;
+  maxConcurrentTasks?: string;
+  pullPolicy?: string;
+}
+
+export type PullPolicy = "always" | "missing" | "never";
+
+export function isPullPolicy(value: string): value is PullPolicy {
+  return value === "always" || value === "missing" || value === "never";
 }
 
 export interface StepProps {
@@ -132,10 +171,19 @@ export const INITIAL_STATE: OnboardState = {
   deployType: "local",
   presetId: null,
   services: [],
+  provider: "claude",
   harness: "claude",
   claudeOAuthToken: "",
   anthropicApiKey: "",
   credentialType: "oauth",
+  openaiApiKey: "",
+  openrouterApiKey: "",
+  modelOverride: "",
+  awsRegion: "",
+  awsAccessKeyId: "",
+  awsSecretAccessKey: "",
+  awsSessionToken: "",
+  awsProfile: "",
   apiKey: "",
   agentIds: {},
   integrations: { github: false, slack: false, gitlab: false, sentry: false },
@@ -149,6 +197,8 @@ export const INITIAL_STATE: OnboardState = {
   sentryToken: "",
   sentryOrg: "",
   apiPort: 0,
+  maxConcurrentTasks: null,
+  pullPolicy: "always",
   outputDir: process.cwd(),
   nonInteractive: false,
   error: null,

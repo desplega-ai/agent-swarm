@@ -58,6 +58,7 @@ async function toSiblingTaskInfo(task: AgentTask): Promise<SiblingTaskInfo> {
     agentName: agent?.name ?? null,
     description: stripSiblingBlock(task.task),
     updatedAt: task.lastUpdatedAt,
+    createdAt: task.createdAt,
   };
 }
 

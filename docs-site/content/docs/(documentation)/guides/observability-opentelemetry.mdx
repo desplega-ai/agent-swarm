@@ -117,9 +117,11 @@ Sensitive exception messages, status messages, tool previews, and OTLP auth head
 
 Every API request is wrapped in a span named after its route, following the OpenTelemetry HTTP server semantic conventions: `{METHOD} {route-template}` — for example `GET /api/tasks/{id}` or `POST /api/tasks`.
 
-The route template is **low-cardinality**: a request to `/api/tasks/abc-123` and one to `/api/tasks/def-456` share the span name `GET /api/tasks/{id}`, so SigNoz can group and aggregate by endpoint without raw IDs fragmenting the data. Requests that don't match a registered route — core routes (`/health`, `/ping`, `/me`), the MCP transport, and 404s — fall back to `{METHOD} /{first-segment}` (e.g. `GET /health`, `POST /mcp`), or a bare `{METHOD}` for the root path. The full raw request path is always preserved on the `url.path` attribute.
+The route template is **low-cardinality**: a request to `/api/tasks/abc-123` and one to `/api/tasks/def-456` share the span name `GET /api/tasks/{id}`, so SigNoz can group and aggregate by endpoint without raw IDs fragmenting the data. A handful of static core paths that don't go through the `route()` factory — `/health`, `/openapi.json`, `/docs`, `/me`, `/cancelled-tasks`, `/internal/reload-config`, `/mcp`, `/mcp-user` — are still fixed literal paths, so they get their own `http.route` too (e.g. `GET /health`). Everything else that doesn't match a registered route, including the MCP transport at a deeper path and genuine 404s, falls back to `{METHOD} /{first-segment}` (e.g. `POST /mcp/session-xyz/messages` → `POST /mcp`), or a bare `{METHOD}` for the root path. The full raw request path is always preserved on the `url.path` attribute.
 
-The same route template is also published on the `http.route` span attribute, so SigNoz can group, filter, and aggregate by endpoint as a first-class field instead of parsing it out of the span name. `http.route` is **omitted** (not fabricated) for requests that don't match a registered route.
+The same route template is also published on the `http.route` span attribute, so SigNoz can group, filter, and aggregate by endpoint as a first-class field instead of parsing it out of the span name. `http.route` is **omitted** (not fabricated) for requests that don't match a registered route or one of the static core paths above.
+
+Inbound API request spans are emitted with span kind `SERVER` (`SpanKind.SERVER`). This matters specifically for Datadog: its APM resource-name derivation only appends `http.route` to the resource name for `SpanKindServer` spans, so a `SERVER`-kind span with `http.route` set resolves to a per-endpoint Datadog resource (e.g. `GET /api/tasks/{id}`) instead of every request collapsing into one resource per HTTP method. Every other span kind emitted by Agent Swarm — the `mcp.tool` spans and worker-side spans — stays `INTERNAL`, since Datadog's method-based resource-name shortcut only fires on the HTTP method attribute regardless of kind and internal spans aren't inbound HTTP requests.
 
 Request handling runs inside the HTTP server span's active context, so server-side spans created while serving the request — notably the `mcp.tool` spans from MCP tool calls — nest underneath it as children rather than appearing as disconnected root spans.
 
@@ -132,15 +134,24 @@ Common attributes:
 | Attribute | Description |
 |-----------|-------------|
 | `http.request.method` | HTTP method |
-| `http.route` | Low-cardinality route template, e.g. `/api/tasks/{id}`. Omitted for unmatched core/MCP/404 paths. |
+| `http.route` | Low-cardinality route template, e.g. `/api/tasks/{id}`. Also set for the static core paths (`/health`, `/mcp`, etc.). Omitted for genuinely unmatched paths. |
 | `url.path` | Raw request path (full path, including IDs) |
 | `url.scheme` | Request scheme — `https` or `http` (honors `X-Forwarded-Proto`) |
 | `server.address` | Request host with the port stripped (honors `X-Forwarded-Host`) |
 | `network.protocol.version` | HTTP protocol version, e.g. `1.1` or `2` |
 | `user_agent.original` | Raw `User-Agent` request header |
-| `http.response.status_code` | HTTP response status code (SigNoz surfaces this as the `responseStatusCode` column) |
+| `http.response.status_code` | HTTP response status code (SigNoz surfaces this as the `responseStatusCode` column). Omitted on the premature-close path when no headers were ever sent. |
 | `agentswarm.component` | `api` |
 | `agentswarm.http.duration_ms` | Server-side request duration |
+| `agentswarm.http.aborted` | `true` when the response connection closed before completion. Omitted (never `false`) otherwise. |
+
+#### Premature response close
+
+Node emits `close` on a `ServerResponse` for both a completed response and a connection terminated early, so this path establishes that the response did not complete — not that the client was the actor. Agent Swarm's policy for it:
+
+- `agentswarm.http.aborted` is set to `true`, and omitted entirely otherwise, so `agentswarm.http.aborted:true` is the query.
+- `http.response.status_code` is omitted when no headers were sent, rather than reporting the pre-`writeHead` default of `200` for a response that never went out.
+- The span status is left **Unset**. `close` gives the server no way to tell an intentional client cancellation from a response-write failure, and the dominant case here is the former: a normal SSE teardown on `/mcp` or `/mcp-user`. Marking every premature close an error would put routine traffic into the service error rate. This is a local policy choice, not a claim that such closes are never errors — filter on `agentswarm.http.aborted` rather than on span status to find them.
 
 Useful for:
 
@@ -386,6 +397,37 @@ Both counters share the same set of low-cardinality attributes:
 |-----------|--------|-------------|
 | `token_type` | `input`, `output`, `cacheRead`, `cacheWrite`, `reasoning`, `thinking` | Token class. Only classes with a non-zero count are emitted. |
 
+### Database Retention Sweep
+
+The `src/be/db-retention.ts` sweep emits one metric point per table **attempt**, on both the success and the error path, so a failure is never silently absent from `retention: {}` on `GET /api/metrics` — it shows up as `outcome:error` here instead.
+
+A tick makes up to two passes: pass 1 gives every enabled table its slice, and pass 2 revisits the tables pass 1 left undrained while budget remains. A table can therefore emit two points in one tick. A dry run runs pass 1 only, so it emits exactly one point per table per tick. Aggregate by `table` before reading a rate.
+
+Emission is best-effort. Every span and metric call in the sweep is wrapped so a throwing exporter cannot fail a tick or turn a completed `DELETE` into a failed sweep.
+
+| Metric | Instrument | Unit | Emitted | Meaning |
+| --- | --- | --- | --- | --- |
+| `agentswarm.db.retention.sweeps` | Counter | `{sweep}` | once per table attempt | One point per table attempt. `outcome` tag carries the terminal state. |
+| `agentswarm.db.retention.rows_deleted` | Counter | `{row}` | once per table attempt | Rows deleted. Always 0 when `dry_run:true`. An `outcome:error` point carries the rows that attempt had already committed before it failed — each batch autocommits, so those rows are gone. |
+| `agentswarm.db.retention.backlog` | Gauge | `{row}` | once per table attempt | Rows still older than the horizon at the end of the slice. |
+| `agentswarm.db.retention.batches` | Counter | `{batch}` | once per table attempt | DELETE statements issued. |
+| `agentswarm.db.retention.table_duration_ms` | Histogram | `ms` | once per table attempt | Wall clock of one table's slice. |
+| `agentswarm.db.retention.slowest_statement_ms` | Gauge | `ms` | once per table attempt | Slowest single DELETE in the slice, measured as driver execution time. The event-loop stall signal. |
+| `agentswarm.db.retention.statement_duration_ms` | Histogram | `ms` | once per DELETE | Distribution of statement durations, measured as driver execution time. |
+| `agentswarm.db.retention.batch_size` | Gauge | `{row}` | once per table attempt | The adaptive batch size the table settled on. |
+
+"Driver execution time" is the time the statement spent inside the SQLite driver. It excludes the time the statement waited its turn behind other database operations and the backoff sleeps it spent bridging an external write lock, because nothing is executing then. Use `table_duration_ms` when you want the wall clock of a whole slice, including that waiting.
+
+Tags on every metric:
+
+| Tag | Values |
+| --- | --- |
+| `table` | `session_logs`, `agent_log`, `events` |
+| `dry_run` | `true`, `false` |
+| `outcome` (on `sweeps` and `table_duration_ms` only) | `converged`, `budget_exhausted`, `error` |
+
+`outcome` takes `converged` (the table's backlog is fully drained), `budget_exhausted` (the tick's time budget ran out before the table drained — expected during a large initial backlog), or `error` (the sweep threw). An error is also visible as an ERROR span status on the `db.retention.table` span, with the exception recorded on that span.
+
 ### Metric Temporality
 
 Temporality is NOT hardcoded. Set the following for Datadog or any delta-preferred backend:
@@ -394,7 +436,7 @@ Temporality is NOT hardcoded. Set the following for Datadog or any delta-preferr
 OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=delta
 ```
 
-Omit it for backends (SigNoz, Prometheus) that prefer cumulative temporality (the SDK default).
+Omit it for backends (SigNoz, Prometheus) that prefer cumulative temporality (the SDK default). The retention histograms (`table_duration_ms`, `statement_duration_ms`) depend on the backend's OTLP histogram mapping like any other histogram; `agentswarm.db.retention.slowest_statement_ms` is a plain gauge and does not.
 
 ### Example Dashboard Panels
 
@@ -407,6 +449,15 @@ Omit it for backends (SigNoz, Prometheus) that prefer cumulative temporality (th
 | Output tokens by model | `sum(agentswarm.tokens)` where `token_type = 'output'`, group by `model` |
 | Cache efficiency | `sum(agentswarm.tokens)` where `token_type = 'cacheRead'` ÷ `token_type = 'input'` |
 | Error session cost | `sum(agentswarm.cost.usd)` where `is_error = true` |
+
+### Retention Monitors
+
+| # | Monitor | Query | Catches |
+| --- | --- | --- | --- |
+| 1 | Sweep errors | sum of `agentswarm.db.retention.sweeps` where `outcome = error`, grouped by `table`, above 0 over 2 h | A sweep that throws. Fires within 2 ticks. |
+| 2 | Backlog not draining | max of `agentswarm.db.retention.backlog`, grouped by `table`; alert when the 6-hour change is ≥ 0 and the value is > 0 | Every silent non-completion: errors, a too-slow sweep, a regression to the old decay. Build this one first — it is stated in the operator's terms and does not depend on knowing the failure mode. |
+| 3 | Sweep absent | no data for `agentswarm.db.retention.sweeps` for 3 h | The sweep stopped running: crashed timer, lost config, a pod that never started it. |
+| 4 | Stall guard | max of `agentswarm.db.retention.slowest_statement_ms`, grouped by `table`, above 2000 over 1 h | The adaptive sizer failing to hold the statement bound, before the 10-second liveness probe notices. Only driver execution counts, so waiting for the database lock cannot raise this on its own. |
 
 ### Trace-derived Metrics
 

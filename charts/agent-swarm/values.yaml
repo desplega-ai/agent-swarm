@@ -115,6 +115,23 @@ api:
   replicas: 1
   port: 3013
   resources: {}
+  # -- Optional Kubernetes RuntimeClass for the API pod (the pod that
+  # actually spawns sandboxed script subprocesses — see
+  # src/utils/sandboxed-process.ts). `resources.limits` has no pids field
+  # (only cpu/memory/ephemeral-storage), and neither does the RuntimeClass
+  # API itself — a RuntimeClass only selects a CRI runtime handler by name,
+  # it has no OCI PID-resource field. Setting this alone applies NO pids
+  # ceiling. It only helps if the cluster administrator has separately
+  # provisioned a specifically customized runtime handler (e.g. a `runc`
+  # handler whose own config carries a tighter `pids.max`, or an
+  # equivalently configured gVisor/Kata handler) and confirmed it actually
+  # injects the limit — a stock handler under any of these runtimes does
+  # nothing. Empty = no runtimeClassName set, i.e. zero behavior change from
+  # before this field existed. See charts/agent-swarm/README.md's
+  # "Sandboxed-script pids containment" section for the cluster-wide
+  # alternative (kubelet `--pod-max-pids`) that works with no such
+  # provisioning and should be preferred.
+  runtimeClassName: ""
   storage:
     size: 10Gi
     # -- StorageClass used for the API PVC. Empty = cluster default.
@@ -227,7 +244,7 @@ agentFs:
     registry: ghcr.io
     repository: desplega-ai/agent-fs
     pullPolicy: IfNotPresent
-    tag: 0.13.1
+    tag: 0.13.5
   port: 7433
   # -- Optional API-owned bootstrap key for agent-fs. When blank, the swarm API
   # boot seeder registers a service user and persists its generated key in

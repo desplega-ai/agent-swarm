@@ -44,6 +44,16 @@ describe("agents list model display", () => {
   });
 
   test("presents latest Anthropic direct model ids as readable labels", () => {
+    expect(getAgentModelPresentation("claude-fable-5-1")).toMatchObject({
+      label: "Claude Fable 5.1",
+      provider: "Anthropic",
+      providerId: "anthropic",
+    });
+    expect(getAgentModelPresentation("claude-mythos-5-1")).toMatchObject({
+      label: "Claude Mythos 5.1",
+      provider: "Anthropic",
+      providerId: "anthropic",
+    });
     expect(getAgentModelPresentation("claude-opus-5")).toMatchObject({
       label: "Claude Opus 5",
       provider: "Anthropic",
@@ -68,6 +78,30 @@ describe("agents list model display", () => {
       label: "Claude Opus 5",
       provider: "Anthropic",
       providerId: "anthropic",
+    });
+    expect(getAgentModelPresentation("fable")).toMatchObject({
+      label: "Claude Fable 5.1",
+      provider: "Anthropic",
+      providerId: "anthropic",
+    });
+    expect(getAgentModelPresentation("mythos")).toMatchObject({
+      label: "Claude Mythos 5.1",
+      provider: "Anthropic",
+      providerId: "anthropic",
+    });
+  });
+
+  test.each([
+    ["gpt-6-astra", "GPT-6 Astra"],
+    ["gpt-5.6-sol", "GPT-5.6 Sol"],
+    ["gpt-5.6-terra", "GPT-5.6 Terra"],
+    ["gpt-5.6-luna", "GPT-5.6 Luna"],
+  ])("presents Codex model %s as a readable label", (model, label) => {
+    expect(getAgentModelPresentation(model)).toMatchObject({
+      raw: model,
+      label,
+      provider: "OpenAI",
+      providerId: "openai",
     });
   });
 

@@ -11,7 +11,7 @@ import { resolveTemplate } from "../prompts/resolver";
 import { slackContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { workflowEventBus } from "../workflows/event-bus";
-import { ackSlackMessage } from "./ack";
+import { ackSlackMessage, reactionName } from "./ack";
 import { buildTreeBlocks, type TreeNode } from "./blocks";
 import { enrichSlackUserEmail, resolveSlackUserId, rewriteSlackMentions } from "./enrich";
 import { wasEventSeen } from "./event-dedup";
@@ -196,6 +196,13 @@ let cachedBotId: string | null = null;
 const swarmThreadRootCache = new Map<string, boolean>();
 const SWARM_THREAD_ROOT_CACHE_MAX = 1000;
 
+/** Reset Slack handler caches between tests that exercise production handlers. */
+export function resetSlackHandlerCachesForTesting(): void {
+  cachedBotUserId = null;
+  cachedBotId = null;
+  swarmThreadRootCache.clear();
+}
+
 /**
  * Pure check: does the given thread-root message belong to our own swarm bot?
  * Exported for testing.
@@ -252,6 +259,23 @@ async function wasThreadStartedBySwarm(
   }
   swarmThreadRootCache.set(key, startedBySwarm);
   return startedBySwarm;
+}
+
+/**
+ * True when a thread has swarm activity: either an agent is actively working
+ * the thread, or the swarm itself posted the thread's root message. This is
+ * the single gate for every ADDITIVE_SLACK ingress path — the normal buffer
+ * and the `!now` override must share it so they cannot drift out of sync.
+ */
+async function hasSwarmThreadActivity(
+  client: WebClient,
+  channelId: string,
+  threadTs: string,
+): Promise<boolean> {
+  return (
+    (await getAgentWorkingOnThread(channelId, threadTs)) !== null ||
+    (await wasThreadStartedBySwarm(client, channelId, threadTs))
+  );
 }
 
 /**
@@ -494,7 +518,10 @@ export function registerMessageHandler(app: App): void {
     );
     if (additiveSlack && msg.thread_ts) {
       const stripped = effectiveText.replace(/<@[A-Z0-9]+>/g, "").trim();
-      if (stripped.startsWith("!now")) {
+      if (
+        stripped.startsWith("!now") &&
+        (await hasSwarmThreadActivity(client, msg.channel, msg.thread_ts))
+      ) {
         const nowMessage = stripped.replace(/^!now\s*/, "").trim();
         const threadKey = `${msg.channel}:${msg.thread_ts}`;
 
@@ -509,11 +536,7 @@ export function registerMessageHandler(app: App): void {
         // Instant flush — no dependency
         await instantFlush(threadKey);
 
-        try {
-          await client.reactions.add({ channel: msg.channel, name: "zap", timestamp: msg.ts });
-        } catch (e) {
-          console.log(`[Slack] Reaction failed: ${e instanceof Error ? e.message : e}`);
-        }
+        await ackSlackMessage(client, msg.channel, msg.ts, reactionName("now"), "now");
 
         return;
       }
@@ -536,25 +559,18 @@ export function registerMessageHandler(app: App): void {
       //    message the swarm started). In the latter case there is no task row yet,
       //    so the human's reply would otherwise require an @mention. The Slack lookup
       //    is skipped when a task already matches.
-      const hasSwarmActivity =
-        getAgentWorkingOnThread(msg.channel, msg.thread_ts) !== null ||
-        (await wasThreadStartedBySwarm(client, msg.channel, msg.thread_ts));
+      const hasSwarmActivity = await hasSwarmThreadActivity(client, msg.channel, msg.thread_ts);
 
       if (hasSwarmActivity) {
         const threadKey = `${msg.channel}:${msg.thread_ts}`;
         bufferThreadMessage(msg.channel, msg.thread_ts, effectiveText, msg.user, msg.ts);
 
-        // Slack feedback: react with :eyes: on first buffer, :heavy_plus_sign: on appends
+        // Slack feedback: react with the accepted reaction on first buffer, buffered on appends
         const count = getBufferMessageCount(threadKey);
-        console.log(
-          `[Slack] Additive buffer: ${threadKey} (message #${count}, reaction: ${count === 1 ? "eyes" : "heavy_plus_sign"})`,
-        );
-        await ackSlackMessage(
-          client,
-          msg.channel,
-          msg.ts,
-          count === 1 ? "eyes" : "heavy_plus_sign",
-        );
+        const event = count === 1 ? "accepted" : "buffered";
+        const name = reactionName(event);
+        console.log(`[Slack] Additive buffer: ${threadKey} (message #${count}, reaction: ${name})`);
+        await ackSlackMessage(client, msg.channel, msg.ts, name, event);
 
         return; // Don't process further — buffer will flush
       }
@@ -628,7 +644,7 @@ export function registerMessageHandler(app: App): void {
         requestedByUserId,
         contextKey: slackContextKey({ channelId: msg.channel, threadTs }),
       });
-      await ackSlackMessage(client, msg.channel, msg.ts, "eyes");
+      await ackSlackMessage(client, msg.channel, msg.ts, reactionName("accepted"), "accepted");
 
       if (isSlackRenderV2Enabled()) {
         await ensureSlackThreadTree([task.id]);
@@ -712,7 +728,7 @@ export function registerMessageHandler(app: App): void {
               })
             : null;
           if (steering) {
-            await ackSlackMessage(client, msg.channel, msg.ts, "speech_balloon");
+            await ackSlackMessage(client, msg.channel, msg.ts, reactionName("steered"), "steered");
             results.steered.push({
               agentName: agent.name,
               acknowledgement: formatSlackSteeringAck(steering.result),
@@ -731,7 +747,7 @@ export function registerMessageHandler(app: App): void {
             requestedByUserId,
             contextKey: slackContextKey({ channelId: msg.channel, threadTs }),
           });
-          await ackSlackMessage(client, msg.channel, msg.ts, "eyes");
+          await ackSlackMessage(client, msg.channel, msg.ts, reactionName("accepted"), "accepted");
           results.assigned.push({ agentName: agent.name, taskId: task.id });
           continue;
         }
@@ -747,7 +763,7 @@ export function registerMessageHandler(app: App): void {
           requestedByUserId,
           contextKey: slackContextKey({ channelId: msg.channel, threadTs }),
         });
-        await ackSlackMessage(client, msg.channel, msg.ts, "eyes");
+        await ackSlackMessage(client, msg.channel, msg.ts, reactionName("accepted"), "accepted");
 
         // Check if agent has an in-progress task in this thread (queued follow-up)
         const agentTasks = await getTasksByAgentId(agent.id);

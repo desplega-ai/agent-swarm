@@ -19,6 +19,7 @@ function sibling(overrides: Partial<SiblingTaskInfo> = {}): SiblingTaskInfo {
     agentName: "Picateclas",
     description: "Do the thing",
     updatedAt: new Date(NOW - 60_000).toISOString(),
+    createdAt: new Date(NOW - 60_000).toISOString(),
     ...overrides,
   };
 }
@@ -100,7 +101,34 @@ describe("renderSiblingBlock", () => {
     );
     expect(out).toContain("[in_progress] task:id-1");
     expect(out).toContain("[pending] task:id-2");
-    expect(out).toContain("started 1h ago");
+    expect(out).toContain("last active 1h ago");
+  });
+
+  test("reports start time from createdAt, not from the progress-bumped updatedAt", () => {
+    // Regression: a sibling created 60s ago that emitted a progress event 1s
+    // ago used to render as "started 1s ago", making two independent user
+    // inputs look like a double-submit of the same one.
+    const out = renderSiblingBlock(
+      "task:slack:C1:1",
+      [
+        sibling({
+          createdAt: new Date(NOW - 60_000).toISOString(),
+          updatedAt: new Date(NOW - 1_000).toISOString(),
+        }),
+      ],
+      NOW,
+    );
+    expect(out).toContain("started 1m ago, last active 1s ago");
+    expect(out).not.toContain("started 1s ago");
+  });
+
+  test("omits the started clause rather than guessing when createdAt is absent", () => {
+    const { createdAt: _omitted, ...withoutCreatedAt } = sibling({
+      updatedAt: new Date(NOW - 1_000).toISOString(),
+    });
+    const out = renderSiblingBlock("task:slack:C1:1", [withoutCreatedAt], NOW);
+    expect(out).toContain("last active 1s ago");
+    expect(out).not.toContain("started");
   });
 
   test("falls back to agent:unassigned when no agent info", () => {

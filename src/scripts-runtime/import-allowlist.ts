@@ -2,6 +2,8 @@ import ts from "typescript";
 
 const ALLOWED_BARE_IMPORTS = new Set(["swarm-sdk", "stdlib", "zod"]);
 const FORBIDDEN_HINTS = new Set(["node:", "bun:", "fs", "child_process", "crypto", "bun:sqlite"]);
+const ALLOWLIST_REMEDY =
+  'Allowed imports are "swarm-sdk", "stdlib", "zod", and relative paths ("./" or "../").';
 
 export type ImportAllowlistResult =
   | { ok: true }
@@ -105,5 +107,9 @@ export function validateScriptImports(source: string): ImportAllowlistResult {
   const reason = hint
     ? `Import '${hint}' is not allowed in swarm scripts`
     : `Import '${rejected[0]}' is not on the swarm script allowlist`;
-  return { ok: false, diagnostic: reason, imports: rejected };
+  const remedy =
+    hint === "crypto" || hint === "node:crypto"
+      ? "The global crypto object already provides randomUUID, getRandomValues, and subtle.digest; delete the import and use crypto directly."
+      : ALLOWLIST_REMEDY;
+  return { ok: false, diagnostic: `${reason}. ${remedy}`, imports: rejected };
 }

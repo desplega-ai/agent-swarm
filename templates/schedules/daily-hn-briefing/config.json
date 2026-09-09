@@ -7,7 +7,8 @@
   "description": "Demonstrate web research automation by summarizing relevant technology discussion.",
   "version": "1.0.0",
   "category": "schedules",
-  "placeholders": ["SLACK_CHANNEL_ID", "TIMEZONE"],
+  "placeholders": ["REPORT_EMAIL"],
+  "requires": ["agentmail"],
   "runAllSeedersCandidate": false,
   "tags": ["research", "briefing", "browser"]
 }

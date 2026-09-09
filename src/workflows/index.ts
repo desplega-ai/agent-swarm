@@ -14,6 +14,7 @@ export { startRetryPoller, stopRetryPoller } from "./retry-poller";
 export { interpolate } from "./template";
 export { instantiateTemplate, validateTemplateVariables } from "./templates";
 export {
+  handleEventTrigger,
   handleScheduleTrigger,
   handleWebhookTrigger,
   logOpenWebhookTriggers,
@@ -22,6 +23,7 @@ export { snapshotWorkflow } from "./version";
 export { startWaitPoller, stopWaitPoller } from "./wait-poller";
 
 import * as db from "../be/db";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import { workflowEventBus } from "./event-bus";
 import type { ExecutorRegistry } from "./executors/registry";
 import { createExecutorRegistry } from "./executors/registry";
@@ -29,12 +31,13 @@ import { recoverIncompleteRuns } from "./recovery";
 import { initWaitBusSubscriptions, setupWorkflowResumeListener } from "./resume";
 import { startRetryPoller } from "./retry-poller";
 import { interpolate } from "./template";
-import { logOpenWebhookTriggers } from "./triggers";
+import { handleEventTrigger, logOpenWebhookTriggers } from "./triggers";
 import { startWaitPoller } from "./wait-poller";
 
 // ─── Module-level singleton ────────────────────────────────
 
 let _registry: ExecutorRegistry | null = null;
+let slackMessageTriggerListenerInitialized = false;
 
 function createBuiltInExecutorRegistry(): ExecutorRegistry {
   return createExecutorRegistry({
@@ -54,6 +57,20 @@ export function getExecutorRegistry(): ExecutorRegistry {
   return _registry;
 }
 
+function setupSlackMessageTriggerListener(): void {
+  if (slackMessageTriggerListenerInitialized) return;
+
+  workflowEventBus.on("slack.message", (payload) => {
+    void handleEventTrigger("slack.message", payload, getExecutorRegistry()).catch((err) => {
+      console.error(
+        "[workflows] Failed to dispatch slack.message event trigger:",
+        scrubSecrets(err instanceof Error ? err.message : String(err)),
+      );
+    });
+  });
+  slackMessageTriggerListenerInitialized = true;
+}
+
 /**
  * Initialize the workflow engine:
  * 1. Create executor registry with all built-in executors
@@ -67,6 +84,7 @@ export async function initWorkflows(): Promise<void> {
 
   // 2. Wire up resume listener (task.completed / task.failed / task.cancelled)
   setupWorkflowResumeListener(workflowEventBus, _registry);
+  setupSlackMessageTriggerListener();
 
   // 3. Recover incomplete runs (running + waiting) from previous lifecycle
   recoverIncompleteRuns(_registry).catch((err) => {

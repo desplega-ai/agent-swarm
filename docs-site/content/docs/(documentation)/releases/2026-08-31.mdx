@@ -1,0 +1,44 @@
+---
+title: "Release Notes — Week of August 24 to August 31, 2026"
+description: "Two releases make agent swarms more resilient across storage, database startup, integrations, Slack, pricing, and API discovery, backed by 16 merged commits."
+---
+
+## Highlights
+
+Agent Swarm v1.135.1 and v1.135.2 turn several operational edge cases into recoverable states. Across 16 merged commits, this week’s work strengthens persistent storage, makes compiled deployments safer to start, and gives developers a smaller, more coherent API surface.
+
+### Agent-fs credentials recover automatically
+
+Agents can now recover their agent-fs credentials after a provisioning conflict. Previously, the conflict could leave an agent without the credentials needed to reconnect to its persistent files, even when the underlying storage account already existed. The provisioning path now repairs that missing connection automatically.
+
+For managed and self-hosted swarms, this removes a high-impact manual recovery step from infrastructure that every durable workflow depends on. Agents can resume access to shared artifacts and persistent state instead of remaining stranded after an otherwise recoverable conflict. [#1265](https://github.com/desplega-ai/agent-swarm/pull/1265) (`73744ac2`)
+
+### Compiled deployments bootstrap the database safely
+
+Database startup is now reliable when Agent Swarm runs from Bun’s compiled filesystem. The migration runner no longer treats a successful directory read as proof that the baseline schema was found. It verifies the schema itself before deciding whether bootstrap work is complete.
+
+This closes a subtle startup failure where a compiled deployment could silently skip its baseline schema. Operators get predictable initialization across source and compiled builds, while contributors get compatibility coverage for the Bun filesystem path. [#1263](https://github.com/desplega-ai/agent-swarm/pull/1263) (`4fa6c069`)
+
+### One consolidated API reference
+
+The generated API reference now groups tasks, workflow events, workflow APIs, and task templates into a more compact navigation surface. Developers and agents can scan related endpoints without moving through fragmented tag pages, and the generator now preserves that organization as the OpenAPI source changes.
+
+Both v1.135.1 and v1.135.2 include refreshed reference material, keeping the published documentation aligned with the server. [#1256](https://github.com/desplega-ai/agent-swarm/pull/1256) (`08547fc1`), [#1254](https://github.com/desplega-ai/agent-swarm/pull/1254) (`7158f97b`), [#1268](https://github.com/desplega-ai/agent-swarm/pull/1268) (`348ac62b`)
+
+## Improvements
+
+- **Observable query limits.** `db-query` responses now expose row-truncation metadata. Callers can distinguish a complete result from a bounded response and decide whether to narrow, paginate, or rerun a query instead of assuming every returned row set is exhaustive. The OpenAPI definition and generated types reflect the same behavior. [#1260](https://github.com/desplega-ai/agent-swarm/pull/1260) (`f5d0c5c9`)
+
+- **Predictable Sonnet 5 costs.** Sonnet 5 remains on its permanent launch pricing in the managed-model catalog. Teams can model ongoing usage against stable catalog values rather than treating the launch rate as temporary. Adapter coverage and pricing-source documentation were updated with the catalog change. [#1270](https://github.com/desplega-ai/agent-swarm/pull/1270) (`4cc59006`)
+
+- **Safer migration authoring.** Contributor guidance now explains how to avoid migration ordinal collisions. This makes ordering expectations explicit and reduces the chance that independently authored migrations compete for the same position. [#1258](https://github.com/desplega-ai/agent-swarm/pull/1258) (`b4f246fc`)
+
+- **Aligned deployment dependencies.** Worker harness packages were refreshed, the worker image and supported deployment examples now agree on agent-fs 0.13.2, and Docker Buildx moved to 4.3.0. Keeping these pins synchronized prevents version-drift gates from blocking deployments and keeps local, Compose, Helm, and worker-image paths on compatible tooling. [#1253](https://github.com/desplega-ai/agent-swarm/pull/1253) (`4f9361d2`), [#1261](https://github.com/desplega-ai/agent-swarm/pull/1261) (`11589e1f`), [#1267](https://github.com/desplega-ai/agent-swarm/pull/1267) (`26cf1be6`), [#1269](https://github.com/desplega-ai/agent-swarm/pull/1269) (`a7b2317b`), [#1257](https://github.com/desplega-ai/agent-swarm/pull/1257) (`998db89a`)
+
+## Bug Fixes
+
+- **MCP Registry releases publish current metadata.** The registry workflow now publishes more reliably and uses the current server version instead of leaving stale version data in `server.json`. Registry consumers get metadata that matches the shipped Agent Swarm release. [#1246](https://github.com/desplega-ai/agent-swarm/pull/1246) (`21bdb8d7`)
+
+- **Slack replies remain gated while an agent is working.** The thread handler now waits for the active-agent lookup before deciding whether to buffer a reply. Messages no longer race ahead because an unresolved lookup was treated like a negative result, preserving orderly coordination between users and agents in active threads. [#1255](https://github.com/desplega-ai/agent-swarm/pull/1255) (`fe01a9a0`)
+
+- **Root tests no longer leak shared state.** Slack-handler and artifact SDK coverage now isolate mutable test state across the root suite. This removes order-dependent interference and makes the release signal more trustworthy when the full suite runs together. [#1271](https://github.com/desplega-ai/agent-swarm/pull/1271) (`e8b4878e`)

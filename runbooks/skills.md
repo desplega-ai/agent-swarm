@@ -2,19 +2,38 @@
 
 How a skill reaches an agent, which path to use, and what CI enforces.
 
-## The three delivery paths
+## The four delivery paths
 
 They are **not** interchangeable. Pick deliberately.
 
 | # | Path | Source | Reaches agents by | Use when |
 |---|---|---|---|---|
 | 1 | **Seeded** ⭐ | `templates/skills/<name>/{config.json,content.md,files/}` | Embedded into the API binary at build time → written to the DB at boot → synced to every harness skill tree | Default for anything the swarm owns |
-| 2 | **Baked** | `plugin/{commands,agents,pi-skills}/` or pinned `npx skills` installs in `Dockerfile.worker` (`plugin/skills/` is retired) | Copied or installed into the worker image | Only for harness-specific commands/agents, Pi-only skills, or third-party skills version-locked to a CLI in the image (currently `agent-fs` and `qa-use`) |
+| 2 | **Baked** | `plugin/{commands,agents,pi-skills}/` or pinned `npx skills` installs in `Dockerfile.worker` (`plugin/skills/` is retired) | Copied or installed into the worker image | Only for harness-specific commands/agents, Pi-only skills, or third-party skills version-locked to a CLI in the image (currently `agent-fs`) |
 | 3 | **Remote-installed** | a `SKILL.md` at a path the integrations catalog points at | `skill-install-remote` fetches `<templatePath>/SKILL.md` from GitHub raw, on demand | Optional per-integration skills the operator opts into |
+| 4 | **Public operator** | `skills/<name>/SKILL.md` and `references/*.md` | `npx skills add desplega-ai/agent-swarm` installs into the operator's coding agent | Installing, deploying, operating, and using the swarm. Never seeded or baked. |
 
-**Prefer path 1.** Seeded skills are live-updatable without an image rebuild, listed by the skills API, editable in the UI, per-agent toggleable, and version-tracked with user-edit preservation. Baked skills have none of that.
+**For worker skills, prefer path 1.** Seeded skills are live-updatable without an image rebuild, listed by the skills API, editable in the UI, per-agent toggleable, and version-tracked with user-edit preservation. Baked skills have none of that.
 
 > Paths 1 and 3 can coexist in the same directory. In that case, `SKILL.md` is a **generated artifact** of `config.json` + `content.md`; never hand-edit it. Run `bun run build:skill-md` and commit the result. CI (`bun run check:skill-md`) rejects drift.
+
+## Public operator skills
+
+Keep `skills/agent-swarm/SKILL.md` valid and `skills/` nonempty. If priority discovery finds no public skill, the installer recursively scans the repository and exposes internal skills.
+
+Keep `swarm-local-e2e` canonical in `.claude/internal-skills/swarm-local-e2e/`. Symlinks in `.claude/skills/` and `.agents/skills/` preserve harness access without exposing it to the installer. Do not replace those symlinks with directories.
+
+Public skills use absolute GitHub blob or documentation URLs because installed copies exist outside the repository. The skill must instruct agents to re-fetch current files from `main` before acting. Place long procedures in `references/*.md`.
+
+Run `bun run check:operator-skill` after changing public skills or their referenced files. Merge Gate checks frontmatter, tracked GitHub targets, and documentation URLs through HEAD requests with two retries. It also checks bundled reference files.
+
+Verify discovery from a scratch directory:
+
+```bash
+npx -y skills@latest add <worktree-path> --agent claude-code -y
+```
+
+The installer must report exactly one skill named `agent-swarm`. It must copy the bundled references too.
 
 ## The rule that matters
 

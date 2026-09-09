@@ -137,7 +137,7 @@ After boot, the API server runs an in-process models.dev refresher once immediat
 The same refresh also feeds the runtime model catalog at `GET /api/models-catalog` (`src/be/models-catalog.ts`) — a slim projection of the picker-reachable providers. The UI model picker prefers that live catalog, so newly released models appear without redeploying; the committed snapshot (still symlinked at `ui/src/lib/modelsdev-cache.json`) remains the build-time fallback for names, labels, and context windows while the request is in flight or the server predates the endpoint.
 
 - **Projection rules** live in `src/be/seed-pricing.ts`:
-  - Anthropic models → rows under both `provider='claude'` AND `provider='claude-managed'`. Shortnames (`opus`/`sonnet`/`haiku`) also land under the current default full id.
+  - Anthropic models → rows under both `provider='claude'` AND `provider='claude-managed'`. Shortnames (`opus`/`sonnet`/`haiku`/`fable`/`mythos`) also land under the current default full id; Fable 5.1 and Mythos 5.1 use verified fallback rates until the vendored models.dev snapshot includes them.
   - OpenAI models → `provider='codex'`.
   - OpenRouter models → `provider='opencode'`; `google/*` models also land under `provider='gemini'`.
 - **Manual overrides** (claude-managed `runtime_hour` at $0.08/hr, devin `acu` at $2.25): `MANUAL_PRICING_OVERRIDES` in the same file. Each entry carries its source URL and a `verified` date.
@@ -163,8 +163,9 @@ Pi-mono is the exception: pi-ai owns the formula and we just relay its numbers. 
 ### Per-model window resolution
 
 `getContextWindowSize(model)` resolves:
-- Shortnames (`opus`/`sonnet`/`haiku`)
+- Shortnames (`opus`/`sonnet`/`haiku`/`fable`/`mythos`)
 - Family-versioned ids (`claude-sonnet-4-6`)
+- Claude 5.1 premium ids (`claude-fable-5-1`/`claude-mythos-5-1`)
 - Dated full ids (`claude-sonnet-4-6-20251004`) — by stripping the 8-digit date suffix and retrying
 
 Fallback is 200k. Pre-Phase 4 the dated form fell to 200k unconditionally — wildly wrong for opus/sonnet 4.x.
@@ -178,7 +179,7 @@ Fallback is 200k. Pre-Phase 4 the dated form fell to 200k unconditionally — wi
 ## Per-provider notes
 
 - **claude / claude-managed**: token rates from models.dev. claude-managed also has a per-session-hour runtime fee (`token_class='runtime_hour'`); the worker computes a preview locally via `claude-managed-pricing.ts`, and the API's recompute path overrides with the canonical value.
-- **codex**: `input_tokens` from the SDK is the SUM across every model call in a turn (cached + uncached), and each `turn.completed` payload is accumulated across the session before `CostData` is emitted. The unified formula uses the per-turn number as-is, accepting that chatty turns can over-report (the percent clamps at 100%). Old rows tagged `peak-proxy` predate this change. Cache writes are NULL in `CostData` because this adapter does not report them.
+- **codex**: the app-server reports cumulative usage counters. On each terminal turn, including failed and interrupted turns, the adapter converts the latest total to a delta before it updates `CostData` or context usage. This prevents the same usage from being charged again after a later turn. Context uses the reported input total plus output tokens. Cache writes are input details. Codex 0.153.4 reports cache-write tokens separately, and the adapter includes them in `CostData`.
 - **pi-mono**: cost passes through verbatim from pi-ai's `stats.cost`. Context snapshots tag `contextFormula: 'pi-delegated'`. `durationMs` is now real wallclock (was hardcoded 0). Per-turn `outputTokens` are derived from session-stats delta.
 - **opencode**: passthrough through OpenRouter. The unified formula applies; `contextPercent` is clamped to [0, 100].
 - **devin**: ACU-based pricing (`token_class='acu'`, $2.25 per ACU). No per-token cost. No context events (the API doesn't report context info) — `peakContextTokens` remains `null` for devin tasks.
@@ -186,7 +187,7 @@ Fallback is 200k. Pre-Phase 4 the dated form fell to 200k unconditionally — wi
 ## Gotchas & known limitations
 
 - **Internal-ai Gemini calls are not yet costed.** `src/utils/internal-ai/models.ts:19-25` routes through OpenRouter for summarization/rating but doesn't yet emit `session_costs` rows. The pricing table now has `gemini` rows ready; instrumentation is a follow-up.
-- **Codex `input_tokens` is a turn-sum, not a peak.** Chatty turns over-report by design after Phase 9 (the clamp at 100% keeps the gauge sensible). Old `peak-proxy`-tagged rows in `task_context_snapshots` are correct for their formula but not directly comparable to new `input-cache-output`-tagged rows.
+- **Codex context is usage-delta based.** The app-server counters represent cumulative usage. The adapter emits differences between reports, rather than a peak context size. Old `peak-proxy` rows in `task_context_snapshots` remain correct for their original formula and are not directly comparable to current `input-cache-output` rows.
 - **Model-id key mismatch.** Some adapters use harness-prefixed ids (`openai-codex/gpt-5.4-mini`); pricing-table seeds use the stripped form (`gpt-5.4-mini`). Pick one convention if you're adding a new mapping.
 - **Timestamp convention split.** `session_costs.createdAt` and `task_context_snapshots.createdAt` are TEXT ISO 8601; `pricing.effective_from` / `budgets.createdAt` are INTEGER epoch-ms. Documented in `046_budgets_and_pricing.sql:17-22`; not a near-term cleanup.
 
