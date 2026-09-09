@@ -152,6 +152,20 @@ Cancellation reasons are scrubbed before they reach worker diagnostics.
 The review also identified verification limits for real credential rotation and installed configuration.
 The sections above and below distinguish deterministic coverage from authenticated evidence.
 
+## Live custom queue acknowledgement
+
+A follow-up live test used the real Swarm API, real worker, SDK transport, OAuth, and `claude-haiku-4-5` on macOS.
+Claude Code was version 2.1.266.
+Task `3e04c2b5-3296-49ab-aacd-328a40a28f17` was active inside a Bash fixture when two messages arrived through the steering API.
+Both messages reached `delivered` before the fixture was released.
+
+The agent made both requested file changes, then invoked `mcp__agent-swarm__accept-steer` for each message ID.
+The API stored both rows as `handled`, with separate acknowledgement timestamps.
+The task completed with SDK transport metadata and positive token counts. API pricing records totaled $0.0515039.
+
+The [probe and recorded evidence](./2026-09-09-claude-sdk-parity/README.md#live-swarm-queue-acknowledgement) preserve the commands, assertions, and fixture corrections.
+This closes the live API-to-worker queue acknowledgement gap. Interrupt-and-redirect remains unsupported and unverified.
+
 ## Evidence limits
 
 Distinct authenticated accounts were not available for account-to-account credential rotation testing.

@@ -26,6 +26,35 @@ The script records sanitized tool diagnostics and deletes its fixture directorie
 It checks project instructions, plugins, command hooks, permission tool errors, strict MCP, context-mode execution, and telemetry privacy.
 It does not replace worker persistence, real account rotation, or lifecycle tests.
 
+## Live Swarm queue acknowledgement
+
+`worker-steering.ts.example` starts a real local API and worker with SDK transport and Haiku.
+It sends two distinct messages through `POST /api/tasks/{id}/steer` while a Bash fixture remains active.
+It requires both delivered rows before releasing that fixture.
+It then checks two file changes, both `handled` rows, and actual `accept-steer` calls with matching message IDs.
+The task must complete through SDK and persist positive token counts.
+
+Stage it with the repository-path substitution below, then run:
+
+```sh
+SPIKE_RUN_WORKER_STEERING=1 \
+  bun --env-file="$SPIKE_ENV_FILE" worker-steering.ts "$SPIKE_CLAUDE_EXECUTABLE"
+```
+
+The probe uses only the supplied OAuth credential for the worker. It gives no model credential to the API.
+It uses fresh UUIDs, a free API port, isolated directories, and a 180-second worker deadline.
+It creates the Swarm MCP configuration that `docker-entrypoint.sh` normally provides.
+It deletes API state, temporary MCP configuration, worker logs, and fixture files after execution.
+Set `SPIKE_STEERING_RESULT` to change the sanitized result path, which defaults to `/tmp/claude-sdk-worker-steering-result.json`.
+
+The [recorded run](./worker-steering-result.json) passed on macOS with Claude 2.1.266 and Haiku.
+Both messages reached `delivered` while the original tool was active, then reached `handled` through separate `accept-steer` calls.
+Both unique file markers matched. The task completed with SDK metadata and $0.0515 in API pricing records.
+
+An initial fixture omitted Swarm MCP and could not acknowledge messages. A second run acknowledged both but checked costs before session completion.
+The final fixture includes MCP and waits for costs after the task becomes completed. No production change was required.
+This verifies queued delivery and acknowledgement. It does not verify interrupt-and-redirect or every session-boundary race.
+
 ## Stage
 
 Run from the repository root. Templates use a repository-path placeholder to avoid machine-specific imports.

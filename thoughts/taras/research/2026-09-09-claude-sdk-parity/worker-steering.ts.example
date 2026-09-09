@@ -1,0 +1,327 @@
+import {
+  asRecord,
+  createApiClient,
+  expect,
+  expectStatus,
+  pollUntil,
+} from "__SPIKE_REPO_ROOT__/scripts/e2e/http";
+import {
+  minimalEnv,
+  repoRoot,
+  type Sut,
+  startSut,
+  stopSut,
+} from "__SPIKE_REPO_ROOT__/scripts/e2e/sut";
+import {
+  registerVolatileSecret,
+  scrubSecrets,
+} from "__SPIKE_REPO_ROOT__/src/utils/secret-scrubber";
+
+// Opt-in live verification. Stage this file by replacing __SPIKE_REPO_ROOT__.
+// Supply only OAuth and an installed Claude executable. Never load credentials into the API.
+expect(process.env.SPIKE_RUN_WORKER_STEERING === "1", "Set SPIKE_RUN_WORKER_STEERING=1");
+const token = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+expect(token, "CLAUDE_CODE_OAUTH_TOKEN is required");
+registerVolatileSecret(token, "live-steering-oauth");
+const executable = process.argv[2] || Bun.which("claude");
+expect(executable, "An installed Claude executable is required");
+const directory = (await Bun.$`mktemp -d /tmp/claude-sdk-worker-steering-XXXXXXXX`.text()).trim();
+const home = `${directory}/home`;
+const workspace = `${home}/workspace`;
+const logPath = `${directory}/worker.log`;
+const runnerSessionId = crypto.randomUUID();
+const resultPath =
+  process.env.SPIKE_STEERING_RESULT || "/tmp/claude-sdk-worker-steering-result.json";
+let sut: Sut | undefined;
+let worker: Bun.Subprocess | undefined;
+let drains: Promise<unknown[]> | undefined;
+let writer: Bun.FileSink | undefined;
+let taskId: string | undefined;
+let agentId: string | undefined;
+const evidence: Record<string, unknown> = {
+  passed: false,
+  transport: "sdk",
+  model: "claude-haiku-4-5",
+};
+
+try {
+  await Bun.$`mkdir -p ${workspace} ${home}/logs ${home}/.claude/commands ${home}/.claude-config ${directory}/bin`.quiet();
+  await Bun.write(
+    `${home}/.claude/commands/work-on-task.md`,
+    await Bun.file(`${repoRoot}/plugin/commands/work-on-task.md`).text(),
+  );
+  await Bun.write(`${directory}/bin/pm2`, "#!/bin/sh\nexit 0\n");
+  await Bun.$`chmod +x ${directory}/bin/pm2`.quiet();
+  await Bun.write(
+    `${workspace}/wait-for-queue.ts`,
+    `await Bun.write("queue-ready", "ready");
+const deadline = Date.now() + 45000;
+while (!(await Bun.file("queue-release").exists())) {
+  if (Date.now() > deadline) throw new Error("Queue fixture deadline exceeded");
+  await Bun.sleep(100);
+}
+console.log("QUEUE_FIXTURE_RELEASED");\n`,
+  );
+  sut = await startSut(false, { SLACK_DISABLE: "true" }, { STEERING_ENABLED: "true", HOME: home });
+  registerVolatileSecret(sut.apiKey, "live-steering-api");
+  const api = createApiClient(sut.baseUrl, sut.apiKey);
+  const registered = await api("POST", "/api/agents", {
+    body: {
+      name: "SDK live queue verification",
+      role: "worker",
+      status: "online",
+      harness_provider: "claude",
+    },
+  });
+  expectStatus(registered, [201], "register worker");
+  agentId = String(asRecord(registered.json).id);
+  // Mirror the Swarm MCP entry created by docker-entrypoint.sh.
+  await Bun.write(
+    `${workspace}/.mcp.json`,
+    JSON.stringify({
+      mcpServers: {
+        "agent-swarm": {
+          type: "http",
+          url: `${sut.baseUrl}/mcp`,
+          headers: {
+            Authorization: `Bearer ${sut.apiKey}`,
+            "X-Agent-ID": agentId,
+          },
+        },
+      },
+    }),
+  );
+  const configured = await api("PUT", "/api/config", {
+    body: {
+      scope: "agent",
+      scopeId: agentId,
+      key: "CLAUDE_TRANSPORT",
+      value: "sdk",
+    },
+  });
+  expectStatus(configured, [200], "configure SDK");
+  const created = await api("POST", "/api/tasks", {
+    body: {
+      agentId,
+      source: "api",
+      dir: workspace,
+      task: "Verify live queued instructions. First use Bash to run: bun wait-for-queue.ts. Wait for that command to finish. Two queued messages will arrive through Swarm. Act on both messages and follow their acknowledgement instructions. Complete the task only after both messages have been handled. Do not inspect other files or contact external services.",
+    },
+  });
+  expectStatus(created, [201], "create task");
+  taskId = String(asRecord(created.json).id);
+  Object.assign(evidence, { agentId, taskId });
+  writer = Bun.file(logPath).writer();
+  worker = Bun.spawn([process.execPath, "run", "src/cli.tsx", "worker", "--yolo"], {
+    cwd: repoRoot,
+    env: {
+      ...minimalEnv(),
+      PATH: `${directory}/bin:${process.env.PATH}`,
+      HOME: home,
+      CLAUDE_CONFIG_DIR: `${home}/.claude-config`,
+      LOG_DIR: `${home}/logs`,
+      AGENT_SWARM_API_KEY: sut.apiKey,
+      API_KEY: sut.apiKey,
+      MCP_BASE_URL: sut.baseUrl,
+      AGENT_ID: agentId,
+      SESSION_ID: runnerSessionId,
+      HARNESS_PROVIDER: "claude",
+      CLAUDE_TRANSPORT: "sdk",
+      CLAUDE_BINARY: executable,
+      CLAUDE_CODE_OAUTH_TOKEN: token,
+      CLAUDECODE: "",
+      MODEL_OVERRIDE: "claude-haiku-4-5",
+      MAX_CONCURRENT_TASKS: "1",
+      STEERING_ENABLED: "true",
+      CLAUDE_QUEUE_STEERING: "1",
+      SWARM_USE_CLAUDE_BRIDGE: "0",
+      CONTEXT_MODE_DISABLED: "true",
+      DISABLE_AUTOUPDATER: "1",
+      STARTUP_SCRIPT_STRICT: "false",
+      ANONYMIZED_TELEMETRY: "false",
+      SLACK_DISABLE: "true",
+      GITHUB_DISABLE: "true",
+      LINEAR_DISABLE: "true",
+      JIRA_DISABLE: "true",
+      AGENTMAIL_DISABLE: "true",
+    },
+    stdout: "pipe",
+    stderr: "pipe",
+    timeout: 180_000,
+  });
+  drains = Promise.all(
+    [worker.stdout, worker.stderr].map(async (stream) => {
+      for await (const chunk of stream as ReadableStream<Uint8Array>)
+        writer!.write(scrubSecrets(new TextDecoder().decode(chunk)));
+    }),
+  );
+  expect(
+    await pollUntil(() => Bun.file(`${workspace}/queue-ready`).exists(), 60_000, 100),
+    "SDK did not start the live tool fixture",
+  );
+  const active = asRecord((await api("GET", `/api/tasks/${taskId}`)).json);
+  expect(active.status === "in_progress", "Task must be active when messages are queued");
+  evidence.queuedWhileTaskActive = true;
+  const markers = [crypto.randomUUID(), crypto.randomUUID()];
+  const rows = await Promise.all(
+    markers.map(async (marker, index) => {
+      const response = await api("POST", `/api/tasks/${taskId}/steer`, {
+        body: {
+          mode: "queue",
+          onUnsupported: "fail",
+          message: `Write exactly ${marker} to queue-result-${index}.txt in the current directory. Then acknowledge this steering message using accept-steer.`,
+        },
+      });
+      expectStatus(response, [200], "queue steering message");
+      return asRecord(response.json);
+    }),
+  );
+  evidence.enqueueResults = rows;
+  console.log(scrubSecrets(JSON.stringify({ phase: "queued", taskId, results: rows })));
+  const readMessages = async () => {
+    const response = await api("GET", `/api/tasks/${taskId}/steering-messages`);
+    expectStatus(response, [200], "read steering messages");
+    return (asRecord(response.json).messages as unknown[]).map(asRecord);
+  };
+  const deliveredDuringTool = await pollUntil(
+    async () => {
+      const messages = await readMessages();
+      return messages.length === 2 && messages.every((row) => row.status === "delivered");
+    },
+    10_000,
+    100,
+  );
+  evidence.deliveredDuringTool = deliveredDuringTool;
+  await Bun.write(`${workspace}/queue-release`, "release");
+  expect(
+    deliveredDuringTool,
+    "Both messages must reach delivered while the original tool is active",
+  );
+  expect(
+    await pollUntil(
+      async () => {
+        const messages = await readMessages();
+        return messages.length === 2 && messages.every((row) => row.status === "handled");
+      },
+      90_000,
+      250,
+    ),
+    "Both queued messages must reach handled through accept-steer",
+  );
+  const handled = await readMessages();
+  evidence.messages = handled.map(
+    ({ id, mode, status, deliveredAt, handledAt, promotedTaskId }) => ({
+      id,
+      mode,
+      status,
+      deliveredAt,
+      handledAt,
+      promotedTaskId,
+    }),
+  );
+  for (let index = 0; index < markers.length; index++) {
+    expect(
+      (await Bun.file(`${workspace}/queue-result-${index}.txt`).text()).trim() === markers[index],
+      `Queued action ${index} did not produce its unique marker`,
+    );
+  }
+  evidence.distinctActionsCompleted = true;
+  expect(
+    await pollUntil(
+      async () => {
+        const task = asRecord((await api("GET", `/api/tasks/${taskId}`)).json);
+        if (task.status === "failed") throw new Error("The steered task failed");
+        return task.status === "completed";
+      },
+      45_000,
+      250,
+    ),
+    "Task did not complete after both acknowledgements",
+  );
+  const finished = asRecord((await api("GET", `/api/tasks/${taskId}`)).json);
+  expect(asRecord(finished.providerMeta).transport === "sdk", "Task did not use SDK transport");
+  expect(typeof finished.claudeSessionId === "string", "Task has no session ID");
+  evidence.sessionId = finished.claudeSessionId;
+  let costs: Array<Record<string, unknown>> = [];
+  // store-progress can complete the task before the harness sends its final result and costs.
+  expect(
+    await pollUntil(
+      async () => {
+        costs = asRecord((await api("GET", `/api/session-costs?taskId=${taskId}`)).json)
+          .costs as Array<Record<string, unknown>>;
+        return costs.some((row) => Number(row.inputTokens) > 0 && Number(row.outputTokens) > 0);
+      },
+      45_000,
+      250,
+    ),
+    "Session costs did not arrive after task completion",
+  );
+  expect(
+    costs.some((cost) => Number(cost.inputTokens) > 0 && Number(cost.outputTokens) > 0),
+    "Task has no persisted tokens",
+  );
+  evidence.costUsd = costs.reduce((sum, row) => sum + Number(row.totalCostUsd), 0);
+  const logsResponse = await api("GET", `/api/tasks/${taskId}/session-logs?limit=1000`);
+  expectStatus(logsResponse, [200], "read session evidence");
+  const calls: Array<{ name: string; steeringMessageId: string }> = [];
+  for (const row of asRecord(logsResponse.json).logs as Array<Record<string, unknown>>) {
+    let message: {
+      message?: {
+        content?: Array<{
+          type?: string;
+          name?: string;
+          input?: { steeringMessageId?: string };
+        }>;
+      };
+    };
+    try {
+      message = JSON.parse(String(row.content));
+    } catch {
+      continue;
+    }
+    for (const block of message.message?.content ?? []) {
+      if (
+        block.type === "tool_use" &&
+        block.name?.endsWith("accept-steer") &&
+        block.input?.steeringMessageId
+      ) {
+        calls.push({ name: block.name, steeringMessageId: block.input?.steeringMessageId });
+      }
+    }
+  }
+  evidence.acceptSteerCalls = calls;
+  expect(
+    handled.every((row) => calls.some((call) => call.steeringMessageId === row.id)),
+    "Each acknowledgement must have an actual accept-steer tool call",
+  );
+  evidence.passed = true;
+} catch (error) {
+  evidence.error = scrubSecrets(error instanceof Error ? error.message : String(error));
+} finally {
+  if (sut && taskId) {
+    await createApiClient(sut.baseUrl, sut.apiKey)("POST", `/api/tasks/${taskId}/cancel`).catch(
+      () => {},
+    );
+  }
+  if (worker?.exitCode === null) {
+    worker.kill("SIGTERM");
+    await Promise.race([worker.exited, Bun.sleep(40_000)]);
+    if (worker.exitCode === null) worker.kill("SIGKILL");
+    await worker.exited;
+  }
+  await drains;
+  await writer?.end();
+  if (!evidence.passed)
+    evidence.workerLogTail = scrubSecrets(
+      (
+        await Bun.file(logPath)
+          .text()
+          .catch(() => "")
+      ).slice(-12000),
+    );
+  if (sut) await stopSut(sut, false);
+  await Bun.write(resultPath, `${scrubSecrets(JSON.stringify(evidence, null, 2))}\n`);
+  await Bun.$`rm -rf ${directory} ${repoRoot}/logs/${runnerSessionId}`.quiet();
+}
+console.log(scrubSecrets(JSON.stringify(evidence)));
+if (!evidence.passed) process.exitCode = 1;
