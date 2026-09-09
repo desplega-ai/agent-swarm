@@ -87,6 +87,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useLocalToggle } from "@/hooks/use-local-toggle";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
+import { findLatestUsableContextSnapshot } from "@/lib/context-display";
 import { formatCost } from "@/lib/cost-format";
 import { formatDurationMs } from "@/lib/format-duration-ms";
 import { formatTokens } from "@/lib/format-tokens";
@@ -465,10 +466,10 @@ function TaskContextSection({
   if (!context || context.summary.snapshotCount === 0) return null;
 
   const { summary } = context;
-  const latestSnapshot = context.snapshots[context.snapshots.length - 1];
-  const currentPercent = latestSnapshot?.contextPercent ?? summary.peakContextPercent ?? 0;
-  const usedTokens = latestSnapshot?.contextUsedTokens ?? summary.peakContextTokens ?? 0;
-  const totalTokens = latestSnapshot?.contextTotalTokens ?? summary.contextWindowSize ?? 0;
+  const latestUsageSnapshot = findLatestUsableContextSnapshot(context.snapshots);
+  const currentPercent = latestUsageSnapshot?.contextPercent ?? summary.peakContextPercent ?? 0;
+  const usedTokens = latestUsageSnapshot?.contextUsedTokens ?? summary.peakContextTokens ?? 0;
+  const totalTokens = latestUsageSnapshot?.contextTotalTokens ?? summary.contextWindowSize ?? 0;
 
   return (
     <>
@@ -491,16 +492,17 @@ function TaskContextSection({
             <span className="whitespace-nowrap">
               {formatTokens(usedTokens)} / {formatTokens(totalTokens)}
             </span>
-            {latestSnapshot?.contextFormula && latestSnapshot.contextFormula !== "unknown" && (
-              <Badge
-                variant="outline"
-                size="tag"
-                className="text-muted-foreground"
-                title={`Computed via formula: ${latestSnapshot.contextFormula}`}
-              >
-                {latestSnapshot.contextFormula}
-              </Badge>
-            )}
+            {latestUsageSnapshot?.contextFormula &&
+              latestUsageSnapshot.contextFormula !== "unknown" && (
+                <Badge
+                  variant="outline"
+                  size="tag"
+                  className="text-muted-foreground"
+                  title={`Computed via formula: ${latestUsageSnapshot.contextFormula}`}
+                >
+                  {latestUsageSnapshot.contextFormula}
+                </Badge>
+              )}
           </span>
         </MetaRow>
         {summary.peakContextPercent != null && (

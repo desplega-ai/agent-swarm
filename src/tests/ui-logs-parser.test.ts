@@ -210,6 +210,168 @@ describe("ui logs parser", () => {
     expect(result.pairing.orphanResults).toEqual([]);
   });
 
+  test("coalesces live codex message deltas across upload batch line resets", () => {
+    const result = normalizeSessionLogs([
+      log(
+        "start",
+        "codex",
+        0,
+        {
+          type: "item.started",
+          item: { id: "msg-1", type: "agent_message", text: "" },
+        },
+        "2026-09-09T00:00:17.565Z",
+      ),
+      log(
+        "delta-2",
+        "codex",
+        0,
+        { type: "message.delta", item_id: "msg-1", delta: "world" },
+        "2026-09-09T00:00:22.615Z",
+      ),
+      log(
+        "delta-1",
+        "codex",
+        1,
+        { type: "message.delta", item_id: "msg-1", delta: "Hello " },
+        "2026-09-09T00:00:17.565Z",
+      ),
+    ]);
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({
+      kind: "text",
+      role: "assistant",
+      text: "Hello world",
+      recId: "delta-1",
+      coveredRecIds: ["delta-2"],
+    });
+  });
+
+  test("replaces codex deltas with the completed message without duplicating it", () => {
+    const result = normalizeSessionLogs([
+      log("start", "codex", 0, {
+        type: "item.started",
+        item: { id: "msg-1", type: "agent_message", text: "" },
+      }),
+      log("delta-1", "codex", 1, {
+        type: "message.delta",
+        item_id: "msg-1",
+        delta: "Draft",
+      }),
+      log("delta-2", "codex", 2, {
+        type: "message.delta",
+        item_id: "msg-1",
+        delta: " response",
+      }),
+      log("done", "codex", 3, {
+        type: "item.completed",
+        item: { id: "msg-1", type: "agent_message", text: "Final response" },
+      }),
+    ]);
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({
+      kind: "text",
+      role: "assistant",
+      text: "Final response",
+      recId: "delta-1",
+      coveredRecIds: ["delta-2", "done"],
+    });
+  });
+
+  test("keeps repeated codex item ids separate across sessions", () => {
+    const first = log("first", "codex", 1, {
+      type: "message.delta",
+      item_id: "msg-1",
+      delta: "First session",
+    });
+    const second = {
+      ...log("second", "codex", 1, {
+        type: "message.delta",
+        item_id: "msg-1",
+        delta: "Second session",
+      }),
+      sessionId: "session-2",
+      iteration: 2,
+    };
+    const result = normalizeSessionLogs([first, second]);
+
+    expect(result.items.map((item) => item.text)).toEqual(["First session", "Second session"]);
+  });
+
+  test("renders a wrapped codex user message once and omits empty reasoning items", () => {
+    const userItem = {
+      id: "user-1",
+      type: "unknown",
+      originalType: "userMessage",
+      value: {
+        type: "userMessage",
+        id: "user-1",
+        content: [{ type: "text", text: "Run the focused parser tests" }],
+        text_elements: [],
+      },
+    };
+    const result = normalizeSessionLogs([
+      log("user-start", "codex", 1, { type: "item.started", item: userItem }),
+      log("user-done", "codex", 2, { type: "item.completed", item: userItem }),
+      log("reasoning-start", "codex", 3, {
+        type: "item.started",
+        item: { id: "reasoning-1", type: "reasoning", summary: [], content: [] },
+      }),
+      log("reasoning-done", "codex", 4, {
+        type: "item.completed",
+        item: { id: "reasoning-1", type: "reasoning", summary: [], content: [] },
+      }),
+    ]);
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({
+      kind: "text",
+      role: "user",
+      text: "Run the focused parser tests",
+      recId: "user-start",
+      coveredRecIds: ["user-done"],
+    });
+  });
+
+  test("pairs production-shaped codex MCP calls and preserves failed status", () => {
+    const result = normalizeSessionLogs([
+      log("start", "codex", 1, {
+        type: "item.started",
+        item: {
+          id: "exec-1",
+          type: "mcp_tool_call",
+          server: "agent-swarm",
+          tool: "store-progress",
+          arguments: { status: "completed" },
+          status: "inProgress",
+          result: null,
+          error: null,
+        },
+      }),
+      log("done", "codex", 2, {
+        type: "item.completed",
+        item: {
+          id: "exec-1",
+          type: "mcp_tool_call",
+          server: "agent-swarm",
+          tool: "store-progress",
+          arguments: { status: "completed" },
+          status: "failed",
+          result: { content: [{ type: "text", text: "Input validation error" }] },
+          error: null,
+        },
+      }),
+    ]);
+
+    expect(result.items.map((item) => item.kind)).toEqual(["tool_call", "tool_result"]);
+    expect(result.items[1]?.result).toMatchObject({ id: "exec-1", isError: true });
+    expect(result.pairing).toEqual(
+      expect.objectContaining({ paired: 1, orphanCalls: [], orphanResults: [] }),
+    );
+  });
+
   test("pairs codex collaboration calls and surfaces collaboration state", () => {
     const result = normalizeSessionLogs([
       log("start", "codex", 1, {

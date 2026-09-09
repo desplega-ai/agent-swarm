@@ -249,6 +249,7 @@ function appendAcpChunk(
 export function normalizeCodex(ordered: DecodedRecord[]): NormalizedItem[] {
   const items: NormalizedItem[] = [];
   const toolCallById = new Map<string, NormalizedItem>();
+  const textByItemId = new Map<string, NormalizedItem>();
 
   for (const d of ordered) {
     const ev = d.event;
@@ -288,8 +289,14 @@ export function normalizeCodex(ordered: DecodedRecord[]): NormalizedItem[] {
             // These starts contain no text. Their completed event is the single
             // readable transcript row, so intentionally omit the empty marker.
             break;
-          default:
-            items.push(makeItem(d, "unknown", { role: "system", raw: ev }));
+          default: {
+            const userMessage = codexUserMessage(item);
+            if (userMessage) {
+              upsertCodexText(items, textByItemId, d, item, "user", userMessage, "replace");
+            } else {
+              items.push(makeItem(d, "unknown", { role: "system", raw: ev }));
+            }
+          }
         }
         break;
       }
@@ -317,7 +324,10 @@ export function normalizeCodex(ordered: DecodedRecord[]): NormalizedItem[] {
                 result: {
                   id: String(item.id ?? ""),
                   payload: item.result ?? item.aggregated_output ?? "",
-                  isError: typeof item.exit_code === "number" && item.exit_code !== 0,
+                  isError:
+                    (typeof item.exit_code === "number" && item.exit_code !== 0) ||
+                    item.status === "failed" ||
+                    item.error != null,
                 },
               }),
             );
@@ -354,7 +364,7 @@ export function normalizeCodex(ordered: DecodedRecord[]): NormalizedItem[] {
           }
           case "agent_message": {
             if (typeof item.text === "string") {
-              items.push(makeItem(d, "text", { role: "assistant", text: item.text }));
+              upsertCodexText(items, textByItemId, d, item, "assistant", item.text, "replace");
             }
             break;
           }
@@ -387,10 +397,25 @@ export function normalizeCodex(ordered: DecodedRecord[]): NormalizedItem[] {
             break;
           }
           default: {
-            items.push(makeItem(d, "unknown", { role: "system", raw: ev }));
+            const userMessage = codexUserMessage(item);
+            if (userMessage) {
+              upsertCodexText(items, textByItemId, d, item, "user", userMessage, "replace");
+            } else {
+              items.push(makeItem(d, "unknown", { role: "system", raw: ev }));
+            }
             break;
           }
         }
+        break;
+      }
+      case "message.delta": {
+        const itemId = asString(ev.item_id);
+        const delta = asString(ev.delta);
+        if (!itemId || delta === undefined) {
+          items.push(makeItem(d, "unknown", { role: "system", raw: ev }));
+          break;
+        }
+        upsertCodexText(items, textByItemId, d, { id: itemId }, "assistant", delta, "append");
         break;
       }
       case "turn.completed": {
@@ -752,6 +777,42 @@ function codexToolName(item: Record<string, unknown>): string {
   if (item.type === "mcp_tool_call") return `${item.server ?? "mcp"}.${item.tool ?? "unknown"}`;
   if (item.type === "collab_tool_call") return String(item.tool ?? "collaboration");
   return String(item.type ?? "tool");
+}
+
+function codexUserMessage(item: Record<string, unknown>): string | undefined {
+  if (item.type !== "unknown" || item.originalType !== "userMessage" || !isRecord(item.value)) {
+    return undefined;
+  }
+  const text = resultBlockText(item.value.content);
+  return text || undefined;
+}
+
+function upsertCodexText(
+  items: NormalizedItem[],
+  textByItemId: Map<string, NormalizedItem>,
+  d: DecodedRecord,
+  item: Record<string, unknown>,
+  role: LogRole,
+  text: string,
+  mode: "append" | "replace",
+): void {
+  const id = asString(item.id);
+  const key = id ? `${d.rec.sessionId}:${d.rec.iteration}:${id}` : undefined;
+  const existing = key ? textByItemId.get(key) : undefined;
+  if (existing && existing.role === role) {
+    if (text) existing.text = mode === "append" ? `${existing.text ?? ""}${text}` : text;
+    existing.coveredRecIds = [...new Set([...(existing.coveredRecIds ?? []), d.rec.id])];
+    return;
+  }
+  if (!text) return;
+
+  const normalized = makeItem(d, "text", {
+    role,
+    text,
+    meta: id ? { itemId: id } : undefined,
+  });
+  items.push(normalized);
+  if (key) textByItemId.set(key, normalized);
 }
 
 function codexCallInput(item: Record<string, unknown>): unknown {
