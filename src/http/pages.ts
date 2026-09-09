@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { AssetKeyAuthorizationError, authorizeAssetKeyWrite } from "../be/asset-key-auth";
@@ -29,6 +30,7 @@ import {
 } from "../types";
 import { getAppUrl, getPublicMcpBaseUrl } from "../utils/constants";
 import { issuePageSessionCookie } from "../utils/page-session";
+import { getRequestAuth } from "../utils/request-auth-context";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
 import { route } from "./route-def";
 import { BODY_TOO_LARGE, enforceContentLengthCap, jsonError } from "./utils";
@@ -790,9 +792,20 @@ export async function handlePages(
       return true;
     }
 
-    // public + authed both mint a cookie here. No per-page ACL in v1: the
-    // bearer is the API_KEY, same trust as the rest of the API.
-    const cookie = await issuePageSessionCookie(page.id, { dev: isDevRequest(req) });
+    // public + authed both mint a cookie here. The signed cookie carries the
+    // user identity when a user-bound bearer launched it. Operator sessions
+    // receive a guest handle, while password sessions remain anonymous.
+    const auth = getRequestAuth(req);
+    const identity =
+      auth?.kind === "user"
+        ? { uid: auth.userId, name: auth.user.name }
+        : auth?.kind === "operator"
+          ? { name: `guest-${randomUUID().slice(0, 8)}` }
+          : undefined;
+    const cookie = await issuePageSessionCookie(page.id, {
+      dev: isDevRequest(req),
+      ...identity,
+    });
 
     applyLaunchCors(req, res);
     res.setHeader("Set-Cookie", cookie);

@@ -14,7 +14,7 @@ import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import net from "node:net";
 import type { Subprocess } from "bun";
-import { signPageSession } from "../utils/page-session";
+import { signPageSession, verifyPageSession } from "../utils/page-session";
 import { getFreePort, SERVER_BOOT_HOOK_TIMEOUT_MS, waitForServer } from "./test-net";
 
 let TEST_PORT = 0;
@@ -122,6 +122,30 @@ async function createPage(): Promise<string> {
   return json.id;
 }
 
+async function createUserToken(name: string): Promise<{ id: string; token: string }> {
+  const create = await fetch(`${BASE}/api/users`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${API_KEY}`,
+    },
+    body: JSON.stringify({ name }),
+  });
+  expect(create.status).toBe(200);
+  const created = (await create.json()) as { user: { id: string } };
+  const mint = await fetch(`${BASE}/api/users/${created.user.id}/mcp-tokens`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${API_KEY}`,
+    },
+    body: JSON.stringify({ label: "page-proxy-test" }),
+  });
+  expect(mint.status).toBe(200);
+  const minted = (await mint.json()) as { plaintext: string };
+  return { id: created.user.id, token: minted.plaintext };
+}
+
 describe("/api/pages/:id/launch", () => {
   test("issues HttpOnly Set-Cookie + 204", async () => {
     const id = await createPage();
@@ -139,6 +163,10 @@ describe("/api/pages/:id/launch", () => {
     // In dev (NODE_ENV != production) the cookie should be SameSite=Lax sans Secure.
     expect(cookie!).toContain("SameSite=Lax");
     expect(cookie!).not.toMatch(/\bSecure\b/);
+    const cookieValue = /page_session=([^;]+)/.exec(cookie!)?.[1];
+    const payload = await verifyPageSession(cookieValue);
+    expect(payload?.uid).toBeUndefined();
+    expect(payload?.name).toMatch(/^guest-/);
   });
 
   test("404 for unknown page id", async () => {
@@ -171,10 +199,33 @@ describe("/api/pages/:id/launch", () => {
 });
 
 describe("/@swarm/api/* proxy", () => {
+  test("user launch signs identity and proxy restores user auth", async () => {
+    const viewer = await createUserToken("Page Viewer");
+    const id = await createPage();
+    const launch = await fetch(`${BASE}/api/pages/${id}/launch`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${viewer.token}` },
+    });
+    expect(launch.status).toBe(204);
+    const cookieValue = /page_session=([^;]+)/.exec(launch.headers.get("set-cookie") ?? "")?.[1];
+    expect(cookieValue).toBeTruthy();
+    const payload = await verifyPageSession(cookieValue);
+    expect(payload?.uid).toBe(viewer.id);
+    expect(payload?.name).toBe("Page Viewer");
+
+    const whoami = await fetch(`${BASE}/@swarm/api/whoami`, {
+      headers: { Cookie: `page_session=${cookieValue}` },
+    });
+    expect(whoami.status).toBe(200);
+    const body = (await whoami.json()) as { kind: string; user: { id: string; name: string } };
+    expect(body.kind).toBe("user");
+    expect(body.user.id).toBe(viewer.id);
+    expect(body.user.name).toBe("Page Viewer");
+  });
+
   // The proxy rewrites `/@swarm/api/<rest>` → `/api/<rest>`. We use
-  // `/api/agents/<id>` as the canonical exerciser since it requires both
-  // bearer auth AND a valid agent id — proving the proxy injected both.
-  test("forwards GET /@swarm/api/agents/:id with cookie → 200 carrying page-owner agent", async () => {
+  // `/api/agents/<id>` remains a simple authenticated proxy smoke path.
+  test("forwards GET /@swarm/api/agents/:id with cookie → 200", async () => {
     const id = await createPage();
     const launch = await fetch(`${BASE}/api/pages/${id}/launch`, {
       method: "POST",
