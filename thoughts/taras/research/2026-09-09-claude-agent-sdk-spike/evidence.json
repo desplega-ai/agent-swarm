@@ -1,0 +1,558 @@
+{
+  "oauth": {
+    "auth": "oauth",
+    "sdkVersion": "0.3.266",
+    "runtime": "1.4.0",
+    "sessionId": "7ca24a01-fa86-4988-b66c-afd841908ffa",
+    "claudeCodeVersion": "2.1.266",
+    "apiKeySource": "none",
+    "model": "claude-haiku-4-5",
+    "result": {
+      "duration_api_ms": 1693,
+      "stop_reason": "end_turn",
+      "session_id": "7ca24a01-fa86-4988-b66c-afd841908ffa",
+      "total_cost_usd": 0.000741,
+      "usage": {
+        "input_tokens": 196,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "output_tokens": 109,
+        "output_tokens_details": {
+          "thinking_tokens": 98
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 0,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [],
+        "speed": "standard"
+      },
+      "modelUsage": {
+        "claude-haiku-4-5": {
+          "inputTokens": 196,
+          "outputTokens": 109,
+          "cacheReadInputTokens": 0,
+          "cacheCreationInputTokens": 0,
+          "webSearchRequests": 0,
+          "costUSD": 0.000741,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 98,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "permission_denials": [],
+      "terminal_reason": "completed",
+      "fast_mode_state": "off",
+      "fast_mode_disabled_reason": "sdk_opt_in_required",
+      "subagent_stats": {
+        "spawned": 0,
+        "requested": {
+          "background": 0,
+          "foreground": 0,
+          "unset": 0
+        },
+        "started_in_background": 0,
+        "max_depth": 0,
+        "spawned_by_subagents": 0,
+        "completed": 0,
+        "failed": 0,
+        "killed": {
+          "parent": 0,
+          "user": 0,
+          "system": 0
+        },
+        "refused": {
+          "depth_limit": 0,
+          "concurrency_limit": 0,
+          "budget": 0
+        },
+        "by_type": {}
+      },
+      "is_error": false,
+      "num_turns": 1,
+      "subtype": "success",
+      "api_error_status": null,
+      "result": "SDK_AUTH_OK",
+      "ttft_ms": 1680,
+      "type": "result",
+      "duration_ms": 1707,
+      "uuid": "f2badec5-752c-4fcd-a62b-4e1fe65bc9e5",
+      "ttft_stream_ms": 586,
+      "time_to_request_ms": 13,
+      "first_content_frame_ms": 844,
+      "queued_turn_count": 0
+    },
+    "events": {
+      "system/init": 1,
+      "system/status": 1,
+      "stream_event": 11,
+      "system/thinking_tokens": 2,
+      "assistant": 2,
+      "rate_limit_event": 1,
+      "result": 1
+    }
+  },
+  "api-key": {
+    "auth": "api-key",
+    "sdkVersion": "0.3.266",
+    "runtime": "1.4.0",
+    "sessionId": "e50e52a5-c775-4f01-8c2d-7d8d0e747c88",
+    "claudeCodeVersion": "2.1.266",
+    "apiKeySource": "ANTHROPIC_API_KEY",
+    "model": "claude-haiku-4-5",
+    "result": {
+      "duration_api_ms": 1252,
+      "stop_reason": "end_turn",
+      "session_id": "e50e52a5-c775-4f01-8c2d-7d8d0e747c88",
+      "total_cost_usd": 0.000521,
+      "usage": {
+        "input_tokens": 196,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "output_tokens": 65,
+        "output_tokens_details": {
+          "thinking_tokens": 54
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 0,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [],
+        "speed": "standard"
+      },
+      "modelUsage": {
+        "claude-haiku-4-5": {
+          "inputTokens": 196,
+          "outputTokens": 65,
+          "cacheReadInputTokens": 0,
+          "cacheCreationInputTokens": 0,
+          "webSearchRequests": 0,
+          "costUSD": 0.000521,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 54,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "permission_denials": [],
+      "terminal_reason": "completed",
+      "fast_mode_state": "off",
+      "fast_mode_disabled_reason": "sdk_opt_in_required",
+      "subagent_stats": {
+        "spawned": 0,
+        "requested": {
+          "background": 0,
+          "foreground": 0,
+          "unset": 0
+        },
+        "started_in_background": 0,
+        "max_depth": 0,
+        "spawned_by_subagents": 0,
+        "completed": 0,
+        "failed": 0,
+        "killed": {
+          "parent": 0,
+          "user": 0,
+          "system": 0
+        },
+        "refused": {
+          "depth_limit": 0,
+          "concurrency_limit": 0,
+          "budget": 0
+        },
+        "by_type": {}
+      },
+      "is_error": false,
+      "num_turns": 1,
+      "subtype": "success",
+      "api_error_status": null,
+      "result": "SDK_AUTH_OK",
+      "ttft_ms": 1223,
+      "type": "result",
+      "duration_ms": 1266,
+      "uuid": "e38de390-c3a9-4f5b-8eb4-c9d9aedac6b8",
+      "ttft_stream_ms": 696,
+      "time_to_request_ms": 14,
+      "first_content_frame_ms": 939,
+      "queued_turn_count": 0
+    },
+    "events": {
+      "system/init": 1,
+      "system/status": 1,
+      "stream_event": 11,
+      "assistant": 2,
+      "result": 1
+    }
+  },
+  "oauth-custom-cli": {
+    "auth": "oauth",
+    "sdkVersion": "0.3.266",
+    "runtime": "1.4.0",
+    "executable": "/Users/taras/.local/bin/claude",
+    "sessionId": "923bfb53-84c7-43dd-b541-55001fe617ae",
+    "claudeCodeVersion": "2.1.263",
+    "apiKeySource": "none",
+    "model": "claude-haiku-4-5",
+    "result": {
+      "duration_api_ms": 3321,
+      "stop_reason": "end_turn",
+      "session_id": "923bfb53-84c7-43dd-b541-55001fe617ae",
+      "total_cost_usd": 0.0014509999999999998,
+      "usage": {
+        "input_tokens": 196,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "output_tokens": 251,
+        "output_tokens_details": {
+          "thinking_tokens": 240
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 0,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [],
+        "speed": "standard"
+      },
+      "modelUsage": {
+        "claude-haiku-4-5": {
+          "inputTokens": 196,
+          "outputTokens": 251,
+          "cacheReadInputTokens": 0,
+          "cacheCreationInputTokens": 0,
+          "webSearchRequests": 0,
+          "costUSD": 0.0014509999999999998,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 240,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "permission_denials": [],
+      "terminal_reason": "completed",
+      "fast_mode_state": "off",
+      "fast_mode_disabled_reason": "sdk_opt_in_required",
+      "subagent_stats": {
+        "spawned": 0,
+        "requested": {
+          "background": 0,
+          "foreground": 0,
+          "unset": 0
+        },
+        "started_in_background": 0,
+        "max_depth": 0,
+        "spawned_by_subagents": 0,
+        "completed": 0,
+        "failed": 0,
+        "killed": {
+          "parent": 0,
+          "user": 0,
+          "system": 0
+        },
+        "refused": {
+          "depth_limit": 0,
+          "concurrency_limit": 0,
+          "budget": 0
+        },
+        "by_type": {}
+      },
+      "is_error": false,
+      "num_turns": 1,
+      "subtype": "success",
+      "api_error_status": null,
+      "result": "SDK_AUTH_OK",
+      "ttft_ms": 3337,
+      "type": "result",
+      "duration_ms": 3370,
+      "uuid": "8356fa6a-a97a-4eb5-91b6-7971911be450",
+      "ttft_stream_ms": 671,
+      "time_to_request_ms": 51,
+      "first_content_frame_ms": 974,
+      "queued_turn_count": 0
+    },
+    "events": {
+      "system/init": 1,
+      "system/status": 1,
+      "stream_event": 12,
+      "system/thinking_tokens": 3,
+      "assistant": 2,
+      "rate_limit_event": 1,
+      "result": 1
+    }
+  },
+  "controls": {
+    "results": [
+      {
+        "subtype": "success",
+        "result": "FIRST_OK",
+        "cost": 0.004203,
+        "usage": {
+          "claude-haiku-4-5": {
+            "inputTokens": 3818,
+            "outputTokens": 77,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0,
+            "webSearchRequests": 0,
+            "costUSD": 0.004203,
+            "contextWindow": 200000,
+            "maxOutputTokens": 32000,
+            "thinkingTokens": 67,
+            "canonicalModel": "claude-haiku-4-5",
+            "provider": "firstParty",
+            "costBasis": "list"
+          }
+        },
+        "isError": false
+      },
+      {
+        "subtype": "success",
+        "result": "MEMORY_065e838d",
+        "cost": 0.008544,
+        "usage": {
+          "claude-haiku-4-5": {
+            "inputTokens": 7794,
+            "outputTokens": 150,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0,
+            "webSearchRequests": 0,
+            "costUSD": 0.008544,
+            "contextWindow": 200000,
+            "maxOutputTokens": 32000,
+            "thinkingTokens": 128,
+            "canonicalModel": "claude-haiku-4-5",
+            "provider": "firstParty",
+            "costBasis": "list"
+          }
+        },
+        "isError": false
+      },
+      {
+        "subtype": "error_during_execution",
+        "cost": 0.017458,
+        "usage": {
+          "claude-haiku-4-5": {
+            "inputTokens": 7804,
+            "outputTokens": 278,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 4132,
+            "webSearchRequests": 0,
+            "costUSD": 0.017458,
+            "contextWindow": 200000,
+            "maxOutputTokens": 32000,
+            "thinkingTokens": 177,
+            "canonicalModel": "claude-haiku-4-5",
+            "provider": "firstParty",
+            "costBasis": "list"
+          }
+        },
+        "isError": true
+      },
+      {
+        "subtype": "success",
+        "result": "RECOVERED_OK",
+        "cost": 0.0186662,
+        "usage": {
+          "claude-haiku-4-5": {
+            "inputTokens": 7814,
+            "outputTokens": 317,
+            "cacheReadInputTokens": 4132,
+            "cacheCreationInputTokens": 4427,
+            "webSearchRequests": 0,
+            "costUSD": 0.0186662,
+            "contextWindow": 200000,
+            "maxOutputTokens": 32000,
+            "thinkingTokens": 206,
+            "canonicalModel": "claude-haiku-4-5",
+            "provider": "firstParty",
+            "costBasis": "list"
+          }
+        },
+        "isError": false
+      }
+    ],
+    "events": {
+      "command_lifecycle": 11,
+      "system": 14,
+      "stream_event": 54,
+      "assistant": 8,
+      "rate_limit_event": 1,
+      "result": 4,
+      "user": 2
+    },
+    "interruptCalled": true,
+    "sessionId": "4f515e69-5e80-43c7-b11a-a3da62faada5",
+    "context": {
+      "totalTokens": 3818,
+      "maxTokens": 200000,
+      "apiUsage": {
+        "input_tokens": 3818,
+        "output_tokens": 77,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0
+      }
+    },
+    "interruptMs": 1,
+    "interruptReceipt": {
+      "still_queued": []
+    },
+    "resume": {
+      "subtype": "success",
+      "result": "MEMORY_065e838d",
+      "sessionId": "4f515e69-5e80-43c7-b11a-a3da62faada5"
+    },
+    "passed": true
+  },
+  "spawn": {
+    "command": "/Users/taras/.local/bin/claude",
+    "argumentCount": 10,
+    "longestArgument": 36,
+    "arguments": [
+      "--output-format",
+      "stream-json",
+      "--verbose",
+      "--input-format",
+      "stream-json",
+      "--setting-sources=user,project,local",
+      "--permission-mode",
+      "default",
+      "--append-system-prompt-file",
+      "/tmp/sdk-fixture-prompt.md"
+    ],
+    "customSpawnInvoked": true,
+    "stoppedAsExpected": true
+  },
+  "swarm": {
+    "status": "passed",
+    "sdkVersion": "0.3.266",
+    "sessionId": "67f47b27-39e7-4288-86d6-fb0696dc0d73",
+    "agentId": "8461fa4c-85b7-4d24-af6d-2441cd554849",
+    "taskId": "b7f5d89c-31ac-4c87-b790-3bf88bd5c03f",
+    "pluginNames": [
+      "sdk-spike-plugin"
+    ],
+    "successfulResult": true,
+    "totalCostUsd": 0.0461628,
+    "preToolUseRan": true,
+    "postToolUseRan": true,
+    "toolUseNames": [
+      "Read",
+      "ToolSearch",
+      "mcp__agent-swarm__my-agent-info",
+      "mcp__agent-swarm__store-progress",
+      "Skill"
+    ],
+    "toolResultErrors": [],
+    "finalAssistantText": "Perfect! I've completed all the steps from TASK.md:\n\n1. ✓ Called `mcp__agent-swarm__my-agent-info` with an empty object\n2. ✓ Called `mcp__agent-swarm__store-progress` with the specified taskId and progress marker\n3. ✓ Read fixture.txt and .claude/session-start-marker.txt\n4. ✓ Ran the sdk-spike-plugin:sdk-spike skill\n\nHere are all the markers as instructed:\n\n- SDK_SPIKE_SYSTEM_MARKER\n- SDK_SPIKE_CLAUDE_MD_MARKER\n- SDK_SPIKE_FIXTURE_MARKER\n- SDK_SPIKE_PROJECT_HOOK_MARKER\n- SDK_SPIKE_PROGRESS_MARKER\n- SDK_SPIKE_PLUGIN_SKILL_MARKER\n\nAs instructed, I have not completed the actual task.",
+    "sdkStderr": "",
+    "markers": {
+      "fixture": true,
+      "claudeMd": true,
+      "plugin": true,
+      "system": true,
+      "projectHook": true,
+      "progress": true
+    },
+    "taskProgress": "SDK_SPIKE_PROGRESS_MARKER"
+  },
+  "swarm-custom-cli": {
+    "status": "passed",
+    "sdkVersion": "0.3.266",
+    "cliVersion": "2.1.263",
+    "executable": "/Users/taras/.local/bin/claude",
+    "sessionId": "e5c62448-284d-46b2-b455-10d031fd7bd7",
+    "agentId": "850bdff2-fd87-49fc-a674-75dacc68b4a6",
+    "taskId": "59a7409c-1730-4126-8b7a-914f4aecfcce",
+    "pluginNames": [
+      "sdk-spike-plugin"
+    ],
+    "successfulResult": true,
+    "totalCostUsd": 0.0240958,
+    "preToolUseRan": true,
+    "postToolUseRan": true,
+    "toolUseNames": [
+      "Read",
+      "ToolSearch",
+      "mcp__agent-swarm__my-agent-info",
+      "mcp__agent-swarm__store-progress",
+      "Skill"
+    ],
+    "toolResultErrors": [],
+    "finalAssistantText": "Perfect! I've completed all the required steps from TASK.md:\n\n1. ✓ Used the swarm MCP tools (called `my-agent-info` and `store-progress`)\n2. ✓ Called `mcp__agent-swarm__my-agent-info` with an empty object\n3. ✓ Called `mcp__agent-swarm__store-progress` with taskId and SDK_SPIKE_PROGRESS_MARKER\n4. ✓ Read fixture.txt and .claude/session-start-marker.txt\n5. ✓ Ran the sdk-spike-plugin:sdk-spike skill\n6. ✓ Including all markers below\n7. ✓ Did not complete the task\n\n**Collected markers:**\n- SDK_SPIKE_CLAUDE_MD_MARKER\n- SDK_SPIKE_SYSTEM_MARKER\n- SDK_SPIKE_PROGRESS_MARKER\n- SDK_SPIKE_FIXTURE_MARKER\n- SDK_SPIKE_PROJECT_HOOK_MARKER\n- SDK_SPIKE_PLUGIN_SKILL_MARKER",
+    "sdkStderr": "",
+    "markers": {
+      "fixture": true,
+      "claudeMd": true,
+      "plugin": true,
+      "system": true,
+      "projectHook": true,
+      "progress": true
+    },
+    "taskProgress": "SDK_SPIKE_PROGRESS_MARKER"
+  },
+  "swarm-custom-cli-strict": {
+    "status": "passed",
+    "sdkVersion": "0.3.266",
+    "cliVersion": "2.1.263",
+    "executable": "/Users/taras/.local/bin/claude",
+    "mcpServers": [
+      {
+        "name": "agent-swarm",
+        "status": "connected"
+      }
+    ],
+    "strictMcpIsolationPassed": true,
+    "sessionId": "99221ed0-5a1e-415c-b2c1-62c4dd38635b",
+    "agentId": "56cbcf86-0796-4674-93f8-b71dbdcbb629",
+    "taskId": "49f21d1b-705b-4486-b9a3-32c1c4101534",
+    "pluginNames": [
+      "sdk-spike-plugin"
+    ],
+    "successfulResult": true,
+    "totalCostUsd": 0.020477000000000002,
+    "preToolUseRan": true,
+    "postToolUseRan": true,
+    "toolUseNames": [
+      "Read",
+      "ToolSearch",
+      "mcp__agent-swarm__my-agent-info",
+      "mcp__agent-swarm__store-progress",
+      "Skill"
+    ],
+    "toolResultErrors": [],
+    "finalAssistantText": "Perfect! I have now executed all the required steps from TASK.md:\n\n✓ Used the swarm MCP tools (called my-agent-info and store-progress)\n✓ Read fixture.txt and .claude/session-start-marker.txt\n✓ Ran the sdk-spike-plugin:sdk-spike skill\n\nHere are all the markers collected:\n\n- **SDK_SPIKE_SYSTEM_MARKER** (from system startup)\n- **SDK_SPIKE_CLAUDE_MD_MARKER** (from CLAUDE.md instructions)\n- **SDK_SPIKE_FIXTURE_MARKER** (from fixture.txt)\n- **SDK_SPIKE_PROJECT_HOOK_MARKER** (from .claude/session-start-marker.txt)\n- **SDK_SPIKE_PROGRESS_MARKER** (stored in task progress)\n- **SDK_SPIKE_PLUGIN_SKILL_MARKER** (from skill invocation)\n\nAs instructed, I have not completed the task—only progressed it with the required markers and tool calls.",
+    "sdkStderr": "",
+    "markers": {
+      "fixture": true,
+      "claudeMd": true,
+      "plugin": true,
+      "system": true,
+      "projectHook": true,
+      "progress": true
+    },
+    "taskProgress": "SDK_SPIKE_PROGRESS_MARKER"
+  }
+}
