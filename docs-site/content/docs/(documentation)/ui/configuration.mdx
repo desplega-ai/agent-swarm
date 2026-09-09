@@ -21,6 +21,15 @@ Each row shows a source chip when the underlying environment variable is set on 
 
 ## Groups
 
+### Claude transport default
+
+The **Harness & tools** group includes `CLAUDE_TRANSPORT`, with `cli` as the default and `sdk` as the optional value.
+Agents can inherit this default or assign a transport beneath the harness selector on their details page.
+An agent override takes precedence over the global default. A repository override takes precedence when the session supplies its repository.
+Transport changes apply to future sessions and do not require a worker restart.
+The worker resolves this key for each session instead of retaining a scoped value in its deployment environment.
+SDK selection is incompatible with an effective Claude Bridge or legacy bridge binary.
+
 | Group | Examples |
 | --- | --- |
 | Steering | `STEERING_ENABLED`, `SLACK_THREAD_STEERING`, `SLACK_THREAD_STEERING_MODE` |
@@ -28,7 +37,7 @@ Each row shows a source chip when the underlying environment variable is set on 
 | Heartbeat & crash recovery | `HEARTBEAT_INTERVAL_MS`, `HEARTBEAT_STALL_THRESHOLD_MIN`, `RUNTIME_STALE_THRESHOLD_MIN`, `HEARTBEAT_PIN_CRASH_RESUME` |
 | Harness & tools | `SCRIPTS_ONLY_MCP`, `MULTI_RUNTIME_ENABLED`, `CAPABILITIES`, `OPENROUTER_BASE_URL`, `WORKER_API_READY_TIMEOUT_SECONDS` |
 | Database | `DB_QUERY_BOUNDED_ENABLED`, `DB_QUERY_HTTP_BUDGET_MS`, `DB_QUERY_HTTP_MAX_ROWS`, `DB_QUERY_MCP_BUDGET_MS`, `DB_QUERY_MCP_MAX_ROWS`, `DB_QUERY_CONCURRENCY_CAP`, `SESSION_LOG_RETENTION_DAYS`, `AGENT_LOG_RETENTION_DAYS`, `EVENTS_RETENTION_DAYS`, `DB_RETENTION_DRY_RUN`, `DB_RETENTION_TICK_BUDGET_MS`, `DB_RETENTION_CATCHUP_INTERVAL_MS`, `DB_RETENTION_MAX_STATEMENT_MS` |
-| Integrations | `SLACK_DISABLE`, `SLACK_ALLOW_DEV_SOCKET_MODE`, `SLACK_RENDER_V2`, `GITHUB_DISABLE`, `LINEAR_DISABLE`, `SLACK_ALERTS_CHANNEL`, `AGENT_FS_REQUEST_TIMEOUT_MS`, `SLACK_REACTION_ACCEPTED`, `SLACK_REACTION_BUFFERED`, `SLACK_REACTION_NOW`, `SLACK_REACTION_STEERED`, `SLACK_REACTION_COMPLETED`, `SLACK_REACTION_FAILED` |
+| Integrations | `SLACK_DISABLE`, `SLACK_ALLOW_DEV_SOCKET_MODE`, `SLACK_RENDER_V2`, `SLACK_RENDER_V2_DELEGATION`, `SLACK_CONCLUSION_SETTLE_SEC`, `SLACK_CONCLUSION_TIMEOUT_MIN`, `SLACK_TREE_STALL_MIN`, `GITHUB_DISABLE`, `LINEAR_DISABLE`, `SLACK_ALERTS_CHANNEL`, `AGENT_FS_REQUEST_TIMEOUT_MS`, `SLACK_REACTION_ACCEPTED`, `SLACK_REACTION_BUFFERED`, `SLACK_REACTION_NOW`, `SLACK_REACTION_STEERED`, `SLACK_REACTION_COMPLETED`, `SLACK_REACTION_FAILED` |
 | Security & access | `RBAC_ENABLED`, `BUDGET_ADMISSION_DISABLED`, `MCP_OAUTH_ALLOW_PRIVATE_HOSTS` |
 | Workflows & scheduler | `WORKFLOW_MAX_ITERATIONS`, `SCHEDULER_INTERVAL_MS` |
 | Telemetry & observability | `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, `ANONYMIZED_TELEMETRY` |

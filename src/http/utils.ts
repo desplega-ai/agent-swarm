@@ -182,14 +182,111 @@ export async function agentWithCapacity<T extends { id: string; maxTasks?: numbe
  * `{}` lets an all-optional body schema accept a bodyless request and turns a
  * required-body schema's failure into the honest 400 its validation produces.
  */
-export async function parseBody<T = unknown>(req: IncomingMessage): Promise<T> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) {
-    chunks.push(chunk as Buffer);
+export class RequestBodyTooLargeError extends Error {
+  readonly maxBytes: number;
+
+  constructor(maxBytes: number) {
+    super(`Payload too large (max ${maxBytes} bytes)`);
+    this.name = "RequestBodyTooLargeError";
+    this.maxBytes = maxBytes;
   }
-  const raw = Buffer.concat(chunks).toString();
-  if (raw.trim() === "") return {} as T;
-  return JSON.parse(raw) as T;
+}
+
+function requestContentLength(req: IncomingMessage): number | undefined {
+  const raw = req.headers["content-length"];
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  if (!value) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
+/**
+ * Parse a JSON request body with an optional byte cap.
+ *
+ * On overflow, the request keeps draining while the caller receives the
+ * rejection. This preserves keep-alive connections for the next request.
+ */
+export async function parseBody<T = unknown>(
+  req: IncomingMessage,
+  maxBytes = Number.POSITIVE_INFINITY,
+): Promise<T> {
+  const contentLength = requestContentLength(req);
+  if (contentLength !== undefined && contentLength > maxBytes) {
+    req.resume();
+    throw new RequestBodyTooLargeError(maxBytes);
+  }
+
+  return await new Promise<T>((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let totalBytes = 0;
+    let settled = false;
+
+    const cleanup = () => {
+      req.off("data", onData);
+      req.off("end", onEnd);
+      req.off("error", onError);
+      req.off("aborted", onAborted);
+      req.off("close", onClose);
+    };
+
+    const rejectTooLarge = () => {
+      if (settled) return;
+      settled = true;
+      reject(new RequestBodyTooLargeError(maxBytes));
+      req.resume();
+    };
+
+    const onData = (chunk: Buffer | string) => {
+      if (settled) return;
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      totalBytes += buffer.byteLength;
+      if (totalBytes > maxBytes) {
+        rejectTooLarge();
+        return;
+      }
+      chunks.push(buffer);
+    };
+
+    const onEnd = () => {
+      if (settled) {
+        cleanup();
+        return;
+      }
+      settled = true;
+      cleanup();
+      const raw = Buffer.concat(chunks).toString();
+      if (raw.trim() === "") {
+        resolve({} as T);
+        return;
+      }
+      try {
+        resolve(JSON.parse(raw) as T);
+      } catch (error) {
+        reject(error);
+      }
+    };
+
+    const onError = (error: Error) => {
+      cleanup();
+      if (!settled) {
+        settled = true;
+        reject(error);
+      }
+    };
+
+    const onAborted = () => onError(new Error("Request body was aborted"));
+
+    const onClose = () => {
+      if (!req.readableEnded) onError(new Error("Request body closed before completion"));
+    };
+
+    req.on("data", onData);
+    req.on("end", onEnd);
+    req.on("error", onError);
+    req.on("aborted", onAborted);
+    req.on("close", onClose);
+    req.resume();
+  });
 }
 
 /**

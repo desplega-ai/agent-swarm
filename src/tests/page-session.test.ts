@@ -60,6 +60,38 @@ describe("page-session HMAC helpers", () => {
     expect(got).toEqual(payload);
   });
 
+  test("round-trip: signed viewer identity survives verification", async () => {
+    const payload = {
+      pageId: "identity-page",
+      exp: Math.floor(Date.now() / 1000) + 3600,
+      uid: "user-123",
+      name: "Ada Lovelace",
+    };
+    const token = await signPageSession(payload);
+    expect(await verifyPageSession(token)).toEqual(payload);
+  });
+
+  test("rejects malformed optional viewer identity fields", async () => {
+    const payloadB64 = Buffer.from(
+      JSON.stringify({
+        pageId: "identity-page",
+        exp: Math.floor(Date.now() / 1000) + 3600,
+        uid: 42,
+      }),
+    ).toString("base64url");
+    const key = await crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode("test-secret-fixed-vector-key"),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"],
+    );
+    const sig = Buffer.from(
+      await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payloadB64)),
+    ).toString("base64url");
+    expect(await verifyPageSession(`${payloadB64}.${sig}`)).toBeNull();
+  });
+
   test("expired token (exp in the past) returns null", async () => {
     const payload = { pageId: "abc123", exp: Math.floor(Date.now() / 1000) - 1 };
     const token = await signPageSession(payload);

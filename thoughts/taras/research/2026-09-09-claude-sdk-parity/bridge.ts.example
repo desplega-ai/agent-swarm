@@ -1,0 +1,47 @@
+import { query } from "@anthropic-ai/claude-agent-sdk@0.3.266";
+import { scrubSecrets } from "__SPIKE_REPO_ROOT__/src/utils/secret-scrubber";
+
+const root = "/private/tmp/claude-sdk-parity-20260909";
+const dir = `${root}/bridge-${crypto.randomUUID()}`;
+const executable = process.argv[2] ?? Bun.which("claude-bridge");
+if (!executable) throw new Error("Provide the Claude Bridge executable path.");
+await Bun.$`mkdir -p ${dir}/workspace ${dir}/home`.quiet();
+const abort = new AbortController();
+const timeout = setTimeout(() => abort.abort(), 15_000);
+const summary: Record<string, unknown> = {
+  expected: "Bridge rejects the SDK protocol before a model call",
+};
+let sdk: ReturnType<typeof query> | undefined;
+try {
+  sdk = query({
+    prompt: "Protocol probe",
+    options: {
+      pathToClaudeCodeExecutable: executable,
+      cwd: `${dir}/workspace`,
+      env: {
+        PATH: process.env.PATH,
+        HOME: `${dir}/home`,
+        CLAUDE_CONFIG_DIR: `${dir}/home/.claude`,
+      },
+      abortController: abort,
+      settingSources: [],
+      strictMcpConfig: true,
+      stderr: (text) => {
+        summary.stderr = scrubSecrets(String(summary.stderr ?? "") + text);
+      },
+    },
+  });
+  for await (const message of sdk)
+    if (message.type === "system") summary.systemMessageReceived = true;
+} catch (error) {
+  summary.error = scrubSecrets(String(error));
+  summary.expectedRejectionObserved = /requires.*-p.*--print/.test(String(error));
+} finally {
+  clearTimeout(timeout);
+  sdk?.close();
+  await Bun.$`rm -rf ${dir}`.quiet();
+  if (!summary.expectedRejectionObserved) process.exitCode = 1;
+  const output = scrubSecrets(JSON.stringify(summary, null, 2));
+  await Bun.write(`${root}/bridge-result.json`, output);
+  console.log(output);
+}

@@ -105,6 +105,30 @@ export interface KvListData<T = unknown> {
   namespace: string;
 }
 
+export type RoomOperation =
+  | { type: "set"; path: Array<string | number>; value: JsonValue }
+  | { type: "delete"; path: Array<string | number> }
+  | { type: "insert"; path: Array<string | number>; index: number; values: JsonValue[] }
+  | { type: "increment"; path: Array<string | number>; by: number }
+  | { type: "text"; path: Array<string | number>; index: number; deleteCount?: number; insert?: string };
+
+export interface RoomView {
+  namespace: string;
+  name: string;
+  schemaVersion: number;
+  generation: string;
+  stale: boolean;
+  state: unknown;
+  snapshot: string;
+  bytes: number;
+}
+
+export interface RoomDecoded {
+  schemaVersion: number;
+  generation: string;
+  state: unknown;
+}
+
 export interface SwarmSdk {
   // --- memory ---
   memory_search(args: { query: string; intent: string; scope?: "all" | "agent" | "swarm"; limit?: number; source?: string }): Promise<unknown>;
@@ -126,6 +150,17 @@ export interface SwarmSdk {
   kv_del(args: { key: string; namespace?: string }): Promise<KvSdkResponse<KvEmptyData, 204>>;
   kv_incr(args: { key: string; by?: number; namespace?: string }): Promise<KvSdkResponse<KvEntry<number>>>;
   kv_list<T = unknown>(args?: { prefix?: string; namespace?: string; limit?: number; offset?: number }): Promise<KvSdkResponse<KvListData<T>>>;
+  // --- realtime rooms ---
+  room: {
+    get(args?: { name?: string; namespace?: string; schemaVersion?: number }): Promise<RoomView>;
+    change(args: { name?: string; namespace?: string; schemaVersion?: number; operations: RoomOperation[] }): Promise<RoomView>;
+    reset(args?: { name?: string; namespace?: string; schemaVersion?: number; state?: Record<string, JsonValue> }): Promise<RoomView>;
+    decode(args: { value: unknown }): Promise<RoomDecoded>;
+  };
+  room_get(args?: { name?: string; namespace?: string; schemaVersion?: number }): Promise<unknown>;
+  room_change(args: { name?: string; namespace?: string; schemaVersion?: number; operations: RoomOperation[] }): Promise<unknown>;
+  room_reset(args?: { name?: string; namespace?: string; schemaVersion?: number; state?: unknown }): Promise<unknown>;
+  room_decode(args: { value: unknown }): Promise<unknown>;
   // --- repos ---
   repo_list(args?: Record<string, unknown>): Promise<unknown>;
   // --- schedules ---

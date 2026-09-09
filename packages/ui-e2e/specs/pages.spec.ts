@@ -168,3 +168,65 @@ test("page viewer forwards its query params to the page body", async ({
 
   await clean.assertClean();
 });
+
+test("saved room inspector decodes persisted state without creating a missing room", async ({
+  api,
+  page,
+  seed,
+  swarm,
+  clean,
+}) => {
+  test.skip(!seed, "remote run without seed");
+  const pageId = seed!.pages.public.id;
+  const namespace = `task:page:${pageId}`;
+  const suffix = crypto.randomUUID().replaceAll("-", "").slice(0, 8);
+  const savedRoom = `saved_${suffix}`;
+  const missingRoom = `missing_${suffix}`;
+  const listRooms = (name: string) => {
+    const query = new URLSearchParams({ prefix: `_room/${name}`, limit: "1" });
+    return api.get<{ entries: Array<{ key: string }>; total: number }>(
+      `/api/kv/_/${encodeURIComponent(namespace)}?${query}`,
+    );
+  };
+
+  const changeResponse = await page.request.post(`${swarm.apiUrl}/api/rooms/change`, {
+    headers: {
+      Authorization: `Bearer ${swarm.apiKey}`,
+      "X-Agent-ID": seed!.agents.lead,
+    },
+    data: {
+      namespace,
+      name: savedRoom,
+      operations: [
+        { type: "set", path: ["project"], value: "Realtime launch" },
+        { type: "set", path: ["progress"], value: { complete: 3, total: 5 } },
+      ],
+    },
+  });
+  expect(changeResponse.status()).toBe(200);
+
+  await expect
+    .poll(async () => (await listRooms(savedRoom)).entries[0]?.key, {
+      message: "room snapshot should persist before UI inspection",
+    })
+    .toBe(`_room/${savedRoom}`);
+
+  await page.goto(`/pages/${pageId}`);
+  await page.getByRole("button", { name: "Saved room state" }).click();
+  const roomName = page.getByLabel("Room name");
+  await roomName.fill(savedRoom);
+  await page.getByRole("button", { name: "Inspect saved state" }).click();
+
+  await expect(page.getByText("Schema version 1")).toBeVisible();
+  const decodedState = page.locator("pre").filter({ hasText: "Realtime launch" });
+  await expect(decodedState).toContainText('"project": "Realtime launch"');
+  await expect(decodedState).toContainText('"complete": 3');
+  await expect(decodedState).toContainText('"total": 5');
+
+  await roomName.fill(missingRoom);
+  await page.getByRole("button", { name: "Inspect saved state" }).click();
+  await expect(page.getByText("This room has no saved state yet.")).toBeVisible();
+  expect(await listRooms(missingRoom)).toMatchObject({ entries: [], total: 0 });
+
+  await clean.assertClean();
+});

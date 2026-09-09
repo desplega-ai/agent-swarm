@@ -183,6 +183,13 @@ describe("validateConfigValue", () => {
     expect(validateConfigValue("HARNESS_PROVIDER", null)).not.toBeNull();
   });
 
+  test("accepts only supported CLAUDE_TRANSPORT values", () => {
+    expect(validateConfigValue("CLAUDE_TRANSPORT", "cli")).toBeNull();
+    expect(validateConfigValue("claude_transport", "sdk")).toBeNull();
+    expect(validateConfigValue("CLAUDE_TRANSPORT", "SDK")).toMatch(/CLAUDE_TRANSPORT/);
+    expect(validateConfigValue("CLAUDE_TRANSPORT", "bridge")).toMatch(/CLAUDE_TRANSPORT/);
+  });
+
   test("accepts a valid CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS", () => {
     expect(validateConfigValue("CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS", "7200000")).toBeNull();
     expect(validateConfigValue("CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS", "1800000")).toBeNull();

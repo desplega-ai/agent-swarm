@@ -1,0 +1,271 @@
+import { type Options, query, type SDKMessage } from "@anthropic-ai/claude-agent-sdk@0.3.266";
+import {
+  registerVolatileSecret,
+  scrubObject,
+  scrubSecrets,
+} from "__SPIKE_REPO_ROOT__/src/utils/secret-scrubber";
+
+const probeDir = "/private/tmp/claude-sdk-parity-20260909";
+const workspaceDir = `${probeDir}/permissions-workspace`;
+const configDir = `${probeDir}/permissions-config`;
+const executable = process.argv[2] ?? Bun.which("claude") ?? "";
+const timeoutMs = 90_000;
+const controlMarker = "PERMISSIONS_PROBE_ALLOWED_READ";
+
+type ToolCall = { id: string; name: string };
+type Denial = { toolName: string; toolUseId: string };
+type Evidence = {
+  initialTools: string[];
+  toolCalls: ToolCall[];
+  toolResultErrorIds: string[];
+  toolResultErrors: { id: string; message: string }[];
+  permissionDeniedIds: string[];
+  resultDenials: Denial[];
+  assistantText: string;
+  resultSubtype?: string;
+  estimatedCostUsd?: number;
+};
+
+function assert(condition: unknown, message: string): asserts condition {
+  if (!condition) throw new Error(message);
+}
+
+function safeJson(value: unknown): string {
+  return scrubSecrets(JSON.stringify(scrubObject(value)));
+}
+
+async function writeText(path: string, value: string): Promise<void> {
+  await Bun.write(path, scrubSecrets(value));
+}
+
+async function writeSettings(deny: string[] = []): Promise<void> {
+  await Bun.write(
+    `${workspaceDir}/.claude/settings.json`,
+    scrubSecrets(JSON.stringify({ permissions: { allow: ["Read", "Write"], deny } }, null, 2)),
+  );
+}
+
+async function setup(): Promise<void> {
+  await Bun.$`rm -rf ${workspaceDir} ${configDir}`.quiet();
+  await Bun.$`mkdir -p ${workspaceDir}/.claude ${configDir}`.quiet();
+  await writeText(`${workspaceDir}/allowed.txt`, `${controlMarker}\n`);
+  await writeSettings();
+}
+
+async function runProbe(
+  prompt: string,
+  options: Pick<
+    Options,
+    "disallowedTools" | "permissionMode" | "settingSources" | "allowDangerouslySkipPermissions"
+  >,
+  oauthToken: string,
+): Promise<Evidence> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let sdk: ReturnType<typeof query> | undefined;
+  const evidence: Evidence = {
+    initialTools: [],
+    toolCalls: [],
+    toolResultErrorIds: [],
+    toolResultErrors: [],
+    permissionDeniedIds: [],
+    resultDenials: [],
+    assistantText: "",
+  };
+
+  try {
+    const queryOptions: Options = {
+      cwd: workspaceDir,
+      pathToClaudeCodeExecutable: executable,
+      model: "claude-haiku-4-5",
+      tools: ["Read", "Write"],
+      permissionPrompts: "none",
+      maxBudgetUsd: 0.3,
+      maxTurns: 4,
+      abortController: controller,
+      env: {
+        PATH: process.env.PATH ?? "/usr/bin:/bin",
+        HOME: workspaceDir,
+        CLAUDE_CONFIG_DIR: configDir,
+        CLAUDE_CODE_OAUTH_TOKEN: oauthToken,
+      },
+      stderr: (data: string) => {
+        void scrubSecrets(data);
+      },
+      ...options,
+    };
+    sdk = query({ prompt, options: queryOptions });
+
+    for await (const message of sdk as AsyncIterable<SDKMessage>) {
+      if (message.type === "system" && message.subtype === "init")
+        evidence.initialTools = message.tools;
+      if (message.type === "system" && message.subtype === "permission_denied") {
+        evidence.permissionDeniedIds.push(message.tool_use_id);
+      }
+      if (message.type === "assistant") {
+        for (const block of message.message.content) {
+          if (block.type === "tool_use")
+            evidence.toolCalls.push({ id: block.id, name: block.name });
+          if (block.type === "text") evidence.assistantText += block.text;
+        }
+      }
+      if (message.type === "user" && Array.isArray(message.message.content)) {
+        for (const block of message.message.content) {
+          if (
+            block.type === "tool_result" &&
+            block.is_error &&
+            typeof block.tool_use_id === "string"
+          ) {
+            evidence.toolResultErrorIds.push(block.tool_use_id);
+            evidence.toolResultErrors.push({
+              id: block.tool_use_id,
+              message: scrubSecrets(JSON.stringify(block.content)),
+            });
+          }
+        }
+      }
+      if (message.type === "result") {
+        evidence.resultSubtype = message.subtype;
+        evidence.estimatedCostUsd = message.total_cost_usd;
+        evidence.resultDenials = message.permission_denials.map((denial) => ({
+          toolName: denial.tool_name,
+          toolUseId: denial.tool_use_id,
+        }));
+      }
+      void scrubObject(message);
+    }
+    return evidence;
+  } finally {
+    clearTimeout(timeout);
+    controller.abort();
+    sdk?.close();
+  }
+}
+
+function assertReadControl(evidence: Evidence, label: string): void {
+  assert(
+    evidence.toolCalls.some((call) => call.name === "Read"),
+    `${label} did not execute Read`,
+  );
+  assert(evidence.assistantText.includes(controlMarker), `${label} did not report Read evidence`);
+}
+
+async function main(): Promise<void> {
+  const oauthToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  assert(oauthToken, "CLAUDE_CODE_OAUTH_TOKEN is required");
+  registerVolatileSecret(oauthToken, "CLAUDE_CODE_OAUTH_TOKEN");
+  assert(await Bun.file(executable).exists(), "Pinned stock Claude executable is absent");
+  await setup();
+
+  const filtered = await runProbe(
+    `Use Read on allowed.txt and report the exact marker. Then try Write on filtered-blocked.txt.`,
+    {
+      disallowedTools: ["Write"],
+      permissionMode: "bypassPermissions",
+      allowDangerouslySkipPermissions: true,
+      settingSources: [],
+    },
+    oauthToken,
+  );
+  assert(filtered.initialTools.includes("Read"), "Read was absent after disallowedTools filtering");
+  assert(
+    !filtered.initialTools.includes("Write"),
+    "Write remained after disallowedTools filtering",
+  );
+  assertReadControl(filtered, "disallowedTools filtering control");
+  assert(
+    !(await Bun.file(`${workspaceDir}/filtered-blocked.txt`).exists()),
+    "Filtered Write created a file",
+  );
+
+  await writeSettings();
+  const allowed = await runProbe(
+    `Use Read on allowed.txt and report the exact marker. Then use Write to create project-allowed.txt containing ALLOWED.`,
+    {
+      permissionMode: "bypassPermissions",
+      allowDangerouslySkipPermissions: true,
+      settingSources: ["project"],
+    },
+    oauthToken,
+  );
+  await Bun.write(`${probeDir}/permissions-allowed.json`, safeJson(allowed));
+  assert(
+    allowed.initialTools.includes("Read") && allowed.initialTools.includes("Write"),
+    "Allowed project settings changed the tool list",
+  );
+  assertReadControl(allowed, "allowed project settings control");
+  assert(
+    allowed.toolCalls.some((call) => call.name === "Write"),
+    "Allowed project settings did not execute Write",
+  );
+  assert(
+    await Bun.file(`${workspaceDir}/project-allowed.txt`).exists(),
+    "Allowed project settings did not create its file",
+  );
+
+  await writeSettings(["Edit(project-denied.txt)"]);
+  const denied = await runProbe(
+    `Use Read on allowed.txt and report the exact marker. Then use Write to create project-denied.txt containing DENIED.`,
+    {
+      permissionMode: "bypassPermissions",
+      allowDangerouslySkipPermissions: true,
+      settingSources: ["project"],
+    },
+    oauthToken,
+  );
+  await Bun.write(`${probeDir}/permissions-denied.json`, safeJson(denied));
+  assert(
+    denied.initialTools.includes("Read") && denied.initialTools.includes("Write"),
+    "Denied project settings changed the tool list",
+  );
+  assertReadControl(denied, "denied project settings control");
+  const deniedWriteIds = new Set(
+    denied.toolCalls.filter((call) => call.name === "Write").map((call) => call.id),
+  );
+  const correlatedDenial = denied.resultDenials.find(
+    (denial) => denial.toolName === "Write" && deniedWriteIds.has(denial.toolUseId),
+  );
+  const correlatedError = denied.toolResultErrors.find(
+    (error) => deniedWriteIds.has(error.id) && /denied|permission/i.test(error.message),
+  );
+  assert(
+    correlatedDenial || correlatedError,
+    "Project deny rule did not produce a correlated Write denial.",
+  );
+  assert(
+    !(await Bun.file(`${workspaceDir}/project-denied.txt`).exists()),
+    "Denied project settings created a file",
+  );
+
+  console.log(
+    safeJson({
+      probe: "permissions",
+      toolFiltering: {
+        initialTools: filtered.initialTools,
+        toolCalls: filtered.toolCalls.map((call) => call.name),
+        resultSubtype: filtered.resultSubtype,
+        estimatedCostUsd: filtered.estimatedCostUsd,
+      },
+      projectAllowedControl: {
+        toolCalls: allowed.toolCalls.map((call) => call.name),
+        resultSubtype: allowed.resultSubtype,
+        estimatedCostUsd: allowed.estimatedCostUsd,
+      },
+      projectDeniedRule: {
+        toolCalls: denied.toolCalls.map((call) => call.name),
+        resultDenials: denied.resultDenials,
+        permissionDeniedIds: denied.permissionDeniedIds,
+        correlatedPermissionError: Boolean(correlatedError),
+        resultSubtype: denied.resultSubtype,
+        estimatedCostUsd: denied.estimatedCostUsd,
+      },
+      controlMarkerObserved: true,
+      passed: true,
+    }),
+  );
+}
+
+main().catch((error) => {
+  console.error(scrubSecrets(error instanceof Error ? error.message : String(error)));
+  process.exitCode = 1;
+});

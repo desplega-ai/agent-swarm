@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import type { PermissionVerb } from "../rbac";
 import { scrubSecrets } from "../utils/secret-scrubber";
-import { jsonError, matchRoute, parseBody } from "./utils";
+import { jsonError, matchRoute, parseBody, RequestBodyTooLargeError } from "./utils";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -69,6 +69,8 @@ export interface RouteDef<
    */
   headers?: z.ZodObject;
   body?: TBody;
+  /** Maximum JSON request body size in bytes. */
+  maxBodyBytes?: number;
   responses: TResponses;
   auth?: {
     apiKey?: boolean; // default true
@@ -378,7 +380,7 @@ export function route<
         // Parse + validate each part
         const params = def.params ? def.params.parse(rawParams) : undefined;
         const query = def.query ? def.query.parse(Object.fromEntries(queryParams)) : undefined;
-        const body = def.body ? def.body.parse(await parseBody(req)) : undefined;
+        const body = def.body ? def.body.parse(await parseBody(req, def.maxBodyBytes)) : undefined;
 
         return { params, query, body } as ParsedRequest<
           z.infer<TParams>,
@@ -392,6 +394,10 @@ export function route<
             `Validation error: ${err.issues.map((e) => `${e.path.join(".")}: ${e.message}`).join(", ")}`,
             400,
           );
+          return null;
+        }
+        if (err instanceof RequestBodyTooLargeError) {
+          jsonError(res, err.message, 413);
           return null;
         }
         throw err;

@@ -1,7 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "../client";
-import type { AcpRuntimeConfig, AgentAvatar, AgentWithTasks, ReasoningEffortLevel } from "../types";
+import type {
+  AcpRuntimeConfig,
+  AgentAvatar,
+  AgentWithTasks,
+  ClaudeRuntimeConfig,
+  ReasoningEffortLevel,
+} from "../types";
 
 export function useAgents(includeTasks = false) {
   return useQuery({
@@ -25,6 +31,14 @@ export function useAgentRuntimeInstances(id: string, enabled = true) {
     queryFn: () => api.fetchAgentRuntimeInstances(id),
     enabled: !!id && enabled,
     refetchInterval: 5000,
+  });
+}
+
+export function useAgentRuntime(id: string, repoId?: string) {
+  return useQuery({
+    queryKey: ["agent-runtime", id, repoId],
+    queryFn: () => api.fetchAgentRuntime(id, repoId),
+    enabled: !!id,
   });
 }
 
@@ -100,16 +114,19 @@ export function useUpdateAgentRuntime() {
   return useMutation({
     mutationFn: (data: {
       id: string;
+      repoId?: string;
       harnessProvider: "claude" | "codex" | "pi" | "opencode" | "acp";
       model: string | null;
       allowCustomModel?: boolean;
       reasoningEffort?: ReasoningEffortLevel | null;
       acp?: AcpRuntimeConfig;
+      claude?: ClaudeRuntimeConfig;
     }) => api.updateAgentRuntime(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["agents"] });
       queryClient.invalidateQueries({ queryKey: ["agent"] });
       queryClient.invalidateQueries({ queryKey: ["configs"] });
+      queryClient.invalidateQueries({ queryKey: ["agent-runtime"] });
     },
   });
 }

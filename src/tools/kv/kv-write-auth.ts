@@ -1,6 +1,6 @@
 import { getAgentById } from "@/be/db";
 import { mcpOverflowAuthError } from "@/kv-overflow";
-import { reservedNamespaceError } from "@/kv-reserved-namespaces";
+import { reservedNamespaceError, reservedRoomKeyError } from "@/kv-reserved-namespaces";
 import { can } from "@/rbac";
 
 /**
@@ -16,7 +16,12 @@ import { can } from "@/rbac";
 export async function kvWriteAuthError(
   namespace: string,
   info: { agentId: string | undefined },
+  key?: string,
 ): Promise<string | null> {
+  if (key) {
+    const reservedKeyErr = reservedRoomKeyError(key);
+    if (reservedKeyErr) return reservedKeyErr;
+  }
   const reservedErr = reservedNamespaceError(namespace);
   if (reservedErr) return reservedErr;
 

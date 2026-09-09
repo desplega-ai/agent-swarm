@@ -3,9 +3,23 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { Agent } from "../../api/types";
 
 mock.module("@/api/hooks/use-agents", () => ({
+  useAgentRuntime: () => ({ data: runtimeMetadata, isError: runtimeError }),
   useUpdateAgentRuntime: () => ({ mutate: () => {}, isPending: false }),
 }));
 let resolvedConfigs: Array<{ key: string; value: string }> = [];
+let runtimeMetadata:
+  | {
+      claude: {
+        transport: "cli" | "sdk" | null;
+        effectiveTransport: "cli" | "sdk";
+        inheritedTransport: "cli" | "sdk";
+        bridgeEffective: boolean;
+      };
+    }
+  | null
+  | undefined;
+let runtimeError = false;
+let envPresence: Record<string, boolean> = {};
 mock.module("@/api/hooks/use-config-api", () => ({
   useResolvedConfigs: () => ({ data: resolvedConfigs }),
 }));
@@ -17,7 +31,7 @@ mock.module("@/api/hooks/use-feature-gate", () => ({
   }),
 }));
 mock.module("@/api/hooks/use-integrations-meta", () => ({
-  useEnvPresence: () => ({ data: {} }),
+  useEnvPresence: () => ({ data: envPresence }),
 }));
 mock.module("@/api/hooks/use-models-catalog", () => ({
   useModelsCatalog: () => ({ data: undefined }),
@@ -63,6 +77,77 @@ describe("AgentRuntimeSettings", () => {
 
   beforeEach(() => {
     resolvedConfigs = [];
+    runtimeMetadata = undefined;
+    runtimeError = false;
+    envPresence = {};
+  });
+
+  test("shows the inherited Claude transport and future-session guidance", () => {
+    runtimeMetadata = {
+      claude: {
+        transport: null,
+        effectiveTransport: "sdk",
+        inheritedTransport: "sdk",
+        bridgeEffective: false,
+      },
+    };
+    const html = renderToStaticMarkup(
+      <TooltipProvider>
+        <AgentRuntimeSettings agent={{ ...acpAgent, harnessProvider: "claude" }} />
+      </TooltipProvider>,
+    );
+
+    expect(html).toContain("Transport");
+    expect(html).toContain("Inherit (SDK)");
+    expect(html).toContain("future Claude sessions");
+  });
+
+  test("shows the configured Bridge conflict for an effective SDK selection", () => {
+    runtimeMetadata = {
+      claude: {
+        transport: "sdk",
+        effectiveTransport: "sdk",
+        inheritedTransport: "cli",
+        bridgeEffective: true,
+      },
+    };
+    const html = renderToStaticMarkup(
+      <TooltipProvider>
+        <AgentRuntimeSettings agent={{ ...acpAgent, harnessProvider: "claude" }} />
+      </TooltipProvider>,
+    );
+
+    expect(html).toContain("SDK conflicts with the Claude Bridge configuration");
+    expect(html).toContain('aria-invalid="true"');
+  });
+
+  test("blocks Claude saves when runtime metadata is unavailable", () => {
+    runtimeError = true;
+    const html = renderToStaticMarkup(
+      <TooltipProvider>
+        <AgentRuntimeSettings agent={{ ...acpAgent, harnessProvider: "claude" }} />
+      </TooltipProvider>,
+    );
+
+    expect(html).toContain("Transport settings are unavailable");
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>.*Save/s);
+  });
+
+  test("allows model saves when an older API lacks Claude transport support", () => {
+    runtimeMetadata = null;
+    resolvedConfigs = [{ key: "MODEL_OVERRIDE", value: "claude-haiku-4-5" }];
+    envPresence = { CLAUDE_CODE_OAUTH_TOKEN: true };
+    const html = renderToStaticMarkup(
+      <TooltipProvider>
+        <AgentRuntimeSettings agent={{ ...acpAgent, harnessProvider: "claude" }} />
+      </TooltipProvider>,
+    );
+
+    expect(html).toContain("Claude transport requires a newer API");
+    expect(html).toMatch(/<button(?=[^>]*aria-label="Claude transport")(?=[^>]*disabled="")[^>]*>/);
+    const saveEnd = html.indexOf("Save</button>");
+    const saveStart = html.lastIndexOf("<button", saveEnd);
+    expect(html.slice(saveStart, html.indexOf(">", saveStart))).not.toContain(' disabled=""');
   });
 
   test("defaults an existing unconfigured ACP agent to the custom target", () => {
@@ -80,6 +165,7 @@ describe("AgentRuntimeSettings", () => {
     expect(html).toContain("Model fallback environment key");
     expect(html).toContain("Not reported yet.");
     expect(html).not.toContain("Reasoning effort");
+    expect(html).not.toContain(">Transport<");
   });
 
   test("hydrates the OpenCode preset and hides custom target fields", () => {

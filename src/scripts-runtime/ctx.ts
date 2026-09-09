@@ -31,8 +31,7 @@ export function buildCtx({
   apiConnections?: ScriptApiConnectionDescriptor[];
   mcpConnections?: ScriptMcpConnectionDescriptor[];
 }): RuntimeCtx {
-  const swarm = createSwarmSdk(swarmConfig) as Record<string, unknown> & { config: SwarmConfig };
-  swarm.config = swarmConfig;
+  const swarm = Object.assign(createSwarmSdk(swarmConfig), { config: swarmConfig });
   return {
     swarm,
     api: createApiRegistryClient(apiConnections),

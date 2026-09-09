@@ -9,6 +9,7 @@ import {
   matchesDefaultIdentityMd,
 } from "../prompts/defaults";
 import { configureDbResolver } from "../prompts/resolver";
+import { realtimeBus } from "../realtime/bus";
 import { slackChannelFromContextKey } from "../tasks/slack-routing";
 import { _resolveIntegrationType, emitIntegrationConnected, telemetry } from "../telemetry";
 import type {
@@ -1718,7 +1719,29 @@ export async function ensureSlackRenderV2Activation(): Promise<string> {
   return persisted;
 }
 
+export async function getSlackDelegationActivatedAt(): Promise<string | null> {
+  const row = await getDbClient().get<{ delegation_activated_at: string | null }>(
+    `SELECT delegation_activated_at FROM slack_render_v2_state WHERE id = 1`,
+  );
+  return row?.delegation_activated_at ?? null;
+}
+
+export async function ensureSlackDelegationActivation(): Promise<string> {
+  const activatedAt = new Date().toISOString();
+  await getDbClient().run(
+    `INSERT INTO slack_render_v2_state (id, activated_at, delegation_activated_at)
+     VALUES (1, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       delegation_activated_at = COALESCE(slack_render_v2_state.delegation_activated_at, excluded.delegation_activated_at)`,
+    [activatedAt, activatedAt],
+  );
+  const persisted = await getSlackDelegationActivatedAt();
+  if (!persisted) throw new Error("Failed to persist Slack render v2 delegation activation");
+  return persisted;
+}
+
 export type SlackMessageKind = "tree" | "outcome" | "agent";
+export type SlackConclusionKind = "complete" | "timeout";
 
 export interface SlackMessageRecord {
   id: string;
@@ -1731,6 +1754,7 @@ export interface SlackMessageRecord {
   permalink?: string;
   finalizedAt?: string;
   streamChunksAppended: number;
+  conclusionKind?: SlackConclusionKind;
   createdAt: string;
   updatedAt: string;
 }
@@ -1752,6 +1776,7 @@ type SlackMessageRow = {
   permalink: string | null;
   finalized_at: string | null;
   stream_chunks_appended: number;
+  conclusion_kind: SlackConclusionKind | null;
   created_at: string;
   updated_at: string;
 };
@@ -1768,6 +1793,7 @@ function rowToSlackMessage(row: SlackMessageRow): SlackMessageRecord {
     permalink: row.permalink ?? undefined,
     finalizedAt: row.finalized_at ?? undefined,
     streamChunksAppended: row.stream_chunks_appended,
+    conclusionKind: row.conclusion_kind ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -1783,6 +1809,7 @@ export async function recordSlackMessage(input: {
   permalink?: string;
   finalized?: boolean;
   streamChunksAppended?: number;
+  conclusionKind?: SlackConclusionKind;
   actorId?: string;
 }): Promise<SlackMessageRecord> {
   const id = crypto.randomUUID();
@@ -1790,8 +1817,8 @@ export async function recordSlackMessage(input: {
   const row = await getDbClient().get<SlackMessageRow>(
     `INSERT INTO slack_messages (
          id, context_key, channel_id, thread_ts, ts, kind, task_id, permalink,
-         finalized_at, stream_chunks_appended, created_at, updated_at, created_by, updated_by
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         finalized_at, stream_chunks_appended, conclusion_kind, created_at, updated_at, created_by, updated_by
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(channel_id, ts) DO UPDATE SET
          context_key = excluded.context_key,
          kind = excluded.kind,
@@ -1802,6 +1829,7 @@ export async function recordSlackMessage(input: {
            excluded.stream_chunks_appended,
            slack_messages.stream_chunks_appended
          ),
+         conclusion_kind = COALESCE(excluded.conclusion_kind, slack_messages.conclusion_kind),
          updated_at = excluded.updated_at,
          updated_by = excluded.updated_by
        RETURNING *`,
@@ -1816,6 +1844,7 @@ export async function recordSlackMessage(input: {
       input.permalink ?? null,
       input.finalized ? now : null,
       input.streamChunksAppended ?? 0,
+      input.conclusionKind ?? null,
       now,
       now,
       input.actorId ?? null,
@@ -1896,6 +1925,7 @@ export async function updateSlackMessageRecord(
     permalink?: string;
     finalized?: boolean;
     streamChunksAppended?: number;
+    conclusionKind?: SlackConclusionKind;
     actorId?: string;
     touchUpdatedAt?: boolean;
   },
@@ -1906,6 +1936,7 @@ export async function updateSlackMessageRecord(
          permalink = COALESCE(?, permalink),
          finalized_at = CASE WHEN ? = 1 THEN COALESCE(finalized_at, ?) ELSE finalized_at END,
          stream_chunks_appended = COALESCE(?, stream_chunks_appended),
+         conclusion_kind = COALESCE(?, conclusion_kind),
          updated_at = CASE WHEN ? = 1 THEN ? ELSE updated_at END,
          updated_by = COALESCE(?, updated_by)
        WHERE id = ?
@@ -1915,6 +1946,7 @@ export async function updateSlackMessageRecord(
       updates.finalized ? 1 : 0,
       now,
       updates.streamChunksAppended ?? null,
+      updates.conclusionKind ?? null,
       updates.touchUpdatedAt === false ? 0 : 1,
       now,
       updates.actorId ?? null,
@@ -10909,7 +10941,13 @@ export async function deletePage(id: string): Promise<boolean> {
     await tx.run("DELETE FROM user_favorites WHERE itemType = 'page' AND itemId = ?", [id]);
     await tx.run("DELETE FROM kv_entries WHERE namespace = ?", [`task:page:${id}`]);
     // ON DELETE CASCADE on page_versions.pageId handles history cleanup.
-    return await tx.run("DELETE FROM pages WHERE id = ?", [id]);
+    const deleted = await tx.run("DELETE FROM pages WHERE id = ?", [id]);
+    if (deleted.changes > 0) {
+      getDbClient().afterCommit(() =>
+        realtimeBus.publish("room:namespace-deleted", `task:page:${id}`),
+      );
+    }
+    return deleted;
   });
   return result.changes > 0;
 }

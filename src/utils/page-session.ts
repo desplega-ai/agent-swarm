@@ -4,7 +4,7 @@
  * Scope-locked to the `pages` feature (db-backed pages) — do NOT reuse for any
  * other surface. If a second cookie use-case emerges, refactor then.
  *
- * Cookie payload: `{pageId, exp}` where `exp` is a unix seconds timestamp.
+ * Cookie payload: `{pageId, exp, uid?, name?}` where `exp` is a unix seconds timestamp.
  * Wire shape: `${base64url(JSON.stringify(payload))}.${base64url(HMAC-SHA256(payload, secret))}`.
  *
  * Secret resolution (first match wins), mirroring `src/be/crypto/key-bootstrap.ts`:
@@ -21,10 +21,11 @@
  * Verification is constant-time via `crypto.timingSafeEqual` so we don't leak
  * bits via signature-comparison timing.
  *
- * Both `sign`/`verify` are async because `crypto.subtle.sign` is async;
+ * `sign`/`verify` keep an async API for callers. HMAC stays synchronous to avoid
+ * deferred cryptographic work during HTTP upgrade authentication.
  * `getSecret` itself is sync (only touches env vars + local disk, no network).
  */
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
@@ -42,6 +43,10 @@ export interface PageSessionPayload {
   pageId: string;
   /** Unix seconds (NOT millis). */
   exp: number;
+  /** Stable user id for a user-bound bearer session. */
+  uid?: string;
+  /** Display name for a user or generated guest session. */
+  name?: string;
 }
 
 /** base64url encode a byte buffer (no padding). */
@@ -118,29 +123,16 @@ function getSecret(): string {
   }
 }
 
-/** Import the HMAC key for crypto.subtle. */
-async function importHmacKey(secret: string): Promise<CryptoKey> {
-  const enc = new TextEncoder();
-  return crypto.subtle.importKey(
-    "raw",
-    enc.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign", "verify"],
-  );
-}
-
 /**
  * Sign a page-session payload. Returns the cookie value (no `Set-Cookie` shell).
  * Caller is responsible for attaching cookie attributes (HttpOnly, Path, etc.).
  */
 export async function signPageSession(payload: PageSessionPayload): Promise<string> {
   const secret = getSecret();
-  const key = await importHmacKey(secret);
   const enc = new TextEncoder();
   const payloadJson = JSON.stringify(payload);
   const payloadB64 = base64urlEncode(enc.encode(payloadJson));
-  const sigBuf = await crypto.subtle.sign("HMAC", key, enc.encode(payloadB64));
+  const sigBuf = createHmac("sha256", secret).update(payloadB64).digest();
   const sigB64 = base64urlEncode(sigBuf);
   return `${payloadB64}.${sigB64}`;
 }
@@ -180,17 +172,9 @@ export async function verifyPageSession(
     return null;
   }
 
-  let key: CryptoKey;
-  try {
-    key = await importHmacKey(secret);
-  } catch {
-    return null;
-  }
-
-  const enc = new TextEncoder();
   let expectedSig: Uint8Array;
   try {
-    expectedSig = new Uint8Array(await crypto.subtle.sign("HMAC", key, enc.encode(payloadB64)));
+    expectedSig = createHmac("sha256", secret).update(payloadB64).digest();
   } catch {
     return null;
   }
@@ -227,6 +211,10 @@ export async function verifyPageSession(
   ) {
     return null;
   }
+
+  const candidate = payload as { uid?: unknown; name?: unknown };
+  if (candidate.uid !== undefined && typeof candidate.uid !== "string") return null;
+  if (candidate.name !== undefined && typeof candidate.name !== "string") return null;
 
   const parsed = payload as PageSessionPayload;
   const nowSec = Math.floor(Date.now() / 1000);
@@ -298,10 +286,15 @@ const PAGE_SESSION_TTL_SECONDS = 3600;
  */
 export async function issuePageSessionCookie(
   pageId: string,
-  opts: { dev: boolean },
+  opts: { dev: boolean; uid?: string; name?: string },
 ): Promise<string> {
   const exp = Math.floor(Date.now() / 1000) + PAGE_SESSION_TTL_SECONDS;
-  const token = await signPageSession({ pageId, exp });
+  const token = await signPageSession({
+    pageId,
+    exp,
+    ...(opts.uid ? { uid: opts.uid } : {}),
+    ...(opts.name ? { name: opts.name } : {}),
+  });
   const attrs = [
     `page_session=${token}`,
     "HttpOnly",

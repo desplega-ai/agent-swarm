@@ -1,0 +1,71 @@
+import { type Options, query } from "@anthropic-ai/claude-agent-sdk@0.3.266";
+import { scrubSecrets } from "../../../../src/utils/secret-scrubber.ts";
+
+const auth = process.argv[2];
+if (auth !== "api-key" && auth !== "oauth") throw new Error("Select api-key or oauth.");
+const credential = auth === "api-key" ? "ANTHROPIC_API_KEY" : "CLAUDE_CODE_OAUTH_TOKEN";
+if (!process.env[credential]) throw new Error(`Missing ${credential}.`);
+const dir = `/tmp/claude-sdk-spike-20260909/${auth}`;
+await Bun.write(`${dir}/workspace/.keep`, "");
+await Bun.write(`${dir}/config/.keep`, "");
+const childEnv: Record<string, string> = {
+  PATH: process.env.PATH ?? "",
+  HOME: process.env.HOME ?? "",
+  TMPDIR: "/tmp",
+  CLAUDE_CONFIG_DIR: `${dir}/config`,
+  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+  [credential]: process.env[credential]!,
+};
+const controller = new AbortController();
+const timeout = setTimeout(() => controller.abort(), 90000);
+const options: Options = {
+  pathToClaudeCodeExecutable: process.argv[3],
+  cwd: `${dir}/workspace`,
+  env: childEnv,
+  model: "claude-haiku-4-5",
+  settingSources: [],
+  tools: [],
+  mcpServers: {},
+  strictMcpConfig: true,
+  includePartialMessages: true,
+  maxTurns: 1,
+  maxBudgetUsd: 0.2,
+  abortController: controller,
+  stderr: (data) => process.stderr.write(scrubSecrets(data)),
+};
+const events: Record<string, number> = {};
+const summary: Record<string, unknown> = {
+  auth,
+  sdkVersion: "0.3.266",
+  runtime: Bun.version,
+  executable: process.argv[3] ?? "bundled",
+};
+const run = query({ prompt: "Reply with exactly SDK_AUTH_OK.", options });
+try {
+  for await (const message of run) {
+    const kind = message.type === "system" ? `${message.type}/${message.subtype}` : message.type;
+    events[kind] = (events[kind] ?? 0) + 1;
+    if (message.type === "system" && message.subtype === "init") {
+      summary.sessionId = message.session_id;
+      summary.claudeCodeVersion = message.claude_code_version;
+      summary.apiKeySource = message.apiKeySource;
+      summary.model = message.model;
+    }
+    if (message.type === "result") {
+      summary.result = message;
+    }
+  }
+  summary.events = events;
+} catch (error) {
+  summary.error = String(error);
+  process.exitCode = 1;
+} finally {
+  clearTimeout(timeout);
+  run.close();
+}
+const output = scrubSecrets(JSON.stringify(summary, null, 2));
+await Bun.write(
+  `/tmp/claude-sdk-spike-20260909/${auth}${process.argv[3] ? "-custom-cli" : ""}-result.json`,
+  output,
+);
+console.log(output);

@@ -72,6 +72,7 @@ describe("seeded skills with bundled files", () => {
     const pages = skills.find((skill) => skill.name === "pages");
     expect(pages?.files.map((file) => file.path).sort()).toEqual([
       "examples/annotated-pr.html",
+      "examples/multiplayer-board.html",
       "examples/report-page.html",
     ]);
 

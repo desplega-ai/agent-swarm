@@ -102,7 +102,7 @@ const publicPageJsonRoute = route({
  * Default `<head>` injection: `<base>` so links escape the iframe, Tailwind
  * Play CDN so agent pages can use utility classes out of the box, Space
  * Grotesk / Space Mono fonts to match the swarm SPA, a small reset that
- * makes pages theme-aware (dark by default) so an agent who writes zero CSS
+ * makes pages theme-aware (light by default) so an agent who writes zero CSS
  * still gets a presentable page, and finally the Browser SDK so
  * `window.swarmSdk` works.
  *
@@ -126,11 +126,12 @@ const PAGE_HEAD_DEFAULTS = `<base target="_blank">
   img, video { display: block; max-width: 100%; height: auto; }
   button, input, optgroup, select, textarea, ::file-selector-button { font: inherit; }
   :root {
-    --swarm-bg: #0b0f17;
-    --swarm-card: #121826;
-    --swarm-border: #22304a;
-    --swarm-text: #e6eaf2;
-    --swarm-muted: #7c8aa6;
+    color-scheme: light;
+    --swarm-bg: #fbfbfa;
+    --swarm-card: #ffffff;
+    --swarm-border: #e5e7eb;
+    --swarm-text: #111827;
+    --swarm-muted: #6b7280;
     --swarm-primary: #3b82f6;
   }
   html, body { background: var(--swarm-bg); color: var(--swarm-text); }

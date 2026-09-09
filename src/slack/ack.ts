@@ -132,6 +132,44 @@ export async function finalizeSlackMessageReaction(
   await addReaction(client, channel, timestamp, outcome, event);
 }
 
+/**
+ * The reaction to apply for one finalization: the shortcode to send, plus the
+ * configurable event it came from when there is one. A choice with no `event`
+ * is a fixed built-in shortcode, so it opts out of the `invalid_name` fallback
+ * that only makes sense for operator-configured names.
+ */
+export type SlackReactionChoice = { name: string; event?: SlackReactionEvent };
+
+/** The reaction choice for a task's terminal outcome, honouring operator config. */
+export function terminalReactionChoice(task: AgentTask): SlackReactionChoice {
+  const event: SlackReactionEvent = task.status === "completed" ? "completed" : "failed";
+  return { name: reactionName(event), event };
+}
+
+/** Finalize acknowledgement reactions that were added to Slack steer messages. */
+export async function finalizeSlackSteerReactions(
+  tasks: AgentTask[],
+  reactionFor: (task: AgentTask) => SlackReactionChoice,
+): Promise<void> {
+  const app = getSlackApp();
+  if (!app) return;
+
+  for (const task of tasks) {
+    const { name, event } = reactionFor(task);
+    for (const log of await getLogsByTaskIdChronological(task.id)) {
+      if (log.eventType !== "task_steering" || log.newValue !== "slack_reaction") continue;
+      const { slackChannelId: channelId, slackMessageTs: timestamp } = JSON.parse(log.metadata!);
+      void finalizeSlackMessageReaction(app.client, channelId, timestamp, name, event).catch(
+        (error) =>
+          console.error(
+            `[Slack] Failed to finalize steer reaction for ${channelId}/${timestamp}:`,
+            error,
+          ),
+      );
+    }
+  }
+}
+
 export async function finalizeTerminalSlackReactions(tasks: AgentTask[]): Promise<void> {
   const app = getSlackApp();
   if (!app) return;
@@ -171,23 +209,5 @@ export async function finalizeTerminalSlackReactions(tasks: AgentTask[]): Promis
     );
   }
 
-  for (const task of tasks) {
-    const event: SlackReactionEvent = task.status === "completed" ? "completed" : "failed";
-    for (const log of await getLogsByTaskIdChronological(task.id)) {
-      if (log.eventType !== "task_steering" || log.newValue !== "slack_reaction") continue;
-      const { slackChannelId: channelId, slackMessageTs: timestamp } = JSON.parse(log.metadata!);
-      void finalizeSlackMessageReaction(
-        app.client,
-        channelId,
-        timestamp,
-        reactionName(event),
-        event,
-      ).catch((error) =>
-        console.error(
-          `[Slack] Failed to finalize steer reaction for ${channelId}/${timestamp}:`,
-          error,
-        ),
-      );
-    }
-  }
+  await finalizeSlackSteerReactions(tasks, terminalReactionChoice);
 }

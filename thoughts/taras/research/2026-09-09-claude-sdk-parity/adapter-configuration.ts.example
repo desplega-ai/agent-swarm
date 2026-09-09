@@ -1,0 +1,515 @@
+import { ClaudeAdapter } from "__SPIKE_REPO_ROOT__/src/providers/claude-adapter";
+import type { ProviderEvent, ProviderSession } from "__SPIKE_REPO_ROOT__/src/providers/types";
+import {
+  registerVolatileSecret,
+  scrubObject,
+  scrubSecrets,
+} from "__SPIKE_REPO_ROOT__/src/utils/secret-scrubber";
+
+const root = "/private/tmp/claude-sdk-parity-20260909";
+const executable = process.argv[2] ?? "";
+const pluginSource = process.env.SPIKE_CONTEXT_MODE_PLUGIN ?? "";
+const projectMarker = "ADAPTER_PROJECT_MARKER_20260909";
+const contextMarker = "ADAPTER_CONTEXT_MARKER_20260909";
+const hookMarker = "ADAPTER_HOOK_MARKER_20260909";
+const completionMarker = "ADAPTER_CONFIGURATION_COMPLETE_20260909";
+const timeoutMs = 90_000;
+
+type Transport = "cli" | "sdk";
+type JsonObject = Record<string, unknown>;
+type ProbeEvidence = {
+  transportReported: boolean;
+  pluginInitialized: boolean;
+  contextExecuteResult: boolean;
+  projectMarkerObserved: boolean;
+  deniedReadToolError: boolean;
+  hookInvoked: boolean;
+  telemetryExported: boolean;
+  telemetryPromptPrivate: boolean;
+  completed: boolean;
+  passed: boolean;
+  invokedToolNames: string[];
+  contextToolCalls: Array<{ id: string; name: string }>;
+  contextToolResults: Array<{ toolUseId: string; isError: boolean; content: string }>;
+  initMcpServers: Array<{ name: string; status: string }>;
+  error?: string;
+};
+
+type Fixture = {
+  dir: string;
+  workspace: string;
+  config: string;
+  hookEvidence: string;
+};
+
+type CollectorRequest = {
+  path: string;
+  promptFound: boolean;
+};
+
+function assert(condition: unknown, message: string): asserts condition {
+  if (!condition) throw new Error(message);
+}
+
+function isObject(value: unknown): value is JsonObject {
+  return typeof value === "object" && value !== null;
+}
+
+function contentBlocks(message: JsonObject): JsonObject[] {
+  const envelope = message.message;
+  if (!isObject(envelope) || !Array.isArray(envelope.content)) return [];
+  return envelope.content.filter(isObject);
+}
+
+function isContextExecuteTool(name: unknown): name is string {
+  return (
+    typeof name === "string" &&
+    name.startsWith("mcp__") &&
+    name.endsWith("__ctx_execute") &&
+    /context[-_]mode/.test(name)
+  );
+}
+
+function pushUniqueBounded(values: string[], value: string, limit = 20): void {
+  if (!values.includes(value) && values.length < limit) values.push(value);
+}
+
+function boundedContent(value: unknown): string {
+  return scrubSecrets(JSON.stringify(value ?? "")).slice(0, 500);
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
+async function writeJson(path: string, value: unknown): Promise<void> {
+  await Bun.write(path, `${JSON.stringify(scrubObject(value), null, 2)}\n`);
+}
+
+async function setupFixture(transport: Transport): Promise<Fixture> {
+  const dir = `${root}/adapter-configuration-${transport}-${crypto.randomUUID()}`;
+  const workspace = `${dir}/workspace`;
+  const config = `${dir}/config`;
+  const plugin = `${config}/plugins/cache/context-mode/context-mode/probe`;
+  const hookEvidence = `${dir}/hook-evidence.jsonl`;
+  const hookScript = `${dir}/hook.ts`;
+  const bin = `${dir}/bin`;
+
+  await Bun.$`mkdir -p ${workspace}/.claude ${config}/plugins/cache/context-mode/context-mode ${bin} ${dir}/tmp`.quiet();
+  await Bun.$`cp -R ${pluginSource} ${plugin}`.quiet();
+
+  for (const name of [
+    "better-sqlite3",
+    "@modelcontextprotocol/sdk",
+    "turndown",
+    "turndown-plugin-gfm",
+    "@mixmark-io/domino",
+  ]) {
+    assert(
+      await Bun.file(`${plugin}/node_modules/${name}/package.json`).exists(),
+      `The context-mode copy lacks ${name}.`,
+    );
+  }
+
+  const pluginHooks = `${plugin}/hooks/hooks.json`;
+  await Bun.write(
+    pluginHooks,
+    (await Bun.file(pluginHooks).text()).replaceAll(pluginSource, plugin),
+  );
+
+  await Bun.write(
+    `${bin}/context-mode`,
+    `#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(`${plugin}/start.mjs`)}\n`,
+  );
+  await Bun.$`chmod +x ${bin}/context-mode`.quiet();
+
+  await Bun.write(
+    hookScript,
+    `const input = await Bun.stdin.text();
+let event = {};
+try { event = JSON.parse(input); } catch {}
+const path = ${JSON.stringify(hookEvidence)};
+const previous = await Bun.file(path).exists() ? await Bun.file(path).text() : "";
+const record = {
+  marker: ${JSON.stringify(hookMarker)},
+  hookEventName: event.hook_event_name,
+  toolName: event.tool_name,
+};
+await Bun.write(path, previous + JSON.stringify(record) + "\\n");
+`,
+  );
+
+  await Bun.write(
+    `${workspace}/CLAUDE.md`,
+    `Project instruction: include ${projectMarker} in the final response.\n`,
+  );
+  await Bun.write(`${workspace}/denied.txt`, "DENIED_FILE_CONTENT_MUST_NOT_BE_RETURNED\n");
+  await writeJson(`${workspace}/.mcp.json`, {
+    mcpServers: {
+      "plugin_context-mode_context-mode": { command: "context-mode" },
+    },
+  });
+  await writeJson(`${workspace}/.claude/settings.json`, {
+    enabledPlugins: { "context-mode@context-mode": true },
+    permissions: { deny: ["Read(denied.txt)"] },
+    hooks: {
+      UserPromptSubmit: [
+        {
+          matcher: "*",
+          hooks: [
+            {
+              type: "command",
+              command: `${shellQuote(process.execPath)} ${shellQuote(hookScript)}`,
+            },
+          ],
+        },
+      ],
+    },
+  });
+  await writeJson(`${config}/plugins/installed_plugins.json`, {
+    version: 2,
+    plugins: {
+      "context-mode@context-mode": [
+        {
+          scope: "user",
+          installPath: plugin,
+          version: "probe",
+          installedAt: "2026-09-09T00:00:00.000Z",
+          lastUpdated: "2026-09-09T00:00:00.000Z",
+        },
+      ],
+    },
+  });
+
+  return { dir, workspace, config, hookEvidence };
+}
+
+function prompt(): string {
+  return `Complete these steps in order. Do not skip a step.
+1. Remember the exact project instruction marker from the loaded project guidance. Do not read CLAUDE.md.
+2. Call mcp__plugin_context-mode_context-mode__ctx_execute exactly once. Use language javascript and code console.log(${JSON.stringify(contextMarker)}).
+3. Call Read exactly once for denied.txt. The project settings must deny this read. Do not retry it.
+4. Reply with the project instruction marker, the exact context tool output, and ${completionMarker}.`;
+}
+
+function inspectRawMessage(
+  message: JsonObject,
+  evidence: ProbeEvidence,
+  state: { contextCalls: Set<string>; deniedReads: Set<string> },
+): void {
+  if (message.type === "system" && message.subtype === "init") {
+    const plugins = Array.isArray(message.plugins) ? message.plugins : [];
+    evidence.pluginInitialized ||= plugins.some(
+      (plugin) => isObject(plugin) && String(plugin.name).includes("context-mode"),
+    );
+    const servers = Array.isArray(message.mcp_servers) ? message.mcp_servers : [];
+    for (const server of servers) {
+      if (!isObject(server) || evidence.initMcpServers.length >= 20) continue;
+      evidence.initMcpServers.push({
+        name: scrubSecrets(String(server.name ?? "unknown")).slice(0, 120),
+        status: scrubSecrets(String(server.status ?? "unknown")).slice(0, 120),
+      });
+    }
+  }
+
+  if (message.type === "system" && message.subtype === "permission_denied") {
+    const toolUseId = message.tool_use_id;
+    evidence.deniedReadToolError ||=
+      typeof toolUseId === "string" && state.deniedReads.has(toolUseId);
+  }
+
+  if (message.type === "assistant") {
+    for (const block of contentBlocks(message)) {
+      if (block.type === "text" && typeof block.text === "string") {
+        evidence.projectMarkerObserved ||= block.text.includes(projectMarker);
+        evidence.completed ||= block.text.includes(completionMarker);
+      }
+      if (block.type !== "tool_use" || typeof block.id !== "string") continue;
+      if (typeof block.name === "string") {
+        pushUniqueBounded(evidence.invokedToolNames, scrubSecrets(block.name).slice(0, 160));
+      }
+      if (isContextExecuteTool(block.name)) {
+        state.contextCalls.add(block.id);
+        if (evidence.contextToolCalls.length < 10) {
+          evidence.contextToolCalls.push({
+            id: scrubSecrets(block.id).slice(0, 160),
+            name: scrubSecrets(block.name).slice(0, 160),
+          });
+        }
+      }
+      if (
+        block.name === "Read" &&
+        isObject(block.input) &&
+        typeof block.input.file_path === "string" &&
+        (block.input.file_path === "denied.txt" || block.input.file_path.endsWith("/denied.txt"))
+      ) {
+        state.deniedReads.add(block.id);
+      }
+    }
+  }
+
+  if (message.type === "user") {
+    for (const block of contentBlocks(message)) {
+      if (block.type !== "tool_result" || typeof block.tool_use_id !== "string") continue;
+      const content = JSON.stringify(block.content ?? "");
+      if (state.contextCalls.has(block.tool_use_id)) {
+        if (evidence.contextToolResults.length < 10) {
+          evidence.contextToolResults.push({
+            toolUseId: scrubSecrets(block.tool_use_id).slice(0, 160),
+            isError: block.is_error === true,
+            content: boundedContent(block.content),
+          });
+        }
+        if (!block.is_error) evidence.contextExecuteResult ||= content.includes(contextMarker);
+      }
+      if (state.deniedReads.has(block.tool_use_id) && block.is_error) {
+        evidence.deniedReadToolError ||= /denied|permission/i.test(content);
+      }
+    }
+  }
+
+  if (message.type === "result") {
+    evidence.completed ||=
+      message.subtype === "success" && String(message.result).includes(completionMarker);
+    const denials = Array.isArray(message.permission_denials) ? message.permission_denials : [];
+    evidence.deniedReadToolError ||= denials.some(
+      (denial) =>
+        isObject(denial) &&
+        typeof denial.tool_use_id === "string" &&
+        state.deniedReads.has(denial.tool_use_id),
+    );
+  }
+}
+
+async function runTransport(
+  transport: Transport,
+  oauthToken: string,
+  collectorUrl: string,
+  requests: CollectorRequest[],
+): Promise<ProbeEvidence> {
+  const evidence: ProbeEvidence = {
+    transportReported: false,
+    pluginInitialized: false,
+    contextExecuteResult: false,
+    projectMarkerObserved: false,
+    deniedReadToolError: false,
+    hookInvoked: false,
+    telemetryExported: false,
+    telemetryPromptPrivate: true,
+    completed: false,
+    passed: false,
+    invokedToolNames: [],
+    contextToolCalls: [],
+    contextToolResults: [],
+    initMcpServers: [],
+  };
+  const state = { contextCalls: new Set<string>(), deniedReads: new Set<string>() };
+  const requestStart = requests.length;
+  let fixture: Fixture | undefined;
+  let session: ProviderSession | undefined;
+  let createSession: Promise<ProviderSession> | undefined;
+  let timedOut = false;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+
+  try {
+    fixture = await setupFixture(transport);
+    const ids = { agent: crypto.randomUUID(), task: crypto.randomUUID() };
+    const adapter = new ClaudeAdapter(async () => {});
+    const deadline = new Promise<never>((_, reject) => {
+      timeout = setTimeout(() => {
+        timedOut = true;
+        void session?.abort("Adapter configuration probe timed out.");
+        reject(new Error(`${transport} exceeded ${timeoutMs}ms.`));
+      }, timeoutMs);
+    });
+    createSession = adapter.createSession({
+      prompt: prompt(),
+      systemPrompt: "Follow the project instructions and complete every numbered probe step.",
+      model: "claude-haiku-4-5",
+      role: `adapter-configuration-${transport}`,
+      agentId: ids.agent,
+      taskId: ids.task,
+      apiUrl: "",
+      apiKey: "",
+      cwd: fixture.workspace,
+      logFile: `${fixture.dir}/adapter.jsonl`,
+      additionalArgs: [
+        "--plugin-dir",
+        `${fixture.config}/plugins/cache/context-mode/context-mode/probe`,
+        "--max-turns",
+        "8",
+        "--max-budget-usd",
+        "0.30",
+      ],
+      env: {
+        PATH: `${fixture.dir}/bin:${process.env.PATH ?? "/usr/bin:/bin"}`,
+        HOME: fixture.dir,
+        TMPDIR: `${fixture.dir}/tmp`,
+        CLAUDE_CONFIG_DIR: fixture.config,
+        CLAUDE_PROJECT_DIR: fixture.workspace,
+        CONTEXT_MODE_PROJECT_DIR: fixture.workspace,
+        CONTEXT_MODE_DIR: `${fixture.dir}/context-mode-storage`,
+        CLAUDE_PLUGIN_ROOT: `${fixture.config}/plugins/cache/context-mode/context-mode/probe`,
+        VITEST: "1",
+        CLAUDE_CODE_OAUTH_TOKEN: oauthToken,
+        CLAUDE_BINARY: executable,
+        CLAUDE_TRANSPORT: transport,
+        SWARM_USE_CLAUDE_BRIDGE: "false",
+        SWARM_ENABLE_HARNESS_OTEL: "1",
+        CLAUDE_CODE_ENABLE_TELEMETRY: "1",
+        CLAUDE_CODE_ENHANCED_TELEMETRY_BETA: "1",
+        OTEL_TRACES_EXPORTER: "otlp",
+        OTEL_METRICS_EXPORTER: "otlp",
+        OTEL_LOGS_EXPORTER: "otlp",
+        OTEL_EXPORTER_OTLP_PROTOCOL: "http/json",
+        OTEL_EXPORTER_OTLP_ENDPOINT: collectorUrl,
+        OTEL_METRIC_EXPORT_INTERVAL: "1000",
+        OTEL_LOGS_EXPORT_INTERVAL: "1000",
+        OTEL_BSP_SCHEDULE_DELAY: "1000",
+      },
+    });
+    session = await Promise.race([createSession, deadline]);
+
+    session.onEvent((event: ProviderEvent) => {
+      if (event.type === "session_init") {
+        evidence.transportReported ||= event.providerMeta?.transport === transport;
+      }
+      if (event.type !== "raw_log") return;
+      try {
+        const message: unknown = JSON.parse(event.content);
+        if (isObject(message)) inspectRawMessage(message, evidence, state);
+      } catch {
+        // The adapter can emit non-JSON diagnostic lines on the CLI transport.
+      }
+    });
+
+    const result = await Promise.race([session.waitForCompletion(), deadline]);
+    assert(
+      !result.isError,
+      result.failureReason ?? `${transport} returned adapter exit code ${result.exitCode}.`,
+    );
+    await Bun.sleep(1_500);
+
+    if (await Bun.file(fixture.hookEvidence).exists()) {
+      const hookLog = await Bun.file(fixture.hookEvidence).text();
+      evidence.hookInvoked = hookLog.includes(hookMarker) && hookLog.includes("UserPromptSubmit");
+    }
+    const transportRequests = requests.slice(requestStart);
+    evidence.telemetryExported = ["/v1/metrics", "/v1/logs", "/v1/traces"].every((path) =>
+      transportRequests.some((request) => request.path === path),
+    );
+    evidence.telemetryPromptPrivate = transportRequests.every((request) => !request.promptFound);
+    evidence.passed =
+      evidence.transportReported &&
+      evidence.pluginInitialized &&
+      evidence.contextExecuteResult &&
+      evidence.projectMarkerObserved &&
+      evidence.deniedReadToolError &&
+      evidence.hookInvoked &&
+      evidence.telemetryExported &&
+      evidence.telemetryPromptPrivate &&
+      evidence.completed;
+    if (!evidence.passed) {
+      const keys = [
+        "transportReported",
+        "pluginInitialized",
+        "contextExecuteResult",
+        "projectMarkerObserved",
+        "deniedReadToolError",
+        "hookInvoked",
+        "telemetryExported",
+        "telemetryPromptPrivate",
+        "completed",
+      ] as const;
+      const missing = keys.filter((key) => !evidence[key]);
+      evidence.error = `Missing evidence: ${missing.join(", ")}.`;
+    }
+    return evidence;
+  } catch (error) {
+    evidence.error = scrubSecrets(error instanceof Error ? error.message : String(error));
+    if (timedOut && !session && createSession) {
+      void createSession
+        .then((lateSession) => lateSession.abort("Probe deadline elapsed."))
+        .catch(() => {});
+    }
+    return evidence;
+  } finally {
+    if (timeout) clearTimeout(timeout);
+    if (timedOut && session) {
+      await Promise.race([
+        session.abort("Adapter configuration probe timed out.").catch(() => {}),
+        Bun.sleep(3_000),
+      ]);
+    }
+    if (fixture) await Bun.$`rm -rf ${fixture.dir}`.quiet();
+  }
+}
+
+async function main(): Promise<void> {
+  assert(
+    process.env.SPIKE_RUN_ADAPTER_CONFIGURATION === "1",
+    "Set SPIKE_RUN_ADAPTER_CONFIGURATION=1 to run this paid probe.",
+  );
+  assert(executable, "Pass the pinned stock Claude executable as argv[2].");
+  assert(await Bun.file(executable).exists(), "The pinned stock Claude executable is absent.");
+  assert(pluginSource, "SPIKE_CONTEXT_MODE_PLUGIN must name the installed plugin directory.");
+  assert(
+    await Bun.file(`${pluginSource}/start.mjs`).exists(),
+    "The context-mode source is absent.",
+  );
+  const oauthToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  assert(oauthToken, "CLAUDE_CODE_OAUTH_TOKEN is required.");
+  registerVolatileSecret(oauthToken, "CLAUDE_CODE_OAUTH_TOKEN");
+
+  const requests: CollectorRequest[] = [];
+  const collector = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(request) {
+      const body = await request.text();
+      requests.push({
+        path: new URL(request.url).pathname,
+        promptFound: body.includes(projectMarker) || body.includes(contextMarker),
+      });
+      return Response.json({});
+    },
+  });
+
+  const previousContextModeDisabled = process.env.CONTEXT_MODE_DISABLED;
+  delete process.env.CONTEXT_MODE_DISABLED;
+  try {
+    const collectorUrl = `http://127.0.0.1:${collector.port}`;
+    const requestedTransport = process.env.SPIKE_ADAPTER_TRANSPORT;
+    assert(
+      requestedTransport === undefined ||
+        requestedTransport === "cli" ||
+        requestedTransport === "sdk",
+      "SPIKE_ADAPTER_TRANSPORT must be cli or sdk when set.",
+    );
+    const transports: Transport[] = requestedTransport
+      ? [requestedTransport as Transport]
+      : ["cli", "sdk"];
+    const results: Partial<Record<Transport, ProbeEvidence>> = {};
+    for (const transport of transports) {
+      results[transport] = await runTransport(transport, oauthToken, collectorUrl, requests);
+    }
+    const summary = {
+      probe: "production-adapter-configuration",
+      ...results,
+      passed: transports.every((transport) => results[transport]?.passed === true),
+    };
+    const output = scrubSecrets(JSON.stringify(scrubObject(summary), null, 2));
+    await Bun.write(`${root}/adapter-configuration-result.json`, `${output}\n`);
+    console.log(output);
+    if (!summary.passed) process.exitCode = 1;
+  } finally {
+    if (previousContextModeDisabled === undefined) delete process.env.CONTEXT_MODE_DISABLED;
+    else process.env.CONTEXT_MODE_DISABLED = previousContextModeDisabled;
+    collector.stop(true);
+  }
+}
+
+main().catch((error) => {
+  console.error(scrubSecrets(error instanceof Error ? error.message : String(error)));
+  process.exitCode = 1;
+});

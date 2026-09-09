@@ -70,6 +70,8 @@
     "unrs-resolver"
   ],
   "scripts": {
+    "build:realtime-browser": "bun scripts/build-realtime-browser.ts",
+    "check:realtime-browser": "bun tsc -p src/realtime/tsconfig.browser.json && bun scripts/build-realtime-browser.ts --check",
     "build:pi-skills": "bun run plugin/build-pi-skills.ts",
     "build:skill-md": "bun scripts/build-skill-md.ts",
     "check:skill-md": "bun scripts/build-skill-md.ts --check",
@@ -177,6 +179,7 @@
   "dependencies": {
     "@agentclientprotocol/sdk": "1.4.0",
     "@ai-sdk/openai": "^3.0.41",
+    "@anthropic-ai/claude-agent-sdk": "0.3.266",
     "@anthropic-ai/sdk": "^0.93.0",
     "@asteasolutions/zod-to-openapi": "^8.0.0",
     "@aws-sdk/client-bedrock": "3.1048.0",
@@ -187,7 +190,7 @@
     "@earendil-works/pi-coding-agent": "^0.85.1",
     "@inkjs/ui": "^2.0.0",
     "@linear/sdk": "^77.0.0",
-    "@modelcontextprotocol/sdk": "^1.25.1",
+    "@modelcontextprotocol/sdk": "1.29.0",
     "@openai/codex": "0.153.4",
     "@opencode-ai/sdk": "^1.18.29",
     "@openfort/openfort-node": "^0.9.1",
@@ -216,6 +219,9 @@
     "sqlite-vec": "^0.1.9",
     "svix": "^1.62.0",
     "viem": "^2.46.3",
+    "ws": "8.18.3",
+    "y-protocols": "1.0.7",
+    "yjs": "13.6.32",
     "zod": "^4.2.1",
     "zod-to-json-schema": "^3.25.1"
   }

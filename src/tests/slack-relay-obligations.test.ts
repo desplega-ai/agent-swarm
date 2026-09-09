@@ -7,6 +7,7 @@ import {
   createAgent,
   createTaskExtended,
   failTask,
+  getDbClient,
   getPendingSlackRelayTasks,
   initDb,
   markFinalizedSlackRelaysDelivered,
@@ -85,6 +86,15 @@ describe("durable Slack relay obligations", () => {
     });
     await completeTask(first.id, "first");
     await completeTask(second.id, "second");
+    // Explicit fixture times prevent ties when both completions occur within one millisecond.
+    await getDbClient().run("UPDATE slack_relay_obligations SET created_at = ? WHERE task_id = ?", [
+      "2026-01-01T00:00:00.000Z",
+      first.id,
+    ]);
+    await getDbClient().run("UPDATE slack_relay_obligations SET created_at = ? WHERE task_id = ?", [
+      "2026-01-01T00:00:01.000Z",
+      second.id,
+    ]);
 
     const before = (await getPendingSlackRelayTasks()).map((pending) => pending.id);
     expect(before.indexOf(first.id)).toBeLessThan(before.indexOf(second.id));

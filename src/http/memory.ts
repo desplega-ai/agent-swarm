@@ -26,6 +26,7 @@ import { getUsefulnessStats } from "../be/memory/usefulness-stats";
 import { shouldPersistAutomaticTaskMemory } from "../memory/automatic-task-gate";
 import { SIMILARITY_THRESHOLD } from "../prompts/memories";
 import { AgentMemorySchema, AgentMemoryScopeSchema, AgentMemorySourceSchema } from "../types";
+import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { route } from "./route-def";
 import { jsonError, parseQueryParams } from "./utils";
@@ -592,8 +593,10 @@ export async function handleMemory(
   req: IncomingMessage,
   res: ServerResponse,
   pathSegments: string[],
-  myAgentId: string | undefined,
+  callerAgentId: string | undefined,
 ): Promise<boolean> {
+  // Page memory operations use the owner's scope. Authentication and audit retain the signed viewer.
+  const myAgentId = getRequestAuth(req)?.page?.executionAgentId ?? callerAgentId;
   if (indexMemory.match(req.method, pathSegments)) {
     const parsed = await indexMemory.parse(req, res, pathSegments, new URLSearchParams());
     if (!parsed) return true;

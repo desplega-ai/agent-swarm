@@ -149,11 +149,13 @@ async function savePm2State(role: string): Promise<void> {
 }
 
 /** Fetch repo config for a task's vcsRepo (e.g., "desplega-ai/agent-swarm") */
-async function fetchRepoConfig(
+export async function fetchRepoConfig(
   apiUrl: string,
   apiKey: string,
   vcsRepo: string,
+  requireExactMatch = false,
 ): Promise<{
+  id: string;
   url: string;
   name: string;
   clonePath: string;
@@ -162,13 +164,18 @@ async function fetchRepoConfig(
   guidelines?: RepoGuidelines | null;
 } | null> {
   try {
-    const repoName = vcsRepo.split("/").pop() || vcsRepo;
+    const requested = vcsRepo
+      .trim()
+      .replace(/\/+$/, "")
+      .replace(/\.git$/, "");
+    const repoName = requested.split("/").pop() || requested;
     const resp = await fetch(`${apiUrl}/api/repos?name=${encodeURIComponent(repoName)}`, {
       headers: { Authorization: `Bearer ${apiKey}` },
     });
     if (!resp.ok) return null;
     const data = (await resp.json()) as {
       repos: Array<{
+        id: string;
         url: string;
         name: string;
         clonePath: string;
@@ -177,6 +184,20 @@ async function fetchRepoConfig(
         guidelines?: RepoGuidelines | null;
       }>;
     };
+    if (requireExactMatch) {
+      return (
+        data.repos.find((r) => {
+          const normalized = r.url
+            .trim()
+            .replace(/\/+$/, "")
+            .replace(/\.git$/, "");
+          if (normalized === requested) return true;
+          // Qualified URLs must retain their host. Only shorthand references use suffix matching.
+          if (requested.includes(":")) return false;
+          return normalized.endsWith(`/${requested}`) || normalized.endsWith(`:${requested}`);
+        }) ?? null
+      );
+    }
     return data.repos.find((r) => r.url.includes(vcsRepo)) ?? data.repos[0] ?? null;
   } catch {
     return null;
@@ -744,8 +765,10 @@ export async function fetchResolvedEnv(
   agentId: string,
   baseEnv: Record<string, string | undefined> = process.env,
   taskModel?: string,
+  sessionContext?: { repoId?: string; provider?: ProviderName },
 ): Promise<ResolvedEnvResult> {
   const env: Record<string, string | undefined> = { ...baseEnv };
+  const repoId = sessionContext?.repoId;
   let scriptsOnlyConfigValue: string | undefined;
 
   if (apiUrl && agentId) {
@@ -753,7 +776,7 @@ export async function fetchResolvedEnv(
       const headers: Record<string, string> = { "X-Agent-ID": agentId };
       if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
 
-      const url = `${apiUrl}/api/config/resolved?agentId=${encodeURIComponent(agentId)}&includeSecrets=true`;
+      const url = `${apiUrl}/api/config/resolved?agentId=${encodeURIComponent(agentId)}&includeSecrets=true${repoId ? `&repoId=${encodeURIComponent(repoId)}` : ""}`;
       const response = await fetch(url, { headers });
 
       if (!response.ok) {
@@ -804,7 +827,10 @@ export async function fetchResolvedEnv(
     }
   }
 
-  const resolvedProvider = resolveHarnessProvider(env, baseEnv);
+  // A task already has an adapter. Repository configuration must not select
+  // credentials or configure hooks for a different harness.
+  const resolvedProvider = sessionContext?.provider ?? resolveHarnessProvider(env, baseEnv);
+  if (sessionContext?.provider) env.HARNESS_PROVIDER = sessionContext.provider;
 
   // Effective model: per-task model takes priority over the agent-level
   // MODEL_OVERRIDE from swarm_config. Passed to resolveCredentialPools so
@@ -974,6 +1000,8 @@ export async function provisionAgentFsAfterRegistration(opts: {
  * - SLACK_DISABLE — read by the prompt builder to gate the Slack tool section.
  * - SWARM_ORG_NAME — read per telemetry event for org identity.
  *
+ * CLAUDE_TRANSPORT stays in the per-session environment. Caching a scoped
+ * value here would prevent deletion from restoring the configured default.
  * NOTE: SCRIPTS_ONLY_MCP and HARNESS_PROVIDER stay excluded on purpose — they
  * have paired adapter/prompt state and their own reconcile path above.
  */
@@ -3351,6 +3379,7 @@ function providerEventAttributes(event: ProviderEvent): Attributes {
 
 function normalizeSessionErrorCategory(category: string | undefined): string {
   switch (category) {
+    case "cancelled":
     case "rate_limit":
     case "api_error":
     case "context_overflow":
@@ -3360,6 +3389,14 @@ function normalizeSessionErrorCategory(category: string | undefined): string {
     default:
       return "unknown";
   }
+}
+
+export function resolveSessionTelemetryEvent(
+  result: Pick<ProviderResult, "exitCode" | "isError" | "errorCategory">,
+): "cancelled" | "failure" | undefined {
+  if (result.errorCategory === "cancelled") return "cancelled";
+  if (result.exitCode !== 0 || result.isError) return "failure";
+  return undefined;
 }
 
 /**
@@ -3434,6 +3471,10 @@ async function spawnProviderProcess(
   // Correlation ID for logs/display — always defined
   const effectiveTaskId = realTaskId || crypto.randomUUID();
 
+  const sessionRepo = opts.vcsRepo
+    ? await fetchRepoConfig(opts.apiUrl, opts.apiKey, opts.vcsRepo, true)
+    : null;
+
   // Resolve env first so we can use MODEL_OVERRIDE from config.
   // Pass opts.model (per-task model) so the credential picker can apply
   // the harness × model matrix (e.g. exclude OPENAI_API_KEY for OpenRouter models).
@@ -3443,12 +3484,17 @@ async function spawnProviderProcess(
     opts.agentId,
     process.env,
     opts.model,
+    { repoId: sessionRepo?.id, provider: adapter.name as ProviderName },
   );
 
   // Report which key was selected for this task (fire-and-forget)
   if (credentialSelections.length > 0 && realTaskId) {
     for (const sel of credentialSelections) {
-      reportKeyUsage(opts.apiUrl, opts.apiKey, sel.keyType, sel, realTaskId).catch(() => {});
+      // Claude selections follow credential precedence. Secondary reports must
+      // not overwrite the task's primary credential when both types exist.
+      const taskId =
+        adapter.name === "claude" && sel !== credentialSelections[0] ? undefined : realTaskId;
+      reportKeyUsage(opts.apiUrl, opts.apiKey, sel.keyType, sel, taskId).catch(() => {});
     }
   }
 
@@ -4484,8 +4530,9 @@ async function checkCompletedProcesses(
         isError: result.exitCode !== 0,
         durationMs,
       });
-      if (result.exitCode !== 0 || result.isError) {
-        telemetry.session("failure", {
+      const sessionTelemetryEvent = resolveSessionTelemetryEvent(result);
+      if (sessionTelemetryEvent) {
+        telemetry.session(sessionTelemetryEvent, {
           agentId: apiConfig.agentId,
           errorCategory: normalizeSessionErrorCategory(result.errorCategory),
           provider: result.cost?.provider ?? harnessProvider,

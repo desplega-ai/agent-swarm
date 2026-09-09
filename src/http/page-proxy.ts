@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { getPage } from "../be/db";
 import { getApiKey } from "../utils/api-key";
-import { extractAndVerifyCookie } from "../utils/page-session";
+import { extractAndVerifyCookie, parseCookieHeader } from "../utils/page-session";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
 
@@ -14,10 +14,10 @@ import { jsonError } from "./utils";
  * Flow:
  *   1. Browser hits `/@swarm/api/<rest>` from inside an iframe of `/p/:id`.
  *   2. We parse the `page_session` cookie, verify HMAC + expiry.
- *   3. Look up the page; map `agentId` → `X-Agent-ID`.
+ *   3. Look up the page and recover the signed viewer identity.
  *   4. Re-issue the request to the same API server's `/api/<rest>` with
- *      `Authorization: Bearer ${API_KEY}` and `X-Agent-ID: ${page.agentId}`
- *      injected server-side. The bearer NEVER touches the browser.
+ *      the operator bearer plus the original signed session token. The bearer NEVER
+ *      touches the browser, and the page owner's agent id is not forwarded.
  *
  * Cookie IS the auth — this route opts out of the global bearer gate via
  * `route({ auth: { apiKey: false } })`. Unknown paths fail closed (the
@@ -215,9 +215,12 @@ export async function handlePageProxy(req: IncomingMessage, res: ServerResponse)
   // priority namespace source so a page can't escape `task:page:<own>`.
   const headers: Record<string, string> = {
     Authorization: `Bearer ${apiKey}`,
-    "X-Agent-ID": page.agentId,
     "X-Page-Id": page.id,
+    "X-Page-Session": parseCookieHeader(req.headers.cookie, "page_session") ?? "",
   };
+  // The page owner is not the browser viewer. The receiving auth layer
+  // verifies this original signed token before resolving any user identity.
+  // It also loads the page's execution context for agent-scoped memory operations.
 
   // Forward content-type / accept verbatim for non-GET so JSON bodies work.
   const reqContentType = req.headers["content-type"];

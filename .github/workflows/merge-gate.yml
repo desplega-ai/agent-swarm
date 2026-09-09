@@ -381,6 +381,9 @@ jobs:
       - name: Check Bun version pins
         run: bun run check:bun-version
 
+      - name: Check realtime browser bundle
+        run: bun run check:realtime-browser
+
       # scripts/pre-push-tests.sh prints a skip-list when its worker-image sandbox
       # probe trips; keep it mechanically synced to the SKIP_SANDBOX_SPAWN_TESTS
       # importer set so it can't silently drift again.
