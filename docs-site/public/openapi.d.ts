@@ -2163,6 +2163,8 @@ export interface paths {
                                     max: number;
                                     available: number;
                                 };
+                                /** @enum {string} */
+                                claudeTransport?: "cli" | "sdk";
                             })[];
                         };
                     };
@@ -2799,6 +2801,8 @@ export interface paths {
                                 max: number;
                                 available: number;
                             };
+                            /** @enum {string} */
+                            claudeTransport?: "cli" | "sdk";
                         };
                     };
                 };

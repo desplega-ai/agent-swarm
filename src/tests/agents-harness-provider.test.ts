@@ -1011,3 +1011,73 @@ describe("deleteSwarmConfigByKey", () => {
     ).toBeUndefined();
   });
 });
+
+// ─── GET /api/agents — effective Claude transport on list rows ───────────────
+
+describe("GET /api/agents claudeTransport", () => {
+  test("Claude agents carry the effective transport; other harnesses omit it", async () => {
+    const claudeInherit = await createAgent({
+      name: "transport-claude-inherit",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+      harnessProvider: "claude",
+    });
+    const claudeOverride = await createAgent({
+      name: "transport-claude-override",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+      harnessProvider: "claude",
+    });
+    const codex = await createAgent({
+      name: "transport-codex",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+      harnessProvider: "codex",
+    });
+    await upsertSwarmConfig({ scope: "global", key: "CLAUDE_TRANSPORT", value: "sdk" });
+    await upsertSwarmConfig({
+      scope: "agent",
+      scopeId: claudeOverride.id,
+      key: "CLAUDE_TRANSPORT",
+      value: "cli",
+    });
+
+    const res = await fetch(`${baseUrl}/api/agents`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      agents: { id: string; claudeTransport?: "cli" | "sdk" }[];
+    };
+    const byId = new Map(body.agents.map((agent) => [agent.id, agent]));
+    expect(byId.get(claudeInherit.id)?.claudeTransport).toBe("sdk");
+    expect(byId.get(claudeOverride.id)?.claudeTransport).toBe("cli");
+    expect(byId.get(codex.id)?.claudeTransport).toBeUndefined();
+
+    const single = await fetch(`${baseUrl}/api/agents/${claudeInherit.id}`);
+    expect(single.status).toBe(200);
+    expect(((await single.json()) as { claudeTransport?: string }).claudeTransport).toBe("sdk");
+  });
+
+  test("an invalid stored transport omits the field instead of failing the list", async () => {
+    const a = await createAgent({
+      name: "transport-claude-invalid",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+      harnessProvider: "claude",
+    });
+    await upsertSwarmConfig({
+      scope: "agent",
+      scopeId: a.id,
+      key: "CLAUDE_TRANSPORT",
+      value: "bogus",
+    });
+
+    const res = await fetch(`${baseUrl}/api/agents`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { agents: { id: string; claudeTransport?: string }[] };
+    expect(body.agents.find((agent) => agent.id === a.id)?.claudeTransport).toBeUndefined();
+  });
+});
