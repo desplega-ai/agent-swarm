@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.143.0] - 2026-09-09
+
+### Added
+- **Codex tasks run through an isolated app-server with native steering and interruption** (#1393), with queued input accepted on the next turn and process-group termination as a cancellation fallback.
+- **Slack reactions are configurable per event** (#1384), covering acceptance, buffering, immediate flush, steering, completion, and failure, with shortcode validation and default fallback.
+- **A public operator skill guides Compose and Helm installations** (#1388), with setup checklists and a shorter README.
+
+### Changed
+- **Gateway setup supports any OpenAI-compatible endpoint for pi and opencode** (#1383), with dashboard configuration and updated provider guidance.
+- **Templates UI upgrades Next.js to 16.3.3** (#1398).
+
+### Fixed
+- **Slack terminal replies survive API restarts** (#1378), with durable pending delivery and persisted progress-message tracking for retries.
+- **Codex app-server logs render in the dashboard and eval viewer** (#1399), and task context usage follows the shared display calculation. Codex advisories are distinguished from failures and Astra models are labeled correctly (#1387).
+- **Worker identity refreshes safely before each task prompt** (#1391), preserving local edits while applying current profile defaults.
+- **Sandboxed scripts have independent process-tree containment** (#1392), including descendants that start a new session.
+- **ACP protocol traffic is persisted for diagnostics and configuration metadata is scrubbed before emission** (#1385, #1389).
+- **Published pages preserve authored styles when Tailwind loads** (#1382).
+- **The feedback popup waits for the configured install age**, and dashboard status tolerates older APIs without automation fields (#1390, #1381).
+- **Script pause, query saturation, and migration queue checks are more stable** (#1396).
+
 ## [1.142.0] - 2026-09-08
 
 ### Added
