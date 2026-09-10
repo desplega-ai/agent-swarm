@@ -43,8 +43,15 @@ describe("Tool Annotations & Classification", () => {
     initDb(TEST_DB_PATH);
     // Tier classification (core vs deferred) spans every tool, including ones
     // behind default-disabled capabilities — build the full-surface server.
-    server = await createServer({ fullSurface: true });
-    tools = getRegisteredTools(server);
+    const previousSteeringEnabled = process.env.STEERING_ENABLED;
+    process.env.STEERING_ENABLED = "true";
+    try {
+      server = await createServer({ fullSurface: true, scriptsOnly: false });
+      tools = getRegisteredTools(server);
+    } finally {
+      if (previousSteeringEnabled === undefined) delete process.env.STEERING_ENABLED;
+      else process.env.STEERING_ENABLED = previousSteeringEnabled;
+    }
   });
 
   afterAll(async () => {
