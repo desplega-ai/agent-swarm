@@ -32,6 +32,9 @@ export const CORE_TOOLS = new Set([
 
   // Swarm awareness
   "get-swarm", // check who's online
+
+  // Script execution
+  "script-run", // run inline or reusable scripts
 ]);
 
 /** Tools that can be discovered via Tool Search on demand */
@@ -193,9 +196,8 @@ export const DEFERRED_TOOLS = new Set([
   "room-reset",
   "room-decode",
 
-  // Reusable scripts (9)
+  // Reusable scripts (8)
   "script-search",
-  "script-run",
   "script-upsert",
   "script-delete",
   "script-query-types",
