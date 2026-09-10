@@ -9,6 +9,7 @@ import {
   getTaskById,
   initDb,
 } from "../be/db";
+import { getTaskOutputValidationError } from "../tasks/terminal-result-guard";
 import { validateJsonSchema } from "../workflows/json-schema-validator";
 
 const TEST_DB_PATH = "./test-structured-output.sqlite";
@@ -161,6 +162,36 @@ describe("Structured output validation logic", () => {
     const errors = validateJsonSchema(schema, parsed);
     expect(errors.length).toBe(1);
     expect(errors[0]).toContain("expected type");
+  });
+});
+
+// ─── getTaskOutputValidationError — malformed schema must not throw ──
+
+describe("getTaskOutputValidationError — malformed outputSchema", () => {
+  test("a malformed nested schema returns a validation error instead of throwing", () => {
+    // send-task's ingress guard (checkOutputSchemaShape) rejects this shape
+    // today, but a task created before that guard existed — or via a path
+    // that bypasses it — can still carry one. store-progress completion must
+    // fail cleanly, not crash reading `null.type` in validateJsonSchema.
+    const malformedSchema = { type: "object", properties: { answer: null } };
+    let error: string | undefined;
+    expect(() => {
+      error = getTaskOutputValidationError(malformedSchema, JSON.stringify({ answer: "ok" }));
+    }).not.toThrow();
+    expect(error).toBeDefined();
+    expect(error).toContain("malformed");
+  });
+
+  test("a well-formed schema still validates normally", () => {
+    const schema = {
+      type: "object",
+      required: ["answer"],
+      properties: { answer: { type: "string" } },
+    };
+    expect(getTaskOutputValidationError(schema, JSON.stringify({ answer: "ok" }))).toBeUndefined();
+    expect(getTaskOutputValidationError(schema, JSON.stringify({}))).toContain(
+      "does not match the outputSchema",
+    );
   });
 });
 

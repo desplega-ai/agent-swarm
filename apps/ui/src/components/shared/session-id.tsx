@@ -1,10 +1,10 @@
 import { ExternalLink } from "lucide-react";
-import type { DevinProviderMeta, ProviderName } from "@/api/types";
+import type { ClaudeProviderMeta, DevinProviderMeta, ProviderName } from "@/api/types";
 
 interface SessionIdProps {
   sessionId: string;
   provider?: ProviderName;
-  providerMeta?: DevinProviderMeta | Record<string, never>;
+  providerMeta?: DevinProviderMeta | ClaudeProviderMeta | Record<string, never>;
 }
 
 export function SessionId({ sessionId, provider, providerMeta }: SessionIdProps) {

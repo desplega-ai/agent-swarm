@@ -44,6 +44,23 @@ answer. Script-internal `ctx.swarm.*` responses are not subject to the 10 KB
 model-context ceiling; see [Scripts runtime](/docs/guides/scripts-runtime) for
 that separate boundary.
 
+## Realtime rooms
+
+The `kv` capability exposes four room tools for state shared with browser pages, agents, scripts, and workflows:
+
+| Tool | Purpose |
+|------|---------|
+| `room-get` | Read current room state. |
+| `room-change` | Apply `set`, `delete`, `insert`, `increment`, or `text` operations. |
+| `room-reset` | Replace the document with a new generation. |
+| `room-decode` | Decode a saved snapshot without changing the room. |
+
+Scripts use `ctx.swarm.room.get/change/reset/decode`. Browser pages use `swarmSdk.room(name, {schemaVersion})` for state and presence, and `swarmSdk.channel(name)` for transient messages. Room changes do not create page versions.
+
+Room snapshots have a 2 MiB encoded limit and normally flush within one second. Presence and channel messages are not persisted. A schema mismatch keeps state readable but rejects writes until an explicit reset. Deploy a single API replica for shared room state.
+
+See the [Rooms API reference](/docs/api-reference/rooms) for request schemas.
+
 ## Core Tools
 
 Always available tools for basic swarm operations.
@@ -113,6 +130,7 @@ Send a task to a specific agent, create an unassigned task, or offer a task for 
 | `overrideSlackContext` | boolean | No | Set with both channel and thread fields for an intentional audited cross-channel handoff. Without it, routes conflicting with the parent or Slack context key are rejected. |
 | `requestedByUserId` | uuid | No | ID of the human user who originally requested this task chain. Auto-inherited from the caller's current task so attribution flows through multi-hop delegation (lead → worker → child tasks). |
 | `followUpConfig` | object | No | Control the lead follow-up created when this task finishes. Use `disabled: true` to suppress it, or `onCompleted` / `onFailed` to inject outcome-specific instructions for long-running flows. |
+| `outputSchema` | object | No | JSON Schema the assignee's final output must satisfy. `store-progress` rejects a completion that doesn't match. Supported keywords: `type`, `required`, `properties`, `enum`, `const`, `items`; every nested schema under `properties`/`items` must itself be a plain object, or `send-task` rejects it at ingress. |
 
 Slack metadata and `requestedByUserId` are auto-inherited from the creator's current task via the `X-Source-Task-Id` header. Slack channel/thread fields inherit as one route: explicit values that conflict with the parent or Slack context key are rejected unless both fields are provided with `overrideSlackContext: true` for an intentional audited handoff.
 

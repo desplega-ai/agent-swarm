@@ -141,6 +141,10 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [kv-delete](#kv-delete)
   - [kv-incr](#kv-incr)
   - [kv-list](#kv-list)
+  - [room-get](#room-get)
+  - [room-change](#room-change)
+  - [room-reset](#room-reset)
+  - [room-decode](#room-decode)
 - [Slack Tools](#slack-tools)
   - [slack-reply](#slack-reply)
   - [slack-read](#slack-read)
@@ -285,6 +289,7 @@ Sends a task to a specific agent, creates an unassigned task for the pool, or of
 | `overrideSlackContext` | `boolean` | No | false | Explicitly route this task's Slack updates to a different channel/thread than its parent/contextKey. Requires slackChannelId AND slackThreadTs. Use only for deliberate cross-channel dispatch (e.g. escalation to another human's DM); logged for audit. Without this flag, a slackChannelId/slackThreadTs that disagrees with the parent task or inherited contextKey is rejected — omit the three Slack fields to inherit them from the parent as a unit instead. |
 | `requestedByUserId` | `string` | No | - | ID of the human user who originally requested this task chain. When omitted, inherited from the caller's current task so the attribution flows through multi-hop delegation automatically. |
 | `followUpConfig` | `unknown` | No | - | Control the lead follow-up created when this task finishes. When to use `followUpConfig`: set `disabled: true` when you'll wait for this task to complete inline and no follow-up is needed; set `onCompleted` / `onFailed` with specific instructions when you need to follow up effectively on a particular outcome of a long-running flow; for normal one-shot tasks, leave it unset because defaults are fine. It is most valuable for long-running / complex flows. |
+| `outputSchema` | `object` | No | - | Optional JSON Schema the assignee's final output must satisfy. store-progress rejects a completion that does not match. Supported keywords: type, required, properties, enum, const, items. |
 
 ### get-task-details
 
@@ -1716,6 +1721,52 @@ List KV entries in the resolved namespace (optionally filtered by key prefix). E
 | `limit` | `number` | No | - | Max entries to return (default 100, max 1000). |
 | `offset` | `number` | No | - | - |
 | `namespace` | `unknown` | No | - | - |
+
+### room-get
+
+**Room Get**
+
+Read the current state of a realtime room.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `name` | `string` | No | "default" | - |
+| `namespace` | `unknown` | No | - | - |
+| `schemaVersion` | `number` | No | 1 | - |
+
+### room-change
+
+**Room Change**
+
+Apply operations to the live state of a realtime room.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `name` | `string` | No | "default" | - |
+| `namespace` | `unknown` | No | - | - |
+| `schemaVersion` | `number` | No | 1 | - |
+
+### room-reset
+
+**Room Reset**
+
+Replace a realtime room with a new state and schema version.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `name` | `string` | No | "default" | - |
+| `namespace` | `unknown` | No | - | - |
+| `schemaVersion` | `number` | No | 1 | - |
+
+### room-decode
+
+**Room Decode**
+
+Decode a room snapshot value that the caller already holds.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `value` | `unknown` | Yes | - | - |
 
 ## Slack Tools
 

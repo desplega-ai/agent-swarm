@@ -246,6 +246,7 @@ beforeAll(() => {
 
 beforeEach(async () => {
   clearVolatileSecretsForTesting();
+  process.env.SLACK_RENDER_V2_DELEGATION = "false";
   closeDb();
   await removeDbFiles();
   initDb(TEST_DB_PATH);

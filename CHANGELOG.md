@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.144.0] - 2026-09-10
+
+### Added
+- **Realtime rooms share state between pages, agents, scripts, and workflows** (#1406), with browser presence, transient channels, MCP room operations, and a dashboard snapshot inspector.
+- **Claude workers can opt into the Agent SDK transport** (#1404). The dashboard exposes transport selection and identifies SDK sessions on task details and agent lists (#1411).
+- **Delegated Slack task results reach the originating thread** (#1372), including late child results and failure outcomes when delegation rendering is enabled.
+
+### Fixed
+- **Published pages default to a light canvas** (#1409), and the browser SDK no longer requests the removed configuration endpoint (#1412).
+- **Sandbox resource limits always run through Bash** (#1405), avoiding shell-dependent launch failures.
+- **WebSocket dependencies no longer resolve the vulnerable ws version** (#1410, #1415).
+- **Rebuilt visual reports preserve Vercel deployment guards** (#1407).
+
 ## [1.143.0] - 2026-09-09
 
 ### Added

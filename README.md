@@ -15,6 +15,7 @@ agent-swarm.dev is an open-source operating system for AI work. A lead agent del
 - Workers in isolated Docker containers with development environments
 - Memory and identity that persist across sessions
 - Workflows, schedules, scripts, and apps for recurring work
+- [Realtime rooms](./runbooks/realtime-rooms.md) for shared page state, presence, and live channels
 - Your choice of harness and models: Claude Code, Codex, pi, opencode, Devin, or ACP agents
 
 ```mermaid

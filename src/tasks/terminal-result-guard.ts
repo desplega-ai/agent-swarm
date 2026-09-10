@@ -37,7 +37,20 @@ export function getTaskOutputValidationError(outputSchema: unknown, output: stri
     return `Task output must be valid JSON matching the outputSchema. Got invalid JSON. Schema:\n${JSON.stringify(schema, null, 2)}`;
   }
 
-  const validationErrors = validateJsonSchema(schema, parsed);
+  let validationErrors: string[];
+  try {
+    validationErrors = validateJsonSchema(schema, parsed);
+  } catch (error) {
+    // A malformed outputSchema should be rejected at send-task ingress (see
+    // checkOutputSchemaShape in src/tools/send-task.ts), but a task created
+    // before that guard existed, or via a path that doesn't go through it,
+    // can still carry one. Fail the completion with a normal validation
+    // error instead of throwing and stranding the task in a non-terminal
+    // state (see src/workflows/json-schema-validator.ts's recursive
+    // properties/items walk, which assumes every nested schema is an object).
+    const detail = error instanceof Error ? error.message : String(error);
+    return `Task outputSchema is malformed and cannot be validated (${detail}). Ask an operator to correct the task's outputSchema, or force-complete with store-progress force: true.`;
+  }
   if (validationErrors.length > 0) {
     return `Task output does not match the outputSchema. Errors:\n${validationErrors.join("\n")}\n\nExpected schema:\n${JSON.stringify(schema, null, 2)}\n\nPlease fix your output and retry.`;
   }

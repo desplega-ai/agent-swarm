@@ -352,6 +352,7 @@ export default function AgentDetailPage() {
                         <HarnessCell
                           harnessProvider={agent.harnessProvider}
                           credStatus={agent.credStatus}
+                          claudeTransport={agent.claudeTransport}
                         />
                       </InfoRow>
                       <InfoRow label="Runtime">

@@ -516,7 +516,7 @@ RUN mkdir -p /opt/global-deps-full && cat > /opt/global-deps-full/package.json <
     "@sentry/cli": "3.3.4",
     "@desplega.ai/localtunnel": "2.2.0",
     "@desplega.ai/claude-bridge": "0.2.2",
-    "agent-browser": "0.37.0",
+    "agent-browser": "0.37.1",
     "playwright": "1.58.0"
   },
   "overrides": {

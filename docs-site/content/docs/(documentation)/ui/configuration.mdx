@@ -35,7 +35,7 @@ SDK selection is incompatible with an effective Claude Bridge or legacy bridge b
 | Steering | `STEERING_ENABLED`, `SLACK_THREAD_STEERING`, `SLACK_THREAD_STEERING_MODE` |
 | Memory | `MEMORY_HYBRID_SEARCH`, `MEMORY_GRAPH_EXPANSION`, `MEMORY_RATERS`, `EMBEDDING_MODEL` |
 | Heartbeat & crash recovery | `HEARTBEAT_INTERVAL_MS`, `HEARTBEAT_STALL_THRESHOLD_MIN`, `RUNTIME_STALE_THRESHOLD_MIN`, `HEARTBEAT_PIN_CRASH_RESUME` |
-| Harness & tools | `SCRIPTS_ONLY_MCP`, `MULTI_RUNTIME_ENABLED`, `CAPABILITIES`, `OPENROUTER_BASE_URL`, `WORKER_API_READY_TIMEOUT_SECONDS` |
+| Harness & tools | `SCRIPTS_ONLY_MCP`, `MULTI_RUNTIME_ENABLED`, `CAPABILITIES`, `OPENROUTER_BASE_URL`, `WORKER_API_READY_TIMEOUT_SECONDS`, `CONTEXT_PREAMBLE_MAX_TOKENS` |
 | Database | `DB_QUERY_BOUNDED_ENABLED`, `DB_QUERY_HTTP_BUDGET_MS`, `DB_QUERY_HTTP_MAX_ROWS`, `DB_QUERY_MCP_BUDGET_MS`, `DB_QUERY_MCP_MAX_ROWS`, `DB_QUERY_CONCURRENCY_CAP`, `SESSION_LOG_RETENTION_DAYS`, `AGENT_LOG_RETENTION_DAYS`, `EVENTS_RETENTION_DAYS`, `DB_RETENTION_DRY_RUN`, `DB_RETENTION_TICK_BUDGET_MS`, `DB_RETENTION_CATCHUP_INTERVAL_MS`, `DB_RETENTION_MAX_STATEMENT_MS` |
 | Integrations | `SLACK_DISABLE`, `SLACK_ALLOW_DEV_SOCKET_MODE`, `SLACK_RENDER_V2`, `SLACK_RENDER_V2_DELEGATION`, `SLACK_CONCLUSION_SETTLE_SEC`, `SLACK_CONCLUSION_TIMEOUT_MIN`, `SLACK_TREE_STALL_MIN`, `GITHUB_DISABLE`, `LINEAR_DISABLE`, `SLACK_ALERTS_CHANNEL`, `AGENT_FS_REQUEST_TIMEOUT_MS`, `SLACK_REACTION_ACCEPTED`, `SLACK_REACTION_BUFFERED`, `SLACK_REACTION_NOW`, `SLACK_REACTION_STEERED`, `SLACK_REACTION_COMPLETED`, `SLACK_REACTION_FAILED` |
 | Security & access | `RBAC_ENABLED`, `BUDGET_ADMISSION_DISABLED`, `MCP_OAUTH_ALLOW_PRIVATE_HOSTS` |
@@ -87,6 +87,12 @@ Every row shows its default, and rows with a stored value offer a **Reset** acti
   Every worker and lead container's `docker-entrypoint.sh` polls the control-plane API's public `GET /health` endpoint before doing anything else that depends on it (fetching config, syncing skills, restoring services). If the API never becomes reachable within `WORKER_API_READY_TIMEOUT_SECONDS` (a positive integer, default `90`), the container logs a stable `[entrypoint] FATAL: API readiness timed out after Ns waiting for <url>; exiting.` line and exits non-zero rather than starting half-provisioned.
 
   This check runs **before** the container can reach the API at all, so it can only ever read the value from its own process environment — a row saved here documents and validates the setting (and is what the **Restart required** badge refers to), but it cannot reach an already-waiting container. Set it as a real deployment environment variable on the worker/lead container, not just in the dashboard.
+</Callout>
+
+<Callout type="warn" title="CONTEXT_PREAMBLE_MAX_TOKENS is read once at process start">
+  Every follow-up task gets a bounded text summary of its parent/ancestor task chain prepended to its prompt, uniformly across all harness providers (not just those with native session resume). `CONTEXT_PREAMBLE_MAX_TOKENS` (default `2000`, ~4 chars/token, so ~8,000 chars) caps that summary's size. It exists to prevent the SIGTERM-143 context-saturation failure mode seen with unbounded session resumes — raising it too far risks reintroducing that failure, so keep it well below the target model's context window.
+
+  The API server reads this value into a module-level constant at boot, so a saved value takes effect on the next restart (the **Restart required** badge on this row).
 </Callout>
 
 ## Access control

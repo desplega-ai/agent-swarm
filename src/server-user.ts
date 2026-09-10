@@ -21,7 +21,7 @@ import {
   getTaskDetailsOutputSchema,
 } from "./tools/get-task-details";
 import { getTasksHandler, getTasksInputSchema, getTasksOutputSchema } from "./tools/get-tasks";
-import { sendTaskHandler, sendTaskOutputSchema } from "./tools/send-task";
+import { checkOutputSchemaShape, sendTaskHandler, sendTaskOutputSchema } from "./tools/send-task";
 import {
   steerTaskHandler,
   steerTaskOutputSchema,
@@ -42,21 +42,33 @@ type UserToolAdmissionConfig = {
   rbac?: AdmissionRbac;
 };
 
-const userSendTaskInputSchema = z.object({
-  task: z.string().min(1).describe("The task description to send."),
-  taskType: z.string().max(50).optional().describe("Task type (e.g., 'bug', 'feature', 'review')."),
-  tags: z.array(z.string()).optional().describe("Tags for filtering (e.g., ['urgent'])."),
-  priority: z.number().int().min(0).max(100).optional().describe("Priority 0-100 (default: 50)."),
-  model: z
-    .string()
-    .trim()
-    .min(1)
-    .optional()
-    .describe("Concrete model override interpreted by the assignee's harness/provider."),
-  modelTier: ModelTierSchema.optional().describe(
-    "Portable model tier: 'smol', 'regular', 'smart', or 'ultra'. Resolved by the assignee's harness/provider.",
-  ),
-});
+export const userSendTaskInputSchema = z
+  .object({
+    task: z.string().min(1).describe("The task description to send."),
+    taskType: z
+      .string()
+      .max(50)
+      .optional()
+      .describe("Task type (e.g., 'bug', 'feature', 'review')."),
+    tags: z.array(z.string()).optional().describe("Tags for filtering (e.g., ['urgent'])."),
+    priority: z.number().int().min(0).max(100).optional().describe("Priority 0-100 (default: 50)."),
+    model: z
+      .string()
+      .trim()
+      .min(1)
+      .optional()
+      .describe("Concrete model override interpreted by the assignee's harness/provider."),
+    modelTier: ModelTierSchema.optional().describe(
+      "Portable model tier: 'smol', 'regular', 'smart', or 'ultra'. Resolved by the assignee's harness/provider.",
+    ),
+    outputSchema: z
+      .record(z.string(), z.unknown())
+      .optional()
+      .describe(
+        "Optional JSON Schema the assignee's final output must satisfy. store-progress rejects a completion that does not match. Supported keywords: type, required, properties, enum, const, items.",
+      ),
+  })
+  .superRefine((data, ctx) => checkOutputSchemaShape(data.outputSchema, ctx));
 
 function permission(verb: PermissionVerb): AdmissionRbac {
   return { permission: verb };

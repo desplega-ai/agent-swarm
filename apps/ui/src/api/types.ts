@@ -139,6 +139,12 @@ export interface Agent {
    * worker hasn't booted yet, or `CRED_CHECK_DISABLE=1` opted it out.
    */
   credStatus?: AgentCredStatus | null;
+  /**
+   * Effective `CLAUDE_TRANSPORT` (global → agent precedence) for Claude
+   * agents. Absent for other harnesses. Reflects the next session, not
+   * necessarily the last one that ran.
+   */
+  claudeTransport?: ClaudeTransport;
   createdAt: string;
   lastUpdatedAt: string;
 }
@@ -252,7 +258,7 @@ export interface AgentTask {
   credentialKeyType?: string;
   swarmVersion?: string;
   provider?: ProviderName;
-  providerMeta?: DevinProviderMeta | Record<string, never>;
+  providerMeta?: DevinProviderMeta | ClaudeProviderMeta | Record<string, never>;
   harnessVariant?: string;
   harnessVariantMeta?: { version?: string; failureArtifact?: string };
   peakContextPercent?: number;
@@ -293,6 +299,10 @@ export type DevinProviderMeta = {
   sessionUrl: string;
   maxAcuLimit?: number;
   acuCostUsd?: number;
+};
+/** Persisted by the worker at session init (`providerMeta.transport`). */
+export type ClaudeProviderMeta = {
+  transport?: ClaudeTransport;
 };
 
 // ============================================================================

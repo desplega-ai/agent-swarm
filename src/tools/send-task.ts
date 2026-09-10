@@ -32,7 +32,25 @@ import {
   ReasoningEffortSchema,
   splitLegacyModelAlias,
 } from "@/types";
+import { findJsonSchemaShapeErrors } from "@/workflows/json-schema-validator";
 import { looseAgentTaskOutputSchema } from "./get-task-details";
+
+/**
+ * Shared by `sendTaskInputSchema` (owner MCP) and `userSendTaskInputSchema`
+ * (`/mcp-user`, see src/server-user.ts) so a malformed nested `outputSchema`
+ * (e.g. `{ properties: { answer: null } }`) is rejected at ingress on both
+ * surfaces instead of reaching `store-progress` completion validation, where
+ * the hand-rolled validator would throw reading `null.type`.
+ */
+export function checkOutputSchemaShape(
+  outputSchema: Record<string, unknown> | undefined,
+  ctx: z.RefinementCtx,
+): void {
+  if (outputSchema === undefined) return;
+  for (const message of findJsonSchemaShapeErrors(outputSchema)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message, path: ["outputSchema"] });
+  }
+}
 
 export const sendTaskInputSchema = z
   .object({
@@ -138,6 +156,12 @@ export const sendTaskInputSchema = z
     followUpConfig: FollowUpConfigSchema.optional().describe(
       "Control the lead follow-up created when this task finishes. When to use `followUpConfig`: set `disabled: true` when you'll wait for this task to complete inline and no follow-up is needed; set `onCompleted` / `onFailed` with specific instructions when you need to follow up effectively on a particular outcome of a long-running flow; for normal one-shot tasks, leave it unset because defaults are fine. It is most valuable for long-running / complex flows.",
     ),
+    outputSchema: z
+      .record(z.string(), z.unknown())
+      .optional()
+      .describe(
+        "Optional JSON Schema the assignee's final output must satisfy. store-progress rejects a completion that does not match. Supported keywords: type, required, properties, enum, const, items.",
+      ),
   })
   .superRefine((data, ctx) => {
     const hasChannel = !!data.slackChannelId;
@@ -149,6 +173,7 @@ export const sendTaskInputSchema = z
         path: [hasChannel ? "slackThreadTs" : "slackChannelId"],
       });
     }
+    checkOutputSchemaShape(data.outputSchema, ctx);
   });
 
 export const sendTaskOutputSchema = swarmToolOutputSchema({
@@ -218,6 +243,7 @@ export async function sendTaskHandler(
     overrideSlackContext,
     requestedByUserId: inputRequestedByUserId,
     followUpConfig,
+    outputSchema,
   }: SendTaskArgs,
 ): Promise<SwarmToolResult> {
   if (ctx.kind === "owner" && !ctx.agentId) {
@@ -436,6 +462,7 @@ export async function sendTaskHandler(
         slackUserId,
         overrideSlackContext,
         followUpConfig,
+        outputSchema,
         routingAffinity:
           effectiveLeadOnly || requiredCapabilities?.length
             ? { leadOnly: effectiveLeadOnly, capabilities: requiredCapabilities ?? [] }
@@ -502,6 +529,7 @@ export async function sendTaskHandler(
         slackUserId,
         overrideSlackContext,
         followUpConfig,
+        outputSchema,
         routingAffinity:
           effectiveLeadOnly || requiredCapabilities?.length
             ? { leadOnly: effectiveLeadOnly, capabilities: requiredCapabilities ?? [] }
@@ -542,6 +570,7 @@ export async function sendTaskHandler(
       slackUserId,
       overrideSlackContext,
       followUpConfig,
+      outputSchema,
       routingAffinity:
         effectiveLeadOnly || requiredCapabilities?.length
           ? { leadOnly: effectiveLeadOnly, capabilities: requiredCapabilities ?? [] }

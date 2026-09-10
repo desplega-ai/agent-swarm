@@ -123,3 +123,55 @@ function typeOf(data: unknown): string {
   if (Array.isArray(data)) return "array";
   return typeof data;
 }
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Validates that a candidate JSON Schema uses only the shape `validateJsonSchema`
+ * above can consume — every nested schema under `properties`/`items` must itself
+ * be a plain object. A schema that passes this check can never crash the
+ * validator (e.g. `{ properties: { answer: null } }` reading `null.type`).
+ *
+ * Returns an array of error strings naming the offending path (empty = valid).
+ */
+export function findJsonSchemaShapeErrors(schema: unknown, path = "outputSchema"): string[] {
+  const errors: string[] = [];
+
+  if (!isPlainObject(schema)) {
+    errors.push(`${path}: must be a JSON Schema object, got ${typeOf(schema)}`);
+    return errors;
+  }
+
+  if (schema.type !== undefined && typeof schema.type !== "string") {
+    errors.push(`${path}.type: must be a string, got ${typeOf(schema.type)}`);
+  }
+
+  if (
+    schema.required !== undefined &&
+    (!Array.isArray(schema.required) || !schema.required.every((v) => typeof v === "string"))
+  ) {
+    errors.push(`${path}.required: must be an array of strings`);
+  }
+
+  if (schema.enum !== undefined && !Array.isArray(schema.enum)) {
+    errors.push(`${path}.enum: must be an array`);
+  }
+
+  if (schema.properties !== undefined) {
+    if (!isPlainObject(schema.properties)) {
+      errors.push(`${path}.properties: must be an object mapping property names to schemas`);
+    } else {
+      for (const [key, value] of Object.entries(schema.properties)) {
+        errors.push(...findJsonSchemaShapeErrors(value, `${path}.properties.${key}`));
+      }
+    }
+  }
+
+  if (schema.items !== undefined) {
+    errors.push(...findJsonSchemaShapeErrors(schema.items, `${path}.items`));
+  }
+
+  return errors;
+}
