@@ -2,7 +2,9 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { countSessions, getRootTaskChain, getTaskById, listRecentSessions } from "../be/db";
 import { getTaskSteeringFields } from "../be/steering";
+import { mintSessionToken, revokeSessionToken } from "../be/users";
 import { AgentTaskSchema, AgentTaskStatusSchema, SteerModeSchema } from "../types";
+import { getRequestAuth } from "../utils/request-auth-context";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
 
@@ -67,6 +69,55 @@ const TaskWithSteeringSchema = AgentTaskSchema.extend({
 });
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
+
+/** Maximum TTL for an ephemeral session token: 7 days. */
+const MAX_SESSION_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+const mintSessionTokenRoute = route({
+  method: "post",
+  path: "/api/sessions/tokens",
+  pattern: ["api", "sessions", "tokens"],
+  summary: "Mint an ephemeral session token for an ACP provider session",
+  description:
+    "Returns a short-lived aseph_ bearer for use by the ACP adapter in place of the full " +
+    "operator key. The token expires at the requested TTL and is actively revoked when the " +
+    "session ends. Only the operator key may mint session tokens.",
+  tags: ["Sessions"],
+  body: z.object({
+    agentId: z.string().min(1),
+    taskId: z.string().min(1),
+    ttlMs: z.number().int().positive().max(MAX_SESSION_TOKEN_TTL_MS),
+  }),
+  responses: {
+    200: {
+      description: "Minted token plaintext (returned once) and its stable token ID",
+      schema: z.object({
+        tokenId: z.string(),
+        plaintext: z.string(),
+      }),
+    },
+    400: { description: "Validation error" },
+    401: { description: "Unauthorized" },
+  },
+  auth: { apiKey: true },
+  rbac: { ungated: "operator-only: minting is gated on the full operator key in auth middleware" },
+});
+
+const revokeSessionTokenRoute = route({
+  method: "delete",
+  path: "/api/sessions/tokens/{tokenId}",
+  pattern: ["api", "sessions", "tokens", null],
+  summary: "Revoke an ephemeral session token",
+  description: "Revokes an aseph_ bearer token by ID. No-op if already revoked.",
+  tags: ["Sessions"],
+  params: z.object({ tokenId: z.string() }),
+  responses: {
+    204: { description: "Token revoked (or was already revoked)" },
+    401: { description: "Unauthorized" },
+  },
+  auth: { apiKey: true },
+  rbac: { ungated: "operator-only: revocation is gated on the full operator key in auth middleware" },
+});
 
 const listSessions = route({
   method: "get",
@@ -136,6 +187,35 @@ export async function handleSessions(
   pathSegments: string[],
   queryParams: URLSearchParams,
 ): Promise<boolean> {
+  if (mintSessionTokenRoute.match(req.method, pathSegments)) {
+    // Restrict to the full operator key — aseph_ and aswt_ bearers must not be
+    // able to mint new session tokens.
+    if (getRequestAuth(req)?.kind !== "operator") {
+      jsonError(res, "Unauthorized", 401);
+      return true;
+    }
+    const parsed = await mintSessionTokenRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const { agentId, taskId, ttlMs } = parsed.body;
+    const token = await mintSessionToken(agentId, taskId, ttlMs);
+    mintSessionTokenRoute.respond(res, 200, { tokenId: token.tokenId, plaintext: token.plaintext });
+    return true;
+  }
+
+  if (revokeSessionTokenRoute.match(req.method, pathSegments)) {
+    // Restrict revocation to the operator key as well.
+    if (getRequestAuth(req)?.kind !== "operator") {
+      jsonError(res, "Unauthorized", 401);
+      return true;
+    }
+    const parsed = await revokeSessionTokenRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    await revokeSessionToken(parsed.params.tokenId);
+    res.writeHead(204);
+    res.end();
+    return true;
+  }
+
   if (listSessions.match(req.method, pathSegments)) {
     const parsed = await listSessions.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;

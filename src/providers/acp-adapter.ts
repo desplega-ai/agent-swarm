@@ -11,6 +11,7 @@ import {
 } from "@agentclientprotocol/sdk";
 import pkg from "../../package.json";
 import type { AcpSessionConfigOption } from "../types";
+import { mintAcpSessionToken, revokeAcpSessionToken } from "../utils/acp-session-token";
 import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
 import {
   detachedProcessGroup,
@@ -175,6 +176,10 @@ class ACPSession implements ProviderSession {
   private output = "";
   private completionPromise: Promise<ProviderResult>;
   private completionResolve!: (result: ProviderResult) => void;
+  /** ID of the ephemeral aseph_ token minted for this session, or null when
+   * the fallback operator key is in use (e.g. during tests or if the API is
+   * not yet upgraded). Revoked in finish(). */
+  private ephemeralTokenId: string | null = null;
 
   constructor(
     private readonly connection: ClientSideConnection,
@@ -182,8 +187,10 @@ class ACPSession implements ProviderSession {
     private readonly config: ProviderSessionConfig,
     sessionId: string,
     providerMeta?: Record<string, unknown>,
+    ephemeralTokenId?: string,
   ) {
     this.sessionId = sessionId;
+    this.ephemeralTokenId = ephemeralTokenId ?? null;
     this.completionPromise = new Promise((resolve) => {
       this.completionResolve = resolve;
     });
@@ -320,6 +327,15 @@ class ACPSession implements ProviderSession {
     if (this.completed) return;
     this.completed = true;
     this.completionResolve(result);
+    // Revoke the ephemeral token now that the session is done. Best-effort:
+    // the token expires on its own, so a failure here is not critical.
+    if (this.ephemeralTokenId) {
+      void revokeAcpSessionToken(
+        this.config.apiUrl,
+        this.config.apiKey,
+        this.ephemeralTokenId,
+      );
+    }
   }
 }
 
@@ -361,6 +377,17 @@ export class ACPAdapter implements ProviderAdapter {
         clientInfo: { name: "agent-swarm", version: pkg.version },
         clientCapabilities: { session: { configOptions: { boolean: {} } } },
       });
+      // Mint a short-lived session-scoped bearer so the ACP target receives
+      // an aseph_ token rather than the full operator key. Falls back to the
+      // operator key when the API server is not yet upgraded (returns null).
+      const ephemeralToken = await mintAcpSessionToken(
+        config.apiUrl,
+        config.apiKey,
+        config.agentId,
+        config.taskId,
+      );
+      const mcpBearer = ephemeralToken?.plaintext ?? config.apiKey;
+
       const installedServers = await fetchInstalledMcpServers(
         config.apiUrl,
         config.apiKey,
@@ -381,7 +408,7 @@ export class ACPAdapter implements ProviderAdapter {
             name: "swarm",
             url: `${config.apiUrl.replace(/\/+$/, "")}/mcp`,
             headers: [
-              { name: "Authorization", value: `Bearer ${config.apiKey}` },
+              { name: "Authorization", value: `Bearer ${mcpBearer}` },
               { name: "X-Agent-ID", value: config.agentId },
               { name: "X-Source-Task-Id", value: config.taskId },
             ],
@@ -395,10 +422,17 @@ export class ACPAdapter implements ProviderAdapter {
         newSession.configOptions ?? [],
         target.configuredOptions(config),
       );
-      session = new ACPSession(connection, proc, config, newSession.sessionId, {
-        target: target.target,
-        configOptions: sanitizeAcpConfigOptions(configOptions),
-      });
+      session = new ACPSession(
+        connection,
+        proc,
+        config,
+        newSession.sessionId,
+        {
+          target: target.target,
+          configOptions: sanitizeAcpConfigOptions(configOptions),
+        },
+        ephemeralToken?.tokenId,
+      );
       for (const event of preSessionEvents) session.emitFromAcp(event);
       return session;
     } catch (err) {

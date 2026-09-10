@@ -530,6 +530,84 @@ export async function resolveUserByToken(plaintext: string): Promise<User | null
 }
 
 // ---------------------------------------------------------------------------
+// Session tokens (ephemeral, ACP provider)
+// ---------------------------------------------------------------------------
+
+const SESSION_TOKEN_PREFIX = "aseph_"; // agent-swarm-ephemeral
+
+/**
+ * Mint a short-lived `aseph_<base62-24>` token scoped to an ACP session.
+ * The token is handed to the ACP target process instead of the full operator
+ * key; it expires at `now + ttlMs` and is actively revoked when the session
+ * ends.
+ */
+export async function mintSessionToken(
+  agentId: string,
+  taskId: string,
+  ttlMs: number,
+): Promise<{ tokenId: string; plaintext: string }> {
+  const plaintext = `${SESSION_TOKEN_PREFIX}${base62(randomBytes(24))}`;
+  const tokenId = randomUUID().replace(/-/g, "");
+  const hash = sha256Hex(plaintext);
+  const preview = plaintext.slice(-4);
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + ttlMs).toISOString();
+
+  await getDbClient().run(
+    `INSERT INTO session_tokens (id, tokenHash, tokenPreview, agentId, taskId, expiresAt, createdAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [tokenId, hash, preview, agentId, taskId, expiresAt, now.toISOString()],
+  );
+
+  return { tokenId, plaintext };
+}
+
+/** Revoke a session token by id. No-op if already revoked. */
+export async function revokeSessionToken(tokenId: string): Promise<void> {
+  await getDbClient().run(
+    "UPDATE session_tokens SET revokedAt = ? WHERE id = ? AND revokedAt IS NULL",
+    [new Date().toISOString(), tokenId],
+  );
+}
+
+/**
+ * Resolve a plaintext `aseph_` token to its principal. Returns null when the
+ * token is unknown, revoked, or past its expiry. On a hit, touches `lastUsedAt`
+ * best-effort.
+ */
+export async function resolveBySessionToken(
+  plaintext: string,
+): Promise<{ agentId: string; taskId: string } | null> {
+  if (!plaintext.startsWith(SESSION_TOKEN_PREFIX)) return null;
+  const hash = sha256Hex(plaintext);
+  const client = getDbClient();
+
+  const row = await client.get<{
+    id: string;
+    agentId: string;
+    taskId: string;
+    expiresAt: string;
+    revokedAt: string | null;
+  }>(
+    "SELECT id, agentId, taskId, expiresAt, revokedAt FROM session_tokens WHERE tokenHash = ?",
+    [hash],
+  );
+  if (!row || row.revokedAt !== null) return null;
+  if (new Date(row.expiresAt) <= new Date()) return null;
+
+  try {
+    await client.run("UPDATE session_tokens SET lastUsedAt = ? WHERE id = ?", [
+      new Date().toISOString(),
+      row.id,
+    ]);
+  } catch {
+    // best-effort
+  }
+
+  return { agentId: row.agentId, taskId: row.taskId };
+}
+
+// ---------------------------------------------------------------------------
 // API-key fingerprint (operator audit)
 // ---------------------------------------------------------------------------
 

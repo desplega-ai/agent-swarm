@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
+import { createServer as createHttpServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { normalizeSessionLogs } from "../../apps/ui/src/logs-parser";
@@ -549,5 +550,138 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
   test("toAcpMcpServers skips entries with neither command nor url", () => {
     expect(toAcpMcpServers({ broken: { foo: "bar" } })).toEqual([]);
     expect(toAcpMcpServers(null)).toEqual([]);
+  });
+
+  test("mints an ephemeral token and revokes it when the session ends", async () => {
+    const cwd = makeTempDir();
+    const agentPath = join(cwd, "fake-acp-ephem-agent.ts");
+    const sdkPath = join(process.cwd(), "node_modules/@agentclientprotocol/sdk/dist/acp.js");
+
+    await Bun.write(
+      agentPath,
+      `
+import { Readable, Writable } from "node:stream";
+import { AgentSideConnection, PROTOCOL_VERSION, ndJsonStream } from "${sdkPath}";
+class FakeAgent {
+  constructor(connection) { this.connection = connection; }
+  async initialize() {
+    return { protocolVersion: PROTOCOL_VERSION, agentCapabilities: { loadSession: false } };
+  }
+  async newSession(params) {
+    const swarm = params.mcpServers.find((s) => s.name === "swarm");
+    const auth = swarm?.headers?.find((h) => h.name === "Authorization")?.value ?? "";
+    // Emit bearer value as a custom event so the test can verify it.
+    await this.connection.sessionUpdate({
+      sessionId: "ephem-session-1",
+      update: { sessionUpdate: "custom", name: "captured_bearer", data: { bearer: auth } },
+    });
+    // newSession must return { sessionId, configOptions? }, not a prompt response.
+    return { sessionId: "ephem-session-1" };
+  }
+  async prompt(params) {
+    await this.connection.sessionUpdate({
+      sessionId: params.sessionId,
+      update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "done" }, messageId: "m1" },
+    });
+    return { stopReason: "end_turn" };
+  }
+  async cancel() {}
+}
+const stream = ndJsonStream(Writable.toWeb(process.stdout), Readable.toWeb(process.stdin));
+new AgentSideConnection((connection) => new FakeAgent(connection), stream);
+`,
+    );
+
+    // Minimal swarm API stub: tracks calls to the session token endpoints.
+    const FAKE_TOKEN = "aseph_ephemtesttoken12345678901234";
+    const FAKE_TOKEN_ID = "fake-ephem-token-id";
+    let mintCalled = false;
+    let revokeCalled = false;
+    let mintBody: Record<string, unknown> = {};
+
+    const swarmServer = createHttpServer(
+      async (req: IncomingMessage, res: ServerResponse) => {
+        if (req.method === "POST" && req.url === "/api/sessions/tokens") {
+          mintCalled = true;
+          const chunks: Buffer[] = [];
+          for await (const chunk of req) chunks.push(chunk as Buffer);
+          try {
+            mintBody = JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>;
+          } catch { /* ignore */ }
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ tokenId: FAKE_TOKEN_ID, plaintext: FAKE_TOKEN }));
+        } else if (
+          req.method === "DELETE" &&
+          req.url === `/api/sessions/tokens/${FAKE_TOKEN_ID}`
+        ) {
+          revokeCalled = true;
+          res.writeHead(204);
+          res.end();
+        } else {
+          res.writeHead(404);
+          res.end();
+        }
+      },
+    );
+    await new Promise<void>((resolve) => swarmServer.listen(0, "127.0.0.1", resolve));
+    const swarmPort = (swarmServer.address() as import("net").AddressInfo).port;
+
+    try {
+      const adapter = new ACPAdapter();
+      const session = await adapter.createSession(
+        baseConfig({
+          cwd,
+          apiUrl: `http://127.0.0.1:${swarmPort}`,
+          apiKey: "real-operator-key",
+          env: {
+            PATH: process.env.PATH ?? "",
+            HOME: process.env.HOME ?? "",
+            ACP_TARGET_COMMAND: "bun",
+            ACP_TARGET_ARGS: JSON.stringify([agentPath]),
+          },
+        }),
+      );
+
+      const events: ProviderEvent[] = [];
+      session.onEvent((e) => events.push(e));
+      const result = await session.waitForCompletion();
+      // Give the revoke call (fire-and-forget) a moment to complete.
+      await Bun.sleep(100);
+
+      expect(result.exitCode).toBe(0);
+
+      // The adapter must have minted an ephemeral token.
+      expect(mintCalled).toBe(true);
+      expect(mintBody).toMatchObject({
+        agentId: "agent-1",
+        taskId: "task-1",
+      });
+
+      // The adapter must have revoked the token after the session ended.
+      expect(revokeCalled).toBe(true);
+
+      // Verify the bearer forwarded to the ACP target is the ephemeral token.
+      const rawLogs = events
+        .filter((e): e is Extract<ProviderEvent, { type: "raw_log" }> => e.type === "raw_log")
+        .map((e) => {
+          try { return JSON.parse(e.content) as Record<string, unknown>; } catch { return null; }
+        })
+        .filter(Boolean) as Record<string, unknown>[];
+
+      const captured = rawLogs
+        .map((entry) => {
+          const update = entry.update as Record<string, unknown> | undefined;
+          if (update?.sessionUpdate === "custom") {
+            const data = update.data as Record<string, unknown> | undefined;
+            if (typeof data?.bearer === "string") return data.bearer;
+          }
+          return null;
+        })
+        .find((v) => v !== null);
+
+      expect(captured).toBe(`Bearer ${FAKE_TOKEN}`);
+    } finally {
+      await new Promise<void>((resolve) => swarmServer.close(() => resolve()));
+    }
   });
 });
