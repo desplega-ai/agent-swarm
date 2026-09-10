@@ -320,6 +320,10 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   ),
   // 0 is meaningful here: "auto-assign nothing this sweep".
   ...integerValidators(["HEARTBEAT_MAX_AUTO_ASSIGN"], 0),
+  // Below ~100 tokens the preamble can't fit a useful summary; above 20000
+  // (~80k chars) it risks the SIGTERM-143 context-saturation failure mode
+  // the cap exists to prevent (see context-preamble.ts).
+  ...boundedIntegerValidators(["CONTEXT_PREAMBLE_MAX_TOKENS"], 100, 20000),
   MEMORY_MIN_SIMILARITY: (value) =>
     validateFloatRange("MEMORY_MIN_SIMILARITY", value, 0, 1, "between 0 and 1 inclusive"),
   MEMORY_ACCESS_BOOST_MAX: (value) =>

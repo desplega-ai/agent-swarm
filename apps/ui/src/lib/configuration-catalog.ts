@@ -339,6 +339,17 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         restartRequired: true,
         docsUrl: `${DOCS}ui/configuration`,
       },
+      {
+        key: "CONTEXT_PREAMBLE_MAX_TOKENS",
+        label: "Context preamble cap (tokens)",
+        description:
+          "Token budget for the follow-up context preamble prepended to a child task's prompt, at ~4 chars/token. Bounds how much parent/ancestor task context (and prior tool-call summary) a follow-up task sees, uniformly across every harness provider. Raising it lets a follow-up carry more prior context at the cost of a larger prompt; keep it well below the target model's context window to avoid the SIGTERM-143 context-saturation failure mode. Read once at process start.",
+        kind: "number",
+        defaultValue: "2000",
+        placeholder: "2000",
+        restartRequired: true,
+        docsUrl: `${DOCS}ui/configuration`,
+      },
     ],
   },
   {
