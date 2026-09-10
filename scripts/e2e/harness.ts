@@ -4,6 +4,7 @@ import { knownSecrets, redactSecrets } from "./redact";
 import type { HarnessAttempt, HarnessCost, HarnessFailureKind, HarnessResult } from "./report";
 import { usd } from "./report";
 import { minimalEnv, repoRoot, tailLog } from "./sut";
+import { buildSkillContent, type SkillTemplateConfig } from "../../src/be/seed-skills/render";
 
 const DEFAULT_MODELS: Record<string, string> = {
   claude: "claude-sonnet-5",
@@ -178,19 +179,21 @@ function codexOAuthAuthJson(): string {
 
 /** Seeds the temp HOME for one attempt and returns the session workspace directory. */
 async function prepareHarnessHome(homeDir: string, provider: string): Promise<string> {
-  const claudeDir = `${homeDir}/.claude/commands`;
+  const claudeDir = `${homeDir}/.claude/skills/work-on-task`;
   const piDir = `${homeDir}/.pi/agent/skills/work-on-task`;
   const codexDir = `${homeDir}/.codex/skills/work-on-task`;
   const opencodeDir = `${homeDir}/.opencode/skills/work-on-task`;
   const workspaceDir = `${homeDir}/workspace`;
   await Bun.$`mkdir -p ${homeDir}/logs ${workspaceDir} ${claudeDir} ${piDir} ${codexDir} ${opencodeDir}`.quiet();
-  const command = await Bun.file(`${repoRoot}/plugin/commands/work-on-task.md`).text();
-  const piSkill = await Bun.file(`${repoRoot}/plugin/pi-skills/work-on-task/SKILL.md`).text();
+  const skillTemplateDir = `${repoRoot}/templates/skills/work-on-task`;
+  const config = (await Bun.file(`${skillTemplateDir}/config.json`).json()) as SkillTemplateConfig;
+  const body = await Bun.file(`${skillTemplateDir}/content.md`).text();
+  const skill = buildSkillContent(config, body);
   await Promise.all([
-    Bun.write(`${claudeDir}/work-on-task.md`, command),
-    Bun.write(`${piDir}/SKILL.md`, piSkill),
-    Bun.write(`${codexDir}/SKILL.md`, command),
-    Bun.write(`${opencodeDir}/SKILL.md`, command),
+    Bun.write(`${claudeDir}/SKILL.md`, skill),
+    Bun.write(`${piDir}/SKILL.md`, skill),
+    Bun.write(`${codexDir}/SKILL.md`, skill),
+    Bun.write(`${opencodeDir}/SKILL.md`, skill),
   ]);
   if (provider === "codex" && process.env.CODEX_OAUTH) {
     const authPath = `${homeDir}/.codex/auth.json`;
