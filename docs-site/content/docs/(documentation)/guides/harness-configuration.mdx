@@ -598,6 +598,10 @@ Check the startup logs — the entrypoint prints `Harness Provider: <value>`. If
 
 The target agent has to honor ACP's `newSession.mcpServers` field itself; the swarm adapter passes the swarm MCP server and every other installed MCP server into that field, but whether the target *connects* to them is up to its own implementation. There's no swarm-side fallback here — check the target agent's ACP docs for its MCP support status.
 
+### Identifying the Claude transport
+
+The agent list and task detail page label Claude SDK transport separately from the CLI transport. Task details use the recorded session transport, so changing an agent’s setting does not relabel its past sessions.
+
 ## Related
 
 - [Model Gateways](/docs/guides/provider-auth/model-gateways) — Route supported harnesses through OpenRouter or an OpenRouter-compatible proxy, with current Ramp Router gaps

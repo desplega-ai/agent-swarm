@@ -140,6 +140,10 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [kv-delete](#kv-delete)
   - [kv-incr](#kv-incr)
   - [kv-list](#kv-list)
+  - [room-get](#room-get)
+  - [room-change](#room-change)
+  - [room-reset](#room-reset)
+  - [room-decode](#room-decode)
 - [Slack Tools](#slack-tools)
   - [slack-reply](#slack-reply)
   - [slack-read](#slack-read)
@@ -1700,6 +1704,52 @@ List KV entries in the resolved namespace (optionally filtered by key prefix). E
 | `limit` | `number` | No | - | Max entries to return (default 100, max 1000). |
 | `offset` | `number` | No | - | - |
 | `namespace` | `unknown` | No | - | - |
+
+### room-get
+
+**Room Get**
+
+Read the current state of a realtime room.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `name` | `string` | No | "default" | - |
+| `namespace` | `unknown` | No | - | - |
+| `schemaVersion` | `number` | No | 1 | - |
+
+### room-change
+
+**Room Change**
+
+Apply operations to the live state of a realtime room.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `name` | `string` | No | "default" | - |
+| `namespace` | `unknown` | No | - | - |
+| `schemaVersion` | `number` | No | 1 | - |
+
+### room-reset
+
+**Room Reset**
+
+Replace a realtime room with a new state and schema version.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `name` | `string` | No | "default" | - |
+| `namespace` | `unknown` | No | - | - |
+| `schemaVersion` | `number` | No | 1 | - |
+
+### room-decode
+
+**Room Decode**
+
+Decode a room snapshot value that the caller already holds.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `value` | `unknown` | Yes | - | - |
 
 ## Slack Tools
 

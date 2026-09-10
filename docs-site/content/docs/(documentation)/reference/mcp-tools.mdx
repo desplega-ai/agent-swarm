@@ -44,6 +44,23 @@ answer. Script-internal `ctx.swarm.*` responses are not subject to the 10 KB
 model-context ceiling; see [Scripts runtime](/docs/guides/scripts-runtime) for
 that separate boundary.
 
+## Realtime rooms
+
+The `kv` capability exposes four room tools for state shared with browser pages, agents, scripts, and workflows:
+
+| Tool | Purpose |
+|------|---------|
+| `room-get` | Read current room state. |
+| `room-change` | Apply `set`, `delete`, `insert`, `increment`, or `text` operations. |
+| `room-reset` | Replace the document with a new generation. |
+| `room-decode` | Decode a saved snapshot without changing the room. |
+
+Scripts use `ctx.swarm.room.get/change/reset/decode`. Browser pages use `swarmSdk.room(name, {schemaVersion})` for state and presence, and `swarmSdk.channel(name)` for transient messages. Room changes do not create page versions.
+
+Room snapshots have a 2 MiB encoded limit and normally flush within one second. Presence and channel messages are not persisted. A schema mismatch keeps state readable but rejects writes until an explicit reset. Deploy a single API replica for shared room state.
+
+See the [Rooms API reference](/docs/api-reference/rooms) for request schemas.
+
 ## Core Tools
 
 Always available tools for basic swarm operations.
