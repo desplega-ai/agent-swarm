@@ -12,6 +12,18 @@ Provider abstractions live in `src/be/memory/`:
 
 Tuning constants are env-overridable in `src/be/memory/constants.ts`.
 
+## Edit authorization
+
+The `memory-edit` MCP tool and `POST /api/memory/edit` require the memory owner
+or a Lead. By-ID edits evaluate `memory.edit.any`; key+scope edits are already
+filtered to the caller's ownership by the store. Lead may edit another agent's
+private (`agent`) scope by ID. This intentionally differs from `memory.delete.any`,
+which permits Lead to delete another agent's memory only in `swarm` scope.
+
+Authorization stays at these entrypoints. Internal `indexMemoryContent()`
+re-indexing, boot and HTTP re-embedding, and link refresh retain their cross-agent
+store access.
+
 ## Memory raters (v1.5)
 
 The v1.5 wedge adds a small framework that lets the swarm learn which memories

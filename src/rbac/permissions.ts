@@ -69,6 +69,10 @@ export const PERMISSIONS = {
     description: "Inject a learning into another agent's memory.",
     namespace: "memory",
   },
+  "memory.edit.any": {
+    description: "Edit a memory entry (own entries, or any scope as lead).",
+    namespace: "memory",
+  },
   "memory.delete.any": {
     description: "Delete a memory entry (own entries, or swarm-scoped entries as lead).",
     namespace: "memory",

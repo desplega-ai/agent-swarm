@@ -1,7 +1,9 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
+import { getAgentById } from "@/be/db";
 import { getEmbeddingProvider, getMemoryStore } from "@/be/memory";
 import { refreshLinks } from "@/be/memory/link-resolver";
+import { can } from "@/rbac";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { AgentMemoryScopeSchema, AgentMemorySourceSchema } from "@/types";
 
@@ -36,7 +38,7 @@ export const registerMemoryEditTool = (server: McpServer) => {
     {
       title: "Edit a memory",
       description:
-        "Edit a single memory in place while preserving its ID, usefulness posterior, and audit history. Two modes: 'replace' overwrites the entire content (requires `content`); 'exact' performs a surgical find-and-replace of `oldString` with `newString` within the existing content (fails if `oldString` is missing or ambiguous). Use 'replace' for full rewrites, 'exact' for targeted edits.",
+        "Edit a single memory in place while preserving its ID, usefulness posterior, and audit history. Two modes: 'replace' overwrites the entire content (requires `content`); 'exact' performs a surgical find-and-replace of `oldString` with `newString` within the existing content (fails if `oldString` is missing or ambiguous). Use 'replace' for full rewrites, 'exact' for targeted edits. Agents can edit their own memories; lead agents can edit any scope.",
       annotations: { destructiveHint: true },
 
       inputSchema: z.object({
@@ -95,6 +97,35 @@ export const registerMemoryEditTool = (server: McpServer) => {
 
       try {
         const store = getMemoryStore();
+        // Key+scope edits already constrain the owner in store.edit(). IDs do not.
+        // Keep this boundary gate out of the internal indexer/store write path.
+        if (memoryId) {
+          const memory = await store.peek(memoryId);
+          if (!memory) {
+            return toolErr(`Memory "${memoryId}" not found.`, {
+              data: { yourAgentId: requestInfo.agentId },
+            });
+          }
+          const agent = await getAgentById(requestInfo.agentId);
+          const decision = can({
+            principal: {
+              kind: "agent",
+              agentId: requestInfo.agentId,
+              isLead: agent?.isLead ?? false,
+            },
+            verb: "memory.edit.any",
+            resource: { kind: "owned", ownerAgentId: memory.agentId, scope: memory.scope },
+            source: "mcp",
+          });
+          if (!decision.allow) {
+            return toolErr(
+              "Permission denied. You can only edit your own memories unless you are the lead.",
+              {
+                data: { yourAgentId: requestInfo.agentId },
+              },
+            );
+          }
+        }
         const result = await store.edit({
           id: memoryId,
           key,
@@ -115,7 +146,11 @@ export const registerMemoryEditTool = (server: McpServer) => {
           if (embedding) await store.updateEmbedding(result.memory.id, embedding, provider.name);
           try {
             // Edit path: prune links derived from removed content (sequel links survive).
-            await refreshLinks(result.memory.id, requestInfo.agentId, result.memory.content);
+            await refreshLinks(
+              result.memory.id,
+              result.memory.agentId ?? requestInfo.agentId,
+              result.memory.content,
+            );
           } catch (err) {
             console.error(
               `[memory-edit] Link resolution failed for ${result.memory.id}:`,

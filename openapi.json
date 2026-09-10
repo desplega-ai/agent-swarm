@@ -17944,6 +17944,16 @@
               }
             }
           },
+          "403": {
+            "description": "Permission denied: requires memory owner or lead",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Memory not found",
             "content": {
