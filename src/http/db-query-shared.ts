@@ -9,7 +9,8 @@
  * (MCP) need to read them without importing each other.
  */
 
-import { getDb } from "../be/db";
+import { Database } from "bun:sqlite";
+import { getDb, resolveSqliteVecExtensionPath } from "../be/db";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 
 export interface DbQueryResult {
@@ -71,31 +72,51 @@ export function executeReadOnlyQuery(
   maxRows?: number,
 ): DbQueryResult {
   assertSingleStatement(sql);
-  const stmt = getDb().prepare(sql);
-
-  // bun:sqlite: columnNames is empty for write statements, populated for SELECT/PRAGMA/EXPLAIN
-  if (stmt.columnNames.length === 0) {
-    throw new Error("Only read-only queries are allowed");
-  }
-
-  const columns = stmt.columnNames as string[];
-  const start = performance.now();
-  // Iterate rather than `stmt.all()` + slice: a query against a huge table
-  // with a small maxRows would otherwise hold every matched row's object in
-  // memory at once just to throw most of them away. Iterating still visits
-  // every row (so `total` keeps meaning "rows SQLite matched"), but only the
-  // first `maxRows` are converted and retained.
-  const rowArrays: unknown[][] = [];
-  let total = 0;
-  for (const row of stmt.iterate(...(params as [string]))) {
-    total++;
-    if (maxRows === undefined || rowArrays.length < maxRows) {
-      rowArrays.push(columns.map((col) => (row as Record<string, unknown>)[col]));
+  const database = getDb();
+  // Never prepare user SQL on the writable application connection. In-memory
+  // databases have no file to reopen, so query a read-only snapshot instead.
+  const reader =
+    !database.filename || database.filename === ":memory:"
+      ? Database.deserialize(database.serialize(), { readonly: true })
+      : new Database(database.filename, { readonly: true });
+  try {
+    const vecExtensionPath = resolveSqliteVecExtensionPath();
+    if (vecExtensionPath) {
+      try {
+        reader.loadExtension(vecExtensionPath);
+      } catch {
+        // Match the bounded path: only vec queries require the extension.
+      }
     }
-  }
-  const elapsed = Math.round(performance.now() - start);
+    using stmt = reader.prepare(sql);
 
-  return { columns, rows: rowArrays, elapsed, total };
+    // Require a result set; SQLite readonly mode is the write barrier.
+    // RETURNING statements have columns too, so columnNames alone is not a guard.
+    if (stmt.columnNames.length === 0) {
+      throw new Error("Only read-only queries are allowed");
+    }
+
+    const columns = stmt.columnNames as string[];
+    const start = performance.now();
+    // Iterate rather than `stmt.all()` + slice: a query against a huge table
+    // with a small maxRows would otherwise hold every matched row's object in
+    // memory at once just to throw most of them away. Iterating still visits
+    // every row (so `total` keeps meaning "rows SQLite matched"), but only the
+    // first `maxRows` are converted and retained.
+    const rowArrays: unknown[][] = [];
+    let total = 0;
+    for (const row of stmt.iterate(...(params as [string]))) {
+      total++;
+      if (maxRows === undefined || rowArrays.length < maxRows) {
+        rowArrays.push(columns.map((col) => (row as Record<string, unknown>)[col]));
+      }
+    }
+    const elapsed = Math.round(performance.now() - start);
+
+    return { columns, rows: rowArrays, elapsed, total };
+  } finally {
+    reader.close();
+  }
 }
 
 /** Hardcoded pre-flag defaults — kept equal to the values PR #87 shipped with, so adding the flag changes no behaviour out of the box. */
