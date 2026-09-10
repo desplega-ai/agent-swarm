@@ -156,6 +156,7 @@ export const LEGACY_POLICY = {
   "task.fs.mutate": taskFsMutate,
   "favorite.write.own": anyAuthenticated,
   "memory.learning.inject": leadOnly,
+  "memory.edit.any": leadOrResourceOwner,
   "memory.delete.any": memoryOwnerOrLeadSwarm,
   "channel.delete": leadOnly,
   "integration.kapso.manage": leadOnly,
