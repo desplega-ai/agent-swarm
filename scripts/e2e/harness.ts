@@ -4,7 +4,6 @@ import { knownSecrets, redactSecrets } from "./redact";
 import type { HarnessAttempt, HarnessCost, HarnessFailureKind, HarnessResult } from "./report";
 import { usd } from "./report";
 import { minimalEnv, repoRoot, tailLog } from "./sut";
-import { buildSkillContent, type SkillTemplateConfig } from "../../src/be/seed-skills/render";
 
 const DEFAULT_MODELS: Record<string, string> = {
   claude: "claude-sonnet-5",
@@ -178,6 +177,16 @@ function codexOAuthAuthJson(): string {
 }
 
 /** Seeds the temp HOME for one attempt and returns the session workspace directory. */
+/**
+ * Renders a seeded skill's SKILL.md frontmatter + body. Deliberately duplicated
+ * from src/be/seed-skills/render.ts (rather than imported) — scripts/e2e is a
+ * black-box HTTP/MCP/Bun-only runner (scripts/check-e2e-boundary.sh forbids
+ * importing from src/). Keep in sync if the seeded-skill frontmatter shape changes.
+ */
+function renderSkill(config: { name: string; description: string }, body: string): string {
+  return `---\nname: ${config.name}\ndescription: ${JSON.stringify(config.description)}\n---\n\n${body.trim()}\n`;
+}
+
 async function prepareHarnessHome(homeDir: string, provider: string): Promise<string> {
   const claudeDir = `${homeDir}/.claude/skills/work-on-task`;
   const piDir = `${homeDir}/.pi/agent/skills/work-on-task`;
@@ -186,9 +195,12 @@ async function prepareHarnessHome(homeDir: string, provider: string): Promise<st
   const workspaceDir = `${homeDir}/workspace`;
   await Bun.$`mkdir -p ${homeDir}/logs ${workspaceDir} ${claudeDir} ${piDir} ${codexDir} ${opencodeDir}`.quiet();
   const skillTemplateDir = `${repoRoot}/templates/skills/work-on-task`;
-  const config = (await Bun.file(`${skillTemplateDir}/config.json`).json()) as SkillTemplateConfig;
+  const config = (await Bun.file(`${skillTemplateDir}/config.json`).json()) as {
+    name: string;
+    description: string;
+  };
   const body = await Bun.file(`${skillTemplateDir}/content.md`).text();
-  const skill = buildSkillContent(config, body);
+  const skill = renderSkill(config, body);
   await Promise.all([
     Bun.write(`${claudeDir}/SKILL.md`, skill),
     Bun.write(`${piDir}/SKILL.md`, skill),
