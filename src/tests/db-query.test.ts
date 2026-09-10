@@ -16,6 +16,7 @@ import {
 } from "../http/db-query";
 import { executeReadOnlyQueryBounded, isReportableTimeout } from "../http/db-query-bounded";
 import {
+  executeReadOnlyQuery,
   getDbQueryConcurrencyCap,
   getDbQueryHttpBudgetMs,
   getDbQueryHttpMaxRows,
@@ -52,6 +53,33 @@ describe("db-query input compatibility", () => {
 
     expect(parsed.success).toBe(false);
   });
+});
+
+test("in-memory fallback queries a read-only snapshot", () => {
+  closeDb();
+  const db = initDb(":memory:");
+  try {
+    db.run("CREATE TABLE snapshot_guard (id INTEGER PRIMARY KEY)");
+    db.run("INSERT INTO snapshot_guard VALUES (1)");
+    expect(executeReadOnlyQuery("SELECT id FROM snapshot_guard").rows).toEqual([[1]]);
+    expect(() =>
+      executeReadOnlyQuery("INSERT INTO snapshot_guard VALUES (2) RETURNING id"),
+    ).toThrow(/readonly/i);
+    expect(() => executeReadOnlyQuery("UPDATE snapshot_guard SET id = 2 RETURNING id")).toThrow(
+      /readonly/i,
+    );
+    expect(() => executeReadOnlyQuery("DELETE FROM snapshot_guard RETURNING id")).toThrow(
+      /readonly/i,
+    );
+    expect(db.query("SELECT id FROM snapshot_guard").all()).toEqual([{ id: 1 }]);
+    db.run("INSERT INTO snapshot_guard VALUES (2)");
+    expect(executeReadOnlyQuery("SELECT id FROM snapshot_guard ORDER BY id", [], 1)).toMatchObject({
+      rows: [[1]],
+      total: 2,
+    });
+  } finally {
+    closeDb();
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -485,6 +513,16 @@ describe("db-query bounded execution (Fix 1)", () => {
       const result = await executeReadOnlyQueryBounded("SELECT 1 AS one", [], 5000);
       expect(result.rows).toEqual([[1]]);
       expect(result.total).toBe(1);
+      const db = getDb();
+      db.run("CREATE TABLE spawn_fallback_guard (id INTEGER PRIMARY KEY)");
+      await expect(
+        executeReadOnlyQueryBounded(
+          "INSERT INTO spawn_fallback_guard VALUES (1) RETURNING id",
+          [],
+          5000,
+        ),
+      ).rejects.toThrow(/readonly/i);
+      expect(db.query("SELECT * FROM spawn_fallback_guard").all()).toEqual([]);
     } finally {
       Bun.spawn = originalSpawn;
     }
@@ -576,6 +614,41 @@ describe("db-query bounded execution (Fix 1)", () => {
     process.env.DB_QUERY_BOUNDED_ENABLED = "false";
     const result = await executeReadOnlyQueryGated(SLOW_QUERY, [], 200);
     expect(result.rows.length).toBe(1);
+  });
+
+  test("fallback rejects column-returning writes and leaves the application connection writable", async () => {
+    process.env.DB_QUERY_BOUNDED_ENABLED = "false";
+    const db = getDb();
+    db.run("CREATE TABLE fallback_readonly_guard (id INTEGER PRIMARY KEY, value TEXT)");
+    db.run("INSERT INTO fallback_readonly_guard VALUES (1, 'original')");
+    const writes = [
+      "INSERT INTO fallback_readonly_guard VALUES (2, 'inserted') RETURNING id",
+      "UPDATE fallback_readonly_guard SET value = 'updated' RETURNING id",
+      "DELETE FROM fallback_readonly_guard RETURNING id",
+      "WITH input(id, value) AS (VALUES (2, 'cte')) INSERT INTO fallback_readonly_guard SELECT * FROM input RETURNING id",
+      "WITH input(id) AS (VALUES (1)) UPDATE fallback_readonly_guard SET value = 'cte' WHERE id IN (SELECT id FROM input) RETURNING id",
+      "WITH input(id) AS (VALUES (1)) DELETE FROM fallback_readonly_guard WHERE id IN (SELECT id FROM input) RETURNING id",
+    ];
+    for (const sql of writes) {
+      await expect(executeReadOnlyQueryGated(sql)).rejects.toThrow(/readonly/i);
+      expect(db.query("SELECT * FROM fallback_readonly_guard").all()).toEqual([
+        { id: 1, value: "original" },
+      ]);
+    }
+    // SQLite does not support a DML statement inside a CTE body.
+    await expect(
+      executeReadOnlyQueryGated(
+        "WITH inserted AS (INSERT INTO fallback_readonly_guard VALUES (2, 'cte') RETURNING id) SELECT * FROM inserted",
+      ),
+    ).rejects.toThrow(/syntax/i);
+    expect(
+      executeReadOnlyQuery("SELECT value FROM fallback_readonly_guard WHERE id = ?", [1]).rows,
+    ).toEqual([["original"]]);
+    expect(executeReadOnlyQuery("PRAGMA table_info(fallback_readonly_guard)").total).toBe(2);
+    db.run("UPDATE fallback_readonly_guard SET value = 'application write' WHERE id = 1");
+    expect(executeReadOnlyQuery("SELECT value FROM fallback_readonly_guard").rows).toEqual([
+      ["application write"],
+    ]);
   });
 
   // J: HTTP route, flag OFF — still caps rows via the legacy path (the cap is
