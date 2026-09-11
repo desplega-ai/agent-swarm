@@ -7,6 +7,7 @@ import {
   buildIndependentIdentityPayloads,
   CLAUDE_MD_LINEAGE_PATH,
   CLAUDE_MD_PATH,
+  CLAUDE_MD_PENDING_RECORD,
   collectProfilePayloads,
   contentSha256,
   extractSetupScriptContent,
@@ -716,6 +717,18 @@ describe("collectProfilePayloads (baseline integration)", () => {
       [CLAUDE_MD_PATH]: "hook materialization",
       [IDENTITY_BASELINES_PATH]: JSON.stringify({ claudeMd: contentSha256("boot") }),
       [CLAUDE_MD_LINEAGE_PATH]: JSON.stringify({ written: "not-a-sha256", base: null }),
+    });
+
+    expect(await collectProfilePayloads(["claude"], "session_sync", files)).toEqual([]);
+  });
+
+  test("the runner backstop does not push while a hook write is pending", async () => {
+    // A hook write whose lineage never landed leaves the record marked pending:
+    // whatever is on disk then counts as hook-written, for the backstop too.
+    const files = reader({
+      [CLAUDE_MD_PATH]: "edited",
+      [IDENTITY_BASELINES_PATH]: JSON.stringify({ claudeMd: contentSha256("boot") }),
+      [CLAUDE_MD_LINEAGE_PATH]: CLAUDE_MD_PENDING_RECORD,
     });
 
     expect(await collectProfilePayloads(["claude"], "session_sync", files)).toEqual([]);

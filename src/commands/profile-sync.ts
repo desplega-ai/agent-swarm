@@ -376,6 +376,14 @@ export function parseClaudeMdLineage(raw: string | undefined): ClaudeMdLineage |
   return { written: written as string | null, base: base as string | null };
 }
 
+/**
+ * What the record holds while a hook write is in flight: marked before the file
+ * is touched, replaced by the real lineage after. It parses as no lineage, so
+ * whatever the file holds counts as hook-written and is never pushed (see
+ * `effectiveClaudeMdLineage`) — also when the real lineage never lands.
+ */
+export const CLAUDE_MD_PENDING_RECORD = JSON.stringify({ pending: true });
+
 /** Lineage of content whose origin is unknown: counts as hook-written, never pushed. */
 export function hookWrittenLineage(content: string): ClaudeMdLineage {
   return { written: contentSha256(content), base: null };

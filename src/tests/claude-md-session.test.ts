@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { lstat, mkdtemp, readdir, rm, symlink } from "node:fs/promises";
+import { chmod, lstat, mkdtemp, readdir, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   type ClaudeMdSessionPaths,
   DEFAULT_CLAUDE_MD_SESSION_PATHS,
@@ -9,7 +9,11 @@ import {
   planClaudeMdSync,
   stopClaudeMd,
 } from "../commands/claude-md-session";
-import { contentSha256, type ProfilePayload } from "../commands/profile-sync";
+import {
+  CLAUDE_MD_PENDING_RECORD,
+  contentSha256,
+  type ProfilePayload,
+} from "../commands/profile-sync";
 import { setFlockForTests } from "../utils/file-lock";
 import { holdFileLock } from "./fixtures/hold-file-lock";
 
@@ -327,6 +331,112 @@ describe("concurrent sessions sharing ~/.claude/CLAUDE.md", () => {
     expect(await sessionStartB).toBe("materialized");
     expect(await stop()).toBeNull(); // v2 with its own record: hook-written
   });
+});
+
+describe("a lineage write that fails leaves nothing pushable", () => {
+  let root: string;
+  let paths: ClaudeMdSessionPaths;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "claude-md-write-failure-"));
+    paths = {
+      file: join(root, "home/.claude/CLAUDE.md"),
+      backup: join(root, "home/.claude/CLAUDE.md.bak"),
+      record: join(root, "lineage.json"),
+      lock: join(root, "home/.claude/CLAUDE.md.lock"),
+    };
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  const stop = async (options: Parameters<typeof stopClaudeMd>[2] = {}) => {
+    let sent: ProfilePayload["body"] | null = null;
+    await stopClaudeMd(
+      async (body) => {
+        sent = body;
+      },
+      paths,
+      options,
+    );
+    return sent;
+  };
+  const failing = async () => {
+    throw new Error("injected write failure");
+  };
+  /**
+   * A record whose temp file name exceeds NAME_MAX: every atomic write of it
+   * fails for real (ENAMETOOLONG, for root too), while the record itself can
+   * still be written directly and read.
+   */
+  const useUnwritableRecord = () => {
+    paths = { ...paths, record: join(root, "r".repeat(230)) };
+  };
+
+  test("a SessionStart that cannot mark the record writes nothing", async () => {
+    // The reviewed case: the record write failed silently, the Stop found no
+    // record and sent the materialization unconditionally over a newer DB value.
+    useUnwritableRecord();
+
+    await expect(materializeClaudeMd(V2, paths)).rejects.toThrow();
+    expect(await Bun.file(paths.file).exists()).toBe(false);
+    expect(await stop()).toBeNull();
+  });
+
+  test("a SessionStart whose final record write fails leaves the file unpushable", async () => {
+    const outcome = await materializeClaudeMd(V2, paths, {
+      testPauses: { beforeRecordCommit: failing },
+    });
+
+    expect(outcome).toBe("materialized"); // the session still gets the DB value
+    expect(await Bun.file(paths.file).text()).toBe(V2);
+    expect(await Bun.file(paths.record).text()).toBe(CLAUDE_MD_PENDING_RECORD);
+    await Bun.write(paths.file, "edited"); // even an edit on top stays unsynced
+    expect(await stop()).toBeNull();
+  });
+
+  test("a Stop that cannot mark the record restores nothing", async () => {
+    // The reviewed case: the restore's record write failed silently, the record
+    // kept describing v2, and a second Stop sent the restored v1 against v2 — a
+    // compare-and-set the DB, still at v2, accepts.
+    useUnwritableRecord();
+    await Bun.write(paths.backup, V1);
+    await Bun.write(paths.file, V2);
+    await Bun.write(paths.record, JSON.stringify({ written: h(V2), base: h(V2) }));
+
+    expect(await stop()).toBeNull(); // v2 is the hook's own write
+    expect(await Bun.file(paths.file).text()).toBe(V2); // not restored: file and record still agree
+    expect(await Bun.file(paths.backup).text()).toBe(V1); // the .bak waits for a later Stop
+    expect(await stop()).toBeNull();
+  });
+
+  test("a Stop whose final record write fails leaves the restored copy unpushable", async () => {
+    await Bun.write(paths.file, V1); // before the session
+    await materializeClaudeMd(V2, paths);
+
+    expect(await stop({ testPauses: { beforeRecordCommit: failing } })).toBeNull();
+    expect(await Bun.file(paths.file).text()).toBe(V1); // restored
+    expect(await Bun.file(paths.record).text()).toBe(CLAUDE_MD_PENDING_RECORD);
+    expect(await stop()).toBeNull(); // the double Stop does not send v1 against v2
+  });
+
+  // A read-only directory is the real failure here, and it does not stop root.
+  test.skipIf(process.getuid?.() === 0)(
+    "a Stop that cannot remove the file keeps its record",
+    async () => {
+      await materializeClaudeMd(V2, paths); // nothing on disk before: no .bak
+      const dir = dirname(paths.file);
+      await chmod(dir, 0o555); // the file can no longer be removed
+      try {
+        expect(await stop()).toBeNull();
+        expect(await Bun.file(paths.file).text()).toBe(V2);
+      } finally {
+        await chmod(dir, 0o755);
+      }
+      expect(await stop()).toBeNull(); // v2 still has its record: hook-written
+    },
+  );
 });
 
 describe("default paths", () => {

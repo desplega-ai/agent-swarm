@@ -37,6 +37,15 @@
  *     CLAUDE.md edits is lost there.
  * The record and the sidecar are also written atomically (temp file + rename),
  * and an unreadable record counts as hook-written, never as a reason to push.
+ * A write that fails fails closed, the same way: every hook write marks the
+ * record pending BEFORE touching the file, and the real lineage replaces the
+ * marker after. A pending record makes whatever is on disk hook-written, for
+ * the Stop and the runner backstop alike, so:
+ *   - the marker cannot be written → the transition is skipped (SessionStart
+ *     throws, a Stop restores nothing), as with a busy lock;
+ *   - the real lineage cannot replace it → the marker stays: an edit made on
+ *     top of that file goes unsynced, it never reverts the DB.
+ * A Stop with no `.bak` removes the record only once the file is gone.
  *
  * Known limit: with one `.bak` slot, a third overlapping session overwrites the
  * backup of the first, and a Stop can restore a backup a sibling took (as before
@@ -44,13 +53,15 @@
  */
 
 // `rename` has no Bun equivalent; it is what makes the record writes atomic.
-import { rename } from "node:fs/promises";
+// `rm` with `force` tells "already gone" apart from a removal that failed.
+import { rename, rm } from "node:fs/promises";
 import { withFileLock } from "../utils/file-lock.ts";
 import { scrubSecrets } from "../utils/secret-scrubber.ts";
 import {
   CLAUDE_MD_LINEAGE_PATH,
   CLAUDE_MD_LOCK_PATH,
   CLAUDE_MD_PATH,
+  CLAUDE_MD_PENDING_RECORD,
   type ClaudeMdLineage,
   claudeMdLineageOf,
   contentSha256,
@@ -95,9 +106,14 @@ export const DEFAULT_CLAUDE_MD_SESSION_PATHS: ClaudeMdSessionPaths = {
 const SESSION_START_LOCK_WAIT_MS = 40_000;
 const STOP_LOCK_WAIT_MS = 15_000;
 
-/** Test seam: pause points inside a transition, to force interleavings. */
+/**
+ * Test seam: pause points inside a transition, to force interleavings — or, by
+ * throwing, a failure of the step that follows.
+ */
 export interface ClaudeMdTestPauses {
   afterFileWrite?: () => Promise<void>;
+  /** Right before the real lineage replaces the pending marker. */
+  beforeRecordCommit?: () => Promise<void>;
 }
 
 /**
@@ -118,6 +134,25 @@ async function writeAtomic(path: string, data: string): Promise<void> {
   }
 }
 
+/**
+ * Replace the pending marker with the real lineage. A failure is logged, not
+ * thrown: the file is already in place and the marker keeps it unpushable.
+ */
+async function commitRecord(
+  paths: ClaudeMdSessionPaths,
+  lineage: ClaudeMdLineage,
+  pauses: ClaudeMdTestPauses,
+): Promise<void> {
+  try {
+    await pauses.beforeRecordCommit?.();
+    await writeAtomic(paths.record, JSON.stringify(lineage));
+  } catch (error) {
+    console.warn(
+      scrubSecrets(`[claude-md] lineage not recorded, the file stays unpushable: ${String(error)}`),
+    );
+  }
+}
+
 /** Why a transition did not run under the lock; see `FileLockResult`. */
 type LockMiss = "busy" | "error" | "unsupported";
 
@@ -133,7 +168,8 @@ export type ClaudeMdMaterializeOutcome = "materialized" | LockMiss;
  * SessionStart: under the lock, back up whatever is on disk together with its
  * lineage, then materialize the DB value and record it. Lock busy or failing →
  * nothing is written (the file is left as it is). No flock on this platform →
- * materialized without protection; `stopClaudeMd` then never pushes.
+ * materialized without protection; `stopClaudeMd` then never pushes. Throws,
+ * having written nothing, if the record cannot be marked pending.
  */
 export async function materializeClaudeMd(
   content: string,
@@ -156,6 +192,7 @@ async function materializeUnlocked(
   pauses: ClaudeMdTestPauses,
 ): Promise<void> {
   const current = Bun.file(paths.file);
+  let backup: { content: string; lineage: ClaudeMdLineage } | null = null;
   if (await current.exists()) {
     const existing = await current.text();
     const record = effectiveClaudeMdLineage(
@@ -166,21 +203,33 @@ async function materializeUnlocked(
     // edit. Without one (the file predates the hook, e.g. the user's own) its
     // origin is unknown: treat it as hook-written, never to be pushed.
     const lineage = record ? claudeMdLineageOf(existing, record) : hookWrittenLineage(existing);
-    await Bun.write(paths.backup, existing);
+    backup = { content: existing, lineage };
+  }
+
+  // The record was read above; the marker replaces it before anything is written.
+  await writeAtomic(paths.record, CLAUDE_MD_PENDING_RECORD);
+  if (backup) {
+    await Bun.write(paths.backup, backup.content);
     // `of` pins the sidecar to this exact backup: a stale sidecar left by an
     // earlier overlap must not describe a different `.bak`.
-    const sidecar = { ...lineage, of: contentSha256(existing) };
+    const sidecar = { ...backup.lineage, of: contentSha256(backup.content) };
     await writeAtomic(`${paths.backup}.lineage`, JSON.stringify(sidecar)).catch(() => {});
   }
   await Bun.write(paths.file, content); // creates ~/.claude if missing
   await pauses.afterFileWrite?.();
 
   const hash = contentSha256(content);
-  await writeAtomic(paths.record, JSON.stringify({ written: hash, base: hash })).catch(() => {});
+  await commitRecord(paths, { written: hash, base: hash }, pauses);
 }
 
-/** Restore the `.bak` with its lineage (or remove the file if there was none). */
-async function restoreUnlocked(paths: ClaudeMdSessionPaths): Promise<void> {
+/**
+ * Restore the `.bak` with its lineage (or remove the file if there was none).
+ * Throws, having restored nothing, if the record cannot be marked pending.
+ */
+async function restoreUnlocked(
+  paths: ClaudeMdSessionPaths,
+  pauses: ClaudeMdTestPauses,
+): Promise<void> {
   const backup = Bun.file(paths.backup);
   const sidecar = Bun.file(`${paths.backup}.lineage`);
   if (await backup.exists()) {
@@ -193,22 +242,27 @@ async function restoreUnlocked(paths: ClaudeMdSessionPaths): Promise<void> {
     } catch {
       lineage = null; // corrupt sidecar: unknown lineage
     }
+    await writeAtomic(paths.record, CLAUDE_MD_PENDING_RECORD);
     await Bun.write(paths.file, content);
     await backup.delete();
     await sidecar.delete().catch(() => {});
     // Without a matching sidecar (a legacy `.bak`, a failed or stale sidecar) the
     // lineage is unknown: record it as hook-written, the conservative choice
     // (never pushed as an edit).
-    const record = lineage ?? hookWrittenLineage(content);
-    await writeAtomic(paths.record, JSON.stringify(record)).catch(() => {});
+    await commitRecord(paths, lineage ?? hookWrittenLineage(content), pauses);
   } else {
-    await Bun.file(paths.file)
-      .delete()
-      .catch(() => {});
-    await Bun.file(paths.record)
-      .delete()
-      .catch(() => {});
+    // The record goes only once the file is gone: a file left without its
+    // record would be sent unconditionally by the next Stop.
+    await rm(paths.file, { force: true });
+    await rm(paths.record, { force: true }).catch(() => {});
   }
+}
+
+/** A Stop never fails over its restore: it is logged, and the rest of Stop runs. */
+async function restoreOrWarn(paths: ClaudeMdSessionPaths, pauses: ClaudeMdTestPauses) {
+  await restoreUnlocked(paths, pauses).catch((error: unknown) => {
+    console.warn(scrubSecrets(`[claude-md] .bak not restored: ${String(error)}`));
+  });
 }
 
 export interface ClaudeMdSyncState {
@@ -236,13 +290,15 @@ export type ClaudeMdStopOutcome = "synced" | "not-an-edit" | LockMiss;
  * restore the `.bak` — one transition, so no SessionStart can land in between.
  * Lock busy or failing → nothing is pushed or restored (safe: the next
  * SessionStart backs up whatever is there, with its lineage). No flock on this
- * platform → the `.bak` is restored as before, but nothing is ever pushed.
+ * platform → the `.bak` is restored as before, but nothing is ever pushed. A
+ * restore that fails is logged, never thrown.
  */
 export async function stopClaudeMd(
   sync: (body: ProfilePayload["body"]) => Promise<void>,
   paths: ClaudeMdSessionPaths = DEFAULT_CLAUDE_MD_SESSION_PATHS,
-  options: { lockWaitMs?: number } = {},
+  options: { testPauses?: ClaudeMdTestPauses; lockWaitMs?: number } = {},
 ): Promise<ClaudeMdStopOutcome> {
+  const pauses = options.testPauses ?? {};
   const locked = await withFileLock(
     paths.lock,
     async (): Promise<ClaudeMdStopOutcome> => {
@@ -253,13 +309,13 @@ export async function stopClaudeMd(
           console.warn(scrubSecrets(`[claude-md] sync failed: ${String(error)}`));
         });
       }
-      await restoreUnlocked(paths);
+      await restoreOrWarn(paths, pauses);
       return body ? "synced" : "not-an-edit";
     },
     { waitMs: options.lockWaitMs ?? STOP_LOCK_WAIT_MS },
   );
   if (locked.acquired) return locked.value;
   warnLockMiss("Stop", locked);
-  if (locked.reason === "unsupported") await restoreUnlocked(paths);
+  if (locked.reason === "unsupported") await restoreOrWarn(paths, pauses);
   return locked.reason;
 }
