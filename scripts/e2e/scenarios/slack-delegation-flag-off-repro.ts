@@ -33,11 +33,14 @@ import {
 //
 // Ordering is load-bearing: enableSlackDelegation (called by every
 // slackDelegation* scenario below) flips SLACK_RENDER_V2_DELEGATION on
-// globally for the rest of the process (see run.ts's comment on that block
-// and enableSlackRenderV2Only's docstring). This scenario must run before
-// all of them or its flag-off premise is unreachable.
+// globally for the rest of the process (see enableSlackRenderV2Only's
+// docstring). This scenario must run before all of them or its flag-off
+// premise is unreachable — hence the low `order` below (130), well ahead of
+// slack-delegation-child-result/failed-child/late-child (140/150/160), which
+// enable delegation and leave it on for the rest of the run.
 export const slackDelegationFlagOffRepro: Scenario = {
   name: "slack-delegation-flag-off-repro",
+  order: 130,
   async run(ctx) {
     await enableSlackRenderV2Only(ctx);
 

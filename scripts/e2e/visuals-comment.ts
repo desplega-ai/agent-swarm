@@ -40,16 +40,40 @@ function required(value: string | undefined, flag: string): string {
   return value;
 }
 
+// Scenario names, error text, and frame filenames all come from index.json, which a fork PR
+// controls end to end (it runs the E2E job that produces the artifact). Every such string is
+// escaped before it reaches the comment body — this comment is posted under the bot's own
+// identity, so unescaped fork content here is a stored-HTML-injection vector, not just a
+// rendering nuisance.
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
 function markdownCell(value: string): string {
-  return value.replaceAll("|", "\\|").replaceAll("\n", "<br>");
+  return escapeHtml(value).replaceAll("|", "\\|").replaceAll("\n", "<br>");
+}
+
+// Keeps a fork-supplied filename to a single safe path segment (no traversal, no query/fragment
+// tricks, no characters that could break out of the <img src="..."> attribute).
+function sanitizeFileSegment(value: string): string {
+  return value
+    .replace(/^\/+/, "")
+    .split("/")
+    .filter((part) => part !== "" && part !== "." && part !== "..")
+    .map((part) => encodeURIComponent(part))
+    .join("/");
 }
 
 function imageUrl(baseUrl: string, profile: string, file: string): string {
-  return `${baseUrl.replace(/\/+$/, "")}/${profile.replace(/^\/+|\/+$/g, "")}/${file.replace(/^\/+/, "")}`;
+  return `${baseUrl.replace(/\/+$/, "")}/${encodeURIComponent(profile.replace(/^\/+|\/+$/g, ""))}/${sanitizeFileSegment(file)}`;
 }
 
 function image(baseUrl: string, profile: string, file: string): string {
-  return `<img src="${imageUrl(baseUrl, profile, file)}" width="420">`;
+  return `<img src="${escapeHtml(imageUrl(baseUrl, profile, file))}" width="420">`;
 }
 
 function table(profiles: Profile[], cells: (profile: Profile) => string): string[] {
@@ -79,7 +103,7 @@ function scenarioCell(
     .join("<br>");
   if (scenario.status !== "pass") {
     // A failed scenario may still have frames from the steps that ran before the failure.
-    const status = `**${scenario.status.toUpperCase()}**: ${markdownCell(scenario.error ?? "No error reported")}`;
+    const status = `**${escapeHtml(scenario.status.toUpperCase())}**: ${markdownCell(scenario.error ?? "No error reported")}`;
     return files.length === 0 ? status : `${status}<br>${images}`;
   }
   if (files.length === 0) return "not recorded";
@@ -97,7 +121,7 @@ function mainSection(
 
   for (const name of scenarioNames) {
     lines.push(
-      `#### ${name}`,
+      `#### ${escapeHtml(name)}`,
       "",
       ...table(profiles, (profile) =>
         scenarioCell(profile, scenarioFor(profile, name), baseUrl, (thread) => thread.finalThread),
@@ -131,7 +155,7 @@ function desktopSection(profiles: Profile[], scenarioNames: string[], baseUrl: s
   const lines = ["<details><summary>Desktop layout and channel</summary>", ""];
   for (const name of scenarioNames) {
     lines.push(
-      `##### ${name}`,
+      `##### ${escapeHtml(name)}`,
       "",
       ...table(profiles, (profile) =>
         scenarioCell(profile, scenarioFor(profile, name), baseUrl, (thread) => thread.finalDesktop),

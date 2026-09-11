@@ -821,3 +821,14 @@ bun deploy/docker-push.ts
 ```
 
 This builds, tags with version from package.json + `latest`, and pushes to GHCR.
+
+
+## Built-in API CORS
+
+**Breaking change:** unset or blank `CORS_ALLOWED_ORIGINS` now uses a restrictive hosted/dev allowlist. Custom dashboards must set `CORS_ALLOWED_ORIGINS=https://dashboard.example.com` on the API (use the actual SPA origin). A nonblank custom list replaces the defaults.
+
+Defaults: `https://*.agent-swarm.dev,https://*.agent-swarm.cloud,http://localhost:5274,http://127.0.0.1:5274,http://[::1]:5274,https://ui.swarm.localhost:1355`.
+
+For intentional compatibility only, `CORS_ALLOW_ANY_ORIGIN=true` allows any origin for non-credentialed requests only. Bearer-token clients from unlisted origins must use `credentials: "omit"`. Cookie-authenticated responses, including page JSON and `/@swarm/api/*`, always require an allowlisted origin for credentialed CORS. The API warns once per process when enabled, at startup or first request. Denied-origin logs name the rejected origin and the allowlist setting. Only CORS_ALLOWED_ORIGINS is reloadable through Settings → Configuration. CORS_ALLOW_ANY_ORIGIN is deployment-only: set it in the API environment and restart. Runtime config writes reject it, and legacy stored values are ignored at startup and reload.
+
+See the [Kubernetes CORS guide](https://docs.agent-swarm.dev/docs/guides/kubernetes#cors) for ingress and preflight diagnostics. CORS limits browser response access; authentication and CSRF protections remain necessary.

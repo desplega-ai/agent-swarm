@@ -92,6 +92,7 @@ async function closePeer(peer: { ws: WebSocket }): Promise<void> {
 
 export const realtimeRooms: Scenario = {
   name: "realtime-rooms",
+  order: 50,
   async run(ctx) {
     const register = await ctx.api("POST", "/api/agents", {
       body: { name: `e2e-realtime-${ctx.nonce}`, role: "worker", status: "online" },
