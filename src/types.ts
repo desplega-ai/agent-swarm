@@ -1548,6 +1548,7 @@ export const EventNameSchema = z.enum([
   "system.error",
   "system.profile_sync_rejected",
   "system.profile_sync_reconciled",
+  "system.profile_sync_conflict",
   // Script catalog events
   "script.global_upsert",
   // Schedule events

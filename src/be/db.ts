@@ -6097,11 +6097,11 @@ export async function updateAgentProfile(
     // Runs BEFORE the budget check: a stale copy of an older, longer value must be
     // dropped, not rejected — a budget rejection throws and would also roll back
     // the other fields of the same update.
-    const effective = { ...updates };
+    const writable = { ...updates };
     for (const field of VERSIONABLE_FIELDS) {
       const expectedHash = guard?.expectedHashes?.[field];
       if (expectedHash === undefined) continue;
-      if (effective[field] === undefined || effective[field] === null) continue;
+      if (writable[field] === undefined || writable[field] === null) continue;
 
       const currentHash = computeContentHash(current[field] ?? "");
       if (currentHash === expectedHash) continue;
@@ -6109,12 +6109,12 @@ export async function updateAgentProfile(
       console.warn(
         `[profile-sync] agent ${id}: ${field} dropped — based on ${expectedHash.slice(0, 12)}, DB is at ${currentHash.slice(0, 12)}`,
       );
-      delete effective[field];
+      delete writable[field];
       guard?.onConflict?.({ field, expectedHash, currentHash });
     }
 
     for (const field of BUDGETED_IDENTITY_FIELDS) {
-      const nextValue = effective[field];
+      const nextValue = writable[field];
       if (nextValue === undefined) continue;
 
       const result = checkIdentityFieldBudget({
@@ -6141,7 +6141,7 @@ export async function updateAgentProfile(
 
     // Create context versions for changed fields (stale copies already dropped)
     for (const field of VERSIONABLE_FIELDS) {
-      const newValue = effective[field];
+      const newValue = writable[field];
       if (newValue === undefined || newValue === null) continue;
 
       const currentValue = current[field] ?? "";
@@ -6198,12 +6198,12 @@ export async function updateAgentProfile(
         updates.description ?? null,
         updates.role ?? null,
         updates.capabilities ? JSON.stringify(updates.capabilities) : null,
-        effective.claudeMd ?? null,
-        effective.soulMd ?? null,
-        effective.identityMd ?? null,
-        effective.setupScript ?? null,
-        effective.toolsMd ?? null,
-        effective.heartbeatMd ?? null,
+        writable.claudeMd ?? null,
+        writable.soulMd ?? null,
+        writable.identityMd ?? null,
+        writable.setupScript ?? null,
+        writable.toolsMd ?? null,
+        writable.heartbeatMd ?? null,
         avatarProvided ? 1 : 0,
         avatarJson,
         now,

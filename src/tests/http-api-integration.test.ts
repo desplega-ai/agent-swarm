@@ -426,6 +426,25 @@ describe("Agents", () => {
     expect(stale.body.claudeMd).toBe(base);
     expect(stale.body.toolsMd).toBe("fresh tools");
     expect(await reconciledClaudeMd()).toBe(before); // not written → not reconciled
+    const conflictEvents = await get(
+      `/api/events?${new URLSearchParams({
+        event: "system.profile_sync_conflict",
+        agentId: ids.workerAgent,
+        dataField: "claudeMd",
+        limit: "1",
+      })}`,
+      { agentId: ids.workerAgent },
+    );
+    expect(conflictEvents.body.events[0]).toMatchObject({
+      event: "system.profile_sync_conflict",
+      status: "skipped",
+      data: {
+        field: "claudeMd",
+        expectedHash: sha("an older materialization"),
+        currentHash: sha(base),
+        changeSource: "session_sync",
+      },
+    });
 
     // An edit on top of the current value applies.
     const edited = await put(`/api/agents/${ids.workerAgent}/profile`, {

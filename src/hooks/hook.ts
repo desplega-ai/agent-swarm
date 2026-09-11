@@ -10,14 +10,17 @@ import {
   type RetrievalRow,
 } from "../be/memory/raters/llm";
 import {
-  buildClaudeMdSessionSync,
+  materializeClaudeMd,
+  planClaudeMdSync,
+  readClaudeMdSyncState,
+  restoreClaudeMd,
+} from "../commands/claude-md-session";
+import {
   buildIndependentIdentityPayloads,
   contentSha256,
   type ProfilePayload,
   readIdentityBaselines,
-  readSessionClaudeMdBaseline,
   warnProfileFileTooLarge,
-  writeSessionClaudeMdBaseline,
 } from "../commands/profile-sync";
 import type { Agent } from "../types";
 import { getApiKey } from "../utils/api-key";
@@ -27,10 +30,6 @@ import { scrubSecrets } from "../utils/secret-scrubber";
 import { checkToolLoop, clearToolHistory } from "./tool-loop-detection";
 
 const SERVER_NAME = pkg.config?.name ?? "agent-swarm";
-
-// CLAUDE.md file paths
-const CLAUDE_MD_PATH = `${process.env.HOME}/.claude/CLAUDE.md`;
-const CLAUDE_MD_BACKUP_PATH = `${process.env.HOME}/.claude/CLAUDE.md.bak`;
 
 // Identity and workspace file paths
 const SOUL_MD_PATH = "/workspace/SOUL.md";
@@ -205,47 +204,6 @@ async function fetchTaskDetails(
     return (await response.json()) as { id: string; task: string; progress?: string };
   } catch {
     return null;
-  }
-}
-
-/**
- * Backup existing CLAUDE.md file if it exists
- */
-async function backupExistingClaudeMd(): Promise<void> {
-  const file = Bun.file(CLAUDE_MD_PATH);
-  if (await file.exists()) {
-    const content = await file.text();
-    await Bun.write(CLAUDE_MD_BACKUP_PATH, content);
-  }
-}
-
-/**
- * Write agent's CLAUDE.md content to ~/.claude/CLAUDE.md
- */
-async function writeAgentClaudeMd(content: string): Promise<void> {
-  // Ensure ~/.claude directory exists
-  const dir = `${process.env.HOME}/.claude`;
-  try {
-    await Bun.$`mkdir -p ${dir}`.quiet();
-  } catch {
-    // Directory may already exist
-  }
-  await Bun.write(CLAUDE_MD_PATH, content);
-}
-
-/**
- * Restore CLAUDE.md from backup or remove it if no backup exists
- */
-async function restoreClaudeMdBackup(): Promise<void> {
-  const backupFile = Bun.file(CLAUDE_MD_BACKUP_PATH);
-  if (await backupFile.exists()) {
-    const content = await backupFile.text();
-    await Bun.write(CLAUDE_MD_PATH, content);
-    // Remove backup file
-    await Bun.$`rm -f ${CLAUDE_MD_BACKUP_PATH}`.quiet();
-  } else {
-    // No backup existed, remove the agent's CLAUDE.md
-    await Bun.$`rm -f ${CLAUDE_MD_PATH}`.quiet();
   }
 }
 
@@ -667,18 +625,14 @@ export async function handleHook(): Promise<void> {
   };
 
   /**
-   * Sync CLAUDE.md content back to the server, as a compare-and-set against
-   * the copy THIS session materialized (see `buildClaudeMdSessionSync`).
+   * Sync CLAUDE.md back to the server — only if THIS session edited it, and as
+   * a compare-and-set against what it materialized (see `claude-md-session.ts`).
    */
   const syncClaudeMdToServer = async (agentId: string, sessionId?: string): Promise<void> => {
     if (!mcpConfig) return;
 
-    const file = Bun.file(CLAUDE_MD_PATH);
-    if (!(await file.exists())) return;
-
-    const content = await file.text();
-    const baseHash = sessionId ? await readSessionClaudeMdBaseline(sessionId) : null;
-    const body = buildClaudeMdSessionSync(content, baseHash);
+    const state = await readClaudeMdSyncState(sessionId);
+    const body = state ? planClaudeMdSync(state) : null;
     if (!body) return;
 
     await postHookProfileUpdate({
@@ -1062,13 +1016,7 @@ export async function handleHook(): Promise<void> {
       // Write agent's CLAUDE.md if available
       if (agentInfo.claudeMd) {
         try {
-          await backupExistingClaudeMd();
-          await writeAgentClaudeMd(agentInfo.claudeMd);
-          // The compare-and-set token for this session's Stop sync. Best effort:
-          // without it the sync falls back to the previous unconditional write.
-          if (msg.session_id) {
-            await writeSessionClaudeMdBaseline(msg.session_id, agentInfo.claudeMd).catch(() => {});
-          }
+          await materializeClaudeMd(agentInfo.claudeMd, msg.session_id);
           console.log("Loaded your personal CLAUDE.md configuration.");
         } catch (error) {
           console.log(`Warning: Could not load CLAUDE.md: ${(error as Error).message}`);
@@ -1352,7 +1300,7 @@ export async function handleHook(): Promise<void> {
           await syncClaudeMdToServer(agentInfo.id, msg.session_id);
           await syncIdentityFilesToServer(agentInfo.id);
           await syncSetupScriptToServer(agentInfo.id);
-          await restoreClaudeMdBackup();
+          await restoreClaudeMd();
         } catch {
           // Silently fail - don't block shutdown
         }

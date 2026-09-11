@@ -1463,6 +1463,7 @@
               "system.error",
               "system.profile_sync_rejected",
               "system.profile_sync_reconciled",
+              "system.profile_sync_conflict",
               "script.global_upsert",
               "schedule.deleted"
             ]
@@ -14949,6 +14950,7 @@
                       "system.error",
                       "system.profile_sync_rejected",
                       "system.profile_sync_reconciled",
+                      "system.profile_sync_conflict",
                       "script.global_upsert",
                       "schedule.deleted"
                     ]
@@ -15096,6 +15098,7 @@
                 "system.error",
                 "system.profile_sync_rejected",
                 "system.profile_sync_reconciled",
+                "system.profile_sync_conflict",
                 "script.global_upsert",
                 "schedule.deleted"
               ]
@@ -15276,6 +15279,7 @@
                             "system.error",
                             "system.profile_sync_rejected",
                             "system.profile_sync_reconciled",
+                            "system.profile_sync_conflict",
                             "script.global_upsert",
                             "schedule.deleted"
                           ]
