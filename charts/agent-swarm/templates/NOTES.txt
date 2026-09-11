@@ -15,6 +15,28 @@ To list registered agents:
   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "agent-swarm.fullname" . }}-api {{ .Values.api.port }}:{{ .Values.api.port }}
   curl -H "Authorization: Bearer $API_KEY" http://localhost:{{ .Values.api.port }}/api/agents
 
+Dashboard:
+  Open {{ default "https://app.agent-swarm.dev" .Values.config.appUrl }}
+  In the connection panel, enter your browser-reachable API base URL and the
+  API key from your configured auth Secret. This chart does not deploy the dashboard.
+{{- if and .Values.ingress.enabled .Values.ingress.host }}
+  Configured API ingress URL: {{ ternary "https" "http" (gt (len .Values.ingress.tls) 0) }}://{{ .Values.ingress.host }}
+  Verify ingress controller, DNS, and browser-trusted TLS are configured.
+  If TLS terminates outside ingress.tls, use the actual HTTPS URL and set
+  config.publicMcpBaseUrl to match.
+{{- else if .Values.ingress.enabled }}
+  API ingress is enabled without a host. Set ingress.host and configure your
+  ingress controller, DNS, and TLS for a browser-reachable API URL.
+{{- else }}
+  API ingress is disabled. Configure ingress.enabled, ingress.className,
+  ingress.host, ingress.annotations, and ingress.tls, or provide another
+  browser-reachable route. The port-forward above is for local access only.
+{{- end }}
+  The hosted HTTPS dashboard needs an HTTPS API for remote connections.
+  The API already handles CORS; preserve its headers and unauthenticated OPTIONS.
+  Check controller-specific CORS behavior if browser requests fail.
+  Guide: https://docs.agent-swarm.dev/docs/guides/kubernetes
+
 {{- if not .Values.agentFs.enabled }}
 
 Note: agent-fs is disabled. Agents will operate with local-only filesystem

@@ -2,6 +2,7 @@
   "title": "Guides",
   "pages": [
     "deployment",
+    "kubernetes",
     "published-artifacts",
     "asset-namespaces",
     "agent-fs-co-deployment",

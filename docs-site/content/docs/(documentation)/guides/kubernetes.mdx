@@ -1,0 +1,203 @@
+---
+title: Kubernetes and Helm
+description: Install Agent Swarm with Helm, expose the API through ingress, and connect the dashboard with working CORS
+---
+
+The Helm chart deploys the API and agent pools to Kubernetes. The dashboard runs separately: use [app.agent-swarm.dev](https://app.agent-swarm.dev) or [self-host the dashboard](/docs/ui#self-hosting). Browser requests go directly to your API, so the API address must be reachable from the operator's browser.
+
+## Prerequisites
+
+- A Kubernetes cluster with persistent volume provisioning for the API and agent pools.
+- Helm with OCI registry support, and `kubectl` configured for your cluster.
+- An installed ingress controller, an API hostname pointing at its address, and a TLS certificate for that hostname. An Ingress resource alone does not install a controller; see the [Kubernetes ingress documentation](https://kubernetes.io/docs/concepts/services-networking/ingress/).
+- Credentials for your chosen [harness provider](/docs/guides/harness-providers). The default pools use Claude; the example below uses a token from `claude setup-token`.
+
+## Install the chart
+
+Create a namespace and an empty credentials file readable only by your user:
+
+```bash
+kubectl create namespace agent-swarm
+install -m 600 /dev/null ./swarm-secrets.env
+```
+
+Populate `swarm-secrets.env` in a local editor or through your secret manager with the following keys. Replace the placeholders with your credentials. Use a strong API key and generate the encryption key with `openssl rand -base64 32`. Keep this file out of version control. Back up the encryption key with the database; see [Secrets encryption](/docs/guides/secrets-encryption).
+
+```dotenv title="swarm-secrets.env"
+API_KEY=replace-with-your-api-key
+CLAUDE_CODE_OAUTH_TOKEN=replace-with-your-provider-token
+SECRETS_ENCRYPTION_KEY=replace-with-your-base64-encryption-key
+```
+
+Create the Secret from that file, then remove the local file after the command succeeds. The credentials stay out of `kubectl`'s command-line arguments. You can also provision the same Secret through your cluster's external secrets integration.
+
+```bash
+kubectl -n agent-swarm create secret generic agent-swarm-secrets \
+  --from-env-file=./swarm-secrets.env && rm ./swarm-secrets.env
+```
+
+Save these values as `swarm-values.yaml`. Replace the hostname, ingress class, and TLS Secret name with your cluster's values. Provision the TLS Secret in the same namespace, or configure certificate issuance using your controller's supported annotations.
+
+```yaml title="swarm-values.yaml"
+auth:
+  existingSecret: agent-swarm-secrets
+
+ingress:
+  enabled: true
+  className: your-ingress-class
+  host: swarm-api.example.com
+  annotations: {}
+  tls:
+    - secretName: swarm-api-tls
+      hosts:
+        - swarm-api.example.com
+
+config:
+  appUrl: https://app.agent-swarm.dev
+```
+
+```bash
+helm install swarm oci://ghcr.io/desplega-ai/charts/agent-swarm \
+  --namespace agent-swarm \
+  --values swarm-values.yaml
+
+kubectl -n agent-swarm get pods,pvc,ingress
+curl -fsS https://swarm-api.example.com/health
+```
+
+Add `--version <chart-version>` to pin a release. This installs a single API replica, a lead pool, and a coder pool. The API uses SQLite and must remain at one replica. Each agent pod gets persistent personal storage. Shared agent-fs storage and Litestream backups are opt-in; see the [chart README](https://github.com/desplega-ai/agent-swarm/tree/main/charts/agent-swarm) for pool sizing, storage, and backup configuration.
+
+For an existing release, apply the same values with `helm upgrade swarm oci://ghcr.io/desplega-ai/charts/agent-swarm --namespace agent-swarm --values swarm-values.yaml`.
+
+## Expose the API through ingress
+
+API ingress is disabled by default. Enable `ingress.enabled` when using the chart to expose the API to browsers outside the cluster. An existing gateway, VPN, or local port-forward can provide an alternative route; a cluster Service DNS name alone is not reachable from a browser outside that network.
+
+The chart exposes these API ingress values:
+
+| Value | Default | Purpose |
+| --- | --- | --- |
+| `ingress.enabled` | `false` | Create the API Ingress resource. |
+| `ingress.className` | `""` | Set `spec.ingressClassName` to the class served by your controller. |
+| `ingress.annotations` | `{}` | Controller-specific settings such as certificate issuance or proxy behavior. |
+| `ingress.host` | `""` | Hostname used by the ingress routing rule. |
+| `ingress.tls` | `[]` | TLS entries containing `hosts` and `secretName`. |
+
+The template routes `/` with `pathType: Prefix` to the API Service on `api.port` (default `3013`). This exposes the swarm API, including `/api/*` and `/mcp`; it does not serve the dashboard. The optional `agentFs.ingress` values control a separate service.
+
+### Public API URL
+
+The chart keeps worker traffic on the internal `MCP_BASE_URL`. It sets `PUBLIC_MCP_BASE_URL`, used for OAuth callbacks and webhook URLs, in this order:
+
+1. Use `config.publicMcpBaseUrl` when explicitly set.
+2. Otherwise, when `ingress.enabled` is true and `ingress.host` is nonempty, derive the URL from that host: `https://` if `ingress.tls` has at least one entry, or `http://` if it is empty.
+3. Otherwise, leave `PUBLIC_MCP_BASE_URL` unset. The API falls back to the chart's internal `MCP_BASE_URL`.
+
+**An empty `ingress.tls` produces an `http://` public URL**, even when a load balancer terminates HTTPS elsewhere. The chart does not infer HTTPS from annotations or an external proxy. If TLS terminates outside ingress, or another gateway provides the public address, set the externally reachable API origin explicitly:
+
+```yaml
+config:
+  publicMcpBaseUrl: https://swarm-api.example.com
+```
+
+### Separate agent-fs ingress
+
+The API ingress does not expose agent-fs. Enable both `agentFs.enabled` and `agentFs.ingress.enabled` to create its separate Ingress. It routes `/` with `pathType: Prefix` to the agent-fs Service on `agentFs.port` (default `7433`).
+
+The `agentFs.ingress.enabled`, `className`, `annotations`, `host`, and `tls` fields have the same meanings and defaults as the API ingress fields above. Use a separate hostname and matching TLS Secret:
+
+```yaml
+# Merge with your agent-fs bucket and S3 credential configuration.
+agentFs:
+  enabled: true
+  ingress:
+    enabled: true
+    className: your-ingress-class
+    annotations: {}
+    host: files.example.com
+    tls:
+      - hosts:
+          - files.example.com
+        secretName: swarm-files-tls
+```
+
+Provision DNS and the TLS Secret for this host too. See the [chart's shared filesystem setup](https://github.com/desplega-ai/agent-swarm/tree/main/charts/agent-swarm#cross-agent-shared-filesystem) for required storage configuration. This ingress does not determine `PUBLIC_MCP_BASE_URL`; that comes from the API ingress or `config.publicMcpBaseUrl`.
+
+## Connect the dashboard
+
+Open [app.agent-swarm.dev](https://app.agent-swarm.dev) and enter these in the connection panel:
+
+- **API URL:** `https://swarm-api.example.com` (the base URL, without `/api` or `/mcp`).
+- **API key:** the same key provided in the Kubernetes Secret.
+
+Use browser-trusted HTTPS for the API when connecting from the hosted HTTPS dashboard. DNS, certificate trust, and network access must work on the operator's machine. Setting `config.appUrl` only configures dashboard links in notifications; it does not deploy a dashboard or expose the API.
+
+For local diagnosis without ingress, keep this command running:
+
+```bash
+kubectl -n agent-swarm port-forward svc/swarm-agent-swarm-api 3013:3013
+curl -fsS http://localhost:3013/health
+```
+
+The Service name above assumes release `swarm` and no name overrides. Helm's install notes print the actual name. A port-forward reaches only the machine running it; browser local-network policies can also affect connections from the hosted dashboard. A [local dashboard](/docs/ui#self-hosting) is another option for local development.
+
+## CORS
+
+The hosted dashboard and your self-hosted API have different origins. Every API request from that dashboard crosses origins and must satisfy the browser's CORS rules. The same applies to a self-hosted dashboard on a different scheme, hostname, or port.
+
+### What the API already does
+
+The API enables CORS in its HTTP request handler; no chart switch is needed to turn it on. For a request with an `Origin` header, it:
+
+- Echoes that origin in `Access-Control-Allow-Origin`, sets `Vary: Origin`, and sends `Access-Control-Allow-Credentials: true`.
+- Allows `GET, POST, PUT, PATCH, DELETE, OPTIONS` and echoes requested preflight headers, with a default that includes `Authorization` and `Content-Type`.
+- Answers `OPTIONS` with `204` before API authentication.
+
+Normal API requests still require their usual authentication. Requests without an `Origin` header receive wildcard CORS headers, so a plain `curl` request does not reproduce the browser's CORS exchange.
+
+### Security posture
+
+Echoing any origin with `Access-Control-Allow-Credentials: true` does not restrict which websites can read credentialed responses. This behavior alone does not bypass bearer authentication on the main API routes: a hostile website still needs the bearer token, which the browser does not automatically attach to its requests.
+
+Cookie authentication has a different exposure. DB-backed pages issue a `page_session` cookie with `SameSite=None; Secure` outside development mode. The `/@swarm/api/*` page-iframe proxy accepts that cookie as authentication. When the browser permits the cookie on a cross-site request, a hostile website can make a credentialed request and read the response within that session's permissions. Do not rely on the default CORS behavior to protect sensitive data accessible through a page session.
+
+An opt-in origin allowlist is proposed in [PR #1436](https://github.com/desplega-ai/agent-swarm/pull/1436). It is pending, not a shipped configuration option in this guide.
+
+### What the ingress must preserve
+
+If the ingress forwards requests and preserves the API's response headers, you do not need an ingress CORS annotation. Allow unauthenticated preflight requests through any proxy authentication layer, and preserve CORS headers on actual responses as well as preflight responses.
+
+If the controller handles CORS itself, configure it for the dashboard origin, credentials, methods, and requested headers. Whether it replaces upstream headers, appends headers, or answers `OPTIONS` itself depends on the controller, version, and configuration. For example, [ingress-nginx's CORS template](https://github.com/kubernetes/ingress-nginx/blob/main/rootfs/etc/nginx/template/nginx.tmpl) uses `more_set_headers` without append mode and can answer `OPTIONS` with `204`; enabling its CORS annotation does not by itself prove duplicate headers.
+
+A proxy that **appends** a second `Access-Control-Allow-Origin` to the API's header produces multiple values, which browsers reject. A comma-separated list in one header is also invalid. See [MDN's duplicate-origin-header diagnostic](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS/Errors/CORSMultipleAllowOriginNotAllowed).
+
+### Diagnose the response
+
+Replace the placeholders with the dashboard origin (scheme and host, plus port if non-default; no path or trailing slash) and the API URL:
+
+```bash
+curl -sI -X OPTIONS -H 'Origin: <dashboard-origin>' <api-url>
+```
+
+For the example deployment, capture and count the origin headers:
+
+```bash
+curl -sS -D /tmp/swarm-cors-headers.txt -o /dev/null -X OPTIONS \
+  -H 'Origin: https://app.agent-swarm.dev' \
+  -H 'Access-Control-Request-Method: GET' \
+  -H 'Access-Control-Request-Headers: authorization,content-type' \
+  https://swarm-api.example.com/api/agents
+
+grep -ic '^access-control-allow-origin:' /tmp/swarm-cors-headers.txt
+cat /tmp/swarm-cors-headers.txt
+```
+
+Expect one `Access-Control-Allow-Origin` header with exactly `https://app.agent-swarm.dev`, `Access-Control-Allow-Credentials: true`, and allow-methods/allow-headers covering the request. The API's preflight status is `204`; a controller that handles preflight may return its own successful response. A count of two or more indicates duplicate header lines. A count of one still needs inspection for a comma-separated value or the wrong origin.
+
+If the response redirects, demands authentication, lacks CORS headers, or contains duplicates, repeat the request against `http://localhost:3013/api/agents` through the port-forward and compare it with the ingress response. Inspect the failing request in browser developer tools too: a proxy may treat preflight and actual responses differently. If a proxy appends another origin header, remove its append rule so only one valid origin value reaches the browser. If the direct API response has CORS headers but the public response does not, check each intervening proxy for rules that strip them, using the same `Origin` header for both requests. A failed DNS lookup, TLS handshake, or network connection must be resolved before there is an HTTP CORS response to inspect.
+
+## Related
+
+- [Deployment guide](/docs/guides/deployment) for Compose, Docker, and systemd.
+- [Dashboard UI](/docs/ui) for hosted and self-hosted dashboard setup.
+- [Chart values](https://github.com/desplega-ai/agent-swarm/blob/main/charts/agent-swarm/values.yaml) and [ingress template](https://github.com/desplega-ai/agent-swarm/blob/main/charts/agent-swarm/templates/ingress.yaml) for the chart configuration.
