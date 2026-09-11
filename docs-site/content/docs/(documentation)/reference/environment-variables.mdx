@@ -18,7 +18,7 @@ Complete reference for all environment variables used by Agent Swarm.
 | `PUBLIC_MCP_BASE_URL` | Falls back to `MCP_BASE_URL` | Public, browser/externally-reachable API origin used for OAuth redirect URIs and webhook URLs. Defaults to `MCP_BASE_URL` when unset; set it in split deploys where `MCP_BASE_URL` is an internal/cluster address that external providers (Linear, Jira, GitHub) can't reach. |
 | `MCP_OAUTH_ALLOW_PRIVATE_HOSTS` | `false` | When `true`, disables the SSRF guard that otherwise refuses `localhost`/RFC1918 private-IP hosts when the server connects to an operator-registered MCP server's OAuth discovery/token endpoints. Only needed to reach an internal-only MCP server, or for local dev/testing — keep the default deny-list in production. |
 | `CORS_ALLOWED_ORIGINS` | Hosted/dev allowlist (below) | Comma-separated exact origins or wildcard-subdomain patterns. Unset or blank uses built-in defaults; a nonblank value replaces them. Unlisted origins receive neither Allow-Origin nor Allow-Credentials. Applies to API and page-session endpoints. |
-| `CORS_ALLOW_ANY_ORIGIN` | `false` | Explicit compatibility opt-out: reflect any origin with credentials, overriding the allowlist. Warns once per process when enabled. Prefer listing trusted SPA origins instead. |
+| `CORS_ALLOW_ANY_ORIGIN` | `false` | Deployment-only compatibility opt-out (requires API restart; cannot be stored in Configuration): reflect any origin with credentials, overriding the allowlist. Warns once per process when enabled. Prefer listing trusted SPA origins instead. |
 | `OAUTH_KEEPALIVE_DISABLE` | `false` | Disables the background job that proactively refreshes Linear/Jira OAuth refresh tokens every 12h to prevent silent expiry. |
 | `SWARM_URL` | `localhost` | Base domain for service discovery |
 | `APP_URL` | — | Dashboard URL for Slack message links. `DASHBOARD_URL` is a deprecated alias of `APP_URL`. |
@@ -584,7 +584,9 @@ Include every trusted origin you need, comma-separated. The hosted patterns excl
 If you intentionally need the previous unrestricted behavior, set `CORS_ALLOW_ANY_ORIGIN=true`.
 This overrides even a configured allowlist and allows arbitrary sites to read credentialed
 responses when the browser sends a page-session cookie. It is an explicit compatibility option.
-Both settings take effect after Configuration reload; environment changes require restarting the API.
-The API warns once per process at startup, or on first use after enabling the opt-out via reload.
+Only `CORS_ALLOWED_ORIGINS` takes effect after Configuration reload. The bypass is deployment-only:
+set it in the API environment and restart. Config writes through HTTP, MCP, or database helpers
+reject the reserved key; legacy stored values are ignored at startup and reload and can be deleted.
+The API warns once per process at startup or first use when the deployment opt-out is enabled.
 Denied-origin logs name the origin and `CORS_ALLOWED_ORIGINS` so a missing SPA origin is diagnosable.
 CORS controls browser response access; it does not replace authentication or CSRF protection.

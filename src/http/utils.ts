@@ -15,7 +15,7 @@ const DEFAULT_ALLOWED_ORIGINS = [
 
 let warnedAboutAllowAnyOrigin = false;
 
-/** Warn at boot (after config injection), and on first use after a config reload. */
+/** Warn at boot (after config injection), or on first use of the deployment opt-out. */
 export function warnIfCorsAllowsAnyOrigin(): void {
   if (isEnvFlagEnabled("CORS_ALLOW_ANY_ORIGIN", false) && !warnedAboutAllowAnyOrigin) {
     warnedAboutAllowAnyOrigin = true;
