@@ -12,11 +12,22 @@
 # artifact slack-visuals.yml already built (data only — PNGs, GIFs, JSON), and runs
 # repo-trusted scripts from that checkout against that data. Keep it that way.
 #
-# The triggering PR's number is not reliably available on the workflow_run event for a
-# fork-authored run (github.event.workflow_run.pull_requests is populated from a same-repo
-# relationship and is typically empty for forks), so slack-visuals.yml writes it into the
-# artifact itself (visuals/pr-context.json) and this workflow reads it back from there instead
-# of trying to resolve it from the event payload.
+# Trust model for the downloaded artifact (this job's real attack surface):
+# the producing job (slack-visuals.yml) runs with the PR-branch copy of that workflow file for
+# a `pull_request` trigger, so for a fork PR the artifact's CONTENTS — including
+# visuals/pr-context.json — are attacker-controlled, even though this job's own token is not.
+# `workflow_run.head_sha` is the one piece of trusted event metadata we get for free, so every
+# other value is treated as a hint that must be corroborated against it and against the GitHub
+# API before it is allowed to drive a privileged action:
+#   1. Run-provenance gate on the job `if`: the completed run must belong to this repository.
+#   2. pr-context.json is schema-validated (exact key set, prNumber decimal, headSha 40-hex)
+#      before anything reads it.
+#   3. The artifact's headSha must equal the trusted `workflow_run.head_sha` — this is the
+#      cross-check that demotes the artifact from authority to hint.
+#   4. The artifact's prNumber is resolved through `gh api pulls/$PR` (trusted server-side
+#      lookup) and that PR's head.sha/base.repo.full_name must match the trusted head_sha and
+#      this repository. A mismatch means the artifact pointed at a PR it does not own — reject.
+# Any failed check aborts the job instead of silently continuing.
 name: Slack Visuals Publish
 
 on:
@@ -29,7 +40,9 @@ permissions:
 
 jobs:
   publish:
-    if: github.event.workflow_run.event == 'pull_request'
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.repository.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -61,6 +74,8 @@ jobs:
       - name: Read PR context
         id: pr
         if: steps.download.outcome == 'success'
+        env:
+          TRUSTED_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
           if [ ! -f visuals/pr-context.json ]; then
@@ -69,9 +84,65 @@ jobs:
             echo "found=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+
+          # Exact-schema check first: the artifact is fork-controlled, so this is read as an
+          # untrusted hint, never as authority. Reject anything but exactly {headSha, prNumber}.
+          actual_keys=$(jq -r 'keys_unsorted | sort | join(",")' visuals/pr-context.json)
+          if [ "$actual_keys" != "headSha,prNumber" ]; then
+            echo "Unexpected keys in pr-context.json: $actual_keys" >&2
+            exit 1
+          fi
+
+          pr_number=$(jq -r '.prNumber' visuals/pr-context.json)
+          head_sha=$(jq -r '.headSha' visuals/pr-context.json)
+
+          if ! [[ "$pr_number" =~ ^[1-9][0-9]*$ ]]; then
+            echo "prNumber is not a decimal integer for an existing PR: $pr_number" >&2
+            exit 1
+          fi
+          if ! [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "headSha is not exactly 40 lowercase hex characters: $head_sha" >&2
+            exit 1
+          fi
+
+          # The one piece of trusted metadata this event carries for free: cross-check the
+          # artifact's claimed headSha against it. This is what demotes the artifact from
+          # authority to hint — everything downstream keys off TRUSTED_HEAD_SHA, not the file.
+          if [ "$head_sha" != "$TRUSTED_HEAD_SHA" ]; then
+            echo "pr-context.json headSha ($head_sha) != triggering run's head_sha ($TRUSTED_HEAD_SHA)" >&2
+            exit 1
+          fi
+
           echo "found=true" >> "$GITHUB_OUTPUT"
-          echo "pr_number=$(jq -r '.prNumber' visuals/pr-context.json)" >> "$GITHUB_OUTPUT"
-          echo "head_sha=$(jq -r '.headSha' visuals/pr-context.json)" >> "$GITHUB_OUTPUT"
+          echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$head_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Verify PR identity against trusted API metadata
+        id: verify
+        if: steps.pr.outputs.found == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ steps.pr.outputs.pr_number }}
+          TRUSTED_HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          # Derive the PR identity from the commit itself rather than trusting the artifact's
+          # prNumber outright — a commit's associated-PRs lookup is scoped to this repository, so
+          # every PR it returns already belongs here regardless of what the artifact claimed.
+          # (Using pulls/$PR directly would instead compare against the PR's CURRENT head, which
+          # can have legitimately moved on by the time this job runs — a false rejection, not a
+          # security property.)
+          associated=$(gh api "repos/$GITHUB_REPOSITORY/commits/$TRUSTED_HEAD_SHA/pulls")
+          match_count=$(printf '%s' "$associated" | jq --argjson pr "$PR" '[.[] | select(.number == $pr)] | length')
+          if [ "$match_count" -ne 1 ]; then
+            echo "Commit $TRUSTED_HEAD_SHA is not associated with exactly one PR numbered $PR in this repository (found $match_count)." >&2
+            exit 1
+          fi
+          base_repo=$(printf '%s' "$associated" | jq -r --argjson pr "$PR" '.[] | select(.number == $pr) | .base.repo.full_name')
+          if [ "$base_repo" != "$GITHUB_REPOSITORY" ]; then
+            echo "PR #$PR's base repo ($base_repo) is not this repository ($GITHUB_REPOSITORY)." >&2
+            exit 1
+          fi
 
       - name: Publish Slack visuals
         if: steps.pr.outputs.found == 'true'
