@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { Usage } from "@agentclientprotocol/sdk";
 import { normalizeSessionLogs } from "../../apps/ui/src/logs-parser";
 import {
   closeDb,
@@ -68,7 +69,30 @@ describe("ACPAdapter", () => {
     );
   });
 
-  test("redacts credential headers from arrays and nested maps before persistence", async () => {
+  test.each<{ name: string; usage?: Usage | null }>([
+    { name: "absent", usage: undefined },
+    { name: "null", usage: null },
+    {
+      name: "OpenCode observed",
+      usage: {
+        inputTokens: 84376,
+        outputTokens: 65,
+        totalTokens: 86233,
+        cachedReadTokens: 1792,
+      },
+    },
+    {
+      name: "populated",
+      usage: {
+        totalTokens: 180,
+        inputTokens: 100,
+        outputTokens: 30,
+        thoughtTokens: 10,
+        cachedReadTokens: 25,
+        cachedWriteTokens: 15,
+      },
+    },
+  ])("persists $name prompt usage and scrubs raw logs", async ({ usage }) => {
     const cwd = makeTempDir();
     const agentPath = join(cwd, "fake-acp-agent.ts");
     const sdkPath = join(process.cwd(), "node_modules/@agentclientprotocol/sdk/dist/acp.js");
@@ -222,7 +246,15 @@ class FakeAgent {
         rawOutput: { chunks: Array.from({ length: 20 }, () => "z".repeat(2_000)) },
       },
     });
-    return { stopReason: "end_turn" };
+    return ${JSON.stringify({
+      stopReason: "end_turn",
+      usage,
+      _meta: {
+        debug: "ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+        authorization: "opaque-response-credential",
+        note: "response metadata",
+      },
+    })};
   }
 
   async cancel() {}
@@ -316,7 +348,26 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
       expect(persisted).toHaveLength(rawLogs.length);
       expect(persisted.map((entry) => entry.content)).toEqual(rawLogs);
       expect(persisted.every((entry) => entry.cli === "acp")).toBe(true);
+      const responseLog = persisted
+        .map((entry) => JSON.parse(entry.content))
+        .find((entry) => entry.name === "acp_prompt_response");
+      expect(responseLog).toEqual({
+        type: "custom",
+        name: "acp_prompt_response",
+        data: {
+          sessionId: session.sessionId,
+          stopReason: "end_turn",
+          usage: usage ?? null,
+          _meta: { debug: "[REDACTED:github_token]", note: "response metadata" },
+        },
+      });
+      expect(result.cost?.totalCostUsd).toBe(0);
+      expect(result.cost?.inputTokens).toBe(usage?.inputTokens);
+      expect(result.cost?.outputTokens).toBe(usage?.outputTokens);
+      expect(result.cost?.cacheReadTokens).toBe(usage?.cachedReadTokens ?? undefined);
+      expect(result.cost?.cacheWriteTokens).toBe(usage?.cachedWriteTokens ?? undefined);
       const persistedJson = persisted.map((entry) => entry.content).join("\n");
+      expect(persistedJson).not.toContain("opaque-response-credential");
       const credentialHeaderNames = [
         "authorization",
         "proxy-authorization",

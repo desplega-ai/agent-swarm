@@ -139,6 +139,15 @@ and heartbeat-classified roots are omitted, and the metrics remain separate.
   (`webSearchRequests`, per-model `costUSD`) degrade per-field without
   invalidating the entry.
 
+- **ACP usage:** optional `session/prompt` response usage supplies `inputTokens`,
+  `outputTokens`, `cachedReadTokens`, and `cachedWriteTokens`. The adapter maps
+  those counters directly; absent cache counts remain unknown. The scrubbed
+  `acp_prompt_response` session log preserves the payload and optional `_meta`.
+  Context-window `usage_update` totals are not billing token estimates.
+  ACP reports no USD amount through `CostData`; unresolved `(acp, model)`
+  pricing identity stays `unpriced`. A target may fall back after rejecting
+  the requested model, so that requested ID alone cannot justify a rate alias.
+
 ## When a model is missing
 
 If `POST /api/session-costs` arrives with a `(provider, model)` pair that has

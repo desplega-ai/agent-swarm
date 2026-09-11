@@ -144,6 +144,8 @@ The runner consumes these events (not the provider's native ones) to post progre
 
 ACP config-option metadata is scrubbed with `scrubSecrets` before session events are emitted, including strings in grouped choices. This protects both persisted dashboard metadata and diagnostic logs while preserving non-secret model IDs, descriptions, and boolean values.
 
+After a prompt completes, ACP persists a bounded, scrubbed `acp_prompt_response` raw-log diagnostic with the optional usage and `_meta` fields. Reported input/output/cache counters feed cost telemetry; missing usage stays unknown and unresolved pricing stays `unpriced`. See [cost and context computation](/docs/guides/cost-and-context-computation#acp-prompt-usage).
+
 ### Local subprocess teardown
 
 Local CLI adapters start each harness in a dedicated POSIX process group. Normal completion, `abort()`, runner shutdown, and fatal runner errors terminate the whole group with SIGTERM, followed by SIGKILL after a short grace period. This also removes MCP servers and other descendants that outlive the harness CLI; Windows keeps direct-PID termination because it has no POSIX process groups.

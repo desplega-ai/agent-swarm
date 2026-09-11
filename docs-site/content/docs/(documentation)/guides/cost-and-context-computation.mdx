@@ -196,3 +196,18 @@ Fallback is 200k. Pre-Phase 4 the dated form fell to 200k unconditionally — wi
 - [Harness providers](./harness-providers) — provider-specific quirks
 - [`src/providers/pricing-sources.md`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/pricing-sources.md) — operator workflow
 - [`BUSINESS_USE.md`](https://github.com/desplega-ai/agent-swarm/blob/main/BUSINESS_USE.md) — flow diagrams for `task` / `agent` / `api` events
+
+## ACP prompt usage
+
+ACP targets can supply optional token usage in the `session/prompt` response.
+The adapter maps `inputTokens` and `outputTokens` directly, and maps
+`cachedReadTokens` / `cachedWriteTokens` to the corresponding cache counters.
+Missing counts remain unknown. Context-window `usage_update` totals never
+substitute for billing tokens.
+
+The `acp_prompt_response` raw session log retains the bounded, scrubbed usage
+payload and optional `_meta`; `usage: null` records an absent payload.
+ACP does not infer USD or a pricing alias from its target. A session with an
+unresolved `(acp, model)` pricing identity remains `unpriced`, even when token
+counts are available. A requested model ID is insufficient evidence for a rate
+mapping when the target can reject that model and fall back to another.

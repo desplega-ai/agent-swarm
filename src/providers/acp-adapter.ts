@@ -8,6 +8,7 @@ import {
   type RequestPermissionResponse,
   type SessionConfigOption,
   type SessionNotification,
+  type Usage,
 } from "@agentclientprotocol/sdk";
 import pkg from "../../package.json";
 import type { AcpSessionConfigOption } from "../types";
@@ -258,8 +259,21 @@ class ACPSession implements ProviderSession {
         sessionId: this.sessionId,
         prompt: [{ type: "text", text: this.config.prompt }],
       });
+      this.emit({
+        type: "raw_log",
+        content: serializeAcpLog({
+          type: "custom",
+          name: "acp_prompt_response",
+          data: {
+            sessionId: this.sessionId,
+            stopReason: response.stopReason,
+            usage: response.usage ?? null,
+            _meta: response._meta,
+          },
+        }),
+      });
       const isError = response.stopReason === "refusal" || response.stopReason === "cancelled";
-      const cost = this.buildCostData(isError);
+      const cost = this.buildCostData(isError, response.usage);
       result = {
         exitCode: isError ? 1 : 0,
         sessionId: this.sessionId,
@@ -302,12 +316,16 @@ class ACPSession implements ProviderSession {
     }
   }
 
-  private buildCostData(isError: boolean): CostData {
+  private buildCostData(isError: boolean, usage?: Usage | null): CostData {
     return {
       sessionId: this.sessionId,
       taskId: this.config.taskId,
       agentId: this.config.agentId,
       totalCostUsd: 0,
+      inputTokens: usage?.inputTokens,
+      outputTokens: usage?.outputTokens,
+      cacheReadTokens: usage?.cachedReadTokens ?? undefined,
+      cacheWriteTokens: usage?.cachedWriteTokens ?? undefined,
       durationMs: Date.now() - this.startedAt,
       numTurns: 1,
       model: this.config.model,
