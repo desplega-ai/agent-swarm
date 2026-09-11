@@ -118,13 +118,22 @@ async function writeAtomic(path: string, data: string): Promise<void> {
   }
 }
 
-export type ClaudeMdMaterializeOutcome = "materialized" | "skipped" | "unprotected";
+/** Why a transition did not run under the lock; see `FileLockResult`. */
+type LockMiss = "busy" | "error" | "unsupported";
+
+function warnLockMiss(step: string, miss: { reason: LockMiss; error?: unknown }): void {
+  const detail = miss.error === undefined ? "" : `: ${String(miss.error)}`;
+  console.warn(scrubSecrets(`[claude-md] no lock at ${step} (${miss.reason})${detail}`));
+}
+
+/** `unsupported`: materialized anyway, without protection (see the module header). */
+export type ClaudeMdMaterializeOutcome = "materialized" | LockMiss;
 
 /**
  * SessionStart: under the lock, back up whatever is on disk together with its
- * lineage, then materialize the DB value and record it. Lock busy → skipped (the
- * file is left as it is). No flock on this platform → materialized without
- * protection; `stopClaudeMd` then never pushes.
+ * lineage, then materialize the DB value and record it. Lock busy or failing →
+ * nothing is written (the file is left as it is). No flock on this platform →
+ * materialized without protection; `stopClaudeMd` then never pushes.
  */
 export async function materializeClaudeMd(
   content: string,
@@ -134,17 +143,11 @@ export async function materializeClaudeMd(
   const pauses = options.testPauses ?? {};
   const locked = await withFileLock(paths.lock, () => materializeUnlocked(content, paths, pauses), {
     waitMs: options.lockWaitMs ?? SESSION_START_LOCK_WAIT_MS,
-  }).catch((error: unknown) => {
-    console.warn(scrubSecrets(`[claude-md] lock failed at SessionStart: ${String(error)}`));
-    return { acquired: false as const, reason: "busy" as const };
   });
   if (locked.acquired) return "materialized";
-  if (locked.reason === "unsupported") {
-    await materializeUnlocked(content, paths, pauses);
-    return "unprotected";
-  }
-  console.warn("[claude-md] lock busy at SessionStart — CLAUDE.md left as it is");
-  return "skipped";
+  warnLockMiss("SessionStart", locked);
+  if (locked.reason === "unsupported") await materializeUnlocked(content, paths, pauses);
+  return locked.reason;
 }
 
 async function materializeUnlocked(
@@ -225,14 +228,15 @@ export async function readClaudeMdSyncState(
   return { content, record: effectiveClaudeMdLineage(await readFile(paths.record), content) };
 }
 
-export type ClaudeMdStopOutcome = "synced" | "not-an-edit" | "busy" | "unsupported";
+/** `unsupported`: the `.bak` was restored, but nothing is ever pushed there. */
+export type ClaudeMdStopOutcome = "synced" | "not-an-edit" | LockMiss;
 
 /**
  * Stop: under the lock, decide the sync from what is on disk, run it, then
  * restore the `.bak` — one transition, so no SessionStart can land in between.
- * Lock busy → nothing is pushed or restored (safe: the next SessionStart backs
- * up whatever is there, with its lineage). No flock on this platform → the
- * `.bak` is restored as before, but nothing is ever pushed.
+ * Lock busy or failing → nothing is pushed or restored (safe: the next
+ * SessionStart backs up whatever is there, with its lineage). No flock on this
+ * platform → the `.bak` is restored as before, but nothing is ever pushed.
  */
 export async function stopClaudeMd(
   sync: (body: ProfilePayload["body"]) => Promise<void>,
@@ -253,15 +257,9 @@ export async function stopClaudeMd(
       return body ? "synced" : "not-an-edit";
     },
     { waitMs: options.lockWaitMs ?? STOP_LOCK_WAIT_MS },
-  ).catch((error: unknown) => {
-    console.warn(scrubSecrets(`[claude-md] lock failed at Stop: ${String(error)}`));
-    return { acquired: false as const, reason: "busy" as const };
-  });
+  );
   if (locked.acquired) return locked.value;
-  if (locked.reason === "unsupported") {
-    await restoreUnlocked(paths);
-    return "unsupported";
-  }
-  console.warn("[claude-md] lock busy at Stop — CLAUDE.md sync and restore skipped");
-  return "busy";
+  warnLockMiss("Stop", locked);
+  if (locked.reason === "unsupported") await restoreUnlocked(paths);
+  return locked.reason;
 }

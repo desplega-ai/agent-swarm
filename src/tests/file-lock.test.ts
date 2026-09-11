@@ -1,23 +1,37 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { withFileLock } from "../utils/file-lock";
+import { setFlockForTests, withFileLock } from "../utils/file-lock";
+import { CHILD_PROCESS_TEST_BUDGET_MS, CHILD_PROCESS_TIMEOUT_MS } from "./test-proc";
 
 const HOLDER = join(import.meta.dir, "fixtures/file-lock-holder.ts");
 
-/** Start a separate process holding the lock; resolves once it has it. */
+/**
+ * Start a separate process holding the lock; resolves once it has it. The child
+ * is killed at CHILD_PROCESS_TIMEOUT_MS no matter what, and waiting for its
+ * "locked" line gives up at the same deadline.
+ */
 async function holdInAnotherProcess(lockPath: string, holdMs: number) {
   const child = Bun.spawn([process.execPath, HOLDER, lockPath, String(holdMs)], {
     stdout: "pipe",
     stderr: "inherit",
+    timeout: CHILD_PROCESS_TIMEOUT_MS,
+    killSignal: "SIGKILL",
   });
   const reader = child.stdout.getReader();
+  const deadline = Date.now() + CHILD_PROCESS_TIMEOUT_MS;
   let out = "";
   while (!out.includes("locked")) {
-    const { value, done } = await reader.read();
-    if (done) throw new Error(`holder exited before locking: ${out}`);
-    out += new TextDecoder().decode(value);
+    const next = await Promise.race([
+      reader.read(),
+      Bun.sleep(Math.max(0, deadline - Date.now())).then(() => "timeout" as const),
+    ]);
+    if (next === "timeout" || next.done) {
+      child.kill("SIGKILL");
+      throw new Error(`holder did not lock: ${out}`);
+    }
+    out += new TextDecoder().decode(next.value);
   }
   reader.releaseLock();
   return child;
@@ -33,6 +47,7 @@ describe("withFileLock (kernel flock)", () => {
   });
 
   afterEach(async () => {
+    setFlockForTests(undefined);
     await rm(root, { recursive: true, force: true });
   });
 
@@ -51,33 +66,49 @@ describe("withFileLock (kernel flock)", () => {
     expect(events[1]).toBe(events[0]?.replace(":in", ":out")); // no overlap
   });
 
-  test("a live holder in another process is never robbed, however long it holds", async () => {
-    // No staleness threshold exists: a slow or suspended holder keeps the lock.
-    const holder = await holdInAnotherProcess(lock, 1_500);
-    try {
-      const whileHeld = await withFileLock(lock, async () => "ran", { waitMs: 300 });
-      expect(whileHeld).toEqual({ acquired: false, reason: "busy" });
+  test(
+    "a live holder is never robbed, however old its lock file looks",
+    async () => {
+      // The previous lock broke any lock file older than 30 s. Backdate the file
+      // while a live process holds it: nothing may take it over.
+      const holder = await holdInAnotherProcess(lock, 2_000);
+      try {
+        const longAgo = new Date(0);
+        await utimes(lock, longAgo, longAgo);
 
-      await holder.exited;
-      expect(await withFileLock(lock, async () => "ran", { waitMs: 1_000 })).toEqual({
-        acquired: true,
-        value: "ran",
-      });
-    } finally {
-      holder.kill();
-    }
-  });
+        const whileHeld = await withFileLock(lock, async () => "ran", { waitMs: 300 });
+        expect(whileHeld).toEqual({ acquired: false, reason: "busy" });
 
-  test("a holder killed with SIGKILL releases the lock", async () => {
-    const holder = await holdInAnotherProcess(lock, 60_000);
-    holder.kill("SIGKILL");
-    await holder.exited;
+        await holder.exited;
+        expect(await withFileLock(lock, async () => "ran", { waitMs: 1_000 })).toEqual({
+          acquired: true,
+          value: "ran",
+        });
+      } finally {
+        holder.kill("SIGKILL");
+      }
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
 
-    expect(await withFileLock(lock, async () => "ran", { waitMs: 1_000 })).toEqual({
-      acquired: true,
-      value: "ran",
-    });
-  });
+  test(
+    "a holder killed with SIGKILL releases the lock",
+    async () => {
+      const holder = await holdInAnotherProcess(lock, 60_000);
+      try {
+        holder.kill("SIGKILL");
+        await holder.exited;
+
+        expect(await withFileLock(lock, async () => "ran", { waitMs: 1_000 })).toEqual({
+          acquired: true,
+          value: "ran",
+        });
+      } finally {
+        holder.kill("SIGKILL");
+      }
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
 
   test("releases the lock when fn throws, and never deletes the lock file", async () => {
     await expect(
@@ -91,5 +122,23 @@ describe("withFileLock (kernel flock)", () => {
       acquired: true,
       value: "again",
     });
+  });
+
+  test("reports an unusable lock path as an error, not as busy", async () => {
+    await Bun.write(join(root, "file"), "not a directory");
+    const result = await withFileLock(join(root, "file/test.lock"), async () => "ran");
+
+    expect(result).toMatchObject({ acquired: false, reason: "error" });
+  });
+
+  test("without flock on the platform it never runs fn", async () => {
+    setFlockForTests(null);
+    let ran = false;
+    const result = await withFileLock(lock, async () => {
+      ran = true;
+    });
+
+    expect(result).toEqual({ acquired: false, reason: "unsupported" });
+    expect(ran).toBe(false);
   });
 });

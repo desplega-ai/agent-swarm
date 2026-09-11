@@ -27,7 +27,7 @@ import { dirname } from "node:path";
 const LOCK_EX = 2;
 const LOCK_NB = 4;
 
-type Flock = (fd: number, operation: number) => number;
+export type Flock = (fd: number, operation: number) => number;
 
 const LIBC_CANDIDATES =
   process.platform === "darwin"
@@ -53,21 +53,33 @@ function loadFlock(): Flock | null {
   return flockImpl;
 }
 
+const DEFAULTS = { waitMs: 15_000, pollMs: 25 };
+
 export interface FileLockOptions {
-  /** How long to wait for a held lock before giving up. */
+  /** How long to wait for a held lock before giving up (default 15 s). */
   waitMs?: number;
-  /** Poll interval while waiting. */
+  /** Poll interval while waiting (default 25 ms). */
   pollMs?: number;
 }
 
 export type FileLockResult<T> =
   | { acquired: true; value: T }
-  /** `busy`: another live process holds it. `unsupported`: no flock on this platform. */
-  | { acquired: false; reason: "busy" | "unsupported" };
+  /**
+   * `busy`: another live process holds it (or flock keeps refusing).
+   * `error`: the lock file could not be created or opened.
+   * `unsupported`: no flock on this platform.
+   */
+  | { acquired: false; reason: "busy" | "error" | "unsupported"; error?: unknown };
+
+/** Test seam: replace the flock binding (`null` = unsupported platform, `undefined` = real). */
+export function setFlockForTests(impl: Flock | null | undefined): void {
+  flockImpl = impl;
+}
 
 /**
  * Run `fn` while holding the lock. Never runs `fn` without it: callers decide
- * what a `busy` or `unsupported` result means for them.
+ * what a `busy`, `error` or `unsupported` result means for them. Errors thrown
+ * by `fn` propagate (after the lock is released).
  */
 export async function withFileLock<T>(
   lockPath: string,
@@ -76,11 +88,16 @@ export async function withFileLock<T>(
 ): Promise<FileLockResult<T>> {
   const flock = loadFlock();
   if (!flock) return { acquired: false, reason: "unsupported" };
-  const waitMs = options.waitMs ?? 15_000;
-  const pollMs = options.pollMs ?? 25;
+  const waitMs = options.waitMs ?? DEFAULTS.waitMs;
+  const pollMs = options.pollMs ?? DEFAULTS.pollMs;
 
-  await mkdir(dirname(lockPath), { recursive: true });
-  const handle = await open(lockPath, "a");
+  let handle: Awaited<ReturnType<typeof open>>;
+  try {
+    await mkdir(dirname(lockPath), { recursive: true });
+    handle = await open(lockPath, "a");
+  } catch (error) {
+    return { acquired: false, reason: "error", error };
+  }
   try {
     const deadline = Date.now() + waitMs;
     while (flock(handle.fd, LOCK_EX | LOCK_NB) !== 0) {

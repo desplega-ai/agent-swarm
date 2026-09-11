@@ -859,13 +859,15 @@ export async function syncProfileFilesToServer(opts: ProfileSyncOptions): Promis
         for (const payload of claude) await postProfileUpdate(bounded, payload);
       },
       { waitMs },
-    ).catch((error: unknown) => {
-      console.warn(scrubSecrets(`[profile-sync] CLAUDE.md lock failed: ${String(error)}`));
-      return { acquired: false as const, reason: "busy" as const };
-    });
+    );
     // Never read or push the hook-owned file without the lock.
-    if (!locked.acquired && locked.reason === "busy") {
-      console.warn("[profile-sync] CLAUDE.md busy (lock held) — backstop sync skipped this time");
+    if (!locked.acquired) {
+      const detail = locked.error === undefined ? "" : `: ${String(locked.error)}`;
+      console.warn(
+        scrubSecrets(
+          `[profile-sync] no CLAUDE.md lock (${locked.reason})${detail} — backstop sync skipped`,
+        ),
+      );
     }
   }
 }

@@ -1014,7 +1014,7 @@ export async function handleHook(): Promise<void> {
         try {
           const outcome = await materializeClaudeMd(agentInfo.claudeMd);
           console.log(
-            outcome === "skipped"
+            outcome === "busy" || outcome === "error"
               ? "CLAUDE.md is being updated by another session; keeping the current copy."
               : "Loaded your personal CLAUDE.md configuration.",
           );

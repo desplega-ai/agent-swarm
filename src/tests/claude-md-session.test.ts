@@ -10,7 +10,8 @@ import {
   stopClaudeMd,
 } from "../commands/claude-md-session";
 import { contentSha256, type ProfilePayload } from "../commands/profile-sync";
-import { withFileLock } from "../utils/file-lock";
+import { setFlockForTests } from "../utils/file-lock";
+import { holdFileLock } from "./fixtures/hold-file-lock";
 
 const V1 = "# CLAUDE.md\n\nversion one";
 const V2 = "# CLAUDE.md\n\nversion two — the Lead added a rule";
@@ -67,6 +68,7 @@ describe("concurrent sessions sharing ~/.claude/CLAUDE.md", () => {
   });
 
   afterEach(async () => {
+    setFlockForTests(undefined);
     await rm(root, { recursive: true, force: true });
   });
 
@@ -80,26 +82,7 @@ describe("concurrent sessions sharing ~/.claude/CLAUDE.md", () => {
   };
   const edit = (content: string) => Bun.write(paths.file, content);
 
-  /** Hold the CLAUDE.md lock (a live holder) until the returned release is called. */
-  const holdLock = async () => {
-    let release!: () => void;
-    const released = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    let held!: () => void;
-    const acquired = new Promise<void>((resolve) => {
-      held = resolve;
-    });
-    const holding = withFileLock(paths.lock, async () => {
-      held();
-      await released;
-    });
-    await acquired;
-    return async () => {
-      release();
-      await holding;
-    };
-  };
+  const holdLock = () => holdFileLock(paths.lock);
 
   test("a sibling's .bak restore is not pushed as an edit", async () => {
     await materializeClaudeMd(V1, paths); // A starts on v1
@@ -293,9 +276,25 @@ describe("concurrent sessions sharing ~/.claude/CLAUDE.md", () => {
     const outcome = await materializeClaudeMd(V2, paths, { lockWaitMs: 100 });
     await release();
 
-    expect(outcome).toBe("skipped"); // never falls back to an unlocked write
+    expect(outcome).toBe("busy"); // never falls back to an unlocked write
     expect(await Bun.file(paths.file).text()).toBe(V1);
     expect(await stop()).toBeNull(); // and nothing it did not write gets pushed
+  });
+
+  test("without flock: SessionStart still materializes, but no Stop ever pushes", async () => {
+    setFlockForTests(null);
+    expect(await materializeClaudeMd(V2, paths)).toBe("unsupported");
+    expect(await Bun.file(paths.file).text()).toBe(V2);
+
+    await edit("edited");
+    let synced = false;
+    const outcome = await stopClaudeMd(async () => {
+      synced = true;
+    }, paths);
+
+    expect(outcome).toBe("unsupported");
+    expect(synced).toBe(false); // the DB is never written without the lock
+    expect(await Bun.file(paths.file).exists()).toBe(false); // restored as before (no .bak)
   });
 
   test("a live SessionStart paused mid-transition is never robbed by a Stop", async () => {
