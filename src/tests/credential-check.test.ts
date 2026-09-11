@@ -2,8 +2,10 @@ import { describe, expect, mock, test } from "bun:test";
 import {
   buildCredStatusReport,
   checkProviderCredentials,
+  isBedrockMode,
   isCredCheckDisabled,
   REQUIRED_CRED_VARS_BY_PROVIDER,
+  validateProviderCredentials,
 } from "../commands/provider-credentials";
 import { checkClaudeCredentials } from "../providers/claude-adapter";
 import { checkClaudeManagedCredentials } from "../providers/claude-managed-adapter";
@@ -736,6 +738,42 @@ describe("snapshot: every provider", () => {
 });
 
 // ─── REQUIRED_CRED_VARS_BY_PROVIDER documentation map ────────────────────────
+
+describe("isBedrockMode (shared gate for the live test and the refresh loop)", () => {
+  test("recognizes both explicit modes and the MODEL_OVERRIDE prefix inference", () => {
+    expect(isBedrockMode({ BEDROCK_AUTH_MODE: "sdk" })).toBe(true);
+    expect(isBedrockMode({ BEDROCK_AUTH_MODE: "bearer" })).toBe(true);
+    expect(isBedrockMode({ BEDROCK_AUTH_MODE: "Bearer", MODEL_OVERRIDE: "some-model" })).toBe(true);
+    expect(isBedrockMode({ MODEL_OVERRIDE: "amazon-bedrock/anthropic.claude" })).toBe(true);
+    expect(isBedrockMode({ MODEL_OVERRIDE: "anthropic/claude" })).toBe(false);
+    expect(isBedrockMode({})).toBe(false);
+  });
+});
+
+describe("validateProviderCredentials: pi Bedrock pass-through", () => {
+  const saved = { ...process.env };
+  const restore = () => {
+    for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key];
+    Object.assign(process.env, saved);
+  };
+
+  test("bearer mode is a pass-through like sdk mode: no provider-key live test is issued", async () => {
+    const realFetch = globalThis.fetch;
+    // A stray provider key must not be live-tested: the Bedrock enumeration already ran.
+    process.env.BEDROCK_AUTH_MODE = "bearer";
+    process.env.AWS_BEARER_TOKEN_BEDROCK = "bedrock-api-key";
+    process.env.ANTHROPIC_API_KEY = "x";
+    globalThis.fetch = (async () => {
+      throw new Error("live test must not reach the network in Bedrock mode");
+    }) as typeof fetch;
+    try {
+      expect(await validateProviderCredentials("pi")).toEqual({ ok: true, latency_ms: 0 });
+    } finally {
+      globalThis.fetch = realFetch;
+      restore();
+    }
+  });
+});
 
 describe("REQUIRED_CRED_VARS_BY_PROVIDER", () => {
   test("covers every supported provider", () => {

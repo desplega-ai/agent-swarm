@@ -84,7 +84,7 @@ import {
 import {
   buildCredStatusReport,
   buildLatestModelReport,
-  isBedrockSdkMode,
+  isBedrockMode,
   isCredCheckDisabled,
   reportAcpStatus,
   reportCredStatus,
@@ -5929,7 +5929,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           );
       } else if (
         currentHarness === "pi" &&
-        isBedrockSdkMode(process.env) &&
+        isBedrockMode(process.env) &&
         Date.now() - lastBedrockRefreshAt > BEDROCK_REFRESH_INTERVAL_MS
       ) {
         // Bedrock enumeration drifts independently of the harness_provider:

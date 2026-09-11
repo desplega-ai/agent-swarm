@@ -44,16 +44,20 @@ export type SupportedProvider =
   | "acp";
 
 /**
- * True when the pi harness should use the AWS SDK Bedrock path: either an
- * explicit `BEDROCK_AUTH_MODE=sdk`, or — preserving prefix-inference semantics —
+ * True when the pi harness authenticates against Bedrock rather than a provider
+ * API key: an explicit `BEDROCK_AUTH_MODE=sdk` (AWS credential chain), an
+ * explicit `BEDROCK_AUTH_MODE=bearer` (Bedrock API key in
+ * `AWS_BEARER_TOKEN_BEDROCK`), or — preserving prefix-inference semantics —
  * `BEDROCK_AUTH_MODE` absent with a `MODEL_OVERRIDE=amazon-bedrock/*` selection.
  * Single source of truth for the gate so the live-test arm and the worker
- * reconcile loop agree with `checkPiMonoCredentials`.
+ * reconcile loop agree with `checkPiMonoCredentials`, which owns the per-mode
+ * readiness rules (what must be present, how readiness is reported).
  */
-export function isBedrockSdkMode(env: Record<string, string | undefined>): boolean {
+export function isBedrockMode(env: Record<string, string | undefined>): boolean {
   const mode = env.BEDROCK_AUTH_MODE?.toLowerCase();
   return (
     mode === "sdk" ||
+    mode === "bearer" ||
     (mode === undefined && Boolean(env.MODEL_OVERRIDE?.toLowerCase().startsWith("amazon-bedrock/")))
   );
 }
@@ -336,14 +340,14 @@ export async function validateProviderCredentials(provider: string): Promise<Liv
       }
       case "pi":
       case "opencode": {
-        // For the pi Bedrock path, the real credential check is the AWS SDK
+        // For the pi Bedrock path (sdk or bearer), the real credential check is the AWS SDK
         // enumeration (`ListFoundationModels` + `ListInferenceProfiles`) that
         // `checkProviderCredentials` (the `pi` dynamic-import arm) already ran.
         // That result is already in `buildCredStatusReport` — the live-test is a
         // pass-through / no-op so we never issue a second AWS SDK call here
         // (which would drag the SDK into the wrong binary or make slow IMDS
         // calls on non-EC2 hosts).
-        if (provider === "pi" && isBedrockSdkMode(env)) {
+        if (provider === "pi" && isBedrockMode(env)) {
           return presenceCheckOk();
         }
         // Both pi-mono and opencode resolve credentials in the same order:
