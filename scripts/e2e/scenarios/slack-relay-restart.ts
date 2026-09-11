@@ -51,6 +51,7 @@ async function finishSlackTask(
 
 export const slackRelayRestart: Scenario = {
   name: "slack-relay-restart",
+  order: 120,
   async run(ctx) {
     const leadId = await registerLead(ctx, "e2e-lead-relay-restart");
     const output = `durable relay ${ctx.nonce}`;

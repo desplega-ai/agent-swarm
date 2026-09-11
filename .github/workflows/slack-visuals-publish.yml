@@ -1,0 +1,112 @@
+# Companion to slack-visuals.yml, split out so the write side (push to `ci-visuals`, upsert the
+# PR comment) runs with a trusted token on EVERY PR, fork-authored included.
+#
+# `workflow_run` jobs always run against the base branch's default token — GitHub does not
+# downgrade it the way it downgrades a `pull_request` job's token for a fork head — so this is
+# the standard safe pattern for "do a privileged thing after a fork PR's checks finish" without
+# resorting to `pull_request_target` (which would need to check out and run fork-authored code
+# under a privileged token; that trade is worse than the gap this file closes).
+#
+# Security invariant: this job NEVER checks out the PR head and NEVER runs anything from the PR
+# branch. It checks out the workflow file's own ref (the base branch), downloads the visuals
+# artifact slack-visuals.yml already built (data only — PNGs, GIFs, JSON), and runs
+# repo-trusted scripts from that checkout against that data. Keep it that way.
+#
+# The triggering PR's number is not reliably available on the workflow_run event for a
+# fork-authored run (github.event.workflow_run.pull_requests is populated from a same-repo
+# relationship and is typically empty for forks), so slack-visuals.yml writes it into the
+# artifact itself (visuals/pr-context.json) and this workflow reads it back from there instead
+# of trying to resolve it from the event payload.
+name: Slack Visuals Publish
+
+on:
+  workflow_run:
+    workflows: ["Slack Visuals"]
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    if: github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      # No `ref:` override — this checks out whatever commit the workflow file itself lives on
+      # (the base branch), never the PR head.
+      - name: Checkout repository (base branch only)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # visuals-comment.ts only imports node:util, so no `bun install` — just the runtime.
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      - name: Download Slack visuals artifact
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: slack-visuals
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: visuals
+
+      - name: Read PR context
+        id: pr
+        if: steps.download.outcome == 'success'
+        run: |
+          set -euo pipefail
+          if [ ! -f visuals/pr-context.json ]; then
+            echo "No visuals/pr-context.json in the artifact (non-pull_request run, or the" >&2
+            echo "producing workflow failed before writing it). Nothing to publish." >&2
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "found=true" >> "$GITHUB_OUTPUT"
+          echo "pr_number=$(jq -r '.prNumber' visuals/pr-context.json)" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$(jq -r '.headSha' visuals/pr-context.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Publish Slack visuals
+        if: steps.pr.outputs.found == 'true'
+        id: publish
+        env:
+          PR: ${{ steps.pr.outputs.pr_number }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          publish_output=$(bash scripts/e2e/visuals-publish.sh visuals "$PR" "$HEAD_SHA")
+          printf '%s\n' "$publish_output"
+          base_url=$(printf '%s\n' "$publish_output" | tail -n 1)
+          echo "base_url=${base_url#base_url=}" >> "$GITHUB_OUTPUT"
+
+      - name: Post Slack visual preview
+        if: steps.pr.outputs.found == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ steps.pr.outputs.pr_number }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+          BASE_URL: ${{ steps.publish.outputs.base_url }}
+        run: |
+          set -euo pipefail
+          bun scripts/e2e/visuals-comment.ts \
+            --base-url "$BASE_URL" \
+            --profile legacy=visuals/legacy \
+            --profile v2=visuals/v2 \
+            --out comment.md \
+            --run-url "${{ github.event.workflow_run.html_url }}" \
+            --sha "$HEAD_SHA"
+          # --paginate emits one JSON array per page; --jq runs per page, so take the first id.
+          comment_id=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments?per_page=100" \
+            --jq '.[] | select(.body | startswith("<!-- slack-visuals -->")) | .id' | head -n 1)
+          if [ -n "$comment_id" ]; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$comment_id" --raw-field body="$(<comment.md)"
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --raw-field body="$(<comment.md)"
+          fi

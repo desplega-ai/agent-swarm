@@ -3,6 +3,7 @@ import type { Scenario } from "../run";
 
 export const auth: Scenario = {
   name: "auth",
+  order: 20,
   async run(ctx) {
     expectStatus(
       await ctx.api("GET", "/api/tasks", { apiKey: null }),

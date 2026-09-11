@@ -13,6 +13,7 @@ import {
 
 export const slackReactionOverride: Scenario = {
   name: "slack-reaction-override",
+  order: 110,
   async run(ctx) {
     const acceptedKey = "SLACK_REACTION_ACCEPTED";
     const completedKey = "SLACK_REACTION_COMPLETED";
