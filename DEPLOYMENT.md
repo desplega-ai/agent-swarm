@@ -5,6 +5,7 @@ This guide covers all deployment options for Agent Swarm.
 ## Table of Contents
 
 - [Docker Compose (Recommended)](#docker-compose-recommended)
+- [Kubernetes (Helm)](#kubernetes-helm)
 - [Docker Worker](#docker-worker)
 - [Server Deployment (systemd)](#server-deployment-systemd)
 - [Graceful Shutdown & Task Resume](#graceful-shutdown--task-resume)
@@ -178,6 +179,107 @@ The docker-compose example uses `stop_grace_period: 60s` to allow graceful task 
 This enables zero-downtime deployments. See [Graceful Shutdown & Task Resume](#graceful-shutdown--task-resume) for details.
 
 > **Important:** Use stable `AGENT_ID` values for each worker to enable task resume after restarts.
+
+---
+
+## Kubernetes (Helm)
+
+Use the [Helm chart quick start](./charts/agent-swarm/README.md#tldr) to install the API and agent pools with your credentials. Add the following overrides to your deployment's `values.yaml` when exposing services outside the cluster.
+
+### API ingress
+
+The API ingress is disabled by default. Set `ingress.enabled: true` to create a `networking.k8s.io/v1` Ingress that routes `/` with `pathType: Prefix` to the chart's `<fullname>-api` Service on `api.port`.
+
+| Value | Default | Purpose |
+|---|---|---|
+| `ingress.enabled` | `false` | Create the API Ingress. |
+| `ingress.className` | `""` | Set `spec.ingressClassName` to an installed IngressClass, such as `nginx` or `traefik`. Empty leaves the field unset. |
+| `ingress.annotations` | `{}` | Annotations for your ingress controller or certificate manager. |
+| `ingress.host` | `""` | API hostname, without a scheme or path. Point its DNS record at your ingress controller. |
+| `ingress.tls` | `[]` | Kubernetes Ingress TLS entries, each with `hosts` and a certificate `secretName`. |
+
+For example, with an installed `nginx` IngressClass and a TLS Secret named `swarm-api-tls` in the release namespace:
+
+```yaml
+# values.yaml (merge into your existing deployment values)
+ingress:
+  enabled: true
+  className: nginx
+  annotations: {}
+  host: swarm-api.example.com
+  tls:
+    - hosts:
+        - swarm-api.example.com
+      secretName: swarm-api-tls
+```
+
+Replace the hostname and Secret name with your own. The certificate must cover the hostname; provision it before use or configure your certificate manager through `annotations`. The chart creates the Ingress, but does not install an ingress controller or provision this TLS Secret.
+
+Apply your values to the release (use the same namespace as your existing installation):
+
+```bash
+helm upgrade --install swarm oci://ghcr.io/desplega-ai/charts/agent-swarm \
+  -f values.yaml
+```
+
+#### Public API URL
+
+The chart keeps `MCP_BASE_URL` pointed at the internal API Service. For external OAuth redirect URIs and webhook URLs sent to providers such as Linear, Jira, and GitHub, it sets `PUBLIC_MCP_BASE_URL` as follows:
+
+- If `config.publicMcpBaseUrl` is set, use that explicit URL.
+- Otherwise, if `ingress.enabled` is true and `ingress.host` is nonempty, derive the URL from the host: `https://` when `ingress.tls` has at least one entry, or `http://` when it is empty.
+- Otherwise, the chart leaves `PUBLIC_MCP_BASE_URL` unset and the API falls back to `MCP_BASE_URL`.
+
+**An empty `ingress.tls` produces an `http://` public URL**, even if a load balancer terminates HTTPS elsewhere. The chart does not infer HTTPS from annotations or the external proxy. Configure `ingress.tls` when terminating TLS at ingress, or explicitly set the public origin when TLS terminates elsewhere:
+
+```yaml
+config:
+  publicMcpBaseUrl: https://swarm-api.example.com
+```
+
+### Separate agent-fs ingress
+
+The API ingress does not expose agent-fs. To expose that service, enable both `agentFs.enabled` and `agentFs.ingress.enabled`. Its separate Ingress routes `/` with `pathType: Prefix` to `<fullname>-agent-fs` on `agentFs.port` (default `7433`).
+
+The values `agentFs.ingress.enabled`, `agentFs.ingress.className`, `agentFs.ingress.annotations`, `agentFs.ingress.host`, and `agentFs.ingress.tls` have the same meanings and defaults as their API counterparts above. Use a separate hostname and matching TLS Secret:
+
+```yaml
+# Merge with your agent-fs bucket and S3 credential configuration.
+agentFs:
+  enabled: true
+  ingress:
+    enabled: true
+    className: nginx
+    annotations: {}
+    host: files.example.com
+    tls:
+      - hosts:
+          - files.example.com
+        secretName: swarm-files-tls
+```
+
+Provision DNS and the TLS Secret for this host too. See [cross-agent shared filesystem setup](./charts/agent-swarm/README.md#cross-agent-shared-filesystem) for the required storage configuration. This ingress does not determine `PUBLIC_MCP_BASE_URL`; that URL comes from the API ingress or `config.publicMcpBaseUrl`.
+
+### Built-in API CORS
+
+The swarm API sets CORS headers on every response. For requests with an `Origin` header, it echoes that origin in `Access-Control-Allow-Origin`, sets `Vary: Origin`, and allows credentials with `Access-Control-Allow-Credentials: true`. It echoes requested preflight headers in `Access-Control-Allow-Headers` and allows `GET, POST, PUT, PATCH, DELETE, OPTIONS`. Preflight `OPTIONS` requests receive `204` before authentication. Requests without `Origin` receive wildcard origin and header values.
+
+**You do not need to enable CORS at your ingress controller for the swarm API.** No API CORS enablement flag is required.
+
+If the browser still reports a CORS failure:
+
+1. Capture the actual response headers from the public endpoint, replacing the example origin with your browser app's origin and the hostname with your API host:
+
+   ```bash
+   curl -i -X OPTIONS \
+     -H 'Origin: https://your-app' \
+     -H 'Access-Control-Request-Method: GET' \
+     https://swarm-api.example.com/health
+   ```
+
+   Expect `204`, `Access-Control-Allow-Origin: https://your-app`, and `Access-Control-Allow-Credentials: true`. Also inspect the failing request in the browser's Network panel; a proxy-generated error or redirect may differ from the API response.
+2. If your proxy is configured to **append** CORS headers, check for duplicated `Access-Control-Allow-Origin` headers or multiple origin values. Remove that append rule so the browser receives one valid origin value.
+3. Check that the proxy is not stripping the API's CORS headers. Compare headers at the public endpoint with a direct request to the API Service, using the same `Origin` header.
 
 ---
 

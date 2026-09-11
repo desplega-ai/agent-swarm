@@ -28,7 +28,7 @@ That's a minimal install: API + lead + 1 coder pool, no agent-fs, no litestream.
 | API Service | yes | ClusterIP by default. |
 | Auth Secret | conditional | Created from `auth.*` inline values, or skipped when `auth.existingSecret` is set. |
 | ServiceAccount | conditional | `serviceAccount.create: true` by default. |
-| Ingress | opt-in | `ingress.enabled: true`. Standard `networking.k8s.io/v1` Ingress. |
+| Ingress | opt-in | API: `ingress.enabled: true`. Separate agent-fs ingress: `agentFs.enabled: true` and `agentFs.ingress.enabled: true`. Standard `networking.k8s.io/v1` Ingresses. See [ingress values, TLS, public URL, and CORS](../../DEPLOYMENT.md#api-ingress). |
 | Litestream sidecar | opt-in | `litestream.enabled: true`. Streams the SQLite WAL to S3-compatible object storage. |
 | agent-fs | opt-in | `agentFs.enabled: true`. Cross-agent searchable filesystem service. |
 | RWX shared volume | opt-in | `sharedVolume.existingClaim`. Mount a pre-existing RWX PVC at `/workspace/shared` on every pool pod. |
