@@ -80,7 +80,10 @@ export async function materializeClaudeMd(
       ? claudeMdLineageOf(existing, record)
       : { written: contentSha256(existing), base: null };
     await Bun.write(paths.backup, existing);
-    await Bun.write(`${paths.backup}.lineage`, JSON.stringify(lineage)).catch(() => {});
+    // `of` pins the sidecar to this exact backup: a stale sidecar left by an
+    // earlier overlap must not describe a different `.bak`.
+    const sidecar = { ...lineage, of: contentSha256(existing) };
+    await Bun.write(`${paths.backup}.lineage`, JSON.stringify(sidecar)).catch(() => {});
   }
   await Bun.write(paths.file, content); // creates ~/.claude if missing
 
@@ -96,14 +99,20 @@ export async function restoreClaudeMd(
   const sidecar = Bun.file(`${paths.backup}.lineage`);
   if (await backup.exists()) {
     const content = await backup.text();
-    const lineage = parseClaudeMdLineage(
-      (await sidecar.exists()) ? await sidecar.text() : undefined,
-    );
+    const raw = (await sidecar.exists()) ? await sidecar.text() : undefined;
+    let lineage: ClaudeMdLineage | null = null;
+    try {
+      const pinnedTo = raw ? (JSON.parse(raw) as { of?: unknown }).of : undefined;
+      if (pinnedTo === contentSha256(content)) lineage = parseClaudeMdLineage(raw);
+    } catch {
+      lineage = null; // corrupt sidecar: unknown lineage
+    }
     await Bun.write(paths.file, content);
     await backup.delete();
     await sidecar.delete().catch(() => {});
-    // Without a sidecar (a `.bak` from before this module) the lineage is unknown:
-    // record it as hook-written, the conservative choice (never pushed as an edit).
+    // Without a matching sidecar (a legacy `.bak`, a failed or stale sidecar) the
+    // lineage is unknown: record it as hook-written, the conservative choice
+    // (never pushed as an edit).
     const record = lineage ?? { written: contentSha256(content), base: null };
     await Bun.write(paths.record, JSON.stringify(record)).catch(() => {});
   } else {

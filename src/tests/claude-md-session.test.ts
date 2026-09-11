@@ -133,6 +133,16 @@ describe("concurrent sessions sharing ~/.claude/CLAUDE.md", () => {
     expect(await Bun.file(paths.record).exists()).toBe(false);
   });
 
+  test("a stale sidecar describing another backup is ignored", async () => {
+    await materializeClaudeMd(V2, paths);
+    await edit("A's edit");
+    await materializeClaudeMd(V2, paths); // .bak = A's edit, sidecar says "edit on v2"
+    await Bun.write(paths.backup, V1); // the .bak changed under a sidecar that no longer matches
+    await restoreClaudeMd(paths);
+
+    expect(await stop()).toBeNull(); // unknown lineage → treated as hook-written
+  });
+
   test("a .bak without lineage (from before this module) is treated as hook-written", async () => {
     await Bun.write(paths.backup, V1); // legacy backup, no sidecar
     await Bun.write(paths.file, V2);
