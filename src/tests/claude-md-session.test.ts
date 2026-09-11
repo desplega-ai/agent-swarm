@@ -351,6 +351,7 @@ describe("a lineage write that fails leaves nothing pushable", () => {
   });
 
   afterEach(async () => {
+    setFlockForTests(undefined);
     await rm(root, { recursive: true, force: true });
   });
 
@@ -371,6 +372,11 @@ describe("a lineage write that fails leaves nothing pushable", () => {
   const failLineageCommit = { testPauses: { beforeRecordCommit: throwInjectedFailure } };
   /** The copy a hook saves of content it can neither push nor keep. */
   const unsynced = (content: string) => Bun.file(unsyncedCopyPath(paths, content));
+  /** A non-empty directory where the copy goes: saving it fails, for root too. */
+  const occupy = async (path: string) => {
+    await mkdir(path);
+    await Bun.write(join(path, "occupied"), "");
+  };
   /**
    * A record whose temp file name exceeds NAME_MAX: every atomic replacement of
    * it — the only way the hook writes it — fails for real (ENAMETOOLONG, for
@@ -462,12 +468,48 @@ describe("a lineage write that fails leaves nothing pushable", () => {
     });
   });
 
+  test("the reviewed lifecycle: failure, edit, Stop, then a healthy session", async () => {
+    await materializeClaudeMd(V2, paths, failLineageCommit); // the lineage never lands
+    await Bun.write(paths.file, "real edit"); // made on top: its base is unknown
+    expect(await stop()).toBeNull(); // not pushed…
+    expect(await unsynced("real edit").text()).toBe("real edit"); // …but saved
+
+    await materializeClaudeMd(V2, paths); // storage is back: the record heals
+    expect(await Bun.file(paths.record).text()).toBe(
+      JSON.stringify({ written: h(V2), base: h(V2) }),
+    );
+    await Bun.write(paths.file, "next edit");
+    expect(await stop()).toEqual({
+      claudeMd: "next edit",
+      changeSource: "session_sync",
+      expectedHashes: { claudeMd: h(V2) },
+    });
+    expect(await unsynced("real edit").text()).toBe("real edit"); // the copy outlives it
+  });
+
+  test("a SessionStart that cannot save an unsynced edit leaves it in place", async () => {
+    await materializeClaudeMd(V2, paths, failLineageCommit);
+    await Bun.write(paths.file, "real edit");
+    await occupy(unsyncedCopyPath(paths, "real edit"));
+
+    await expect(materializeClaudeMd(V2, paths)).rejects.toThrow();
+    expect(await Bun.file(paths.file).text()).toBe("real edit");
+    expect(await Bun.file(paths.backup).exists()).toBe(false);
+  });
+
+  test("without flock, an edit under a pending record is saved too", async () => {
+    setFlockForTests(null);
+    expect(await materializeClaudeMd(V2, paths, failLineageCommit)).toBe("unsupported");
+    await Bun.write(paths.file, "real edit");
+
+    expect(await stop()).toBeNull();
+    expect(await unsynced("real edit").text()).toBe("real edit");
+  });
+
   test("a Stop that cannot save an unsynced edit leaves it in place", async () => {
     await materializeClaudeMd(V2, paths, failLineageCommit);
     await Bun.write(paths.file, "real edit");
-    const copy = unsyncedCopyPath(paths, "real edit");
-    await mkdir(copy); // a directory where the copy goes: saving fails, for root too
-    await Bun.write(join(copy, "occupied"), "");
+    await occupy(unsyncedCopyPath(paths, "real edit"));
 
     expect(await stop()).toBeNull();
     expect(await Bun.file(paths.file).text()).toBe("real edit"); // neither deleted nor overwritten

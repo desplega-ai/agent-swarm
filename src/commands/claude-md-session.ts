@@ -182,13 +182,20 @@ export function unsyncedCopyPath(paths: ClaudeMdSessionPaths, content: string): 
   return `${paths.file}.unsynced-${contentSha256(content).slice(0, 12)}`;
 }
 
-/** Save content that cannot be pushed before a hook discards it; throws if it cannot. */
+/**
+ * Save content that cannot be pushed before a hook discards it; throws if it
+ * cannot. The copy may hold an agent's edit, or not (a partial write, content a
+ * failed write left behind): its base is unknown either way, so it is never
+ * something to re-apply blindly.
+ */
 async function saveUnsynced(paths: ClaudeMdSessionPaths, content: string): Promise<void> {
   const copy = unsyncedCopyPath(paths, content);
   await writeAtomic(copy, content);
   console.warn(
     scrubSecrets(
-      `[claude-md] an edit that cannot be synced was saved to ${copy}; re-apply it by hand`,
+      `[claude-md] CLAUDE.md content of unknown lineage was not synced; saved to ${copy} ` +
+        "instead of discarding it. It may hold an agent's edit: compare it with the current " +
+        "value before re-applying anything.",
     ),
   );
 }
@@ -241,12 +248,10 @@ async function materializeUnlocked(
   paths: ClaudeMdSessionPaths,
   pauses: ClaudeMdTestPauses,
 ): Promise<void> {
-  const current = Bun.file(paths.file);
-  if (await current.exists()) {
-    const existing = await current.text();
-    const raw = await readText(paths.record).catch(() => undefined);
-    if (hasUnknownLineage(existing, raw)) await saveUnsynced(paths, existing);
-    const record = effectiveClaudeMdLineage(raw, existing);
+  const state = await readClaudeMdSyncState(paths);
+  if (state) {
+    const { content: existing, record } = state;
+    if (state.lineageUnknown) await saveUnsynced(paths, existing);
     // With a record, anything but the hook's own write is an agent's unsynced
     // edit. Without one (the file predates the hook, e.g. the user's own) its
     // origin is unknown: treat it as hook-written, never to be pushed.
@@ -298,11 +303,22 @@ async function restoreUnlocked(
 }
 
 /**
- * A Stop never fails over its restore: it is logged, and the rest of Stop runs.
- * `unpushed` is content the restore would discard without it having been
- * pushed: it is saved first, and if that fails the restore is skipped.
+ * What a Stop must save before its restore discards the file: content of
+ * unknown lineage (never pushed), or, when the Stop could not push at all (no
+ * flock), an edit it would have sent.
  */
-async function restoreOrWarn(
+function unpushedContent(state: ClaudeMdSyncState | null, couldPush: boolean): string | null {
+  if (!state) return null;
+  if (state.lineageUnknown) return state.content;
+  return !couldPush && planClaudeMdSync(state) ? state.content : null;
+}
+
+/**
+ * Save `unpushed` (see `unpushedContent`), then restore; if the save fails the
+ * restore is skipped and the file stays. A Stop never fails over its restore:
+ * it is logged, and the rest of Stop runs.
+ */
+async function restoreSavingUnpushed(
   paths: ClaudeMdSessionPaths,
   pauses: ClaudeMdTestPauses,
   unpushed: string | null,
@@ -367,7 +383,7 @@ export async function stopClaudeMd(
           console.warn(scrubSecrets(`[claude-md] sync failed: ${String(error)}`));
         });
       }
-      await restoreOrWarn(paths, pauses, state?.lineageUnknown ? state.content : null);
+      await restoreSavingUnpushed(paths, pauses, unpushedContent(state, true));
       return body ? "synced" : "not-an-edit";
     },
     { waitMs: options.lockWaitMs ?? STOP_LOCK_WAIT_MS },
@@ -376,11 +392,14 @@ export async function stopClaudeMd(
   warnLockMiss("Stop", locked);
   if (locked.reason === "unsupported") {
     // Nothing is pushed without the lock: an edit this Stop would have sent is
-    // saved instead of being discarded by the restore.
-    const state = await readClaudeMdSyncState(paths).catch(() => null);
-    const unpushed =
-      state && (state.lineageUnknown || planClaudeMdSync(state)) ? state.content : null;
-    await restoreOrWarn(paths, pauses, unpushed);
+    // saved instead of being discarded by the restore. Unreadable → no restore.
+    const state = await readClaudeMdSyncState(paths).catch((error: unknown) => {
+      console.warn(scrubSecrets(`[claude-md] .bak not restored: ${String(error)}`));
+      return undefined;
+    });
+    if (state !== undefined) {
+      await restoreSavingUnpushed(paths, pauses, unpushedContent(state, false));
+    }
   }
   return locked.reason;
 }
