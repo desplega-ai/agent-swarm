@@ -185,6 +185,19 @@ describe("concurrent sessions sharing ~/.claude/CLAUDE.md", () => {
     expect((await lstat(paths.record)).isSymbolicLink()).toBe(false);
   });
 
+  test("a sidecar with a non-sha256 value is treated as unknown lineage", async () => {
+    await materializeClaudeMd(V2, paths);
+    await edit("A's edit");
+    await materializeClaudeMd(V2, paths); // .bak = A's edit
+    await Bun.write(
+      `${paths.backup}.lineage`,
+      JSON.stringify({ written: null, base: "not-a-sha256", of: h("A's edit") }),
+    );
+
+    expect(await stop()).toBeNull(); // disk v2 is the second materialization
+    expect(await stop()).toBeNull(); // restored edit with an invalid base: never pushed
+  });
+
   test("a .bak without lineage (from before this module) is treated as hook-written", async () => {
     await Bun.write(paths.backup, V1); // legacy backup, no sidecar
     await Bun.write(paths.file, V2);
@@ -208,7 +221,7 @@ describe("concurrent sessions sharing ~/.claude/CLAUDE.md", () => {
       release = resolve;
     });
     const sessionStartB = materializeClaudeMd(V2, paths, {
-      hooks: {
+      testPauses: {
         afterFileWrite: async () => {
           reachedPause();
           await gate;
@@ -242,7 +255,7 @@ describe("concurrent sessions sharing ~/.claude/CLAUDE.md", () => {
         synced = true;
       },
       paths,
-      { lock: { waitMs: 100 } },
+      { lockWaitMs: 100 },
     );
 
     expect(outcome).toBe("busy");

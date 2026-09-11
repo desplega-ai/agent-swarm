@@ -1,4 +1,7 @@
 import { describe, expect, spyOn, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   buildIdentityPayload,
   buildIndependentIdentityPayloads,
@@ -479,6 +482,35 @@ describe("postProfileUpdate (non-2xx is surfaced, not swallowed)", () => {
 });
 
 describe("syncProfileFilesToServer (orchestration is non-fatal)", () => {
+  test("skips the personal CLAUDE.md, reading nothing, while its lock is held", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "claude-md-lock-"));
+    const lockPath = join(dir, "CLAUDE.md.lock");
+    await Bun.write(lockPath, "live holder");
+    const sent: string[] = [];
+    const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      sent.push(String(init?.body));
+      return new Response("{}", { status: 200 });
+    }) as typeof fetch;
+    try {
+      await syncProfileFilesToServer({
+        agentId: "agent-1",
+        apiUrl: "https://api.example.test",
+        apiKey: "secret-key",
+        changeSource: "session_sync",
+        fields: ["claude"],
+        claudeMdLock: { path: lockPath, waitMs: 100 },
+        fetchImpl,
+      });
+      expect(sent).toEqual([]);
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("CLAUDE.md busy"));
+      expect(await Bun.file(lockPath).text()).toBe("live holder");
+    } finally {
+      warnSpy.mockRestore();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   test("resolves without throwing even when every POST fails", async () => {
     const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
     const errSpy = spyOn(console, "error").mockImplementation(() => {});
@@ -491,6 +523,7 @@ describe("syncProfileFilesToServer (orchestration is non-fatal)", () => {
           apiKey: "secret-key",
           changeSource: "session_sync",
           // No files on a CI box → typically no payloads; still must never throw.
+          claudeMdLock: { path: join(tmpdir(), `claude-md-${crypto.randomUUID()}.lock`) },
           fetchImpl,
         }),
       ).resolves.toBeUndefined();

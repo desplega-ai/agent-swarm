@@ -28,15 +28,14 @@
  */
 
 import { resolveTemplateAsync } from "../prompts/resolver.ts";
-
 import type { Agent, ProfileExpectedHashes, SwarmEvent } from "../types.ts";
 import { MAX_PROFILE_FILE_LENGTH } from "../utils/constants.ts";
+import { withFileLock } from "../utils/file-lock.ts";
 import {
   type BudgetedIdentityField,
   IDENTITY_FIELD_BUDGETS,
 } from "../utils/identity-field-budget.ts";
 import { scrubSecrets } from "../utils/secret-scrubber.ts";
-import { type FileLockOptions, withFileLock } from "./file-lock.ts";
 import "./templates.ts";
 
 export const SOUL_MD_PATH = "/workspace/SOUL.md";
@@ -317,6 +316,34 @@ export const CLAUDE_MD_LINEAGE_PATH = `${CLAUDE_MD_PATH}.lineage.json`;
  * record across processes (hook SessionStart/Stop and the runner backstop).
  */
 export const CLAUDE_MD_LOCK_PATH = `${CLAUDE_MD_PATH}.lock`;
+/**
+ * Every holder of CLAUDE_MD_LOCK_PATH bounds its network call by this, so the
+ * lock is never held much longer — which is what lets CLAUDE_MD_LOCK_STALE_MS
+ * treat an older lock as abandoned, and waiters bound their wait below the
+ * Claude Code hook timeout (60 s).
+ */
+export const CLAUDE_MD_SYNC_TIMEOUT_MS = 10_000;
+export const CLAUDE_MD_LOCK_STALE_MS = 30_000;
+
+/** `fetch` bounded by CLAUDE_MD_SYNC_TIMEOUT_MS, for calls made while holding the lock. */
+export function fetchWithSyncTimeout(fetchImpl: typeof fetch = fetch): typeof fetch {
+  return ((input, init) =>
+    fetchImpl(input, {
+      ...init,
+      signal: AbortSignal.timeout(CLAUDE_MD_SYNC_TIMEOUT_MS),
+    })) as typeof fetch;
+}
+
+/**
+ * Whether a CLAUDE.md sync reads the Claude hook's personal file (and so must
+ * follow its lineage, under its lock) rather than an unconditional source.
+ */
+export function syncsHookOwnedClaudeMd(
+  claudeMdPath: string,
+  changeSource: ProfileChangeSource,
+): boolean {
+  return claudeMdPath === CLAUDE_MD_PATH && changeSource === "session_sync";
+}
 
 /** Where the content of CLAUDE_MD_PATH came from; see `claude-md-session.ts`. */
 export interface ClaudeMdLineage {
@@ -469,8 +496,8 @@ export interface ProfileSyncOptions {
    * `resolveClaudeMdPath`.
    */
   claudeMdPath?: string;
-  /** Lock for the personal-file CLAUDE.md sync; `path` defaults to CLAUDE_MD_LOCK_PATH. */
-  claudeMdLock?: FileLockOptions & { path?: string };
+  /** Lock for the personal-file CLAUDE.md sync (tests); defaults to CLAUDE_MD_LOCK_PATH. */
+  claudeMdLock?: { path?: string; waitMs?: number };
   /** Injectable fetch for tests. Defaults to the global `fetch`. */
   fetchImpl?: typeof fetch;
 }
@@ -716,7 +743,7 @@ export async function collectProfilePayloads(
     if (raw?.trim()) {
       if (baselines?.claudeMd && contentSha256(raw) === baselines.claudeMd) {
         // CLAUDE.md unchanged during session — skip to preserve Lead's DB edits
-      } else if (claudeMdPath === CLAUDE_MD_PATH && changeSource === "session_sync") {
+      } else if (syncsHookOwnedClaudeMd(claudeMdPath, changeSource)) {
         // The personal file is owned by the Claude hook, which keeps its lineage:
         // skip what a hook wrote, send an edit against the base it derives from.
         // Without a record the only base the runner knows is its boot baseline.
@@ -801,7 +828,7 @@ export async function syncProfileFilesToServer(opts: ProfileSyncOptions): Promis
   // Claude hook; reading the pair mid-transition can misjudge a restored copy as
   // an edit. So that group is read and posted under the same lock the hook holds.
   const claudeUnderLock =
-    fields.includes("claude") && claudeMdPath === CLAUDE_MD_PATH && changeSource === "session_sync";
+    fields.includes("claude") && syncsHookOwnedClaudeMd(claudeMdPath, changeSource);
   const unlockedFields = claudeUnderLock ? fields.filter((f) => f !== "claude") : fields;
 
   const payloads = await collectProfilePayloads(
@@ -816,7 +843,8 @@ export async function syncProfileFilesToServer(opts: ProfileSyncOptions): Promis
   }
 
   if (claudeUnderLock) {
-    const { path: lockPath = CLAUDE_MD_LOCK_PATH, ...lockOptions } = opts.claudeMdLock ?? {};
+    const { path: lockPath = CLAUDE_MD_LOCK_PATH, waitMs } = opts.claudeMdLock ?? {};
+    const bounded = { ...opts, fetchImpl: fetchWithSyncTimeout(opts.fetchImpl) };
     const locked = await withFileLock(
       lockPath,
       async () => {
@@ -827,9 +855,9 @@ export async function syncProfileFilesToServer(opts: ProfileSyncOptions): Promis
           claudeMdPath,
           opts.agentId,
         );
-        for (const payload of claude) await postProfileUpdate(opts, payload);
+        for (const payload of claude) await postProfileUpdate(bounded, payload);
       },
-      lockOptions,
+      { waitMs, staleMs: CLAUDE_MD_LOCK_STALE_MS },
     ).catch((error: unknown) => {
       console.warn(scrubSecrets(`[profile-sync] CLAUDE.md lock failed: ${String(error)}`));
       return { acquired: false as const };

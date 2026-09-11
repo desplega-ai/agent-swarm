@@ -13,6 +13,7 @@ import { materializeClaudeMd, stopClaudeMd } from "../commands/claude-md-session
 import {
   buildIndependentIdentityPayloads,
   contentSha256,
+  fetchWithSyncTimeout,
   type ProfilePayload,
   readIdentityBaselines,
   warnProfileFileTooLarge,
@@ -622,10 +623,10 @@ export async function handleHook(): Promise<void> {
   /**
    * Stop's CLAUDE.md step: sync an agent's edit (never content a hook wrote, and
    * as a compare-and-set against its base), then restore the `.bak` — all under
-   * the CLAUDE.md lock (see `claude-md-session.ts`). The POST is bounded so the
-   * lock is never held longer than the other hooks will wait for it.
+   * the CLAUDE.md lock (see `claude-md-session.ts`). The POST is bounded
+   * (CLAUDE_MD_SYNC_TIMEOUT_MS) so the lock is never held for long.
    */
-  const stopClaudeMdAndSync = async (agentId: string): Promise<void> => {
+  const syncAndRestoreClaudeMd = async (agentId: string): Promise<void> => {
     await stopClaudeMd(async (body) => {
       if (!mcpConfig) return;
       await postHookProfileUpdate({
@@ -633,8 +634,7 @@ export async function handleHook(): Promise<void> {
         headers: mcpConfig.headers,
         body,
         label: "claudeMd",
-        fetchImpl: ((input, init) =>
-          fetch(input, { ...init, signal: AbortSignal.timeout(10_000) })) as typeof fetch,
+        fetchImpl: fetchWithSyncTimeout(),
       });
     });
   };
@@ -1293,7 +1293,7 @@ export async function handleHook(): Promise<void> {
       // Sync CLAUDE.md (then restore its backup), identity files, and setup script back to database
       if (agentInfo?.id) {
         try {
-          await stopClaudeMdAndSync(agentInfo.id);
+          await syncAndRestoreClaudeMd(agentInfo.id);
           await syncIdentityFilesToServer(agentInfo.id);
           await syncSetupScriptToServer(agentInfo.id);
         } catch {

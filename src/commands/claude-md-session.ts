@@ -22,24 +22,32 @@
  * unsynced edit that a sibling's SessionStart had backed up brings back an edit
  * (still synced, against its own base), not something a hook wrote.
  *
- * Every transition of the pair (file + record) runs under one cross-process
- * lock (`file-lock.ts`): SessionStart's materialization, and the Stop's whole
- * read → sync → restore protocol. Without it a Stop landing between the file
- * write and the record write reads a mismatched pair and can re-create the
- * revert this module exists to prevent. The record and the sidecar are also
- * written atomically (temp file + rename), and an unreadable record counts as
- * hook-written, never as a reason to push.
+ * Transitions of the pair (file + record) run under one cross-process lock
+ * (`src/utils/file-lock.ts`): SessionStart's materialization, the Stop's whole
+ * read → sync → restore protocol, and the runner backstop's read + post. Without
+ * it a Stop landing between the file write and the record write reads a
+ * mismatched pair and can re-create the revert this module exists to prevent.
+ * Every holder bounds its network call (CLAUDE_MD_SYNC_TIMEOUT_MS), so a lock
+ * older than CLAUDE_MD_LOCK_STALE_MS is abandoned and broken. The record and the
+ * sidecar are also written atomically (temp file + rename), and an unreadable
+ * record counts as hook-written, never as a reason to push.
  *
- * Known limit: with one `.bak` slot, a third overlapping session overwrites the
- * backup of the first (as before this module).
+ * Known limits: a SessionStart that still cannot get the lock after
+ * SESSION_START_LOCK_WAIT_MS — only possible if the lock errors out or is taken
+ * back-to-back by holders for that long — materializes without it (a session
+ * needs its instructions), which reopens the window for that one write; and with
+ * one `.bak` slot, a third overlapping session overwrites the backup of the first
+ * (as before this module).
  */
 
 // `rename` has no Bun equivalent; it is what makes the record writes atomic.
 import { rename } from "node:fs/promises";
-import { type FileLockOptions, withFileLock } from "./file-lock.ts";
+import { withFileLock } from "../utils/file-lock.ts";
+import { scrubSecrets } from "../utils/secret-scrubber.ts";
 import {
   CLAUDE_MD_LINEAGE_PATH,
   CLAUDE_MD_LOCK_PATH,
+  CLAUDE_MD_LOCK_STALE_MS,
   CLAUDE_MD_PATH,
   type ClaudeMdLineage,
   claudeMdLineageOf,
@@ -77,8 +85,15 @@ export const DEFAULT_CLAUDE_MD_SESSION_PATHS: ClaudeMdSessionPaths = {
   lock: CLAUDE_MD_LOCK_PATH,
 };
 
+/**
+ * How long each side waits for the lock, both below the Claude Code hook timeout
+ * (60 s). SessionStart waits longer: giving up means writing without the lock.
+ */
+const SESSION_START_LOCK_WAIT_MS = 40_000;
+const STOP_LOCK_WAIT_MS = 15_000;
+
 /** Test seam: pause points inside a transition, to force interleavings. */
-export interface ClaudeMdTransitionHooks {
+export interface ClaudeMdTestPauses {
   afterFileWrite?: () => Promise<void>;
 }
 
@@ -103,30 +118,32 @@ async function writeAtomic(path: string, data: string): Promise<void> {
 /**
  * SessionStart: under the lock, back up whatever is on disk together with its
  * lineage, then materialize the DB value and record it. If the lock stays busy
- * the session still gets its CLAUDE.md (unlocked, with a warning): an agent
- * without its instructions is worse than the narrow race the lock closes.
+ * or errors, the session still gets its CLAUDE.md, written without the lock and
+ * with a warning: an agent without its instructions is worse than that race.
  */
 export async function materializeClaudeMd(
   content: string,
   paths: ClaudeMdSessionPaths = DEFAULT_CLAUDE_MD_SESSION_PATHS,
-  options: { hooks?: ClaudeMdTransitionHooks; lock?: FileLockOptions } = {},
+  options: { testPauses?: ClaudeMdTestPauses } = {},
 ): Promise<void> {
-  const hooks = options.hooks ?? {};
-  const locked = await withFileLock(
-    paths.lock,
-    () => materializeUnlocked(content, paths, hooks),
-    options.lock,
-  );
+  const pauses = options.testPauses ?? {};
+  const locked = await withFileLock(paths.lock, () => materializeUnlocked(content, paths, pauses), {
+    waitMs: SESSION_START_LOCK_WAIT_MS,
+    staleMs: CLAUDE_MD_LOCK_STALE_MS,
+  }).catch((error: unknown) => {
+    console.warn(scrubSecrets(`[claude-md] lock failed at SessionStart: ${String(error)}`));
+    return { acquired: false as const };
+  });
   if (!locked.acquired) {
-    console.warn("[claude-md] lock busy at SessionStart — materializing without it");
-    await materializeUnlocked(content, paths, hooks);
+    console.warn("[claude-md] no lock at SessionStart — materializing without it");
+    await materializeUnlocked(content, paths, pauses);
   }
 }
 
 async function materializeUnlocked(
   content: string,
   paths: ClaudeMdSessionPaths,
-  hooks: ClaudeMdTransitionHooks,
+  pauses: ClaudeMdTestPauses,
 ): Promise<void> {
   const current = Bun.file(paths.file);
   if (await current.exists()) {
@@ -146,7 +163,7 @@ async function materializeUnlocked(
     await writeAtomic(`${paths.backup}.lineage`, JSON.stringify(sidecar)).catch(() => {});
   }
   await Bun.write(paths.file, content); // creates ~/.claude if missing
-  await hooks.afterFileWrite?.();
+  await pauses.afterFileWrite?.();
 
   const hash = contentSha256(content);
   await writeAtomic(paths.record, JSON.stringify({ written: hash, base: hash })).catch(() => {});
@@ -212,7 +229,7 @@ export type ClaudeMdStopOutcome = "synced" | "not-an-edit" | "busy";
 export async function stopClaudeMd(
   sync: (body: ProfilePayload["body"]) => Promise<void>,
   paths: ClaudeMdSessionPaths = DEFAULT_CLAUDE_MD_SESSION_PATHS,
-  options: { lock?: FileLockOptions } = {},
+  options: { lockWaitMs?: number } = {},
 ): Promise<ClaudeMdStopOutcome> {
   const locked = await withFileLock(
     paths.lock,
@@ -221,16 +238,19 @@ export async function stopClaudeMd(
       const body = state ? planClaudeMdSync(state) : null;
       if (body) {
         await sync(body).catch((error: unknown) => {
-          console.warn(`[claude-md] sync failed: ${String(error)}`);
+          console.warn(scrubSecrets(`[claude-md] sync failed: ${String(error)}`));
         });
       }
       await restoreUnlocked(paths);
       return body ? "synced" : "not-an-edit";
     },
-    options.lock,
-  );
+    { waitMs: options.lockWaitMs ?? STOP_LOCK_WAIT_MS, staleMs: CLAUDE_MD_LOCK_STALE_MS },
+  ).catch((error: unknown) => {
+    console.warn(scrubSecrets(`[claude-md] lock failed at Stop: ${String(error)}`));
+    return { acquired: false as const };
+  });
   if (!locked.acquired) {
-    console.warn("[claude-md] lock busy at Stop — CLAUDE.md sync and restore skipped");
+    console.warn("[claude-md] no lock at Stop — CLAUDE.md sync and restore skipped");
     return "busy";
   }
   return locked.value;
