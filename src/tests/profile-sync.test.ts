@@ -677,6 +677,16 @@ describe("collectProfilePayloads (baseline integration)", () => {
     expect(await collectProfilePayloads(["claude"], "session_sync", files)).toEqual([]);
   });
 
+  test("the runner backstop does not push when the record holds a non-sha256 value", async () => {
+    const files = reader({
+      [CLAUDE_MD_PATH]: "hook materialization",
+      [IDENTITY_BASELINES_PATH]: JSON.stringify({ claudeMd: contentSha256("boot") }),
+      [CLAUDE_MD_LINEAGE_PATH]: JSON.stringify({ written: "not-a-sha256", base: null }),
+    });
+
+    expect(await collectProfilePayloads(["claude"], "session_sync", files)).toEqual([]);
+  });
+
   test("the runner backstop sends an edit against the base the hook recorded", async () => {
     const files = reader({
       [CLAUDE_MD_PATH]: "edited",

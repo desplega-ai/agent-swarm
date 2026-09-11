@@ -28,6 +28,7 @@
  */
 
 import { resolveTemplateAsync } from "../prompts/resolver.ts";
+
 import type { Agent, ProfileExpectedHashes, SwarmEvent } from "../types.ts";
 import { MAX_PROFILE_FILE_LENGTH } from "../utils/constants.ts";
 import {
@@ -35,6 +36,7 @@ import {
   IDENTITY_FIELD_BUDGETS,
 } from "../utils/identity-field-budget.ts";
 import { scrubSecrets } from "../utils/secret-scrubber.ts";
+import { type FileLockOptions, withFileLock } from "./file-lock.ts";
 import "./templates.ts";
 
 export const SOUL_MD_PATH = "/workspace/SOUL.md";
@@ -310,6 +312,11 @@ export const CLAUDE_MD_PATH = `${process.env.HOME}/.claude/CLAUDE.md`;
  * in a world-writable directory where another user could plant a symlink.
  */
 export const CLAUDE_MD_LINEAGE_PATH = `${CLAUDE_MD_PATH}.lineage.json`;
+/**
+ * Lock serializing every multi-file transition of CLAUDE_MD_PATH + its lineage
+ * record across processes (hook SessionStart/Stop and the runner backstop).
+ */
+export const CLAUDE_MD_LOCK_PATH = `${CLAUDE_MD_PATH}.lock`;
 
 /** Where the content of CLAUDE_MD_PATH came from; see `claude-md-session.ts`. */
 export interface ClaudeMdLineage {
@@ -319,7 +326,12 @@ export interface ClaudeMdLineage {
   base: string | null;
 }
 
-/** Parse a lineage record; null for anything that is not exactly that shape. */
+const SHA256_HEX = /^[0-9a-f]{64}$/;
+
+/**
+ * Parse a lineage record; null for anything that is not exactly that shape —
+ * both keys present, each a lowercase sha256 hex or null.
+ */
 export function parseClaudeMdLineage(raw: string | undefined): ClaudeMdLineage | null {
   if (!raw) return null;
   let value: unknown;
@@ -330,7 +342,7 @@ export function parseClaudeMdLineage(raw: string | undefined): ClaudeMdLineage |
   }
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
   const { written, base } = value as Record<string, unknown>;
-  const hashOrNull = (v: unknown) => v === null || typeof v === "string";
+  const hashOrNull = (v: unknown) => v === null || (typeof v === "string" && SHA256_HEX.test(v));
   if (!("written" in value) || !("base" in value) || !hashOrNull(written) || !hashOrNull(base)) {
     return null;
   }
@@ -457,6 +469,8 @@ export interface ProfileSyncOptions {
    * `resolveClaudeMdPath`.
    */
   claudeMdPath?: string;
+  /** Lock for the personal-file CLAUDE.md sync; `path` defaults to CLAUDE_MD_LOCK_PATH. */
+  claudeMdLock?: FileLockOptions & { path?: string };
   /** Injectable fetch for tests. Defaults to the global `fetch`. */
   fetchImpl?: typeof fetch;
 }
@@ -782,14 +796,46 @@ export async function syncProfileFilesToServer(opts: ProfileSyncOptions): Promis
   const changeSource = opts.changeSource ?? "session_sync";
   const fields = opts.fields ?? ["identity", "claude", "setup"];
 
+  const claudeMdPath = opts.claudeMdPath ?? CLAUDE_MD_PATH;
+  // The personal file is rewritten together with its lineage record by the
+  // Claude hook; reading the pair mid-transition can misjudge a restored copy as
+  // an edit. So that group is read and posted under the same lock the hook holds.
+  const claudeUnderLock =
+    fields.includes("claude") && claudeMdPath === CLAUDE_MD_PATH && changeSource === "session_sync";
+  const unlockedFields = claudeUnderLock ? fields.filter((f) => f !== "claude") : fields;
+
   const payloads = await collectProfilePayloads(
-    fields,
+    unlockedFields,
     changeSource,
     readFileIfExists,
-    opts.claudeMdPath ?? CLAUDE_MD_PATH,
+    claudeMdPath,
     opts.agentId,
   );
   for (const payload of payloads) {
     await postProfileUpdate(opts, payload);
+  }
+
+  if (claudeUnderLock) {
+    const { path: lockPath = CLAUDE_MD_LOCK_PATH, ...lockOptions } = opts.claudeMdLock ?? {};
+    const locked = await withFileLock(
+      lockPath,
+      async () => {
+        const claude = await collectProfilePayloads(
+          ["claude"],
+          changeSource,
+          readFileIfExists,
+          claudeMdPath,
+          opts.agentId,
+        );
+        for (const payload of claude) await postProfileUpdate(opts, payload);
+      },
+      lockOptions,
+    ).catch((error: unknown) => {
+      console.warn(scrubSecrets(`[profile-sync] CLAUDE.md lock failed: ${String(error)}`));
+      return { acquired: false as const };
+    });
+    if (!locked.acquired) {
+      console.warn("[profile-sync] CLAUDE.md busy (lock held) — backstop sync skipped this time");
+    }
   }
 }

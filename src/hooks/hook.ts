@@ -9,12 +9,7 @@ import {
   postRatings,
   type RetrievalRow,
 } from "../be/memory/raters/llm";
-import {
-  materializeClaudeMd,
-  planClaudeMdSync,
-  readClaudeMdSyncState,
-  restoreClaudeMd,
-} from "../commands/claude-md-session";
+import { materializeClaudeMd, stopClaudeMd } from "../commands/claude-md-session";
 import {
   buildIndependentIdentityPayloads,
   contentSha256,
@@ -625,21 +620,22 @@ export async function handleHook(): Promise<void> {
   };
 
   /**
-   * Sync CLAUDE.md back to the server — only an agent's edit, never content a
-   * hook wrote, and as a compare-and-set against its base (see `claude-md-session.ts`).
+   * Stop's CLAUDE.md step: sync an agent's edit (never content a hook wrote, and
+   * as a compare-and-set against its base), then restore the `.bak` — all under
+   * the CLAUDE.md lock (see `claude-md-session.ts`). The POST is bounded so the
+   * lock is never held longer than the other hooks will wait for it.
    */
-  const syncClaudeMdToServer = async (agentId: string): Promise<void> => {
-    if (!mcpConfig) return;
-
-    const state = await readClaudeMdSyncState();
-    const body = state ? planClaudeMdSync(state) : null;
-    if (!body) return;
-
-    await postHookProfileUpdate({
-      url: `${getBaseUrl()}/api/agents/${agentId}/profile`,
-      headers: mcpConfig.headers,
-      body,
-      label: "claudeMd",
+  const stopClaudeMdAndSync = async (agentId: string): Promise<void> => {
+    await stopClaudeMd(async (body) => {
+      if (!mcpConfig) return;
+      await postHookProfileUpdate({
+        url: `${getBaseUrl()}/api/agents/${agentId}/profile`,
+        headers: mcpConfig.headers,
+        body,
+        label: "claudeMd",
+        fetchImpl: ((input, init) =>
+          fetch(input, { ...init, signal: AbortSignal.timeout(10_000) })) as typeof fetch,
+      });
     });
   };
 
@@ -1294,13 +1290,12 @@ export async function handleHook(): Promise<void> {
         // PM2 not available or no processes - silently ignore
       }
 
-      // Sync CLAUDE.md, identity files, and setup script back to database, then restore backup
+      // Sync CLAUDE.md (then restore its backup), identity files, and setup script back to database
       if (agentInfo?.id) {
         try {
-          await syncClaudeMdToServer(agentInfo.id);
+          await stopClaudeMdAndSync(agentInfo.id);
           await syncIdentityFilesToServer(agentInfo.id);
           await syncSetupScriptToServer(agentInfo.id);
-          await restoreClaudeMd();
         } catch {
           // Silently fail - don't block shutdown
         }

@@ -7,10 +7,9 @@ import {
   DEFAULT_CLAUDE_MD_SESSION_PATHS,
   materializeClaudeMd,
   planClaudeMdSync,
-  readClaudeMdSyncState,
-  restoreClaudeMd,
+  stopClaudeMd,
 } from "../commands/claude-md-session";
-import { contentSha256 } from "../commands/profile-sync";
+import { contentSha256, type ProfilePayload } from "../commands/profile-sync";
 
 const V1 = "# CLAUDE.md\n\nversion one";
 const V2 = "# CLAUDE.md\n\nversion two — the Lead added a rule";
@@ -62,6 +61,7 @@ describe("concurrent sessions sharing ~/.claude/CLAUDE.md", () => {
       file: join(root, "home/.claude/CLAUDE.md"),
       backup: join(root, "home/.claude/CLAUDE.md.bak"),
       record: join(root, "lineage.json"),
+      lock: join(root, "home/.claude/CLAUDE.md.lock"),
     };
   });
 
@@ -69,12 +69,13 @@ describe("concurrent sessions sharing ~/.claude/CLAUDE.md", () => {
     await rm(root, { recursive: true, force: true });
   });
 
-  /** A Stop: decide the sync from what is on disk, then restore the `.bak`. */
+  /** A Stop: the payload it would sync (null if none); restores the `.bak`. */
   const stop = async () => {
-    const state = await readClaudeMdSyncState(paths);
-    const body = state ? planClaudeMdSync(state) : null;
-    await restoreClaudeMd(paths);
-    return body;
+    let sent: ProfilePayload["body"] | null = null;
+    await stopClaudeMd(async (body) => {
+      sent = body;
+    }, paths);
+    return sent;
   };
   const edit = (content: string) => Bun.write(paths.file, content);
 
@@ -128,7 +129,7 @@ describe("concurrent sessions sharing ~/.claude/CLAUDE.md", () => {
 
   test("restoring without a .bak removes the file and the record", async () => {
     await materializeClaudeMd(V1, paths); // nothing on disk before: no .bak
-    await restoreClaudeMd(paths);
+    expect(await stop()).toBeNull();
 
     expect(await Bun.file(paths.file).exists()).toBe(false);
     expect(await Bun.file(paths.record).exists()).toBe(false);
@@ -139,13 +140,23 @@ describe("concurrent sessions sharing ~/.claude/CLAUDE.md", () => {
     await edit("A's edit");
     await materializeClaudeMd(V2, paths); // .bak = A's edit, sidecar says "edit on v2"
     await Bun.write(paths.backup, V1); // the .bak changed under a sidecar that no longer matches
-    await restoreClaudeMd(paths);
 
-    expect(await stop()).toBeNull(); // unknown lineage → treated as hook-written
+    expect(await stop()).toBeNull(); // disk v2 is the second materialization
+    expect(await stop()).toBeNull(); // restored v1: unknown lineage → hook-written
   });
 
   test("an unreadable or malformed record never turns into a push", async () => {
-    for (const bad of ['{"written": "abc', "{}", "[]", "42", '{"written": 5, "base": null}']) {
+    const upper = h(V1).toUpperCase();
+    for (const bad of [
+      '{"written": "abc',
+      "{}",
+      "[]",
+      "42",
+      '{"written": 5, "base": null}',
+      '{"written": "not-a-sha256", "base": null}',
+      `{"written": null, "base": "not-a-sha256"}`,
+      `{"written": "${upper}", "base": null}`,
+    ]) {
       await materializeClaudeMd(V2, paths);
       await edit("edited");
       await Bun.write(paths.record, bad);
@@ -157,7 +168,7 @@ describe("concurrent sessions sharing ~/.claude/CLAUDE.md", () => {
   test("record and sidecar writes are atomic: no temp files are left behind", async () => {
     await edit(V1);
     await materializeClaudeMd(V2, paths); // writes .bak, sidecar and record
-    await restoreClaudeMd(paths);
+    await stop(); // restores them
 
     const leftovers = [...(await readdir(root)), ...(await readdir(join(root, "home/.claude")))];
     expect(leftovers.filter((name) => name.endsWith(".tmp"))).toEqual([]);
@@ -177,9 +188,66 @@ describe("concurrent sessions sharing ~/.claude/CLAUDE.md", () => {
   test("a .bak without lineage (from before this module) is treated as hook-written", async () => {
     await Bun.write(paths.backup, V1); // legacy backup, no sidecar
     await Bun.write(paths.file, V2);
-    await restoreClaudeMd(paths);
+    await Bun.write(paths.record, JSON.stringify({ written: h(V2), base: h(V2) }));
 
-    expect(await stop()).toBeNull();
+    expect(await stop()).toBeNull(); // disk v2 was written by a hook
+    expect(await stop()).toBeNull(); // restored legacy v1 is never pushed
+  });
+
+  test("a Stop cannot land between SessionStart's file and record writes", async () => {
+    // The reviewed race: B writes file v2 while its record still says v1; a Stop
+    // in that window restores the old .bak, B then commits record v2, and the
+    // next Stop sends v1 against v2 — a revert the compare-and-set accepts.
+    await materializeClaudeMd(V1, paths); // A starts on v1
+    let reachedPause!: () => void;
+    const paused = new Promise<void>((resolve) => {
+      reachedPause = resolve;
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const sessionStartB = materializeClaudeMd(V2, paths, {
+      hooks: {
+        afterFileWrite: async () => {
+          reachedPause();
+          await gate;
+        },
+      },
+    });
+    await paused; // B wrote v2, record still v1
+
+    let stopADone = false;
+    const stopA = stop().then((body) => {
+      stopADone = true;
+      return body;
+    });
+    await Bun.sleep(100);
+    expect(stopADone).toBe(false); // A waits for B's transition to finish
+
+    release();
+    await sessionStartB;
+    expect(await stopA).toBeNull(); // A sees B's consistent write, restores v1
+    expect(await stop()).toBeNull(); // B: v1 was restored by a hook — no revert
+  });
+
+  test("a Stop that cannot get the lock pushes and restores nothing", async () => {
+    await materializeClaudeMd(V2, paths);
+    await edit("edited");
+    await Bun.write(paths.lock, "live holder");
+    let synced = false;
+
+    const outcome = await stopClaudeMd(
+      async () => {
+        synced = true;
+      },
+      paths,
+      { lock: { waitMs: 100 } },
+    );
+
+    expect(outcome).toBe("busy");
+    expect(synced).toBe(false);
+    expect(await Bun.file(paths.file).text()).toBe("edited");
   });
 });
 
