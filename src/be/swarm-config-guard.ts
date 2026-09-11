@@ -223,7 +223,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   },
   // AWS credential mode for the Bedrock path on the pi harness.
   //   sdk    — AWS SDK default credential chain (env, ~/.aws/*, SSO, IMDS, …)
-  //   bearer — explicit bearer token via AWS_BEARER_TOKEN_BEDROCK (future/Mantle)
+  //   bearer — explicit Bedrock API key via AWS_BEARER_TOKEN_BEDROCK (required in this mode)
   // When absent the worker infers the mode from MODEL_OVERRIDE (sdk semantics).
   BEDROCK_AUTH_MODE: (value) => {
     if (value === "sdk" || value === "bearer") return null;

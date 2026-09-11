@@ -191,19 +191,36 @@ export async function checkPiMonoCredentials(
   env: Record<string, string | undefined>,
   opts: CredCheckOptions = {},
 ): Promise<CredStatus> {
-  // Determine Bedrock SDK mode:
-  //   - Explicit:  BEDROCK_AUTH_MODE=sdk
+  // Determine the Bedrock mode:
+  //   - Explicit:  BEDROCK_AUTH_MODE=sdk — the AWS SDK default credential chain
+  //   - Explicit:  BEDROCK_AUTH_MODE=bearer — an explicit Bedrock API key in
+  //                AWS_BEARER_TOKEN_BEDROCK, which the AWS SDK picks up as the
+  //                bearer identity for the Bedrock clients
   //   - Fallback:  BEDROCK_AUTH_MODE absent AND MODEL_OVERRIDE starts with
   //                "amazon-bedrock/" (preserves today's prefix-inference semantics)
-  // BEDROCK_AUTH_MODE=bearer is declared/validated but the full bearer-token
-  // path is not implemented yet — it falls through to the standard auth check.
+  // Both explicit modes share the region check and the enumeration probe; they
+  // differ in what has to be present up front and in how readiness is reported.
   const bedrockAuthMode = env.BEDROCK_AUTH_MODE?.toLowerCase();
+  const isBedrockBearer = bedrockAuthMode === "bearer";
   const isBedrockSdk =
     bedrockAuthMode === "sdk" ||
     (bedrockAuthMode === undefined &&
       env.MODEL_OVERRIDE?.toLowerCase().startsWith("amazon-bedrock/"));
 
-  if (isBedrockSdk) {
+  if (isBedrockBearer && !env.AWS_BEARER_TOKEN_BEDROCK) {
+    // The token is the whole point of this mode; without it there is nothing
+    // the probe could authenticate with, and the standard API keys do not
+    // apply to Bedrock, so do not fall through to them.
+    return {
+      ready: false,
+      missing: ["AWS_BEARER_TOKEN_BEDROCK"],
+      hint: "BEDROCK_AUTH_MODE=bearer requires AWS_BEARER_TOKEN_BEDROCK (a Bedrock API key); set it, or use BEDROCK_AUTH_MODE=sdk to authenticate through the AWS credential chain.",
+      bedrockModels: [],
+      bedrockRegion: env.AWS_REGION ?? "",
+    };
+  }
+
+  if (isBedrockSdk || isBedrockBearer) {
     const region = env.AWS_REGION;
     if (!region) {
       // Do NOT fabricate a region. A guessed `us-east-1` can differ from where
@@ -231,7 +248,7 @@ export async function checkPiMonoCredentials(
       return {
         ready: true,
         missing: [],
-        satisfiedBy: "sdk-delegated",
+        satisfiedBy: isBedrockBearer ? "env" : "sdk-delegated",
         hint: `Bedrock models invocable in ${region} enumerated (${bedrockModels.length} usable; ListFoundationModels + ListInferenceProfiles).`,
         bedrockModels,
         bedrockRegion: region,

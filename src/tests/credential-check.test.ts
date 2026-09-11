@@ -410,21 +410,69 @@ describe("checkPiMonoCredentials", () => {
     expect(status.ready).toBe(false);
   });
 
-  test("BEDROCK_AUTH_MODE=bearer: does NOT trigger the sdk probe (falls through)", async () => {
-    // The bearer path is declared/validated but the full implementation is
-    // not implemented yet. With no other credentials set it should be not-ready
-    // via the standard permissive check, not via the sdk probe.
-    const env = { BEDROCK_AUTH_MODE: "bearer" };
-    // No other keys set, no auth.json → not-ready from the permissive path.
-    const status = await checkPiMonoCredentials(env, { homeDir: HOME, fs: noFiles });
+  // ─── BEDROCK_AUTH_MODE=bearer: explicit Bedrock API key ─────────────────────
+
+  test("BEDROCK_AUTH_MODE=bearer: missing AWS_BEARER_TOKEN_BEDROCK → not ready, no probe, no fall-through", async () => {
+    let probed = false;
+    // A standard key must not satisfy the bearer mode: it does not apply to Bedrock.
+    const env = { BEDROCK_AUTH_MODE: "bearer", AWS_REGION: "us-east-1", ANTHROPIC_API_KEY: "x" };
+    const status = await checkPiMonoCredentials(env, {
+      homeDir: HOME,
+      fs: noFiles,
+      bedrockProbe: async () => {
+        probed = true;
+      },
+    });
     expect(status.ready).toBe(false);
-    // Satisfying via any standard key still works for the bearer mode today.
-    const withKey = await checkPiMonoCredentials(
-      { BEDROCK_AUTH_MODE: "bearer", ANTHROPIC_API_KEY: "x" },
-      { homeDir: HOME, fs: noFiles },
-    );
-    expect(withKey.ready).toBe(true);
-    expect(withKey.satisfiedBy).toBe("env");
+    expect(status.missing).toEqual(["AWS_BEARER_TOKEN_BEDROCK"]);
+    expect(status.hint).toContain("AWS_BEARER_TOKEN_BEDROCK");
+    expect(probed).toBe(false);
+  });
+
+  test("BEDROCK_AUTH_MODE=bearer: token without AWS_REGION → not ready with the region hint", async () => {
+    const env = { BEDROCK_AUTH_MODE: "bearer", AWS_BEARER_TOKEN_BEDROCK: "bedrock-api-key" };
+    const status = await checkPiMonoCredentials(env, {
+      homeDir: HOME,
+      fs: noFiles,
+      bedrockProbe: bedrockProbeSuccess,
+    });
+    expect(status.ready).toBe(false);
+    expect(status.hint).toContain("AWS_REGION");
+    expect(status.bedrockRegion).toBe("");
+  });
+
+  test("BEDROCK_AUTH_MODE=bearer: token + region → probe runs, ready via env", async () => {
+    const env = {
+      BEDROCK_AUTH_MODE: "bearer",
+      AWS_BEARER_TOKEN_BEDROCK: "bedrock-api-key",
+      AWS_REGION: "eu-central-1",
+    };
+    const status = await checkPiMonoCredentials(env, {
+      homeDir: HOME,
+      fs: noFiles,
+      bedrockProbe: async () => [{ id: "anthropic.claude-sonnet", name: "Claude Sonnet" }],
+    });
+    expect(status.ready).toBe(true);
+    expect(status.satisfiedBy).toBe("env");
+    expect(status.bedrockRegion).toBe("eu-central-1");
+    expect(status.bedrockModels).toEqual([
+      { id: "anthropic.claude-sonnet", name: "Claude Sonnet" },
+    ]);
+  });
+
+  test("BEDROCK_AUTH_MODE=bearer: probe failure → ready:false with the classified hint", async () => {
+    const env = {
+      BEDROCK_AUTH_MODE: "bearer",
+      AWS_BEARER_TOKEN_BEDROCK: "bedrock-api-key",
+      AWS_REGION: "us-east-1",
+    };
+    const status = await checkPiMonoCredentials(env, {
+      homeDir: HOME,
+      fs: noFiles,
+      bedrockProbe: bedrockProbeAuthFail,
+    });
+    expect(status.ready).toBe(false);
+    expect(status.bedrockRegion).toBe("us-east-1");
   });
 
   test("BEDROCK_AUTH_MODE absent + no MODEL_OVERRIDE=amazon-bedrock: no probe", async () => {
