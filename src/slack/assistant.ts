@@ -2,10 +2,17 @@ import { Assistant } from "@slack/bolt";
 import { getAgentWorkingOnThread, getLeadAgent, getMostRecentTaskInThread } from "../be/db";
 import { resolveTemplate } from "../prompts/resolver";
 import { slackContextKey } from "../tasks/context-key";
-import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { ackSlackMessage, reactionName } from "./ack";
 import { resolveSlackUserId, rewriteSlackMentions } from "./enrich";
 import { wasEventSeen } from "./event-dedup";
+import type { SlackFile } from "./files";
+import {
+  bufferedFileFailures,
+  buildEffectiveText,
+  createSlackTaskWithFiles,
+  fetchSlackFiles,
+  notifySlackFileFailures,
+} from "./inbound-files";
 import { ensureSlackThreadTree, isSlackRenderV2Enabled } from "./render-v2";
 import { hasOtherUserMention } from "./router";
 import { bufferThreadMessage, getBufferMessageCount } from "./thread-buffer";
@@ -80,12 +87,10 @@ export function createAssistant(): Assistant {
         const threadTs = (msg.thread_ts as string) || message.ts;
         const channelId = message.channel;
         const messageText = (msg.text as string) || "";
+        // `file_share` messages land here too: an image sent with no caption
+        // arrives with empty `text` and everything in `files`.
+        const files = msg.files as SlackFile[] | undefined;
         const userId = (msg.user as string) || "";
-        // Any in-body `<@U…>` mention the requester typed is rewritten via
-        // the identity primitive before it reaches agent-visible task text —
-        // never a raw Slack ID. Bot-mention routing checks below use the
-        // raw `messageText`, not this rendered copy.
-        const renderedMessageText = await rewriteSlackMentions(messageText);
 
         // Resolve the bot's own Slack user ID (cached after first call) so we can
         // check whether this message is actually addressed to us.
@@ -123,30 +128,55 @@ export function createAssistant(): Assistant {
         // 1. Check if an agent is already working in this thread
         const workingAgent = await getAgentWorkingOnThread(channelId, threadTs);
 
-        if (workingAgent && workingAgent.status !== "offline") {
-          // Follow-up message → route to the same agent
-          if (isAdditiveSlack()) {
-            bufferThreadMessage(channelId, threadTs, messageText, userId, message.ts);
-            const count = getBufferMessageCount(`${channelId}:${threadTs}`);
-            const event = count === 1 ? "accepted" : "buffered";
-            await ackSlackMessage(client, channelId, message.ts, reactionName(event), event);
-            await safeSetStatus("Queuing follow-up...");
-            return;
-          }
+        // Follow-up message → route to the same agent. Buffered follow-ups
+        // carry the `[File: …]` lines only; their files are not attached.
+        if (workingAgent && workingAgent.status !== "offline" && isAdditiveSlack()) {
+          const unattached = bufferedFileFailures(files);
+          bufferThreadMessage(
+            channelId,
+            threadTs,
+            buildEffectiveText(messageText, files, unattached),
+            userId,
+            message.ts,
+          );
+          const count = getBufferMessageCount(`${channelId}:${threadTs}`);
+          const event = count === 1 ? "accepted" : "buffered";
+          await ackSlackMessage(client, channelId, message.ts, reactionName(event), event);
+          await notifySlackFileFailures(client, channelId, threadTs, unattached);
+          await safeSetStatus("Queuing follow-up...");
+          return;
+        }
 
+        // Fetch shared files before the task text is final: a file that can't be
+        // downloaded is flagged in it.
+        if (files?.length) await safeSetStatus("Downloading attachments...");
+        const inbound = await fetchSlackFiles(client, files);
+        // Any in-body `<@U…>` mention the requester typed is rewritten via
+        // the identity primitive before it reaches agent-visible task text —
+        // never a raw Slack ID. Bot-mention routing checks above use the
+        // raw `messageText`, not this rendered copy.
+        const renderedMessageText = await rewriteSlackMentions(
+          buildEffectiveText(messageText, inbound.files, inbound.failed),
+        );
+
+        if (workingAgent && workingAgent.status !== "offline") {
           // Otherwise, create a follow-up task for the working agent
           const latestTask = await getMostRecentTaskInThread(channelId, threadTs);
-          const task = await createTaskWithSiblingAwareness(renderedMessageText, {
-            agentId: workingAgent.id,
-            source: "slack",
-            slackChannelId: channelId,
-            slackThreadTs: threadTs,
-            slackTriggerMessageTs: message.ts,
-            slackUserId: userId,
-            parentTaskId: latestTask?.id,
-            requestedByUserId,
-            contextKey: slackContextKey({ channelId, threadTs }),
-          });
+          const { task, unattached } = await createSlackTaskWithFiles(
+            renderedMessageText,
+            {
+              agentId: workingAgent.id,
+              source: "slack",
+              slackChannelId: channelId,
+              slackThreadTs: threadTs,
+              slackTriggerMessageTs: message.ts,
+              slackUserId: userId,
+              parentTaskId: latestTask?.id,
+              requestedByUserId,
+              contextKey: slackContextKey({ channelId, threadTs }),
+            },
+            inbound,
+          );
           await ackSlackMessage(
             client,
             channelId,
@@ -154,6 +184,7 @@ export function createAssistant(): Assistant {
             reactionName("accepted"),
             "accepted",
           );
+          await notifySlackFileFailures(client, channelId, threadTs, unattached);
 
           if (isSlackRenderV2Enabled()) await ensureSlackThreadTree([task.id]);
 
@@ -182,15 +213,19 @@ export function createAssistant(): Assistant {
         const lead = await getLeadAgent();
         if (!lead) {
           // No lead — still queue the task
-          const task = await createTaskWithSiblingAwareness(renderedMessageText + channelContext, {
-            source: "slack",
-            slackChannelId: channelId,
-            slackThreadTs: threadTs,
-            slackTriggerMessageTs: message.ts,
-            slackUserId: userId,
-            requestedByUserId,
-            contextKey: slackContextKey({ channelId, threadTs }),
-          });
+          const { task, unattached } = await createSlackTaskWithFiles(
+            renderedMessageText + channelContext,
+            {
+              source: "slack",
+              slackChannelId: channelId,
+              slackThreadTs: threadTs,
+              slackTriggerMessageTs: message.ts,
+              slackUserId: userId,
+              requestedByUserId,
+              contextKey: slackContextKey({ channelId, threadTs }),
+            },
+            inbound,
+          );
           await ackSlackMessage(
             client,
             channelId,
@@ -198,6 +233,7 @@ export function createAssistant(): Assistant {
             reactionName("accepted"),
             "accepted",
           );
+          await notifySlackFileFailures(client, channelId, threadTs, unattached);
           if (isSlackRenderV2Enabled()) {
             await ensureSlackThreadTree([task.id]);
           } else {
@@ -207,17 +243,22 @@ export function createAssistant(): Assistant {
           return;
         }
 
-        const task = await createTaskWithSiblingAwareness(renderedMessageText + channelContext, {
-          agentId: lead.id,
-          source: "slack",
-          slackChannelId: channelId,
-          slackThreadTs: threadTs,
-          slackTriggerMessageTs: message.ts,
-          slackUserId: userId,
-          requestedByUserId,
-          contextKey: slackContextKey({ channelId, threadTs }),
-        });
+        const { task, unattached } = await createSlackTaskWithFiles(
+          renderedMessageText + channelContext,
+          {
+            agentId: lead.id,
+            source: "slack",
+            slackChannelId: channelId,
+            slackThreadTs: threadTs,
+            slackTriggerMessageTs: message.ts,
+            slackUserId: userId,
+            requestedByUserId,
+            contextKey: slackContextKey({ channelId, threadTs }),
+          },
+          inbound,
+        );
         await ackSlackMessage(client, channelId, message.ts, reactionName("accepted"), "accepted");
+        await notifySlackFileFailures(client, channelId, threadTs, unattached);
         if (isSlackRenderV2Enabled()) await ensureSlackThreadTree([task.id]);
         // setStatus shows typing indicator — watcher will post final result when done
       } catch (error) {

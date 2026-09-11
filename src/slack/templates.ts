@@ -40,6 +40,20 @@ registerTemplate({
 });
 
 registerTemplate({
+  eventType: "slack.message.attachment_failed",
+  header: "",
+  defaultBody:
+    ":warning: Couldn't attach {{failed_files}} to the task. The agent sees the file name, not its contents.",
+  variables: [
+    {
+      name: "failed_files",
+      description: "Comma-separated `name` (reason) list of the files that were not attached",
+    },
+  ],
+  category: "system",
+});
+
+registerTemplate({
   eventType: "slack.message.thread_context",
   header: "",
   defaultBody: `<thread_context>
