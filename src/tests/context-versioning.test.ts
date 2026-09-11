@@ -412,6 +412,81 @@ describe("Context Versioning", () => {
   });
 
   // ============================================================================
+  // session_sync stale-echo guard
+  // ============================================================================
+
+  describe("session_sync stale-echo guard", () => {
+    const echoAgentId = "cccc0000-0000-4000-8000-000000000004";
+    const v1 = "# CLAUDE.md\n\nversion one — written by the Lead";
+    const v2 = "# CLAUDE.md\n\nversion two — the Lead added the triage rule";
+    const v3 = "# CLAUDE.md\n\nversion three — a genuine edit made in-session";
+
+    beforeAll(async () => {
+      await createAgent({ id: echoAgentId, name: "Echo Agent", isLead: false, status: "idle" });
+      await updateAgentProfile(echoAgentId, { claudeMd: v1 }, { changeSource: "self_edit" });
+      await updateAgentProfile(echoAgentId, { claudeMd: v2 }, { changeSource: "self_edit" });
+    });
+
+    test("ignores a session_sync whose content is a superseded version", async () => {
+      // The shape of the 2026-09-11 incident: a concurrent session (or the
+      // restored ~/.claude/CLAUDE.md.bak) syncs the copy it materialized from
+      // the DB before the Lead's self_edit landed.
+      const agent = await updateAgentProfile(
+        echoAgentId,
+        { claudeMd: v1 },
+        { changeSource: "session_sync" },
+      );
+
+      expect(agent).not.toBeNull();
+      expect(agent!.claudeMd).toBe(v2);
+
+      const latest = await getLatestContextVersion(echoAgentId, "claudeMd");
+      expect(latest!.version).toBe(2);
+      expect(latest!.content).toBe(v2);
+    });
+
+    test("still applies a session_sync carrying content never seen before", async () => {
+      const agent = await updateAgentProfile(
+        echoAgentId,
+        { claudeMd: v3 },
+        { changeSource: "session_sync" },
+      );
+
+      expect(agent!.claudeMd).toBe(v3);
+      const latest = await getLatestContextVersion(echoAgentId, "claudeMd");
+      expect(latest!.version).toBe(3);
+      expect(latest!.changeSource).toBe("session_sync");
+    });
+
+    test("an explicit source may still revert to an older version", async () => {
+      const agent = await updateAgentProfile(
+        echoAgentId,
+        { claudeMd: v1 },
+        { changeSource: "self_edit" },
+      );
+
+      expect(agent!.claudeMd).toBe(v1);
+      const latest = await getLatestContextVersion(echoAgentId, "claudeMd");
+      expect(latest!.version).toBe(4);
+    });
+
+    test("the echo guard is per field: other fields in the same update still land", async () => {
+      // claudeMd echoes v2 (superseded, the column holds v1 now); soulMd is new.
+      const soul = "s".repeat(600);
+      const agent = await updateAgentProfile(
+        echoAgentId,
+        { claudeMd: v2, soulMd: soul },
+        { changeSource: "session_sync" },
+      );
+
+      expect(agent!.claudeMd).toBe(v1);
+      expect(agent!.soulMd).toBe(soul);
+      expect((await getLatestContextVersion(echoAgentId, "claudeMd"))!.version).toBe(4);
+      expect((await getLatestContextVersion(echoAgentId, "soulMd"))!.version).toBe(1);
+    });
+  });
+
+  // ============================================================================
   // Content hash consistency
   // ============================================================================
 

@@ -14,6 +14,7 @@ import {
   contentSha256,
   readIdentityBaselines,
   warnProfileFileTooLarge,
+  writeIdentityBaselines,
 } from "../commands/profile-sync";
 import type { Agent } from "../types";
 import { getApiKey } from "../utils/api-key";
@@ -227,6 +228,25 @@ async function writeAgentClaudeMd(content: string): Promise<void> {
     // Directory may already exist
   }
   await Bun.write(CLAUDE_MD_PATH, content);
+}
+
+/**
+ * Record the hash of the CLAUDE.md just materialized from the DB, so the Stop
+ * hook can tell "unchanged since I wrote it" from "edited during the session".
+ * The runner records the same baseline at boot; refreshing it at every
+ * SessionStart matters because concurrent sessions of the same agent share
+ * `~/.claude/CLAUDE.md`: whichever session ends last would otherwise sync a
+ * copy that a sibling session (or an `update-profile` call) already moved past.
+ * Non-fatal: without a baseline the sync falls back to the server-side guard.
+ */
+async function recordClaudeMdBaseline(content: string): Promise<void> {
+  try {
+    const baselines = (await readIdentityBaselines()) ?? {};
+    baselines.claudeMd = contentSha256(content);
+    await writeIdentityBaselines(baselines);
+  } catch {
+    // Best effort — see docstring.
+  }
 }
 
 /**
@@ -674,6 +694,16 @@ export async function handleHook(): Promise<void> {
     const content = await file.text();
 
     if (!content.trim()) return;
+
+    // Same guard the identity files already get below: a CLAUDE.md that still
+    // hashes to what SessionStart materialized was not edited in this session,
+    // and syncing it back can only clobber a newer DB value written meanwhile
+    // (a sibling session's edit, or an `update-profile` call).
+    const baselines = await readIdentityBaselines();
+    if (baselines?.claudeMd && contentSha256(content) === baselines.claudeMd) {
+      return;
+    }
+
     await postHookProfileUpdate({
       url: `${getBaseUrl()}/api/agents/${agentId}/profile`,
       headers: mcpConfig.headers,
@@ -1057,6 +1087,7 @@ export async function handleHook(): Promise<void> {
         try {
           await backupExistingClaudeMd();
           await writeAgentClaudeMd(agentInfo.claudeMd);
+          await recordClaudeMdBaseline(agentInfo.claudeMd);
           console.log("Loaded your personal CLAUDE.md configuration.");
         } catch (error) {
           console.log(`Warning: Could not load CLAUDE.md: ${(error as Error).message}`);
