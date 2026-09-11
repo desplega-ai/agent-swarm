@@ -10,6 +10,7 @@ import {
   stopClaudeMd,
 } from "../commands/claude-md-session";
 import { contentSha256, type ProfilePayload } from "../commands/profile-sync";
+import { withFileLock } from "../utils/file-lock";
 
 const V1 = "# CLAUDE.md\n\nversion one";
 const V2 = "# CLAUDE.md\n\nversion two — the Lead added a rule";
@@ -78,6 +79,27 @@ describe("concurrent sessions sharing ~/.claude/CLAUDE.md", () => {
     return sent;
   };
   const edit = (content: string) => Bun.write(paths.file, content);
+
+  /** Hold the CLAUDE.md lock (a live holder) until the returned release is called. */
+  const holdLock = async () => {
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let held!: () => void;
+    const acquired = new Promise<void>((resolve) => {
+      held = resolve;
+    });
+    const holding = withFileLock(paths.lock, async () => {
+      held();
+      await released;
+    });
+    await acquired;
+    return async () => {
+      release();
+      await holding;
+    };
+  };
 
   test("a sibling's .bak restore is not pushed as an edit", async () => {
     await materializeClaudeMd(V1, paths); // A starts on v1
@@ -247,7 +269,7 @@ describe("concurrent sessions sharing ~/.claude/CLAUDE.md", () => {
   test("a Stop that cannot get the lock pushes and restores nothing", async () => {
     await materializeClaudeMd(V2, paths);
     await edit("edited");
-    await Bun.write(paths.lock, "live holder");
+    const release = await holdLock();
     let synced = false;
 
     const outcome = await stopClaudeMd(
@@ -257,10 +279,54 @@ describe("concurrent sessions sharing ~/.claude/CLAUDE.md", () => {
       paths,
       { lockWaitMs: 100 },
     );
+    await release();
 
     expect(outcome).toBe("busy");
     expect(synced).toBe(false);
     expect(await Bun.file(paths.file).text()).toBe("edited");
+  });
+
+  test("a SessionStart that cannot get the lock leaves the file as it is", async () => {
+    await materializeClaudeMd(V1, paths);
+    const release = await holdLock();
+
+    const outcome = await materializeClaudeMd(V2, paths, { lockWaitMs: 100 });
+    await release();
+
+    expect(outcome).toBe("skipped"); // never falls back to an unlocked write
+    expect(await Bun.file(paths.file).text()).toBe(V1);
+    expect(await stop()).toBeNull(); // and nothing it did not write gets pushed
+  });
+
+  test("a live SessionStart paused mid-transition is never robbed by a Stop", async () => {
+    // The stale-lock variant of the race: however long the holder pauses between
+    // its file and record writes, a Stop cannot take the lock from it.
+    await materializeClaudeMd(V1, paths);
+    let reachedPause!: () => void;
+    const paused = new Promise<void>((resolve) => {
+      reachedPause = resolve;
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const sessionStartB = materializeClaudeMd(V2, paths, {
+      testPauses: {
+        afterFileWrite: async () => {
+          reachedPause();
+          await gate;
+        },
+      },
+    });
+    await paused;
+
+    const outcome = await stopClaudeMd(async () => {}, paths, { lockWaitMs: 300 });
+    expect(outcome).toBe("busy");
+    expect(await Bun.file(paths.file).text()).toBe(V2); // untouched mid-transition
+
+    release();
+    expect(await sessionStartB).toBe("materialized");
+    expect(await stop()).toBeNull(); // v2 with its own record: hook-written
   });
 });
 

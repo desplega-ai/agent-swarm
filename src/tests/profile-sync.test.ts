@@ -26,6 +26,7 @@ import {
 } from "../commands/profile-sync";
 import { profileSyncAuditExitCode, runProfileSyncAudit } from "../commands/profile-sync-audit";
 import { MAX_PROFILE_FILE_LENGTH } from "../utils/constants";
+import { withFileLock } from "../utils/file-lock";
 import { IDENTITY_FIELD_BUDGETS } from "../utils/identity-field-budget";
 
 const MARKER_START = "# === Agent-managed setup (from DB) ===";
@@ -485,7 +486,19 @@ describe("syncProfileFilesToServer (orchestration is non-fatal)", () => {
   test("skips the personal CLAUDE.md, reading nothing, while its lock is held", async () => {
     const dir = await mkdtemp(join(tmpdir(), "claude-md-lock-"));
     const lockPath = join(dir, "CLAUDE.md.lock");
-    await Bun.write(lockPath, "live holder");
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let held!: () => void;
+    const acquired = new Promise<void>((resolve) => {
+      held = resolve;
+    });
+    const holding = withFileLock(lockPath, async () => {
+      held();
+      await released;
+    });
+    await acquired;
     const sent: string[] = [];
     const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
     const fetchImpl = (async (_url: string, init?: RequestInit) => {
@@ -504,8 +517,9 @@ describe("syncProfileFilesToServer (orchestration is non-fatal)", () => {
       });
       expect(sent).toEqual([]);
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("CLAUDE.md busy"));
-      expect(await Bun.file(lockPath).text()).toBe("live holder");
     } finally {
+      release();
+      await holding;
       warnSpy.mockRestore();
       await rm(dir, { recursive: true, force: true });
     }

@@ -1,85 +1,94 @@
 /**
- * Advisory cross-process lock backed by an exclusively created lock file.
+ * Advisory cross-process lock held by the kernel: flock(2) on a lock file, via
+ * `bun:ffi` (Bun and Node expose no flock).
  *
- * Makes a multi-file state transition look atomic to other processes of the
- * same user. First use: the Claude hook rewrites `~/.claude/CLAUDE.md` together
- * with its lineage record, and the hook and the runner read that pair — a reader
+ * Makes a multi-file state transition exclusive across processes of the same
+ * user. First use: the Claude hook rewrites `~/.claude/CLAUDE.md` together with
+ * its lineage record, and the hook and the runner read that pair — a reader
  * landing between the two writes can misjudge the file (see
  * `src/commands/claude-md-session.ts`).
  *
- * A holder that dies leaves its lock file behind, so a lock older than
- * `staleMs` is broken. Two waiters breaking the same stale lock at the same
- * instant could both acquire it — the price of not needing a lock daemon, and
- * only reachable after a holder died or outlived `staleMs`.
+ * Why the kernel and not a lock file with a staleness threshold: a threshold
+ * cannot tell a slow holder (a stalled filesystem, a suspended process) from a
+ * dead one, so it eventually lets a second process into a transition that is
+ * still running. flock is released only when the holder closes its descriptor or
+ * dies, so it can never be taken from a live holder and needs no breaking.
+ *
+ * The lock file is never deleted: unlinking a locked path would let a newcomer
+ * create and lock a different inode while the old one is still held.
  */
 
-// Exclusive create (`wx`) and directory creation have no Bun equivalents.
+import { dlopen, FFIType } from "bun:ffi";
+// A file handle whose descriptor stays open while the lock is held has no Bun
+// equivalent; neither does directory creation.
 import { mkdir, open } from "node:fs/promises";
 import { dirname } from "node:path";
+
+const LOCK_EX = 2;
+const LOCK_NB = 4;
+
+type Flock = (fd: number, operation: number) => number;
+
+const LIBC_CANDIDATES =
+  process.platform === "darwin"
+    ? ["libc.dylib", "/usr/lib/libSystem.B.dylib"]
+    : ["libc.so.6", "libc.so", "libc.musl-x86_64.so.1", "libc.musl-aarch64.so.1"];
+
+let flockImpl: Flock | null | undefined;
+
+function loadFlock(): Flock | null {
+  if (flockImpl !== undefined) return flockImpl;
+  flockImpl = null;
+  for (const name of LIBC_CANDIDATES) {
+    try {
+      const { symbols } = dlopen(name, {
+        flock: { args: [FFIType.i32, FFIType.i32], returns: FFIType.i32 },
+      });
+      flockImpl = (fd, operation) => symbols.flock(fd, operation);
+      break;
+    } catch {
+      // try the next libc name
+    }
+  }
+  return flockImpl;
+}
 
 export interface FileLockOptions {
   /** How long to wait for a held lock before giving up. */
   waitMs?: number;
-  /** A lock file older than this is considered abandoned and broken. */
-  staleMs?: number;
   /** Poll interval while waiting. */
   pollMs?: number;
 }
 
-export type FileLockResult<T> = { acquired: true; value: T } | { acquired: false };
+export type FileLockResult<T> =
+  | { acquired: true; value: T }
+  /** `busy`: another live process holds it. `unsupported`: no flock on this platform. */
+  | { acquired: false; reason: "busy" | "unsupported" };
 
-const DEFAULTS = { waitMs: 15_000, staleMs: 60_000, pollMs: 25 };
-
-async function isStale(lockPath: string, staleMs: number): Promise<boolean> {
-  const info = await Bun.file(lockPath)
-    .stat()
-    .catch(() => null);
-  return info !== null && Date.now() - info.mtimeMs > staleMs;
-}
-
-/** Run `fn` while holding the lock; `{ acquired: false }` if it never became free. */
+/**
+ * Run `fn` while holding the lock. Never runs `fn` without it: callers decide
+ * what a `busy` or `unsupported` result means for them.
+ */
 export async function withFileLock<T>(
   lockPath: string,
   fn: () => Promise<T>,
   options: FileLockOptions = {},
 ): Promise<FileLockResult<T>> {
-  // `??`, not a spread: an explicit `undefined` must not override a default
-  // (a NaN deadline would wait forever).
-  const waitMs = options.waitMs ?? DEFAULTS.waitMs;
-  const staleMs = options.staleMs ?? DEFAULTS.staleMs;
-  const pollMs = options.pollMs ?? DEFAULTS.pollMs;
-  const token = `${process.pid}:${crypto.randomUUID()}`;
-  const deadline = Date.now() + waitMs;
+  const flock = loadFlock();
+  if (!flock) return { acquired: false, reason: "unsupported" };
+  const waitMs = options.waitMs ?? 15_000;
+  const pollMs = options.pollMs ?? 25;
 
   await mkdir(dirname(lockPath), { recursive: true });
-  for (;;) {
-    try {
-      const handle = await open(lockPath, "wx");
-      try {
-        await handle.writeFile(token);
-      } finally {
-        await handle.close();
-      }
-      break;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      if (await isStale(lockPath, staleMs)) {
-        await Bun.file(lockPath)
-          .delete()
-          .catch(() => {});
-        continue;
-      }
-      if (Date.now() >= deadline) return { acquired: false };
+  const handle = await open(lockPath, "a");
+  try {
+    const deadline = Date.now() + waitMs;
+    while (flock(handle.fd, LOCK_EX | LOCK_NB) !== 0) {
+      if (Date.now() >= deadline) return { acquired: false, reason: "busy" };
       await Bun.sleep(pollMs);
     }
-  }
-
-  try {
     return { acquired: true, value: await fn() };
   } finally {
-    // Only release our own lock: if it was broken as stale, someone else holds it now.
-    const lock = Bun.file(lockPath);
-    const current = await lock.text().catch(() => null);
-    if (current === token) await lock.delete().catch(() => {});
+    await handle.close(); // closing the descriptor releases the lock
   }
 }

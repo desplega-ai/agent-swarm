@@ -22,22 +22,25 @@
  * unsynced edit that a sibling's SessionStart had backed up brings back an edit
  * (still synced, against its own base), not something a hook wrote.
  *
- * Transitions of the pair (file + record) run under one cross-process lock
- * (`src/utils/file-lock.ts`): SessionStart's materialization, the Stop's whole
- * read → sync → restore protocol, and the runner backstop's read + post. Without
- * it a Stop landing between the file write and the record write reads a
- * mismatched pair and can re-create the revert this module exists to prevent.
- * Every holder bounds its network call (CLAUDE_MD_SYNC_TIMEOUT_MS), so a lock
- * older than CLAUDE_MD_LOCK_STALE_MS is abandoned and broken. The record and the
- * sidecar are also written atomically (temp file + rename), and an unreadable
- * record counts as hook-written, never as a reason to push.
+ * Transitions of the pair (file + record) run under one kernel-held
+ * cross-process lock (`src/utils/file-lock.ts`, flock): SessionStart's
+ * materialization, the Stop's whole read → sync → restore protocol, and the
+ * runner backstop's read + post. Without it a Stop landing between the file
+ * write and the record write reads a mismatched pair and can re-create the
+ * revert this module exists to prevent. The lock can never be taken from a live
+ * holder, so no transition ever runs without it:
+ *   - lock busy (or failing) → the transition is skipped, never run unlocked.
+ *     A skipped SessionStart leaves the file as it is (whatever is there carries
+ *     its own lineage); a skipped Stop pushes and restores nothing.
+ *   - no flock on this platform → SessionStart still materializes (unprotected)
+ *     but no Stop ever pushes: the DB is never at risk, only the sync of
+ *     CLAUDE.md edits is lost there.
+ * The record and the sidecar are also written atomically (temp file + rename),
+ * and an unreadable record counts as hook-written, never as a reason to push.
  *
- * Known limits: a SessionStart that still cannot get the lock after
- * SESSION_START_LOCK_WAIT_MS — only possible if the lock errors out or is taken
- * back-to-back by holders for that long — materializes without it (a session
- * needs its instructions), which reopens the window for that one write; and with
- * one `.bak` slot, a third overlapping session overwrites the backup of the first
- * (as before this module).
+ * Known limit: with one `.bak` slot, a third overlapping session overwrites the
+ * backup of the first, and a Stop can restore a backup a sibling took (as before
+ * this module); both are disk-level only, since every copy carries its lineage.
  */
 
 // `rename` has no Bun equivalent; it is what makes the record writes atomic.
@@ -47,7 +50,6 @@ import { scrubSecrets } from "../utils/secret-scrubber.ts";
 import {
   CLAUDE_MD_LINEAGE_PATH,
   CLAUDE_MD_LOCK_PATH,
-  CLAUDE_MD_LOCK_STALE_MS,
   CLAUDE_MD_PATH,
   type ClaudeMdLineage,
   claudeMdLineageOf,
@@ -87,7 +89,8 @@ export const DEFAULT_CLAUDE_MD_SESSION_PATHS: ClaudeMdSessionPaths = {
 
 /**
  * How long each side waits for the lock, both below the Claude Code hook timeout
- * (60 s). SessionStart waits longer: giving up means writing without the lock.
+ * (60 s). SessionStart waits longer: giving up means the session starts with
+ * whatever CLAUDE.md is already on disk.
  */
 const SESSION_START_LOCK_WAIT_MS = 40_000;
 const STOP_LOCK_WAIT_MS = 15_000;
@@ -115,29 +118,33 @@ async function writeAtomic(path: string, data: string): Promise<void> {
   }
 }
 
+export type ClaudeMdMaterializeOutcome = "materialized" | "skipped" | "unprotected";
+
 /**
  * SessionStart: under the lock, back up whatever is on disk together with its
- * lineage, then materialize the DB value and record it. If the lock stays busy
- * or errors, the session still gets its CLAUDE.md, written without the lock and
- * with a warning: an agent without its instructions is worse than that race.
+ * lineage, then materialize the DB value and record it. Lock busy → skipped (the
+ * file is left as it is). No flock on this platform → materialized without
+ * protection; `stopClaudeMd` then never pushes.
  */
 export async function materializeClaudeMd(
   content: string,
   paths: ClaudeMdSessionPaths = DEFAULT_CLAUDE_MD_SESSION_PATHS,
-  options: { testPauses?: ClaudeMdTestPauses } = {},
-): Promise<void> {
+  options: { testPauses?: ClaudeMdTestPauses; lockWaitMs?: number } = {},
+): Promise<ClaudeMdMaterializeOutcome> {
   const pauses = options.testPauses ?? {};
   const locked = await withFileLock(paths.lock, () => materializeUnlocked(content, paths, pauses), {
-    waitMs: SESSION_START_LOCK_WAIT_MS,
-    staleMs: CLAUDE_MD_LOCK_STALE_MS,
+    waitMs: options.lockWaitMs ?? SESSION_START_LOCK_WAIT_MS,
   }).catch((error: unknown) => {
     console.warn(scrubSecrets(`[claude-md] lock failed at SessionStart: ${String(error)}`));
-    return { acquired: false as const };
+    return { acquired: false as const, reason: "busy" as const };
   });
-  if (!locked.acquired) {
-    console.warn("[claude-md] no lock at SessionStart — materializing without it");
+  if (locked.acquired) return "materialized";
+  if (locked.reason === "unsupported") {
     await materializeUnlocked(content, paths, pauses);
+    return "unprotected";
   }
+  console.warn("[claude-md] lock busy at SessionStart — CLAUDE.md left as it is");
+  return "skipped";
 }
 
 async function materializeUnlocked(
@@ -218,13 +225,14 @@ export async function readClaudeMdSyncState(
   return { content, record: effectiveClaudeMdLineage(await readFile(paths.record), content) };
 }
 
-export type ClaudeMdStopOutcome = "synced" | "not-an-edit" | "busy";
+export type ClaudeMdStopOutcome = "synced" | "not-an-edit" | "busy" | "unsupported";
 
 /**
  * Stop: under the lock, decide the sync from what is on disk, run it, then
  * restore the `.bak` — one transition, so no SessionStart can land in between.
- * If the lock stays busy nothing is pushed or restored: that is safe, the next
- * SessionStart backs up whatever is there together with its lineage.
+ * Lock busy → nothing is pushed or restored (safe: the next SessionStart backs
+ * up whatever is there, with its lineage). No flock on this platform → the
+ * `.bak` is restored as before, but nothing is ever pushed.
  */
 export async function stopClaudeMd(
   sync: (body: ProfilePayload["body"]) => Promise<void>,
@@ -244,14 +252,16 @@ export async function stopClaudeMd(
       await restoreUnlocked(paths);
       return body ? "synced" : "not-an-edit";
     },
-    { waitMs: options.lockWaitMs ?? STOP_LOCK_WAIT_MS, staleMs: CLAUDE_MD_LOCK_STALE_MS },
+    { waitMs: options.lockWaitMs ?? STOP_LOCK_WAIT_MS },
   ).catch((error: unknown) => {
     console.warn(scrubSecrets(`[claude-md] lock failed at Stop: ${String(error)}`));
-    return { acquired: false as const };
+    return { acquired: false as const, reason: "busy" as const };
   });
-  if (!locked.acquired) {
-    console.warn("[claude-md] no lock at Stop — CLAUDE.md sync and restore skipped");
-    return "busy";
+  if (locked.acquired) return locked.value;
+  if (locked.reason === "unsupported") {
+    await restoreUnlocked(paths);
+    return "unsupported";
   }
-  return locked.value;
+  console.warn("[claude-md] lock busy at Stop — CLAUDE.md sync and restore skipped");
+  return "busy";
 }

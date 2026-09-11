@@ -317,13 +317,11 @@ export const CLAUDE_MD_LINEAGE_PATH = `${CLAUDE_MD_PATH}.lineage.json`;
  */
 export const CLAUDE_MD_LOCK_PATH = `${CLAUDE_MD_PATH}.lock`;
 /**
- * Every holder of CLAUDE_MD_LOCK_PATH bounds its network call by this, so the
- * lock is never held much longer — which is what lets CLAUDE_MD_LOCK_STALE_MS
- * treat an older lock as abandoned, and waiters bound their wait below the
- * Claude Code hook timeout (60 s).
+ * Every holder of CLAUDE_MD_LOCK_PATH bounds its network call by this, so other
+ * processes waiting for the lock (within the 60 s Claude Code hook timeout) are
+ * not held up by a hung request.
  */
 export const CLAUDE_MD_SYNC_TIMEOUT_MS = 10_000;
-export const CLAUDE_MD_LOCK_STALE_MS = 30_000;
 /** The runner backstop is best effort: it waits briefly, then skips this round. */
 const RUNNER_LOCK_WAIT_MS = 15_000;
 
@@ -860,12 +858,13 @@ export async function syncProfileFilesToServer(opts: ProfileSyncOptions): Promis
         );
         for (const payload of claude) await postProfileUpdate(bounded, payload);
       },
-      { waitMs, staleMs: CLAUDE_MD_LOCK_STALE_MS },
+      { waitMs },
     ).catch((error: unknown) => {
       console.warn(scrubSecrets(`[profile-sync] CLAUDE.md lock failed: ${String(error)}`));
-      return { acquired: false as const };
+      return { acquired: false as const, reason: "busy" as const };
     });
-    if (!locked.acquired) {
+    // Never read or push the hook-owned file without the lock.
+    if (!locked.acquired && locked.reason === "busy") {
       console.warn("[profile-sync] CLAUDE.md busy (lock held) — backstop sync skipped this time");
     }
   }

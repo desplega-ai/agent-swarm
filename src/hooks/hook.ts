@@ -1012,8 +1012,12 @@ export async function handleHook(): Promise<void> {
       // Write agent's CLAUDE.md if available
       if (agentInfo.claudeMd) {
         try {
-          await materializeClaudeMd(agentInfo.claudeMd);
-          console.log("Loaded your personal CLAUDE.md configuration.");
+          const outcome = await materializeClaudeMd(agentInfo.claudeMd);
+          console.log(
+            outcome === "skipped"
+              ? "CLAUDE.md is being updated by another session; keeping the current copy."
+              : "Loaded your personal CLAUDE.md configuration.",
+          );
         } catch (error) {
           console.log(`Warning: Could not load CLAUDE.md: ${(error as Error).message}`);
         }
