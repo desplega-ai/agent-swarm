@@ -1,0 +1,302 @@
+[
+  {
+    "id": "00000000-0000-4000-8000-000000000001",
+    "taskId": "00000000-0000-4000-8000-000000000002",
+    "sessionId": "00000000-0000-4000-8000-000000000003",
+    "iteration": 2,
+    "cli": "acp",
+    "content": "{\"type\":\"acp_log_truncated\",\"originalType\":\"session_init\",\"sessionId\":\"ses_example_01\",\"preview\":\"{\\\"type\\\":\\\"session_init\\\",\\\"sessionId\\\":\\\"ses_example_01\\\",\\\"provider\\\":\\\"acp\\\",\\\"providerMeta\\\":{\\\"target\\\":\\\"opencode\\\",\\\"configOptions\\\":[{\\\"id\\\":\\\"model\\\",\\\"name\\\":\\\"Model\\\",\\\"category\\\":\\\"model\\\",\\\"type\\\":\\\"select\\\",\\\"currentValue\\\":\\\"example/model\\\",\\\"options\\\":[{\\\"value\\\":\\\"example/model-0\\\",\\\"name\\\":\\\"Example model 0\\\"},{\\\"value\\\":\\\"example/model-1\\\",\\\"name\\\":\\\"Example model 1\\\"},{\\\"value\\\":\\\"example/model-2\\\",\\\"name\\\":\\\"Example model 2\\\"},{\\\"value\\\":\\\"example/model-3\\\",\\\"name\\\":\\\"Example model 3\\\"},{\\\"value\\\":\\\"example/model-4\\\",\\\"name\\\":\\\"Example model 4\\\"},{\\\"value\\\":\\\"example/model-5\\\",\\\"name\\\":\\\"Example model 5\\\"},{\\\"value\\\":\\\"example/model-6\\\",\\\"name\\\":\\\"Example model 6\\\"},{\\\"value\\\":\\\"example/model-7\\\",\\\"name\\\":\\\"Example model 7\\\"},{\\\"value\\\":\\\"example/model-8\\\",\\\"name\\\":\\\"Example model 8\\\"},{\\\"value\\\":\\\"example/model-9\\\",\\\"name\\\":\\\"Example model 9\\\"},{\\\"value\\\":\\\"example/model-10\\\",\\\"name\\\":\\\"Example model 10\\\"},{\\\"value\\\":\\\"example/model-11\\\",\\\"name\\\":\\\"Example model 11\\\"},{\\\"value\\\":\\\"example/model-12\\\",\\\"name\\\":\\\"Example model 12\\\"},{\\\"value\\\":\\\"example/model-13\\\",\\\"name\\\":\\\"Example model 13\\\"},{\\\"value\\\":\\\"example/model-14\\\",\\\"name\\\":\\\"Example model 14\\\"},{\\\"value\\\":\\\"example/model-15\\\",\\\"name\\\":\\\"Example model 15\\\"},{\\\"value\\\":\\\"example/model-16\\\",\\\"name\\\":\\\"Example model 16\\\"},{\\\"value\\\":\\\"example/model-17\\\",\\\"name\\\":\\\"Example model 17\\\"},{\\\"value\\\":\\\"example/model-18\\\",\\\"name\\\":\\\"Example model 18\\\"},{\\\"value\\\":\\\"example/model-19\\\",\\\"name\\\":\\\"Example model 19\\\"},{\\\"value\\\":\\\"example/model-20\\\",\\\"name\\\":\\\"Example model 20\\\"},{\\\"value\\\":\\\"example/model-21\\\",\\\"name\\\":\\\"Example model 21\\\"},{\\\"value\\\":\\\"example/model-22\\\",\\\"name\\\":\\\"Example model 22\\\"},{\\\"value\\\":\\\"example/model-23\\\",\\\"name\\\":\\\"Example model 23\\\"},{\\\"value\\\":\\\"example/model-24\\\",\\\"name\\\":\\\"Example model 24\\\"},{\\\"value\\\":\\\"example/model-25\\\",\\\"name\\\":\\\"Example model 25\\\"},{\\\"value\\\":\\\"example/model-26\\\",\\\"name\\\":\\\"Example model 26\\\"},{\\\"value\\\":\\\"example/model-27\\\",\\\"name\\\":\\\"Example model 27\\\"},{\\\"value\\\":\\\"example/model-28\\\",\\\"name\\\":\\\"Example model 28\\\"},{\\\"value\\\":\\\"example/model-29\\\",\\\"name\\\":\\\"Example model 29\\\"},{\\\"value\\\":\\\"example/model-30\\\",\\\"name\\\":\\\"Example model 30\\\"},{\\\"value\\\":\\\"example/model-31\\\",\\\"name\\\":\\\"Example model 31\\\"},{\\\"value\\\":\\\"example/model-32\\\",\\\"name\\\":\\\"Example model 32\\\"},{\\\"value\\\":\\\"example/model-33\\\",\\\"name\\\":\\\"Example model 33\\\"},{\\\"value\\\":\\\"example/model-34\\\",\\\"name\\\":\\\"Example model 34\\\"},{\\\"value\\\":\\\"example/model-35\\\",\\\"name\\\":\\\"Example model 35\\\"},{\\\"value\\\":\\\"example/model-36\\\",\\\"name\\\":\\\"Example model 36\\\"},{\\\"value\\\":\\\"example/model-37\\\",\\\"name\\\":\\\"Example model 37\\\"},{\\\"value\\\":\\\"example/model-38\\\",\\\"name\\\":\\\"Example model 38\\\"},{\\\"value\\\":\\\"example/model-39\\\",\\\"name\\\":\\\"Example model 39\\\"},{\\\"value\\\":\\\"example/model-40\\\",\\\"name\\\":\\\"Example model 40\\\"},{\\\"value\\\":\\\"example/model-41\\\",\\\"name\\\":\\\"Example model 41\\\"},{\\\"value\\\":\\\"example/model-42\\\",\\\"name\\\":\\\"Example model 42\\\"},{\\\"value\\\":\\\"example/model-43\\\",\\\"name\\\":\\\"Example model 43\\\"},{\\\"value\\\":\\\"example/model-44\\\",\\\"name\\\":\\\"Example model 44\\\"},{\\\"value\\\":\\\"example/model-45\\\",\\\"name\\\":\\\"Example model 45\\\"},{\\\"value\\\":\\\"example/model-46\\\",\\\"name\\\":\\\"Example model 46\\\"},{\\\"value\\\":\\\"example/model-47\\\",\\\"name\\\":\\\"Example model 47\\\"},{\\\"value\\\":\\\"example/model-48\\\",\\\"name\\\":\\\"Example model 48\\\"},{\\\"value\\\":\\\"example/model-49\\\",\\\"name\\\":\\\"Example model 49\\\"},{\\\"value\\\":\\\"example/model-50\\\",\\\"name\\\":\\\"Example model 50\\\"},{\\\"value\\\":\\\"example/model-51\\\",\\\"name\\\":\\\"Example model 51\\\"},{\\\"value\\\":\\\"example/model-52\\\",\\\"name\\\":\\\"Example model 52\\\"},{\\\"value\\\":\\\"example/model-53\\\",\\\"name\\\":\\\"Example model 53\\\"},{\\\"value\\\":\\\"example/model-54\\\",\\\"name\\\":\\\"Example model 54\\\"},{\\\"value\\\":\\\"example/model-55\\\",\\\"name\\\":\\\"Example model 55\\\"},{\\\"value\\\":\\\"example/model-56\\\",\\\"name\\\":\\\"Example model 56\\\"},{\\\"value\\\":\\\"example/model-57\\\",\\\"name\\\":\\\"Example model 57\\\"},{\\\"value\\\":\\\"example/model-58\\\",\\\"name\\\":\\\"Example model 58\\\"},{\\\"value\\\":\\\"example/model-59\\\",\\\"name\\\":\\\"Example model 59\\\"},{\\\"value\\\":\\\"example/model-60\\\",\\\"name\\\":\\\"Example model 60\\\"},{\\\"value\\\":\\\"example/model-61\\\",\\\"name\\\":\\\"Example model 61\\\"},{\\\"value\\\":\\\"example/model-62\\\",\\\"name\\\":\\\"Example model 62\\\"},{\\\"value\\\":\\\"example/model-63\\\",\\\"name\\\":\\\"Example model 63\\\"},{\\\"value\\\":\\\"example/model-64\\\",\\\"name\\\":\\\"Example model 64\\\"},{\\\"value\\\":\\\"example/model-65\\\",\\\"name\\\":\\\"Example model 65\\\"},{\\\"value\\\":\\\"example/model-66\\\",\\\"name\\\":\\\"Example model 66\\\"},{\\\"value\\\":\\\"example/model-67\\\",\\\"name\\\":\\\"Example model 67\\\"},{\\\"value\\\":\\\"example/model-68\\\",\\\"name\\\":\\\"Example model 68\\\"},{\\\"value\\\":\\\"example/model-69\\\",\\\"name\\\":\\\"Example model 69\\\"},{\\\"value\\\":\\\"example/model-70\\\",\\\"name\\\":\\\"Example model 70\\\"},{\\\"value\\\":\\\"example/model-71\\\",\\\"name\\\":\\\"Example model 71\\\"},{\\\"value\\\":\\\"example/model-72\\\",\\\"name\\\":\\\"Example model 72\\\"},{\\\"value\\\":\\\"example/model-73\\\",\\\"name\\\":\\\"Example model 73\\\"},{\\\"value\\\":\\\"example/model-74\\\",\\\"name\\\":\\\"Example model 74\\\"},{\\\"value\\\":\\\"example/model-75\\\",\\\"name\\\":\\\"Example model 75\\\"},{\\\"value\\\":\\\"example/model-76\\\",\\\"name\\\":\\\"Example model 76\\\"},{\\\"value\\\":\\\"example/model-77\\\",\\\"name\\\":\\\"Example model 77\\\"},{\\\"value\\\":\\\"example/model-78\\\",\\\"name\\\":\\\"Example model 78\\\"},{\\\"value\\\":\\\"example/model-79\\\",\\\"name\\\":\\\"Example model 79\\\"},{\\\"value\\\":\\\"example/model-80\\\",\\\"name\\\":\\\"Example model 80\\\"},{\\\"value\\\":\\\"example/model-81\\\",\\\"name\\\":\\\"Example model 81\\\"},{\\\"value\\\":\\\"example/model-82\\\",\\\"name\\\":\\\"Example model 82\\\"},{\\\"value\\\":\\\"example/model-83\\\",\\\"name\\\":\\\"Example model 83\\\"},{\\\"value\\\":\\\"example/model-84\\\",\\\"name\\\":\\\"Example model 84\\\"},{\\\"value\\\":\\\"example/model-85\\\",\\\"name\\\":\\\"Example model 85\\\"},{\\\"value\\\":\\\"example/model-86\\\",\\\"name\\\":\\\"Example model 86\\\"},{\\\"value\\\":\\\"example/model-87\\\",\\\"name\\\":\\\"Example model 87\\\"},{\\\"value\\\":\\\"example/model-88\\\",\\\"name\\\":\\\"Example model 88\\\"},{\\\"value\\\":\\\"example/model-89\\\",\\\"name\\\":\\\"Example model 89\\\"},{\\\"value\\\":\\\"example/model-90\\\",\\\"name\\\":\\\"Example model 90\\\"},{\\\"value\\\":\\\"example/model-91\\\",\\\"name\\\":\\\"Example model 91\\\"},{\\\"value\\\":\\\"example/model-92\\\",\\\"name\\\":\\\"Example model 92\\\"},{\\\"value\\\":\\\"example/model-93\\\",\\\"name\\\":\\\"Example model 93\\\"},{\\\"value\\\":\\\"example/model-94\\\",\\\"name\\\":\\\"Example model 94\\\"},{\\\"value\\\":\\\"example/model-95\\\",\\\"name\\\":\\\"Example model 95\\\"},{\\\"value\\\":\\\"example/model-96\\\",\\\"name\\\":\\\"Example model 96\\\"},{\\\"value\\\":\\\"example/model-97\\\",\\\"name\\\":\\\"Example model 97\\\"},{\\\"value\\\":\\\"example/model-98\\\",\\\"name\\\":\\\"Example model 98\\\"},{\\\"value\\\":\\\"example/model-99\\\",\\\"name\\\":\\\"Example model 99\\\"},{\\\"value\\\":\\\"example/model-100\\\",\\\"name\\\":\\\"Example model 100\\\"},{\\\"value\\\":\\\"example/model-101\\\",\\\"name\\\":\\\"Example model 101\\\"},{\\\"value\\\":\\\"example/model-102\\\",\\\"name\\\":\\\"Example model 102\\\"},{\\\"value\\\":\\\"example/model-103\\\",\\\"name\\\":\\\"Example model 103\\\"},{\\\"value\\\":\\\"example/model-104\\\",\\\"name\\\":\\\"Example model 104\\\"},{\\\"value\\\":\\\"example/model-105\\\",\\\"name\\\":\\\"Example model 105\\\"},{\\\"value\\\":\\\"example/model-106\\\",\\\"name\\\":\\\"Example model 106\\\"},{\\\"value\\\":\\\"example/model-107\\\",\\\"name\\\":\\\"Example model 107\\\"},{\\\"value\\\":\\\"example/model-108\\\",\\\"name\\\":\\\"Example model 108\\\"},{\\\"value\\\":\\\"example/model-109\\\",\\\"name\\\":\\\"Example model 109\\\"},{\\\"value\\\":\\\"example/model-110\\\",\\\"name\\\":\\\"Example model 110\\\"},{\\\"value\\\":\\\"example/model-111\\\",\\\"name\\\":\\\"Example model 111\\\"},{\\\"value\\\":\\\"example/model-112\\\",\\\"name\\\":\\\"Example model 112\\\"},{\\\"value\\\":\\\"example/model-113\\\",\\\"name\\\":\\\"Example model 113\\\"},{\\\"value\\\":\\\"example/model-114\\\",\\\"name\\\":\\\"Example model 114\\\"},{\\\"value\\\":\\\"example/model-115\\\",\\\"name\\\":\\\"Example model 115\\\"},{\\\"value\\\":\\\"example/model-116\\\",\\\"name\\\":\\\"Example model 116\\\"},{\\\"value\\\":\\\"example/model-117\\\",\\\"name\\\":\\\"Example model 117\\\"},{\\\"value\\\":\\\"example/model-118\\\",\\\"name\\\":\\\"Example model 118\\\"},{\\\"value\\\":\\\"example/model-119\\\",\\\"name\\\":\\\"Example model 119\\\"},{\\\"value\\\":\\\"example/model-120\\\",\\\"name\\\":\\\"Example model 120\\\"},{\\\"value\\\":\\\"example/model-121\\\",\\\"name\\\":\\\"Example model 121\\\"},{\\\"value\\\":\\\"example/model-122\\\",\\\"name\\\":\\\"Example model 122\\\"},{\\\"value\\\":\\\"example/model-123\\\",\\\"name\\\":\\\"Example model 123\\\"},{\\\"value\\\":\\\"example/model-124\\\",\\\"name\\\":\\\"Example model 124\\\"},{\\\"value\\\":\\\"example/model-125\\\",\\\"name\\\":\\\"Example model 125\\\"},{\\\"value\\\":\\\"example/model-126\\\",\\\"name\\\":\\\"Example model 126\\\"},{\\\"value\\\":\\\"example/model-127\\\",\\\"name\\\":\\\"Example model 127\\\"},{\\\"value\\\":\\\"example/model-128\\\",\\\"name\\\":\\\"Example model 128\\\"},{\\\"value\\\":\\\"example/model-129\\\",\\\"name\\\":\\\"Example model 129\\\"},{\\\"value\\\":\\\"example/model-130\\\",\\\"name\\\":\\\"Example model 130\\\"},{\\\"value\\\":\\\"example/model-131\\\",\\\"name\\\":\\\"Example model 131\\\"},{\\\"value\\\":\\\"example/model-132\\\",\\\"name\\\":\\\"Example model 132\\\"},{\\\"value\\\":\\\"example/model-133\\\",\\\"name\\\":\\\"Example model 133\\\"},{\\\"value\\\":\\\"example/model-134\\\",\\\"name\\\":\\\"Example model 134\\\"},{\\\"value\\\":\\\"example/model-135\\\",\\\"name\\\":\\\"Example model 135\\\"},{\\\"value\\\":\\\"example/model-136\\\",\\\"name\\\":\\\"Example model 136\\\"},{\\\"value\\\":\\\"example/model-137\\\",\\\"name\\\":\\\"Example model 137\\\"},{\\\"value\\\":\\\"example/model-138\\\",\\\"name\\\":\\\"Example model 138\\\"},{\\\"value\\\":\\\"example/model-139\\\",\\\"name\\\":\\\"Example model 139\\\"},{\\\"value\\\":\\\"example/model-140\\\",\\\"name\\\":\\\"Example model 140\\\"},{\\\"value\\\":\\\"example/model-141\\\",\\\"name\\\":\\\"Example model 141\\\"},{\\\"value\\\":\\\"example/model-142\\\",\\\"name\\\":\\\"Example model 142\\\"},{\\\"value\\\":\\\"example/model-143\\\",\\\"name\\\":\\\"Example model 143\\\"},{\\\"value\\\":\\\"example/model-144\\\",\\\"name\\\":\\\"Example model 144\\\"},{\\\"value\\\":\\\"example/model-145\\\",\\\"name\\\":\\\"Example model 145\\\"},{\\\"value\\\":\\\"example/model-146\\\",\\\"name\\\":\\\"Example model 146\\\"},{\\\"value\\\":\\\"example/model-147\\\",\\\"name\\\":\\\"Example model 147\\\"},{\\\"value\\\":\\\"example/model-148\\\",\\\"name\\\":\\\"Example model 148\\\"},{\\\"value\\\":\\\"example/model-149\\\",\\\"name\\\":\\\"Example model 149\\\"},{\\\"value\\\":\\\"example/model-150\\\",\\\"name\\\":\\\"Example model 150\\\"},{\\\"value\\\":\\\"example/model-151\\\",\\\"name\\\":\\\"Example model 151\\\"},{\\\"value\\\":\\\"example/model-152\\\",\\\"name\\\":\\\"Example model 152\\\"},{\\\"value\\\":\\\"example/model-153\\\",\\\"name\\\":\\\"Example model 153\\\"},{\\\"value\\\":\\\"example/model-154\\\",\\\"name\\\":\\\"Example model 154\\\"},{\\\"value\\\":\\\"example/model-155\\\",\\\"name\\\":\\\"Example model 155\\\"},{\\\"value\\\":\\\"example/model-156\\\",\\\"name\\\":\\\"Example model 156\\\"},{\\\"value\\\":\\\"example/model-157\\\",\\\"name\\\":\\\"Example model 157\\\"},{\\\"value\\\":\\\"example/model-158\\\",\\\"name\\\":\\\"Example model 158\\\"},{\\\"value\\\":\\\"example/model-159\\\",\\\"name\\\":\\\"Example model 159\\\"},{\\\"value\\\":\\\"example/model-160\\\",\\\"name\\\":\\\"Example model 160\\\"},{\\\"value\\\":\\\"example/model-161\\\",\\\"name\\\":\\\"Example model 161\\\"},{\\\"value\\\":\\\"example/model-162\\\",\\\"name\\\":\\\"Example model 162\\\"},{\\\"value\\\":\\\"example/model-163\\\",\\\"name\\\":\\\"Example model 163\\\"},{\\\"value\\\":\\\"example/model-164\\\",\\\"name\\\":\\\"Example model 164\\\"},{\\\"value\\\":\\\"example/model-165\\\",\\\"name\\\":\\\"Example model 165\\\"},{\\\"value\\\":\\\"example/model-166\\\",\\\"name\\\":\\\"Example model 166\\\"},{\\\"value\\\":\\\"example/model-167\\\",\\\"name\\\":\\\"Example model 167\\\"},{\\\"value\\\":\\\"example/model-168\\\",\\\"name\\\":\\\"Example model 168\\\"},{\\\"value\\\":\\\"example/model-169\\\",\\\"name\\\":\\\"Example model 169\\\"},{\\\"value\\\":\\\"example/model-170\\\",\\\"name\\\":\\\"Example model 170\\\"},{\\\"value\\\":\\\"example/model-171\\\",\\\"name\\\":\\\"Example model 171\\\"},{\\\"value\\\":\\\"example/model-172\\\",\\\"name\\\":\\\"Example model 172\\\"},{\\\"value\\\":\\\"example/model-173\\\",\\\"name\\\":\\\"Example model 173\\\"},{\\\"value\\\":\\\"example/model-174\\\",\\\"name\\\":\\\"Example model 174\\\"},{\\\"value\\\":\\\"example...[truncated]\"}",
+    "lineNumber": 0,
+    "createdAt": "2025-01-01T00:00:00.000Z"
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000004",
+    "taskId": "00000000-0000-4000-8000-000000000002",
+    "sessionId": "00000000-0000-4000-8000-000000000003",
+    "iteration": 2,
+    "cli": "acp",
+    "content": "{\"type\":\"custom\",\"name\":\"acp_available_commands_update\",\"data\":{\"truncated\":true,\"preview\":\"{\\\"type\\\":\\\"custom\\\",\\\"name\\\":\\\"acp_available_commands_update\\\",\\\"data\\\":{\\\"availableCommands\\\":[{\\\"name\\\":\\\"example-0\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-1\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-2\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-3\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-4\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-5\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-6\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-7\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-8\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-9\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-10\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-11\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-12\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-13\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-14\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-15\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-16\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-17\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-18\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-19\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-20\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-21\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-22\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-23\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-24\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-25\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-26\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-27\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-28\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-29\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-30\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-31\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-32\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-33\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-34\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-35\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-36\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-37\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-38\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-39\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-40\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-41\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-42\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-43\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-44\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-45\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-46\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-47\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-48\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-49\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-50\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-51\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-52\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-53\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-54\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-55\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-56\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-57\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-58\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-59\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-60\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-61\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-62\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-63\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-64\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-65\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-66\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-67\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-68\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-69\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-70\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-71\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-72\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-73\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-74\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-75\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-76\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-77\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-78\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-79\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-80\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-81\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-82\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-83\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-84\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-85\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-86\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-87\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-88\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-89\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-90\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-91\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-92\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-93\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-94\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-95\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-96\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-97\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-98\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-99\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-100\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-101\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-102\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-103\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-104\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-105\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-106\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-107\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-108\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-109\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-110\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-111\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-112\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-113\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-114\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-115\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-116\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-117\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-118\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-119\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-120\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-121\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-122\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-123\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-124\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-125\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-126\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-127\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-128\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-129\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-130\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-131\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-132\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-133\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-134\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-135\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-136\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-137\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-138\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-139\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-140\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-141\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-142\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-143\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-144\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-145\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-146\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-147\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-148\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-149\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-150\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-151\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-152\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-153\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-154\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-155\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-156\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-157\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-158\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-159\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-160\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-161\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-162\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-163\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-164\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-165\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-166\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-167\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-168\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-169\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-170\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-171\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-172\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-173\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-174\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-175\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-176\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-177\\\",\\\"description\\\":\\\"Example command.\\\"},{\\\"name\\\":\\\"example-178\\\",\\\"description\\\":\\\"Example command.\\\"},{...[truncated]\"}}",
+    "lineNumber": 2,
+    "createdAt": "2025-01-01T00:00:01.000Z"
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000005",
+    "taskId": "00000000-0000-4000-8000-000000000002",
+    "sessionId": "00000000-0000-4000-8000-000000000003",
+    "iteration": 2,
+    "cli": "acp",
+    "content": "{\"type\":\"stderr\",\"content\":\"Sample text 1.\",\"timestamp\":\"2025-01-01T00:00:00.000Z\"}",
+    "lineNumber": 3,
+    "createdAt": "2025-01-01T00:00:02.000Z"
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000006",
+    "taskId": "00000000-0000-4000-8000-000000000002",
+    "sessionId": "00000000-0000-4000-8000-000000000003",
+    "iteration": 2,
+    "cli": "acp",
+    "content": "{\"sessionId\":\"ses_example_01\",\"update\":{\"content\":{\"text\":\"Sample text 2.\",\"type\":\"text\"},\"messageId\":\"msg_example_02\",\"sessionUpdate\":\"agent_thought_chunk\"}}",
+    "lineNumber": 4,
+    "createdAt": "2025-01-01T00:00:03.000Z"
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000007",
+    "taskId": "00000000-0000-4000-8000-000000000002",
+    "sessionId": "00000000-0000-4000-8000-000000000003",
+    "iteration": 2,
+    "cli": "acp",
+    "content": "{\"type\":\"custom\",\"name\":\"acp_agent_thought_chunk\",\"data\":{\"content\":{\"text\":\"Sample text 2.\",\"type\":\"text\"},\"messageId\":\"msg_example_02\"}}",
+    "lineNumber": 0,
+    "createdAt": "2025-01-01T00:00:04.000Z"
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000008",
+    "taskId": "00000000-0000-4000-8000-000000000002",
+    "sessionId": "00000000-0000-4000-8000-000000000003",
+    "iteration": 2,
+    "cli": "acp",
+    "content": "{\"sessionId\":\"ses_example_01\",\"update\":{\"content\":{\"text\":\"Sample text 3.\",\"type\":\"text\"},\"messageId\":\"msg_example_02\",\"sessionUpdate\":\"agent_thought_chunk\"}}",
+    "lineNumber": 1,
+    "createdAt": "2025-01-01T00:00:05.000Z"
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000009",
+    "taskId": "00000000-0000-4000-8000-000000000002",
+    "sessionId": "00000000-0000-4000-8000-000000000003",
+    "iteration": 2,
+    "cli": "acp",
+    "content": "{\"type\":\"custom\",\"name\":\"acp_agent_thought_chunk\",\"data\":{\"content\":{\"text\":\"Sample text 3.\",\"type\":\"text\"},\"messageId\":\"msg_example_02\"}}",
+    "lineNumber": 2,
+    "createdAt": "2025-01-01T00:00:06.000Z"
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000010",
+    "taskId": "00000000-0000-4000-8000-000000000002",
+    "sessionId": "00000000-0000-4000-8000-000000000003",
+    "iteration": 2,
+    "cli": "acp",
+    "content": "{\"sessionId\":\"ses_example_01\",\"update\":{\"content\":{\"text\":\"Sample text 4.\",\"type\":\"text\"},\"messageId\":\"msg_example_03\",\"sessionUpdate\":\"agent_message_chunk\"}}",
+    "lineNumber": 21,
+    "createdAt": "2025-01-01T00:00:07.000Z"
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000011",
+    "taskId": "00000000-0000-4000-8000-000000000002",
+    "sessionId": "00000000-0000-4000-8000-000000000003",
+    "iteration": 2,
+    "cli": "acp",
+    "content": "{\"type\":\"message\",\"role\":\"assistant\",\"content\":\"Sample text 4.\",\"messageId\":\"msg_example_03\"}",
+    "lineNumber": 22,
+    "createdAt": "2025-01-01T00:00:08.000Z"
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000012",
+    "taskId": "00000000-0000-4000-8000-000000000002",
+    "sessionId": "00000000-0000-4000-8000-000000000003",
+    "iteration": 2,
+    "cli": "acp",
+    "content": "{\"sessionId\":\"ses_example_01\",\"update\":{\"content\":{\"text\":\"Sample text 5.\",\"type\":\"text\"},\"messageId\":\"msg_example_03\",\"sessionUpdate\":\"agent_message_chunk\"}}",
+    "lineNumber": 23,
+    "createdAt": "2025-01-01T00:00:09.000Z"
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000013",
+    "taskId": "00000000-0000-4000-8000-000000000002",
+    "sessionId": "00000000-0000-4000-8000-000000000003",
+    "iteration": 2,
+    "cli": "acp",
+    "content": "{\"type\":\"message\",\"role\":\"assistant\",\"content\":\"Sample text 5.\",\"messageId\":\"msg_example_03\"}",
+    "lineNumber": 24,
+    "createdAt": "2025-01-01T00:00:10.000Z"
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000014",
+    "taskId": "00000000-0000-4000-8000-000000000002",
+    "sessionId": "00000000-0000-4000-8000-000000000003",
+    "iteration": 2,
+    "cli": "acp",
+    "content": "{\"sessionId\":\"ses_example_01\",\"update\":{\"toolCallId\":\"call_example_04\",\"title\":\"bash\",\"kind\":\"execute\",\"status\":\"pending\",\"locations\":[{\"path\":\"/tmp/acp-example\"}],\"rawInput\":{\"cwd\":\"/tmp/acp-example\"},\"sessionUpdate\":\"tool_call\"}}",
+    "lineNumber": 43,
+    "createdAt": "2025-01-01T00:00:11.000Z"
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000015",
+    "taskId": "00000000-0000-4000-8000-000000000002",
+    "sessionId": "00000000-0000-4000-8000-000000000003",
+    "iteration": 2,
+    "cli": "acp",
+    "content": "{\"type\":\"tool_start\",\"toolCallId\":\"call_example_04\",\"toolName\":\"bash\",\"args\":{\"cwd\":\"/tmp/acp-example\"}}",
+    "lineNumber": 44,
+    "createdAt": "2025-01-01T00:00:12.000Z"
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000016",
+    "taskId": "00000000-0000-4000-8000-000000000002",
+    "sessionId": "00000000-0000-4000-8000-000000000003",
+    "iteration": 2,
+    "cli": "acp",
+    "content": "{\"sessionId\":\"ses_example_01\",\"update\":{\"toolCallId\":\"call_example_04\",\"kind\":\"execute\",\"status\":\"in_progress\",\"title\":\"mkdir -p /tmp/acp-example/output\",\"locations\":[{\"path\":\"/tmp/acp-example\"}],\"rawInput\":{\"command\":\"mkdir -p /tmp/acp-example/output\",\"description\":\"Create example directory\",\"cwd\":\"/tmp/acp-example\"},\"sessionUpdate\":\"tool_call_update\"}}",
+    "lineNumber": 45,
+    "createdAt": "2025-01-01T00:00:13.000Z"
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000017",
+    "taskId": "00000000-0000-4000-8000-000000000002",
+    "sessionId": "00000000-0000-4000-8000-000000000003",
+    "iteration": 2,
+    "cli": "acp",
+    "content": "{\"type\":\"progress\",\"message\":\"ACP tool call_example_04 in_progress\"}",
+    "lineNumber": 46,
+    "createdAt": "2025-01-01T00:00:14.000Z"
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000018",
+    "taskId": "00000000-0000-4000-8000-000000000002",
+    "sessionId": "00000000-0000-4000-8000-000000000003",
+    "iteration": 2,
+    "cli": "acp",
+    "content": "{\"type\":\"custom\",\"name\":\"acp_tool_call_update\",\"data\":{\"toolCallId\":\"call_example_04\",\"kind\":\"execute\",\"status\":\"in_progress\",\"title\":\"mkdir -p /tmp/acp-example/output\",\"locations\":[{\"path\":\"/tmp/acp-example\"}],\"rawInput\":{\"command\":\"mkdir -p /tmp/acp-example/output\",\"description\":\"Create example directory\",\"cwd\":\"/tmp/acp-example\"},\"sessionUpdate\":\"tool_call_update\"}}",
+    "lineNumber": 47,
+    "createdAt": "2025-01-01T00:00:15.000Z"
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000019",
+    "taskId": "00000000-0000-4000-8000-000000000002",
+    "sessionId": "00000000-0000-4000-8000-000000000003",
+    "iteration": 2,
+    "cli": "acp",
+    "content": "{\"sessionId\":\"ses_example_01\",\"update\":{\"toolCallId\":\"call_example_04\",\"kind\":\"execute\",\"status\":\"in_progress\",\"title\":\"mkdir -p /tmp/acp-example/output\",\"locations\":[{\"path\":\"/tmp/acp-example\"}],\"rawInput\":{\"command\":\"mkdir -p /tmp/acp-example/output\",\"description\":\"Create example directory\",\"cwd\":\"/tmp/acp-example\"},\"sessionUpdate\":\"tool_call_update\"}}",
+    "lineNumber": 48,
+    "createdAt": "2025-01-01T00:00:16.000Z"
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000020",
+    "taskId": "00000000-0000-4000-8000-000000000002",
+    "sessionId": "00000000-0000-4000-8000-000000000003",
+    "iteration": 2,
+    "cli": "acp",
+    "content": "{\"type\":\"progress\",\"message\":\"ACP tool call_example_04 in_progress\"}",
+    "lineNumber": 49,
+    "createdAt": "2025-01-01T00:00:17.000Z"
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000021",
+    "taskId": "00000000-0000-4000-8000-000000000002",
+    "sessionId": "00000000-0000-4000-8000-000000000003",
+    "iteration": 2,
+    "cli": "acp",
+    "content": "{\"type\":\"custom\",\"name\":\"acp_tool_call_update\",\"data\":{\"toolCallId\":\"call_example_04\",\"kind\":\"execute\",\"status\":\"in_progress\",\"title\":\"mkdir -p /tmp/acp-example/output\",\"locations\":[{\"path\":\"/tmp/acp-example\"}],\"rawInput\":{\"command\":\"mkdir -p /tmp/acp-example/output\",\"description\":\"Create example directory\",\"cwd\":\"/tmp/acp-example\"},\"sessionUpdate\":\"tool_call_update\"}}",
+    "lineNumber": 0,
+    "createdAt": "2025-01-01T00:00:18.000Z"
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000022",
+    "taskId": "00000000-0000-4000-8000-000000000002",
+    "sessionId": "00000000-0000-4000-8000-000000000003",
+    "iteration": 2,
+    "cli": "acp",
+    "content": "{\"sessionId\":\"ses_example_01\",\"update\":{\"toolCallId\":\"call_example_04\",\"status\":\"completed\",\"title\":\"mkdir -p /tmp/acp-example/output\",\"content\":[{\"content\":{\"text\":\"(no output)\",\"type\":\"text\"},\"type\":\"content\"}],\"rawOutput\":{\"output\":\"(no output)\",\"metadata\":{\"output\":\"(no output)\",\"exit\":0,\"truncated\":false}},\"sessionUpdate\":\"tool_call_update\"}}",
+    "lineNumber": 1,
+    "createdAt": "2025-01-01T00:00:19.000Z"
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000023",
+    "taskId": "00000000-0000-4000-8000-000000000002",
+    "sessionId": "00000000-0000-4000-8000-000000000003",
+    "iteration": 2,
+    "cli": "acp",
+    "content": "{\"type\":\"tool_end\",\"toolCallId\":\"call_example_04\",\"toolName\":\"mkdir -p /tmp/acp-example/output\",\"result\":{\"status\":\"completed\",\"content\":[{\"content\":{\"text\":\"(no output)\",\"type\":\"text\"},\"type\":\"content\"}],\"rawOutput\":{\"output\":\"(no output)\",\"metadata\":{\"output\":\"(no output)\",\"exit\":0,\"truncated\":false}}}}",
+    "lineNumber": 2,
+    "createdAt": "2025-01-01T00:00:20.000Z"
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000024",
+    "taskId": "00000000-0000-4000-8000-000000000002",
+    "sessionId": "00000000-0000-4000-8000-000000000003",
+    "iteration": 2,
+    "cli": "acp",
+    "content": "{\"sessionId\":\"ses_example_01\",\"update\":{\"toolCallId\":\"call_example_06\",\"title\":\"todowrite\",\"kind\":\"other\",\"status\":\"pending\",\"locations\":[],\"rawInput\":{},\"sessionUpdate\":\"tool_call\"}}",
+    "lineNumber": 46,
+    "createdAt": "2025-01-01T00:00:21.000Z"
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000025",
+    "taskId": "00000000-0000-4000-8000-000000000002",
+    "sessionId": "00000000-0000-4000-8000-000000000003",
+    "iteration": 2,
+    "cli": "acp",
+    "content": "{\"type\":\"tool_start\",\"toolCallId\":\"call_example_06\",\"toolName\":\"todowrite\",\"args\":{}}",
+    "lineNumber": 47,
+    "createdAt": "2025-01-01T00:00:22.000Z"
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000026",
+    "taskId": "00000000-0000-4000-8000-000000000002",
+    "sessionId": "00000000-0000-4000-8000-000000000003",
+    "iteration": 2,
+    "cli": "acp",
+    "content": "{\"sessionId\":\"ses_example_01\",\"update\":{\"toolCallId\":\"call_example_06\",\"kind\":\"other\",\"status\":\"in_progress\",\"title\":\"todowrite\",\"locations\":[],\"rawInput\":{\"todos\":[{\"content\":\"Sample text 6.\",\"priority\":\"high\",\"status\":\"completed\"},{\"content\":\"Sample text 7.\",\"priority\":\"high\",\"status\":\"completed\"},{\"content\":\"Sample text 8.\",\"priority\":\"high\",\"status\":\"completed\"},{\"content\":\"Sample text 9.\",\"priority\":\"high\",\"status\":\"completed\"},{\"content\":\"Sample text 10.\",\"priority\":\"high\",\"status\":\"completed\"},{\"content\":\"Sample text 11.\",\"priority\":\"high\",\"status\":\"completed\"},{\"content\":\"Sample text 12.\",\"priority\":\"high\",\"status\":\"completed\"},{\"content\":\"Sample text 13.\",\"priority\":\"high\",\"status\":\"completed\"},{\"content\":\"Sample text 14.\",\"priority\":\"high\",\"status\":\"completed\"},{\"content\":\"Sample text 15.\",\"priority\":\"high\",\"status\":\"completed\"},{\"content\":\"Sample text 16.\",\"priority\":\"high\",\"status\":\"completed\"},{\"content\":\"Sample text 17.\",\"priority\":\"high\",\"status\":\"completed\"},{\"content\":\"Sample text 18.\",\"priority\":\"medium\",\"status\":\"cancelled\"}]},\"sessionUpdate\":\"tool_call_update\"}}",
+    "lineNumber": 48,
+    "createdAt": "2025-01-01T00:00:23.000Z"
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000027",
+    "taskId": "00000000-0000-4000-8000-000000000002",
+    "sessionId": "00000000-0000-4000-8000-000000000003",
+    "iteration": 2,
+    "cli": "acp",
+    "content": "{\"type\":\"progress\",\"message\":\"ACP tool call_example_06 in_progress\"}",
+    "lineNumber": 49,
+    "createdAt": "2025-01-01T00:00:24.000Z"
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000028",
+    "taskId": "00000000-0000-4000-8000-000000000002",
+    "sessionId": "00000000-0000-4000-8000-000000000003",
+    "iteration": 2,
+    "cli": "acp",
+    "content": "{\"type\":\"custom\",\"name\":\"acp_tool_call_update\",\"data\":{\"toolCallId\":\"call_example_06\",\"kind\":\"other\",\"status\":\"in_progress\",\"title\":\"todowrite\",\"locations\":[],\"rawInput\":{\"todos\":[{\"content\":\"Sample text 6.\",\"priority\":\"high\",\"status\":\"completed\"},{\"content\":\"Sample text 7.\",\"priority\":\"high\",\"status\":\"completed\"},{\"content\":\"Sample text 8.\",\"priority\":\"high\",\"status\":\"completed\"},{\"content\":\"Sample text 9.\",\"priority\":\"high\",\"status\":\"completed\"},{\"content\":\"Sample text 10.\",\"priority\":\"high\",\"status\":\"completed\"},{\"content\":\"Sample text 11.\",\"priority\":\"high\",\"status\":\"completed\"},{\"content\":\"Sample text 12.\",\"priority\":\"high\",\"status\":\"completed\"},{\"content\":\"Sample text 13.\",\"priority\":\"high\",\"status\":\"completed\"},{\"content\":\"Sample text 14.\",\"priority\":\"high\",\"status\":\"completed\"},{\"content\":\"Sample text 15.\",\"priority\":\"high\",\"status\":\"completed\"},{\"content\":\"Sample text 16.\",\"priority\":\"high\",\"status\":\"completed\"},{\"content\":\"Sample text 17.\",\"priority\":\"high\",\"status\":\"completed\"},{\"content\":\"Sample text 18.\",\"priority\":\"medium\",\"status\":\"cancelled\"}]},\"sessionUpdate\":\"tool_call_update\"}}",
+    "lineNumber": 0,
+    "createdAt": "2025-01-01T00:00:25.000Z"
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000029",
+    "taskId": "00000000-0000-4000-8000-000000000002",
+    "sessionId": "00000000-0000-4000-8000-000000000003",
+    "iteration": 2,
+    "cli": "acp",
+    "content": "{\"sessionId\":\"ses_example_01\",\"update\":{\"toolCallId\":\"call_example_06\",\"status\":\"completed\",\"title\":\"1 todos\",\"content\":[{\"content\":{\"text\":\"[\\n  {\\n    \\\"content\\\": \\\"Sample text 6.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 7.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 8.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 9.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 10.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 11.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 12.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 13.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 14.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 15.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 16.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 17.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 18.\\\",\\n    \\\"status\\\": \\\"cancelled\\\",\\n    \\\"priority\\\": \\\"medium\\\"\\n  }\\n]\",\"type\":\"text\"},\"type\":\"content\"}],\"rawOutput\":{\"output\":\"[\\n  {\\n    \\\"content\\\": \\\"Sample text 6.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 7.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 8.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 9.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 10.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 11.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 12.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 13.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 14.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 15.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 16.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 17.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 18.\\\",\\n    \\\"status\\\": \\\"cancelled\\\",\\n    \\\"priority\\\": \\\"medium\\\"\\n  }\\n]\",\"metadata\":{\"todos\":[{\"content\":\"Sample text 6.\",\"status\":\"completed\",\"priority\":\"high\"},{\"content\":\"Sample text 7.\",\"status\":\"completed\",\"priority\":\"high\"},{\"content\":\"Sample text 8.\",\"status\":\"completed\",\"priority\":\"high\"},{\"content\":\"Sample text 9.\",\"status\":\"completed\",\"priority\":\"high\"},{\"content\":\"Sample text 10.\",\"status\":\"completed\",\"priority\":\"high\"},{\"content\":\"Sample text 11.\",\"status\":\"completed\",\"priority\":\"high\"},{\"content\":\"Sample text 12.\",\"status\":\"completed\",\"priority\":\"high\"},{\"content\":\"Sample text 13.\",\"status\":\"completed\",\"priority\":\"high\"},{\"content\":\"Sample text 14.\",\"status\":\"completed\",\"priority\":\"high\"},{\"content\":\"Sample text 15.\",\"status\":\"completed\",\"priority\":\"high\"},{\"content\":\"Sample text 16.\",\"status\":\"completed\",\"priority\":\"high\"},{\"content\":\"Sample text 17.\",\"status\":\"completed\",\"priority\":\"high\"},{\"content\":\"Sample text 18.\",\"status\":\"cancelled\",\"priority\":\"medium\"}],\"truncated\":false}},\"sessionUpdate\":\"tool_call_update\"}}",
+    "lineNumber": 1,
+    "createdAt": "2025-01-01T00:00:26.000Z"
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000030",
+    "taskId": "00000000-0000-4000-8000-000000000002",
+    "sessionId": "00000000-0000-4000-8000-000000000003",
+    "iteration": 2,
+    "cli": "acp",
+    "content": "{\"type\":\"tool_end\",\"toolCallId\":\"call_example_06\",\"toolName\":\"1 todos\",\"result\":{\"status\":\"completed\",\"content\":[{\"content\":{\"text\":\"[\\n  {\\n    \\\"content\\\": \\\"Sample text 6.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 7.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 8.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 9.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 10.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 11.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 12.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 13.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 14.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 15.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 16.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 17.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 18.\\\",\\n    \\\"status\\\": \\\"cancelled\\\",\\n    \\\"priority\\\": \\\"medium\\\"\\n  }\\n]\",\"type\":\"text\"},\"type\":\"content\"}],\"rawOutput\":{\"output\":\"[\\n  {\\n    \\\"content\\\": \\\"Sample text 6.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 7.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 8.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 9.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 10.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 11.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 12.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 13.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 14.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 15.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 16.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 17.\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"priority\\\": \\\"high\\\"\\n  },\\n  {\\n    \\\"content\\\": \\\"Sample text 18.\\\",\\n    \\\"status\\\": \\\"cancelled\\\",\\n    \\\"priority\\\": \\\"medium\\\"\\n  }\\n]\",\"metadata\":{\"todos\":[{\"content\":\"Sample text 6.\",\"status\":\"completed\",\"priority\":\"high\"},{\"content\":\"Sample text 7.\",\"status\":\"completed\",\"priority\":\"high\"},{\"content\":\"Sample text 8.\",\"status\":\"completed\",\"priority\":\"high\"},{\"content\":\"Sample text 9.\",\"status\":\"completed\",\"priority\":\"high\"},{\"content\":\"Sample text 10.\",\"status\":\"completed\",\"priority\":\"high\"},{\"content\":\"Sample text 11.\",\"status\":\"completed\",\"priority\":\"high\"},{\"content\":\"Sample text 12.\",\"status\":\"completed\",\"priority\":\"high\"},{\"content\":\"Sample text 13.\",\"status\":\"completed\",\"priority\":\"high\"},{\"content\":\"Sample text 14.\",\"status\":\"completed\",\"priority\":\"high\"},{\"content\":\"Sample text 15.\",\"status\":\"completed\",\"priority\":\"high\"},{\"content\":\"Sample text 16.\",\"status\":\"completed\",\"priority\":\"high\"},{\"content\":\"Sample text 17.\",\"status\":\"completed\",\"priority\":\"high\"},{\"content\":\"Sample text 18.\",\"status\":\"cancelled\",\"priority\":\"medium\"}],\"truncated\":false}}}}",
+    "lineNumber": 2,
+    "createdAt": "2025-01-01T00:00:27.000Z"
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000031",
+    "taskId": "00000000-0000-4000-8000-000000000002",
+    "sessionId": "00000000-0000-4000-8000-000000000003",
+    "iteration": 2,
+    "cli": "acp",
+    "content": "{\"type\":\"context_usage\",\"contextUsedTokens\":132351,\"contextTotalTokens\":200000,\"contextPercent\":0.661755,\"outputTokens\":null,\"contextFormula\":\"harness-reported\"}",
+    "lineNumber": 21,
+    "createdAt": "2025-01-01T00:00:28.000Z"
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000032",
+    "taskId": "00000000-0000-4000-8000-000000000002",
+    "sessionId": "00000000-0000-4000-8000-000000000003",
+    "iteration": 2,
+    "cli": "acp",
+    "content": "{\"type\":\"result\",\"cost\":{\"sessionId\":\"ses_example_01\",\"taskId\":\"00000000-0000-4000-8000-000000000002\",\"agentId\":\"00000000-0000-4000-8000-000000000033\",\"totalCostUsd\":0,\"durationMs\":555700,\"numTurns\":1,\"model\":\"example/model\",\"isError\":false,\"provider\":\"acp\"},\"output\":\"Sample text 19.\",\"isError\":false}",
+    "lineNumber": 22,
+    "createdAt": "2025-01-01T00:00:29.000Z"
+  }
+]
