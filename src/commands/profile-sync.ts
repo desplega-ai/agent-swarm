@@ -319,30 +319,40 @@ export interface ClaudeMdLineage {
   base: string | null;
 }
 
+/** Parse a lineage record; null for anything that is not exactly that shape. */
 export function parseClaudeMdLineage(raw: string | undefined): ClaudeMdLineage | null {
   if (!raw) return null;
+  let value: unknown;
   try {
-    const value = JSON.parse(raw) as Partial<ClaudeMdLineage>;
-    return {
-      written: typeof value.written === "string" ? value.written : null,
-      base: typeof value.base === "string" ? value.base : null,
-    };
+    value = JSON.parse(raw);
   } catch {
     return null;
   }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const { written, base } = value as Record<string, unknown>;
+  const hashOrNull = (v: unknown) => v === null || typeof v === "string";
+  if (!("written" in value) || !("base" in value) || !hashOrNull(written) || !hashOrNull(base)) {
+    return null;
+  }
+  return { written: written as string | null, base: base as string | null };
+}
+
+/** Lineage of content whose origin is unknown: counts as hook-written, never pushed. */
+export function hookWrittenLineage(content: string): ClaudeMdLineage {
+  return { written: contentSha256(content), base: null };
 }
 
 /**
- * The record to decide on, from the raw record file: absent → null (no lineage
- * yet, the previous behaviour); present but unreadable → the content counts as
- * hook-written, so an unreadable record never turns into an unconditional push.
+ * The lineage to decide on, from the raw record file: absent → null (no lineage
+ * yet, the previous behaviour); present but unreadable or malformed → the content
+ * counts as hook-written, so a bad record never turns into an unconditional push.
  */
-export function claudeMdRecordFor(
+export function effectiveClaudeMdLineage(
   raw: string | undefined,
   content: string,
 ): ClaudeMdLineage | null {
   if (raw === undefined) return null;
-  return parseClaudeMdLineage(raw) ?? { written: contentSha256(content), base: null };
+  return parseClaudeMdLineage(raw) ?? hookWrittenLineage(content);
 }
 
 /**
@@ -697,7 +707,7 @@ export async function collectProfilePayloads(
         // skip what a hook wrote, send an edit against the base it derives from.
         // Without a record the only base the runner knows is its boot baseline.
         const record =
-          claudeMdRecordFor(await readFile(CLAUDE_MD_LINEAGE_PATH), raw) ??
+          effectiveClaudeMdLineage(await readFile(CLAUDE_MD_LINEAGE_PATH), raw) ??
           (baselines?.claudeMd ? { written: null, base: baselines.claudeMd } : null);
         const body = planClaudeMdSync({ content: raw, record });
         if (body) payloads.push({ label: "claude", body });

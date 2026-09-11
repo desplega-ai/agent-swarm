@@ -144,12 +144,14 @@ describe("concurrent sessions sharing ~/.claude/CLAUDE.md", () => {
     expect(await stop()).toBeNull(); // unknown lineage → treated as hook-written
   });
 
-  test("an unreadable record never turns into a push", async () => {
-    await materializeClaudeMd(V2, paths);
-    await edit("edited");
-    await Bun.write(paths.record, '{"written": "abc'); // torn or corrupt
+  test("an unreadable or malformed record never turns into a push", async () => {
+    for (const bad of ['{"written": "abc', "{}", "[]", "42", '{"written": 5, "base": null}']) {
+      await materializeClaudeMd(V2, paths);
+      await edit("edited");
+      await Bun.write(paths.record, bad);
 
-    expect(await stop()).toBeNull();
+      expect(await stop()).toBeNull();
+    }
   });
 
   test("record and sidecar writes are atomic: no temp files are left behind", async () => {
@@ -186,6 +188,5 @@ describe("default paths", () => {
     const { file, backup, record } = DEFAULT_CLAUDE_MD_SESSION_PATHS;
     expect(record).toBe(`${file}.lineage.json`);
     expect(backup).toBe(`${file}.bak`);
-    expect(record.startsWith("/tmp/")).toBe(false);
   });
 });

@@ -39,9 +39,10 @@ import {
   CLAUDE_MD_PATH,
   type ClaudeMdLineage,
   claudeMdLineageOf,
-  claudeMdRecordFor,
   contentSha256,
+  effectiveClaudeMdLineage,
   type FileReader,
+  hookWrittenLineage,
   parseClaudeMdLineage,
 } from "./profile-sync.ts";
 
@@ -97,13 +98,14 @@ export async function materializeClaudeMd(
   const current = Bun.file(paths.file);
   if (await current.exists()) {
     const existing = await current.text();
-    const record = await readClaudeMdLineage(paths.record).catch(() => null);
+    const record = effectiveClaudeMdLineage(
+      await readText(paths.record).catch(() => undefined),
+      existing,
+    );
     // With a record, anything but the hook's own write is an agent's unsynced
     // edit. Without one (the file predates the hook, e.g. the user's own) its
     // origin is unknown: treat it as hook-written, never to be pushed.
-    const lineage = record
-      ? claudeMdLineageOf(existing, record)
-      : { written: contentSha256(existing), base: null };
+    const lineage = record ? claudeMdLineageOf(existing, record) : hookWrittenLineage(existing);
     await Bun.write(paths.backup, existing);
     // `of` pins the sidecar to this exact backup: a stale sidecar left by an
     // earlier overlap must not describe a different `.bak`.
@@ -138,7 +140,7 @@ export async function restoreClaudeMd(
     // Without a matching sidecar (a legacy `.bak`, a failed or stale sidecar) the
     // lineage is unknown: record it as hook-written, the conservative choice
     // (never pushed as an edit).
-    const record = lineage ?? { written: contentSha256(content), base: null };
+    const record = lineage ?? hookWrittenLineage(content);
     await writeAtomic(paths.record, JSON.stringify(record)).catch(() => {});
   } else {
     await Bun.file(paths.file)
@@ -148,13 +150,6 @@ export async function restoreClaudeMd(
       .delete()
       .catch(() => {});
   }
-}
-
-export async function readClaudeMdLineage(
-  path: string = CLAUDE_MD_LINEAGE_PATH,
-  readFile: FileReader = readText,
-): Promise<ClaudeMdLineage | null> {
-  return parseClaudeMdLineage(await readFile(path));
 }
 
 export interface ClaudeMdSyncState {
@@ -171,5 +166,5 @@ export async function readClaudeMdSyncState(
 ): Promise<ClaudeMdSyncState | null> {
   const content = await readFile(paths.file);
   if (content === undefined) return null;
-  return { content, record: claudeMdRecordFor(await readFile(paths.record), content) };
+  return { content, record: effectiveClaudeMdLineage(await readFile(paths.record), content) };
 }
