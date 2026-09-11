@@ -265,7 +265,7 @@ export function normalizeAcp(ordered: DecodedRecord[]): NormalizedItem[] {
         const match = /^ACP tool (\S+) (?:pending|in_progress|completed|failed)$/.exec(
           String(ev.message ?? ""),
         );
-        if (!match || !toolCalls.has(match[1])) {
+        if (!match?.[1] || !toolCalls.has(match[1])) {
           items.push(makeItem(d, "lifecycle", { role: "system", meta: ev }));
         }
         break;

@@ -1,10 +1,18 @@
 # ACP persisted log regression fixture
 
-`acp-beea63b7.json` contains 30 unmodified `session_logs` rows from task
-`beea63b7-04ee-485e-a09f-335afa5ddcef`, fetched on 2026-09-11. It includes the
-truncated session-init model catalog, raw/normalized message and thought twins,
-bash and todowrite calls with their updates/progress/results, and usage/result
-metadata. Row IDs, timestamps and content are retained for provenance.
+`acp-beea63b7.json` contains 30 rows derived from a real persisted ACP transcript,
+then sanitized for this public repository. Row/task/session/agent and provider
+message/tool identifiers are deterministic examples; timestamps are synthetic.
+Internal paths, business prose, agent instructions, command descriptions and model
+catalog entries have been replaced with neutral synthetic payloads.
+
+The real record envelopes, event order, nested object/array shapes, raw/normalized
+message and thought twins, bash and todowrite update/progress/result sequences,
+and usage/result metadata remain intact. Catalog previews retain truncated JSON
+and their original length class. This preserves the provider-emitted regression
+cases without retaining the source transcript's operational content. Identical
+source strings and identifiers map consistently so deduplication and pairing are
+still exercised. The filename is a historical label, not a live task reference.
 
 Run from the repository root:
 

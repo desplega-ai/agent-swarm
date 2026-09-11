@@ -9,7 +9,7 @@ for (const [name, normalize] of [
   ["evals", normalizeEvalLogs],
 ] as const) {
   describe(`ACP reader (${name})`, () => {
-    test("golden real persisted rows retain content and pair tools without protocol noise", () => {
+    test("sanitized real-derived persisted rows retain content and pair tools without protocol noise", () => {
       const parsed = normalize(fixture);
       const blocks = itemsToParsedMessages(parsed.items).flatMap((message) => message.content);
       const histogram: Record<string, number> = {};
@@ -32,9 +32,9 @@ for (const [name, normalize] of [
       expect(parsed.pairing.orphanResults).toEqual([]);
       const bash = parsed.items.find((item) => item.tool?.name === "bash");
       expect(bash?.tool?.input).toEqual({
-        cwd: "/workspace",
-        command: "mkdir -p /workspace/shared/linkedin-infographics-2026-09-10/specs",
-        description: "Create specs directory",
+        cwd: "/tmp/acp-example",
+        command: "mkdir -p /tmp/acp-example/output",
+        description: "Create example directory",
       });
       expect(blocks).toContainEqual({
         type: "tool_result",
@@ -42,7 +42,7 @@ for (const [name, normalize] of [
         content: "(no output)",
         isError: false,
       });
-      const todo = parsed.items.find((item) => item.tool?.id === "call_01f2695fbe0b4f1daa7949b9");
+      const todo = parsed.items.find((item) => item.tool?.id === "call_example_06");
       expect(todo?.tool?.name).toBe("todowrite");
       expect(todo?.tool?.input).toHaveProperty("todos");
       expect(todo?.coveredRecIds).toHaveLength(1);
