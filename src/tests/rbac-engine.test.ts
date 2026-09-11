@@ -82,6 +82,7 @@ const LEAD_ONLY_VERBS: PermissionVerb[] = [
 ];
 
 const LEAD_OR_RESOURCE_OWNER_VERBS: PermissionVerb[] = [
+  "memory.edit.any",
   "skill.update.any",
   "skill.delete.any",
   "mcp-server.delete.any",

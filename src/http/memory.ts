@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { getDbClient, getTaskById } from "../be/db";
+import { getAgentById, getDbClient, getTaskById } from "../be/db";
 import { getEmbeddingProvider, getMemoryStore } from "../be/memory";
 import { canReadMemory } from "../be/memory/access";
 import { CANDIDATE_SET_MULTIPLIER } from "../be/memory/constants";
@@ -25,6 +25,7 @@ import { getRetrievalsForAgent, hasRetrievalForTask } from "../be/memory/retriev
 import { getUsefulnessStats } from "../be/memory/usefulness-stats";
 import { shouldPersistAutomaticTaskMemory } from "../memory/automatic-task-gate";
 import { SIMILARITY_THRESHOLD } from "../prompts/memories";
+import { can } from "../rbac";
 import { AgentMemorySchema, AgentMemoryScopeSchema, AgentMemorySourceSchema } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
@@ -133,6 +134,7 @@ const editMemory = route({
     "Edit a single memory in place while preserving its ID and usefulness posterior. Modes: 'replace' overwrites entire content; 'exact' performs surgical find-and-replace of oldString→newString (fails if missing or ambiguous)",
   tags: ["Memory"],
   auth: { apiKey: true, agentId: true },
+  rbac: { permission: "memory.edit.any" },
   body: z.object({
     memoryId: z.string().uuid().optional(),
     key: z.string().min(1).optional(),
@@ -147,6 +149,7 @@ const editMemory = route({
   responses: {
     200: { description: "Memory edited", schema: MemoryEditResultSchema },
     400: { description: "Validation error" },
+    403: { description: "Permission denied: requires memory owner or lead" },
     404: { description: "Memory not found" },
     409: { description: "Version conflict" },
   },
@@ -885,6 +888,30 @@ export async function handleMemory(
 
     try {
       const store = getMemoryStore();
+      // Key+scope edits already constrain the owner in store.edit(). IDs do not.
+      // Internal indexing and re-embedding intentionally bypass this entrypoint.
+      if (memoryId) {
+        const memory = await store.peek(memoryId);
+        if (!memory) {
+          jsonError(res, "Memory not found", 404);
+          return true;
+        }
+        const agent = await getAgentById(myAgentId);
+        const decision = can({
+          principal: { kind: "agent", agentId: myAgentId, isLead: agent?.isLead ?? false },
+          verb: "memory.edit.any",
+          resource: { kind: "owned", ownerAgentId: memory.agentId, scope: memory.scope },
+          source: "http",
+        });
+        if (!decision.allow) {
+          jsonError(
+            res,
+            "Permission denied. You can only edit your own memories unless you are the lead.",
+            403,
+          );
+          return true;
+        }
+      }
       const result = await store.edit({
         id: memoryId,
         key,
@@ -904,7 +931,11 @@ export async function handleMemory(
         if (embedding) await store.updateEmbedding(result.memory.id, embedding, provider.name);
         try {
           // Edit path: prune links derived from removed content (sequel links survive).
-          await refreshLinks(result.memory.id, myAgentId, result.memory.content);
+          await refreshLinks(
+            result.memory.id,
+            result.memory.agentId ?? myAgentId,
+            result.memory.content,
+          );
         } catch (err) {
           console.error(
             `[memory-edit] Link resolution failed for ${result.memory.id}:`,
