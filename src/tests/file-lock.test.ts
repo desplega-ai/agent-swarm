@@ -52,6 +52,17 @@ describe("withFileLock", () => {
     });
   });
 
+  test("an explicit undefined option keeps its default", async () => {
+    await Bun.write(lock, "dead-holder");
+    const old = new Date(Date.now() - 120_000);
+    await utimes(lock, old, old);
+
+    // staleMs: undefined must still mean the 60 s default, so this lock is broken.
+    expect(
+      await withFileLock(lock, async () => "ran", { waitMs: 100, staleMs: undefined }),
+    ).toEqual({ acquired: true, value: "ran" });
+  });
+
   test("does not delete a lock it no longer owns", async () => {
     await withFileLock(lock, async () => {
       await Bun.write(lock, "taken-over"); // ours was broken as stale meanwhile

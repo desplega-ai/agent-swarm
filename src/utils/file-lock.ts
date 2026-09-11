@@ -43,7 +43,11 @@ export async function withFileLock<T>(
   fn: () => Promise<T>,
   options: FileLockOptions = {},
 ): Promise<FileLockResult<T>> {
-  const { waitMs, staleMs, pollMs } = { ...DEFAULTS, ...options };
+  // `??`, not a spread: an explicit `undefined` must not override a default
+  // (a NaN deadline would wait forever).
+  const waitMs = options.waitMs ?? DEFAULTS.waitMs;
+  const staleMs = options.staleMs ?? DEFAULTS.staleMs;
+  const pollMs = options.pollMs ?? DEFAULTS.pollMs;
   const token = `${process.pid}:${crypto.randomUUID()}`;
   const deadline = Date.now() + waitMs;
 

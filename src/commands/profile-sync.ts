@@ -324,6 +324,8 @@ export const CLAUDE_MD_LOCK_PATH = `${CLAUDE_MD_PATH}.lock`;
  */
 export const CLAUDE_MD_SYNC_TIMEOUT_MS = 10_000;
 export const CLAUDE_MD_LOCK_STALE_MS = 30_000;
+/** The runner backstop is best effort: it waits briefly, then skips this round. */
+const RUNNER_LOCK_WAIT_MS = 15_000;
 
 /** `fetch` bounded by CLAUDE_MD_SYNC_TIMEOUT_MS, for calls made while holding the lock. */
 export function fetchWithSyncTimeout(fetchImpl: typeof fetch = fetch): typeof fetch {
@@ -843,7 +845,8 @@ export async function syncProfileFilesToServer(opts: ProfileSyncOptions): Promis
   }
 
   if (claudeUnderLock) {
-    const { path: lockPath = CLAUDE_MD_LOCK_PATH, waitMs } = opts.claudeMdLock ?? {};
+    const { path: lockPath = CLAUDE_MD_LOCK_PATH, waitMs = RUNNER_LOCK_WAIT_MS } =
+      opts.claudeMdLock ?? {};
     const bounded = { ...opts, fetchImpl: fetchWithSyncTimeout(opts.fetchImpl) };
     const locked = await withFileLock(
       lockPath,
