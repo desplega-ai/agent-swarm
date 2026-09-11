@@ -85,7 +85,43 @@ The chart exposes these API ingress values:
 
 The template routes `/` with `pathType: Prefix` to the API Service on `api.port` (default `3013`). This exposes the swarm API, including `/api/*` and `/mcp`; it does not serve the dashboard. The optional `agentFs.ingress` values control a separate service.
 
-The chart keeps worker traffic on its internal `MCP_BASE_URL`. When API ingress is enabled with a hostname, it derives `PUBLIC_MCP_BASE_URL` from that hostname, using HTTPS if `ingress.tls` is nonempty and HTTP otherwise. If your controller terminates HTTPS without an `ingress.tls` entry, or another gateway provides the public address, set `config.publicMcpBaseUrl` explicitly to the externally reachable API origin. This address is used for OAuth callbacks and webhook URLs.
+### Public API URL
+
+The chart keeps worker traffic on the internal `MCP_BASE_URL`. It sets `PUBLIC_MCP_BASE_URL`, used for OAuth callbacks and webhook URLs, in this order:
+
+1. Use `config.publicMcpBaseUrl` when explicitly set.
+2. Otherwise, when `ingress.enabled` is true and `ingress.host` is nonempty, derive the URL from that host: `https://` if `ingress.tls` has at least one entry, or `http://` if it is empty.
+3. Otherwise, leave `PUBLIC_MCP_BASE_URL` unset. The API falls back to the chart's internal `MCP_BASE_URL`.
+
+**An empty `ingress.tls` produces an `http://` public URL**, even when a load balancer terminates HTTPS elsewhere. The chart does not infer HTTPS from annotations or an external proxy. If TLS terminates outside ingress, or another gateway provides the public address, set the externally reachable API origin explicitly:
+
+```yaml
+config:
+  publicMcpBaseUrl: https://swarm-api.example.com
+```
+
+### Separate agent-fs ingress
+
+The API ingress does not expose agent-fs. Enable both `agentFs.enabled` and `agentFs.ingress.enabled` to create its separate Ingress. It routes `/` with `pathType: Prefix` to the agent-fs Service on `agentFs.port` (default `7433`).
+
+The `agentFs.ingress.enabled`, `className`, `annotations`, `host`, and `tls` fields have the same meanings and defaults as the API ingress fields above. Use a separate hostname and matching TLS Secret:
+
+```yaml
+# Merge with your agent-fs bucket and S3 credential configuration.
+agentFs:
+  enabled: true
+  ingress:
+    enabled: true
+    className: your-ingress-class
+    annotations: {}
+    host: files.example.com
+    tls:
+      - hosts:
+          - files.example.com
+        secretName: swarm-files-tls
+```
+
+Provision DNS and the TLS Secret for this host too. See the [chart's shared filesystem setup](https://github.com/desplega-ai/agent-swarm/tree/main/charts/agent-swarm#cross-agent-shared-filesystem) for required storage configuration. This ingress does not determine `PUBLIC_MCP_BASE_URL`; that comes from the API ingress or `config.publicMcpBaseUrl`.
 
 ## Connect the dashboard
 
@@ -119,6 +155,14 @@ The API enables CORS in its HTTP request handler; no chart switch is needed to t
 
 Normal API requests still require their usual authentication. Requests without an `Origin` header receive wildcard CORS headers, so a plain `curl` request does not reproduce the browser's CORS exchange.
 
+### Security posture
+
+Echoing any origin with `Access-Control-Allow-Credentials: true` does not restrict which websites can read credentialed responses. This behavior alone does not bypass bearer authentication on the main API routes: a hostile website still needs the bearer token, which the browser does not automatically attach to its requests.
+
+Cookie authentication has a different exposure. DB-backed pages issue a `page_session` cookie with `SameSite=None; Secure` outside development mode. The `/@swarm/api/*` page-iframe proxy accepts that cookie as authentication. When the browser permits the cookie on a cross-site request, a hostile website can make a credentialed request and read the response within that session's permissions. Do not rely on the default CORS behavior to protect sensitive data accessible through a page session.
+
+An opt-in origin allowlist is proposed in [PR #1436](https://github.com/desplega-ai/agent-swarm/pull/1436). It is pending, not a shipped configuration option in this guide.
+
 ### What the ingress must preserve
 
 If the ingress forwards requests and preserves the API's response headers, you do not need an ingress CORS annotation. Allow unauthenticated preflight requests through any proxy authentication layer, and preserve CORS headers on actual responses as well as preflight responses.
@@ -150,7 +194,7 @@ cat /tmp/swarm-cors-headers.txt
 
 Expect one `Access-Control-Allow-Origin` header with exactly `https://app.agent-swarm.dev`, `Access-Control-Allow-Credentials: true`, and allow-methods/allow-headers covering the request. The API's preflight status is `204`; a controller that handles preflight may return its own successful response. A count of two or more indicates duplicate header lines. A count of one still needs inspection for a comma-separated value or the wrong origin.
 
-If the response redirects, demands authentication, lacks CORS headers, or contains duplicates, repeat the request against `http://localhost:3013/api/agents` through the port-forward and compare it with the ingress response. Inspect the failing request in browser developer tools too: a proxy may treat preflight and actual responses differently. Check your controller's configuration and each intervening proxy based on those results. A failed DNS lookup, TLS handshake, or network connection must be resolved before there is an HTTP CORS response to inspect.
+If the response redirects, demands authentication, lacks CORS headers, or contains duplicates, repeat the request against `http://localhost:3013/api/agents` through the port-forward and compare it with the ingress response. Inspect the failing request in browser developer tools too: a proxy may treat preflight and actual responses differently. If a proxy appends another origin header, remove its append rule so only one valid origin value reaches the browser. If the direct API response has CORS headers but the public response does not, check each intervening proxy for rules that strip them, using the same `Origin` header for both requests. A failed DNS lookup, TLS handshake, or network connection must be resolved before there is an HTTP CORS response to inspect.
 
 ## Related
 
