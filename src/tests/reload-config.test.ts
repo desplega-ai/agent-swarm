@@ -216,7 +216,7 @@ describe("reload-config", () => {
         process.env[key] = "true";
         await loadGlobalConfigsIntoEnv(override);
         expect(process.env[key]).toBe("true");
-        expect(isOriginAllowedForCredentials("https://attacker.invalid")).toBe(true);
+        expect(isOriginAllowedForCredentials("https://attacker.invalid")).toBe(false);
       }
     } finally {
       await deleteSwarmConfig(rowId);

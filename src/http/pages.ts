@@ -376,7 +376,7 @@ function applyLaunchCors(req: IncomingMessage, res: ServerResponse): void {
   const origin = (req.headers.origin as string | undefined) ?? "";
   if (origin) {
     res.setHeader("Vary", "Origin");
-    // Share the default hosted/dev policy and explicit compatibility opt-out.
+    // Cookie issuance always requires the hosted/dev or configured allowlist.
     if (isOriginAllowedForCredentials(origin)) {
       res.setHeader("Access-Control-Allow-Origin", origin);
       res.setHeader("Access-Control-Allow-Credentials", "true");

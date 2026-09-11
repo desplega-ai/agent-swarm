@@ -20,7 +20,7 @@ export function warnIfCorsAllowsAnyOrigin(): void {
   if (isEnvFlagEnabled("CORS_ALLOW_ANY_ORIGIN", false) && !warnedAboutAllowAnyOrigin) {
     warnedAboutAllowAnyOrigin = true;
     console.warn(
-      "[CORS] CORS_ALLOW_ANY_ORIGIN=true: any request origin can receive credentialed responses. Set CORS_ALLOWED_ORIGINS and disable CORS_ALLOW_ANY_ORIGIN to restrict access.",
+      "[CORS] CORS_ALLOW_ANY_ORIGIN=true: any request origin can receive non-credentialed responses; cookie-authenticated responses still require CORS_ALLOWED_ORIGINS. Set CORS_ALLOWED_ORIGINS and disable CORS_ALLOW_ANY_ORIGIN to restrict access.",
     );
   }
 }
@@ -44,10 +44,6 @@ function getAllowedOrigins(): string[] {
  * Bare `*`, `https://*`, other wildcard positions, and non-origin URLs are ignored.
  */
 export function isOriginAllowedForCredentials(origin: string): boolean {
-  if (isEnvFlagEnabled("CORS_ALLOW_ANY_ORIGIN", false)) {
-    warnIfCorsAllowsAnyOrigin();
-    return true;
-  }
   const allowed = getAllowedOrigins().some((entry) => {
     if (!entry.includes("*")) return entry === origin;
 
@@ -80,17 +76,22 @@ export function setCorsHeaders(req: IncomingMessage, res: ServerResponse) {
   // page-session cookie endpoints — pass the browser's CORS check. A wildcard
   // would force the browser to reject any credentialed cross-origin response.
   //
-  // Origins outside the configured or built-in allowlist receive no CORS grant.
+  // Only allowlisted origins receive a credentialed CORS grant.
   const rawOrigin = req.headers.origin;
   const origin = Array.isArray(rawOrigin) ? rawOrigin[0] : rawOrigin;
-  if (origin && !isOriginAllowedForCredentials(origin)) {
+  const allowCredentials = origin ? isOriginAllowedForCredentials(origin) : false;
+  const allowAnyOrigin = isEnvFlagEnabled("CORS_ALLOW_ANY_ORIGIN", false);
+  if (allowAnyOrigin) warnIfCorsAllowsAnyOrigin();
+  if (origin && !allowCredentials && !allowAnyOrigin) {
     res.setHeader("Vary", "Origin");
     return;
   }
   if (origin) {
     res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Vary", "Origin");
-    res.setHeader("Access-Control-Allow-Credentials", "true");
+    // The compatibility flag never grants access to browser-supplied cookies.
+    // Bearer clients from unlisted origins must use credentials: "omit".
+    if (allowCredentials) res.setHeader("Access-Control-Allow-Credentials", "true");
     // When credentials are involved the spec disallows wildcards in
     // Allow-Headers / Allow-Methods / Expose-Headers — they must be
     // explicit. Echo whatever the preflight asked for (defensive default

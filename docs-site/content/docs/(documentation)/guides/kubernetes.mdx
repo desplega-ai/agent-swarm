@@ -157,7 +157,7 @@ Normal API requests still require their usual authentication. Requests without a
 
 ### Security posture
 
-Unset or blank `CORS_ALLOWED_ORIGINS` now allows HTTPS subdomains of `agent-swarm.dev` and `agent-swarm.cloud`, plus the documented local development origins. Other origins receive neither `Access-Control-Allow-Origin` nor `Access-Control-Allow-Credentials`. The wildcard patterns exclude apex domains.
+Unset or blank `CORS_ALLOWED_ORIGINS` now allows HTTPS subdomains of `agent-swarm.dev` and `agent-swarm.cloud`, plus the documented local development origins. By default, other origins receive neither `Access-Control-Allow-Origin` nor `Access-Control-Allow-Credentials`. The wildcard patterns exclude apex domains.
 
 **Breaking change for custom dashboards:** set `CORS_ALLOWED_ORIGINS=https://dashboard.example.com` on the API, substituting your dashboard origin. A custom list replaces all built-in entries. In Helm, set `config.extraEnv.CORS_ALLOWED_ORIGINS` in your values.yaml as shown below and upgrade the release with that file (`helm upgrade ... -f values.yaml`). See [the complete defaults and migration options](/docs/reference/environment-variables#breaking-change-secure-cors-defaults).
 
@@ -167,7 +167,7 @@ config:
     CORS_ALLOWED_ORIGINS: "https://dashboard.example.com"
 ```
 
-For intentional compatibility, the deployment-only `CORS_ALLOW_ANY_ORIGIN=true` environment variable (requires an API restart; unavailable through runtime Configuration) restores unrestricted reflected credentialed CORS, overriding the allowlist. The API logs a warning once per process when active. This exposes page-session responses to arbitrary sites when the browser sends the cookie; prefer listing trusted origins. CORS does not replace authentication or CSRF protection.
+For intentional compatibility, the deployment-only `CORS_ALLOW_ANY_ORIGIN=true` environment variable (requires an API restart; unavailable through runtime Configuration) allows arbitrary origins for non-credentialed requests only. Bearer-token clients from unlisted origins must use `credentials: "omit"`. Cookie-authenticated responses, including page JSON and `/@swarm/api/*`, always require an allowlisted origin for credentialed CORS. The API logs a warning once per process when active. The flag never grants `Access-Control-Allow-Credentials` to an unlisted origin; configure trusted origins for page-session access. CORS does not replace authentication or CSRF protection.
 
 Denied-origin logs identify the rejected origin and the setting to change. Check these logs when an otherwise reachable SPA loses access after upgrading.
 
