@@ -1,15 +1,20 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { Usage } from "@agentclientprotocol/sdk";
 import { normalizeSessionLogs } from "../../apps/ui/src/logs-parser";
 import {
   closeDb,
+  createAgent,
   createSessionLogs,
   createTaskExtended,
   getSessionLogsByTaskId,
   initDb,
 } from "../be/db";
+import { handleSessionData } from "../http/session-data";
+import { getPathSegments, parseQueryParams } from "../http/utils";
 import { createProviderAdapter } from "../providers";
 import {
   ACPAdapter,
@@ -19,6 +24,7 @@ import {
 } from "../providers/acp-adapter";
 import { AcpTargetResolutionError, resolveAcpTarget } from "../providers/acp-targets";
 import type { ProviderEvent, ProviderSessionConfig } from "../providers/types";
+import { listenOnFreePort } from "./test-net";
 
 const tmpDirs: string[] = [];
 
@@ -68,7 +74,32 @@ describe("ACPAdapter", () => {
     );
   });
 
-  test("redacts credential headers from arrays and nested maps before persistence", async () => {
+  test.each<{ name: string; usage?: Usage | null }>([
+    { name: "absent", usage: undefined },
+    { name: "null", usage: null },
+    {
+      name: "OpenCode observed",
+      usage: {
+        inputTokens: 84376,
+        outputTokens: 65,
+        totalTokens: 86233,
+        cachedReadTokens: 1792,
+      },
+    },
+    {
+      name: "populated",
+      usage: {
+        totalTokens: 180,
+        inputTokens: 100,
+        outputTokens: 30,
+        thoughtTokens: 10,
+        cachedReadTokens: 25,
+        cachedWriteTokens: 15,
+      },
+    },
+  ])("persists $name ACP usage with deliberate zero-coalescing of missing session-cost counters", async ({
+    usage,
+  }) => {
     const cwd = makeTempDir();
     const agentPath = join(cwd, "fake-acp-agent.ts");
     const sdkPath = join(process.cwd(), "node_modules/@agentclientprotocol/sdk/dist/acp.js");
@@ -222,7 +253,15 @@ class FakeAgent {
         rawOutput: { chunks: Array.from({ length: 20 }, () => "z".repeat(2_000)) },
       },
     });
-    return { stopReason: "end_turn" };
+    return ${JSON.stringify({
+      stopReason: "end_turn",
+      usage,
+      _meta: {
+        debug: "ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+        authorization: "opaque-response-credential",
+        note: "response metadata",
+      },
+    })};
   }
 
   async cancel() {}
@@ -316,7 +355,85 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
       expect(persisted).toHaveLength(rawLogs.length);
       expect(persisted.map((entry) => entry.content)).toEqual(rawLogs);
       expect(persisted.every((entry) => entry.cli === "acp")).toBe(true);
+      const responseLog = persisted
+        .map((entry) => JSON.parse(entry.content))
+        .find((entry) => entry.name === "acp_prompt_response");
+      expect(responseLog).toEqual({
+        type: "custom",
+        name: "acp_prompt_response",
+        data: {
+          sessionId: session.sessionId,
+          stopReason: "end_turn",
+          usage: usage ?? null,
+          _meta: { debug: "[REDACTED:github_token]", note: "response metadata" },
+        },
+      });
+      expect(result.cost?.totalCostUsd).toBe(0);
+      expect(result.cost?.inputTokens).toBe(usage?.inputTokens);
+      expect(result.cost?.outputTokens).toBe(usage?.outputTokens);
+      expect(result.cost?.cacheReadTokens).toBe(usage?.cachedReadTokens ?? undefined);
+      expect(result.cost?.cacheWriteTokens).toBe(usage?.cachedWriteTokens ?? undefined);
+      // Match saveCostData's JSON transport: undefined counters disappear on the wire.
+      // The existing API deliberately coalesces them to zero; only raw logs retain absence.
+      const agent = await createAgent({ name: "ACP cost test", isLead: false, status: "idle" });
+      const server = createServer(async (req, res) => {
+        const handled = await handleSessionData(
+          req,
+          res,
+          getPathSegments(req.url ?? ""),
+          parseQueryParams(req.url ?? ""),
+          agent.id,
+        );
+        if (!handled) {
+          res.writeHead(404);
+          res.end();
+        }
+      });
+      try {
+        const port = await listenOnFreePort(server);
+        const endpoint = `http://127.0.0.1:${port}/api/session-costs`;
+        const body = JSON.stringify({ ...result.cost, agentId: agent.id, taskId: task.id });
+        if (!usage) {
+          for (const counter of [
+            "inputTokens",
+            "outputTokens",
+            "cacheReadTokens",
+            "cacheWriteTokens",
+          ]) {
+            expect(JSON.parse(body)).not.toHaveProperty(counter);
+          }
+        }
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body,
+        });
+        expect(response.status).toBe(201);
+        const { cost } = await response.json();
+        expect(cost).toMatchObject({
+          inputTokens: usage?.inputTokens ?? 0,
+          outputTokens: usage?.outputTokens ?? 0,
+          cacheReadTokens: usage?.cachedReadTokens ?? 0,
+          cacheWriteTokens: usage?.cachedWriteTokens ?? 0,
+          costSource: "unpriced",
+        });
+        const readback = await fetch(`${endpoint}?taskId=${task.id}`);
+        expect(readback.status).toBe(200);
+        const { costs } = await readback.json();
+        expect(costs).toHaveLength(1);
+        expect(costs[0]).toMatchObject({
+          id: cost.id,
+          inputTokens: cost.inputTokens,
+          outputTokens: cost.outputTokens,
+          cacheReadTokens: cost.cacheReadTokens,
+          cacheWriteTokens: cost.cacheWriteTokens,
+          costSource: cost.costSource,
+        });
+      } finally {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
       const persistedJson = persisted.map((entry) => entry.content).join("\n");
+      expect(persistedJson).not.toContain("opaque-response-credential");
       const credentialHeaderNames = [
         "authorization",
         "proxy-authorization",

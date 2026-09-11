@@ -65,6 +65,8 @@ Custom targets use `ACP_TARGET_COMMAND` plus JSON-array `ACP_TARGET_ARGS`. `ACP_
 
 All projected config-option strings pass through `scrubSecrets` before the adapter emits session metadata, including grouped choices. Boolean values and non-secret model IDs and descriptions retain their values. This protects both credential-status persistence and the diagnostic mirror.
 
+After `session/prompt` completes, the adapter persists a bounded, scrubbed `custom` raw-log entry named `acp_prompt_response`. Its `data` contains `sessionId`, `stopReason`, `usage` (`null` when absent), and `_meta` when supplied. Token classes from the optional prompt usage map directly into `CostData`; missing counters remain `undefined` at the adapter boundary. The session-cost API and DB coalesce missing input/output/cache counters to zero, so persisted costs and UI displays cannot distinguish absent usage from measured zero. The raw diagnostic retains that distinction. Context `usage_update` totals do not substitute for billing tokens. No ACP pricing identity is inferred from the target or requested model.
+
 The latest sanitized `configOptions` advertised by a target are stored in the agent's credential-status telemetry and shown read-only in the dashboard. No report means no ACP session has reported options yet; an empty list means a session explicitly advertised none.
 
 The `docker-entrypoint.sh` swarm_config-fetch step explicitly **skips** `HARNESS_PROVIDER` when exporting config to env. Baking it would shadow swarm_config deletes with the stale value persisted in `process.env`.
