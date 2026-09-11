@@ -362,22 +362,22 @@ describe("a lineage write that fails leaves nothing pushable", () => {
     );
     return sent;
   };
-  const failing = async () => {
+  const throwInjectedFailure = async () => {
     throw new Error("injected write failure");
   };
   /**
-   * A record whose temp file name exceeds NAME_MAX: every atomic write of it
-   * fails for real (ENAMETOOLONG, for root too), while the record itself can
-   * still be written directly and read.
+   * A record whose temp file name exceeds NAME_MAX: every atomic replacement of
+   * it — the only way the hook writes it — fails for real (ENAMETOOLONG, for
+   * root too), while a test can still write it directly and the hook read it.
    */
-  const useUnwritableRecord = () => {
+  const useUnreplaceableRecord = () => {
     paths = { ...paths, record: join(root, "r".repeat(230)) };
   };
 
   test("a SessionStart that cannot mark the record writes nothing", async () => {
     // The reviewed case: the record write failed silently, the Stop found no
     // record and sent the materialization unconditionally over a newer DB value.
-    useUnwritableRecord();
+    useUnreplaceableRecord();
 
     await expect(materializeClaudeMd(V2, paths)).rejects.toThrow();
     expect(await Bun.file(paths.file).exists()).toBe(false);
@@ -386,7 +386,7 @@ describe("a lineage write that fails leaves nothing pushable", () => {
 
   test("a SessionStart whose final record write fails leaves the file unpushable", async () => {
     const outcome = await materializeClaudeMd(V2, paths, {
-      testPauses: { beforeRecordCommit: failing },
+      testPauses: { beforeRecordCommit: throwInjectedFailure },
     });
 
     expect(outcome).toBe("materialized"); // the session still gets the DB value
@@ -400,7 +400,7 @@ describe("a lineage write that fails leaves nothing pushable", () => {
     // The reviewed case: the restore's record write failed silently, the record
     // kept describing v2, and a second Stop sent the restored v1 against v2 — a
     // compare-and-set the DB, still at v2, accepts.
-    useUnwritableRecord();
+    useUnreplaceableRecord();
     await Bun.write(paths.backup, V1);
     await Bun.write(paths.file, V2);
     await Bun.write(paths.record, JSON.stringify({ written: h(V2), base: h(V2) }));
@@ -415,11 +415,50 @@ describe("a lineage write that fails leaves nothing pushable", () => {
     await Bun.write(paths.file, V1); // before the session
     await materializeClaudeMd(V2, paths);
 
-    expect(await stop({ testPauses: { beforeRecordCommit: failing } })).toBeNull();
+    expect(await stop({ testPauses: { beforeRecordCommit: throwInjectedFailure } })).toBeNull();
     expect(await Bun.file(paths.file).text()).toBe(V1); // restored
     expect(await Bun.file(paths.record).text()).toBe(CLAUDE_MD_PENDING_RECORD);
     expect(await stop()).toBeNull(); // the double Stop does not send v1 against v2
   });
+
+  test("a SessionStart whose backup fails leaves an unsynced edit pushable", async () => {
+    // The marker goes on right before the file, not before the `.bak`: a backup
+    // that fails must not turn the edit still on disk into hook-written content.
+    await materializeClaudeMd(V2, paths);
+    await Bun.write(paths.file, "edited"); // not synced yet
+    await Bun.write(join(root, "blocker"), "a file where a directory should be");
+    paths = { ...paths, backup: join(root, "blocker/CLAUDE.md.bak") }; // ENOTDIR, for root too
+
+    await expect(materializeClaudeMd(V2, paths)).rejects.toThrow();
+    expect(await Bun.file(paths.file).text()).toBe("edited");
+    expect(await stop()).toEqual({
+      claudeMd: "edited",
+      changeSource: "session_sync",
+      expectedHashes: { claudeMd: h(V2) },
+    });
+  });
+
+  test.skipIf(process.getuid?.() === 0)(
+    "a Stop that cannot delete the .bak still records the restored edit's lineage",
+    async () => {
+      await materializeClaudeMd(V2, paths); // A starts on v2
+      await Bun.write(paths.file, "A's edit"); // not synced yet
+      await materializeClaudeMd(V2, paths); // B starts: .bak = A's edit
+      const dir = dirname(paths.file);
+      await chmod(dir, 0o555); // the file can be rewritten, the .bak not deleted
+      try {
+        expect(await stop()).toBeNull(); // A: disk v2 is B's materialization
+        expect(await Bun.file(paths.file).text()).toBe("A's edit"); // restored
+      } finally {
+        await chmod(dir, 0o755);
+      }
+      expect(await stop()).toEqual({
+        claudeMd: "A's edit",
+        changeSource: "session_sync",
+        expectedHashes: { claudeMd: h(V2) },
+      });
+    },
+  );
 
   // A read-only directory is the real failure here, and it does not stop root.
   test.skipIf(process.getuid?.() === 0)(

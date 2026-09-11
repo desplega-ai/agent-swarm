@@ -53,8 +53,7 @@
  */
 
 // `rename` has no Bun equivalent; it is what makes the record writes atomic.
-// `rm` with `force` tells "already gone" apart from a removal that failed.
-import { rename, rm } from "node:fs/promises";
+import { rename } from "node:fs/promises";
 import { withFileLock } from "../utils/file-lock.ts";
 import { scrubSecrets } from "../utils/secret-scrubber.ts";
 import {
@@ -135,14 +134,19 @@ async function writeAtomic(path: string, data: string): Promise<void> {
 }
 
 /**
- * Replace the pending marker with the real lineage. A failure is logged, not
- * thrown: the file is already in place and the marker keeps it unpushable.
+ * The one way a hook write reaches the file: mark the record pending, run
+ * `write` (it puts the content in place and returns its lineage), then replace
+ * the marker with that lineage. The marker failing throws before `write` runs;
+ * the lineage failing is logged, not thrown: the file is already in place and
+ * the marker keeps it unpushable.
  */
-async function commitRecord(
+async function writeUnderPendingRecord(
   paths: ClaudeMdSessionPaths,
-  lineage: ClaudeMdLineage,
   pauses: ClaudeMdTestPauses,
+  write: () => Promise<ClaudeMdLineage>,
 ): Promise<void> {
+  await writeAtomic(paths.record, CLAUDE_MD_PENDING_RECORD);
+  const lineage = await write();
   try {
     await pauses.beforeRecordCommit?.();
     await writeAtomic(paths.record, JSON.stringify(lineage));
@@ -150,6 +154,15 @@ async function commitRecord(
     console.warn(
       scrubSecrets(`[claude-md] lineage not recorded, the file stays unpushable: ${String(error)}`),
     );
+  }
+}
+
+/** Delete `path`: already gone is fine, any other failure throws. */
+async function deleteIfPresent(path: string): Promise<void> {
+  try {
+    await Bun.file(path).delete();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
 }
 
@@ -169,7 +182,8 @@ export type ClaudeMdMaterializeOutcome = "materialized" | LockMiss;
  * lineage, then materialize the DB value and record it. Lock busy or failing →
  * nothing is written (the file is left as it is). No flock on this platform →
  * materialized without protection; `stopClaudeMd` then never pushes. Throws,
- * having written nothing, if the record cannot be marked pending.
+ * leaving the file and its record as they were, if the record cannot be marked
+ * pending.
  */
 export async function materializeClaudeMd(
   content: string,
@@ -192,7 +206,6 @@ async function materializeUnlocked(
   pauses: ClaudeMdTestPauses,
 ): Promise<void> {
   const current = Bun.file(paths.file);
-  let backup: { content: string; lineage: ClaudeMdLineage } | null = null;
   if (await current.exists()) {
     const existing = await current.text();
     const record = effectiveClaudeMdLineage(
@@ -203,23 +216,18 @@ async function materializeUnlocked(
     // edit. Without one (the file predates the hook, e.g. the user's own) its
     // origin is unknown: treat it as hook-written, never to be pushed.
     const lineage = record ? claudeMdLineageOf(existing, record) : hookWrittenLineage(existing);
-    backup = { content: existing, lineage };
-  }
-
-  // The record was read above; the marker replaces it before anything is written.
-  await writeAtomic(paths.record, CLAUDE_MD_PENDING_RECORD);
-  if (backup) {
-    await Bun.write(paths.backup, backup.content);
+    await Bun.write(paths.backup, existing);
     // `of` pins the sidecar to this exact backup: a stale sidecar left by an
     // earlier overlap must not describe a different `.bak`.
-    const sidecar = { ...backup.lineage, of: contentSha256(backup.content) };
+    const sidecar = { ...lineage, of: contentSha256(existing) };
     await writeAtomic(`${paths.backup}.lineage`, JSON.stringify(sidecar)).catch(() => {});
   }
-  await Bun.write(paths.file, content); // creates ~/.claude if missing
-  await pauses.afterFileWrite?.();
-
-  const hash = contentSha256(content);
-  await commitRecord(paths, { written: hash, base: hash }, pauses);
+  await writeUnderPendingRecord(paths, pauses, async () => {
+    await Bun.write(paths.file, content); // creates ~/.claude if missing
+    await pauses.afterFileWrite?.();
+    const hash = contentSha256(content);
+    return { written: hash, base: hash };
+  });
 }
 
 /**
@@ -242,19 +250,22 @@ async function restoreUnlocked(
     } catch {
       lineage = null; // corrupt sidecar: unknown lineage
     }
-    await writeAtomic(paths.record, CLAUDE_MD_PENDING_RECORD);
-    await Bun.write(paths.file, content);
+    await writeUnderPendingRecord(paths, pauses, async () => {
+      await Bun.write(paths.file, content);
+      // Without a matching sidecar (a legacy `.bak`, a failed or stale sidecar)
+      // the lineage is unknown: record it as hook-written, the conservative
+      // choice (never pushed as an edit).
+      return lineage ?? hookWrittenLineage(content);
+    });
+    // Only after the lineage: a `.bak` that cannot be deleted must not cost a
+    // restored edit its lineage. (A leftover `.bak` is restored again, harmlessly.)
     await backup.delete();
     await sidecar.delete().catch(() => {});
-    // Without a matching sidecar (a legacy `.bak`, a failed or stale sidecar) the
-    // lineage is unknown: record it as hook-written, the conservative choice
-    // (never pushed as an edit).
-    await commitRecord(paths, lineage ?? hookWrittenLineage(content), pauses);
   } else {
     // The record goes only once the file is gone: a file left without its
     // record would be sent unconditionally by the next Stop.
-    await rm(paths.file, { force: true });
-    await rm(paths.record, { force: true }).catch(() => {});
+    await deleteIfPresent(paths.file);
+    await deleteIfPresent(paths.record).catch(() => {});
   }
 }
 
