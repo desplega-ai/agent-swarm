@@ -16,22 +16,7 @@ import {
   SkipError,
   writeReports,
 } from "./report";
-import { auth } from "./scenarios/auth";
-import { configRoundtrip } from "./scenarios/config-roundtrip";
-import { health } from "./scenarios/health";
-import { mcpSurface } from "./scenarios/mcp-surface";
-import { realtimeRooms } from "./scenarios/realtime-rooms";
-import { slackDelegationChildResult } from "./scenarios/slack-delegation-child-result";
-import { slackDelegationFailedChild } from "./scenarios/slack-delegation-failed-child";
-import { slackDelegationFlagOffRepro } from "./scenarios/slack-delegation-flag-off-repro";
-import { slackDelegationLateChild } from "./scenarios/slack-delegation-late-child";
-import { slackFailedTask } from "./scenarios/slack-failed-task";
-import { slackFollowUp } from "./scenarios/slack-follow-up";
-import { slackMention } from "./scenarios/slack-mention";
-import { slackReactionOverride } from "./scenarios/slack-reaction-override";
-import { slackRelayRestart } from "./scenarios/slack-relay-restart";
-import { taskLifecycle } from "./scenarios/task-lifecycle";
-import { workflowScriptNode } from "./scenarios/workflow-script-node";
+import { loadScenarios } from "./scenarios/registry";
 import { type SlackHarness, startSlackMock, stopSlackMock } from "./slack";
 import { repoRoot, restartSut, type Sut, startSut, stopSut, tailLog } from "./sut";
 
@@ -47,33 +32,25 @@ export type ScenarioContext = {
   restartSut: () => Promise<void>;
   nonce: string;
 };
-export type Scenario = { name: string; run: (ctx: ScenarioContext) => Promise<void> };
-
-const scenarios: Scenario[] = [
-  health,
-  auth,
-  taskLifecycle,
-  mcpSurface,
-  realtimeRooms,
-  workflowScriptNode,
-  configRoundtrip,
-  slackMention,
-  slackFollowUp,
-  slackFailedTask,
-  slackReactionOverride,
-  slackRelayRestart,
-  // Flag-off negative control: SLACK_RENDER_V2 on, SLACK_RENDER_V2_DELEGATION
-  // off — production's actual state during the incident this PR responds to.
-  // Must run before the flag-on block below, which flips delegation on
-  // globally and leaves it on for the rest of the process.
-  slackDelegationFlagOffRepro,
-  // Delegated-delivery coverage (PR #1272). These enable
-  // SLACK_RENDER_V2_DELEGATION via the config API and leave it on for the
-  // rest of the run, so they stay last.
-  slackDelegationChildResult,
-  slackDelegationFailedChild,
-  slackDelegationLateChild,
-];
+export type Scenario = {
+  name: string;
+  /**
+   * Explicit run order. Scenarios execute in ascending `order`, never
+   * filesystem/import order — several scenarios carry cross-scenario state
+   * (see the slack-delegation-* files), so a directory-scan registry cannot
+   * be allowed to reorder them implicitly. Leave gaps (10, 20, 30, ...) so a
+   * new scenario can slot in without renumbering its neighbors.
+   */
+  order: number;
+  /**
+   * Tags a CI workflow can select on instead of a hardcoded scenario-name
+   * list (see .github/workflows/slack-visuals.yml's `--group` usage). A new
+   * scenario joins a workflow by declaring the group here, not by editing
+   * the workflow file.
+   */
+  groups?: string[];
+  run: (ctx: ScenarioContext) => Promise<void>;
+};
 
 type ThreadMark = { scenario: string; label: string; channel: string; ts: string };
 
@@ -119,9 +96,11 @@ async function cleanup(keep: boolean): Promise<void> {
 }
 
 async function main(): Promise<number> {
+  const scenarios = await loadScenarios();
   const options = parseOptions(
     process.argv.slice(2),
     scenarios.map((scenario) => scenario.name),
+    [...new Set(scenarios.flatMap((scenario) => scenario.groups ?? []))],
   );
   if (options.help) {
     console.log(helpText);
@@ -183,6 +162,7 @@ async function main(): Promise<number> {
   for (const scenario of scenarios) {
     if (options.only && !options.only.has(scenario.name)) continue;
     if (options.skip.has(scenario.name)) continue;
+    if (options.group && !scenario.groups?.includes(options.group)) continue;
     const result = await runScenario(scenario, {
       ...ctx,
       markThread(label, channel, ts) {

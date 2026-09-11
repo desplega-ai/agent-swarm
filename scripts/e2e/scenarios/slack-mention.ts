@@ -14,6 +14,9 @@ import {
 
 export const slackMention: Scenario = {
   name: "slack-mention",
+  order: 80,
+  // Rendered by both legs of .github/workflows/slack-visuals.yml.
+  groups: ["visuals-legacy", "visuals-v2"],
   async run(ctx) {
     expect(ctx.slack.apiCalls("auth.test").length > 0, "Bolt never called auth.test on the mock");
     expect(

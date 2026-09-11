@@ -67,6 +67,7 @@ export type Options = {
   harnessAttempts: number;
   only?: Set<string>;
   skip: Set<string>;
+  group?: string;
   list: boolean;
   help: boolean;
   jsonPath: string;
@@ -87,6 +88,7 @@ Options:
                                 (1 through 5, default: 1)
   --only name,name              Run only named contract scenarios
   --skip name,name              Skip named contract scenarios
+  --group name                  Run only contract scenarios tagged with this group
   --list                        Print contract scenario names and exit
   --json path                   JSON result path (default: ./e2e-results.json)
   --summary-md path             Optional Markdown summary path
@@ -132,7 +134,11 @@ function sutEnvValue(value: string): [string, string] {
   return [value.slice(0, separator), value.slice(separator + 1)];
 }
 
-export function parseOptions(args: string[], scenarioNames: string[]): Options {
+export function parseOptions(
+  args: string[],
+  scenarioNames: string[],
+  groupNames: string[] = [],
+): Options {
   const options: Options = {
     harness: [],
     harnessAttempts: 1,
@@ -152,6 +158,7 @@ export function parseOptions(args: string[], scenarioNames: string[]): Options {
     else if (arg === "--harness-attempts") options.harnessAttempts = attemptsValue(value());
     else if (arg === "--only") options.only = new Set(listValue(value()));
     else if (arg === "--skip") options.skip = new Set(listValue(value()));
+    else if (arg === "--group") options.group = value();
     else if (arg === "--json") options.jsonPath = value();
     else if (arg === "--summary-md") options.summaryPath = value();
     else if (arg === "--sut-env") {
@@ -169,6 +176,9 @@ export function parseOptions(args: string[], scenarioNames: string[]): Options {
   const names = new Set(scenarioNames);
   for (const name of [...(options.only ?? []), ...options.skip]) {
     if (!names.has(name)) throw new Error(`Unknown scenario: ${name}`);
+  }
+  if (options.group && !new Set(groupNames).has(options.group)) {
+    throw new Error(`Unknown scenario group: ${options.group}`);
   }
   for (const provider of options.harness) {
     if (!["claude", "codex", "pi", "opencode"].includes(provider)) {

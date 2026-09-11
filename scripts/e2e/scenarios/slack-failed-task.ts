@@ -13,6 +13,9 @@ import {
 
 export const slackFailedTask: Scenario = {
   name: "slack-failed-task",
+  order: 100,
+  // Rendered by both legs of .github/workflows/slack-visuals.yml.
+  groups: ["visuals-legacy", "visuals-v2"],
   async run(ctx) {
     const leadId = await registerLead(ctx, "e2e-lead-failed");
     const message = await ask(ctx, "deploy the hotfix to staging");

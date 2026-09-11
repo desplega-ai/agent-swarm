@@ -1,10 +1,14 @@
 # Informational job, not part of the merge gate. It runs the legacy-renderer scenarios twice
 # (once as-is, once again under SLACK_RENDER_V2=true plus the delegated-delivery scenarios,
 # which only exist under v2), renders one PNG per Slack event from the slack-mock journal, and
-# upserts one sticky PR comment with both columns side by side.
+# uploads the result as an artifact.
 # Images live on the single-commit `ci-visuals` branch (rebuilt on every run, so history never
-# grows). Fork PRs run with a read-only token: they still run the E2E and upload the artifact,
-# but the two write steps (publish to `ci-visuals`, post the PR comment) are skipped.
+# grows) — but publishing and commenting happen in a SEPARATE workflow,
+# slack-visuals-publish.yml, triggered by `workflow_run` once this one completes. This job
+# always runs with a read-only token (no `contents`/`pull-requests` permission at all), even on
+# a same-repo PR, so fork PRs and same-repo PRs behave identically here: build the visuals,
+# upload the artifact, done. The publish workflow runs with the base branch's trusted token and
+# never checks out or executes fork-authored code — see that file for why the split is safe.
 name: Slack Visuals
 
 on:
@@ -22,14 +26,14 @@ concurrency:
   group: slack-visuals-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   visuals:
     if: github.repository == 'desplega-ai/agent-swarm'
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    permissions:
-      contents: write
-      pull-requests: write
 
     steps:
       - name: Checkout repository
@@ -52,15 +56,19 @@ jobs:
           sudo apt-get install -y -qq --no-install-recommends ffmpeg
           ffmpeg -version | head -n 1
 
+      # Scenario selection is by declared group (see each scenario file's `groups` field and
+      # scripts/e2e/scenarios/registry.ts), not a hardcoded name list — a new Slack scenario
+      # joins these legs by tagging itself with "visuals-legacy" and/or "visuals-v2", no
+      # workflow edit required.
       - name: Run legacy Slack E2E
         id: legacy
         continue-on-error: true
-        run: bun run e2e --only slack-mention,slack-follow-up,slack-failed-task --visuals visuals/legacy --json visuals/legacy.json
+        run: bun run e2e --group visuals-legacy --visuals visuals/legacy --json visuals/legacy.json
 
       - name: Run v2 Slack E2E
         id: v2
         continue-on-error: true
-        run: bun run e2e --only slack-mention,slack-follow-up,slack-failed-task,slack-delegation-child-result,slack-delegation-failed-child,slack-delegation-late-child --sut-env SLACK_RENDER_V2=true --visuals visuals/v2 --json visuals/v2.json
+        run: bun run e2e --group visuals-v2 --sut-env SLACK_RENDER_V2=true --visuals visuals/v2 --json visuals/v2.json
 
       - name: Render Slack visuals
         if: always()
@@ -69,6 +77,22 @@ jobs:
           if test -f visuals/legacy/manifest.json; then bun run e2e:visuals visuals/legacy; fi
           if test -f visuals/v2/manifest.json; then bun run e2e:visuals visuals/v2; fi
 
+      # workflow_run does not carry the triggering PR's number for a fork-authored run the way
+      # you might expect (github.event.workflow_run.pull_requests is populated from a same-repo
+      # relationship and is typically empty for forks) — so the publish workflow reads it back
+      # out of the artifact instead of trying to resolve it from the workflow_run event.
+      - name: Write PR context for the publish workflow
+        if: always() && github.event_name == 'pull_request'
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p visuals
+          jq -n --arg pr "$PR" --arg sha "$HEAD_SHA" \
+            '{prNumber: ($pr | tonumber), headSha: $sha}' > visuals/pr-context.json
+          cat visuals/pr-context.json
+
       - name: Upload Slack visuals
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -76,46 +100,6 @@ jobs:
           name: slack-visuals
           path: visuals/
           if-no-files-found: warn
-
-      # Both write steps need a token with `contents: write` + `pull-requests: write`. GitHub
-      # downgrades the token to read-only on fork PRs, so gate them on a same-repo head.
-      - name: Publish Slack visuals
-        if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        id: publish
-        env:
-          PR: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-          publish_output=$(bash scripts/e2e/visuals-publish.sh visuals "$PR" "$HEAD_SHA")
-          printf '%s\n' "$publish_output"
-          base_url=$(printf '%s\n' "$publish_output" | tail -n 1)
-          echo "base_url=${base_url#base_url=}" >> "$GITHUB_OUTPUT"
-
-      - name: Post Slack visual preview
-        if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          BASE_URL: ${{ steps.publish.outputs.base_url }}
-        run: |
-          set -euo pipefail
-          bun scripts/e2e/visuals-comment.ts \
-            --base-url "$BASE_URL" \
-            --profile legacy=visuals/legacy \
-            --profile v2=visuals/v2 \
-            --out comment.md \
-            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
-            --sha "$HEAD_SHA"
-          # --paginate emits one JSON array per page; --jq runs per page, so take the first id.
-          comment_id=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments?per_page=100" \
-            --jq '.[] | select(.body | startswith("<!-- slack-visuals -->")) | .id' | head -n 1)
-          if [ -n "$comment_id" ]; then
-            gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$comment_id" --raw-field body="$(<comment.md)"
-          else
-            gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --raw-field body="$(<comment.md)"
-          fi
 
       - name: Fail when Slack E2E failed
         if: always()

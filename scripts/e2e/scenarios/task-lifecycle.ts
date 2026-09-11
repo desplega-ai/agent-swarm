@@ -11,6 +11,7 @@ function records(value: unknown, field: string): Record<string, unknown>[] {
 
 export const taskLifecycle: Scenario = {
   name: "task-lifecycle",
+  order: 30,
   async run(ctx) {
     const agentResponse = await ctx.api("POST", "/api/agents", {
       body: { name: `e2e-worker-${ctx.nonce}`, role: "worker", status: "online" },

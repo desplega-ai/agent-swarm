@@ -21,6 +21,8 @@ import {
 // — distinct from slack-failed-task, where the ask itself is the failure.
 export const slackDelegationFailedChild: Scenario = {
   name: "slack-delegation-failed-child",
+  order: 150,
+  groups: ["visuals-v2"],
   async run(ctx) {
     await enableSlackDelegation(ctx);
 
