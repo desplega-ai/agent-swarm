@@ -68,6 +68,8 @@ async function expectStoredScreenshot(ctx: ScenarioContext, taskId: string): Pro
 export const slackAssistantFileShare: Scenario = {
   name: "slack-assistant-file-share",
   order: 105,
+  // Rendered by both legs of .github/workflows/slack-visuals.yml.
+  groups: ["visuals-legacy", "visuals-v2"],
   async run(ctx) {
     await registerLead(ctx, `e2e-lead-files-${ctx.nonce}`);
 
