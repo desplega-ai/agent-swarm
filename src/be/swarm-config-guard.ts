@@ -241,6 +241,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     return null;
   },
   ...booleanValidators([
+    "CORS_ALLOW_ANY_ORIGIN",
     "MULTI_RUNTIME_ENABLED",
     "STEERING_ENABLED",
     "MEMORY_HYBRID_SEARCH",

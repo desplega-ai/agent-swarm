@@ -376,10 +376,7 @@ function applyLaunchCors(req: IncomingMessage, res: ServerResponse): void {
   const origin = (req.headers.origin as string | undefined) ?? "";
   if (origin) {
     res.setHeader("Vary", "Origin");
-    // Same opt-in `CORS_ALLOWED_ORIGINS` allowlist as `setCorsHeaders`
-    // (src/http/utils.ts) — unset preserves today's reflect-any-origin
-    // behavior; set, an origin outside the list gets no credentialed
-    // headers at all.
+    // Share the default hosted/dev policy and explicit compatibility opt-out.
     if (isOriginAllowedForCredentials(origin)) {
       res.setHeader("Access-Control-Allow-Origin", origin);
       res.setHeader("Access-Control-Allow-Credentials", "true");

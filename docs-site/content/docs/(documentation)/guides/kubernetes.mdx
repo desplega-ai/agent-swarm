@@ -147,7 +147,7 @@ The hosted dashboard and your self-hosted API have different origins. Every API 
 
 ### What the API already does
 
-The API enables CORS in its HTTP request handler; no chart switch is needed to turn it on. For a request with an `Origin` header, it:
+The API enables CORS in its HTTP request handler; no chart switch is needed to turn it on. For a request with an allowed `Origin` header, it:
 
 - Echoes that origin in `Access-Control-Allow-Origin`, sets `Vary: Origin`, and sends `Access-Control-Allow-Credentials: true`.
 - Allows `GET, POST, PUT, PATCH, DELETE, OPTIONS` and echoes requested preflight headers, with a default that includes `Authorization` and `Content-Type`.
@@ -157,11 +157,13 @@ Normal API requests still require their usual authentication. Requests without a
 
 ### Security posture
 
-Echoing any origin with `Access-Control-Allow-Credentials: true` does not restrict which websites can read credentialed responses. This behavior alone does not bypass bearer authentication on the main API routes: a hostile website still needs the bearer token, which the browser does not automatically attach to its requests.
+Unset or blank `CORS_ALLOWED_ORIGINS` now allows HTTPS subdomains of `agent-swarm.dev` and `agent-swarm.cloud`, plus the documented local development origins. Other origins receive neither `Access-Control-Allow-Origin` nor `Access-Control-Allow-Credentials`. The wildcard patterns exclude apex domains.
 
-Cookie authentication has a different exposure. DB-backed pages issue a `page_session` cookie with `SameSite=None; Secure` outside development mode. The `/@swarm/api/*` page-iframe proxy accepts that cookie as authentication. When the browser permits the cookie on a cross-site request, a hostile website can make a credentialed request and read the response within that session's permissions. Do not rely on the default CORS behavior to protect sensitive data accessible through a page session.
+**Breaking change for custom dashboards:** set `CORS_ALLOWED_ORIGINS=https://dashboard.example.com` on the API, substituting your dashboard origin. A custom list replaces all built-in entries. In Helm, put this under `api.env.CORS_ALLOWED_ORIGINS` and upgrade the release. See [the complete defaults and migration options](/docs/reference/environment-variables#breaking-change-secure-cors-defaults).
 
-An opt-in origin allowlist is proposed in [PR #1436](https://github.com/desplega-ai/agent-swarm/pull/1436). It is pending, not a shipped configuration option in this guide.
+For intentional compatibility, `CORS_ALLOW_ANY_ORIGIN=true` restores unrestricted reflected credentialed CORS, overriding the allowlist. The API logs a warning once per process when active. This exposes page-session responses to arbitrary sites when the browser sends the cookie; prefer listing trusted origins. CORS does not replace authentication or CSRF protection.
+
+Denied-origin logs identify the rejected origin and the setting to change. Check these logs when an otherwise reachable SPA loses access after upgrading.
 
 ### What the ingress must preserve
 

@@ -132,10 +132,20 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
       }
       // APP_URL puts the static UI origin on the API's CSP frame-ancestors list,
       // so the page detail view can iframe /p/:id.
-      const child = spawn("bun", ["boot/sut.ts", "--sut-env", `APP_URL=${requireUiUrl()}`], {
-        cwd: packageRoot,
-        stdio: ["pipe", "pipe", "pipe"],
-      });
+      const child = spawn(
+        "bun",
+        [
+          "boot/sut.ts",
+          "--sut-env",
+          `APP_URL=${requireUiUrl()}`,
+          "--sut-env",
+          `CORS_ALLOWED_ORIGINS=${new URL(requireUiUrl()).origin}`,
+        ],
+        {
+          cwd: packageRoot,
+          stdio: ["pipe", "pipe", "pipe"],
+        },
+      );
       let handle: SwarmHandle;
       try {
         const boot = await readBootHandle(child);

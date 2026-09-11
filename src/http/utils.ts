@@ -1,26 +1,34 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { getActiveTaskCount } from "../be/db";
 import type { SwarmSpan } from "../otel";
+import { isEnvFlagEnabled } from "../utils/env-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
 
-/**
- * Opt-in trusted-origin allowlist for credentialed CORS. Unset (default)
- * preserves the long-standing reflect-any-origin behavior documented in
- * DEPLOYMENT.md — required for today's SPA deployments that don't set this
- * var. When set, only an exact origin or wildcard-subdomain match gets the credentialed
- * headers; every other origin is denied (no Access-Control-Allow-Origin at
- * all, so the browser's CORS check fails closed).
- *
- * Comma-separated exact origins, e.g. `https://app.example.com,https://dashboard.example.com`.
- * Wildcard entries use `https://*.example.com` (optionally with a port).
- *
- * Re-reads `process.env` on every call (no caching) so a value saved via the
- * Settings → Configuration page takes effect after the debounced config
- * reload, without a restart.
- */
-function getAllowedOrigins(): string[] | null {
+const DEFAULT_ALLOWED_ORIGINS = [
+  "https://*.agent-swarm.dev",
+  "https://*.agent-swarm.cloud",
+  "http://localhost:5274",
+  "http://127.0.0.1:5274",
+  "http://[::1]:5274",
+  "https://ui.swarm.localhost:1355",
+];
+
+let warnedAboutAllowAnyOrigin = false;
+
+/** Warn at boot (after config injection), and on first use after a config reload. */
+export function warnIfCorsAllowsAnyOrigin(): void {
+  if (isEnvFlagEnabled("CORS_ALLOW_ANY_ORIGIN", false) && !warnedAboutAllowAnyOrigin) {
+    warnedAboutAllowAnyOrigin = true;
+    console.warn(
+      "[CORS] CORS_ALLOW_ANY_ORIGIN=true: any request origin can receive credentialed responses. Set CORS_ALLOWED_ORIGINS and disable CORS_ALLOW_ANY_ORIGIN to restrict access.",
+    );
+  }
+}
+
+/** Re-read env on each request so Configuration reloads take effect immediately. */
+function getAllowedOrigins(): string[] {
   const raw = process.env.CORS_ALLOWED_ORIGINS;
-  if (!raw || !raw.trim()) return null;
+  if (!raw || !raw.trim()) return DEFAULT_ALLOWED_ORIGINS;
   return raw
     .split(",")
     .map((entry) => entry.trim())
@@ -29,16 +37,18 @@ function getAllowedOrigins(): string[] | null {
 
 /**
  * Decide whether `origin` may receive credentialed CORS headers.
- * Unset preserves the legacy reflect-any-origin behavior. Exact entries retain
+ * Unset or blank uses the built-in hosted/dev allowlist. Exact entries retain
  * their case-sensitive string comparison. A single leading `*.` matches one or
  * more complete hostname labels, case-insensitively, but never the apex (list
  * it separately). Wildcard schemes and explicit ports must match exactly.
  * Bare `*`, `https://*`, other wildcard positions, and non-origin URLs are ignored.
  */
 export function isOriginAllowedForCredentials(origin: string): boolean {
-  const allowlist = getAllowedOrigins();
-  if (allowlist === null) return true;
-  return allowlist.some((entry) => {
+  if (isEnvFlagEnabled("CORS_ALLOW_ANY_ORIGIN", false)) {
+    warnIfCorsAllowsAnyOrigin();
+    return true;
+  }
+  const allowed = getAllowedOrigins().some((entry) => {
     if (!entry.includes("*")) return entry === origin;
 
     // Fixed parsers, never a regex interpolated from operator-controlled text.
@@ -56,6 +66,12 @@ export function isOriginAllowedForCredentials(origin: string): boolean {
     }
     return hostname.endsWith(`.${suffix}`);
   });
+  if (!allowed) {
+    console.warn(
+      `[CORS] Denied credentialed origin ${scrubSecrets(JSON.stringify(origin.slice(0, 512)))}; add the trusted SPA origin to CORS_ALLOWED_ORIGINS (custom values replace hosted/dev defaults).`,
+    );
+  }
+  return allowed;
 }
 
 export function setCorsHeaders(req: IncomingMessage, res: ServerResponse) {
@@ -64,11 +80,7 @@ export function setCorsHeaders(req: IncomingMessage, res: ServerResponse) {
   // page-session cookie endpoints — pass the browser's CORS check. A wildcard
   // would force the browser to reject any credentialed cross-origin response.
   //
-  // When `CORS_ALLOWED_ORIGINS` is set, an origin outside the allowlist gets
-  // NO Access-Control-Allow-Origin at all (falls through to the `else`
-  // branch's non-credentialed path is wrong for a real cross-origin browser
-  // request too — so we deny explicitly instead of reusing the no-Origin
-  // wildcard path).
+  // Origins outside the configured or built-in allowlist receive no CORS grant.
   const rawOrigin = req.headers.origin;
   const origin = Array.isArray(rawOrigin) ? rawOrigin[0] : rawOrigin;
   if (origin && !isOriginAllowedForCredentials(origin)) {
