@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.145.0] - 2026-09-11
+
+### Added
+- **Task callers can require structured JSON results with `send-task.outputSchema`** on both owner and user MCP surfaces (#1419). Invalid nested schemas are rejected at submission, and completion validates the result.
+- **The Configuration page exposes the follow-up context preamble budget**, with a validated 100–20,000 token range and a restart requirement (#1423).
+
+### Changed
+- **25 core tools are available without discovery**, adding frequently used script, query, KV, configuration, repository, memory-editing, and steering operations (#1422).
+
+### Fixed
+- **Memory edits enforce ownership or lead authorization**, including edits by ID to swarm-visible memories (#1425).
+- **Fallback database queries use a read-only connection**, blocking writes even when a statement returns rows (#1424).
+
 ## [1.144.0] - 2026-09-10
 
 ### Added

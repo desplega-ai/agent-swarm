@@ -12,6 +12,7 @@ agent-swarm.dev is an open-source operating system for AI work. A lead agent del
 ## What you get
 
 - A lead agent that receives work from Slack, repositories, issue trackers, email, or the API
+- [Schema-validated task results](./MCP.md#send-task) for callers that need structured JSON output
 - Workers in isolated Docker containers with development environments
 - Memory and identity that persist across sessions
 - Workflows, schedules, scripts, and apps for recurring work
