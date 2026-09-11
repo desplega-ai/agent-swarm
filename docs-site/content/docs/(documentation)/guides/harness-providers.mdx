@@ -144,7 +144,7 @@ The runner consumes these events (not the provider's native ones) to post progre
 
 ACP config-option metadata is scrubbed with `scrubSecrets` before session events are emitted, including strings in grouped choices. This protects both persisted dashboard metadata and diagnostic logs while preserving non-secret model IDs, descriptions, and boolean values.
 
-After a prompt completes, ACP persists a bounded, scrubbed `acp_prompt_response` raw-log diagnostic with the optional usage and `_meta` fields. Reported input/output/cache counters feed cost telemetry; missing usage stays unknown and unresolved pricing stays `unpriced`. See [cost and context computation](/docs/guides/cost-and-context-computation#acp-prompt-usage).
+After a prompt completes, ACP persists a bounded, scrubbed `acp_prompt_response` raw-log diagnostic with the optional usage and `_meta` fields. Reported input/output/cache counters feed cost telemetry; missing counters are `undefined` at the adapter boundary but become zero in the session-cost API and DB. Persisted costs and UI displays cannot distinguish missing usage from measured zero; the raw diagnostic retains absence. Unresolved pricing stays `unpriced`. See [cost and context computation](/docs/guides/cost-and-context-computation#acp-prompt-usage).
 
 ### Local subprocess teardown
 

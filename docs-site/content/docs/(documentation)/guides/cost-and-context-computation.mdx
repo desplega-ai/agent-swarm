@@ -202,8 +202,13 @@ Fallback is 200k. Pre-Phase 4 the dated form fell to 200k unconditionally — wi
 ACP targets can supply optional token usage in the `session/prompt` response.
 The adapter maps `inputTokens` and `outputTokens` directly, and maps
 `cachedReadTokens` / `cachedWriteTokens` to the corresponding cache counters.
-Missing counts remain unknown. Context-window `usage_update` totals never
-substitute for billing tokens.
+Missing counts remain `undefined` at the adapter boundary. JSON serialization
+omits them; the session-cost API and DB deliberately retain their existing
+zero-coalescing behavior for input, output, cache-read, and cache-write counters.
+Persisted costs, pricing computation, and UI displays therefore cannot distinguish
+absent usage from measured zero. Preserving that distinction end to end would
+require a separate request/DB/response contract change. Context-window
+`usage_update` totals never substitute for billing tokens.
 
 The `acp_prompt_response` raw session log retains the bounded, scrubbed usage
 payload and optional `_meta`; `usage: null` records an absent payload.

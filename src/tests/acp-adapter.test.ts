@@ -1,16 +1,20 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Usage } from "@agentclientprotocol/sdk";
 import { normalizeSessionLogs } from "../../apps/ui/src/logs-parser";
 import {
   closeDb,
+  createAgent,
   createSessionLogs,
   createTaskExtended,
   getSessionLogsByTaskId,
   initDb,
 } from "../be/db";
+import { handleSessionData } from "../http/session-data";
+import { getPathSegments, parseQueryParams } from "../http/utils";
 import { createProviderAdapter } from "../providers";
 import {
   ACPAdapter,
@@ -20,6 +24,7 @@ import {
 } from "../providers/acp-adapter";
 import { AcpTargetResolutionError, resolveAcpTarget } from "../providers/acp-targets";
 import type { ProviderEvent, ProviderSessionConfig } from "../providers/types";
+import { listenOnFreePort } from "./test-net";
 
 const tmpDirs: string[] = [];
 
@@ -92,7 +97,9 @@ describe("ACPAdapter", () => {
         cachedWriteTokens: 15,
       },
     },
-  ])("persists $name prompt usage and scrubs raw logs", async ({ usage }) => {
+  ])("persists $name ACP usage with deliberate zero-coalescing of missing session-cost counters", async ({
+    usage,
+  }) => {
     const cwd = makeTempDir();
     const agentPath = join(cwd, "fake-acp-agent.ts");
     const sdkPath = join(process.cwd(), "node_modules/@agentclientprotocol/sdk/dist/acp.js");
@@ -366,6 +373,65 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
       expect(result.cost?.outputTokens).toBe(usage?.outputTokens);
       expect(result.cost?.cacheReadTokens).toBe(usage?.cachedReadTokens ?? undefined);
       expect(result.cost?.cacheWriteTokens).toBe(usage?.cachedWriteTokens ?? undefined);
+      // Match saveCostData's JSON transport: undefined counters disappear on the wire.
+      // The existing API deliberately coalesces them to zero; only raw logs retain absence.
+      const agent = await createAgent({ name: "ACP cost test", isLead: false, status: "idle" });
+      const server = createServer(async (req, res) => {
+        const handled = await handleSessionData(
+          req,
+          res,
+          getPathSegments(req.url ?? ""),
+          parseQueryParams(req.url ?? ""),
+          agent.id,
+        );
+        if (!handled) {
+          res.writeHead(404);
+          res.end();
+        }
+      });
+      try {
+        const port = await listenOnFreePort(server);
+        const endpoint = `http://127.0.0.1:${port}/api/session-costs`;
+        const body = JSON.stringify({ ...result.cost, agentId: agent.id, taskId: task.id });
+        if (!usage) {
+          for (const counter of [
+            "inputTokens",
+            "outputTokens",
+            "cacheReadTokens",
+            "cacheWriteTokens",
+          ]) {
+            expect(JSON.parse(body)).not.toHaveProperty(counter);
+          }
+        }
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body,
+        });
+        expect(response.status).toBe(201);
+        const { cost } = await response.json();
+        expect(cost).toMatchObject({
+          inputTokens: usage?.inputTokens ?? 0,
+          outputTokens: usage?.outputTokens ?? 0,
+          cacheReadTokens: usage?.cachedReadTokens ?? 0,
+          cacheWriteTokens: usage?.cachedWriteTokens ?? 0,
+          costSource: "unpriced",
+        });
+        const readback = await fetch(`${endpoint}?taskId=${task.id}`);
+        expect(readback.status).toBe(200);
+        const { costs } = await readback.json();
+        expect(costs).toHaveLength(1);
+        expect(costs[0]).toMatchObject({
+          id: cost.id,
+          inputTokens: cost.inputTokens,
+          outputTokens: cost.outputTokens,
+          cacheReadTokens: cost.cacheReadTokens,
+          cacheWriteTokens: cost.cacheWriteTokens,
+          costSource: cost.costSource,
+        });
+      } finally {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
       const persistedJson = persisted.map((entry) => entry.content).join("\n");
       expect(persistedJson).not.toContain("opaque-response-credential");
       const credentialHeaderNames = [

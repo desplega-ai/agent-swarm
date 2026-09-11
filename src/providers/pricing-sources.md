@@ -141,7 +141,9 @@ and heartbeat-classified roots are omitted, and the metrics remain separate.
 
 - **ACP usage:** optional `session/prompt` response usage supplies `inputTokens`,
   `outputTokens`, `cachedReadTokens`, and `cachedWriteTokens`. The adapter maps
-  those counters directly; absent cache counts remain unknown. The scrubbed
+  those counters directly; absent counters remain `undefined` only at the adapter
+  boundary. The session-cost API and DB coalesce missing input/output/cache
+  counters to zero, so persisted costs and UI displays lose unknown-vs-zero. The scrubbed
   `acp_prompt_response` session log preserves the payload and optional `_meta`.
   Context-window `usage_update` totals are not billing token estimates.
   ACP reports no USD amount through `CostData`; unresolved `(acp, model)`
