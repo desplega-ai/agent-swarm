@@ -33,18 +33,24 @@
  *     A skipped SessionStart leaves the file as it is (whatever is there carries
  *     its own lineage); a skipped Stop pushes and restores nothing.
  *   - no flock on this platform → SessionStart still materializes (unprotected)
- *     but no Stop ever pushes: the DB is never at risk, only the sync of
- *     CLAUDE.md edits is lost there.
+ *     but no Stop ever pushes: the DB is never at risk. An edit a Stop would
+ *     have sent is saved instead (see below).
  * The record and the sidecar are also written atomically (temp file + rename),
  * and an unreadable record counts as hook-written, never as a reason to push.
  * A write that fails fails closed, the same way: every hook write marks the
- * record pending BEFORE touching the file, and the real lineage replaces the
- * marker after. A pending record makes whatever is on disk hook-written, for
- * the Stop and the runner backstop alike, so:
+ * record pending BEFORE touching the file, naming the content it writes, and
+ * the real lineage replaces the marker after. A pending record makes whatever
+ * is on disk hook-written, for the Stop and the runner backstop alike, so:
  *   - the marker cannot be written → the transition is skipped (SessionStart
  *     throws, a Stop restores nothing), as with a busy lock;
  *   - the real lineage cannot replace it → the marker stays: an edit made on
- *     top of that file goes unsynced, it never reverts the DB.
+ *     top of that file is never pushed, since its base is unknown.
+ * Such an edit is never discarded silently either. Before a hook overwrites or
+ * deletes content it did not push and whose lineage is unknown (a pending
+ * marker naming other content, an unreadable record, or an edit where there is
+ * no flock), it saves a copy as `CLAUDE.md.unsynced-<hash>` and warns; if the
+ * copy fails, it leaves the file alone. Bringing the copy into the DB is a
+ * manual step. The next hook write whose lineage lands heals the record.
  * A Stop with no `.bak` removes the record only once the file is gone.
  *
  * Known limit: with one `.bak` slot, a third overlapping session overwrites the
@@ -60,15 +66,16 @@ import {
   CLAUDE_MD_LINEAGE_PATH,
   CLAUDE_MD_LOCK_PATH,
   CLAUDE_MD_PATH,
-  CLAUDE_MD_PENDING_RECORD,
   type ClaudeMdLineage,
   claudeMdLineageOf,
+  claudeMdPendingRecord,
   contentSha256,
   effectiveClaudeMdLineage,
   type FileReader,
   hookWrittenLineage,
   type ProfilePayload,
   parseClaudeMdLineage,
+  parseClaudeMdPendingRecord,
   planClaudeMdSync,
 } from "./profile-sync.ts";
 
@@ -134,19 +141,21 @@ async function writeAtomic(path: string, data: string): Promise<void> {
 }
 
 /**
- * The one way a hook write reaches the file: mark the record pending, run
- * `write` (it puts the content in place and returns its lineage), then replace
- * the marker with that lineage. The marker failing throws before `write` runs;
- * the lineage failing is logged, not thrown: the file is already in place and
- * the marker keeps it unpushable.
+ * The one way a hook write reaches the file: mark the record pending (naming
+ * the content), write the content, then replace the marker with its lineage.
+ * The marker failing throws before the file is touched; the lineage failing is
+ * logged, not thrown: the file is already in place and the marker keeps it
+ * unpushable.
  */
 async function writeUnderPendingRecord(
   paths: ClaudeMdSessionPaths,
   pauses: ClaudeMdTestPauses,
-  write: () => Promise<ClaudeMdLineage>,
+  content: string,
+  lineage: ClaudeMdLineage,
 ): Promise<void> {
-  await writeAtomic(paths.record, CLAUDE_MD_PENDING_RECORD);
-  const lineage = await write();
+  await writeAtomic(paths.record, claudeMdPendingRecord(contentSha256(content)));
+  await Bun.write(paths.file, content); // creates ~/.claude if missing
+  await pauses.afterFileWrite?.();
   try {
     await pauses.beforeRecordCommit?.();
     await writeAtomic(paths.record, JSON.stringify(lineage));
@@ -155,6 +164,33 @@ async function writeUnderPendingRecord(
       scrubSecrets(`[claude-md] lineage not recorded, the file stays unpushable: ${String(error)}`),
     );
   }
+}
+
+/**
+ * Whether `content` may be an agent's edit whose base is unknown: the record is
+ * there but is no lineage — a pending marker naming other content, or an
+ * unreadable record. Such content is never pushed, so it must not be discarded.
+ */
+function hasUnknownLineage(content: string, rawRecord: string | undefined): boolean {
+  if (rawRecord === undefined || !content.trim()) return false;
+  if (parseClaudeMdLineage(rawRecord)) return false;
+  return parseClaudeMdPendingRecord(rawRecord) !== contentSha256(content);
+}
+
+/** Where a hook saves content it can neither push nor keep: one file per content. */
+export function unsyncedCopyPath(paths: ClaudeMdSessionPaths, content: string): string {
+  return `${paths.file}.unsynced-${contentSha256(content).slice(0, 12)}`;
+}
+
+/** Save content that cannot be pushed before a hook discards it; throws if it cannot. */
+async function saveUnsynced(paths: ClaudeMdSessionPaths, content: string): Promise<void> {
+  const copy = unsyncedCopyPath(paths, content);
+  await writeAtomic(copy, content);
+  console.warn(
+    scrubSecrets(
+      `[claude-md] an edit that cannot be synced was saved to ${copy}; re-apply it by hand`,
+    ),
+  );
 }
 
 /** Delete `path`: already gone is fine, any other failure throws. */
@@ -183,7 +219,7 @@ export type ClaudeMdMaterializeOutcome = "materialized" | LockMiss;
  * nothing is written (the file is left as it is). No flock on this platform →
  * materialized without protection; `stopClaudeMd` then never pushes. Throws,
  * leaving the file and its record as they were, if the record cannot be marked
- * pending.
+ * pending or an unsynced edit on disk cannot be saved.
  */
 export async function materializeClaudeMd(
   content: string,
@@ -208,10 +244,9 @@ async function materializeUnlocked(
   const current = Bun.file(paths.file);
   if (await current.exists()) {
     const existing = await current.text();
-    const record = effectiveClaudeMdLineage(
-      await readText(paths.record).catch(() => undefined),
-      existing,
-    );
+    const raw = await readText(paths.record).catch(() => undefined);
+    if (hasUnknownLineage(existing, raw)) await saveUnsynced(paths, existing);
+    const record = effectiveClaudeMdLineage(raw, existing);
     // With a record, anything but the hook's own write is an agent's unsynced
     // edit. Without one (the file predates the hook, e.g. the user's own) its
     // origin is unknown: treat it as hook-written, never to be pushed.
@@ -222,12 +257,8 @@ async function materializeUnlocked(
     const sidecar = { ...lineage, of: contentSha256(existing) };
     await writeAtomic(`${paths.backup}.lineage`, JSON.stringify(sidecar)).catch(() => {});
   }
-  await writeUnderPendingRecord(paths, pauses, async () => {
-    await Bun.write(paths.file, content); // creates ~/.claude if missing
-    await pauses.afterFileWrite?.();
-    const hash = contentSha256(content);
-    return { written: hash, base: hash };
-  });
+  const hash = contentSha256(content);
+  await writeUnderPendingRecord(paths, pauses, content, { written: hash, base: hash });
 }
 
 /**
@@ -250,13 +281,10 @@ async function restoreUnlocked(
     } catch {
       lineage = null; // corrupt sidecar: unknown lineage
     }
-    await writeUnderPendingRecord(paths, pauses, async () => {
-      await Bun.write(paths.file, content);
-      // Without a matching sidecar (a legacy `.bak`, a failed or stale sidecar)
-      // the lineage is unknown: record it as hook-written, the conservative
-      // choice (never pushed as an edit).
-      return lineage ?? hookWrittenLineage(content);
-    });
+    // Without a matching sidecar (a legacy `.bak`, a failed or stale sidecar)
+    // the lineage is unknown: record it as hook-written, the conservative choice
+    // (never pushed as an edit).
+    await writeUnderPendingRecord(paths, pauses, content, lineage ?? hookWrittenLineage(content));
     // Only after the lineage: a `.bak` that cannot be deleted must not cost a
     // restored edit its lineage. (A leftover `.bak` is restored again, harmlessly.)
     await backup.delete();
@@ -269,11 +297,22 @@ async function restoreUnlocked(
   }
 }
 
-/** A Stop never fails over its restore: it is logged, and the rest of Stop runs. */
-async function restoreOrWarn(paths: ClaudeMdSessionPaths, pauses: ClaudeMdTestPauses) {
-  await restoreUnlocked(paths, pauses).catch((error: unknown) => {
+/**
+ * A Stop never fails over its restore: it is logged, and the rest of Stop runs.
+ * `unpushed` is content the restore would discard without it having been
+ * pushed: it is saved first, and if that fails the restore is skipped.
+ */
+async function restoreOrWarn(
+  paths: ClaudeMdSessionPaths,
+  pauses: ClaudeMdTestPauses,
+  unpushed: string | null,
+): Promise<void> {
+  try {
+    if (unpushed !== null) await saveUnsynced(paths, unpushed);
+    await restoreUnlocked(paths, pauses);
+  } catch (error) {
     console.warn(scrubSecrets(`[claude-md] .bak not restored: ${String(error)}`));
-  });
+  }
 }
 
 export interface ClaudeMdSyncState {
@@ -281,6 +320,8 @@ export interface ClaudeMdSyncState {
   content: string;
   /** Lineage record of the last hook write, or null if there is none. */
   record: ClaudeMdLineage | null;
+  /** The record is there but is no lineage for this content: never pushed, never discarded. */
+  lineageUnknown: boolean;
 }
 
 /** Read what the Stop sync needs to decide; null when the file does not exist. */
@@ -290,7 +331,12 @@ export async function readClaudeMdSyncState(
 ): Promise<ClaudeMdSyncState | null> {
   const content = await readFile(paths.file);
   if (content === undefined) return null;
-  return { content, record: effectiveClaudeMdLineage(await readFile(paths.record), content) };
+  const raw = await readFile(paths.record);
+  return {
+    content,
+    record: effectiveClaudeMdLineage(raw, content),
+    lineageUnknown: hasUnknownLineage(content, raw),
+  };
 }
 
 /** `unsupported`: the `.bak` was restored, but nothing is ever pushed there. */
@@ -301,8 +347,9 @@ export type ClaudeMdStopOutcome = "synced" | "not-an-edit" | LockMiss;
  * restore the `.bak` — one transition, so no SessionStart can land in between.
  * Lock busy or failing → nothing is pushed or restored (safe: the next
  * SessionStart backs up whatever is there, with its lineage). No flock on this
- * platform → the `.bak` is restored as before, but nothing is ever pushed. A
- * restore that fails is logged, never thrown.
+ * platform → the `.bak` is restored as before, but nothing is ever pushed (an
+ * edit it would have sent is saved first). A restore that fails is logged,
+ * never thrown.
  */
 export async function stopClaudeMd(
   sync: (body: ProfilePayload["body"]) => Promise<void>,
@@ -320,13 +367,20 @@ export async function stopClaudeMd(
           console.warn(scrubSecrets(`[claude-md] sync failed: ${String(error)}`));
         });
       }
-      await restoreOrWarn(paths, pauses);
+      await restoreOrWarn(paths, pauses, state?.lineageUnknown ? state.content : null);
       return body ? "synced" : "not-an-edit";
     },
     { waitMs: options.lockWaitMs ?? STOP_LOCK_WAIT_MS },
   );
   if (locked.acquired) return locked.value;
   warnLockMiss("Stop", locked);
-  if (locked.reason === "unsupported") await restoreOrWarn(paths, pauses);
+  if (locked.reason === "unsupported") {
+    // Nothing is pushed without the lock: an edit this Stop would have sent is
+    // saved instead of being discarded by the restore.
+    const state = await readClaudeMdSyncState(paths).catch(() => null);
+    const unpushed =
+      state && (state.lineageUnknown || planClaudeMdSync(state)) ? state.content : null;
+    await restoreOrWarn(paths, pauses, unpushed);
+  }
   return locked.reason;
 }

@@ -7,7 +7,7 @@ import {
   buildIndependentIdentityPayloads,
   CLAUDE_MD_LINEAGE_PATH,
   CLAUDE_MD_PATH,
-  CLAUDE_MD_PENDING_RECORD,
+  claudeMdPendingRecord,
   collectProfilePayloads,
   contentSha256,
   extractSetupScriptContent,
@@ -728,7 +728,7 @@ describe("collectProfilePayloads (baseline integration)", () => {
     const files = reader({
       [CLAUDE_MD_PATH]: "edited",
       [IDENTITY_BASELINES_PATH]: JSON.stringify({ claudeMd: contentSha256("boot") }),
-      [CLAUDE_MD_LINEAGE_PATH]: CLAUDE_MD_PENDING_RECORD,
+      [CLAUDE_MD_LINEAGE_PATH]: claudeMdPendingRecord(contentSha256("materialized")),
     });
 
     expect(await collectProfilePayloads(["claude"], "session_sync", files)).toEqual([]);

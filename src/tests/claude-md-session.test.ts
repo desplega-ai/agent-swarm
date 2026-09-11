@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { chmod, lstat, mkdtemp, readdir, rm, symlink } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readdir, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
@@ -8,9 +8,10 @@ import {
   materializeClaudeMd,
   planClaudeMdSync,
   stopClaudeMd,
+  unsyncedCopyPath,
 } from "../commands/claude-md-session";
 import {
-  CLAUDE_MD_PENDING_RECORD,
+  claudeMdPendingRecord,
   contentSha256,
   type ProfilePayload,
 } from "../commands/profile-sync";
@@ -285,7 +286,7 @@ describe("concurrent sessions sharing ~/.claude/CLAUDE.md", () => {
     expect(await stop()).toBeNull(); // and nothing it did not write gets pushed
   });
 
-  test("without flock: SessionStart still materializes, but no Stop ever pushes", async () => {
+  test("without flock: SessionStart still materializes, no Stop ever pushes, an edit is saved", async () => {
     setFlockForTests(null);
     expect(await materializeClaudeMd(V2, paths)).toBe("unsupported");
     expect(await Bun.file(paths.file).text()).toBe(V2);
@@ -299,6 +300,8 @@ describe("concurrent sessions sharing ~/.claude/CLAUDE.md", () => {
     expect(outcome).toBe("unsupported");
     expect(synced).toBe(false); // the DB is never written without the lock
     expect(await Bun.file(paths.file).exists()).toBe(false); // restored as before (no .bak)
+    // …but the edit it could not push is saved, not discarded with the file.
+    expect(await Bun.file(unsyncedCopyPath(paths, "edited")).text()).toBe("edited");
   });
 
   test("a live SessionStart paused mid-transition is never robbed by a Stop", async () => {
@@ -365,6 +368,9 @@ describe("a lineage write that fails leaves nothing pushable", () => {
   const throwInjectedFailure = async () => {
     throw new Error("injected write failure");
   };
+  const failLineageCommit = { testPauses: { beforeRecordCommit: throwInjectedFailure } };
+  /** The copy a hook saves of content it can neither push nor keep. */
+  const unsynced = (content: string) => Bun.file(unsyncedCopyPath(paths, content));
   /**
    * A record whose temp file name exceeds NAME_MAX: every atomic replacement of
    * it — the only way the hook writes it — fails for real (ENAMETOOLONG, for
@@ -385,15 +391,15 @@ describe("a lineage write that fails leaves nothing pushable", () => {
   });
 
   test("a SessionStart whose final record write fails leaves the file unpushable", async () => {
-    const outcome = await materializeClaudeMd(V2, paths, {
-      testPauses: { beforeRecordCommit: throwInjectedFailure },
-    });
+    const outcome = await materializeClaudeMd(V2, paths, failLineageCommit);
 
     expect(outcome).toBe("materialized"); // the session still gets the DB value
     expect(await Bun.file(paths.file).text()).toBe(V2);
-    expect(await Bun.file(paths.record).text()).toBe(CLAUDE_MD_PENDING_RECORD);
-    await Bun.write(paths.file, "edited"); // even an edit on top stays unsynced
-    expect(await stop()).toBeNull();
+    expect(await Bun.file(paths.record).text()).toBe(claudeMdPendingRecord(h(V2)));
+    await Bun.write(paths.file, "edited"); // an edit on top: its base is unknown
+    expect(await stop()).toBeNull(); // so it is not pushed…
+    expect(await Bun.file(paths.file).exists()).toBe(false); // …the Stop removes the file…
+    expect(await unsynced("edited").text()).toBe("edited"); // …but saves the edit first
   });
 
   test("a Stop that cannot mark the record restores nothing", async () => {
@@ -415,10 +421,57 @@ describe("a lineage write that fails leaves nothing pushable", () => {
     await Bun.write(paths.file, V1); // before the session
     await materializeClaudeMd(V2, paths);
 
-    expect(await stop({ testPauses: { beforeRecordCommit: throwInjectedFailure } })).toBeNull();
+    expect(await stop(failLineageCommit)).toBeNull();
     expect(await Bun.file(paths.file).text()).toBe(V1); // restored
-    expect(await Bun.file(paths.record).text()).toBe(CLAUDE_MD_PENDING_RECORD);
+    expect(await Bun.file(paths.record).text()).toBe(claudeMdPendingRecord(h(V1)));
     expect(await stop()).toBeNull(); // the double Stop does not send v1 against v2
+  });
+
+  test("an edit the restore would overwrite is saved first", async () => {
+    // The reviewed case: under a pending record an edit cannot be pushed, and
+    // the Stop's restore would overwrite it with the `.bak`, silently.
+    await Bun.write(paths.file, V1); // before the session
+    await materializeClaudeMd(V2, paths, failLineageCommit);
+    await Bun.write(paths.file, "real edit");
+
+    expect(await stop()).toBeNull();
+    expect(await Bun.file(paths.file).text()).toBe(V1); // restored
+    expect(await unsynced("real edit").text()).toBe("real edit");
+  });
+
+  test("a SessionStart over an unsynced edit saves it first", async () => {
+    await materializeClaudeMd(V2, paths, failLineageCommit);
+    await Bun.write(paths.file, "real edit");
+
+    expect(await materializeClaudeMd(V2, paths)).toBe("materialized");
+    expect(await unsynced("real edit").text()).toBe("real edit");
+  });
+
+  test("the hook's own write under a pending record is not saved, and the record heals", async () => {
+    await materializeClaudeMd(V2, paths, failLineageCommit);
+    expect(await stop()).toBeNull(); // v2 is what the hook was writing: nothing to save
+    const leftovers = await readdir(dirname(paths.file));
+    expect(leftovers.filter((name) => name.includes(".unsynced-"))).toEqual([]);
+
+    await materializeClaudeMd(V2, paths); // storage is back: a real lineage again
+    await Bun.write(paths.file, "edited");
+    expect(await stop()).toEqual({
+      claudeMd: "edited",
+      changeSource: "session_sync",
+      expectedHashes: { claudeMd: h(V2) },
+    });
+  });
+
+  test("a Stop that cannot save an unsynced edit leaves it in place", async () => {
+    await materializeClaudeMd(V2, paths, failLineageCommit);
+    await Bun.write(paths.file, "real edit");
+    const copy = unsyncedCopyPath(paths, "real edit");
+    await mkdir(copy); // a directory where the copy goes: saving fails, for root too
+    await Bun.write(join(copy, "occupied"), "");
+
+    expect(await stop()).toBeNull();
+    expect(await Bun.file(paths.file).text()).toBe("real edit"); // neither deleted nor overwritten
+    expect(await Bun.file(paths.record).text()).toBe(claudeMdPendingRecord(h(V2)));
   });
 
   test("a SessionStart whose backup fails leaves an unsynced edit pushable", async () => {
