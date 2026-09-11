@@ -14,6 +14,8 @@ kubectl -n agent-swarm create secret generic agent-swarm-secrets \
 helm show values oci://ghcr.io/desplega-ai/charts/agent-swarm > swarm-values.yaml
 ```
 
+Follow [Kubernetes and Helm](https://github.com/desplega-ai/agent-swarm/blob/main/docs-site/content/docs/%28documentation%29/guides/kubernetes.mdx) for ingress, dashboard connection, and CORS.
+
 Review `swarm-values.yaml` before installation. Configure `pools`, resources, storage, URLs, and the selected harness.
 The default pools use Claude. Use `poolDefaults.harnessProvider` or each pool's `harnessProvider` for another harness.
 The chart permits one lead pool with one replica. Worker pools can have multiple replicas.
