@@ -19,6 +19,10 @@ Omit `--version` for latest, or pin the release you want.
 
 That's a minimal install: API + lead + 1 coder pool, no agent-fs, no litestream. Override `pools` in your own values to size the swarm.
 
+## Connect the dashboard
+
+Follow the [Kubernetes and Helm guide](https://docs.agent-swarm.dev/docs/guides/kubernetes) to enable API ingress, configure DNS and TLS, and connect the hosted or self-hosted dashboard. API ingress defaults to disabled; configure `enabled`, `className`, `host`, `annotations`, and `tls` under `ingress` for your controller. The dashboard calls the API directly from your browser. The API already handles CORS; see the guide’s [CORS diagnostics](https://docs.agent-swarm.dev/docs/guides/kubernetes#cors) before adding proxy CORS settings.
+
 ## What this chart deploys
 
 | Component | Always | Notes |

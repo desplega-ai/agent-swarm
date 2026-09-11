@@ -4,6 +4,7 @@ This guide covers all deployment options for Agent Swarm.
 
 ## Table of Contents
 
+- [Kubernetes and Helm](https://docs.agent-swarm.dev/docs/guides/kubernetes) — API ingress, dashboard access, and CORS diagnostics
 - [Docker Compose (Recommended)](#docker-compose-recommended)
 - [Docker Worker](#docker-worker)
 - [Server Deployment (systemd)](#server-deployment-systemd)
