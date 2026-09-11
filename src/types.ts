@@ -1145,8 +1145,8 @@ export type AgentLatestModel = z.infer<typeof AgentLatestModelSchema>;
 
 /**
  * Worker-reported Bedrock enumeration block. Only present when the pi harness
- * is in Bedrock SDK mode (`BEDROCK_AUTH_MODE=sdk` or
- * `MODEL_OVERRIDE=amazon-bedrock/*`). Rides inside `cred_status` JSON (no new
+ * is in a Bedrock mode (`BEDROCK_AUTH_MODE=sdk`, `BEDROCK_AUTH_MODE=bearer`,
+ * or `MODEL_OVERRIDE=amazon-bedrock/*`). Rides inside `cred_status` JSON (no new
  * DB column). `models` is the intersection of the models invocable by this
  * account/region (on-demand/ACTIVE foundation models ∪ inference profiles) with
  * the set the pi-ai Converse harness can actually drive — Converse-incompatible

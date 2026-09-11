@@ -5,6 +5,7 @@ import {
   isBedrockMode,
   isCredCheckDisabled,
   REQUIRED_CRED_VARS_BY_PROVIDER,
+  shouldRefreshBedrockStatus,
   validateProviderCredentials,
 } from "../commands/provider-credentials";
 import { checkClaudeCredentials } from "../providers/claude-adapter";
@@ -747,6 +748,62 @@ describe("isBedrockMode (shared gate for the live test and the refresh loop)", (
     expect(isBedrockMode({ MODEL_OVERRIDE: "amazon-bedrock/anthropic.claude" })).toBe(true);
     expect(isBedrockMode({ MODEL_OVERRIDE: "anthropic/claude" })).toBe(false);
     expect(isBedrockMode({})).toBe(false);
+  });
+});
+
+describe("shouldRefreshBedrockStatus (runner post-task refresh gate)", () => {
+  const INTERVAL = 5 * 60 * 1000;
+  const base = { harnessProvider: "pi", lastRefreshAt: 1_000, intervalMs: INTERVAL };
+
+  test("bearer-only pi configuration is refreshed once the interval has elapsed", () => {
+    const env = {
+      BEDROCK_AUTH_MODE: "bearer",
+      AWS_BEARER_TOKEN_BEDROCK: "tok",
+      AWS_REGION: "us-east-1",
+    };
+    expect(shouldRefreshBedrockStatus({ ...base, env, now: 1_000 + INTERVAL + 1 })).toBe(true);
+  });
+
+  test("bearer mode stays throttled inside the interval", () => {
+    const env = {
+      BEDROCK_AUTH_MODE: "bearer",
+      AWS_BEARER_TOKEN_BEDROCK: "tok",
+      AWS_REGION: "us-east-1",
+    };
+    expect(shouldRefreshBedrockStatus({ ...base, env, now: 1_000 + INTERVAL })).toBe(false);
+    expect(shouldRefreshBedrockStatus({ ...base, env, now: 1_000 + 1 })).toBe(false);
+  });
+
+  test("sdk mode and the amazon-bedrock/ prefix inference refresh the same way", () => {
+    const now = 1_000 + INTERVAL + 1;
+    expect(shouldRefreshBedrockStatus({ ...base, env: { BEDROCK_AUTH_MODE: "sdk" }, now })).toBe(
+      true,
+    );
+    expect(
+      shouldRefreshBedrockStatus({
+        ...base,
+        env: { MODEL_OVERRIDE: "amazon-bedrock/anthropic.claude" },
+        now,
+      }),
+    ).toBe(true);
+  });
+
+  test("never fires outside Bedrock mode or for a non-pi harness", () => {
+    const now = 1_000 + INTERVAL + 1;
+    expect(shouldRefreshBedrockStatus({ ...base, env: { ANTHROPIC_API_KEY: "sk" }, now })).toBe(
+      false,
+    );
+    expect(
+      shouldRefreshBedrockStatus({ ...base, env: { MODEL_OVERRIDE: "anthropic/claude" }, now }),
+    ).toBe(false);
+    expect(
+      shouldRefreshBedrockStatus({
+        ...base,
+        harnessProvider: "claude",
+        env: { BEDROCK_AUTH_MODE: "bearer" },
+        now,
+      }),
+    ).toBe(false);
   });
 });
 

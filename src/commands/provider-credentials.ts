@@ -63,6 +63,27 @@ export function isBedrockMode(env: Record<string, string | undefined>): boolean 
 }
 
 /**
+ * Scheduling decision for the runner's post-task Bedrock enumeration refresh
+ * (see the throttled branch in `runner.ts`). Kept pure so the gate can be
+ * exercised without spinning the runner: it fires for the pi harness in any
+ * Bedrock mode (`sdk`, `bearer`, or the `MODEL_OVERRIDE=amazon-bedrock/*`
+ * inference) once `intervalMs` has elapsed since the last refresh.
+ */
+export function shouldRefreshBedrockStatus(opts: {
+  harnessProvider: string | null | undefined;
+  env: Record<string, string | undefined>;
+  lastRefreshAt: number;
+  now: number;
+  intervalMs: number;
+}): boolean {
+  return (
+    opts.harnessProvider === "pi" &&
+    isBedrockMode(opts.env) &&
+    opts.now - opts.lastRefreshAt > opts.intervalMs
+  );
+}
+
+/**
  * Static documentation of which env vars each provider considers when running
  * `checkCredentials`. Used by the dashboard to render hints before any worker
  * has reported its dynamic state. The arrays are illustrative — the real
