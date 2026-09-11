@@ -19,8 +19,16 @@ import {
 // an ask delegates to one child, the child gets its own result card in the
 // originating thread, and the ask's own conclusion card is deferred until
 // the child settles too — then its "Results" section names the specialist.
+//
+// This and the other two slackDelegation* scenarios in this group
+// (slack-delegation-failed-child.ts, slack-delegation-late-child.ts) enable
+// SLACK_RENDER_V2_DELEGATION via the config API and leave it on for the
+// rest of the run — that's why their `order` (140/150/160) keeps them after
+// slack-delegation-flag-off-repro.ts (130), the flag-off negative control.
 export const slackDelegationChildResult: Scenario = {
   name: "slack-delegation-child-result",
+  order: 140,
+  groups: ["visuals-v2"],
   async run(ctx) {
     await enableSlackDelegation(ctx);
 

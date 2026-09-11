@@ -118,6 +118,7 @@ import {
   parseQueryParams,
   safeRequestUrlForLog,
   setCorsHeaders,
+  warnIfCorsAllowsAnyOrigin,
   wireHttpSpanLifecycle,
 } from "./utils";
 import { handleWebhooks } from "./webhooks";
@@ -556,6 +557,7 @@ try {
   process.exitCode = 1;
   throw err;
 }
+warnIfCorsAllowsAnyOrigin();
 
 // Upgrade seed: explicit CAPABILITIES env values that predate capability
 // gating get the previously always-registered groups backfilled into a

@@ -11,10 +11,13 @@ import { ProviderNameSchema } from "../types";
  *   - `SECRETS_ENCRYPTION_KEY` is required to decrypt secrets stored in
  *     swarm_config, so it cannot itself be stored encrypted there.
  *
+ * `CORS_ALLOW_ANY_ORIGIN` is deployment-only: runtime config must not
+ * re-enable unrestricted credentialed CORS.
+ *
  * Matching is case-insensitive so `api_key`, `Api_Key`, etc. are all
  * rejected at every write path (DB helpers, HTTP routes, MCP tools).
  */
-const RESERVED_KEYS = new Set(["API_KEY", "SECRETS_ENCRYPTION_KEY"]);
+const RESERVED_KEYS = new Set(["API_KEY", "SECRETS_ENCRYPTION_KEY", "CORS_ALLOW_ANY_ORIGIN"]);
 
 export function isReservedConfigKey(key: string): boolean {
   return RESERVED_KEYS.has(key.toUpperCase());

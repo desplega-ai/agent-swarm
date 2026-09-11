@@ -1,5 +1,10 @@
 #!/bin/bash
-# Publish rendered Slack visuals for one PR to the `ci-visuals` branch.
+# Publish an already-staged, allowlist-filtered Slack visuals tree (flat by profile, e.g.
+# <staged-root>/legacy, <staged-root>/v2) for one PR to the `ci-visuals` branch. Staging
+# (filtering fork-controlled artifact contents down to an explicit allowlist) happens earlier,
+# in the unprivileged validation job — see visuals-stage.sh and slack-visuals-publish.yml for
+# why that split exists. This script only does git mechanics on input it treats as already-safe.
+#
 # The branch is rebuilt as a single commit on every run, so history never grows, and
 # --force-with-lease guards against a concurrent run from another PR (retry on rejection).
 # Prints `base_url=<raw.githubusercontent.com prefix>` on the last line.
@@ -7,20 +12,36 @@
 set -euo pipefail
 
 if [ "$#" -ne 3 ]; then
-  echo "Usage: $0 <out-root> <pr-number> <head-sha>" >&2
+  echo "Usage: $0 <staged-root> <pr-number> <head-sha>" >&2
   exit 1
 fi
 
-out_root=$1
+staged_root=$1
 pr_number=$2
 head_sha=$3
-sha7=${head_sha:0:7}
 
-if [ ! -d "$out_root" ]; then
-  echo "Output root does not exist: $out_root" >&2
+# Defense in depth: the caller already validated these against trusted GitHub API metadata
+# before invoking this script, but this script is directly runnable and pr_number/head_sha end
+# up in a git ref path below, so re-validate here too.
+if ! [[ "$pr_number" =~ ^[1-9][0-9]*$ ]]; then
+  echo "pr-number must be a positive decimal integer: $pr_number" >&2
   exit 1
 fi
-out_root=$(cd "$out_root" && pwd -P)
+if ! [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "head-sha must be exactly 40 lowercase hex characters: $head_sha" >&2
+  exit 1
+fi
+sha7=${head_sha:0:7}
+
+if [ ! -d "$staged_root" ]; then
+  echo "Staged directory does not exist: $staged_root" >&2
+  exit 1
+fi
+staged_root=$(cd "$staged_root" && pwd -P)
+if [ -z "$(find "$staged_root" -mindepth 1 -maxdepth 1 -type d -print -quit)" ]; then
+  echo "No staged profile directories found in $staged_root" >&2
+  exit 1
+fi
 
 repository=${GITHUB_REPOSITORY:-}
 if [ -z "$repository" ]; then
@@ -74,29 +95,11 @@ for attempt in 1 2 3; do
 
     target="pr-$pr_number/$sha7"
     rm -rf "pr-$pr_number"
-    for source_dir in "$out_root"/*; do
-      [ -d "$source_dir" ] || continue
-      profile=$(basename "$source_dir")
-      # A profile whose E2E run or render failed has no index.json; publish the others.
-      if [ ! -f "$source_dir/index.json" ]; then
-        echo "Skipping $profile: no index.json in $source_dir" >&2
-        continue
-      fi
-      for required_file in channel.png frames; do
-        if [ ! -e "$source_dir/$required_file" ]; then
-          echo "Missing $required_file in $source_dir" >&2
-          exit 1
-        fi
-      done
-      mkdir -p "$target/$profile"
-      cp "$source_dir/index.json" "$target/$profile/"
-      cp "$source_dir/channel.png" "$target/$profile/"
-      cp -R "$source_dir/frames" "$target/$profile/"
+    mkdir -p "$target"
+    for profile_dir in "$staged_root"/*; do
+      [ -d "$profile_dir" ] || continue
+      cp -R "$profile_dir" "$target/"
     done
-    if [ ! -d "$target" ]; then
-      echo "No profile with an index.json found in $out_root" >&2
-      exit 1
-    fi
     date -u +%FT%TZ > "pr-$pr_number/updated-at"
 
     now=$(date -u +%s)

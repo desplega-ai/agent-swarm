@@ -4,6 +4,7 @@ import type { Scenario } from "../run";
 
 export const configRoundtrip: Scenario = {
   name: "config-roundtrip",
+  order: 70,
   async run(ctx) {
     const key = "SWARM_HIDE_CLOUD_PROMO";
     const upsert = await ctx.api("PUT", "/api/config", {

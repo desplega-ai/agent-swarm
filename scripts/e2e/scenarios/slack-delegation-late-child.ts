@@ -23,6 +23,8 @@ import {
 // once every member is).
 export const slackDelegationLateChild: Scenario = {
   name: "slack-delegation-late-child",
+  order: 160,
+  groups: ["visuals-v2"],
   async run(ctx) {
     await enableSlackDelegation(ctx);
 

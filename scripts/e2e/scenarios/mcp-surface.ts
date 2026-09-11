@@ -14,6 +14,7 @@ function contentText(result: Record<string, unknown>): string {
 
 export const mcpSurface: Scenario = {
   name: "mcp-surface",
+  order: 40,
   async run(ctx) {
     const register = await ctx.api("POST", "/api/agents", {
       body: { name: `e2e-mcp-${ctx.nonce}`, role: "worker", status: "online" },

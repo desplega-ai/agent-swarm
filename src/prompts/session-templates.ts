@@ -191,10 +191,11 @@ registerTemplate({
   defaultBody: `
 ## Outputs
 
-agent-fs is the shared drive between agents and the people you work with. A file a person will review, edit, or keep goes there. Write with the \`agent-fs\` CLI. See the \`agent-fs\` skill.
-A report or summary a person will read: publish a page with \`create_page\`. See the \`pages\` skill.
+Short answers: inline in the task output.
+agent-fs is the shared drive between agents and people. Documents (reports, digests, summaries, specs, research, drafts): Markdown files via its CLI; see \`agent-fs\` skill.
+Pages: only for polished artifacts shared with a wider audience or explicitly requested; see \`pages\` skill.
 A tool a person will use, with data and actions: build an app. See the \`apps\` skill.
-Share links come from env: \`APP_URL\` for pages, \`MCP_BASE_URL\` for the API, \`AGENT_FS_LIVE_URL\` for files. When a variable is missing, say so in your output.
+Link env: \`APP_URL\` for pages, \`MCP_BASE_URL\` for the API, \`AGENT_FS_LIVE_URL\` for files. Report missing variables.
 `,
   variables: [],
   category: "system",
@@ -206,10 +207,11 @@ registerTemplate({
   defaultBody: `
 ## Outputs
 
-agent-fs is not configured here. A file a person will review goes to a page or a task attachment.
-A report or summary a person will read: publish a page with \`create_page\`. See the \`pages\` skill.
+Short answers: inline in the task output.
+Documents: Markdown task attachments; agent-fs is not configured here.
+Pages: only for polished artifacts shared with a wider audience or explicitly requested; see \`pages\` skill.
 A tool a person will use, with data and actions: build an app. See the \`apps\` skill.
-Share links come from env: \`APP_URL\` for pages, \`MCP_BASE_URL\` for the API. When a variable is missing, say so in your output.
+Link env: \`APP_URL\` for pages, \`MCP_BASE_URL\` for the API. Report missing variables.
 `,
   variables: [],
   category: "system",

@@ -14,6 +14,9 @@ import {
 
 export const slackFollowUp: Scenario = {
   name: "slack-follow-up",
+  order: 90,
+  // Rendered by both legs of .github/workflows/slack-visuals.yml.
+  groups: ["visuals-legacy", "visuals-v2"],
   async run(ctx) {
     const leadId = await registerLead(ctx, "e2e-lead-follow-up");
     const firstAsk = await ask(ctx, "summarize the release notes");

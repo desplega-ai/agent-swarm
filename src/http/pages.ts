@@ -33,7 +33,12 @@ import { issuePageSessionCookie } from "../utils/page-session";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
 import { route } from "./route-def";
-import { BODY_TOO_LARGE, enforceContentLengthCap, jsonError } from "./utils";
+import {
+  BODY_TOO_LARGE,
+  enforceContentLengthCap,
+  isOriginAllowedForCredentials,
+  jsonError,
+} from "./utils";
 
 /**
  * Per-page body-size cap. Page bodies are stored as a TEXT column with no
@@ -370,9 +375,12 @@ const getPageVersionRoute = route({
 function applyLaunchCors(req: IncomingMessage, res: ServerResponse): void {
   const origin = (req.headers.origin as string | undefined) ?? "";
   if (origin) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Vary", "Origin");
-    res.setHeader("Access-Control-Allow-Credentials", "true");
+    // Cookie issuance always requires the hosted/dev or configured allowlist.
+    if (isOriginAllowedForCredentials(origin)) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Access-Control-Allow-Credentials", "true");
+    }
   }
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");

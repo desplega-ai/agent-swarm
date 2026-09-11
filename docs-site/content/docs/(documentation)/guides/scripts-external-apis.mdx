@@ -55,7 +55,7 @@ curl -X POST https://your-swarm-host/api/x/script/kRxMfQaBnTwL \
   step — the in-sandbox Zod check still applies if the script declares
   `argsSchema`).
 - **Timeout**: `X-Swarm-Timeout-Ms`, default 60s, clamped to 1–300s.
-- **CORS**: any origin is allowed by default, inherited from the global CORS
+- **CORS**: origins follow `CORS_ALLOWED_ORIGINS` (hosted/dev defaults when unset), inherited from the global CORS
   handler — no per-endpoint configuration in v1.
 
 ### Response envelope

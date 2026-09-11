@@ -52,6 +52,7 @@ async function execute(ctx: ScenarioContext, runtime: "bash" | "ts") {
 
 export const workflowScriptNode: Scenario = {
   name: "workflow-script-node",
+  order: 60,
   async run(ctx) {
     let result = await execute(ctx, "bash");
     let run = asRecord(result.detail.run);
