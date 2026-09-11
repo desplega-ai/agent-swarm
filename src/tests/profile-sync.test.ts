@@ -2,7 +2,7 @@ import { describe, expect, spyOn, test } from "bun:test";
 import {
   buildIdentityPayload,
   buildIndependentIdentityPayloads,
-  CLAUDE_MD_LAST_HOOK_WRITE_PATH,
+  CLAUDE_MD_LINEAGE_PATH,
   CLAUDE_MD_PATH,
   collectProfilePayloads,
   contentSha256,
@@ -658,10 +658,20 @@ describe("collectProfilePayloads (baseline integration)", () => {
     const files = reader({
       [CLAUDE_MD_PATH]: "restored by a hook",
       [IDENTITY_BASELINES_PATH]: JSON.stringify({ claudeMd: contentSha256("boot") }),
-      [CLAUDE_MD_LAST_HOOK_WRITE_PATH]: JSON.stringify({
+      [CLAUDE_MD_LINEAGE_PATH]: JSON.stringify({
         written: contentSha256("restored by a hook"),
         base: contentSha256("restored by a hook"),
       }),
+    });
+
+    expect(await collectProfilePayloads(["claude"], "session_sync", files)).toEqual([]);
+  });
+
+  test("the runner backstop does not push when the lineage record is unreadable", async () => {
+    const files = reader({
+      [CLAUDE_MD_PATH]: "edited",
+      [IDENTITY_BASELINES_PATH]: JSON.stringify({ claudeMd: contentSha256("boot") }),
+      [CLAUDE_MD_LINEAGE_PATH]: "{not json",
     });
 
     expect(await collectProfilePayloads(["claude"], "session_sync", files)).toEqual([]);
@@ -671,7 +681,7 @@ describe("collectProfilePayloads (baseline integration)", () => {
     const files = reader({
       [CLAUDE_MD_PATH]: "edited",
       [IDENTITY_BASELINES_PATH]: JSON.stringify({ claudeMd: contentSha256("boot") }),
-      [CLAUDE_MD_LAST_HOOK_WRITE_PATH]: JSON.stringify({
+      [CLAUDE_MD_LINEAGE_PATH]: JSON.stringify({
         written: contentSha256("materialized"),
         base: contentSha256("materialized"),
       }),

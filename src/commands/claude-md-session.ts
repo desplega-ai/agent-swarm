@@ -22,17 +22,24 @@
  * unsynced edit that a sibling's SessionStart had backed up brings back an edit
  * (still synced, against its own base), not something a hook wrote.
  *
- * Known limits: the file write and the record write are two steps with no lock
- * between hook processes, so a Stop interleaved within that window can misjudge
- * one write; and with one `.bak` slot, a third overlapping session overwrites
- * the backup of the first (as before this module).
+ * The record and the sidecar are written atomically (temp file + rename), so a
+ * concurrent Stop never reads half a JSON; an unreadable record counts as
+ * hook-written, never as a reason to push.
+ *
+ * Known limits: the file write and the record write are still two steps with no
+ * lock between hook processes, so a Stop interleaved within that window can
+ * misjudge one write; and with one `.bak` slot, a third overlapping session
+ * overwrites the backup of the first (as before this module).
  */
 
+// `rename` has no Bun equivalent; it is what makes the record writes atomic.
+import { rename } from "node:fs/promises";
 import {
-  CLAUDE_MD_LAST_HOOK_WRITE_PATH,
+  CLAUDE_MD_LINEAGE_PATH,
   CLAUDE_MD_PATH,
   type ClaudeMdLineage,
   claudeMdLineageOf,
+  claudeMdRecordFor,
   contentSha256,
   type FileReader,
   parseClaudeMdLineage,
@@ -57,8 +64,26 @@ const readText: FileReader = async (path) => {
 export const DEFAULT_CLAUDE_MD_SESSION_PATHS: ClaudeMdSessionPaths = {
   file: CLAUDE_MD_PATH,
   backup: `${CLAUDE_MD_PATH}.bak`,
-  record: CLAUDE_MD_LAST_HOOK_WRITE_PATH,
+  record: CLAUDE_MD_LINEAGE_PATH,
 };
+
+/**
+ * Write via a temp file in the same directory plus `rename`: readers see the old
+ * content or the new one, never a partial write. `rename` also replaces a
+ * symlink at `path` instead of writing through it.
+ */
+async function writeAtomic(path: string, data: string): Promise<void> {
+  const tmp = `${path}.${process.pid}.${crypto.randomUUID()}.tmp`;
+  await Bun.write(tmp, data);
+  try {
+    await rename(tmp, path);
+  } catch (error) {
+    await Bun.file(tmp)
+      .delete()
+      .catch(() => {});
+    throw error;
+  }
+}
 
 /**
  * SessionStart: back up whatever is on disk together with its lineage, then
@@ -83,12 +108,12 @@ export async function materializeClaudeMd(
     // `of` pins the sidecar to this exact backup: a stale sidecar left by an
     // earlier overlap must not describe a different `.bak`.
     const sidecar = { ...lineage, of: contentSha256(existing) };
-    await Bun.write(`${paths.backup}.lineage`, JSON.stringify(sidecar)).catch(() => {});
+    await writeAtomic(`${paths.backup}.lineage`, JSON.stringify(sidecar)).catch(() => {});
   }
   await Bun.write(paths.file, content); // creates ~/.claude if missing
 
   const hash = contentSha256(content);
-  await Bun.write(paths.record, JSON.stringify({ written: hash, base: hash })).catch(() => {});
+  await writeAtomic(paths.record, JSON.stringify({ written: hash, base: hash })).catch(() => {});
 }
 
 /** Stop: restore the `.bak` with its lineage (or remove the file if there was none). */
@@ -114,7 +139,7 @@ export async function restoreClaudeMd(
     // lineage is unknown: record it as hook-written, the conservative choice
     // (never pushed as an edit).
     const record = lineage ?? { written: contentSha256(content), base: null };
-    await Bun.write(paths.record, JSON.stringify(record)).catch(() => {});
+    await writeAtomic(paths.record, JSON.stringify(record)).catch(() => {});
   } else {
     await Bun.file(paths.file)
       .delete()
@@ -126,7 +151,7 @@ export async function restoreClaudeMd(
 }
 
 export async function readClaudeMdLineage(
-  path: string = CLAUDE_MD_LAST_HOOK_WRITE_PATH,
+  path: string = CLAUDE_MD_LINEAGE_PATH,
   readFile: FileReader = readText,
 ): Promise<ClaudeMdLineage | null> {
   return parseClaudeMdLineage(await readFile(path));
@@ -146,5 +171,5 @@ export async function readClaudeMdSyncState(
 ): Promise<ClaudeMdSyncState | null> {
   const content = await readFile(paths.file);
   if (content === undefined) return null;
-  return { content, record: await readClaudeMdLineage(paths.record, readFile) };
+  return { content, record: claudeMdRecordFor(await readFile(paths.record), content) };
 }

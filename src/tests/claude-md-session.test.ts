@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { lstat, mkdtemp, readdir, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   type ClaudeMdSessionPaths,
+  DEFAULT_CLAUDE_MD_SESSION_PATHS,
   materializeClaudeMd,
   planClaudeMdSync,
   readClaudeMdSyncState,
@@ -143,11 +144,48 @@ describe("concurrent sessions sharing ~/.claude/CLAUDE.md", () => {
     expect(await stop()).toBeNull(); // unknown lineage → treated as hook-written
   });
 
+  test("an unreadable record never turns into a push", async () => {
+    await materializeClaudeMd(V2, paths);
+    await edit("edited");
+    await Bun.write(paths.record, '{"written": "abc'); // torn or corrupt
+
+    expect(await stop()).toBeNull();
+  });
+
+  test("record and sidecar writes are atomic: no temp files are left behind", async () => {
+    await edit(V1);
+    await materializeClaudeMd(V2, paths); // writes .bak, sidecar and record
+    await restoreClaudeMd(paths);
+
+    const leftovers = [...(await readdir(root)), ...(await readdir(join(root, "home/.claude")))];
+    expect(leftovers.filter((name) => name.endsWith(".tmp"))).toEqual([]);
+  });
+
+  test("a symlink planted at the record path is replaced, not written through", async () => {
+    const victim = join(root, "victim.txt");
+    await Bun.write(victim, "do not touch");
+    await symlink(victim, paths.record);
+
+    await materializeClaudeMd(V1, paths);
+
+    expect(await Bun.file(victim).text()).toBe("do not touch");
+    expect((await lstat(paths.record)).isSymbolicLink()).toBe(false);
+  });
+
   test("a .bak without lineage (from before this module) is treated as hook-written", async () => {
     await Bun.write(paths.backup, V1); // legacy backup, no sidecar
     await Bun.write(paths.file, V2);
     await restoreClaudeMd(paths);
 
     expect(await stop()).toBeNull();
+  });
+});
+
+describe("default paths", () => {
+  test("the lineage record lives next to the file it describes, not in /tmp", () => {
+    const { file, backup, record } = DEFAULT_CLAUDE_MD_SESSION_PATHS;
+    expect(record).toBe(`${file}.lineage.json`);
+    expect(backup).toBe(`${file}.bak`);
+    expect(record.startsWith("/tmp/")).toBe(false);
   });
 });

@@ -305,9 +305,11 @@ export const CLAUDE_MD_PATH = `${process.env.HOME}/.claude/CLAUDE.md`;
 /**
  * Lineage record of the LAST content the Claude hook wrote to CLAUDE_MD_PATH (a
  * SessionStart materialization or a Stop `.bak` restore). Maintained by
- * `claude-md-session.ts`; also read by the runner's backstop below.
+ * `claude-md-session.ts`; also read by the runner's backstop below. It lives next
+ * to the file it describes: same owner, same scope (one per `~/.claude`), and not
+ * in a world-writable directory where another user could plant a symlink.
  */
-export const CLAUDE_MD_LAST_HOOK_WRITE_PATH = "/tmp/agent-swarm-claude-md-lineage.json";
+export const CLAUDE_MD_LINEAGE_PATH = `${CLAUDE_MD_PATH}.lineage.json`;
 
 /** Where the content of CLAUDE_MD_PATH came from; see `claude-md-session.ts`. */
 export interface ClaudeMdLineage {
@@ -328,6 +330,19 @@ export function parseClaudeMdLineage(raw: string | undefined): ClaudeMdLineage |
   } catch {
     return null;
   }
+}
+
+/**
+ * The record to decide on, from the raw record file: absent → null (no lineage
+ * yet, the previous behaviour); present but unreadable → the content counts as
+ * hook-written, so an unreadable record never turns into an unconditional push.
+ */
+export function claudeMdRecordFor(
+  raw: string | undefined,
+  content: string,
+): ClaudeMdLineage | null {
+  if (raw === undefined) return null;
+  return parseClaudeMdLineage(raw) ?? { written: contentSha256(content), base: null };
 }
 
 /**
@@ -682,7 +697,7 @@ export async function collectProfilePayloads(
         // skip what a hook wrote, send an edit against the base it derives from.
         // Without a record the only base the runner knows is its boot baseline.
         const record =
-          parseClaudeMdLineage(await readFile(CLAUDE_MD_LAST_HOOK_WRITE_PATH)) ??
+          claudeMdRecordFor(await readFile(CLAUDE_MD_LINEAGE_PATH), raw) ??
           (baselines?.claudeMd ? { written: null, base: baselines.claudeMd } : null);
         const body = planClaudeMdSync({ content: raw, record });
         if (body) payloads.push({ label: "claude", body });
