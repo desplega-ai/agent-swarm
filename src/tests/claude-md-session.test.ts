@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtemp, readdir, rm, utimes } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -8,52 +8,46 @@ import {
   planClaudeMdSync,
   readClaudeMdSyncState,
   restoreClaudeMd,
-  sessionBaselinePath,
 } from "../commands/claude-md-session";
 import { contentSha256 } from "../commands/profile-sync";
 
 const V1 = "# CLAUDE.md\n\nversion one";
 const V2 = "# CLAUDE.md\n\nversion two — the Lead added a rule";
+const h = contentSha256;
 
 describe("planClaudeMdSync", () => {
   test("skips content a hook wrote: it is not an edit", () => {
-    expect(
-      planClaudeMdSync({
-        content: V1,
-        sessionBase: contentSha256(V2),
-        lastHookWrite: contentSha256(V1),
-      }),
-    ).toBeNull();
+    expect(planClaudeMdSync({ content: V1, record: { written: h(V1), base: h(V1) } })).toBeNull();
   });
 
-  test("skips a copy unchanged since this session materialized it", () => {
+  test("sends an edit with the base of the content it was made on", () => {
     expect(
-      planClaudeMdSync({ content: V2, sessionBase: contentSha256(V2), lastHookWrite: null }),
-    ).toBeNull();
-  });
-
-  test("sends an edit with its base as the compare-and-set token", () => {
-    expect(
-      planClaudeMdSync({
-        content: "edited",
-        sessionBase: contentSha256(V2),
-        lastHookWrite: contentSha256(V2),
-      }),
+      planClaudeMdSync({ content: "edited", record: { written: h(V2), base: h(V2) } }),
     ).toEqual({
       claudeMd: "edited",
       changeSource: "session_sync",
-      expectedHashes: { claudeMd: contentSha256(V2) },
+      expectedHashes: { claudeMd: h(V2) },
     });
   });
 
-  test("without a session baseline keeps the previous unconditional sync", () => {
-    expect(planClaudeMdSync({ content: "edited", sessionBase: null, lastHookWrite: null })).toEqual(
-      {
-        claudeMd: "edited",
-        changeSource: "session_sync",
-      },
-    );
-    expect(planClaudeMdSync({ content: "  ", sessionBase: null, lastHookWrite: null })).toBeNull();
+  test("an edit made on a restored stale copy carries the stale base", () => {
+    // The file was a restored v1 (written by a hook, based on v1): an edit on
+    // it must not be applied over a DB at v2 — the token says v1.
+    expect(
+      planClaudeMdSync({ content: "edited", record: { written: h(V1), base: h(V1) } }),
+    ).toEqual({
+      claudeMd: "edited",
+      changeSource: "session_sync",
+      expectedHashes: { claudeMd: h(V1) },
+    });
+  });
+
+  test("without any record keeps the previous unconditional sync", () => {
+    expect(planClaudeMdSync({ content: "edited", record: null })).toEqual({
+      claudeMd: "edited",
+      changeSource: "session_sync",
+    });
+    expect(planClaudeMdSync({ content: "  ", record: null })).toBeNull();
   });
 });
 
@@ -66,8 +60,7 @@ describe("concurrent sessions sharing ~/.claude/CLAUDE.md", () => {
     paths = {
       file: join(root, "home/.claude/CLAUDE.md"),
       backup: join(root, "home/.claude/CLAUDE.md.bak"),
-      lastHookWrite: join(root, "last-hook-write"),
-      sessionsDir: join(root, "sessions"),
+      record: join(root, "lineage.json"),
     };
   });
 
@@ -75,80 +68,76 @@ describe("concurrent sessions sharing ~/.claude/CLAUDE.md", () => {
     await rm(root, { recursive: true, force: true });
   });
 
-  const stop = async (sessionId: string) => {
-    const state = await readClaudeMdSyncState(sessionId, paths);
+  /** A Stop: decide the sync from what is on disk, then restore the `.bak`. */
+  const stop = async () => {
+    const state = await readClaudeMdSyncState(paths);
     const body = state ? planClaudeMdSync(state) : null;
     await restoreClaudeMd(paths);
     return body;
   };
   const edit = (content: string) => Bun.write(paths.file, content);
 
-  test("a sibling's .bak restore is not pushed as an edit (the reviewed race)", async () => {
-    await materializeClaudeMd(V1, "session-a", paths); // A starts on v1
-    await materializeClaudeMd(V2, "session-b", paths); // the DB moved to v2; B starts, .bak = v1
+  test("a sibling's .bak restore is not pushed as an edit", async () => {
+    await materializeClaudeMd(V1, paths); // A starts on v1
+    await materializeClaudeMd(V2, paths); // the DB moved to v2; B starts, .bak = v1
 
-    expect(await stop("session-a")).toBeNull(); // disk v2 is B's materialization
+    expect(await stop()).toBeNull(); // A: disk v2 is B's materialization
     expect(await Bun.file(paths.file).text()).toBe(V1); // A restored the .bak
-
-    // Disk v1 differs from B's base (v2), but a hook wrote it: no sync.
-    expect(await stop("session-b")).toBeNull();
+    expect(await stop()).toBeNull(); // B: disk v1 was written by a hook
   });
 
   test("a second Stop in the same session does not push the restored .bak", async () => {
-    await edit(V1); // what was on disk before the session
-    await materializeClaudeMd(V2, "session-b", paths);
+    await edit(V1); // what was on disk before the session (no record)
+    await materializeClaudeMd(V2, paths);
     await edit("edited in session");
 
-    expect(await stop("session-b")).toEqual({
+    expect(await stop()).toEqual({
       claudeMd: "edited in session",
       changeSource: "session_sync",
-      expectedHashes: { claudeMd: contentSha256(V2) },
+      expectedHashes: { claudeMd: h(V2) },
     });
-    expect(await stop("session-b")).toBeNull(); // disk is the restored v1
+    expect(await stop()).toBeNull(); // disk is the restored pre-session copy
+  });
+
+  test("an unsynced edit backed up by a sibling's SessionStart still reaches the DB", async () => {
+    await materializeClaudeMd(V2, paths); // A starts on v2
+    await edit("A's edit"); // A's agent edits, not synced yet
+    await materializeClaudeMd(V2, paths); // B starts: .bak = A's edit, disk = v2
+
+    expect(await stop()).toBeNull(); // A: disk v2 is B's materialization
+    expect(await Bun.file(paths.file).text()).toBe("A's edit"); // A restored its own edit
+    // B finds A's edit on disk: an edit, sent against the v2 it was made on.
+    expect(await stop()).toEqual({
+      claudeMd: "A's edit",
+      changeSource: "session_sync",
+      expectedHashes: { claudeMd: h(V2) },
+    });
   });
 
   test("a deliberate revert to an earlier version is sent, based on the current value", async () => {
-    await materializeClaudeMd(V2, "session-b", paths);
+    await materializeClaudeMd(V2, paths);
     await edit(V1); // the agent restores v1 on purpose
 
-    expect(await stop("session-b")).toEqual({
+    expect(await stop()).toEqual({
       claudeMd: V1,
       changeSource: "session_sync",
-      expectedHashes: { claudeMd: contentSha256(V2) },
+      expectedHashes: { claudeMd: h(V2) },
     });
   });
 
-  test("the session baselines of overlapping sessions do not overwrite each other", async () => {
-    await materializeClaudeMd(V1, "session-a", paths);
-    await materializeClaudeMd(V2, "session-b", paths);
-
-    expect((await readClaudeMdSyncState("session-a", paths))?.sessionBase).toBe(contentSha256(V1));
-    expect((await readClaudeMdSyncState("session-b", paths))?.sessionBase).toBe(contentSha256(V2));
-    expect((await readClaudeMdSyncState("session-c", paths))?.sessionBase).toBeNull();
-  });
-
-  test("materializing prunes session baselines older than a week", async () => {
-    await materializeClaudeMd(V1, "old-session", paths);
-    const old = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
-    await utimes(join(paths.sessionsDir, "old-session.json"), old, old);
-
-    await materializeClaudeMd(V2, "new-session", paths);
-    expect((await readdir(paths.sessionsDir)).sort()).toEqual(["new-session.json"]);
-  });
-
-  test("restoring without a .bak removes the file and the last-hook-write record", async () => {
-    await materializeClaudeMd(V1, "session-a", paths); // nothing on disk before: no .bak
+  test("restoring without a .bak removes the file and the record", async () => {
+    await materializeClaudeMd(V1, paths); // nothing on disk before: no .bak
     await restoreClaudeMd(paths);
 
     expect(await Bun.file(paths.file).exists()).toBe(false);
-    expect(await Bun.file(paths.lastHookWrite).exists()).toBe(false);
+    expect(await Bun.file(paths.record).exists()).toBe(false);
   });
-});
 
-describe("sessionBaselinePath", () => {
-  test("sanitizes the session id into a single file name", () => {
-    expect(sessionBaselinePath("../../etc/passwd", "/base")).toBe("/base/etcpasswd.json");
-    expect(sessionBaselinePath("abc-123_DEF", "/base")).toBe("/base/abc-123_DEF.json");
-    expect(sessionBaselinePath("../", "/base")).toBeNull();
+  test("a .bak without lineage (from before this module) is treated as hook-written", async () => {
+    await Bun.write(paths.backup, V1); // legacy backup, no sidecar
+    await Bun.write(paths.file, V2);
+    await restoreClaudeMd(paths);
+
+    expect(await stop()).toBeNull();
   });
 });

@@ -625,13 +625,13 @@ export async function handleHook(): Promise<void> {
   };
 
   /**
-   * Sync CLAUDE.md back to the server — only if THIS session edited it, and as
-   * a compare-and-set against what it materialized (see `claude-md-session.ts`).
+   * Sync CLAUDE.md back to the server — only an agent's edit, never content a
+   * hook wrote, and as a compare-and-set against its base (see `claude-md-session.ts`).
    */
-  const syncClaudeMdToServer = async (agentId: string, sessionId?: string): Promise<void> => {
+  const syncClaudeMdToServer = async (agentId: string): Promise<void> => {
     if (!mcpConfig) return;
 
-    const state = await readClaudeMdSyncState(sessionId);
+    const state = await readClaudeMdSyncState();
     const body = state ? planClaudeMdSync(state) : null;
     if (!body) return;
 
@@ -1016,7 +1016,7 @@ export async function handleHook(): Promise<void> {
       // Write agent's CLAUDE.md if available
       if (agentInfo.claudeMd) {
         try {
-          await materializeClaudeMd(agentInfo.claudeMd, msg.session_id);
+          await materializeClaudeMd(agentInfo.claudeMd);
           console.log("Loaded your personal CLAUDE.md configuration.");
         } catch (error) {
           console.log(`Warning: Could not load CLAUDE.md: ${(error as Error).message}`);
@@ -1297,7 +1297,7 @@ export async function handleHook(): Promise<void> {
       // Sync CLAUDE.md, identity files, and setup script back to database, then restore backup
       if (agentInfo?.id) {
         try {
-          await syncClaudeMdToServer(agentInfo.id, msg.session_id);
+          await syncClaudeMdToServer(agentInfo.id);
           await syncIdentityFilesToServer(agentInfo.id);
           await syncSetupScriptToServer(agentInfo.id);
           await restoreClaudeMd();

@@ -4,180 +4,138 @@
  *
  * Every SessionStart backs the current file up to `.bak` and materializes the
  * DB value into it; every Stop syncs the file back and restores the `.bak`.
- * Sessions of one agent overlap, so what a Stop finds on disk can be:
- *   (a) this session's edit,
- *   (b) this session's untouched materialization,
- *   (c) something a SIBLING session's hook wrote — its materialization or its
- *       `.bak` restore,
- *   (d) this session's own restore from an earlier Stop (Stop can fire more
- *       than once per session).
- * Only (a) is an edit. Syncing (b)–(d) can revert a value the DB already moved
- * past — measured: `claudeMd` edits reverted 8–27 s later, byte-for-byte to the
- * previous version.
+ * Sessions of one agent overlap, so what a Stop finds on disk can be an agent's
+ * edit, or content a hook wrote — this session's or a sibling's materialization,
+ * or a `.bak` restore (Stop can fire more than once). Syncing hook-written
+ * content can revert a value the DB already moved past — measured: `claudeMd`
+ * edits reverted 8–27 s later, byte-for-byte to the previous version.
  *
- * Two records tell them apart:
- *   - shared: the hash of the LAST content any hook wrote to the file. A file
- *     that still holds exactly that was written by a hook, not edited — (b),
- *     (c), (d) — and is never synced.
- *   - per `session_id`: the hash this session materialized. An edit is sent with
- *     it as the compare-and-set token (`expectedHashes.claudeMd`), so the server
- *     drops the edit if the DB moved since this session read it, and applies it
- *     otherwise — including a deliberate revert to an earlier version.
+ * So the hook keeps a LINEAGE record for the file, rewritten on every hook write:
+ *   - `written`: hash of the content the hook itself put there, or null when it
+ *     restored an agent's edit. A file that still hashes to it is not an edit
+ *     and is never synced.
+ *   - `base`: hash of the DB value that content derives from. An edit is sent
+ *     with it as the compare-and-set token (`expectedHashes.claudeMd`): the
+ *     server applies it if the DB is still at that value — including a
+ *     deliberate revert to an earlier version — and drops it otherwise.
+ * The `.bak` carries the same two facts in a sidecar, so restoring an agent's
+ * unsynced edit that a sibling's SessionStart had backed up brings back an edit
+ * (still synced, against its own base), not something a hook wrote.
  *
- * Known limit, unchanged by this module: if a sibling's `.bak` restore lands on
- * disk after this session's edit, the edit is lost from disk (not from the DB).
+ * Known limits: the file write and the record write are two steps with no lock
+ * between hook processes, so a Stop interleaved within that window can misjudge
+ * one write; and with one `.bak` slot, a third overlapping session overwrites
+ * the backup of the first (as before this module).
  */
 
 import {
   CLAUDE_MD_LAST_HOOK_WRITE_PATH,
   CLAUDE_MD_PATH,
+  type ClaudeMdLineage,
+  claudeMdLineageOf,
   contentSha256,
   type FileReader,
-  type ProfilePayload,
+  parseClaudeMdLineage,
 } from "./profile-sync.ts";
+
+export { planClaudeMdSync } from "./profile-sync.ts";
 
 export interface ClaudeMdSessionPaths {
   /** The shared personal CLAUDE.md. */
   file: string;
   /** Where SessionStart backs up the previous content; Stop restores it. */
   backup: string;
-  /** sha256 of the last content a hook wrote to `file`. */
-  lastHookWrite: string;
-  /** One `<session_id>.json` per session: the hash it materialized. */
-  sessionsDir: string;
+  /** Lineage record of the content the hook last wrote to `file`. */
+  record: string;
 }
-
-export const DEFAULT_CLAUDE_MD_SESSION_PATHS: ClaudeMdSessionPaths = {
-  file: CLAUDE_MD_PATH,
-  backup: `${CLAUDE_MD_PATH}.bak`,
-  lastHookWrite: CLAUDE_MD_LAST_HOOK_WRITE_PATH,
-  sessionsDir: "/tmp/agent-swarm-session-baselines",
-};
-
-/** Session baselines are kept after Stop (it can fire twice), so prune old ones. */
-const SESSION_BASELINE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 const readText: FileReader = async (path) => {
   const file = Bun.file(path);
   return (await file.exists()) ? await file.text() : undefined;
 };
 
-export function sessionBaselinePath(sessionId: string, sessionsDir: string): string | null {
-  const safe = sessionId.replace(/[^A-Za-z0-9_-]/g, "");
-  return safe ? `${sessionsDir}/${safe}.json` : null;
-}
-
-async function recordHookWrite(content: string | null, paths: ClaudeMdSessionPaths): Promise<void> {
-  if (content === null) await Bun.file(paths.lastHookWrite).delete();
-  else await Bun.write(paths.lastHookWrite, contentSha256(content));
-}
-
-async function writeSessionBaseline(
-  sessionId: string,
-  content: string,
-  paths: ClaudeMdSessionPaths,
-): Promise<void> {
-  const path = sessionBaselinePath(sessionId, paths.sessionsDir);
-  if (!path) return;
-  await Bun.write(path, JSON.stringify({ claudeMd: contentSha256(content) }));
-
-  const now = Date.now();
-  for await (const name of new Bun.Glob("*.json").scan({ cwd: paths.sessionsDir })) {
-    const file = Bun.file(`${paths.sessionsDir}/${name}`);
-    const info = await file.stat().catch(() => null);
-    if (info && now - info.mtimeMs > SESSION_BASELINE_MAX_AGE_MS) {
-      await file.delete().catch(() => {});
-    }
-  }
-}
+export const DEFAULT_CLAUDE_MD_SESSION_PATHS: ClaudeMdSessionPaths = {
+  file: CLAUDE_MD_PATH,
+  backup: `${CLAUDE_MD_PATH}.bak`,
+  record: CLAUDE_MD_LAST_HOOK_WRITE_PATH,
+};
 
 /**
- * SessionStart: back up whatever is on disk, materialize the DB value, and record
- * both the shared last-hook-write and this session's baseline. The two records
- * are best effort — without them the Stop sync degrades to the previous
- * unconditional write, never to a failed session.
+ * SessionStart: back up whatever is on disk together with its lineage, then
+ * materialize the DB value and record it. The record is best effort — without it
+ * the Stop sync degrades to the previous unconditional write, never to a failure.
  */
 export async function materializeClaudeMd(
   content: string,
-  sessionId: string | undefined,
   paths: ClaudeMdSessionPaths = DEFAULT_CLAUDE_MD_SESSION_PATHS,
 ): Promise<void> {
   const current = Bun.file(paths.file);
-  if (await current.exists()) await Bun.write(paths.backup, await current.text());
+  if (await current.exists()) {
+    const existing = await current.text();
+    const record = await readClaudeMdLineage(paths.record).catch(() => null);
+    // With a record, anything but the hook's own write is an agent's unsynced
+    // edit. Without one (the file predates the hook, e.g. the user's own) its
+    // origin is unknown: treat it as hook-written, never to be pushed.
+    const lineage = record
+      ? claudeMdLineageOf(existing, record)
+      : { written: contentSha256(existing), base: null };
+    await Bun.write(paths.backup, existing);
+    await Bun.write(`${paths.backup}.lineage`, JSON.stringify(lineage)).catch(() => {});
+  }
   await Bun.write(paths.file, content); // creates ~/.claude if missing
 
-  await recordHookWrite(content, paths).catch(() => {});
-  if (sessionId) await writeSessionBaseline(sessionId, content, paths).catch(() => {});
+  const hash = contentSha256(content);
+  await Bun.write(paths.record, JSON.stringify({ written: hash, base: hash })).catch(() => {});
 }
 
-/** Stop: restore the `.bak` (or remove the file if there was none) and record it. */
+/** Stop: restore the `.bak` with its lineage (or remove the file if there was none). */
 export async function restoreClaudeMd(
   paths: ClaudeMdSessionPaths = DEFAULT_CLAUDE_MD_SESSION_PATHS,
 ): Promise<void> {
   const backup = Bun.file(paths.backup);
+  const sidecar = Bun.file(`${paths.backup}.lineage`);
   if (await backup.exists()) {
     const content = await backup.text();
+    const lineage = parseClaudeMdLineage(
+      (await sidecar.exists()) ? await sidecar.text() : undefined,
+    );
     await Bun.write(paths.file, content);
     await backup.delete();
-    await recordHookWrite(content, paths).catch(() => {});
+    await sidecar.delete().catch(() => {});
+    // Without a sidecar (a `.bak` from before this module) the lineage is unknown:
+    // record it as hook-written, the conservative choice (never pushed as an edit).
+    const record = lineage ?? { written: contentSha256(content), base: null };
+    await Bun.write(paths.record, JSON.stringify(record)).catch(() => {});
   } else {
     await Bun.file(paths.file)
       .delete()
       .catch(() => {});
-    await recordHookWrite(null, paths).catch(() => {});
+    await Bun.file(paths.record)
+      .delete()
+      .catch(() => {});
   }
+}
+
+export async function readClaudeMdLineage(
+  path: string = CLAUDE_MD_LAST_HOOK_WRITE_PATH,
+  readFile: FileReader = readText,
+): Promise<ClaudeMdLineage | null> {
+  return parseClaudeMdLineage(await readFile(path));
 }
 
 export interface ClaudeMdSyncState {
   /** Current content of the shared file. */
   content: string;
-  /** Hash this session materialized, or null (no `session_id` / no record). */
-  sessionBase: string | null;
-  /** Hash of the last content any hook wrote to the file, or null. */
-  lastHookWrite: string | null;
+  /** Lineage record of the last hook write, or null if there is none. */
+  record: ClaudeMdLineage | null;
 }
 
-/** Read what the Stop sync needs to decide; missing records come back null. */
+/** Read what the Stop sync needs to decide; null when the file does not exist. */
 export async function readClaudeMdSyncState(
-  sessionId: string | undefined,
   paths: ClaudeMdSessionPaths = DEFAULT_CLAUDE_MD_SESSION_PATHS,
   readFile: FileReader = readText,
 ): Promise<ClaudeMdSyncState | null> {
   const content = await readFile(paths.file);
   if (content === undefined) return null;
-
-  let sessionBase: string | null = null;
-  const baselinePath = sessionId ? sessionBaselinePath(sessionId, paths.sessionsDir) : null;
-  if (baselinePath) {
-    try {
-      const hash = (JSON.parse((await readFile(baselinePath)) ?? "null") as { claudeMd?: unknown })
-        ?.claudeMd;
-      sessionBase = typeof hash === "string" ? hash : null;
-    } catch {
-      sessionBase = null;
-    }
-  }
-  const lastHookWrite = (await readFile(paths.lastHookWrite))?.trim() || null;
-  return { content, sessionBase, lastHookWrite };
-}
-
-/**
- * The `session_sync` body for the Stop hook, or null to skip:
- *   - content a hook wrote (last-hook-write) → skip: not an edit;
- *   - no session baseline → the previous unconditional sync;
- *   - unchanged since this session materialized it → skip;
- *   - otherwise an edit → sent with its base as `expectedHashes.claudeMd`.
- */
-export function planClaudeMdSync(state: ClaudeMdSyncState): ProfilePayload["body"] | null {
-  const { content, sessionBase, lastHookWrite } = state;
-  if (!content.trim()) return null;
-  const hash = contentSha256(content);
-  if (lastHookWrite !== null && hash === lastHookWrite) return null;
-  if (sessionBase === null) return { claudeMd: content, changeSource: "session_sync" };
-  if (hash === sessionBase) return null;
-  return {
-    claudeMd: content,
-    changeSource: "session_sync",
-    expectedHashes: { claudeMd: sessionBase },
-  };
+  return { content, record: await readClaudeMdLineage(paths.record, readFile) };
 }

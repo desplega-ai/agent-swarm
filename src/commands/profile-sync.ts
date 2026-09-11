@@ -303,12 +303,65 @@ export async function readIdentityBaselines(
  */
 export const CLAUDE_MD_PATH = `${process.env.HOME}/.claude/CLAUDE.md`;
 /**
- * sha256 of the LAST content the Claude hook itself wrote to CLAUDE_MD_PATH (a
- * SessionStart materialization or a Stop `.bak` restore). A file that still
- * hashes to it was written by a hook, not edited by the agent. Maintained by
- * `claude-md-session.ts`; read here by the runner's backstop.
+ * Lineage record of the LAST content the Claude hook wrote to CLAUDE_MD_PATH (a
+ * SessionStart materialization or a Stop `.bak` restore). Maintained by
+ * `claude-md-session.ts`; also read by the runner's backstop below.
  */
-export const CLAUDE_MD_LAST_HOOK_WRITE_PATH = "/tmp/agent-swarm-claude-md-last-hook-write";
+export const CLAUDE_MD_LAST_HOOK_WRITE_PATH = "/tmp/agent-swarm-claude-md-lineage.json";
+
+/** Where the content of CLAUDE_MD_PATH came from; see `claude-md-session.ts`. */
+export interface ClaudeMdLineage {
+  /** Hash of the content a hook wrote, or null if it restored an agent's edit. */
+  written: string | null;
+  /** Hash of the DB value that content derives from, or null if unknown. */
+  base: string | null;
+}
+
+export function parseClaudeMdLineage(raw: string | undefined): ClaudeMdLineage | null {
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw) as Partial<ClaudeMdLineage>;
+    return {
+      written: typeof value.written === "string" ? value.written : null,
+      base: typeof value.base === "string" ? value.base : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Lineage of content found on disk, given the last record: the hook's own write
+ * inherits the record; anything else is an edit on top of the record's base.
+ */
+export function claudeMdLineageOf(
+  content: string,
+  record: ClaudeMdLineage | null,
+): ClaudeMdLineage {
+  if (record && record.written === contentSha256(content)) return record;
+  return { written: null, base: record?.base ?? null };
+}
+
+/**
+ * The CLAUDE.md `session_sync` body, or null to skip:
+ *   - no record at all → the previous unconditional sync;
+ *   - content a hook wrote, or equal to its own base → skip: not an edit;
+ *   - otherwise an edit → sent with its base as `expectedHashes.claudeMd`
+ *     (unconditional only if that base is unknown).
+ */
+export function planClaudeMdSync(state: {
+  content: string;
+  record: ClaudeMdLineage | null;
+}): ProfilePayload["body"] | null {
+  const { content, record } = state;
+  if (!content.trim()) return null;
+  if (record === null) return { claudeMd: content, changeSource: "session_sync" };
+
+  const { written, base } = claudeMdLineageOf(content, record);
+  if (written !== null || contentSha256(content) === base) return null;
+  if (base === null) return { claudeMd: content, changeSource: "session_sync" };
+  return { claudeMd: content, changeSource: "session_sync", expectedHashes: { claudeMd: base } };
+}
 /**
  * Workspace CLAUDE.md — the agent-level instructions file the runner
  * materializes from the `claudeMd` DB field at boot (`runner.ts`) and that the
@@ -622,21 +675,17 @@ export async function collectProfilePayloads(
   if (fields.includes("claude")) {
     const raw = await readFile(claudeMdPath);
     if (raw?.trim()) {
-      const hash = contentSha256(raw);
-      const hookOwned = claudeMdPath === CLAUDE_MD_PATH;
-      if (baselines?.claudeMd && hash === baselines.claudeMd) {
+      if (baselines?.claudeMd && contentSha256(raw) === baselines.claudeMd) {
         // CLAUDE.md unchanged during session — skip to preserve Lead's DB edits
-      } else if (hookOwned && hash === (await readFile(CLAUDE_MD_LAST_HOOK_WRITE_PATH))?.trim()) {
-        // The Claude hook wrote this (a materialization or a `.bak` restore),
-        // no agent edited it: syncing it could only revert a newer DB value.
-      } else if (hookOwned && baselines?.claudeMd) {
-        // An edit the Claude hook did not sync (its Stop never fired). The only
-        // base the runner knows is its boot baseline: send it as the
-        // compare-and-set token, so the server drops the edit if the DB moved.
-        payloads.push({
-          label: "claude",
-          body: { claudeMd: raw, changeSource, expectedHashes: { claudeMd: baselines.claudeMd } },
-        });
+      } else if (claudeMdPath === CLAUDE_MD_PATH && changeSource === "session_sync") {
+        // The personal file is owned by the Claude hook, which keeps its lineage:
+        // skip what a hook wrote, send an edit against the base it derives from.
+        // Without a record the only base the runner knows is its boot baseline.
+        const record =
+          parseClaudeMdLineage(await readFile(CLAUDE_MD_LAST_HOOK_WRITE_PATH)) ??
+          (baselines?.claudeMd ? { written: null, base: baselines.claudeMd } : null);
+        const body = planClaudeMdSync({ content: raw, record });
+        if (body) payloads.push({ label: "claude", body });
       } else {
         payloads.push({ label: "claude", body: { claudeMd: raw, changeSource } });
       }

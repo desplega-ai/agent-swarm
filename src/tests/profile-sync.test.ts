@@ -658,10 +658,33 @@ describe("collectProfilePayloads (baseline integration)", () => {
     const files = reader({
       [CLAUDE_MD_PATH]: "restored by a hook",
       [IDENTITY_BASELINES_PATH]: JSON.stringify({ claudeMd: contentSha256("boot") }),
-      [CLAUDE_MD_LAST_HOOK_WRITE_PATH]: contentSha256("restored by a hook"),
+      [CLAUDE_MD_LAST_HOOK_WRITE_PATH]: JSON.stringify({
+        written: contentSha256("restored by a hook"),
+        base: contentSha256("restored by a hook"),
+      }),
     });
 
     expect(await collectProfilePayloads(["claude"], "session_sync", files)).toEqual([]);
+  });
+
+  test("the runner backstop sends an edit against the base the hook recorded", async () => {
+    const files = reader({
+      [CLAUDE_MD_PATH]: "edited",
+      [IDENTITY_BASELINES_PATH]: JSON.stringify({ claudeMd: contentSha256("boot") }),
+      [CLAUDE_MD_LAST_HOOK_WRITE_PATH]: JSON.stringify({
+        written: contentSha256("materialized"),
+        base: contentSha256("materialized"),
+      }),
+    });
+
+    const payloads = await collectProfilePayloads(["claude"], "session_sync", files);
+    expect(payloads.map((p) => p.body)).toEqual([
+      {
+        claudeMd: "edited",
+        changeSource: "session_sync",
+        expectedHashes: { claudeMd: contentSha256("materialized") },
+      },
+    ]);
   });
 
   test("session_sync of the workspace CLAUDE.md stays unconditional", async () => {
