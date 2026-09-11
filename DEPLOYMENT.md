@@ -266,6 +266,8 @@ The swarm API sets CORS headers on every response. For requests with an `Origin`
 
 **You do not need to enable CORS at your ingress controller for the swarm API.** No API CORS enablement flag is required.
 
+**Security posture:** echoing any Origin with `Access-Control-Allow-Credentials: true` means CORS is not a security boundary here — any website can get a credentialed cross-origin response back. This is not exploitable for the main API's bearer-authed routes, since browsers never auto-attach an `Authorization` header cross-origin. It **is** a real exposure for a credential a browser *does* auto-attach: the `page_session` cookie issued for db-backed pages (`SameSite=None; Secure` in production), used by the `/@swarm/api/*` page-iframe proxy. A hostile site can trigger a credentialed request that carries a visitor's `page_session` cookie and read the JSON response. There is currently no way to restrict which origins receive credentialed headers — do not rely on CORS to gate access to anything sensitive shared through db-backed pages, and treat any such page as readable by whoever holds a valid session for it. Restricting credentialed CORS to an explicit origin allowlist is tracked separately (not yet available).
+
 If the browser still reports a CORS failure:
 
 1. Capture the actual response headers from the public endpoint, replacing the example origin with your browser app's origin and the hostname with your API host:
