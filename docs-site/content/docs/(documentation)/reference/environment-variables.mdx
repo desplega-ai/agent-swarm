@@ -17,7 +17,7 @@ Complete reference for all environment variables used by Agent Swarm.
 | `MCP_BASE_URL` | `https://api.example-swarm.dev` | Internal/worker-facing API base — the URL workers, the UI, and the setup command use to reach the API server. In split deploys this may be an internal/cluster address. |
 | `PUBLIC_MCP_BASE_URL` | Falls back to `MCP_BASE_URL` | Public, browser/externally-reachable API origin used for OAuth redirect URIs and webhook URLs. Defaults to `MCP_BASE_URL` when unset; set it in split deploys where `MCP_BASE_URL` is an internal/cluster address that external providers (Linear, Jira, GitHub) can't reach. |
 | `MCP_OAUTH_ALLOW_PRIVATE_HOSTS` | `false` | When `true`, disables the SSRF guard that otherwise refuses `localhost`/RFC1918 private-IP hosts when the server connects to an operator-registered MCP server's OAuth discovery/token endpoints. Only needed to reach an internal-only MCP server, or for local dev/testing — keep the default deny-list in production. |
-| `CORS_ALLOWED_ORIGINS` | — (reflects any origin) | Comma-separated exact origins (e.g. `https://app.example.com`) allowed to receive credentialed CORS headers (`Access-Control-Allow-Credentials: true`). Unset preserves the default reflect-any-origin behavior most SPA deployments rely on today. Set it to restrict which origins can make credentialed cross-origin requests against the API, including through the page-session cookie proxy (`/@swarm/api/*`). See [Built-in API CORS](https://github.com/desplega-ai/agent-swarm/blob/main/DEPLOYMENT.md#built-in-api-cors). |
+| `CORS_ALLOWED_ORIGINS` | — (reflects any origin) | Comma-separated exact origins or wildcard-subdomain patterns (e.g. `https://*.agent-swarm.dev`) allowed to receive credentialed CORS headers (`Access-Control-Allow-Credentials: true`). Unset preserves the default reflect-any-origin behavior most SPA deployments rely on today. Set it to restrict which origins can make credentialed cross-origin requests against the API, including through the page-session cookie proxy (`/@swarm/api/*`). See [Built-in API CORS](https://github.com/desplega-ai/agent-swarm/blob/main/DEPLOYMENT.md#built-in-api-cors). |
 | `OAUTH_KEEPALIVE_DISABLE` | `false` | Disables the background job that proactively refreshes Linear/Jira OAuth refresh tokens every 12h to prevent silent expiry. |
 | `SWARM_URL` | `localhost` | Base domain for service discovery |
 | `APP_URL` | — | Dashboard URL for Slack message links. `DASHBOARD_URL` is a deprecated alias of `APP_URL`. |
@@ -557,3 +557,23 @@ When both CLI flags and environment variables are set:
 - [Deployment Guide](/docs/guides/deployment) — Production deployment with Docker Compose
 - [CLI Reference](/docs/reference/cli) — Terminal commands that complement environment variable configuration
 - [MCP Tools Reference](/docs/reference/mcp-tools) — Tools available to agents at runtime
+
+### Credentialed CORS wildcard patterns
+
+`CORS_ALLOWED_ORIGINS` accepts exact origins and patterns such as `https://*.agent-swarm.dev`.
+A single leading `*.` matches one or more complete subdomain labels, including `app.agent-swarm.dev`
+and `a.b.agent-swarm.dev`, but never the apex `agent-swarm.dev`; list the apex separately if needed.
+Wildcard host comparison is case-insensitive. Schemes and explicit ports must match exactly;
+`https://*.agent-swarm.dev:8443` only allows that port. Exact entries retain their existing case-sensitive comparison.
+Patterns reject `evil-agent-swarm.dev`, `app.agent-swarm.dev.evil.com`, and an `http` origin against an `https` pattern.
+Bare `*`, `https://*`, and wildcards in other positions are ignored, never treated as allow-all.
+
+Recommended for our hosted deployments:
+
+```bash
+CORS_ALLOWED_ORIGINS=https://*.agent-swarm.dev,https://*.agent-swarm.cloud
+```
+
+For local development, append `,http://localhost:5274` (the dashboard dev server).
+This is a recommendation, not an enforced default. Unset or blank still reflects any origin;
+operators opt into restrictions by setting the variable explicitly.

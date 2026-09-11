@@ -42,6 +42,51 @@ describe("isOriginAllowedForCredentials", () => {
     expect(isOriginAllowedForCredentials("https://evil.example")).toBe(false);
   });
 
+  test.each([
+    ["matches a subdomain", "https://app.agent-swarm.dev", true],
+    ["matches multiple subdomain labels", "https://a.b.agent-swarm.dev", true],
+    ["rejects suffix confusion", "https://evil-agent-swarm.dev", false],
+    ["rejects trailing-domain attacks", "https://app.agent-swarm.dev.evil.com", false],
+    ["rejects scheme mismatch", "http://app.agent-swarm.dev", false],
+    ["compares scheme exactly", "HTTPS://app.agent-swarm.dev", false],
+    ["rejects the apex", "https://agent-swarm.dev", false],
+    ["compares host case-insensitively", "https://APP.AGENT-SWARM.DEV", true],
+    ["rejects an unlisted port", "https://app.agent-swarm.dev:8443", false],
+    ["rejects empty labels", "https://.agent-swarm.dev", false],
+    ["rejects credentials", "https://evil.com@app.agent-swarm.dev", false],
+    ["rejects paths", "https://app.agent-swarm.dev/evil", false],
+  ])("wildcard %s", (_name, origin, allowed) => {
+    process.env[ENV_KEY] = "https://*.agent-swarm.dev";
+    expect(isOriginAllowedForCredentials(origin)).toBe(allowed);
+  });
+
+  test.each([
+    "*",
+    "https://*",
+    "https://*.*.agent-swarm.dev",
+    "https://app*.agent-swarm.dev",
+  ])("ignores invalid wildcard entry %s", (entry) => {
+    process.env[ENV_KEY] = entry;
+    expect(isOriginAllowedForCredentials("https://app.agent-swarm.dev")).toBe(false);
+    expect(isOriginAllowedForCredentials(entry)).toBe(false);
+  });
+
+  test("wildcard supports uppercase suffixes and requires the configured port", () => {
+    process.env[ENV_KEY] = "https://*.AGENT-SWARM.DEV:8443";
+    expect(isOriginAllowedForCredentials("https://app.agent-swarm.dev:8443")).toBe(true);
+    expect(isOriginAllowedForCredentials("https://app.agent-swarm.dev")).toBe(false);
+    expect(isOriginAllowedForCredentials("https://app.agent-swarm.dev:443")).toBe(false);
+  });
+
+  test("mixes wildcard and exact entries including a separately listed apex", () => {
+    process.env[ENV_KEY] =
+      "https://*.agent-swarm.dev,https://agent-swarm.dev,http://localhost:5274";
+    expect(isOriginAllowedForCredentials("https://app.agent-swarm.dev")).toBe(true);
+    expect(isOriginAllowedForCredentials("https://agent-swarm.dev")).toBe(true);
+    expect(isOriginAllowedForCredentials("http://localhost:5274")).toBe(true);
+    expect(isOriginAllowedForCredentials("http://localhost:5275")).toBe(false);
+  });
+
   test("is an exact match, not a suffix/subdomain match", () => {
     process.env[ENV_KEY] = "https://app.example.com";
     expect(isOriginAllowedForCredentials("https://evil.app.example.com")).toBe(false);

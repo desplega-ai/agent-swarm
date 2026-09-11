@@ -7,13 +7,12 @@ import { scrubSecrets } from "../utils/secret-scrubber";
  * Opt-in trusted-origin allowlist for credentialed CORS. Unset (default)
  * preserves the long-standing reflect-any-origin behavior documented in
  * DEPLOYMENT.md — required for today's SPA deployments that don't set this
- * var. When set, only an exact, case-sensitive match gets the credentialed
+ * var. When set, only an exact origin or wildcard-subdomain match gets the credentialed
  * headers; every other origin is denied (no Access-Control-Allow-Origin at
  * all, so the browser's CORS check fails closed).
  *
  * Comma-separated exact origins, e.g. `https://app.example.com,https://dashboard.example.com`.
- * No wildcards, no subdomain matching — an operator who needs multiple hosts
- * lists them all.
+ * Wildcard entries use `https://*.example.com` (optionally with a port).
  *
  * Re-reads `process.env` on every call (no caching) so a value saved via the
  * Settings → Configuration page takes effect after the debounced config
@@ -30,13 +29,33 @@ function getAllowedOrigins(): string[] | null {
 
 /**
  * Decide whether `origin` may receive credentialed CORS headers.
- * `null` return means "no allowlist configured" — caller falls back to the
- * legacy reflect-any-origin behavior.
+ * Unset preserves the legacy reflect-any-origin behavior. Exact entries retain
+ * their case-sensitive string comparison. A single leading `*.` matches one or
+ * more complete hostname labels, case-insensitively, but never the apex (list
+ * it separately). Wildcard schemes and explicit ports must match exactly.
+ * Bare `*`, `https://*`, other wildcard positions, and non-origin URLs are ignored.
  */
 export function isOriginAllowedForCredentials(origin: string): boolean {
   const allowlist = getAllowedOrigins();
   if (allowlist === null) return true;
-  return allowlist.includes(origin);
+  return allowlist.some((entry) => {
+    if (!entry.includes("*")) return entry === origin;
+
+    // Fixed parsers, never a regex interpolated from operator-controlled text.
+    const pattern = /^([a-zA-Z][a-zA-Z0-9+.-]*):\/\/\*\.([a-zA-Z0-9.-]+)(:\d+)?$/.exec(entry);
+    const candidate = /^([a-zA-Z][a-zA-Z0-9+.-]*):\/\/([a-zA-Z0-9.-]+)(:\d+)?$/.exec(origin);
+    if (!pattern || !candidate) return false;
+    if (pattern[1] !== candidate[1] || pattern[3] !== candidate[3]) return false;
+
+    const suffix = pattern[2]!.toLowerCase();
+    const hostname = candidate[2]!.toLowerCase();
+    // Reject empty or malformed labels instead of accepting suffix lookalikes.
+    const validLabel = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+    if (![...suffix.split("."), ...hostname.split(".")].every((label) => validLabel.test(label))) {
+      return false;
+    }
+    return hostname.endsWith(`.${suffix}`);
+  });
 }
 
 export function setCorsHeaders(req: IncomingMessage, res: ServerResponse) {

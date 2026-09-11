@@ -760,7 +760,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "CORS_ALLOWED_ORIGINS",
         label: "Credentialed CORS allowlist",
         description:
-          "Comma-separated exact origins (e.g. https://app.example.com) allowed to receive credentialed CORS headers. Unset reflects any request Origin (required for most SPA deployments today); set it to restrict which origins can make credentialed cross-origin requests, including via the page-session cookie proxy.",
+          "Comma-separated exact origins or wildcard patterns such as https://*.agent-swarm.dev. Wildcards match one or more subdomain labels, never the apex; hosts ignore case, schemes and ports must match exactly. Bare * and https://* are ignored. Unset reflects any request Origin. Recommended for our hosted deployments: https://*.agent-swarm.dev,https://*.agent-swarm.cloud,http://localhost:5274 (include localhost only for development).",
         kind: "string",
         placeholder: "https://app.example.com,https://dashboard.example.com",
         docsUrl:
