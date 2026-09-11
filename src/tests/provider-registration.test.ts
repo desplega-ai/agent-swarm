@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { buildPricingSeedRows } from "../be/seed-pricing";
 import { CREDENTIAL_PROVIDER_CHECKERS } from "../commands/provider-credentials";
 import { ProviderNameSchema } from "../types";
@@ -31,20 +34,26 @@ async function runCredentialBootstrap(provider: string): Promise<{
   exitCode: number;
   stdout: string;
 }> {
-  const proc = Bun.spawn(["bash", "-c", bootstrapBlock], {
-    env: {
-      PATH: process.env.PATH ?? "",
-      HOME: "/tmp/provider-registration-test",
-      HARNESS_PROVIDER: provider,
-      API_KEY: "",
-      MCP_BASE_URL: "",
-      MCP_URL: "",
-    },
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const [exitCode, stdout] = await Promise.all([proc.exited, new Response(proc.stdout).text()]);
-  return { exitCode, stdout: stdout.trim() };
+  const testRoot = await mkdtemp(join(tmpdir(), "provider-registration-"));
+  try {
+    const proc = Bun.spawn(["bash", "-c", bootstrapBlock], {
+      env: {
+        PATH: process.env.PATH ?? "",
+        HOME: join(testRoot, "home"),
+        WORKER_CODEX_HOME: join(testRoot, "codex"),
+        HARNESS_PROVIDER: provider,
+        API_KEY: "",
+        MCP_BASE_URL: "",
+        MCP_URL: "",
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [exitCode, stdout] = await Promise.all([proc.exited, new Response(proc.stdout).text()]);
+    return { exitCode, stdout: stdout.trim() };
+  } finally {
+    await rm(testRoot, { recursive: true, force: true });
+  }
 }
 
 describe("provider registration synchronization", () => {
