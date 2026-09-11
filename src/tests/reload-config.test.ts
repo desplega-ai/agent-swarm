@@ -12,6 +12,7 @@ import {
   loadGlobalConfigsIntoEnv,
   scheduleIntegrationsReload,
 } from "../http/core";
+import { isOriginAllowedForCredentials } from "../http/utils";
 import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-reload-config.sqlite";
@@ -197,6 +198,31 @@ describe("reload-config", () => {
 
     expect(updated).not.toContain("API_KEY");
     expect(process.env.API_KEY).toBeUndefined();
+  });
+
+  test("stored CORS bypass cannot enable or override deployment CORS at boot or reload", async () => {
+    const key = "CORS_ALLOW_ANY_ORIGIN";
+    const original = process.env[key];
+    const rowId = await insertLegacyReservedRow(key, "true");
+    try {
+      for (const override of [false, true]) {
+        delete process.env[key];
+        expect(await loadGlobalConfigsIntoEnv(override)).not.toContain(key);
+        expect(process.env[key]).toBeUndefined();
+        expect(isOriginAllowedForCredentials("https://attacker.invalid")).toBe(false);
+        process.env[key] = "false";
+        await loadGlobalConfigsIntoEnv(override);
+        expect(process.env[key]).toBe("false");
+        process.env[key] = "true";
+        await loadGlobalConfigsIntoEnv(override);
+        expect(process.env[key]).toBe("true");
+        expect(isOriginAllowedForCredentials("https://attacker.invalid")).toBe(false);
+      }
+    } finally {
+      await deleteSwarmConfig(rowId);
+      if (original === undefined) delete process.env[key];
+      else process.env[key] = original;
+    }
   });
 
   test("loadGlobalConfigsIntoEnv skips unreadable reserved secret rows before decrypting them", async () => {

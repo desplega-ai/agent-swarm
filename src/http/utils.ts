@@ -1,19 +1,97 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { getActiveTaskCount } from "../be/db";
 import type { SwarmSpan } from "../otel";
+import { isEnvFlagEnabled } from "../utils/env-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
+
+const DEFAULT_ALLOWED_ORIGINS = [
+  "https://*.agent-swarm.dev",
+  "https://*.agent-swarm.cloud",
+  "http://localhost:5274",
+  "http://127.0.0.1:5274",
+  "http://[::1]:5274",
+  "https://ui.swarm.localhost:1355",
+];
+
+let warnedAboutAllowAnyOrigin = false;
+
+/** Warn at boot (after config injection), or on first use of the deployment opt-out. */
+export function warnIfCorsAllowsAnyOrigin(): void {
+  if (isEnvFlagEnabled("CORS_ALLOW_ANY_ORIGIN", false) && !warnedAboutAllowAnyOrigin) {
+    warnedAboutAllowAnyOrigin = true;
+    console.warn(
+      "[CORS] CORS_ALLOW_ANY_ORIGIN=true: any request origin can receive non-credentialed responses; cookie-authenticated responses still require CORS_ALLOWED_ORIGINS. Set CORS_ALLOWED_ORIGINS and disable CORS_ALLOW_ANY_ORIGIN to restrict access.",
+    );
+  }
+}
+
+/** Re-read env on each request so Configuration reloads take effect immediately. */
+function getAllowedOrigins(): string[] {
+  const raw = process.env.CORS_ALLOWED_ORIGINS;
+  if (!raw || !raw.trim()) return DEFAULT_ALLOWED_ORIGINS;
+  return raw
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Decide whether `origin` may receive credentialed CORS headers.
+ * Unset or blank uses the built-in hosted/dev allowlist. Exact entries retain
+ * their case-sensitive string comparison. A single leading `*.` matches one or
+ * more complete hostname labels, case-insensitively, but never the apex (list
+ * it separately). Wildcard schemes and explicit ports must match exactly.
+ * Bare `*`, `https://*`, other wildcard positions, and non-origin URLs are ignored.
+ */
+export function isOriginAllowedForCredentials(origin: string): boolean {
+  const allowed = getAllowedOrigins().some((entry) => {
+    if (!entry.includes("*")) return entry === origin;
+
+    // Fixed parsers, never a regex interpolated from operator-controlled text.
+    const pattern = /^([a-zA-Z][a-zA-Z0-9+.-]*):\/\/\*\.([a-zA-Z0-9.-]+)(:\d+)?$/.exec(entry);
+    const candidate = /^([a-zA-Z][a-zA-Z0-9+.-]*):\/\/([a-zA-Z0-9.-]+)(:\d+)?$/.exec(origin);
+    if (!pattern || !candidate) return false;
+    if (pattern[1] !== candidate[1] || pattern[3] !== candidate[3]) return false;
+
+    const suffix = pattern[2]!.toLowerCase();
+    const hostname = candidate[2]!.toLowerCase();
+    // Reject empty or malformed labels instead of accepting suffix lookalikes.
+    const validLabel = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+    if (![...suffix.split("."), ...hostname.split(".")].every((label) => validLabel.test(label))) {
+      return false;
+    }
+    return hostname.endsWith(`.${suffix}`);
+  });
+  if (!allowed) {
+    console.warn(
+      `[CORS] Denied credentialed origin ${scrubSecrets(JSON.stringify(origin.slice(0, 512)))}; add the trusted SPA origin to CORS_ALLOWED_ORIGINS (custom values replace hosted/dev defaults).`,
+    );
+  }
+  return allowed;
+}
 
 export function setCorsHeaders(req: IncomingMessage, res: ServerResponse) {
   // Echo the request Origin (rather than emitting `*`) so credentialed fetches
   // — e.g. the SPA's `credentials: 'include'` calls to `/p/:id.json` and the
   // page-session cookie endpoints — pass the browser's CORS check. A wildcard
   // would force the browser to reject any credentialed cross-origin response.
+  //
+  // Only allowlisted origins receive a credentialed CORS grant.
   const rawOrigin = req.headers.origin;
   const origin = Array.isArray(rawOrigin) ? rawOrigin[0] : rawOrigin;
+  const allowCredentials = origin ? isOriginAllowedForCredentials(origin) : false;
+  const allowAnyOrigin = isEnvFlagEnabled("CORS_ALLOW_ANY_ORIGIN", false);
+  if (allowAnyOrigin) warnIfCorsAllowsAnyOrigin();
+  if (origin && !allowCredentials && !allowAnyOrigin) {
+    res.setHeader("Vary", "Origin");
+    return;
+  }
   if (origin) {
     res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Vary", "Origin");
-    res.setHeader("Access-Control-Allow-Credentials", "true");
+    // The compatibility flag never grants access to browser-supplied cookies.
+    // Bearer clients from unlisted origins must use credentials: "omit".
+    if (allowCredentials) res.setHeader("Access-Control-Allow-Credentials", "true");
     // When credentials are involved the spec disallows wildcards in
     // Allow-Headers / Allow-Methods / Expose-Headers — they must be
     // explicit. Echo whatever the preflight asked for (defensive default

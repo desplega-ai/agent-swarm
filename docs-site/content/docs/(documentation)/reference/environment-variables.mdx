@@ -17,6 +17,8 @@ Complete reference for all environment variables used by Agent Swarm.
 | `MCP_BASE_URL` | `https://api.example-swarm.dev` | Internal/worker-facing API base — the URL workers, the UI, and the setup command use to reach the API server. In split deploys this may be an internal/cluster address. |
 | `PUBLIC_MCP_BASE_URL` | Falls back to `MCP_BASE_URL` | Public, browser/externally-reachable API origin used for OAuth redirect URIs and webhook URLs. Defaults to `MCP_BASE_URL` when unset; set it in split deploys where `MCP_BASE_URL` is an internal/cluster address that external providers (Linear, Jira, GitHub) can't reach. |
 | `MCP_OAUTH_ALLOW_PRIVATE_HOSTS` | `false` | When `true`, disables the SSRF guard that otherwise refuses `localhost`/RFC1918 private-IP hosts when the server connects to an operator-registered MCP server's OAuth discovery/token endpoints. Only needed to reach an internal-only MCP server, or for local dev/testing — keep the default deny-list in production. |
+| `CORS_ALLOWED_ORIGINS` | Hosted/dev allowlist (below) | Comma-separated exact origins or wildcard-subdomain patterns. Unset or blank uses built-in defaults; a nonblank value replaces them. Unlisted origins receive neither Allow-Origin nor Allow-Credentials unless the non-credentialed compatibility option below is enabled. Applies to API and page-session endpoints. |
+| `CORS_ALLOW_ANY_ORIGIN` | `false` | Deployment-only compatibility opt-out (requires API restart; cannot be stored in Configuration): reflect any origin for non-credentialed requests only (`credentials: "omit"` for bearer clients). Cookie-authenticated responses still require an allowlisted origin; this flag never grants credentials to unlisted origins. Warns once per process when enabled. Prefer listing trusted SPA origins instead. |
 | `OAUTH_KEEPALIVE_DISABLE` | `false` | Disables the background job that proactively refreshes Linear/Jira OAuth refresh tokens every 12h to prevent silent expiry. |
 | `SWARM_URL` | `localhost` | Base domain for service discovery |
 | `APP_URL` | — | Dashboard URL for Slack message links. `DASHBOARD_URL` is a deprecated alias of `APP_URL`. |
@@ -556,3 +558,36 @@ When both CLI flags and environment variables are set:
 - [Deployment Guide](/docs/guides/deployment) — Production deployment with Docker Compose
 - [CLI Reference](/docs/reference/cli) — Terminal commands that complement environment variable configuration
 - [MCP Tools Reference](/docs/reference/mcp-tools) — Tools available to agents at runtime
+
+### Credentialed CORS wildcard patterns
+
+`CORS_ALLOWED_ORIGINS` accepts exact origins and patterns such as `https://*.agent-swarm.dev`.
+A single leading `*.` matches one or more complete subdomain labels, including `app.agent-swarm.dev`
+and `a.b.agent-swarm.dev`, but never the apex `agent-swarm.dev`; list the apex separately if needed.
+Wildcard host comparison is case-insensitive. Schemes and explicit ports must match exactly;
+`https://*.agent-swarm.dev:8443` only allows that port. Exact entries retain their existing case-sensitive comparison.
+Patterns reject `evil-agent-swarm.dev`, `app.agent-swarm.dev.evil.com`, and an `http` origin against an `https` pattern.
+Bare `*`, `https://*`, and wildcards in other positions are ignored, never treated as allow-all.
+
+### Breaking change: secure CORS defaults
+
+Unset and blank values now use this built-in allowlist:
+
+```bash
+CORS_ALLOWED_ORIGINS=https://*.agent-swarm.dev,https://*.agent-swarm.cloud,http://localhost:5274,http://127.0.0.1:5274,http://[::1]:5274,https://ui.swarm.localhost:1355
+```
+
+A custom value replaces these defaults, including localhost. For an affected self-hosted SPA,
+set `CORS_ALLOWED_ORIGINS=https://dashboard.example.com` on the API (substitute its actual origin).
+Include every trusted origin you need, comma-separated. The hosted patterns exclude apex domains.
+
+For arbitrary-origin bearer-token clients, set `CORS_ALLOW_ANY_ORIGIN=true` and use
+`credentials: "omit"` in browser requests. This permits non-credentialed CORS only.
+Cookie-authenticated responses, including page JSON and `/@swarm/api/*`, always require an
+allowlisted origin for `Access-Control-Allow-Credentials`; the flag cannot override that check.
+Only `CORS_ALLOWED_ORIGINS` takes effect after Configuration reload. The bypass is deployment-only:
+set it in the API environment and restart. Config writes through HTTP, MCP, or database helpers
+reject the reserved key; legacy stored values are ignored at startup and reload and can be deleted.
+The API warns once per process at startup or first use when the deployment opt-out is enabled.
+Denied-origin logs name the origin and `CORS_ALLOWED_ORIGINS` so a missing SPA origin is diagnosable.
+CORS controls browser response access; it does not replace authentication or CSRF protection.

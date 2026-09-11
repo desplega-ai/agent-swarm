@@ -134,6 +134,27 @@ describe("swarm-config reserved keys guard", () => {
     await unlink(`${TEST_DB_PATH}-shm`).catch(() => {});
   });
 
+  for (const key of ["CORS_ALLOW_ANY_ORIGIN", "cors_allow_any_origin"]) {
+    test(`rejects deployment-only ${key} through DB, HTTP, and MCP`, async () => {
+      const config = { scope: "global" as const, key, value: "true" };
+      await expect(upsertSwarmConfig(config)).rejects.toThrow(EXPECTED_MESSAGE(key));
+      const res = await fetch(`${baseUrl}/api/config`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(config),
+      });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ error: EXPECTED_MESSAGE(key) });
+      const handler = mcpServer.handlers.get("set-config")!;
+      const result = (await handler(config, makeRequestInfo())) as {
+        structuredContent: { success: boolean; message: string };
+      };
+      expect(result.structuredContent.success).toBe(false);
+      expect(result.structuredContent.message).toBe(EXPECTED_MESSAGE(key));
+      expect(await getSwarmConfigs({ key })).toHaveLength(0);
+    });
+  }
+
   // ─── Helper predicate ─────────────────────────────────────────────────────
   describe("isReservedConfigKey helper", () => {
     test("recognizes API_KEY", () => {

@@ -756,6 +756,18 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         kind: "boolean",
         defaultValue: "false",
       },
+      {
+        key: "CORS_ALLOWED_ORIGINS",
+        label: "Credentialed CORS allowlist",
+        description:
+          "Comma-separated exact origins or wildcard patterns such as https://*.agent-swarm.dev. Wildcards match one or more subdomain labels, never the apex; hosts ignore case, schemes and ports must match exactly. Bare * and https://* are ignored. Unset or blank uses the hosted/dev defaults shown below. Custom values replace defaults. The deployment-only CORS_ALLOW_ANY_ORIGIN environment variable overrides this list when enabled.",
+        kind: "string",
+        defaultValue:
+          "https://*.agent-swarm.dev,https://*.agent-swarm.cloud,http://localhost:5274,http://127.0.0.1:5274,http://[::1]:5274,https://ui.swarm.localhost:1355",
+        placeholder: "https://app.example.com,https://dashboard.example.com",
+        docsUrl:
+          "https://github.com/desplega-ai/agent-swarm/blob/main/DEPLOYMENT.md#built-in-api-cors",
+      },
     ],
   },
   {
