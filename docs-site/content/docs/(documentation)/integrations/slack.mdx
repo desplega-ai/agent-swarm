@@ -270,7 +270,10 @@ Agents can upload and download files via Slack:
 
 For task-scoped uploads, `slack-upload-file` preserves the visible conversation thread: channel tasks upload under the original Slack thread, and Slack DMs prefer the user-facing DM tree root instead of an internal progress-message thread when both exist.
 
-Files are saved to `/workspace/shared/downloads/{agentId}/slack/` by default (each agent writes to its own subdirectory).
+Both tools run on the API server, so a file they download is stored where the agent's container can reach it:
+
+- **From a task**, `slack-download-file` stores the file as an **attachment of that task**. This covers an explicit `taskId`, or the task the agent is working on. The result includes a ready-to-run `fetchCommand` that downloads the bytes into the container. `slack-read` does the same for every file in the messages it returns (turn it off with `includeFiles: false`). A file the task already holds is reused, not stored twice.
+- **Without a task** (for example, from a script), the file is saved on the API server's disk: `slack-download-file` uses `savePath` (default `/workspace/shared/downloads/{agentId}/slack/`), and `slack-read` uses `/app/shared/downloads/slack/`. The result says the path is on the API server. Worker containers can only read it if your deployment mounts the shared volume at that path on the API.
 
 ## Related
 

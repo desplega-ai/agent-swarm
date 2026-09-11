@@ -30,12 +30,12 @@ The task carries `slackChannelId` and `slackThreadTs` in its metadata. A follow-
 | `slack-read` | read a thread by `taskId` or `inboxMessageId`, or a channel by `channelId` (lead) |
 | `slack-list-channels` | channels the bot is a member of |
 | `slack-upload-file` | upload a file to a thread or channel, up to 1 GB |
-| `slack-download-file` | download a Slack file by ID or URL |
+| `slack-download-file` | attach a Slack file (by ID or URL) to your task; run the `fetchCommand` it returns to get the bytes |
 | `slack-update` | edit your own message |
 | `slack-delete` | delete your own message (lead) |
 | `slack-create-channel`, `slack-invite-to-channel`, `slack-archive-channel` | channel lifecycle (lead) |
 
-Files attached to your task already come with download commands in the task message. Use those before `slack-download-file`.
+Files attached to your task already come with download commands in the task message. Use those before `slack-download-file`. `slack-read` on your task also attaches the files in the thread and gives each one a `fetchCommand`. Don't look for Slack files under `/app/shared` or `/workspace/shared/downloads`: those paths are the API server's disk.
 
 ## Unknown user
 
