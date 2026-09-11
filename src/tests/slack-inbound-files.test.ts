@@ -1,5 +1,5 @@
 /**
- * Files shared on Slack reach the task as real attachments (MaximilianoAdaro/agent-swarm#1).
+ * Files shared on Slack reach the task as real attachments.
  *
  * Covers the download (bot token, size cap, Slack's HTML login page on a
  * scope miss, `files.info` fallback), the draft → promote window that keeps the

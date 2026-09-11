@@ -1,7 +1,7 @@
 /**
  * `slack-download-file` and `slack-read` store Slack files as attachments of
  * the calling agent's task instead of on the API server's disk, where a worker
- * container can't read them (MaximilianoAdaro/agent-swarm#4).
+ * container can't read them.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import { mkdtemp, rm, unlink } from "node:fs/promises";

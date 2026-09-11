@@ -60,7 +60,7 @@ async function expectStoredScreenshot(ctx: ScenarioContext, taskId: string): Pro
 }
 
 /**
- * MaximilianoAdaro/agent-swarm#1: an image sent to the Assistant with no
+ * An image sent to the Assistant with no
  * caption used to crash task creation, and with a caption the image was
  * silently dropped. Both now land as a stored task attachment the worker
  * receives on poll.
