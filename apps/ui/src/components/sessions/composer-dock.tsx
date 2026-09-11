@@ -43,6 +43,7 @@ const ALLOWED_ATTACHMENT_EXTENSIONS = [
   ".jpeg",
   ".gif",
   ".webp",
+  ".zip",
 ] as const;
 
 function fileExtension(name: string): string {
