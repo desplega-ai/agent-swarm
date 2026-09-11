@@ -261,6 +261,18 @@ export function buildModelsDevSeedRows(cache: ModelsDevCache): PricingSeedRow[] 
   return rows;
 }
 
+/** Build the exact provider rows inserted by the boot-time pricing seeder. */
+export function buildPricingSeedRows(cache: ModelsDevCache | null): PricingSeedRow[] {
+  const modelsdevRows = cache ? buildModelsDevSeedRows(cache) : [];
+  const manualRows = MANUAL_PRICING_OVERRIDES.map((override) => ({
+    provider: override.provider,
+    model: override.model,
+    tokenClass: override.tokenClass,
+    pricePerMillionUsd: override.pricePerMillionUsd,
+  }));
+  return [...modelsdevRows, ...manualRows];
+}
+
 /**
  * Phase 2 entrypoint. Idempotent — safe to call on every boot. Logs a one-line
  * summary so operators can tell whether the boot picked up new rates.
@@ -271,14 +283,7 @@ export function seedPricingFromModelsDev(opts?: { quiet?: boolean }): {
 } {
   const db = getDb();
   const cache = loadModelsDevCache();
-  const modelsdevRows = cache ? buildModelsDevSeedRows(cache) : [];
-  const manualRows = MANUAL_PRICING_OVERRIDES.map((o) => ({
-    provider: o.provider,
-    model: o.model,
-    tokenClass: o.tokenClass,
-    pricePerMillionUsd: o.pricePerMillionUsd,
-  }));
-  const allRows = [...modelsdevRows, ...manualRows];
+  const allRows = buildPricingSeedRows(cache);
 
   const insert = db.prepare<null, [string, string, string, number]>(
     `INSERT OR IGNORE INTO pricing
