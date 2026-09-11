@@ -22,10 +22,10 @@ Workers learn the server's enabled capabilities at registration (`POST /api/agen
 
 All MCP tools have structured annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) to improve Claude Code's Tool Search discoverability. Tools are split into two tiers:
 
-- **Core tools** — Always available in context: task lifecycle, basic communication, memory recall, and swarm awareness
-- **Deferred tools** — Discovered on demand via Claude Code's Tool Search when the agent needs them (scheduling, config, skills, workflows, MCP servers, Slack, user identity, repos, etc.)
+- **Core tools** — 25 tools classified for immediate availability when their capabilities are enabled. These cover task lifecycle, memory, swarm awareness, and recurring operations: `script-run`, `db-query`, `kv-get`, `script-query-types`, `get-repos`, `accept-steer`, `memory-edit`, `script-search`, `steer-task`, `kv-list`, and `get-config`.
+- **Deferred tools** — Discovered on demand via Claude Code's Tool Search, including scheduling, configuration writes, skills, workflows, MCP servers, Slack, and user identity.
 
-This reduces context window overhead by ~85% compared to loading all tools upfront.
+Loading recurring operations upfront avoids repeated discovery while leaving less frequent tools out of the initial context.
 
 ## Large Result Handling
 
@@ -1136,7 +1136,7 @@ List durable script workflow runs, optionally filtered by status or agent ID.
 
 ### db-query
 
-Execute a read-only SQL query against the swarm database. Available to all authenticated agents — be aware results may include secrets (`oauth_tokens`, `configs`). Results are capped by the operator-configurable `DB_QUERY_MCP_MAX_ROWS` limit.
+Execute a read-only SQL query against the swarm database. Available to all authenticated agents — be aware results may include secrets (`oauth_tokens`, `configs`). Results are capped by the operator-configurable `DB_QUERY_MCP_MAX_ROWS` limit. Read-only enforcement also applies to fallback execution when bounded queries are disabled; write statements with `RETURNING` cannot bypass it.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -1207,7 +1207,9 @@ duplicate. The seeded `memory` skill holds the full guidance.
 ### memory-edit
 
 Edit an existing memory in place while preserving its ID, rating history, and
-audit trail.
+audit trail. Agents can edit their own memories, including memories they shared
+with the swarm. Editing another agent's memory by ID requires a lead agent;
+shared visibility does not grant edit permission.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
