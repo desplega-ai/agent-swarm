@@ -10,6 +10,7 @@ import {
   initDb,
   updateAgentProfile,
 } from "../be/db";
+import type { ProfileSyncConflict } from "../types";
 import { IDENTITY_FIELD_BUDGETS } from "../utils/identity-field-budget";
 
 const TEST_DB_PATH = "./test-context-versioning.sqlite";
@@ -413,99 +414,94 @@ describe("Context Versioning", () => {
   });
 
   // ============================================================================
-  // session_sync stale-echo guard
+  // Compare-and-set (expectedHashes)
   // ============================================================================
 
-  describe("session_sync stale-echo guard", () => {
-    const echoAgentId = "cccc0000-0000-4000-8000-000000000004";
-    const v1 = "# CLAUDE.md\n\nversion one — written by the Lead";
-    const v2 = "# CLAUDE.md\n\nversion two — the Lead added the triage rule";
-    const v3 = "# CLAUDE.md\n\nversion three — a genuine edit made in-session";
+  describe("compare-and-set via expectedHashes", () => {
+    const casAgentId = "cccc0000-0000-4000-8000-000000000004";
+    const v1 = "# CLAUDE.md\n\nversion one";
+    const v2 = "# CLAUDE.md\n\nversion two — the Lead added a rule";
+    const v3 = "# CLAUDE.md\n\nversion three — edited in a session";
 
     beforeAll(async () => {
-      await createAgent({ id: echoAgentId, name: "Echo Agent", isLead: false, status: "idle" });
-      await updateAgentProfile(echoAgentId, { claudeMd: v1 }, { changeSource: "self_edit" });
-      await updateAgentProfile(echoAgentId, { claudeMd: v2 }, { changeSource: "self_edit" });
+      await createAgent({ id: casAgentId, name: "CAS Agent", isLead: false, status: "idle" });
+      await updateAgentProfile(casAgentId, { claudeMd: v1 }, { changeSource: "self_edit" });
+      await updateAgentProfile(casAgentId, { claudeMd: v2 }, { changeSource: "self_edit" });
     });
 
-    test("ignores a session_sync whose content is a superseded version", async () => {
-      // The shape of the 2026-09-11 incident: a concurrent session (or the
-      // restored ~/.claude/CLAUDE.md.bak) syncs the copy it materialized from
-      // the DB before the Lead's self_edit landed.
+    test("drops a copy based on a superseded version and reports the conflict", async () => {
+      // The 2026-09-11 incident: a session materialized v1, the Lead moved the
+      // DB to v2 meanwhile, and the session's end-of-run sync carried v1 back.
+      const conflicts: ProfileSyncConflict[] = [];
       const agent = await updateAgentProfile(
-        echoAgentId,
-        { claudeMd: v1 },
-        { changeSource: "session_sync" },
-      );
-
-      expect(agent).not.toBeNull();
-      expect(agent!.claudeMd).toBe(v2);
-
-      const latest = await getLatestContextVersion(echoAgentId, "claudeMd");
-      expect(latest!.version).toBe(2);
-      expect(latest!.content).toBe(v2);
-    });
-
-    test("still applies a session_sync carrying content never seen before", async () => {
-      const agent = await updateAgentProfile(
-        echoAgentId,
+        casAgentId,
         { claudeMd: v3 },
         { changeSource: "session_sync" },
+        { expectedHashes: { claudeMd: sha256(v1) }, onConflict: (c) => conflicts.push(c) },
       );
 
-      expect(agent!.claudeMd).toBe(v3);
-      const latest = await getLatestContextVersion(echoAgentId, "claudeMd");
-      expect(latest!.version).toBe(3);
-      expect(latest!.changeSource).toBe("session_sync");
+      expect(agent!.claudeMd).toBe(v2);
+      expect((await getLatestContextVersion(casAgentId, "claudeMd"))!.version).toBe(2);
+      expect(conflicts).toEqual([
+        { field: "claudeMd", expectedHash: sha256(v1), currentHash: sha256(v2) },
+      ]);
     });
 
-    test("an explicit source may still revert to an older version", async () => {
+    test("applies a deliberate session_sync revert to an earlier version", async () => {
+      // The session was based on the current value (v2) and restored v1 on
+      // purpose. Its hash is in the history, and that must not matter.
       const agent = await updateAgentProfile(
-        echoAgentId,
+        casAgentId,
         { claudeMd: v1 },
-        { changeSource: "self_edit" },
+        { changeSource: "session_sync" },
+        { expectedHashes: { claudeMd: sha256(v2) } },
       );
 
       expect(agent!.claudeMd).toBe(v1);
-      const latest = await getLatestContextVersion(echoAgentId, "claudeMd");
-      expect(latest!.version).toBe(4);
+      const latest = await getLatestContextVersion(casAgentId, "claudeMd");
+      expect(latest!.version).toBe(3);
+      expect(latest!.content).toBe(v1);
+      expect(latest!.changeSource).toBe("session_sync");
     });
 
-    test("the echo guard is per field: other fields in the same update still land", async () => {
-      // claudeMd echoes v2 (superseded, the column holds v1 now); soulMd is new.
+    test("the drop is per field: other fields in the same update land", async () => {
       const soul = "s".repeat(600);
       const agent = await updateAgentProfile(
-        echoAgentId,
-        { claudeMd: v2, soulMd: soul },
+        casAgentId,
+        { claudeMd: v3, soulMd: soul },
         { changeSource: "session_sync" },
+        { expectedHashes: { claudeMd: sha256(v2) } }, // stale: the DB is at v1 now
       );
 
       expect(agent!.claudeMd).toBe(v1);
       expect(agent!.soulMd).toBe(soul);
-      expect((await getLatestContextVersion(echoAgentId, "claudeMd"))!.version).toBe(4);
-      expect((await getLatestContextVersion(echoAgentId, "soulMd"))!.version).toBe(1);
+      expect((await getLatestContextVersion(casAgentId, "claudeMd"))!.version).toBe(3);
+      expect((await getLatestContextVersion(casAgentId, "soulMd"))!.version).toBe(1);
     });
 
-    test("a stale echo over the budget is dropped, not rejected", async () => {
-      // The profile was once longer than today's budget and has since been
-      // shortened. Replaying that old value must be ignored like any echo —
-      // not throw IdentityFieldBudgetError and roll back the fresh fields too.
+    test("without expectedHashes the write stays unconditional", async () => {
+      const agent = await updateAgentProfile(
+        casAgentId,
+        { claudeMd: v2 },
+        { changeSource: "session_sync" },
+      );
+
+      expect(agent!.claudeMd).toBe(v2);
+      expect((await getLatestContextVersion(casAgentId, "claudeMd"))!.version).toBe(4);
+    });
+
+    test("a stale copy over the budget is dropped, not rejected", async () => {
+      // The profile has since been shortened under the budget. A stale copy of
+      // the old, oversized value must be dropped by the compare-and-set — not
+      // throw IdentityFieldBudgetError and roll back the other fields too.
       const longAgentId = "cccc0000-0000-4000-8000-000000000005";
       const oversized = "x".repeat(IDENTITY_FIELD_BUDGETS.claudeMd + 500);
       const shortened = "# CLAUDE.md\n\nshortened below the budget";
       await createAgent({
         id: longAgentId,
-        name: "Long Echo Agent",
+        name: "Long CAS Agent",
         isLead: false,
         status: "idle",
-      });
-      await createContextVersion({
-        agentId: longAgentId,
-        field: "claudeMd",
-        content: oversized,
-        version: 1,
-        changeSource: "self_edit",
-        contentHash: sha256(oversized),
       });
       await updateAgentProfile(longAgentId, { claudeMd: shortened }, { changeSource: "self_edit" });
 
@@ -514,6 +510,7 @@ describe("Context Versioning", () => {
         longAgentId,
         { claudeMd: oversized, soulMd: soul },
         { changeSource: "session_sync" },
+        { expectedHashes: { claudeMd: sha256(oversized) } },
       );
 
       expect(agent!.claudeMd).toBe(shortened);

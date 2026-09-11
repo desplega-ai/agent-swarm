@@ -5,7 +5,7 @@
  * and tests every API endpoint for correct behavior.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { rm, unlink } from "node:fs/promises";
 import type { Subprocess } from "bun";
 import { Webhook } from "svix";
@@ -386,6 +386,64 @@ describe("Agents", () => {
     );
     expect(unrelated.status).toBe(200);
     expect(unrelated.body.events).toHaveLength(0);
+  });
+
+  test("PUT /api/agents/:id/profile — expectedHashes drops a stale field, keeps the rest", async () => {
+    const sha = (v: string) => createHash("sha256").update(v).digest("hex");
+    const base = "# CLAUDE.md\n\nbase the session materialized";
+    const seeded = await put(`/api/agents/${ids.workerAgent}/profile`, {
+      body: { claudeMd: base, changeSource: "self_edit" },
+      agentId: ids.workerAgent,
+    });
+    expect(seeded.status).toBe(200);
+
+    const reconciledClaudeMd = async () =>
+      (
+        await get(
+          `/api/events?${new URLSearchParams({
+            event: "system.profile_sync_reconciled",
+            agentId: ids.workerAgent,
+            dataField: "claudeMd",
+            limit: "100",
+          })}`,
+          { agentId: ids.workerAgent },
+        )
+      ).body.events.length as number;
+    const before = await reconciledClaudeMd();
+
+    // A copy based on something the DB already moved past: dropped, 200, and
+    // the other field of the same sync still lands.
+    const stale = await put(`/api/agents/${ids.workerAgent}/profile`, {
+      body: {
+        claudeMd: "stale copy",
+        toolsMd: "fresh tools",
+        changeSource: "session_sync",
+        expectedHashes: { claudeMd: sha("an older materialization") },
+      },
+      agentId: ids.workerAgent,
+    });
+    expect(stale.status).toBe(200);
+    expect(stale.body.claudeMd).toBe(base);
+    expect(stale.body.toolsMd).toBe("fresh tools");
+    expect(await reconciledClaudeMd()).toBe(before); // not written → not reconciled
+
+    // An edit on top of the current value applies.
+    const edited = await put(`/api/agents/${ids.workerAgent}/profile`, {
+      body: {
+        claudeMd: "edited in session",
+        changeSource: "session_sync",
+        expectedHashes: { claudeMd: sha(base) },
+      },
+      agentId: ids.workerAgent,
+    });
+    expect(edited.status).toBe(200);
+    expect(edited.body.claudeMd).toBe("edited in session");
+
+    const malformed = await put(`/api/agents/${ids.workerAgent}/profile`, {
+      body: { claudeMd: "x", expectedHashes: { claudeMd: "not-a-sha256" } },
+      agentId: ids.workerAgent,
+    });
+    expect(malformed.status).toBe(400);
   });
 
   test("PUT /api/agents/:id/profile — non-existent returns 404", async () => {

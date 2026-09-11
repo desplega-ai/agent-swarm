@@ -27,8 +27,9 @@
  * but it must be VISIBLE.
  */
 
+import { mkdir, readdir, rm, stat } from "node:fs/promises";
 import { resolveTemplateAsync } from "../prompts/resolver.ts";
-import type { Agent, SwarmEvent } from "../types.ts";
+import type { Agent, ProfileExpectedHashes, SwarmEvent } from "../types.ts";
 import { MAX_PROFILE_FILE_LENGTH } from "../utils/constants.ts";
 import {
   type BudgetedIdentityField,
@@ -295,6 +296,87 @@ export async function readIdentityBaselines(
     return null;
   }
 }
+
+// ── Per-session CLAUDE.md baseline (compare-and-set token) ───────────────────
+// Concurrent Claude sessions of one agent share `~/.claude/CLAUDE.md` AND the
+// single IDENTITY_BASELINES_PATH, so neither tells "this session's copy" from a
+// sibling's. The Claude hook records, per `session_id`, the hash of the CLAUDE.md
+// it materialized at SessionStart; the Stop sync sends it as
+// `expectedHashes.claudeMd` and the server applies the edit only if the DB is
+// still at that hash.
+export const SESSION_BASELINES_DIR = "/tmp/agent-swarm-session-baselines";
+const SESSION_BASELINE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+export function sessionBaselinePath(
+  sessionId: string,
+  dir: string = SESSION_BASELINES_DIR,
+): string | null {
+  const safe = sessionId.replace(/[^A-Za-z0-9_-]/g, "");
+  return safe ? `${dir}/${safe}.json` : null;
+}
+
+/** Record the hash of the CLAUDE.md a session just materialized. Best effort. */
+export async function writeSessionClaudeMdBaseline(
+  sessionId: string,
+  content: string,
+  dir: string = SESSION_BASELINES_DIR,
+): Promise<void> {
+  const path = sessionBaselinePath(sessionId, dir);
+  if (!path) return;
+  await mkdir(dir, { recursive: true });
+  await Bun.write(path, JSON.stringify({ claudeMd: contentSha256(content) }));
+  // Not deleted at Stop (Stop can fire more than once per session), so prune old ones.
+  const now = Date.now();
+  for (const name of await readdir(dir).catch(() => [] as string[])) {
+    const file = `${dir}/${name}`;
+    const info = await stat(file).catch(() => null);
+    if (info && now - info.mtimeMs > SESSION_BASELINE_MAX_AGE_MS) {
+      await rm(file, { force: true }).catch(() => {});
+    }
+  }
+}
+
+export async function readSessionClaudeMdBaseline(
+  sessionId: string,
+  readFile: FileReader = readFileIfExists,
+  dir: string = SESSION_BASELINES_DIR,
+): Promise<string | null> {
+  const path = sessionBaselinePath(sessionId, dir);
+  if (!path) return null;
+  try {
+    const raw = await readFile(path);
+    if (!raw) return null;
+    const hash = (JSON.parse(raw) as { claudeMd?: unknown }).claudeMd;
+    return typeof hash === "string" ? hash : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Body for the Claude Stop hook's CLAUDE.md `session_sync`, or null to skip.
+ *   - Unchanged since SessionStart → skip: nothing was edited, and the copy may
+ *     already be behind the DB (a sibling session's sync, an `update-profile`).
+ *   - Edited → send it with its base as `expectedHashes.claudeMd`: the server
+ *     drops it if the DB moved since, and applies it otherwise — including a
+ *     deliberate revert to an earlier version.
+ *   - No session baseline (no `session_id`, or SessionStart did not run) → the
+ *     previous unconditional sync.
+ */
+export function buildClaudeMdSessionSync(
+  content: string,
+  baseHash: string | null,
+): ProfilePayload["body"] | null {
+  if (!content.trim()) return null;
+  if (baseHash === null) return { claudeMd: content, changeSource: "session_sync" };
+  if (contentSha256(content) === baseHash) return null;
+  return {
+    claudeMd: content,
+    changeSource: "session_sync",
+    expectedHashes: { claudeMd: baseHash },
+  };
+}
+
 /**
  * Claude Code's personal-file CLAUDE.md path. This is what the Claude plugin
  * Stop hook reads and owns — the runner only uses it as a backstop for an
@@ -394,7 +476,8 @@ export function resolveClaudeMdPath(completedProviders: readonly string[]): stri
 /** A single profile-update POST body, tagged with a label for logging. */
 export interface ProfilePayload {
   label: string;
-  body: Record<string, string>;
+  /** Field values are strings; `expectedHashes` (compare-and-set) is an object. */
+  body: Record<string, string | ProfileExpectedHashes>;
 }
 
 /**
@@ -615,6 +698,16 @@ export async function collectProfilePayloads(
     if (raw?.trim()) {
       if (baselines?.claudeMd && contentSha256(raw) === baselines.claudeMd) {
         // CLAUDE.md unchanged during session — skip to preserve Lead's DB edits
+      } else if (claudeMdPath === CLAUDE_MD_PATH && baselines?.claudeMd) {
+        // The personal file is owned by the Claude hook: every SessionStart
+        // rewrites it and every Stop restores a `.bak`, so after a batch it can
+        // hold any session's copy. The only base the runner knows is its boot
+        // baseline — send it as the compare-and-set token, so a stale copy is
+        // dropped server-side instead of reverting a newer DB value.
+        payloads.push({
+          label: "claude",
+          body: { claudeMd: raw, changeSource, expectedHashes: { claudeMd: baselines.claudeMd } },
+        });
       } else {
         payloads.push({ label: "claude", body: { claudeMd: raw, changeSource } });
       }

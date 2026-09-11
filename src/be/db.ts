@@ -71,6 +71,8 @@ import type {
   PricingProvider,
   PricingRow,
   PricingTokenClass,
+  ProfileExpectedHashes,
+  ProfileSyncConflict,
   PromptTemplate,
   PromptTemplateHistory,
   ProviderName,
@@ -6040,6 +6042,12 @@ export async function updateAgentProfile(
     avatar?: AgentAvatar | null;
   },
   meta?: VersionMeta,
+  guard?: {
+    /** Per-field compare-and-set token; see {@link ProfileExpectedHashes}. */
+    expectedHashes?: ProfileExpectedHashes;
+    /** Called once per field dropped because its expected hash was stale. */
+    onConflict?: (conflict: ProfileSyncConflict) => void;
+  },
 ): Promise<Agent | null> {
   return await getDbClient().transaction(async (tx) => {
     // Get current agent state for version comparison
@@ -6078,41 +6086,31 @@ export async function updateAgentProfile(
       }
     }
 
-    // `session_sync` is the automatic file→DB echo at session end (Stop hook /
-    // runner batch). Its source file is whatever the LAST session materialized
-    // from the DB, so with overlapping sessions — or after the Stop hook restores
-    // `~/.claude/CLAUDE.md.bak` — it can carry a value the DB has already moved
-    // past. Measured 2026-09-11: three consecutive `self_edit`s of a Lead's
-    // claudeMd were each reverted 8–27 s later by a `session_sync` whose content
-    // was byte-for-byte the previous version. A field that already sits in its
-    // own history is an echo, never an edit: drop it (no version, no column
-    // write). Explicit sources (`self_edit`, `api`, `system`) stay free to revert.
+    // Compare-and-set. A writer that edits a copy of a field (a session's
+    // materialized CLAUDE.md) sends the hash that copy was based on. If the DB
+    // moved since — a sibling session's sync, an `update-profile` — the copy is
+    // stale and writing it would revert the newer value, so the field is dropped
+    // (no version, no column write). An edit on top of the current value applies,
+    // including a deliberate revert to an earlier version. Without a token the
+    // write is unconditional, as before.
     //
-    // Runs BEFORE the budget check: a stale echo of an older, longer value must
-    // be dropped, not rejected — a budget rejection throws and would also roll
-    // back the genuinely new fields of the same sync.
+    // Runs BEFORE the budget check: a stale copy of an older, longer value must be
+    // dropped, not rejected — a budget rejection throws and would also roll back
+    // the other fields of the same update.
     const effective = { ...updates };
-    if (meta?.changeSource === "session_sync") {
-      for (const field of VERSIONABLE_FIELDS) {
-        const newValue = effective[field];
-        if (newValue === undefined || newValue === null) continue;
+    for (const field of VERSIONABLE_FIELDS) {
+      const expectedHash = guard?.expectedHashes?.[field];
+      if (expectedHash === undefined) continue;
+      if (effective[field] === undefined || effective[field] === null) continue;
 
-        const newHash = computeContentHash(newValue);
-        if (newHash === computeContentHash(current[field] ?? "")) continue; // no-op anyway
+      const currentHash = computeContentHash(current[field] ?? "");
+      if (currentHash === expectedHash) continue;
 
-        const echoed = await tx.get<{ version: number }>(
-          `SELECT version FROM context_versions
-            WHERE agentId = ? AND field = ? AND contentHash = ?
-            ORDER BY version DESC LIMIT 1`,
-          [id, field, newHash],
-        );
-        if (echoed) {
-          console.warn(
-            `[profile-sync] agent ${id}: session_sync for ${field} carries superseded version ${echoed.version} — stale echo ignored`,
-          );
-          delete effective[field];
-        }
-      }
+      console.warn(
+        `[profile-sync] agent ${id}: ${field} dropped — based on ${expectedHash.slice(0, 12)}, DB is at ${currentHash.slice(0, 12)}`,
+      );
+      delete effective[field];
+      guard?.onConflict?.({ field, expectedHash, currentHash });
     }
 
     for (const field of BUDGETED_IDENTITY_FIELDS) {
@@ -6141,7 +6139,7 @@ export async function updateAgentProfile(
       if (existingAgent) throw new Error("Agent name already exists");
     }
 
-    // Create context versions for changed fields (stale echoes already dropped)
+    // Create context versions for changed fields (stale copies already dropped)
     for (const field of VERSIONABLE_FIELDS) {
       const newValue = effective[field];
       if (newValue === undefined || newValue === null) continue;

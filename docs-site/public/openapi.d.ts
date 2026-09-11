@@ -2673,6 +2673,14 @@ export interface paths {
                         changeSource?: string;
                         changedByAgentId?: string;
                         changeReason?: string;
+                        expectedHashes?: {
+                            soulMd?: string;
+                            identityMd?: string;
+                            toolsMd?: string;
+                            claudeMd?: string;
+                            setupScript?: string;
+                            heartbeatMd?: string;
+                        };
                     };
                 };
             };

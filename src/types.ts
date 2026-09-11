@@ -1287,6 +1287,20 @@ export type VersionMeta = {
   changeReason?: string | null;
 };
 
+/**
+ * Compare-and-set token for a profile update, per field: the content hash the
+ * writer based its edit on (e.g. what a session materialized from the DB). A
+ * field whose current DB hash differs is dropped: the DB moved since the writer
+ * read it, so its copy is stale, not an edit.
+ */
+export type ProfileExpectedHashes = Partial<Record<VersionableField, string>>;
+
+export type ProfileSyncConflict = {
+  field: VersionableField;
+  expectedHash: string;
+  currentHash: string;
+};
+
 // Channel Types
 export const ChannelTypeSchema = z.enum(["public", "dm"]);
 

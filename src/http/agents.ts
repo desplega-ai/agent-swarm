@@ -411,6 +411,8 @@ const listAgentRuntimeInstances = route({
   },
 });
 
+const ContentHashSchema = z.string().regex(/^[0-9a-f]{64}$/, "sha256 hex");
+
 const ProfileSyncRejectionSchema = z.object({
   field: z.enum(["soulMd", "identityMd", "claudeMd", "toolsMd"]),
   diskSize: z.number().int(),
@@ -442,6 +444,21 @@ const updateAgentProfileRoute = route({
     changeSource: z.string().optional(),
     changedByAgentId: z.string().optional(),
     changeReason: z.string().optional(),
+    /**
+     * Compare-and-set token per field: the sha256 (hex) of the content the edit
+     * was based on. A field whose current value hashes differently is dropped
+     * (the DB moved since), without failing the rest of the update.
+     */
+    expectedHashes: z
+      .object({
+        soulMd: ContentHashSchema.optional(),
+        identityMd: ContentHashSchema.optional(),
+        toolsMd: ContentHashSchema.optional(),
+        claudeMd: ContentHashSchema.optional(),
+        setupScript: ContentHashSchema.optional(),
+        heartbeatMd: ContentHashSchema.optional(),
+      })
+      .optional(),
   }),
   responses: {
     200: { description: "Profile updated", schema: AgentWithCapacitySchema },
@@ -840,6 +857,7 @@ export async function handleAgentsRest(
           }
         : undefined;
 
+    const droppedFields = new Set<string>();
     let agent: Agent | null;
     try {
       agent = await updateAgentProfile(
@@ -859,6 +877,10 @@ export async function handleAgentsRest(
           ...(body.avatar !== undefined ? { avatar: body.avatar } : {}),
         },
         versionMeta,
+        {
+          expectedHashes: body.expectedHashes,
+          onConflict: ({ field }) => droppedFields.add(field),
+        },
       );
     } catch (error) {
       if (error instanceof IdentityFieldBudgetError) {
@@ -904,7 +926,8 @@ export async function handleAgentsRest(
     if (versionMeta?.changeSource === "self_edit" || versionMeta?.changeSource === "session_sync") {
       try {
         for (const field of Object.keys(IDENTITY_FIELD_BUDGETS) as BudgetedIdentityField[]) {
-          if (body[field] === undefined) continue;
+          // A field dropped by the compare-and-set was not written: nothing reconciled.
+          if (body[field] === undefined || droppedFields.has(field)) continue;
           await createEvent({
             category: "system",
             event: "system.profile_sync_reconciled",

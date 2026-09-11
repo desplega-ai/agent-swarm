@@ -38,6 +38,8 @@ This ratchet preserves existing oversized profiles while giving agents a safe pa
 
 Filesystem sync sends each changed identity file independently. If one field is rejected, valid edits to the other fields still persist. The rejection is recorded as a `system.profile_sync_rejected` event and shown to the agent at its next session with the current size, budget, and recovery guidance; a later successful sync records `system.profile_sync_reconciled`. Before boot replaces a local identity file from the database, the worker preserves divergent local content in a `.pre-boot-<timestamp>.bak` file.
 
+`CLAUDE.md` sync is a compare-and-set. Concurrent sessions of one agent share Claude's `~/.claude/CLAUDE.md`, so each session records the hash of the copy it materialized and sends it as `expectedHashes.claudeMd`. The server writes the field only if the database is still at that hash: a copy that a sibling session or an `update-profile` call already moved past is dropped instead of reverting the newer value, while an edit on top of the current value applies, including a deliberate revert to an earlier version.
+
 ### Agent Appearance
 
 An agent profile can optionally store a Lucide icon and hex color. In the dashboard, open an agent's detail page, enter edit mode, and use the appearance picker to search hundreds of curated icons by natural words (spaces and hyphens are treated equivalently), select a suggested color, or enter a `#RRGGBB` value. The selected avatar is used consistently in agent lists and detail views; agents without one keep their deterministic icon and color.

@@ -1,5 +1,9 @@
 import { describe, expect, spyOn, test } from "bun:test";
+import { mkdtemp, readdir, rm, utimes } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
+  buildClaudeMdSessionSync,
   buildIdentityPayload,
   buildIndependentIdentityPayloads,
   CLAUDE_MD_PATH,
@@ -13,12 +17,15 @@ import {
   IDENTITY_MD_PATH,
   type IdentityBaselines,
   postProfileUpdate,
+  readSessionClaudeMdBaseline,
   resolveClaudeMdPath,
   SETUP_SCRIPT_PATH,
   SOUL_MD_PATH,
+  sessionBaselinePath,
   syncProfileFilesToServer,
   TOOLS_MD_PATH,
   WORKSPACE_CLAUDE_MD_PATH,
+  writeSessionClaudeMdBaseline,
 } from "../commands/profile-sync";
 import { profileSyncAuditExitCode, runProfileSyncAudit } from "../commands/profile-sync-audit";
 import { MAX_PROFILE_FILE_LENGTH } from "../utils/constants";
@@ -646,6 +653,29 @@ describe("collectProfilePayloads (baseline integration)", () => {
     const payloads = await collectProfilePayloads(["claude"], "session_sync", files);
     expect(payloads).toHaveLength(1);
     expect(payloads[0]?.body.claudeMd).toBe("modified claude md");
+    // The personal file is hook-owned and can hold any session's copy: the
+    // runner's backstop sends its boot baseline as the compare-and-set token.
+    expect(payloads[0]?.body.expectedHashes).toEqual({ claudeMd: contentSha256("original") });
+  });
+
+  test("session_sync of the workspace CLAUDE.md stays unconditional", async () => {
+    // Non-Claude harnesses edit /workspace/CLAUDE.md directly and nothing
+    // rematerializes it mid-life, so the boot baseline is not a valid base.
+    const baselines: IdentityBaselines = { claudeMd: contentSha256("original") };
+    const files = reader({
+      [WORKSPACE_CLAUDE_MD_PATH]: "modified workspace md",
+      [IDENTITY_BASELINES_PATH]: JSON.stringify(baselines),
+    });
+
+    const payloads = await collectProfilePayloads(
+      ["claude"],
+      "session_sync",
+      files,
+      WORKSPACE_CLAUDE_MD_PATH,
+    );
+    expect(payloads.map((p) => p.body)).toEqual([
+      { claudeMd: "modified workspace md", changeSource: "session_sync" },
+    ]);
   });
 
   test("session_sync proceeds normally when baselines file is missing", async () => {
@@ -706,5 +736,66 @@ describe("buildIndependentIdentityPayloads", () => {
         body: { heartbeatMd: "ungated edit", changeSource: "session_sync" },
       },
     ]);
+  });
+});
+
+describe("per-session CLAUDE.md compare-and-set (Claude hook)", () => {
+  test("buildClaudeMdSessionSync skips a copy unchanged since SessionStart", () => {
+    // Unchanged → nothing edited, and the copy may already be behind the DB.
+    expect(buildClaudeMdSessionSync("materialized", contentSha256("materialized"))).toBeNull();
+  });
+
+  test("buildClaudeMdSessionSync sends an edit with its base as the CAS token", () => {
+    // Also covers a deliberate revert: the content may equal an older version;
+    // what the server checks is that the DB is still at the base.
+    expect(buildClaudeMdSessionSync("edited", contentSha256("materialized"))).toEqual({
+      claudeMd: "edited",
+      changeSource: "session_sync",
+      expectedHashes: { claudeMd: contentSha256("materialized") },
+    });
+  });
+
+  test("buildClaudeMdSessionSync without a session baseline keeps the old unconditional sync", () => {
+    expect(buildClaudeMdSessionSync("edited", null)).toEqual({
+      claudeMd: "edited",
+      changeSource: "session_sync",
+    });
+    expect(buildClaudeMdSessionSync("   ", null)).toBeNull();
+  });
+
+  test("baselines are per session: overlapping sessions do not overwrite each other", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "session-baselines-"));
+    try {
+      await writeSessionClaudeMdBaseline("session-a", "v1", dir);
+      await writeSessionClaudeMdBaseline("session-b", "v2", dir); // DB moved, B started later
+      const read = (path: string) =>
+        Bun.file(path)
+          .text()
+          .catch(() => undefined);
+      expect(await readSessionClaudeMdBaseline("session-a", read, dir)).toBe(contentSha256("v1"));
+      expect(await readSessionClaudeMdBaseline("session-b", read, dir)).toBe(contentSha256("v2"));
+      expect(await readSessionClaudeMdBaseline("session-c", read, dir)).toBeNull();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("session ids are sanitized into a single file name", () => {
+    expect(sessionBaselinePath("../../etc/passwd", "/base")).toBe("/base/etcpasswd.json");
+    expect(sessionBaselinePath("abc-123_DEF", "/base")).toBe("/base/abc-123_DEF.json");
+    expect(sessionBaselinePath("../", "/base")).toBeNull();
+  });
+
+  test("writing a baseline prunes files older than a week", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "session-baselines-"));
+    try {
+      await writeSessionClaudeMdBaseline("old-session", "v1", dir);
+      const old = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
+      await utimes(join(dir, "old-session.json"), old, old);
+      await writeSessionClaudeMdBaseline("new-session", "v2", dir);
+      expect((await readdir(dir)).sort()).toEqual(["new-session.json"]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
