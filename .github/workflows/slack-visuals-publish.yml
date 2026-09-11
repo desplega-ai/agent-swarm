@@ -7,27 +7,30 @@
 # resorting to `pull_request_target` (which would need to check out and run fork-authored code
 # under a privileged token; that trade is worse than the gap this file closes).
 #
-# Security invariant: this job NEVER checks out the PR head and NEVER runs anything from the PR
-# branch. It checks out the workflow file's own ref (the base branch), downloads the visuals
-# artifact slack-visuals.yml already built (data only — PNGs, GIFs, JSON), and runs
-# repo-trusted scripts from that checkout against that data. Keep it that way.
+# Security invariant: neither job checks out the PR head or runs anything from the PR branch.
+# Both check out the workflow file's own ref (the base branch) and run repo-trusted scripts.
 #
-# Trust model for the downloaded artifact (this job's real attack surface):
+# Trust model for the downloaded artifact (this workflow's real attack surface):
 # the producing job (slack-visuals.yml) runs with the PR-branch copy of that workflow file for
 # a `pull_request` trigger, so for a fork PR the artifact's CONTENTS — including
-# visuals/pr-context.json — are attacker-controlled, even though this job's own token is not.
-# `workflow_run.head_sha` is the one piece of trusted event metadata we get for free, so every
-# other value is treated as a hint that must be corroborated against it and against the GitHub
-# API before it is allowed to drive a privileged action:
-#   1. Run-provenance gate on the job `if`: the completed run must belong to this repository.
-#   2. pr-context.json is schema-validated (exact key set, prNumber decimal, headSha 40-hex)
-#      before anything reads it.
-#   3. The artifact's headSha must equal the trusted `workflow_run.head_sha` — this is the
-#      cross-check that demotes the artifact from authority to hint.
-#   4. The artifact's prNumber is resolved through `gh api pulls/$PR` (trusted server-side
-#      lookup) and that PR's head.sha/base.repo.full_name must match the trusted head_sha and
-#      this repository. A mismatch means the artifact pointed at a PR it does not own — reject.
-# Any failed check aborts the job instead of silently continuing.
+# visuals/pr-context.json — are attacker-controlled, even though this workflow's own token is
+# not. `workflow_run.head_sha` is the one piece of trusted event metadata we get for free, so
+# every other value is treated as a hint that must be corroborated against it and against the
+# GitHub API before it is allowed to drive a privileged action.
+#
+# Privilege separation (why this is two jobs, not one): CodeQL's artifact-poisoning query flags
+# any `actions/download-artifact` step keyed off `workflow_run.id` that runs in a job holding
+# write permissions, because the artifact's contents are fork-controlled and this pattern is
+# structurally the same shape as GitHub's canonical artifact-poisoning exploit — the query
+# doesn't credit downstream shell validation as a sanitizer. So the fork-controlled artifact is
+# only ever touched by the `validate` job below, which holds no write permissions at all: even a
+# malicious artifact gets nothing more than a job that can read the repo and call read-only
+# GitHub APIs. `validate` re-derives and cross-checks every value against the trusted head_sha,
+# filters the artifact's files down to an explicit allowlist (visuals-stage.sh), and re-uploads
+# the result as a NEW artifact produced by this workflow's own trusted run. The `publish` job
+# never downloads the original fork artifact — its `download-artifact` step has no `run-id`, so
+# it resolves to an artifact from the CURRENT run, uploaded by our own script, which is the
+# pattern the query does not flag. Any failed check in `validate` aborts before `publish` runs.
 name: Slack Visuals Publish
 
 on:
@@ -39,15 +42,18 @@ permissions:
   contents: read
 
 jobs:
-  publish:
+  validate:
     if: >-
       github.event.workflow_run.event == 'pull_request' &&
       github.event.workflow_run.repository.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read
+    outputs:
+      found: ${{ steps.pr.outputs.found }}
+      pr_number: ${{ steps.pr.outputs.pr_number }}
+      head_sha: ${{ steps.pr.outputs.head_sha }}
 
     steps:
       # No `ref:` override — this checks out whatever commit the workflow file itself lives on
@@ -55,12 +61,8 @@ jobs:
       - name: Checkout repository (base branch only)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # visuals-comment.ts only imports node:util, so no `bun install` — just the runtime.
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: package.json
-
+      # This job holds no write permissions, so even a fully malicious artifact cannot push,
+      # comment, or otherwise act on the repo from here — the worst case is a wasted CI minute.
       - name: Download Slack visuals artifact
         id: download
         continue-on-error: true
@@ -144,32 +146,70 @@ jobs:
             exit 1
           fi
 
-      - name: Publish Slack visuals
+      - name: Stage allowlisted visuals
         if: steps.pr.outputs.found == 'true'
+        run: bash scripts/e2e/visuals-stage.sh visuals staged
+
+      - name: Upload staged visuals
+        if: steps.pr.outputs.found == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: slack-visuals-staged
+          path: staged
+          retention-days: 1
+
+  publish:
+    needs: validate
+    if: needs.validate.outputs.found == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository (base branch only)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # visuals-comment.ts only imports node:util, so no `bun install` — just the runtime.
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      # No `run-id:` — this resolves to an artifact from the CURRENT run, produced by
+      # `validate`'s own trusted script, never the raw fork artifact. That is the whole point of
+      # the split: this job's only download-artifact call is same-run and not attacker-reachable.
+      - name: Download staged visuals
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: slack-visuals-staged
+          path: staged
+
+      - name: Publish Slack visuals
         id: publish
         env:
-          PR: ${{ steps.pr.outputs.pr_number }}
-          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+          PR: ${{ needs.validate.outputs.pr_number }}
+          HEAD_SHA: ${{ needs.validate.outputs.head_sha }}
         run: |
           set -euo pipefail
-          publish_output=$(bash scripts/e2e/visuals-publish.sh visuals "$PR" "$HEAD_SHA")
+          publish_output=$(bash scripts/e2e/visuals-publish.sh staged "$PR" "$HEAD_SHA")
           printf '%s\n' "$publish_output"
           base_url=$(printf '%s\n' "$publish_output" | tail -n 1)
           echo "base_url=${base_url#base_url=}" >> "$GITHUB_OUTPUT"
 
       - name: Post Slack visual preview
-        if: steps.pr.outputs.found == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          PR: ${{ steps.pr.outputs.pr_number }}
-          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+          PR: ${{ needs.validate.outputs.pr_number }}
+          HEAD_SHA: ${{ needs.validate.outputs.head_sha }}
           BASE_URL: ${{ steps.publish.outputs.base_url }}
         run: |
           set -euo pipefail
           bun scripts/e2e/visuals-comment.ts \
             --base-url "$BASE_URL" \
-            --profile legacy=visuals/legacy \
-            --profile v2=visuals/v2 \
+            --profile legacy=staged/legacy \
+            --profile v2=staged/v2 \
             --out comment.md \
             --run-url "${{ github.event.workflow_run.html_url }}" \
             --sha "$HEAD_SHA"
