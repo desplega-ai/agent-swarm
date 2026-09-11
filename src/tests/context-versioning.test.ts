@@ -10,6 +10,7 @@ import {
   initDb,
   updateAgentProfile,
 } from "../be/db";
+import { IDENTITY_FIELD_BUDGETS } from "../utils/identity-field-budget";
 
 const TEST_DB_PATH = "./test-context-versioning.sqlite";
 
@@ -483,6 +484,40 @@ describe("Context Versioning", () => {
       expect(agent!.soulMd).toBe(soul);
       expect((await getLatestContextVersion(echoAgentId, "claudeMd"))!.version).toBe(4);
       expect((await getLatestContextVersion(echoAgentId, "soulMd"))!.version).toBe(1);
+    });
+
+    test("a stale echo over the budget is dropped, not rejected", async () => {
+      // The profile was once longer than today's budget and has since been
+      // shortened. Replaying that old value must be ignored like any echo —
+      // not throw IdentityFieldBudgetError and roll back the fresh fields too.
+      const longAgentId = "cccc0000-0000-4000-8000-000000000005";
+      const oversized = "x".repeat(IDENTITY_FIELD_BUDGETS.claudeMd + 500);
+      const shortened = "# CLAUDE.md\n\nshortened below the budget";
+      await createAgent({
+        id: longAgentId,
+        name: "Long Echo Agent",
+        isLead: false,
+        status: "idle",
+      });
+      await createContextVersion({
+        agentId: longAgentId,
+        field: "claudeMd",
+        content: oversized,
+        version: 1,
+        changeSource: "self_edit",
+        contentHash: sha256(oversized),
+      });
+      await updateAgentProfile(longAgentId, { claudeMd: shortened }, { changeSource: "self_edit" });
+
+      const soul = "t".repeat(600);
+      const agent = await updateAgentProfile(
+        longAgentId,
+        { claudeMd: oversized, soulMd: soul },
+        { changeSource: "session_sync" },
+      );
+
+      expect(agent!.claudeMd).toBe(shortened);
+      expect(agent!.soulMd).toBe(soul);
     });
   });
 
