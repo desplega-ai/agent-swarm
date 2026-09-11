@@ -330,11 +330,7 @@ class ACPSession implements ProviderSession {
     // Revoke the ephemeral token now that the session is done. Best-effort:
     // the token expires on its own, so a failure here is not critical.
     if (this.ephemeralTokenId) {
-      void revokeAcpSessionToken(
-        this.config.apiUrl,
-        this.config.apiKey,
-        this.ephemeralTokenId,
-      );
+      void revokeAcpSessionToken(this.config.apiUrl, this.config.apiKey, this.ephemeralTokenId);
     }
   }
 }
@@ -371,6 +367,7 @@ export class ACPAdapter implements ProviderAdapter {
     const stream = ndJsonStream(fileSinkWritableStream(proc.stdin), proc.stdout);
     const connection = new ClientSideConnection(() => client, stream);
 
+    let ephemeralToken: { tokenId: string; plaintext: string } | null = null;
     try {
       await connection.initialize({
         protocolVersion: PROTOCOL_VERSION,
@@ -378,15 +375,14 @@ export class ACPAdapter implements ProviderAdapter {
         clientCapabilities: { session: { configOptions: { boolean: {} } } },
       });
       // Mint a short-lived session-scoped bearer so the ACP target receives
-      // an aseph_ token rather than the full operator key. Falls back to the
-      // operator key when the API server is not yet upgraded (returns null).
-      const ephemeralToken = await mintAcpSessionToken(
+      // an aseph_ token rather than the full operator key. Throws on failure
+      // so we fail closed instead of falling back to the operator key.
+      ephemeralToken = await mintAcpSessionToken(
         config.apiUrl,
         config.apiKey,
         config.agentId,
         config.taskId,
       );
-      const mcpBearer = ephemeralToken?.plaintext ?? config.apiKey;
 
       const installedServers = await fetchInstalledMcpServers(
         config.apiUrl,
@@ -397,7 +393,7 @@ export class ACPAdapter implements ProviderAdapter {
       // The v2 draft (@agentclientprotocol/sdk/experimental/v2) adds a fourth
       // `{ type: "acp", name, serverId }` variant where the client hosts the MCP
       // server itself and the agent tunnels MCP over the existing ACP connection
-      // (mcp/connect, mcp/message, mcp/disconnect) instead of a network hop — the
+      // (mcp/connect, mcp/message, mcp/disconnect) instead of a network hop -- the
       // shape for an ACP agent with no network route to the swarm API. Gated on
       // `mcpCapabilities.acp` and UNSTABLE; not adopted here.
       const newSession = await connection.newSession({
@@ -408,7 +404,7 @@ export class ACPAdapter implements ProviderAdapter {
             name: "swarm",
             url: `${config.apiUrl.replace(/\/+$/, "")}/mcp`,
             headers: [
-              { name: "Authorization", value: `Bearer ${mcpBearer}` },
+              { name: "Authorization", value: `Bearer ${ephemeralToken.plaintext}` },
               { name: "X-Agent-ID", value: config.agentId },
               { name: "X-Source-Task-Id", value: config.taskId },
             ],
@@ -431,11 +427,17 @@ export class ACPAdapter implements ProviderAdapter {
           target: target.target,
           configOptions: sanitizeAcpConfigOptions(configOptions),
         },
-        ephemeralToken?.tokenId,
+        ephemeralToken.tokenId,
       );
       for (const event of preSessionEvents) session.emitFromAcp(event);
       return session;
     } catch (err) {
+      // Revoke the ephemeral token before re-throwing if ACPSession has not yet
+      // taken ownership of it (i.e. setup failed after mint but before the
+      // ACPSession constructor ran).
+      if (ephemeralToken && !session) {
+        void revokeAcpSessionToken(config.apiUrl, config.apiKey, ephemeralToken.tokenId);
+      }
       await terminateProcessGroup(proc.pid);
       throw new Error(`ACP target failed during startup: ${scrubSecrets(formatError(err))}`);
     }

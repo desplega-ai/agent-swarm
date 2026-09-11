@@ -15,13 +15,10 @@ import {
   type ServerResponse,
 } from "node:http";
 import { closeDb, getDbClient, initDb } from "../be/db";
-import {
-  mintSessionToken,
-  resolveBySessionToken,
-  revokeSessionToken,
-} from "../be/users";
+import { mintSessionToken, resolveBySessionToken, revokeSessionToken } from "../be/users";
 import { resolveHttpRequestAuth } from "../http/auth";
 import { handleCore } from "../http/core";
+import { handleMcp } from "../http/mcp";
 import { handleSessions } from "../http/sessions";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { listenOnFreePort } from "./test-net";
@@ -195,5 +192,88 @@ describe("DELETE /api/sessions/tokens/:tokenId", () => {
       method: "DELETE",
     });
     expect(res.status).toBe(401);
+  });
+});
+
+// ─── /mcp identity enforcement tests ─────────────────────────────────────────
+
+describe("/mcp aseph_ token identity enforcement", () => {
+  let mcpServer: import("node:http").Server;
+  let mcpPort: number;
+
+  beforeAll(async () => {
+    mcpServer = createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
+      const myAgentId = req.headers["x-agent-id"] as string | undefined;
+      const handled = await handleCore(req, res, myAgentId, API_KEY);
+      if (handled) return;
+      const didHandle = await handleMcp(req, res, {});
+      if (!didHandle) {
+        res.writeHead(404);
+        res.end("Not Found");
+      }
+    });
+    mcpPort = await listenOnFreePort(mcpServer);
+  });
+
+  afterAll(async () => {
+    await new Promise<void>((resolve) => mcpServer.close(() => resolve()));
+  });
+
+  test("rejects with 403 when X-Agent-ID does not match the token's bound agentId", async () => {
+    const { plaintext } = await mintSessionToken("mcp-agent-A", "mcp-task-A", 60_000);
+    const res = await fetch(`http://localhost:${mcpPort}/mcp`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${plaintext}`,
+        "Content-Type": "application/json",
+        "X-Agent-ID": "mcp-agent-B",
+        "X-Source-Task-Id": "mcp-task-A",
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", method: "initialize", id: 1, params: {} }),
+    });
+    expect(res.status).toBe(403);
+  });
+
+  test("rejects with 403 when X-Source-Task-Id does not match the token's bound taskId", async () => {
+    const { plaintext } = await mintSessionToken("mcp-agent-C", "mcp-task-C", 60_000);
+    const res = await fetch(`http://localhost:${mcpPort}/mcp`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${plaintext}`,
+        "Content-Type": "application/json",
+        "X-Agent-ID": "mcp-agent-C",
+        "X-Source-Task-Id": "mcp-task-D",
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", method: "initialize", id: 1, params: {} }),
+    });
+    expect(res.status).toBe(403);
+  });
+
+  test("rejects with 403 when X-Agent-ID header is missing", async () => {
+    const { plaintext } = await mintSessionToken("mcp-agent-E", "mcp-task-E", 60_000);
+    const res = await fetch(`http://localhost:${mcpPort}/mcp`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${plaintext}`,
+        "Content-Type": "application/json",
+        "X-Source-Task-Id": "mcp-task-E",
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", method: "initialize", id: 1, params: {} }),
+    });
+    expect(res.status).toBe(403);
+  });
+
+  test("rejects with 403 when X-Source-Task-Id header is missing", async () => {
+    const { plaintext } = await mintSessionToken("mcp-agent-F", "mcp-task-F", 60_000);
+    const res = await fetch(`http://localhost:${mcpPort}/mcp`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${plaintext}`,
+        "Content-Type": "application/json",
+        "X-Agent-ID": "mcp-agent-F",
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", method: "initialize", id: 1, params: {} }),
+    });
+    expect(res.status).toBe(403);
   });
 });

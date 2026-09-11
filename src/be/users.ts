@@ -588,10 +588,9 @@ export async function resolveBySessionToken(
     taskId: string;
     expiresAt: string;
     revokedAt: string | null;
-  }>(
-    "SELECT id, agentId, taskId, expiresAt, revokedAt FROM session_tokens WHERE tokenHash = ?",
-    [hash],
-  );
+  }>("SELECT id, agentId, taskId, expiresAt, revokedAt FROM session_tokens WHERE tokenHash = ?", [
+    hash,
+  ]);
   if (!row || row.revokedAt !== null) return null;
   if (new Date(row.expiresAt) <= new Date()) return null;
 

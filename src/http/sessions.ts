@@ -116,7 +116,9 @@ const revokeSessionTokenRoute = route({
     401: { description: "Unauthorized" },
   },
   auth: { apiKey: true },
-  rbac: { ungated: "operator-only: revocation is gated on the full operator key in auth middleware" },
+  rbac: {
+    ungated: "operator-only: revocation is gated on the full operator key in auth middleware",
+  },
 });
 
 const listSessions = route({
