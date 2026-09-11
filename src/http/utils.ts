@@ -3,13 +3,59 @@ import { getActiveTaskCount } from "../be/db";
 import type { SwarmSpan } from "../otel";
 import { scrubSecrets } from "../utils/secret-scrubber";
 
+/**
+ * Opt-in trusted-origin allowlist for credentialed CORS. Unset (default)
+ * preserves the long-standing reflect-any-origin behavior documented in
+ * DEPLOYMENT.md — required for today's SPA deployments that don't set this
+ * var. When set, only an exact, case-sensitive match gets the credentialed
+ * headers; every other origin is denied (no Access-Control-Allow-Origin at
+ * all, so the browser's CORS check fails closed).
+ *
+ * Comma-separated exact origins, e.g. `https://app.example.com,https://dashboard.example.com`.
+ * No wildcards, no subdomain matching — an operator who needs multiple hosts
+ * lists them all.
+ *
+ * Re-reads `process.env` on every call (no caching) so a value saved via the
+ * Settings → Configuration page takes effect after the debounced config
+ * reload, without a restart.
+ */
+function getAllowedOrigins(): string[] | null {
+  const raw = process.env.CORS_ALLOWED_ORIGINS;
+  if (!raw || !raw.trim()) return null;
+  return raw
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Decide whether `origin` may receive credentialed CORS headers.
+ * `null` return means "no allowlist configured" — caller falls back to the
+ * legacy reflect-any-origin behavior.
+ */
+export function isOriginAllowedForCredentials(origin: string): boolean {
+  const allowlist = getAllowedOrigins();
+  if (allowlist === null) return true;
+  return allowlist.includes(origin);
+}
+
 export function setCorsHeaders(req: IncomingMessage, res: ServerResponse) {
   // Echo the request Origin (rather than emitting `*`) so credentialed fetches
   // — e.g. the SPA's `credentials: 'include'` calls to `/p/:id.json` and the
   // page-session cookie endpoints — pass the browser's CORS check. A wildcard
   // would force the browser to reject any credentialed cross-origin response.
+  //
+  // When `CORS_ALLOWED_ORIGINS` is set, an origin outside the allowlist gets
+  // NO Access-Control-Allow-Origin at all (falls through to the `else`
+  // branch's non-credentialed path is wrong for a real cross-origin browser
+  // request too — so we deny explicitly instead of reusing the no-Origin
+  // wildcard path).
   const rawOrigin = req.headers.origin;
   const origin = Array.isArray(rawOrigin) ? rawOrigin[0] : rawOrigin;
+  if (origin && !isOriginAllowedForCredentials(origin)) {
+    res.setHeader("Vary", "Origin");
+    return;
+  }
   if (origin) {
     res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Vary", "Origin");

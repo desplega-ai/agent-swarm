@@ -756,6 +756,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         kind: "boolean",
         defaultValue: "false",
       },
+      {
+        key: "CORS_ALLOWED_ORIGINS",
+        label: "Credentialed CORS allowlist",
+        description:
+          "Comma-separated exact origins (e.g. https://app.example.com) allowed to receive credentialed CORS headers. Unset reflects any request Origin (required for most SPA deployments today); set it to restrict which origins can make credentialed cross-origin requests, including via the page-session cookie proxy.",
+        kind: "string",
+        placeholder: "https://app.example.com,https://dashboard.example.com",
+        docsUrl:
+          "https://github.com/desplega-ai/agent-swarm/blob/main/DEPLOYMENT.md#built-in-api-cors",
+      },
     ],
   },
   {
