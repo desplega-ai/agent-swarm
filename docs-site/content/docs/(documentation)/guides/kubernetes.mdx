@@ -14,14 +14,26 @@ The Helm chart deploys the API and agent pools to Kubernetes. The dashboard runs
 
 ## Install the chart
 
-Create a namespace and a Secret in that namespace. Set `API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, and `SECRETS_ENCRYPTION_KEY` in your shell before running this example. Use a strong API key and generate the encryption key with `openssl rand -base64 32`. Back up the encryption key with the database; see [Secrets encryption](/docs/guides/secrets-encryption).
+Create a namespace and an empty credentials file readable only by your user:
 
 ```bash
 kubectl create namespace agent-swarm
+install -m 600 /dev/null ./swarm-secrets.env
+```
+
+Populate `swarm-secrets.env` in a local editor or through your secret manager with the following keys. Replace the placeholders with your credentials. Use a strong API key and generate the encryption key with `openssl rand -base64 32`. Keep this file out of version control. Back up the encryption key with the database; see [Secrets encryption](/docs/guides/secrets-encryption).
+
+```dotenv title="swarm-secrets.env"
+API_KEY=replace-with-your-api-key
+CLAUDE_CODE_OAUTH_TOKEN=replace-with-your-provider-token
+SECRETS_ENCRYPTION_KEY=replace-with-your-base64-encryption-key
+```
+
+Create the Secret from that file, then remove the local file after the command succeeds. The credentials stay out of `kubectl`'s command-line arguments. You can also provision the same Secret through your cluster's external secrets integration.
+
+```bash
 kubectl -n agent-swarm create secret generic agent-swarm-secrets \
-  --from-literal=API_KEY="$API_KEY" \
-  --from-literal=CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_CODE_OAUTH_TOKEN" \
-  --from-literal=SECRETS_ENCRYPTION_KEY="$SECRETS_ENCRYPTION_KEY"
+  --from-env-file=./swarm-secrets.env && rm ./swarm-secrets.env
 ```
 
 Save these values as `swarm-values.yaml`. Replace the hostname, ingress class, and TLS Secret name with your cluster's values. Provision the TLS Secret in the same namespace, or configure certificate issuance using your controller's supported annotations.
