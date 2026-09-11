@@ -34190,6 +34190,132 @@
         }
       }
     },
+    "/api/sessions/tokens": {
+      "post": {
+        "summary": "Mint an ephemeral session token for an ACP provider session",
+        "description": "Returns a short-lived aseph_ bearer for use by the ACP adapter in place of the full operator key. The token expires at the requested TTL and is actively revoked when the session ends. Only the operator key may mint session tokens.",
+        "tags": [
+          "Sessions"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "agentId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "taskId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "ttlMs": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 604800000
+                  }
+                },
+                "required": [
+                  "agentId",
+                  "taskId",
+                  "ttlMs"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Minted token plaintext (returned once) and its stable token ID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "tokenId": {
+                      "type": "string"
+                    },
+                    "plaintext": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "tokenId",
+                    "plaintext"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sessions/tokens/{tokenId}": {
+      "delete": {
+        "summary": "Revoke an ephemeral session token",
+        "description": "Revokes an aseph_ bearer token by ID. No-op if already revoked.",
+        "tags": [
+          "Sessions"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "tokenId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Token revoked (or was already revoked)"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/sessions": {
       "get": {
         "summary": "List recent task sessions (root tasks + chain summary)",
