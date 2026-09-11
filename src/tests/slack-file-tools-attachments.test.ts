@@ -174,7 +174,7 @@ describe("slack-download-file", () => {
     expect(result.structuredContent.attachmentId).toBe(attachment!.id);
     expect(result.structuredContent.taskId).toBe(taskId);
     expect(String(result.structuredContent.fetchCommand)).toContain(
-      `/api/fs/tasks/${taskId}/files/${attachment!.id}/raw" -o '/tmp/screenshot.png'`,
+      `/api/fs/tasks/${taskId}/files/${attachment!.id}/raw" --create-dirs -o '/tmp/attachments/${attachment!.id}/screenshot.png'`,
     );
     expect(await storedBytes(taskId, "screenshot.png")).toEqual(PNG);
   });
@@ -295,7 +295,7 @@ describe("slack-download-file", () => {
 
   test("the file a user already sent the bot is reused, not stored again", async () => {
     const file = addSlackFile("F0SHOT0001", "screenshot.png", PNG);
-    const inbound = await fetchSlackFiles({ token: BOT_TOKEN } as never, [file]);
+    await using inbound = await fetchSlackFiles({ token: BOT_TOKEN } as never, [file]);
     const { task } = await createSlackTaskWithFiles("from Slack", { agentId: AGENT_ID }, inbound);
     const [shared] = await getTaskAttachments(task.id);
 
@@ -312,10 +312,15 @@ describe("slack-download-file", () => {
     addSlackFile("F0IMAGE001", "image.png", PNG);
     addSlackFile("F0IMAGE002", "image.png", PNG_2);
 
-    await Promise.all([
+    const results = await Promise.all([
       downloadTool({ fileId: "F0IMAGE001" }, extra({ "x-source-task-id": taskId })),
       downloadTool({ fileId: "F0IMAGE002" }, extra({ "x-source-task-id": taskId })),
     ]);
+    // Both may end up named image.png; what matters is that fetching one
+    // can't overwrite the other in the worker's /tmp.
+    const [first, second] = results.map((r) => String(r.structuredContent.fetchCommand));
+    expect(first).not.toBe(second);
+    expect(first!.split(" -o ")[1]).not.toBe(second!.split(" -o ")[1]);
 
     const attachments = await getTaskAttachments(taskId);
     expect(attachments).toHaveLength(2);

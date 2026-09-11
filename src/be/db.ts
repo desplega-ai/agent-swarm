@@ -5710,6 +5710,18 @@ export async function promoteDraftTask(taskId: string): Promise<AgentTask | null
 }
 
 /**
+ * Mark a draft as still being worked on, so `promoteAbandonedDraftTasks`
+ * (which goes by `lastUpdatedAt`) doesn't promote it while an upload batch
+ * that outlasts the sweep window is still running. No-op once promoted.
+ */
+export async function refreshDraftTaskLease(taskId: string): Promise<void> {
+  await getDbClient().run(
+    "UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ? AND status = 'draft'",
+    [new Date().toISOString(), taskId],
+  );
+}
+
+/**
  * Heartbeat sweep: promote drafts abandoned mid-upload (tab closed, network
  * dropped) instead of leaving them permanently dispatch-ineligible — the
  * composer's UI-driven promote (`promoteDraftTask`) never fires if the user

@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type { FileObject, FileScope, FileStorageProvider } from "../fs/provider";
 import type { TaskAttachment } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
@@ -12,7 +11,9 @@ export type RecordTaskAttachmentUploadInput = {
   scope: FileScope;
   /** What `provider.upload(scope, body, …)` returned. */
   uploaded: FileObject;
-  body: Uint8Array;
+  /** Size and sha256 of the body that was uploaded. */
+  sizeBytes: number;
+  sha256: string;
   contentType: string;
   agentId: string | null;
   intent?: string;
@@ -29,7 +30,7 @@ export type RecordTaskAttachmentUploadInput = {
 export async function recordTaskAttachmentUpload(
   input: RecordTaskAttachmentUploadInput,
 ): Promise<TaskAttachment> {
-  const { provider, scope, uploaded, body, contentType } = input;
+  const { provider, scope, uploaded, contentType } = input;
   try {
     return await insertTaskAttachment({
       taskId: scope.taskId,
@@ -45,8 +46,8 @@ export async function recordTaskAttachmentUpload(
         etag: uploaded.etag,
       },
       mimeType: uploaded.contentType ?? contentType,
-      sizeBytes: uploaded.sizeBytes ?? body.byteLength,
-      sha256: uploaded.sha256 ?? createHash("sha256").update(body).digest("hex"),
+      sizeBytes: uploaded.sizeBytes ?? input.sizeBytes,
+      sha256: uploaded.sha256 ?? input.sha256,
       intent: input.intent,
       description: input.description,
       isPrimary: input.isPrimary ?? false,

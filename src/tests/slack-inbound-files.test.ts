@@ -13,11 +13,13 @@ import { join } from "node:path";
 import {
   closeDb,
   createAgent,
+  createTaskExtended,
   getDbClient,
   getLogsByTaskId,
   getTaskAttachments,
   getTaskById,
   initDb,
+  promoteAbandonedDraftTasks,
 } from "../be/db";
 import { MAX_TASK_ATTACHMENT_BYTES } from "../be/task-attachment-store";
 import { getFileStorageProvider, resetFileStorageProviderForTests } from "../fs/registry";
@@ -30,6 +32,7 @@ import {
   createSlackTaskWithFiles,
   fetchSlackFiles,
   notifySlackFileFailures,
+  setDraftLeaseRefreshMsForTests,
 } from "../slack/inbound-files";
 import { instantFlush } from "../slack/thread-buffer";
 
@@ -46,25 +49,56 @@ const previousEnv = {
   SLACK_BOT_TOKEN: process.env.SLACK_BOT_TOKEN,
   ADDITIVE_SLACK: process.env.ADDITIVE_SLACK,
   SLACK_RENDER_V2: process.env.SLACK_RENDER_V2,
+  STEERING_ENABLED: process.env.STEERING_ENABLED,
+  SLACK_THREAD_STEERING: process.env.SLACK_THREAD_STEERING,
 };
 
-// Mimics files.slack.com: the bytes with the right bearer token, Slack's HTML
-// login page without it (that's what a missing `files:read` scope looks like).
+const HTML_FILE = new TextEncoder().encode("<html><body>quarterly report</body></html>");
+const HUGE_BYTES = MAX_TASK_ATTACHMENT_BYTES + 16 * 1024 * 1024;
+/** Per Slack file id bytes the fake host serves; PNG_BYTES by default. */
+const bytesById = new Map<string, Uint8Array>();
+
+// Mimics files.slack.com: the bytes with the right bearer token; without it
+// (what a missing `files:read` scope looks like) a redirect to Slack's HTML
+// sign-in page.
 function startFakeSlackFileHost() {
   return Bun.serve({
     port: 0,
     fetch(req) {
       const url = new URL(req.url);
       fileRequests.push(url.pathname);
-      if (url.pathname.startsWith("/forbidden")) return new Response("nope", { status: 403 });
-      if (req.headers.get("authorization") !== `Bearer ${BOT_TOKEN}`) {
-        return new Response("<html><body>Sign in to Slack</body></html>", {
+      const signIn = () =>
+        new Response("<html><body>Sign in to Slack</body></html>", {
           headers: { "content-type": "text/html; charset=utf-8" },
         });
+      if (url.pathname === "/signin") return signIn();
+      // A sign-in page served in place, at the file's own URL.
+      if (url.pathname.startsWith("/login-in-place")) return signIn();
+      if (url.pathname.startsWith("/forbidden")) return new Response("nope", { status: 403 });
+      if (req.headers.get("authorization") !== `Bearer ${BOT_TOKEN}`) {
+        return Response.redirect(
+          `${url.origin}/signin?redir=${encodeURIComponent(url.pathname)}`,
+          302,
+        );
       }
-      return new Response(PNG_BYTES, { headers: { "content-type": "image/png" } });
+      if (url.pathname.includes("report.html")) {
+        return new Response(HTML_FILE, { headers: { "content-type": "text/html" } });
+      }
+      const id = /\/T0-([A-Z0-9]+)\//.exec(url.pathname)?.[1] ?? "";
+      return new Response(bytesById.get(id) ?? PNG_BYTES, {
+        headers: { "content-type": "image/png" },
+      });
     },
   });
+}
+
+/** Resolves once `release()` is called; lets a test hold a provider upload open. */
+function gate() {
+  let release!: () => void;
+  const opened = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { opened, release };
 }
 
 function slackFile(overrides: Partial<SlackFile> = {}): SlackFile {
@@ -79,6 +113,17 @@ function slackFile(overrides: Partial<SlackFile> = {}): SlackFile {
     url_private_download: `${slackFiles.url}files-pri/T0-${id}/download/screenshot.png`,
     ...overrides,
   };
+}
+
+/** A real HTML file on Slack, served as `text/html` with the right token. */
+function htmlReport(): SlackFile {
+  return slackFile({
+    id: "F0HTML0001",
+    name: "report.html",
+    mimetype: "text/html",
+    size: HTML_FILE.byteLength,
+    url_private_download: `${slackFiles.url}files-pri/T0-F0HTML0001/download/report.html`,
+  });
 }
 
 function slackClient(overrides: Record<string, unknown> = {}) {
@@ -144,6 +189,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   fileRequests.length = 0;
+  bytesById.clear();
   await getDbClient().run("DELETE FROM task_attachments");
   await getDbClient().run("DELETE FROM agent_tasks");
   await getDbClient().run("DELETE FROM agents");
@@ -156,19 +202,98 @@ describe("fetchSlackFiles", () => {
 
     expect(inbound.failed).toEqual([]);
     expect(inbound.fetched).toHaveLength(1);
-    expect(inbound.fetched[0]!.body).toEqual(PNG_BYTES);
+    const [fetched] = inbound.fetched;
+    expect(new Uint8Array(await Bun.file(fetched!.path).arrayBuffer())).toEqual(PNG_BYTES);
+    expect(fetched!.sizeBytes).toBe(PNG_BYTES.byteLength);
+    expect(fetched!.sha256).toBe(new Bun.CryptoHasher("sha256").update(PNG_BYTES).digest("hex"));
     expect(inbound.files).toEqual([file]);
+
+    // Disposing the batch removes the downloaded copies.
+    await inbound[Symbol.asyncDispose]();
+    expect(await Bun.file(fetched!.path).exists()).toBe(false);
+  });
+
+  test("keeps a real HTML file Slack serves", async () => {
+    await using inbound = await fetchSlackFiles(slackClient() as never, [htmlReport()]);
+
+    expect(inbound.failed).toEqual([]);
+    expect(inbound.fetched).toHaveLength(1);
+  });
+
+  test("rejects Slack's sign-in page for an HTML file too", async () => {
+    await using inbound = await fetchSlackFiles(slackClient({ token: "xoxb-wrong" }) as never, [
+      htmlReport(),
+    ]);
+
+    expect(inbound.fetched).toEqual([]);
+    expect(inbound.failed[0]!.reason).toContain("files:read");
+  });
+
+  test("rejects an HTML sign-in page served in place, by its size", async () => {
+    const file = slackFile({
+      id: "F0HTML0002",
+      name: "notes.html",
+      mimetype: "text/html",
+      size: 4096,
+      url_private_download: `${slackFiles.url}login-in-place/T0-F0HTML0002/notes.html`,
+    });
+    await using inbound = await fetchSlackFiles(slackClient() as never, [file]);
+
+    expect(inbound.fetched).toEqual([]);
+    expect(inbound.failed[0]!.reason).toContain("4096-byte file");
+  });
+
+  test("stops reading at the attachment cap instead of buffering the whole body", async () => {
+    // Slack sometimes omits `size`; the cap still has to hold while streaming.
+    // The body only produces a chunk when it is read, so `pulled` counts exactly
+    // what the download consumed — independent of any HTTP server's buffering.
+    const chunk = new Uint8Array(1024 * 1024);
+    let pulled = 0;
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          if (pulled >= HUGE_BYTES) return controller.close();
+          pulled += chunk.byteLength;
+          controller.enqueue(chunk);
+        },
+        cancel() {
+          cancelled = true;
+        },
+      },
+      { highWaterMark: 0 },
+    );
+    const fetchSpy = spyOn(globalThis, "fetch").mockImplementationOnce(
+      async () => new Response(body, { headers: { "content-type": "application/octet-stream" } }),
+    );
+    const file = slackFile({
+      id: "F0HUGE0001",
+      name: "huge.bin",
+      mimetype: "application/octet-stream",
+      size: 0,
+    });
+
+    try {
+      await using inbound = await fetchSlackFiles(slackClient() as never, [file]);
+
+      expect(inbound.fetched).toEqual([]);
+      expect(inbound.failed[0]!.reason).toContain("50 MB");
+      expect(cancelled).toBe(true);
+      expect(pulled).toBeLessThanOrEqual(MAX_TASK_ATTACHMENT_BYTES + 2 * chunk.byteLength);
+    } finally {
+      fetchSpy.mockRestore();
+    }
   });
 
   test("returns an empty result without touching Slack when there are no files", async () => {
-    const inbound = await fetchSlackFiles(slackClient() as never, undefined);
-    expect(inbound).toEqual({ files: [], fetched: [], failed: [] });
+    await using inbound = await fetchSlackFiles(slackClient() as never, undefined);
+    expect([inbound.files, inbound.fetched, inbound.failed]).toEqual([[], [], []]);
     expect(fileRequests).toEqual([]);
   });
 
   test("skips a file above the attachment cap without downloading it", async () => {
     const file = slackFile({ size: MAX_TASK_ATTACHMENT_BYTES + 1 });
-    const inbound = await fetchSlackFiles(slackClient() as never, [file]);
+    await using inbound = await fetchSlackFiles(slackClient() as never, [file]);
 
     expect(inbound.fetched).toEqual([]);
     expect(inbound.failed).toHaveLength(1);
@@ -178,14 +303,14 @@ describe("fetchSlackFiles", () => {
 
   test("reports a non-2xx download", async () => {
     const file = slackFile({ url_private_download: `${slackFiles.url}forbidden/x.png` });
-    const inbound = await fetchSlackFiles(slackClient() as never, [file]);
+    await using inbound = await fetchSlackFiles(slackClient() as never, [file]);
 
     expect(inbound.fetched).toEqual([]);
     expect(inbound.failed[0]!.reason).toContain("HTTP 403");
   });
 
   test("treats Slack's HTML login page as a failure, not as the file", async () => {
-    const inbound = await fetchSlackFiles(slackClient({ token: "xoxb-wrong" }) as never, [
+    await using inbound = await fetchSlackFiles(slackClient({ token: "xoxb-wrong" }) as never, [
       slackFile(),
     ]);
 
@@ -198,7 +323,7 @@ describe("fetchSlackFiles", () => {
     const info = mock(async () => ({ ok: true, file: full }));
     const bare = { id: "F0CONNECT1" } as SlackFile;
 
-    const inbound = await fetchSlackFiles(slackClient({ files: { info } }) as never, [bare]);
+    await using inbound = await fetchSlackFiles(slackClient({ files: { info } }) as never, [bare]);
 
     expect(info).toHaveBeenCalledWith({ file: "F0CONNECT1" });
     expect(inbound.files[0]!.name).toBe("screenshot.png");
@@ -207,7 +332,7 @@ describe("fetchSlackFiles", () => {
 
   test("reports a file with no download URL anywhere", async () => {
     const bare = { id: "F0HIDDEN01", name: "hidden.png", mimetype: "image/png" } as SlackFile;
-    const inbound = await fetchSlackFiles(slackClient() as never, [bare]);
+    await using inbound = await fetchSlackFiles(slackClient() as never, [bare]);
 
     expect(inbound.fetched).toEqual([]);
     expect(inbound.failed[0]!.reason).toContain("download URL");
@@ -219,7 +344,7 @@ describe("fetchSlackFiles", () => {
       throw new Error(`upstream rejected ${BOT_TOKEN}`);
     });
     try {
-      const inbound = await fetchSlackFiles(slackClient() as never, [file]);
+      await using inbound = await fetchSlackFiles(slackClient() as never, [file]);
       expect(inbound.failed[0]!.reason).toContain("download failed");
       expect(inbound.failed[0]!.reason).not.toContain(BOT_TOKEN);
     } finally {
@@ -253,7 +378,7 @@ describe("buildEffectiveText", () => {
 describe("createSlackTaskWithFiles", () => {
   test("holds the task in draft until its attachments land, then promotes it", async () => {
     const lead = await createAgent({ name: "lead", isLead: true, status: "idle" });
-    const inbound = await fetchSlackFiles(slackClient() as never, [slackFile()]);
+    await using inbound = await fetchSlackFiles(slackClient() as never, [slackFile()]);
 
     const { task, unattached } = await createSlackTaskWithFiles(
       "please look",
@@ -282,7 +407,7 @@ describe("createSlackTaskWithFiles", () => {
     const { task } = await createSlackTaskWithFiles(
       "just text",
       { agentId: lead.id, source: "slack" },
-      { files: [], fetched: [], failed: [] },
+      await fetchSlackFiles(slackClient() as never, []),
     );
 
     expect(task.status).toBe("pending");
@@ -292,12 +417,13 @@ describe("createSlackTaskWithFiles", () => {
 
   test("keeps two files that share a name", async () => {
     const lead = await createAgent({ name: "lead", isLead: true, status: "idle" });
-    const inbound = await fetchSlackFiles(slackClient() as never, [
-      slackFile({ id: "F0IMAGE001", name: "image.png" }),
-      slackFile({ id: "F0IMAGE002", name: "image.png" }),
-    ]);
     // Same bytes would dedupe by sha256; make the second one different.
-    inbound.fetched[1]!.body = new Uint8Array([...PNG_BYTES, 4]);
+    const second = new Uint8Array([...PNG_BYTES, 4]);
+    bytesById.set("F0IMAGE002", second);
+    await using inbound = await fetchSlackFiles(slackClient() as never, [
+      slackFile({ id: "F0IMAGE001", name: "image.png" }),
+      slackFile({ id: "F0IMAGE002", name: "image.png", size: second.byteLength }),
+    ]);
 
     const { task } = await createSlackTaskWithFiles("two", { agentId: lead.id }, inbound);
 
@@ -309,7 +435,7 @@ describe("createSlackTaskWithFiles", () => {
   test("reports download failures as unattached even when nothing was stored", async () => {
     const lead = await createAgent({ name: "lead", isLead: true, status: "idle" });
     const file = slackFile({ url_private_download: `${slackFiles.url}forbidden/x.png` });
-    const inbound = await fetchSlackFiles(slackClient() as never, [file]);
+    await using inbound = await fetchSlackFiles(slackClient() as never, [file]);
 
     const { unattached } = await createSlackTaskWithFiles("x", { agentId: lead.id }, inbound);
 
@@ -318,7 +444,7 @@ describe("createSlackTaskWithFiles", () => {
 
   test("still promotes the task when storing an attachment fails", async () => {
     const lead = await createAgent({ name: "lead", isLead: true, status: "idle" });
-    const inbound = await fetchSlackFiles(slackClient() as never, [slackFile()]);
+    await using inbound = await fetchSlackFiles(slackClient() as never, [slackFile()]);
     const upload = spyOn(getFileStorageProvider(), "upload").mockImplementationOnce(async () => {
       throw new Error("storage down");
     });
@@ -335,6 +461,63 @@ describe("createSlackTaskWithFiles", () => {
       expect(unattached[0]!.reason).toContain("storage down");
     } finally {
       upload.mockRestore();
+    }
+  });
+
+  test("a slow upload keeps the draft out of the abandoned-draft sweep", async () => {
+    const lead = await createAgent({ name: "lead", isLead: true, status: "idle" });
+    await using inbound = await fetchSlackFiles(slackClient() as never, [slackFile()]);
+    const provider = getFileStorageProvider();
+    const realUpload = provider.upload.bind(provider);
+    const held = gate();
+    const upload = spyOn(provider, "upload").mockImplementation(async (...args) => {
+      await held.opened;
+      return realUpload(...args);
+    });
+    const previousInterval = setDraftLeaseRefreshMsForTests(20);
+
+    try {
+      const creating = createSlackTaskWithFiles("slow", { agentId: lead.id }, inbound);
+      let draftId: string | undefined;
+      for (let i = 0; i < 100 && !draftId; i++) {
+        await Bun.sleep(5);
+        draftId = (
+          await getDbClient().get<{ id: string }>(
+            "SELECT id FROM agent_tasks WHERE status = 'draft' AND task = 'slow'",
+          )
+        )?.id;
+      }
+      expect(draftId).toBeDefined();
+
+      // Pretend the upload has been running for ten minutes.
+      const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+        tenMinutesAgo,
+        draftId!,
+      ]);
+      // Wait for the lease to be renewed (the draft's clock moves forward again).
+      let renewed = false;
+      for (let i = 0; i < 400 && !renewed; i++) {
+        await Bun.sleep(5);
+        const row = await getDbClient().get<{ lastUpdatedAt: string }>(
+          "SELECT lastUpdatedAt FROM agent_tasks WHERE id = ?",
+          [draftId!],
+        );
+        renewed = !!row && row.lastUpdatedAt > tenMinutesAgo;
+      }
+      expect(renewed).toBe(true);
+
+      expect(await promoteAbandonedDraftTasks(5)).toBe(0);
+      expect((await getTaskById(draftId!))!.status).toBe("draft");
+
+      held.release();
+      const { task } = await creating;
+      expect((await getTaskById(task.id))!.status).toBe("pending");
+      expect(await getTaskAttachments(task.id)).toHaveLength(1);
+    } finally {
+      held.release();
+      upload.mockRestore();
+      setDraftLeaseRefreshMsForTests(previousInterval);
     }
   });
 });
@@ -391,6 +574,14 @@ describe("Slack ingress with files", () => {
   afterAll(() => {
     resolveSlackUserIdSpy.mockRestore();
   });
+
+  function restoreSteeringEnv() {
+    for (const key of ["STEERING_ENABLED", "SLACK_THREAD_STEERING"] as const) {
+      const value = previousEnv[key];
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
 
   async function sendAssistantDm(message: Record<string, unknown>, client = slackClient()) {
     seq += 1;
@@ -494,6 +685,10 @@ describe("Slack ingress with files", () => {
       first!.id,
     ]);
     process.env.ADDITIVE_SLACK = "true";
+    // instantFlush steers into the running session when steering is on; this
+    // asserts the task-creating path, so keep steering off whatever the env says.
+    process.env.STEERING_ENABLED = "false";
+    delete process.env.SLACK_THREAD_STEERING;
     const client = slackClient();
 
     try {
@@ -519,18 +714,77 @@ describe("Slack ingress with files", () => {
       process.env.ADDITIVE_SLACK = "false";
     }
 
+    try {
+      await assertQueuedFollowUp();
+    } finally {
+      restoreSteeringEnv();
+    }
+
+    async function assertQueuedFollowUp() {
+      expect(fileRequests).toEqual([]);
+      expect(client.chat.postMessage).toHaveBeenCalledTimes(1);
+      const [args] = client.chat.postMessage.mock.calls[0] as unknown as [{ text: string }];
+      expect(args.text).toContain("`screenshot.png` (follow-ups queued by ADDITIVE_SLACK");
+
+      // Drain the debounce buffer now, while the DB is still open.
+      await instantFlush(`${first!.slackChannelId}:${first!.slackThreadTs}`);
+      const queued = await getDbClient().get<{ task: string }>(
+        "SELECT task FROM agent_tasks WHERE slackThreadTs = ? AND id != ? ORDER BY createdAt DESC",
+        [first!.slackThreadTs, first!.id],
+      );
+      expect(queued?.task).toContain("(not attached: follow-ups queued by ADDITIVE_SLACK");
+    }
+  });
+
+  test("a !now follow-up with a file says the file was not attached", async () => {
+    const lead = await createAgent({ name: "lead", isLead: true, status: "busy" });
+    const threadTs = "1950000000.000001";
+    const earlier = await createTaskExtended("earlier work", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: "C0NOWTEST1",
+      slackThreadTs: threadTs,
+    });
+    await getDbClient().run("UPDATE agent_tasks SET status = 'in_progress' WHERE id = ?", [
+      earlier.id,
+    ]);
+    process.env.ADDITIVE_SLACK = "true";
+    process.env.STEERING_ENABLED = "false";
+    delete process.env.SLACK_THREAD_STEERING;
+    const client = slackClient();
+    seq += 1;
+
+    try {
+      await channelMessage({
+        event: {
+          type: "message",
+          subtype: "file_share",
+          channel: "C0NOWTEST1",
+          thread_ts: threadTs,
+          ts: `1950000001.${String(seq).padStart(6, "0")}`,
+          user: "U_HUMAN",
+          text: "!now here it is",
+          files: [slackFile()],
+        },
+        body: { event_id: `evt_inbound_files_${seq}` },
+        client,
+        say: mock(async () => ({})),
+      });
+    } finally {
+      process.env.ADDITIVE_SLACK = "false";
+      restoreSteeringEnv();
+    }
+
     expect(fileRequests).toEqual([]);
     expect(client.chat.postMessage).toHaveBeenCalledTimes(1);
     const [args] = client.chat.postMessage.mock.calls[0] as unknown as [{ text: string }];
-    expect(args.text).toContain("`screenshot.png` (follow-ups queued by ADDITIVE_SLACK");
-
-    // Drain the debounce buffer now, while the DB is still open.
-    await instantFlush(`${first!.slackChannelId}:${first!.slackThreadTs}`);
-    const queued = await getDbClient().get<{ task: string }>(
-      "SELECT task FROM agent_tasks WHERE slackThreadTs = ? AND id != ? ORDER BY createdAt DESC",
-      [first!.slackThreadTs, first!.id],
+    expect(args.text).toContain("`screenshot.png`");
+    const flushed = await getDbClient().get<{ task: string }>(
+      "SELECT task FROM agent_tasks WHERE slackThreadTs = ? AND task != 'earlier work'",
+      [threadTs],
     );
-    expect(queued?.task).toContain("(not attached: follow-ups queued by ADDITIVE_SLACK");
+    expect(flushed?.task).toContain("here it is");
+    expect(flushed?.task).toContain("(not attached: follow-ups queued by ADDITIVE_SLACK");
   });
 
   test("a channel message that mentions the bot with a file attaches it", async () => {

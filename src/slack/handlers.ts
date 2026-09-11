@@ -487,7 +487,11 @@ export function registerMessageHandler(app: App): void {
       false,
     );
     if (additiveSlack && msg.thread_ts) {
-      const stripped = effectiveText.replace(/<@[A-Z0-9]+>/g, "").trim();
+      // A !now follow-up is buffered too: its files ride along as marked `[File: …]` lines only.
+      const unattached = bufferedFileFailures(msg.files);
+      const stripped = buildEffectiveText(msg.text, msg.files, unattached)
+        .replace(/<@[A-Z0-9]+>/g, "")
+        .trim();
       if (
         stripped.startsWith("!now") &&
         (await hasSwarmThreadActivity(client, msg.channel, msg.thread_ts))
@@ -507,6 +511,7 @@ export function registerMessageHandler(app: App): void {
         await instantFlush(threadKey);
 
         await ackSlackMessage(client, msg.channel, msg.ts, reactionName("now"), "now");
+        await notifySlackFileFailures(client, msg.channel, msg.thread_ts, unattached);
 
         return;
       }
@@ -581,7 +586,7 @@ export function registerMessageHandler(app: App): void {
         return;
       }
 
-      const inbound = await fetchSlackFiles(client, msg.files);
+      await using inbound = await fetchSlackFiles(client, msg.files);
       const taskText = buildEffectiveText(msg.text, inbound.files, inbound.failed);
       const taskDescription = isImplicitMention
         ? taskText
@@ -655,7 +660,7 @@ export function registerMessageHandler(app: App): void {
     }
 
     // Extract task description (the text plus a `[File: …]` line per attachment)
-    const inbound = await fetchSlackFiles(client, msg.files);
+    await using inbound = await fetchSlackFiles(client, msg.files);
     const taskDescription = extractTaskFromMessage(
       buildEffectiveText(msg.text, inbound.files, inbound.failed),
       botUserId,

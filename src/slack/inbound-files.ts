@@ -4,16 +4,21 @@
  *
  * The API downloads each file with the bot token, stores it through the active
  * file provider and records a `task_attachments` row, so the worker gets the
- * same fetch recipe as a file uploaded from the UI. The task is created in
- * `draft` while that happens (#1240): nobody can claim it before its
- * attachments exist. Every file also stays in the task text as a
+ * same fetch recipe as a file uploaded from the UI. Downloads stream to temp
+ * files (the size cap holds mid-stream and a batch never sits in memory). The
+ * task is created in `draft` while its uploads run (#1240), with its lease
+ * renewed so the abandoned-draft sweep leaves it alone: nobody can claim it
+ * before its attachments exist. Every file also stays in the task text as a
  * `[File: …]` line, and the user gets a thread reply naming any file that
  * could not be attached — never dropped silently. A download failure is
  * also flagged on that line; a storage failure happens after the text is
  * written, so it shows up only in the reply and in the missing attachment.
  */
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { WebClient } from "@slack/web-api";
-import { getTaskAttachments, getTaskById, promoteDraftTask } from "../be/db";
+import { getTaskAttachments, getTaskById, promoteDraftTask, refreshDraftTaskLease } from "../be/db";
 import { MAX_TASK_ATTACHMENT_BYTES, recordTaskAttachmentUpload } from "../be/task-attachment-store";
 import { providerPath } from "../fs/provider";
 import { getFileStorageProvider } from "../fs/registry";
@@ -27,6 +32,10 @@ import { getFileInfo, type SlackFile } from "./files";
 import "./templates";
 
 const DOWNLOAD_TIMEOUT_MS = 30_000;
+const SIGNED_OUT_REASON =
+  "Slack returned its sign-in page instead of the file (is the files:read scope granted?)";
+/** How often a draft's lease is renewed while its uploads run; the sweep waits 5 minutes. */
+let draftLeaseRefreshMs = 60_000;
 /** A file a user sent the bot, like one uploaded from the dashboard composer. */
 const SHARED_FILE_INTENT = "user-upload";
 /** A file an agent pulled from Slack with `slack-download-file` / `slack-read`. */
@@ -42,11 +51,16 @@ export type SlackFileOutcome =
   | { attachment: TaskAttachment; fetchCommand: string }
   | { reason: string };
 
+/** A downloaded Slack file, spooled to a temp file so a batch never sits in memory. */
+export type FetchedSlackFile = { file: SlackFile; path: string; sizeBytes: number; sha256: string };
+
 export type InboundSlackFiles = {
   /** Every file on the message, with full metadata (resolved via `files.info` when the event omitted it). */
   files: SlackFile[];
-  fetched: Array<{ file: SlackFile; body: Uint8Array }>;
+  fetched: FetchedSlackFile[];
   failed: SlackFileFailure[];
+  /** Deletes the downloaded copies; hold the batch with `await using`. */
+  [Symbol.asyncDispose](): Promise<void>;
 };
 
 /** Error text safe to put in a task or a Slack message. */
@@ -116,60 +130,111 @@ export function bufferedFileFailures(files: SlackFile[] | undefined): SlackFileF
 }
 
 /**
- * Download every file on a Slack message with the bot token. Never throws: a
- * file that can't be fetched lands in `failed` with a reason the user and the
- * agent can read.
+ * Download every file on a Slack message with the bot token, each to its own
+ * temp file. Never throws: a file that can't be fetched lands in `failed` with
+ * a reason the user and the agent can read. Hold the result with `await using`
+ * so the temp files go away with it.
  */
 export async function fetchSlackFiles(
   client: WebClient,
   files: SlackFile[] | undefined,
 ): Promise<InboundSlackFiles> {
-  const result: InboundSlackFiles = { files: [], fetched: [], failed: [] };
+  let dir: string | undefined;
+  const result: InboundSlackFiles = {
+    files: [],
+    fetched: [],
+    failed: [],
+    async [Symbol.asyncDispose]() {
+      if (dir) await rm(dir, { recursive: true, force: true });
+    },
+  };
   if (!files || files.length === 0) return result;
 
+  // Disk use is bounded by the per-file cap times the files on this message.
+  dir = await mkdtemp(join(tmpdir(), "slack-files-"));
   const token = client.token ?? process.env.SLACK_BOT_TOKEN;
-  for (const eventFile of files) {
+  for (const [index, eventFile] of files.entries()) {
     // Slack Connect and some file_share events carry only the file id.
     const file = eventFile.url_private_download
       ? eventFile
       : ((await getFileInfo(client, eventFile.id)) ?? eventFile);
     result.files.push(file);
 
-    const outcome = await downloadSlackFile(file, token);
+    const outcome = await downloadSlackFile(file, token, join(dir, String(index)));
     if (typeof outcome === "string") {
       console.warn(`[Slack] could not fetch file ${file.id}: ${outcome}`);
       result.failed.push({ file, reason: outcome });
     } else {
-      result.fetched.push({ file, body: outcome });
+      result.fetched.push({ file, ...outcome });
     }
   }
   return result;
 }
 
-/** The file's bytes, or the reason they couldn't be fetched. */
+/**
+ * Stream one file to `path`, enforcing the attachment cap as bytes arrive, or
+ * return why it couldn't be fetched. Without `files:read` Slack serves its HTML
+ * sign-in page instead of the file, via a redirect or in place. So an HTML
+ * response counts as "not the file" when the file isn't HTML, when it came
+ * through a redirect off `/files-pri/`, or when its size isn't the one Slack
+ * declared for the file. Non-HTML responses are never second-guessed.
+ */
 async function downloadSlackFile(
   file: SlackFile,
   token: string | undefined,
-): Promise<Uint8Array | string> {
+  path: string,
+): Promise<Omit<FetchedSlackFile, "file"> | string> {
   const limit = `larger than the ${MAX_TASK_ATTACHMENT_BYTES / (1024 * 1024)} MB limit`;
   if (file.size > MAX_TASK_ATTACHMENT_BYTES) return limit;
   if (!file.url_private_download) return "Slack gave no download URL";
   if (!token) return "no Slack bot token configured";
 
+  // Aborting — not just leaving the read loop — closes the connection, so the
+  // rest of an unwanted body stops arriving instead of being read and dropped.
+  const abort = new AbortController();
   try {
     const response = await fetch(file.url_private_download, {
       headers: { Authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
+      signal: AbortSignal.any([abort.signal, AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS)]),
     });
     if (!response.ok) return `download failed (HTTP ${response.status})`;
-    // Without `files:read` Slack answers 200 with its HTML sign-in page.
-    const contentType = response.headers.get("content-type") ?? "";
-    if (contentType.startsWith("text/html") && !file.mimetype?.startsWith("text/html")) {
-      return "Slack returned its sign-in page instead of the file (is the files:read scope granted?)";
+    const isHtml = (response.headers.get("content-type") ?? "").startsWith("text/html");
+    const redirectedToHtml =
+      isHtml && response.redirected && !new URL(response.url).pathname.includes("/files-pri/");
+    if (redirectedToHtml || (isHtml && !file.mimetype?.startsWith("text/html"))) {
+      abort.abort();
+      return SIGNED_OUT_REASON;
     }
-    const body = new Uint8Array(await response.arrayBuffer());
-    if (body.byteLength > MAX_TASK_ATTACHMENT_BYTES) return limit;
-    return body;
+    if (Number(response.headers.get("content-length") ?? 0) > MAX_TASK_ATTACHMENT_BYTES) {
+      abort.abort();
+      return limit;
+    }
+
+    const hasher = new Bun.CryptoHasher("sha256");
+    const sink = Bun.file(path).writer({ highWaterMark: 1024 * 1024 });
+    let sizeBytes = 0;
+    let overCap = false;
+    try {
+      for await (const chunk of response.body ?? []) {
+        sizeBytes += chunk.byteLength;
+        if (sizeBytes > MAX_TASK_ATTACHMENT_BYTES) {
+          overCap = true;
+          break;
+        }
+        hasher.update(chunk);
+        sink.write(chunk);
+      }
+    } finally {
+      await sink.end();
+    }
+    if (overCap) {
+      abort.abort();
+      return limit;
+    }
+    if (isHtml && file.size > 0 && sizeBytes !== file.size) {
+      return `Slack sent ${sizeBytes} bytes of HTML for a ${file.size}-byte file, likely its sign-in page (is the files:read scope granted?)`;
+    }
+    return { path, sizeBytes, sha256: hasher.digest("hex") };
   } catch (error) {
     return `download failed (${errorText(error)})`;
   }
@@ -195,12 +260,29 @@ export async function createSlackTaskWithFiles(
 
   const task = await createTaskWithSiblingAwareness(description, { ...options, status: "draft" });
   const unattached = [...inbound.failed];
+  // Uploads run one after another and can outlast the abandoned-draft sweep's
+  // window; renewing the lease keeps the sweep from promoting a live batch.
+  const lease = setInterval(() => {
+    void refreshDraftTaskLease(task.id).catch((error) =>
+      console.warn(
+        `[Slack] could not renew the draft lease of task ${task.id}: ${errorText(error)}`,
+      ),
+    );
+  }, draftLeaseRefreshMs);
   try {
     unattached.push(...(await attachSlackFilesToTask(task.id, inbound.fetched, null)).unattached);
   } finally {
+    clearInterval(lease);
     await promoteDraftTask(task.id);
   }
   return { task, unattached };
+}
+
+/** Tests shorten the draft lease renewal to observe it; returns the previous interval. */
+export function setDraftLeaseRefreshMsForTests(ms: number): number {
+  const previous = draftLeaseRefreshMs;
+  draftLeaseRefreshMs = ms;
+  return previous;
 }
 
 /**
@@ -211,8 +293,10 @@ export async function createSlackTaskWithFiles(
  * again. Each blob is keyed by its Slack file id, so two different files can
  * never overwrite each other's bytes — not even from parallel tool calls.
  * The attachment name stays the file's own, and gets the Slack file id as a
- * prefix only when another attachment already uses it (pasted screenshots are
- * all called "image.png"), so fetch commands don't collide in `/tmp` either.
+ * prefix when another attachment already uses it (pasted screenshots are all
+ * called "image.png"). That is only for readability: concurrent calls can still
+ * pick the same name, and fetch commands never depend on it — each attachment
+ * downloads into its own directory.
  */
 export async function attachSlackFilesToTask(
   taskId: string,
@@ -226,8 +310,7 @@ export async function attachSlackFilesToTask(
   const attached: AttachedSlackFile[] = [];
   const unattached: SlackFileFailure[] = [];
 
-  for (const { file, body } of fetched) {
-    const sha256 = new Bun.CryptoHasher("sha256").update(body).digest("hex");
+  for (const { file, path, sizeBytes, sha256 } of fetched) {
     const known = bySha.get(sha256);
     if (known) {
       attached.push({ file, attachment: known });
@@ -238,16 +321,17 @@ export async function attachSlackFilesToTask(
     const key = providerPath({ taskId, name: `slack-${file.id}-${file.name}` });
     const scope = { taskId, name, key };
     try {
-      const uploaded = await provider.upload(scope, body, {
+      const uploaded = await provider.upload(scope, Bun.file(path), {
         contentType: file.mimetype,
-        sizeBytes: body.byteLength,
+        sizeBytes,
         message: `Upload ${name} from Slack for task ${taskId}`,
       });
       const attachment = await recordTaskAttachmentUpload({
         provider,
         scope,
-        uploaded: { ...uploaded, sha256: uploaded.sha256 ?? sha256 },
-        body,
+        uploaded,
+        sizeBytes,
+        sha256,
         contentType: file.mimetype,
         agentId,
         intent: agentId ? FETCHED_FILE_INTENT : SHARED_FILE_INTENT,
@@ -268,7 +352,8 @@ export async function attachSlackFilesToTask(
 
 /**
  * Download Slack files and attach them to `task` on behalf of `agentId`
- * (`slack-download-file`, `slack-read`). One outcome per Slack file id.
+ * (`slack-download-file`, `slack-read`), one file at a time so a long thread
+ * never holds more than one download. One outcome per Slack file id.
  */
 export async function attachSlackFilesForAgent(
   client: WebClient,
@@ -276,17 +361,24 @@ export async function attachSlackFilesForAgent(
   files: SlackFile[],
   agentId: string,
 ): Promise<Map<string, SlackFileOutcome>> {
-  const inbound = await fetchSlackFiles(client, files);
-  const { attached, unattached } = await attachSlackFilesToTask(task.id, inbound.fetched, agentId);
   const outcomes = new Map<string, SlackFileOutcome>();
-  for (const { file, reason } of [...inbound.failed, ...unattached]) {
-    outcomes.set(file.id, { reason });
-  }
-  for (const { file, attachment } of attached) {
-    outcomes.set(file.id, {
-      attachment,
-      fetchCommand: taskAttachmentFetchCommand(task.id, attachment.id, attachment.name),
-    });
+  for (const file of files) {
+    if (outcomes.has(file.id)) continue;
+    await using inbound = await fetchSlackFiles(client, [file]);
+    const { attached, unattached } = await attachSlackFilesToTask(
+      task.id,
+      inbound.fetched,
+      agentId,
+    );
+    for (const { file: failed, reason } of [...inbound.failed, ...unattached]) {
+      outcomes.set(failed.id, { reason });
+    }
+    for (const { file: stored, attachment } of attached) {
+      outcomes.set(stored.id, {
+        attachment,
+        fetchCommand: taskAttachmentFetchCommand(task.id, attachment.id, attachment.name),
+      });
+    }
   }
   return outcomes;
 }
