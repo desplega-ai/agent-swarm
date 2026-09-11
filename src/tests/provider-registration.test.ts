@@ -14,6 +14,14 @@ const bootstrapBlock = entrypoint.slice(
   entrypoint.indexOf(bootstrapStart),
   entrypoint.indexOf(bootstrapEnd),
 );
+const codexHomeAssignment = 'WORKER_CODEX_HOME="/home/worker/.codex"';
+const isolatedBootstrapBlock = bootstrapBlock.replace(
+  codexHomeAssignment,
+  'WORKER_CODEX_HOME="$TEST_WORKER_CODEX_HOME"',
+);
+if (isolatedBootstrapBlock === bootstrapBlock) {
+  throw new Error(`Could not isolate entrypoint assignment: ${codexHomeAssignment}`);
+}
 
 const modelsDevFixture = {
   anthropic: { models: { "claude-test": { cost: { input: 1, output: 2 } } } },
@@ -36,11 +44,11 @@ async function runCredentialBootstrap(provider: string): Promise<{
 }> {
   const testRoot = await mkdtemp(join(tmpdir(), "provider-registration-"));
   try {
-    const proc = Bun.spawn(["bash", "-c", bootstrapBlock], {
+    const proc = Bun.spawn(["bash", "-c", isolatedBootstrapBlock], {
       env: {
         PATH: process.env.PATH ?? "",
         HOME: join(testRoot, "home"),
-        WORKER_CODEX_HOME: join(testRoot, "codex"),
+        TEST_WORKER_CODEX_HOME: join(testRoot, "codex"),
         HARNESS_PROVIDER: provider,
         API_KEY: "",
         MCP_BASE_URL: "",

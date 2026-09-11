@@ -151,7 +151,7 @@ elif [ "$HARNESS_PROVIDER" = "devin" ]; then
         echo "Devin API: configured (org: ${DEVIN_ORG_ID})"
     fi
 elif [ "$HARNESS_PROVIDER" = "codex" ]; then
-    WORKER_CODEX_HOME="${WORKER_CODEX_HOME:-/home/worker/.codex}"
+    WORKER_CODEX_HOME="/home/worker/.codex"
 
     # If a stale api-key-mode auth.json is on disk, drop it so the OAuth path
     # below can write fresh chatgpt-mode credentials. (codex_oauth wins over
