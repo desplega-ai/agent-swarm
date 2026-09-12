@@ -11,6 +11,11 @@ import {
   initDb,
   updateSwarmRepo,
 } from "../be/db";
+import {
+  REPO_GUIDELINES_MAX_ENTRIES,
+  RepoGuidelinesInputSchema,
+  RepoGuidelinesSchema,
+} from "../types";
 
 const TEST_DB_PATH = "./test-swarm-repos.sqlite";
 
@@ -253,6 +258,21 @@ describe("Swarm Repos", () => {
 
       const updated = await updateSwarmRepo(repo!.id, { guidelines: null });
       expect(updated?.guidelines).toBeNull();
+    });
+
+    test("write schema caps each guideline list; read schema stays unbounded", () => {
+      const atCap = Array.from({ length: REPO_GUIDELINES_MAX_ENTRIES }, (_, i) => `check ${i}`);
+      const overCap = [...atCap, "one more"];
+      const base = { prChecks: [], mergeChecks: [], allowMerge: false, review: [] };
+
+      expect(RepoGuidelinesInputSchema.safeParse({ ...base, prChecks: atCap }).success).toBe(true);
+      for (const key of ["prChecks", "mergeChecks", "review"] as const) {
+        expect(RepoGuidelinesInputSchema.safeParse({ ...base, [key]: overCap }).success).toBe(
+          false,
+        );
+        // A stored row above the cap must still read back.
+        expect(RepoGuidelinesSchema.safeParse({ ...base, [key]: overCap }).success).toBe(true);
+      }
     });
 
     test("should round-trip null vs configured distinction", async () => {

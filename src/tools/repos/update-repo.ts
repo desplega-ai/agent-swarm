@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { updateSwarmRepo } from "@/be/db";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
-import { RepoGuidelinesSchema, RepoHooksSchema } from "@/types";
+import { RepoGuidelinesInputSchema, RepoHooksSchema } from "@/types";
 
 const swarmRepoOutputShape = z.looseObject({
   id: z.string().optional(),
@@ -46,7 +46,7 @@ export const registerUpdateRepoTool = (server: McpServer) => {
           .describe(
             "Repository hook install config. Set { enabled: true } to opt into best-effort worker hook installation, or null to disable.",
           ),
-        guidelines: RepoGuidelinesSchema.nullable()
+        guidelines: RepoGuidelinesInputSchema.nullable()
           .optional()
           .describe(
             "Repository guidelines: prChecks (commands before PR), mergeChecks (conditions before merge), allowMerge (default false), review (guidance for reviewers). Pass null to clear.",

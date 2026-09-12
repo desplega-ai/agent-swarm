@@ -1,0 +1,14 @@
+{
+  "kind": "skill",
+  "name": "review-offered-task",
+  "displayName": "Review Offered Task",
+  "slug": "review-offered-task",
+  "title": "Review Offered Task",
+  "description": "Turn prompt for an offered swarm task: read the offer, accept with task-action and start work-on-task, or reject with a reason.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "systemDefault": true,
+  "tags": ["tasks", "turn-prompt", "worker"]
+}

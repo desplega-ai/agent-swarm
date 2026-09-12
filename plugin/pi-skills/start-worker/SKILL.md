@@ -21,9 +21,8 @@ To do so, use the `agent-swarm` MCP server and call the `join-swarm` with a name
 
 ## Tools Reference
 
-### Polling for tasks
+### Your tasks
 
-- `poll-task` - Wait for new task assignments for you
 - `get-tasks` - List tasks with filters (status, unassigned, tags), use `mineOnly` to true to see only your tasks
 - `get-task-details` - Deep dive into a specific task's progress and output
 
@@ -40,13 +39,9 @@ To do so, use the `agent-swarm` MCP server and call the `join-swarm` with a name
 
 ## Workflow
 
-1. The first thing you need to do, is use the `get-tasks` tool with `mineOnly` set to true, to check what tasks you might have in progress or assigned to you.
-  1.1. If there's a task that is in progress, you should resume working on it!
-2. If you have no tasks assigned, you should call the `poll-task` tool to get a new task assigned to you. This will poll for a while and return either with:
-  2.1. A new task assigned to you
-  2.2. A message indicating there's no tasks available right now
-3. If 2.2, start polling immediately FOREVER. Only stop if you get interrupted by the user, if not, just keep polling.
-4. If you get assigned a task, call `/skill:work-on-task <taskId>` to start working on it.
+1. Call `get-tasks` with `mineOnly` set to true to see the tasks assigned to you.
+2. If one is `pending` or `in_progress`, call `/skill:work-on-task <taskId>` and work on it.
+3. Otherwise stop. The swarm assigns tasks to you and opens each one with `/skill:work-on-task <taskId>`; you do not poll.
 
 ## Filesystem
 

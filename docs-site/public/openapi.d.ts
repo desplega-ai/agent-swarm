@@ -10820,7 +10820,7 @@ export interface paths {
                         defaultBranch?: string;
                         autoClone?: boolean;
                         hooks?: components["schemas"]["RepoHooks"] | null;
-                        guidelines?: components["schemas"]["RepoGuidelines"];
+                        guidelines?: components["schemas"]["RepoGuidelinesInput"];
                     };
                 };
             };
@@ -10951,7 +10951,7 @@ export interface paths {
                         defaultBranch?: string;
                         autoClone?: boolean;
                         hooks?: components["schemas"]["RepoHooks"];
-                        guidelines?: components["schemas"]["RepoGuidelines"];
+                        guidelines?: components["schemas"]["RepoGuidelinesInput"];
                     };
                 };
             };
@@ -16564,7 +16564,9 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            tasks: components["schemas"]["AgentTask"][];
+                            tasks: (components["schemas"]["AgentTask"] & {
+                                attachments: components["schemas"]["TaskAttachment"][];
+                            })[];
                         };
                     };
                 };
@@ -21035,6 +21037,13 @@ export interface components {
             enabled: boolean;
         };
         RepoGuidelines: {
+            prChecks: string[];
+            mergeChecks: string[];
+            /** @default false */
+            allowMerge: boolean;
+            review: string[];
+        } | null;
+        RepoGuidelinesInput: {
             prChecks: string[];
             mergeChecks: string[];
             /** @default false */
