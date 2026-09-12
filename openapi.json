@@ -23350,6 +23350,9 @@
                             "requestedBy": {
                               "type": "object",
                               "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
                                 "name": {
                                   "type": "string",
                                   "minLength": 1
@@ -23434,6 +23437,9 @@
                             "requestedBy": {
                               "type": "object",
                               "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
                                 "name": {
                                   "type": "string",
                                   "minLength": 1
@@ -25467,6 +25473,9 @@
                     "createdByAgentId": {
                       "type": "string"
                     },
+                    "parentTaskId": {
+                      "type": "string"
+                    },
                     "timezone": {
                       "type": "string",
                       "default": "UTC"
@@ -25821,6 +25830,9 @@
                               "createdByAgentId": {
                                 "type": "string"
                               },
+                              "parentTaskId": {
+                                "type": "string"
+                              },
                               "timezone": {
                                 "type": "string",
                                 "default": "UTC"
@@ -26000,6 +26012,9 @@
                                 "format": "date-time"
                               },
                               "createdByAgentId": {
+                                "type": "string"
+                              },
+                              "parentTaskId": {
                                 "type": "string"
                               },
                               "timezone": {
@@ -26224,6 +26239,9 @@
                           "format": "date-time"
                         },
                         "createdByAgentId": {
+                          "type": "string"
+                        },
+                        "parentTaskId": {
                           "type": "string"
                         },
                         "timezone": {
@@ -26463,6 +26481,9 @@
                       "format": "date-time"
                     },
                     "createdByAgentId": {
+                      "type": "string"
+                    },
+                    "parentTaskId": {
                       "type": "string"
                     },
                     "timezone": {
@@ -26822,6 +26843,9 @@
                       "format": "date-time"
                     },
                     "createdByAgentId": {
+                      "type": "string"
+                    },
+                    "parentTaskId": {
                       "type": "string"
                     },
                     "timezone": {
@@ -27202,6 +27226,9 @@
                       "format": "date-time"
                     },
                     "createdByAgentId": {
+                      "type": "string"
+                    },
+                    "parentTaskId": {
                       "type": "string"
                     },
                     "timezone": {
@@ -38838,6 +38865,9 @@
                             "format": "date-time"
                           },
                           "createdByAgentId": {
+                            "type": "string"
+                          },
+                          "parentTaskId": {
                             "type": "string"
                           },
                           "timezone": {

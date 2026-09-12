@@ -248,6 +248,18 @@ describe("isFirstKickoffTask", () => {
     expect(await isFirstKickoffTask({ taskType: "resume" })).toBe(false);
   });
 
+  test("a deferred wake-up task is never a first kickoff", async () => {
+    // The `defer-task` parent is already `completed`, so the parent-status
+    // check alone would clear it for a destructive hard reset.
+    expect(await isFirstKickoffTask({ taskType: "deferred" })).toBe(false);
+    expect(
+      await isFirstKickoffTask(
+        { taskType: "deferred", parentTaskId: "parent-1" },
+        async () => "completed",
+      ),
+    ).toBe(false);
+  });
+
   test("a brand-new top-level task with no fields at all is a first kickoff", async () => {
     expect(await isFirstKickoffTask({})).toBe(true);
   });

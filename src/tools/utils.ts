@@ -241,6 +241,8 @@ const workflowLongScriptTimeoutNudge = (r: SwarmToolResult): string | undefined 
  * single sentence; derive only from already-scrubbed result fields.
  */
 export const NUDGES: Record<string, (result: SwarmToolResult) => string | undefined> = {
+  "defer-task": (r) =>
+    r.ok ? "Stop working on this task now; the wake-up task will carry your note." : undefined,
   "script-run": scriptRunNudge,
   "script-upsert": scriptAuthoringNudge,
   "launch-script-run": scriptAuthoringNudge,
