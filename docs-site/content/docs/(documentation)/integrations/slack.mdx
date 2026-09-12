@@ -190,7 +190,7 @@ The bot supports Slack's [Assistant](https://api.slack.com/docs/apps/ai) sidebar
 - Suggested prompts help you get started ("Check agent status", "Assign a task", "List recent tasks")
 - Follow-up messages in assistant threads route to the same agent that handled the original task
 - Assistant-thread messages that only @mention another user are ignored unless they also mention the swarm bot, preventing accidental task creation from co-mentions like `@Devin are you here?`
-- File uploads (`file_share` messages) in assistant threads are automatically detected and routed to the lead agent
+- Files shared in assistant threads — with or without a caption — reach the task as attachments (see [Attachment Handling](#attachment-handling))
 - The assistant sets a typing status while the agent is working (gracefully handles permission errors in non-assistant threads)
 
 ### Progress Updates
@@ -248,12 +248,18 @@ If both are set, a user must match **either** an allowed domain **or** be in the
 
 ## Attachment Handling
 
-Slack messages with file attachments (voice memos, images, documents) are automatically recognized and processed. When a user sends a file — even without any text — the bot detects it and includes attachment metadata (filename, MIME type, size, Slack file ID) in the task description.
+Files a user shares with the bot (images, voice memos, documents) become task attachments, in channel mentions and in assistant threads alike, and with or without accompanying text:
 
-This means agents can:
-- Receive voice messages or image uploads as tasks
-- Access file metadata to decide whether to download and process attachments
-- Use `slack-download-file` to retrieve the actual file content
+1. The API server downloads each file from Slack with the bot token (requires the `files:read` scope).
+2. It stores the file through the active file provider (agent-fs, or the local provider) as a task attachment — the same kind of attachment a file uploaded from the dashboard creates. The worker's task prompt includes a ready-to-run command to fetch it.
+3. The task is created in `draft` and becomes claimable only once its attachments are stored, so an agent never starts before the file exists.
+
+Each file also appears in the task description as a metadata line (filename, MIME type, size, Slack file ID). When a file can't be attached, the bot replies in the thread naming the file and the reason. A file that is larger than the 50 MB attachment limit or fails to download is also marked `(not attached: <reason>)` on its metadata line. A storage error happens after the description is written, so that file is reported only in the thread reply, and the task has no attachment for it.
+
+Limitations:
+- With `ADDITIVE_SLACK=true`, follow-ups that are buffered (rather than turned into a task right away) carry only the metadata line, marked as not attached, and the bot says so in the thread.
+- With thread steering enabled, a lead follow-up that includes files creates a follow-up task instead of steering the running session, because steering only carries text.
+- When the bot reads earlier messages of a thread for context, messages that contain only a file are skipped.
 
 ## File Handling
 
@@ -264,7 +270,10 @@ Agents can upload and download files via Slack:
 
 For task-scoped uploads, `slack-upload-file` preserves the visible conversation thread: channel tasks upload under the original Slack thread, and Slack DMs prefer the user-facing DM tree root instead of an internal progress-message thread when both exist.
 
-Files are saved to `/workspace/shared/downloads/{agentId}/slack/` by default (each agent writes to its own subdirectory).
+Both tools run on the API server, so a file they download is stored where the agent's container can reach it:
+
+- **From a task**, `slack-download-file` stores the file as an **attachment of that task**. This covers an explicit `taskId`, or the task the agent is working on. The result includes a ready-to-run `fetchCommand` that downloads the bytes into the container. `slack-read` does the same for every file in the messages it returns (turn it off with `includeFiles: false`). A file the task already holds is reused, not stored twice.
+- **Without a task** (for example, from a script), the file is saved on the API server's disk: `slack-download-file` uses `savePath` (default `/workspace/shared/downloads/{agentId}/slack/`), and `slack-read` uses `/app/shared/downloads/slack/`. The result says the path is on the API server. Worker containers can only read it if your deployment mounts the shared volume at that path on the API.
 
 ## Related
 

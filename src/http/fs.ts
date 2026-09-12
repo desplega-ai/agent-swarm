@@ -1,17 +1,11 @@
-import { createHash } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import {
-  deleteTaskAttachment,
-  getAgentById,
-  getTaskAttachments,
-  getTaskById,
-  insertTaskAttachment,
-} from "../be/db";
+import { deleteTaskAttachment, getAgentById, getTaskAttachments, getTaskById } from "../be/db";
 import {
   ensureAgentFsCredentialsForAgent,
   inviteEmailToSharedOrg,
 } from "../be/seed/agent-fs-provision";
+import { MAX_TASK_ATTACHMENT_BYTES, recordTaskAttachmentUpload } from "../be/task-attachment-store";
 import { type FileObject, type FileScope, FilesError, normalizeFilesError } from "../fs/provider";
 import { getFileStorageProvider } from "../fs/registry";
 import { can, type RbacPrincipal, type RbacResource } from "../rbac";
@@ -21,8 +15,6 @@ import { getCurrentRequestAuth, getRequestAuth } from "../utils/request-auth-con
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { route } from "./route-def";
 import { BODY_TOO_LARGE, enforceContentLengthCap, jsonError } from "./utils";
-
-const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 
 // Upload wall-clock past which the provider round-trip is worth a log line.
 // Attachment stalls were invisible before: this path had no timing at all.
@@ -306,7 +298,8 @@ export async function handleFs(
   }
 
   if (uploadTaskFileRoute.match(req.method, pathSegments)) {
-    if (enforceContentLengthCap(req, res, MAX_UPLOAD_BYTES) === BODY_TOO_LARGE) return true;
+    if (enforceContentLengthCap(req, res, MAX_TASK_ATTACHMENT_BYTES) === BODY_TOO_LARGE)
+      return true;
     const parsed = await uploadTaskFileRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const task = await getTaskById(parsed.params.taskId);
@@ -344,9 +337,9 @@ async function sendUpload(
   query: z.infer<typeof uploadQuery>,
   agentId: string | null,
 ): Promise<boolean> {
-  const body = await readRawBody(req, MAX_UPLOAD_BYTES);
+  const body = await readRawBody(req, MAX_TASK_ATTACHMENT_BYTES);
   if (body === BODY_TOO_LARGE) {
-    jsonError(res, `Payload too large (max ${MAX_UPLOAD_BYTES} bytes)`, 413);
+    jsonError(res, `Payload too large (max ${MAX_TASK_ATTACHMENT_BYTES} bytes)`, 413);
     return true;
   }
 
@@ -380,44 +373,21 @@ async function sendUpload(
     return sendProviderError(res, error);
   }
 
-  try {
-    const auth = getCurrentRequestAuth();
-    const attachment = await insertTaskAttachment({
-      taskId,
-      agentId,
-      name: query.name,
-      kind: provider.id === "agent-fs" ? "agent-fs" : "shared-fs",
-      path: uploaded.key,
-      providerId: provider.id,
-      providerKey: uploaded.key,
-      capabilities: {
-        ...provider.capabilities,
-        version: uploaded.version,
-        etag: uploaded.etag,
-      },
-      mimeType: uploaded.contentType ?? contentType,
-      sizeBytes: uploaded.sizeBytes ?? body.byteLength,
-      sha256: uploaded.sha256 ?? createHash("sha256").update(body).digest("hex"),
-      intent: query.intent,
-      description: query.description,
-      isPrimary: query.isPrimary === "true",
-      createdBy: auth?.kind === "user" ? auth.userId : undefined,
-    });
-    uploadTaskFileRoute.respond(res, 201, attachment);
-  } catch (error) {
-    try {
-      await provider.delete(scope);
-    } catch (cleanupError) {
-      console.warn(
-        scrubSecrets(
-          `[fs] upload metadata insert failed and blob cleanup failed: ${
-            cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
-          }`,
-        ),
-      );
-    }
-    throw error;
-  }
+  const auth = getCurrentRequestAuth();
+  const attachment = await recordTaskAttachmentUpload({
+    provider,
+    scope,
+    uploaded,
+    sizeBytes: body.byteLength,
+    sha256: uploaded.sha256 ?? new Bun.CryptoHasher("sha256").update(body).digest("hex"),
+    contentType,
+    agentId,
+    intent: query.intent,
+    description: query.description,
+    isPrimary: query.isPrimary === "true",
+    createdBy: auth?.kind === "user" ? auth.userId : undefined,
+  });
+  uploadTaskFileRoute.respond(res, 201, attachment);
   return true;
 }
 

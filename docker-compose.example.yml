@@ -176,6 +176,13 @@ services:
 
     volumes:
       - swarm_api:/app
+      # Slack files an agent fetches with `slack-download-file` / `slack-read`
+      # from a task become task attachments (stored through the file provider),
+      # so workers need no shared disk with the API. Only the no-task fallback
+      # writes to the API's own disk, where workers can't see it. Uncomment to
+      # expose `slack-read`'s fallback downloads to workers, under their
+      # `/workspace/shared/downloads/slack/`:
+      # - swarm_shared:/app/shared
 
     secrets:
       - encryption_key

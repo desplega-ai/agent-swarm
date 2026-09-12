@@ -229,6 +229,23 @@ const scriptRunNudge = (r: SwarmToolResult): string | undefined => {
   return !r.ok && body?.error === "timeout" ? SCRIPT_RUN_TIMEOUT_NUDGE : scriptAuthoringNudge(r);
 };
 
+const SLACK_API_DISK_NUDGE =
+  "That path is on the API server's disk, not in your container — call this from a task you own (or pass its taskId) to get the file as a task attachment with a fetchCommand.";
+
+const slackDownloadFileNudge = (r: SwarmToolResult): string | undefined =>
+  r.ok && (r.data as { savedPath?: unknown } | undefined)?.savedPath
+    ? SLACK_API_DISK_NUDGE
+    : undefined;
+
+const slackReadNudge = (r: SwarmToolResult): string | undefined => {
+  if (!r.ok) return undefined;
+  const messages = (r.data as { messages?: Array<{ files?: Array<{ localPath?: unknown }> }> })
+    ?.messages;
+  return messages?.some((m) => m.files?.some((f) => Boolean(f.localPath)))
+    ? SLACK_API_DISK_NUDGE
+    : undefined;
+};
+
 const workflowLongScriptTimeoutNudge = (r: SwarmToolResult): string | undefined => {
   if (!r.ok) return undefined;
   const hint = (r.data as { longScriptTimeoutHint?: unknown } | undefined)?.longScriptTimeoutHint;
@@ -249,6 +266,8 @@ export const NUDGES: Record<string, (result: SwarmToolResult) => string | undefi
   "update-workflow": workflowLongScriptTimeoutNudge,
   "patch-workflow": workflowLongScriptTimeoutNudge,
   "patch-workflow-node": workflowLongScriptTimeoutNudge,
+  "slack-download-file": slackDownloadFileNudge,
+  "slack-read": slackReadNudge,
   "script-search": (r) => {
     if (!r.ok) return undefined;
     // proxyScriptsApi wraps the parsed HTTP body as data = { status, data },

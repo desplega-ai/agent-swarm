@@ -62,6 +62,7 @@ import { resolveScriptsOnlyMode } from "../utils/scripts-only-mode.ts";
 import { scrubSecrets } from "../utils/secret-scrubber.ts";
 import { refreshSkillsIfChanged } from "../utils/skills-refresh.ts";
 import { isSteeringEnabled } from "../utils/steering-enabled.ts";
+import { taskAttachmentFetchCommand } from "../utils/task-attachment-links.ts";
 import { interpolate } from "../utils/template.ts";
 import { detectVcsProvider } from "../vcs/index.ts";
 import { validateJsonSchema } from "../workflows/json-schema-validator.ts";
@@ -3001,8 +3002,7 @@ export function buildAttachmentsSection(
       ]
         .filter(Boolean)
         .join(", ");
-      const url = `$MCP_BASE_URL/api/fs/tasks/${taskId}/files/${id}/raw`;
-      const cmd = `curl -s -H "Authorization: Bearer \${AGENT_SWARM_API_KEY:-$API_KEY}" -H "X-Agent-ID: $AGENT_ID" "${url}" -o /tmp/${name}`;
+      const cmd = taskAttachmentFetchCommand(taskId, id, name);
       return `- ${name}${details ? ` (${details})` : ""}: \`${cmd}\``;
     })
     .filter((line): line is string => line !== null);

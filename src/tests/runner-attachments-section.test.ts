@@ -20,7 +20,7 @@ describe("buildAttachmentsSection", () => {
     expect(section).toContain("IMG_1357.jpeg");
     expect(section).toContain("image/jpeg, 2816227 bytes");
     expect(section).toContain(
-      '$MCP_BASE_URL/api/fs/tasks/task-123/files/att-1/raw" -o /tmp/IMG_1357.jpeg',
+      "$MCP_BASE_URL/api/fs/tasks/task-123/files/att-1/raw\" --create-dirs -o '/tmp/attachments/att-1/IMG_1357.jpeg'",
     );
     // No org/drive discovery should be required — the whole point of the fix.
     expect(section).not.toContain("agent-fs");
@@ -39,6 +39,26 @@ describe("buildAttachmentsSection", () => {
     expect(lines).toHaveLength(2);
     expect(lines[0]).toContain("a.png");
     expect(lines[1]).toContain("b.pdf");
+  });
+
+  test("quotes the output path so names from users can't break the command", () => {
+    const section = buildAttachmentsSection("task-123", [
+      { id: "att-1", name: "Screenshot 2026-09-11 at 1.55 PM.png" },
+      { id: "att-2", name: "it's ../../etc/passwd" },
+    ]);
+
+    expect(section).toContain("-o '/tmp/attachments/att-1/Screenshot 2026-09-11 at 1.55 PM.png'");
+    expect(section).toContain("-o '/tmp/attachments/att-2/it'\\''s .._.._etc_passwd'");
+  });
+
+  test("gives every attachment its own download path, even when names repeat", () => {
+    const section = buildAttachmentsSection("task-123", [
+      { id: "att-1", name: "image.png" },
+      { id: "att-2", name: "image.png" },
+    ]);
+
+    expect(section).toContain("-o '/tmp/attachments/att-1/image.png'");
+    expect(section).toContain("-o '/tmp/attachments/att-2/image.png'");
   });
 
   test("skips malformed attachment entries without throwing", () => {

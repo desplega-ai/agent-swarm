@@ -1775,7 +1775,7 @@ Send a reply to a Slack thread. Use inboxMessageId for inbox messages, or taskId
 
 **Read Slack thread/channel history**
 
-Read messages from a Slack thread or channel. Use inboxMessageId or taskId to read from a thread you have context for, or provide channelId directly for channel history (leads only).
+Read messages from a Slack thread or channel. Use inboxMessageId or taskId to read from a thread you have context for, or provide channelId directly for channel history (leads only). From a task, files in the messages are stored as attachments of that task, each with a ready-to-run `fetchCommand`.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -1784,7 +1784,7 @@ Read messages from a Slack thread or channel. Use inboxMessageId or taskId to re
 | `channelId` | `string` | No | - | Slack channel ID to read from (requires lead privileges). |
 | `threadTs` | `string` | No | - | Thread timestamp (required with channelId for thread history). |
 | `limit` | `number` | No | 20 | Maximum number of messages to retrieve (default: 20, max: 100). |
-| `includeFiles` | `boolean` | No | true | Include file attachments in the response (default: true). |
+| `includeFiles` | `boolean` | No | true | Include file attachments in the response (default: true). From a task, they are also stored as attachments of that task. |
 
 ### slack-post
 
@@ -1875,13 +1875,14 @@ Upload a file (image, document, etc.) to a Slack channel or thread. Use inboxMes
 
 **Download file from Slack**
 
-Download a file from Slack by file ID or URL. Files are saved to the agent's download directory on the shared disk by default.
+Download a file from Slack by file ID or URL. From a task, the file is stored as an attachment of that task and the result carries a ready-to-run `fetchCommand` to get the bytes into your container. Without a task, the file is saved on the API server's disk, which your container usually can't read.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `fileId` | `string` | No | - | The Slack file ID to download (e.g., 'F0RDC39U1'). |
 | `url` | `string` | No | - | Direct URL to download (url_private_download from a file object). |
-| `savePath` | `string` | No | - | Where to save the file. Can be a directory or full path. Defaults to /workspace/shared/downloads/{agentId}/slack/ |
+| `taskId` | `uuid` | No | - | Task to attach the file to. Defaults to the task you are working on; must be a task you own or created. |
+| `savePath` | `string` | No | - | Only without a task: where to save the file on the API server (directory or full path). Defaults to /workspace/shared/downloads/{agentId}/slack/. |
 | `filename` | `string` | No | - | Filename to use when saving. Only used if savePath is a directory. |
 
 ### slack-delete

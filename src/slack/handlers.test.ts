@@ -17,15 +17,13 @@ import { createAssistant } from "./assistant";
 import * as slackEnrichModule from "./enrich";
 import type { SlackFile } from "./files";
 import {
-  buildAttachmentText,
-  buildEffectiveText,
   checkUserAccess,
-  formatFileSize,
   isBotMessage,
   isSwarmThreadRoot,
   registerMessageHandler,
   type UserFilterConfig,
 } from "./handlers";
+import { buildAttachmentText, buildEffectiveText, formatFileSize } from "./inbound-files";
 import { SLACK_REACTION_CONFIG_KEYS } from "./reaction-shortcode";
 
 describe("checkUserAccess", () => {

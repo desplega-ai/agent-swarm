@@ -12,11 +12,12 @@ discovery.
 curl "$MCP_BASE_URL/api/fs/tasks/$AGENT_SWARM_TASK_ID/files/<attachmentId>/raw" \
   -H "X-Agent-ID: $AGENT_ID" \
   -H "Authorization: Bearer ${AGENT_SWARM_API_KEY:-$API_KEY}" \
-  -o /tmp/<name>
+  --create-dirs -o "/tmp/attachments/<attachmentId>/<name>"
 ```
 
 - `$MCP_BASE_URL`, `$AGENT_ID`, `$AGENT_SWARM_TASK_ID` (or `$AGENT_SWARM_AGENT_ID`/`TASK_FILE`-derived taskId), and `$AGENT_SWARM_API_KEY`/`$API_KEY` are already present in every worker container's env — no new plumbing needed.
 - `<attachmentId>` and `<name>`/`mimeType` come from the task's attachment list (see below).
+- One directory per attachment: two attachments can share a name (every pasted screenshot is `image.png`), and `/tmp/<name>` would let one overwrite the other.
 - The route resolves the active file-storage provider (`local-fs` in dev, `agent-fs` in prod) server-side and streams the raw bytes back with the correct `Content-Type` — you get one call no matter which provider is behind it.
 
 ## Finding the attachment ID
