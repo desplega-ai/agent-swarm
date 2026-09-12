@@ -2759,6 +2759,44 @@
           "review"
         ]
       },
+      "RepoGuidelinesInput": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "prChecks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50
+          },
+          "mergeChecks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50
+          },
+          "allowMerge": {
+            "type": "boolean",
+            "default": false
+          },
+          "review": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50
+          }
+        },
+        "required": [
+          "prChecks",
+          "mergeChecks",
+          "review"
+        ]
+      },
       "ScriptRun": {
         "type": "object",
         "properties": {
@@ -24141,7 +24179,7 @@
                     ]
                   },
                   "guidelines": {
-                    "$ref": "#/components/schemas/RepoGuidelines"
+                    "$ref": "#/components/schemas/RepoGuidelinesInput"
                   }
                 }
               }
@@ -24352,7 +24390,7 @@
                     "$ref": "#/components/schemas/RepoHooks"
                   },
                   "guidelines": {
-                    "$ref": "#/components/schemas/RepoGuidelines"
+                    "$ref": "#/components/schemas/RepoGuidelinesInput"
                   }
                 },
                 "required": [
@@ -41208,7 +41246,25 @@
                     "tasks": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/components/schemas/AgentTask"
+                        "allOf": [
+                          {
+                            "$ref": "#/components/schemas/AgentTask"
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "attachments": {
+                                "type": "array",
+                                "items": {
+                                  "$ref": "#/components/schemas/TaskAttachment"
+                                }
+                              }
+                            },
+                            "required": [
+                              "attachments"
+                            ]
+                          }
+                        ]
                       }
                     }
                   },
