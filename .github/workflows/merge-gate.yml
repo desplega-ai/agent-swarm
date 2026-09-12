@@ -563,6 +563,7 @@ jobs:
     # ci-timings report uses its own secret, so GITHUB_TOKEN needs nothing else.
     permissions:
       contents: read
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
