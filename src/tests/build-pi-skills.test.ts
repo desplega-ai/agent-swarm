@@ -23,7 +23,7 @@ describe("build-pi-skills", () => {
     .map((d) => d.name);
 
   test("build script runs successfully", () => {
-    expect(buildOutput).toContain("Converted 13 skills");
+    expect(buildOutput).toContain("Converted 11 skills");
   });
 
   test("every command has a corresponding pi-skill", () => {
@@ -75,12 +75,10 @@ describe("build-pi-skills", () => {
   });
 
   describe("slash command syntax", () => {
-    const skillsWithCrossRefs = [
-      "work-on-task",
-      "start-worker",
-      "start-leader",
-      "review-offered-task",
-    ];
+    // `work-on-task` / `review-offered-task` are seeded skills, not commands —
+    // they have no pi-skill directory. The commands that link to them still
+    // must render the reference as `/skill:work-on-task`.
+    const skillsWithCrossRefs = ["start-worker", "start-leader"];
 
     for (const skill of skillsWithCrossRefs) {
       test(`${skill} uses /skill: prefix for cross-references`, () => {

@@ -444,7 +444,7 @@ The runner (not the adapter) owns all of these. They are listed here so you know
 Native session resume (the `claude --resume <UUID>` CLI flag and `codex.resumeThread(id)` SDK call) was removed in the 2026-05-28 deprecation plan ([`thoughts/taras/plans/2026-05-28-deprecate-native-resume.md`](https://github.com/desplega-ai/agent-swarm/blob/main/thoughts/taras/plans/2026-05-28-deprecate-native-resume.md)). The reasoning: native resume relied on an on-disk transcript that disappears when the worker container restarts (deploy, OOM, autoscaler reschedule), and the harness then either errored out or silently spawned a context-less session. The bounded context preamble survives any worker restart because it is rebuilt from the parent-task chain held in the API DB.
 
 - **Parent → child** continuity is now single-layered: the runner prepends a bounded preamble (cap ~2000 tokens, see `src/commands/context-preamble.ts`) for **all** providers when `task.parentTaskId` is set, and adapters always spawn a fresh harness session. `resolveResumeSession` is preserved as an observability shim that logs which session ids *would* have been used; it never returns a `resumeSessionId`.
-- **Pause → resume**: a paused task restarts with a **new** session, re-applying `task.progress` via `buildResumePrompt` (L809–829); if the task is also part of a parent chain, the context-preamble path is applied before execution resumes.
+- **Pause → resume**: a paused task restarts with a **new** session, re-applying `task.progress`, attachment fetch recipes, and the required `outputSchema` via `buildResumePrompt`; if the task is also part of a parent chain, the context-preamble path is applied before execution resumes.
 - **Adapter behavior**: claude / claude-managed / codex each warn and ignore any stray `resumeSessionId` they receive; the runner no longer sets one. `CodexAdapter.canResume()` returns `false` unconditionally.
 
 **What your adapter owes the task:** emit `session_init` as early as possible (so the runner can persist the provider session id), emit `tool_start`/`tool_end` faithfully (so the UI shows the agent's work), and emit a `result` with populated `CostData` before your `waitForCompletion()` resolves.
@@ -1027,7 +1027,7 @@ Implementation: [`src/commands/claude-managed-setup.ts`](https://github.com/desp
 
 1. Reads `ANTHROPIC_API_KEY` from `.env` / env (or prompts).
 2. Creates the Environment (`client.beta.environments.create`) — the long-lived sandbox configuration (allowed networks, default packages, persistent volumes).
-3. Uploads each `plugin/commands/*.md` skill via `client.beta.skills.create` (one-shot per skill content hash; the CLI dedupes against an existing inventory).
+3. Uploads each remaining `plugin/commands/*.md` skill plus the seeded `work-on-task` and `review-offered-task` skills from `templates/skills/` via `client.beta.skills.create` (one-shot per skill content hash; the CLI dedupes against an existing inventory).
 4. Creates the Agent (`client.beta.agents.create`) and attaches the freshly uploaded skills.
 5. `PUT /api/config` persists `MANAGED_AGENT_ID` + `MANAGED_ENVIRONMENT_ID` into `swarm_config` so deployed workers (and the integrations UI) can restore them at boot.
 6. Re-run with `--force` to recreate (rare — only if upstream rotates IDs).
@@ -1055,7 +1055,7 @@ The MCP integration §5 calls out that every adapter MUST set `X-Source-Task-Id`
 
 ### e. Skill upload via `beta.skills.create`
 
-Skills are **not** synced into a filesystem path on the worker (the worker doesn't run the model). They're uploaded once during `claude-managed-setup` via `client.beta.skills.create({ content, name, ... })` and referenced by ID on the Agent. The skill content is the same `plugin/commands/*.md` body that other providers copy into `~/.claude/skills/<name>/SKILL.md` — so the source of truth stays in the repo.
+Skills are **not** synced into a filesystem path on the worker (the worker doesn't run the model). They're uploaded once during `claude-managed-setup` via `client.beta.skills.create({ content, name, ... })` and referenced by ID on the Agent. The remaining command skills come from `plugin/commands/*.md`. The runner turn skills, `work-on-task` and `review-offered-task`, come from `templates/skills/<name>/config.json` and `content.md`, rendered with the same frontmatter builder used by the seeder. Local workers receive that pair through DB-to-filesystem skill sync; managed agents receive the uploaded pair. Both sources remain in the repo.
 
 ### f. SDK shape deviations to be aware of
 

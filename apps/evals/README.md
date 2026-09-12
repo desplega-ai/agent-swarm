@@ -28,16 +28,45 @@ Each attempt (one cell of the matrix, run `n` times per cell):
 cd apps/evals
 bun install
 
-# one-off: copy E2B_API_KEY / OPENROUTER_API_KEY / CLAUDE_CODE_OAUTH_TOKEN /
-# ANTHROPIC_API_KEY / OPENAI_API_KEY from the repo-root .env into evals/.env
+# There is no apps/evals/.env since the monorepo move. Load the repo-root .env
+# (E2B_API_KEY / OPENROUTER_API_KEY / CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_API_KEY /
+# OPENAI_API_KEY / EMBEDDING_API_KEY) with --env-file, and pick a DB with
+# EVALS_DB_PATH (local file) or EVALS_DB_SYNC_URL + EVALS_DB_AUTH_TOKEN (Turso).
 
-bun src/cli.ts registry                       # available scenarios + configs
-bun src/cli.ts run                            # default: memory-seeded-recall × 3 configs
-bun src/cli.ts run --scenarios memory-seeded-recall,build-verify-fix --configs claude-haiku,pi-deepseek-flash --attempts 2 --judge-model anthropic/claude-sonnet-4.5
-bun src/cli.ts resume <runId>                 # continue an interrupted run
-bun src/cli.ts show <runId>                   # terminal result matrix
-bun src/cli.ts serve                          # UI on http://localhost:4801
+bun --env-file=../../.env src/cli.ts registry                       # available scenarios + configs
+EVALS_DB_PATH=$PWD/evals.db bun --env-file=../../.env src/cli.ts run  # default: memory-seeded-recall × 3 configs
+EVALS_DB_PATH=$PWD/evals.db bun --env-file=../../.env src/cli.ts run --scenarios memory-seeded-recall,build-verify-fix --configs claude-haiku,pi-deepseek-flash --attempts 2 --judge-model anthropic/claude-sonnet-4.5
+EVALS_DB_PATH=$PWD/evals.db bun --env-file=../../.env src/cli.ts resume <runId>   # continue an interrupted run
+EVALS_DB_PATH=$PWD/evals.db bun --env-file=../../.env src/cli.ts show <runId>     # terminal result matrix
+EVALS_DB_PATH=$PWD/evals.db bun --env-file=../../.env src/cli.ts serve            # UI on http://localhost:4801
 ```
+
+### Evaluating a branch
+
+The `agent-swarm-{api,worker}-latest` E2B templates track the last release. To evaluate a branch, build both images from the branch (the API renders the prompt templates over HTTP, so the API image matters as much as the worker image), push them, and build E2B templates from the pushed images:
+
+```bash
+# from the repo root, on the branch under test
+SHA=$(git rev-parse --short HEAD)
+# amd64 images on the remote buildx builder (native amd64; the GHCR packages are public)
+docker buildx build --builder kamal-remote-ssh---root-168-119-139-170 --platform linux/amd64 \
+  -f Dockerfile -t ghcr.io/desplega-ai/agent-swarm:<branch>-$SHA --push .
+docker buildx build --builder kamal-remote-ssh---root-168-119-139-170 --platform linux/amd64 \
+  -f Dockerfile.worker --target worker-slim -t ghcr.io/desplega-ai/agent-swarm-worker:<branch>-$SHA-slim --push .
+
+bun run src/cli.tsx e2b build-template --role api --source image \
+  --template agent-swarm-api-<branch> --image ghcr.io/desplega-ai/agent-swarm:<branch>-$SHA
+bun run src/cli.tsx e2b build-template --role worker --source image \
+  --template agent-swarm-worker-<branch> --image ghcr.io/desplega-ai/agent-swarm-worker:<branch>-$SHA-slim
+
+cd apps/evals
+EVALS_E2B_TEMPLATE_API=agent-swarm-api-<branch> EVALS_E2B_TEMPLATE_WORKER=agent-swarm-worker-<branch> \
+EVALS_DB_PATH=$PWD/evals.db bun --env-file=../../.env src/cli.ts run --name <name> \
+  --scenarios delegation-probe --configs claude-opus-4.8,codex-5.6-terra,pi-deepseek-flash,opencode-deepseek-flash \
+  --attempts 3 --concurrency 12
+```
+
+Rebuild both templates after every push to the branch; a template is a snapshot of one image. The local-checkout template path (`e2b build-template` without `--source image`) does not work with e2b CLI 2.10.2: it rejects multi-stage Dockerfiles.
 
 ### Smoke scenario
 
@@ -47,7 +76,7 @@ bun src/cli.ts serve                          # UI on http://localhost:4801
 bun src/cli.ts run --scenarios memory-seeded-recall --configs claude-haiku
 ```
 
-It requires `EMBEDDING_API_KEY` in `evals/.env` (the API sandbox embeds the seeded memory server-side; the `OPENAI_API_KEY` fallback is no longer injected); without it the attempt fails loudly at seed time. The former `hello-file` / `quick-reasoning` dummies were removed from the registry — historical runs referencing them still render everywhere (the scenario detail page falls back to an "unregistered scenario" view).
+It requires `EMBEDDING_API_KEY` in the repo-root `.env` (the API sandbox embeds the seeded memory server-side; the `OPENAI_API_KEY` fallback is no longer injected); without it the attempt fails loudly at seed time. The former `hello-file` / `quick-reasoning` dummies were removed from the registry — historical runs referencing them still render everywhere (the scenario detail page falls back to an "unregistered scenario" view).
 
 ### UI (`serve`)
 
@@ -119,7 +148,7 @@ remote primary via `EVALS_DB_SYNC_URL` + `EVALS_DB_AUTH_TOKEN`.
 Seeding runs before the first task is created, in this order:
 
 - `sqlDump` — bare filename of a **full SQLite text dump** (`sqlite3 <db> .dump`) under `scenarios/fixtures/`, imported into the API sandbox's DB **before** the API server first boots (migrations forward-apply on top). The runner validates the fixture host-side before any sandbox exists: it must carry the `_migrations` table with applied rows and stay under 5 MB. Seed reference data only — no `agents` rows, no in-flight tasks, no sessions/locks, and no hand-seeded `agent_memory` rows (use `memories` instead). Conventions + regeneration recipe: [scenarios/fixtures/README.md](./scenarios/fixtures/README.md).
-- `memories` — strings (max 16) indexed as **swarm-scope memories** via the memory API after boot; embeddings are computed server-side, and the runner blocks until every seeded memory is searchable (90 s gate). Requires `EMBEDDING_API_KEY` in `evals/.env` (the `OPENAI_API_KEY` fallback is no longer injected) — without it the attempt fails loudly at seed time instead of mysteriously at judging time.
+- `memories` — strings (max 16) indexed as **swarm-scope memories** via the memory API after boot; embeddings are computed server-side, and the runner blocks until every seeded memory is searchable (90 s gate). Requires `EMBEDDING_API_KEY` in the repo-root `.env` (the `OPENAI_API_KEY` fallback is no longer injected) — without it the attempt fails loudly at seed time instead of mysteriously at judging time.
 - `exec` — shell commands run in **worker 0's** sandbox after the stack is healthy (and after memories), e.g. to plant workspace files.
 
 ### Worker configuration, rosters + task routing
@@ -172,10 +201,10 @@ Scoring per cell: the headline is a convergent **mean dimension-score ± bootstr
 
 The DB of record is the Turso database `swarm-evals-local`, accessed through a **libsql embedded replica**: a local WAL file at `evals/evals-replica.db` (gitignored, disposable — rebuilt by sync) whose writes forward synchronously to the remote primary. `initDb()` syncs on boot, pulls in the background every 60 s, and asserts the replica is in WAL mode. Configuration is explicit — with no env set, `bun src/cli.ts serve` fails with a clear error instead of silently creating an empty DB:
 
-- `EVALS_DB_SYNC_URL` + `EVALS_DB_AUTH_TOKEN` (both in `evals/.env`) → embedded replica against Turso (the normal mode).
-- `EVALS_DB_PATH` → plain local libsql file, no sync (offline/dev escape hatch).
+- `EVALS_DB_SYNC_URL` + `EVALS_DB_AUTH_TOKEN` (in the repo-root `.env`, loaded with `bun --env-file=../../.env`) → embedded replica against Turso (the normal mode for the deployed service).
+- `EVALS_DB_PATH` → plain local libsql file, no sync. Local CLI runs use `EVALS_DB_PATH=$PWD/evals.db`; the implicit `file:evals.db` default was removed, so the path must be explicit.
 
-The old `evals/evals.db` (+ `-wal`/`-shm`) is a **frozen backup** of the pre-Turso data — never delete or write to it; new code can no longer open it because the implicit `file:evals.db` default was removed.
+`apps/evals/evals.db` (+ `-wal`/`-shm`) is gitignored and holds the local run history (the pre-Turso data plus every local `EVALS_DB_PATH` run since). Do not delete it.
 
 ## Env
 
@@ -192,7 +221,7 @@ The old `evals/evals.db` (+ `-wal`/`-shm`) is a **frozen backup** of the pre-Tur
 | `EVALS_API_KEY` | static master key for deployed `/api/*`; when unset the API is open for local dev/tests |
 | `EVALS_MAX_CONCURRENT_RUNS` | max active runs accepted by `serve` (default `1`; over-cap creates/resumes return 429) |
 | `EVALS_PORT` | serve port override |
-| `EVALS_E2B_TEMPLATE_API` / `EVALS_E2B_TEMPLATE_WORKER` | template overrides (default `agent-swarm-{api,worker}-latest`) |
+| `EVALS_E2B_TEMPLATE_API` / `EVALS_E2B_TEMPLATE_WORKER` | template overrides (default `agent-swarm-{api,worker}-latest`; see [Evaluating a branch](#evaluating-a-branch)) |
 
 ## Notes
 

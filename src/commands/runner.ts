@@ -2004,11 +2004,13 @@ async function pauseTaskViaAPI(config: ApiConfig, role: string, taskId: string):
 }
 
 /** Fetch paused tasks from API for this agent */
-async function getPausedTasksFromAPI(config: ApiConfig): Promise<
+export async function getPausedTasksFromAPI(config: ApiConfig): Promise<
   Array<{
     id: string;
     task: string;
     progress?: string;
+    attachments?: unknown[];
+    outputSchema?: Record<string, unknown>;
     claudeSessionId?: string;
     provider?: ProviderName;
     providerMeta?: Record<string, unknown>;
@@ -2044,6 +2046,8 @@ async function getPausedTasksFromAPI(config: ApiConfig): Promise<
         id: string;
         task: string;
         progress?: string;
+        attachments?: unknown[];
+        outputSchema?: Record<string, unknown>;
         claudeSessionId?: string;
         provider?: ProviderName;
         providerMeta?: Record<string, unknown>;
@@ -2085,20 +2089,26 @@ async function resumeTaskViaAPI(config: ApiConfig, taskId: string): Promise<bool
 }
 
 /** Build prompt for a resumed task */
-async function buildResumePrompt(
-  task: { id: string; task: string; progress?: string },
+export async function buildResumePrompt(
+  task: {
+    id: string;
+    task: string;
+    progress?: string;
+    attachments?: unknown[];
+    outputSchema?: Record<string, unknown>;
+  },
   fmt: (cmd: string) => string = (cmd) => `/${cmd}`,
   options?: { hasMcp?: boolean },
 ): Promise<string> {
   const hasMcp = options?.hasMcp !== false;
-  const completionInstructions = hasMcp
-    ? '\n\nWhen done, use `store-progress` with status: "completed" and include your output.'
-    : "";
+  const completionInstructions = await buildTaskOutputInstructions(task.outputSchema, hasMcp);
+  const attachmentsSection = buildAttachmentsSection(task.id, task.attachments);
   if (task.progress) {
     const result = await resolveTemplateAsync("task.resumption.with_progress", {
       work_on_task_cmd: hasMcp ? fmt("work-on-task") : "",
       task_id: hasMcp ? task.id : "",
       task_description: task.task,
+      attachments_section: attachmentsSection,
       progress: task.progress,
       completion_instructions: completionInstructions,
     });
@@ -2109,6 +2119,7 @@ async function buildResumePrompt(
     work_on_task_cmd: hasMcp ? fmt("work-on-task") : "",
     task_id: hasMcp ? task.id : "",
     task_description: task.task,
+    attachments_section: attachmentsSection,
     completion_instructions: completionInstructions,
   });
   return result.text;
@@ -3012,6 +3023,21 @@ export function buildAttachmentsSection(
   return `\n\n📎 Attachment(s) — fetch directly, no need to discover the storage path yourself:\n${lines.join("\n")}`;
 }
 
+/** Share the output contract between initial dispatch and deployment resume. */
+async function buildTaskOutputInstructions(
+  outputSchema: unknown,
+  hasMcp: boolean,
+): Promise<string> {
+  if (!hasMcp) return "";
+  const result =
+    outputSchema && typeof outputSchema === "object"
+      ? await resolveTemplateAsync("task.output.schema", {
+          schema: JSON.stringify(outputSchema, null, 2),
+        })
+      : await resolveTemplateAsync("task.output.generic", {});
+  return result.text;
+}
+
 /** Build prompt based on trigger type */
 async function buildPromptForTrigger(
   trigger: Trigger,
@@ -3032,15 +3058,7 @@ async function buildPromptForTrigger(
       // Build output instructions — use outputSchema if present, otherwise generic.
       // Skip store-progress references for providers without MCP (e.g. Devin).
       const taskObj = trigger.task as Record<string, unknown> | undefined;
-      let outputInstructions: string;
-      if (!hasMcp) {
-        outputInstructions = "";
-      } else if (taskObj?.outputSchema && typeof taskObj.outputSchema === "object") {
-        outputInstructions = `\n\n**Required Output Format**: When completing this task, you MUST call store-progress with output that is valid JSON conforming to this schema:\n\`\`\`json\n${JSON.stringify(taskObj.outputSchema, null, 2)}\n\`\`\`\nCall store-progress with status "completed" and your JSON output. If your output doesn't match the schema, the tool call will fail and you should fix and retry.`;
-      } else {
-        outputInstructions =
-          '\n\nWhen done, use `store-progress` with status: "completed" and include your output.';
-      }
+      const outputInstructions = await buildTaskOutputInstructions(taskObj?.outputSchema, hasMcp);
 
       // Include requesting user info if available from the poll trigger
       const requestedBy = trigger.requestedBy;
