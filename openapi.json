@@ -2290,7 +2290,8 @@
             "type": "string",
             "enum": [
               "text/html",
-              "application/json"
+              "application/json",
+              "image/svg+xml"
             ]
           },
           "authMode": {
@@ -2385,7 +2386,8 @@
             "type": "string",
             "enum": [
               "text/html",
-              "application/json"
+              "application/json",
+              "image/svg+xml"
             ]
           },
           "authMode": {
@@ -21468,7 +21470,8 @@
                     "type": "string",
                     "enum": [
                       "text/html",
-                      "application/json"
+                      "application/json",
+                      "image/svg+xml"
                     ]
                   },
                   "authMode": {
@@ -21684,7 +21687,8 @@
                             "type": "string",
                             "enum": [
                               "text/html",
-                              "application/json"
+                              "application/json",
+                              "image/svg+xml"
                             ]
                           },
                           "authMode": {
@@ -21876,7 +21880,8 @@
                     "type": "string",
                     "enum": [
                       "text/html",
-                      "application/json"
+                      "application/json",
+                      "image/svg+xml"
                     ]
                   },
                   "authMode": {
@@ -22294,7 +22299,7 @@
     },
     "/p/{id}": {
       "get": {
-        "summary": "Render a page (HTML inline; JSON redirects to SPA)",
+        "summary": "Render a page (HTML/SVG inline; JSON redirects to SPA)",
         "tags": [
           "Pages"
         ],
@@ -22310,7 +22315,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Rendered HTML page"
+            "description": "Rendered HTML page or raw SVG image"
           },
           "302": {
             "description": "Redirect to SPA for JSON content"
@@ -22385,7 +22390,8 @@
                       "type": "string",
                       "enum": [
                         "text/html",
-                        "application/json"
+                        "application/json",
+                        "image/svg+xml"
                       ]
                     },
                     "authMode": {

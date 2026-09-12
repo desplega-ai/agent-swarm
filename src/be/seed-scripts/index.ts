@@ -44,6 +44,9 @@ import reportProgressSrc from "./catalog/report-progress.ts" with { type: "text"
 import scheduleHealthSrc from "./catalog/schedule-health.ts" with { type: "text" };
 import slackThreadFlattenSrc from "./catalog/slack-thread-flatten.ts" with { type: "text" };
 import smartRecallSrc from "./catalog/smart-recall.ts" with { type: "text" };
+import starHistoryRefreshSrc from "./catalog/star-history-refresh.ts" with { type: "text" };
+// @ts-expect-error Bun text imports synthesize a default string for this helper.
+import starHistoryRendererSrc from "./catalog/star-history-renderer.ts" with { type: "text" };
 import swarmOverviewSrc from "./catalog/swarm-overview.ts" with { type: "text" };
 import taskContextGatheringSrc from "./catalog/task-context-gathering.ts" with { type: "text" };
 import taskFailureAuditSrc from "./catalog/task-failure-audit.ts" with { type: "text" };
@@ -71,6 +74,20 @@ function bundleCatalogReport(source: string): string {
 }
 
 export const SEED_SCRIPTS: SeedScript[] = [
+  {
+    name: "star-history-refresh",
+    description:
+      "Refresh stable public light/dark SVG star-history pages from GitHub with ETags and a last-known KV series.",
+    intent:
+      "Run hourly under the same page-owning agent identity; dryRun validates rendering before SVG page support deploys.",
+    source:
+      asText(starHistoryRendererSrc) +
+      "\n" +
+      asText(starHistoryRefreshSrc).replace(
+        'import { renderChart } from "./star-history-renderer";',
+        "",
+      ),
+  },
   {
     name: "gh-pr-snapshot",
     description:

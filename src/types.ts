@@ -2230,10 +2230,10 @@ export type WorkflowVersion = z.infer<typeof WorkflowVersionSchema>;
 // Pages — DB-backed lightweight artifacts (HTML or JSON spec) stored in
 // SQLite and served at /p/:id. See plan: thoughts/taras/plans/2026-05-12-db-backed-pages/.
 // PageContentTypeSchema + PageAuthModeSchema MUST stay in sync with the SQL
-// CHECK constraints in src/be/migrations/059_pages.sql.
+// CHECK constraints in src/be/migrations/148_pages_svg.sql.
 // ---------------------------------------------------------------------------
 
-export const PageContentTypeSchema = z.enum(["text/html", "application/json"]);
+export const PageContentTypeSchema = z.enum(["text/html", "application/json", "image/svg+xml"]);
 export type PageContentType = z.infer<typeof PageContentTypeSchema>;
 
 export const PageAuthModeSchema = z.enum(["public", "authed", "password"]);

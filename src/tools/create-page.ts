@@ -83,9 +83,11 @@ export const registerCreatePageTool = (server: McpServer) => {
         body: z
           .string()
           .min(1)
-          .describe("Full page body (HTML document or JSON-render spec, per contentType)."),
+          .describe(
+            "Full page body (HTML document, SVG image, or JSON-render spec, per contentType).",
+          ),
         contentType: PageContentTypeSchema.describe(
-          "'text/html' renders directly at /p/:id; 'application/json' is rendered by the SPA.",
+          "'text/html' and 'image/svg+xml' render directly at /p/:id; 'application/json' is rendered by the SPA.",
         ),
         authMode: PageAuthModeSchema.default("authed").describe(
           "'authed' — requires page-session cookie (default); 'public' — no gate and must be explicit; 'password' — requires key.",

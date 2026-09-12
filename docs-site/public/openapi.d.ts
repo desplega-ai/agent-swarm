@@ -9198,7 +9198,7 @@ export interface paths {
                                 title: string;
                                 description?: string;
                                 /** @enum {string} */
-                                contentType: "text/html" | "application/json";
+                                contentType: "text/html" | "application/json" | "image/svg+xml";
                                 /** @enum {string} */
                                 authMode: "public" | "authed" | "password";
                                 passwordHash?: string;
@@ -9238,7 +9238,7 @@ export interface paths {
                         title: string;
                         description?: string;
                         /** @enum {string} */
-                        contentType: "text/html" | "application/json";
+                        contentType: "text/html" | "application/json" | "image/svg+xml";
                         /**
                          * @default authed
                          * @enum {string}
@@ -9354,7 +9354,7 @@ export interface paths {
                         title?: string;
                         description?: string | null;
                         /** @enum {string} */
-                        contentType?: "text/html" | "application/json";
+                        contentType?: "text/html" | "application/json" | "image/svg+xml";
                         /** @enum {string} */
                         authMode?: "public" | "authed" | "password";
                         password?: string | null;
@@ -9688,7 +9688,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Render a page (HTML inline; JSON redirects to SPA) */
+        /** Render a page (HTML/SVG inline; JSON redirects to SPA) */
         get: {
             parameters: {
                 query?: never;
@@ -9700,7 +9700,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Rendered HTML page */
+                /** @description Rendered HTML page or raw SVG image */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -9781,7 +9781,7 @@ export interface paths {
                             title: string;
                             description?: string;
                             /** @enum {string} */
-                            contentType: "text/html" | "application/json";
+                            contentType: "text/html" | "application/json" | "image/svg+xml";
                             /** @enum {string} */
                             authMode: "public" | "authed" | "password";
                             body: string;
@@ -20934,7 +20934,7 @@ export interface components {
             title: string;
             description?: string;
             /** @enum {string} */
-            contentType: "text/html" | "application/json";
+            contentType: "text/html" | "application/json" | "image/svg+xml";
             /** @enum {string} */
             authMode: "public" | "authed" | "password";
             passwordHash?: string;
@@ -20958,7 +20958,7 @@ export interface components {
             title: string;
             description?: string;
             /** @enum {string} */
-            contentType: "text/html" | "application/json";
+            contentType: "text/html" | "application/json" | "image/svg+xml";
             /** @enum {string} */
             authMode: "public" | "authed" | "password";
             passwordHash?: string;

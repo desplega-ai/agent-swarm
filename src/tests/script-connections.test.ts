@@ -564,6 +564,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "143_backfill_gpt_6_astra_pricing.sql");
       // 147 alters scheduled_tasks, which this migration-112-only fixture does not create.
       markMigrationApplied(database, "147_scheduled_tasks_parent_task.sql");
+      // 148 rebuilds pages, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "148_pages_svg.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
