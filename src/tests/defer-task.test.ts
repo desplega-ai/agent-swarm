@@ -19,6 +19,9 @@ import {
   completeTask,
   createAgent,
   createTaskExtended,
+  createWorkflow,
+  createWorkflowRun,
+  createWorkflowRunStep,
   getScheduledTasks,
   getTaskById,
   initDb,
@@ -109,12 +112,17 @@ describe("defer-task handler", () => {
     };
   }
 
-  async function startedTask(description: string, owner: string = agentId) {
+  async function startedTask(
+    description: string,
+    owner: string = agentId,
+    extra: Partial<Parameters<typeof createTaskExtended>[1]> = {},
+  ) {
     const task = await createTaskExtended(description, {
       agentId: owner,
       source: "mcp",
       priority: 70,
       modelTier: "smart",
+      ...extra,
     });
     await startTask(task.id);
     return task;
@@ -277,5 +285,105 @@ describe("defer-task handler", () => {
 
     expect(result.structuredContent.success).toBe(false);
     expect(result.structuredContent.message).toContain("not found");
+  });
+
+  test("a workflow-owned task cannot be deferred and books no schedule", async () => {
+    const workflow = await createWorkflow({
+      name: `defer-race-${crypto.randomUUID()}`,
+      definition: { nodes: [] },
+    });
+    const runId = crypto.randomUUID();
+    const stepId = crypto.randomUUID();
+    await createWorkflowRun({ id: runId, workflowId: workflow.id });
+    await createWorkflowRunStep({ id: stepId, runId, nodeId: "step", nodeType: "agent-task" });
+
+    const task = await startedTask("workflow step", agentId, {
+      workflowRunId: runId,
+      workflowRunStepId: stepId,
+    });
+
+    const result = (await buildTool().handler(
+      { taskId: task.id, delayMs: 60_000, summary: "did some work", note: "pending" },
+      meta(),
+    )) as DeferTaskResult;
+
+    expect(result.structuredContent.success).toBe(false);
+    expect(result.structuredContent.message).toContain("workflow");
+    expect((await schedulesForTask(task.id)).length).toBe(0);
+    expect((await getTaskById(task.id))?.status).toBe("in_progress");
+  });
+
+  test("a task with an outputSchema refuses a prose deferral and books no schedule", async () => {
+    const task = await startedTask("structured output task", agentId, {
+      outputSchema: {
+        type: "object",
+        required: ["result"],
+        properties: { result: { type: "string" } },
+      },
+    });
+
+    const result = (await buildTool().handler(
+      { taskId: task.id, delayMs: 60_000, summary: "did some work", note: "pending" },
+      meta(),
+    )) as DeferTaskResult;
+
+    expect(result.structuredContent.success).toBe(false);
+    expect(result.structuredContent.message).toContain("outputSchema");
+    expect((await schedulesForTask(task.id)).length).toBe(0);
+    const stored = await getTaskById(task.id);
+    expect(stored?.status).toBe("in_progress");
+    expect(stored?.output).toBeFalsy();
+  });
+
+  test("the wake-up schedule carries modelTier but never the parent's concrete model", async () => {
+    const task = await startedTask("pinned model task", agentId, {
+      model: "claude-sonnet-5",
+    });
+
+    const result = (await buildTool().handler(
+      { taskId: task.id, delayMs: 60_000, summary: "did some work", note: "pending" },
+      meta(),
+    )) as DeferTaskResult;
+
+    expect(result.structuredContent.success).toBe(true);
+    const schedules = await schedulesForTask(task.id);
+    expect(schedules.length).toBe(1);
+    expect(schedules[0]!.modelTier).toBe("smart");
+    expect(schedules[0]!.model).toBeFalsy();
+  });
+
+  test("a competing terminal transition between schedule creation and completion aborts the loser and books no orphan schedule", async () => {
+    const task = await startedTask("race target");
+
+    const [first, second] = (await Promise.all([
+      buildTool().handler(
+        { taskId: task.id, delayMs: 60_000, summary: "first writer", note: "pending A" },
+        meta(),
+      ),
+      buildTool().handler(
+        { taskId: task.id, delayMs: 90_000, summary: "second writer", note: "pending B" },
+        meta(),
+      ),
+    ])) as [DeferTaskResult, DeferTaskResult];
+
+    const results = [first, second];
+    const succeeded = results.filter((r) => r.structuredContent.success);
+    const failed = results.filter((r) => !r.structuredContent.success);
+
+    // Both pass the early terminal check (neither has completed yet when it
+    // reads); the FIFO transaction lock serializes their writes, so exactly
+    // one wins the completeTask race and the other's completeTask() returns
+    // null and must abort rather than substitute the stale pre-write task.
+    expect(succeeded.length).toBe(1);
+    expect(failed.length).toBe(1);
+    expect(failed[0]!.structuredContent.message).toContain("terminal state");
+
+    // The loser's schedule INSERT rolled back with its transaction — only
+    // the winner's wake-up was committed. No orphan schedule.
+    const schedules = await schedulesForTask(task.id);
+    expect(schedules.length).toBe(1);
+
+    const stored = await getTaskById(task.id);
+    expect(stored?.status).toBe("completed");
   });
 });

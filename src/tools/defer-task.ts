@@ -11,9 +11,13 @@ import {
   updateAgentStatusFromCapacity,
 } from "@/be/db";
 import { runTaskTerminalEffects } from "@/tasks/task-terminal-effects";
+import { getTaskOutputValidationError } from "@/tasks/terminal-result-guard";
 import { assertOwnsTask, ownerCtx } from "@/tools/task-tool-ctx";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { isTerminalTaskStatus } from "@/types";
+
+/** Thrown inside the transaction to abort and roll back the schedule INSERT. */
+class DeferAbortedError extends Error {}
 
 /** Render `note` + optional `checks` as the plain-text tail both texts share. */
 function renderChecks(checks?: string[]): string {
@@ -95,6 +99,18 @@ export const registerDeferTaskTool = (server: McpServer) => {
         return toolErr(`Task ${taskId} is already ${task.status}; nothing to defer.`);
       }
 
+      // A workflow step's completion drives `src/workflows/resume.ts` to advance
+      // `next` nodes immediately using this call's output. The scheduled wake-up
+      // task runs outside that workflow run and has no way to feed its eventual
+      // result back into the step, so the workflow would advance on a deferral
+      // note instead of the real result. Not supported: fail the step normally
+      // (or use a workflow-native wait) instead of deferring it.
+      if (task.workflowRunId) {
+        return toolErr(
+          `Task ${taskId} is owned by workflow run ${task.workflowRunId}; workflow-owned tasks cannot be deferred.`,
+        );
+      }
+
       if (!delayMs && !runAt) {
         return toolErr("Provide either delayMs or runAt.");
       }
@@ -110,6 +126,19 @@ export const registerDeferTaskTool = (server: McpServer) => {
       const taskTemplate = `Resume task ${taskId}: ${note}${checksBlock}`;
       const createdBy =
         (await resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId)) ?? undefined;
+
+      // The deferral note is written as the task's FINAL output — a task with
+      // an outputSchema must satisfy it on completion (store-progress enforces
+      // the same rule). Validate before creating anything: the real schedule
+      // id isn't known yet, but it never changes whether this prose is valid
+      // JSON against the schema, so a placeholder stands in for it here.
+      const previewOutput = `${summary}\n\nDeferred until ${nextRunAt} (schedule pending). Pending: ${note}${checksBlock}`;
+      const outputValidationError = getTaskOutputValidationError(task.outputSchema, previewOutput);
+      if (outputValidationError) {
+        return toolErr(
+          `Task ${taskId} has an outputSchema; its terminal output must satisfy it, but a deferral note cannot. ${outputValidationError}`,
+        );
+      }
 
       try {
         const committed = await getDbClient().transaction(async () => {
@@ -127,7 +156,10 @@ export const registerDeferTaskTool = (server: McpServer) => {
             taskType: "deferred",
             tags: ["deferred"],
             priority: task.priority,
-            model: task.model,
+            // No `model`: a concrete provider model pinned now can be
+            // incompatible with the assignee/provider at wake-up, especially
+            // after a delay. Only the portable modelTier travels — mirrors
+            // the non-inheriting continuation path in `src/be/db.ts`.
             modelTier: task.modelTier,
             parentTaskId: taskId,
             createdBy,
@@ -135,10 +167,20 @@ export const registerDeferTaskTool = (server: McpServer) => {
 
           const output = `${summary}\n\nDeferred until ${nextRunAt} (schedule ${schedule.id}). Pending: ${note}${checksBlock}`;
 
-          // Deliberately NOT running `getTaskOutputValidationError`: a deferral
-          // note is a status line about pending work, not the task's structured
-          // output. The wake-up run produces that.
+          // Deliberately NOT running `getTaskOutputValidationError` again here:
+          // already validated above against a placeholder id; re-run would be
+          // redundant since the id never affects JSON-shape validity.
           const completed = await completeTask(taskId, output);
+          if (!completed) {
+            // Another writer terminally completed/failed/cancelled this task
+            // between our early check and this transaction's write. Abort:
+            // rolling back here discards the schedule INSERT so no orphan
+            // wake-up is committed, and no terminal effects fire for a
+            // completion that didn't happen on this call.
+            throw new DeferAbortedError(
+              `Task ${taskId} reached a terminal state before this deferral committed.`,
+            );
+          }
 
           // afterCommit: the transaction can still roll back; business-use must
           // not be told the task completed for a write that never landed.
@@ -165,7 +207,7 @@ export const registerDeferTaskTool = (server: McpServer) => {
             await updateAgentStatusFromCapacity(task.agentId);
           }
 
-          return { scheduleId: schedule.id, output, completed: completed ?? task };
+          return { scheduleId: schedule.id, output, completed };
         });
 
         await runTaskTerminalEffects({
