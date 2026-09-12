@@ -601,6 +601,8 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
     const agentPath = join(cwd, "fake-acp-ephem-agent.ts");
     const sdkPath = join(process.cwd(), "node_modules/@agentclientprotocol/sdk/dist/acp.js");
 
+    const captureFile = join(cwd, "captured-auth.txt");
+
     await Bun.write(
       agentPath,
       `
@@ -614,11 +616,9 @@ class FakeAgent {
   async newSession(params) {
     const swarm = params.mcpServers.find((s) => s.name === "swarm");
     const auth = swarm?.headers?.find((h) => h.name === "Authorization")?.value ?? "";
-    // Emit bearer value as a custom event so the test can verify it.
-    await this.connection.sessionUpdate({
-      sessionId: "ephem-session-1",
-      update: { sessionUpdate: "custom", name: "captured_bearer", data: { bearer: auth } },
-    });
+    // Write bearer to a file so the test can read it back without relying on
+    // a custom sessionUpdate type that the ACP SDK schema rejects.
+    await Bun.write(${JSON.stringify(captureFile)}, auth);
     // newSession must return { sessionId, configOptions? }, not a prompt response.
     return { sessionId: "ephem-session-1" };
   }
@@ -702,28 +702,9 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
       expect(revokeCalled).toBe(true);
 
       // Verify the bearer forwarded to the ACP target is the ephemeral token.
-      const rawLogs = events
-        .filter((e): e is Extract<ProviderEvent, { type: "raw_log" }> => e.type === "raw_log")
-        .map((e) => {
-          try {
-            return JSON.parse(e.content) as Record<string, unknown>;
-          } catch {
-            return null;
-          }
-        })
-        .filter(Boolean) as Record<string, unknown>[];
-
-      const captured = rawLogs
-        .map((entry) => {
-          const update = entry.update as Record<string, unknown> | undefined;
-          if (update?.sessionUpdate === "custom") {
-            const data = update.data as Record<string, unknown> | undefined;
-            if (typeof data?.bearer === "string") return data.bearer;
-          }
-          return null;
-        })
-        .find((v) => v !== null);
-
+      // The fake agent wrote the captured Authorization header value to a file
+      // during newSession; read it back here.
+      const captured = await Bun.file(captureFile).text();
       expect(captured).toBe(`Bearer ${FAKE_TOKEN}`);
     } finally {
       await new Promise<void>((resolve) => swarmServer.close(() => resolve()));
