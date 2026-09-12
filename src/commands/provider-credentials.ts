@@ -82,6 +82,25 @@ export const REQUIRED_CRED_VARS_BY_PROVIDER: Record<SupportedProvider, readonly 
   acp: [],
 };
 
+type CredentialChecker = (
+  env: Record<string, string | undefined>,
+  opts?: CredCheckOptions,
+) => CredStatus | Promise<CredStatus>;
+
+/** The handlers used by the credential-readiness dispatcher. */
+export const CREDENTIAL_PROVIDER_CHECKERS: Record<SupportedProvider, CredentialChecker> = {
+  claude: (env) => checkClaudeCredentials(env),
+  "claude-managed": (env) => checkClaudeManagedCredentials(env),
+  codex: (env, opts) => checkCodexCredentials(env, opts),
+  devin: (env) => checkDevinCredentials(env),
+  opencode: (env, opts) => checkOpencodeCredentials(env, opts),
+  pi: async (env, opts) => {
+    const { checkPiMonoCredentials } = await import("../providers/pi-mono-adapter");
+    return checkPiMonoCredentials(env, opts);
+  },
+  acp: () => ({ ready: true, missing: [], satisfiedBy: "sdk-delegated" }),
+};
+
 /**
  * Run the predicate for `provider`. Unknown providers throw — call sites
  * should treat that as a configuration bug, not a user-correctable state.
@@ -95,28 +114,17 @@ export async function checkProviderCredentials(
   env: Record<string, string | undefined>,
   opts?: CredCheckOptions,
 ): Promise<CredStatus> {
-  switch (provider) {
-    case "claude":
-      return checkClaudeCredentials(env);
-    case "claude-managed":
-      return checkClaudeManagedCredentials(env);
-    case "codex":
-      return checkCodexCredentials(env, opts);
-    case "devin":
-      return checkDevinCredentials(env);
-    case "opencode":
-      return checkOpencodeCredentials(env, opts);
-    case "pi": {
-      const { checkPiMonoCredentials } = await import("../providers/pi-mono-adapter");
-      return checkPiMonoCredentials(env, opts);
-    }
-    case "acp":
-      return { ready: true, missing: [], satisfiedBy: "sdk-delegated" };
-    default:
-      throw new Error(
-        `checkProviderCredentials: unknown provider "${provider}". Supported: claude, claude-managed, codex, devin, opencode, pi, acp.`,
-      );
+  const checker = (CREDENTIAL_PROVIDER_CHECKERS as Record<string, CredentialChecker | undefined>)[
+    provider
+  ];
+  if (!checker) {
+    throw new Error(
+      `checkProviderCredentials: unknown provider "${provider}". Supported: ${Object.keys(
+        CREDENTIAL_PROVIDER_CHECKERS,
+      ).join(", ")}.`,
+    );
   }
+  return checker(env, opts);
 }
 
 // ─── Live "Test connection" dispatcher ───────────────────────────────────────
