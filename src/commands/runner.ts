@@ -84,12 +84,12 @@ import {
 import {
   buildCredStatusReport,
   buildLatestModelReport,
-  isBedrockSdkMode,
   isCredCheckDisabled,
   reportAcpStatus,
   reportCredStatus,
   reportLatestModel,
   sendCredStatusReport,
+  shouldRefreshBedrockStatus,
 } from "./provider-credentials.ts";
 import {
   type ResumeSessionCandidate,
@@ -5928,9 +5928,13 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             console.warn(`[${role}] cred_status post_task report failed (non-fatal): ${err}`),
           );
       } else if (
-        currentHarness === "pi" &&
-        isBedrockSdkMode(process.env) &&
-        Date.now() - lastBedrockRefreshAt > BEDROCK_REFRESH_INTERVAL_MS
+        shouldRefreshBedrockStatus({
+          harnessProvider: currentHarness,
+          env: process.env,
+          lastRefreshAt: lastBedrockRefreshAt,
+          now: Date.now(),
+          intervalMs: BEDROCK_REFRESH_INTERVAL_MS,
+        })
       ) {
         // Bedrock enumeration drifts independently of the harness_provider:
         // access granted (or revoked) in the AWS console after boot won't flip
