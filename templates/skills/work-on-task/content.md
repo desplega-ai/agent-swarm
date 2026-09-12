@@ -6,6 +6,6 @@ This message carries the task text, its attachments, its output format, and memo
 
 When the task names a skill (`researching`, `planning`, `implementing`), use it. Otherwise work directly.
 
-Finish the task with one of the three endings in your operating contract: `completed`, `request-human-input`, or `failed`. Then stop.
+Finish the task with one of the four endings in your operating contract: `completed`, `defer-task`, `request-human-input`, or `failed`. Then stop.
 
 If the user interrupts, follow their instructions. To resume, call `/work-on-task <taskId>` again.
