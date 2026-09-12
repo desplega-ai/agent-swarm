@@ -48,10 +48,12 @@ import {
   AgentSchema,
   AgentStatusSchema,
   AgentWithTasksSchema,
+  type ProfileSyncConflict,
   type ProviderName,
   ProviderNameSchema,
   ReasoningEffortSchema,
   RuntimeInstanceSchema,
+  VersionableFieldSchema,
 } from "../types";
 import {
   type ClaudeTransport,
@@ -411,6 +413,8 @@ const listAgentRuntimeInstances = route({
   },
 });
 
+const ContentHashSchema = z.string().regex(/^[0-9a-f]{64}$/, "sha256 hex");
+
 const ProfileSyncRejectionSchema = z.object({
   field: z.enum(["soulMd", "identityMd", "claudeMd", "toolsMd"]),
   diskSize: z.number().int(),
@@ -442,6 +446,12 @@ const updateAgentProfileRoute = route({
     changeSource: z.string().optional(),
     changedByAgentId: z.string().optional(),
     changeReason: z.string().optional(),
+    /**
+     * Compare-and-set token per field: the sha256 (hex) of the content the edit
+     * was based on. A field whose current value hashes differently is dropped
+     * (the DB moved since), without failing the rest of the update.
+     */
+    expectedHashes: z.partialRecord(VersionableFieldSchema, ContentHashSchema).optional(),
   }),
   responses: {
     200: { description: "Profile updated", schema: AgentWithCapacitySchema },
@@ -840,6 +850,7 @@ export async function handleAgentsRest(
           }
         : undefined;
 
+    const conflicts: ProfileSyncConflict[] = [];
     let agent: Agent | null;
     try {
       agent = await updateAgentProfile(
@@ -859,6 +870,10 @@ export async function handleAgentsRest(
           ...(body.avatar !== undefined ? { avatar: body.avatar } : {}),
         },
         versionMeta,
+        {
+          expectedHashes: body.expectedHashes,
+          onConflict: (conflict) => conflicts.push(conflict),
+        },
       );
     } catch (error) {
       if (error instanceof IdentityFieldBudgetError) {
@@ -901,10 +916,29 @@ export async function handleAgentsRest(
       return true;
     }
 
+    // A dropped field still answers 200 (the rest of the update landed), so the
+    // drop must be visible somewhere: one event per field, queryable later.
+    for (const conflict of conflicts) {
+      try {
+        await createEvent({
+          category: "system",
+          event: "system.profile_sync_conflict",
+          status: "skipped",
+          source: "api",
+          agentId: parsed.params.id,
+          data: { ...conflict, changeSource: versionMeta?.changeSource ?? null },
+        });
+      } catch (eventError) {
+        const message = eventError instanceof Error ? eventError.message : String(eventError);
+        console.error(scrubSecrets(`[profile-sync] Failed to persist conflict event: ${message}`));
+      }
+    }
+
     if (versionMeta?.changeSource === "self_edit" || versionMeta?.changeSource === "session_sync") {
       try {
         for (const field of Object.keys(IDENTITY_FIELD_BUDGETS) as BudgetedIdentityField[]) {
-          if (body[field] === undefined) continue;
+          // A field dropped by the compare-and-set was not written: nothing reconciled.
+          if (body[field] === undefined || conflicts.some((c) => c.field === field)) continue;
           await createEvent({
             category: "system",
             event: "system.profile_sync_reconciled",

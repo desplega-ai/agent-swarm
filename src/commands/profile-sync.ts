@@ -28,8 +28,9 @@
  */
 
 import { resolveTemplateAsync } from "../prompts/resolver.ts";
-import type { Agent, SwarmEvent } from "../types.ts";
+import type { Agent, ProfileExpectedHashes, SwarmEvent } from "../types.ts";
 import { MAX_PROFILE_FILE_LENGTH } from "../utils/constants.ts";
+import { withFileLock } from "../utils/file-lock.ts";
 import {
   type BudgetedIdentityField,
   IDENTITY_FIELD_BUDGETS,
@@ -295,12 +296,144 @@ export async function readIdentityBaselines(
     return null;
   }
 }
+
 /**
  * Claude Code's personal-file CLAUDE.md path. This is what the Claude plugin
  * Stop hook reads and owns — the runner only uses it as a backstop for an
  * all-Claude batch (never overwriting it with the workspace materialization).
  */
 export const CLAUDE_MD_PATH = `${process.env.HOME}/.claude/CLAUDE.md`;
+/**
+ * Lineage record of the LAST content the Claude hook wrote to CLAUDE_MD_PATH (a
+ * SessionStart materialization or a Stop `.bak` restore). Maintained by
+ * `claude-md-session.ts`; also read by the runner's backstop below. It lives next
+ * to the file it describes: same owner, same scope (one per `~/.claude`), and not
+ * in a world-writable directory where another user could plant a symlink.
+ */
+export const CLAUDE_MD_LINEAGE_PATH = `${CLAUDE_MD_PATH}.lineage.json`;
+/**
+ * Lock serializing every multi-file transition of CLAUDE_MD_PATH + its lineage
+ * record across processes (hook SessionStart/Stop and the runner backstop).
+ */
+export const CLAUDE_MD_LOCK_PATH = `${CLAUDE_MD_PATH}.lock`;
+/**
+ * Every holder of CLAUDE_MD_LOCK_PATH bounds its network call by this, so other
+ * processes waiting for the lock (within the 60 s Claude Code hook timeout) are
+ * not held up by a hung request.
+ */
+export const CLAUDE_MD_SYNC_TIMEOUT_MS = 10_000;
+/** The runner backstop is best effort: it waits briefly, then skips this round. */
+const RUNNER_LOCK_WAIT_MS = 15_000;
+
+/** `fetch` bounded by CLAUDE_MD_SYNC_TIMEOUT_MS, for calls made while holding the lock. */
+export function fetchWithSyncTimeout(fetchImpl: typeof fetch = fetch): typeof fetch {
+  return ((input, init) =>
+    fetchImpl(input, {
+      ...init,
+      signal: AbortSignal.timeout(CLAUDE_MD_SYNC_TIMEOUT_MS),
+    })) as typeof fetch;
+}
+
+/**
+ * Whether a CLAUDE.md sync reads the Claude hook's personal file (and so must
+ * follow its lineage, under its lock) rather than an unconditional source.
+ */
+export function syncsHookOwnedClaudeMd(
+  claudeMdPath: string,
+  changeSource: ProfileChangeSource,
+): boolean {
+  return claudeMdPath === CLAUDE_MD_PATH && changeSource === "session_sync";
+}
+
+/** Where the content of CLAUDE_MD_PATH came from; see `claude-md-session.ts`. */
+export interface ClaudeMdLineage {
+  /** Hash of the content a hook wrote, or null if it restored an agent's edit. */
+  written: string | null;
+  /** Hash of the DB value that content derives from, or null if unknown. */
+  base: string | null;
+}
+
+const SHA256_HEX = /^[0-9a-f]{64}$/;
+
+/**
+ * Parse a lineage record; null for anything that is not exactly that shape —
+ * both keys present, each a lowercase sha256 hex or null.
+ */
+export function parseClaudeMdLineage(raw: string | undefined): ClaudeMdLineage | null {
+  if (!raw) return null;
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const { written, base } = value as Record<string, unknown>;
+  const hashOrNull = (v: unknown) => v === null || (typeof v === "string" && SHA256_HEX.test(v));
+  if (!("written" in value) || !("base" in value) || !hashOrNull(written) || !hashOrNull(base)) {
+    return null;
+  }
+  return { written: written as string | null, base: base as string | null };
+}
+
+/**
+ * What the record holds while a hook write is in flight: marked before the file
+ * is touched, replaced by the real lineage after. It parses as no lineage, so
+ * whatever the file holds counts as hook-written and is never pushed (see
+ * `effectiveClaudeMdLineage`) — also when the real lineage never lands.
+ */
+export const CLAUDE_MD_PENDING_RECORD = JSON.stringify({ pending: true });
+
+/** Lineage of content whose origin is unknown: counts as hook-written, never pushed. */
+export function hookWrittenLineage(content: string): ClaudeMdLineage {
+  return { written: contentSha256(content), base: null };
+}
+
+/**
+ * The lineage to decide on, from the raw record file: absent → null (no lineage
+ * yet, the previous behaviour); present but unreadable or malformed → the content
+ * counts as hook-written, so a bad record never turns into an unconditional push.
+ */
+export function effectiveClaudeMdLineage(
+  raw: string | undefined,
+  content: string,
+): ClaudeMdLineage | null {
+  if (raw === undefined) return null;
+  return parseClaudeMdLineage(raw) ?? hookWrittenLineage(content);
+}
+
+/**
+ * Lineage of content found on disk, given the last record: the hook's own write
+ * inherits the record; anything else is an edit on top of the record's base.
+ */
+export function claudeMdLineageOf(
+  content: string,
+  record: ClaudeMdLineage | null,
+): ClaudeMdLineage {
+  if (record && record.written === contentSha256(content)) return record;
+  return { written: null, base: record?.base ?? null };
+}
+
+/**
+ * The CLAUDE.md `session_sync` body, or null to skip:
+ *   - no record at all → the previous unconditional sync;
+ *   - content a hook wrote, or equal to its own base → skip: not an edit;
+ *   - otherwise an edit → sent with its base as `expectedHashes.claudeMd`
+ *     (unconditional only if that base is unknown).
+ */
+export function planClaudeMdSync(state: {
+  content: string;
+  record: ClaudeMdLineage | null;
+}): ProfilePayload["body"] | null {
+  const { content, record } = state;
+  if (!content.trim()) return null;
+  if (record === null) return { claudeMd: content, changeSource: "session_sync" };
+
+  const { written, base } = claudeMdLineageOf(content, record);
+  if (written !== null || contentSha256(content) === base) return null;
+  if (base === null) return { claudeMd: content, changeSource: "session_sync" };
+  return { claudeMd: content, changeSource: "session_sync", expectedHashes: { claudeMd: base } };
+}
 /**
  * Workspace CLAUDE.md — the agent-level instructions file the runner
  * materializes from the `claudeMd` DB field at boot (`runner.ts`) and that the
@@ -371,6 +504,8 @@ export interface ProfileSyncOptions {
    * `resolveClaudeMdPath`.
    */
   claudeMdPath?: string;
+  /** Lock for the personal-file CLAUDE.md sync (tests); defaults to CLAUDE_MD_LOCK_PATH. */
+  claudeMdLock?: { path?: string; waitMs?: number };
   /** Injectable fetch for tests. Defaults to the global `fetch`. */
   fetchImpl?: typeof fetch;
 }
@@ -394,7 +529,8 @@ export function resolveClaudeMdPath(completedProviders: readonly string[]): stri
 /** A single profile-update POST body, tagged with a label for logging. */
 export interface ProfilePayload {
   label: string;
-  body: Record<string, string>;
+  /** Field values are strings; `expectedHashes` (compare-and-set) is an object. */
+  body: Record<string, string | ProfileExpectedHashes>;
 }
 
 /**
@@ -615,6 +751,15 @@ export async function collectProfilePayloads(
     if (raw?.trim()) {
       if (baselines?.claudeMd && contentSha256(raw) === baselines.claudeMd) {
         // CLAUDE.md unchanged during session — skip to preserve Lead's DB edits
+      } else if (syncsHookOwnedClaudeMd(claudeMdPath, changeSource)) {
+        // The personal file is owned by the Claude hook, which keeps its lineage:
+        // skip what a hook wrote, send an edit against the base it derives from.
+        // Without a record the only base the runner knows is its boot baseline.
+        const record =
+          effectiveClaudeMdLineage(await readFile(CLAUDE_MD_LINEAGE_PATH), raw) ??
+          (baselines?.claudeMd ? { written: null, base: baselines.claudeMd } : null);
+        const body = planClaudeMdSync({ content: raw, record });
+        if (body) payloads.push({ label: "claude", body });
       } else {
         payloads.push({ label: "claude", body: { claudeMd: raw, changeSource } });
       }
@@ -686,14 +831,51 @@ export async function syncProfileFilesToServer(opts: ProfileSyncOptions): Promis
   const changeSource = opts.changeSource ?? "session_sync";
   const fields = opts.fields ?? ["identity", "claude", "setup"];
 
+  const claudeMdPath = opts.claudeMdPath ?? CLAUDE_MD_PATH;
+  // The personal file is rewritten together with its lineage record by the
+  // Claude hook; reading the pair mid-transition can misjudge a restored copy as
+  // an edit. So that group is read and posted under the same lock the hook holds.
+  const claudeUnderLock =
+    fields.includes("claude") && syncsHookOwnedClaudeMd(claudeMdPath, changeSource);
+  const unlockedFields = claudeUnderLock ? fields.filter((f) => f !== "claude") : fields;
+
   const payloads = await collectProfilePayloads(
-    fields,
+    unlockedFields,
     changeSource,
     readFileIfExists,
-    opts.claudeMdPath ?? CLAUDE_MD_PATH,
+    claudeMdPath,
     opts.agentId,
   );
   for (const payload of payloads) {
     await postProfileUpdate(opts, payload);
+  }
+
+  if (claudeUnderLock) {
+    const { path: lockPath = CLAUDE_MD_LOCK_PATH, waitMs = RUNNER_LOCK_WAIT_MS } =
+      opts.claudeMdLock ?? {};
+    const bounded = { ...opts, fetchImpl: fetchWithSyncTimeout(opts.fetchImpl) };
+    const locked = await withFileLock(
+      lockPath,
+      async () => {
+        const claude = await collectProfilePayloads(
+          ["claude"],
+          changeSource,
+          readFileIfExists,
+          claudeMdPath,
+          opts.agentId,
+        );
+        for (const payload of claude) await postProfileUpdate(bounded, payload);
+      },
+      { waitMs },
+    );
+    // Never read or push the hook-owned file without the lock.
+    if (!locked.acquired) {
+      const detail = locked.error === undefined ? "" : `: ${String(locked.error)}`;
+      console.warn(
+        scrubSecrets(
+          `[profile-sync] no CLAUDE.md lock (${locked.reason})${detail} — backstop sync skipped`,
+        ),
+      );
+    }
   }
 }

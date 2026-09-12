@@ -71,6 +71,8 @@ import type {
   PricingProvider,
   PricingRow,
   PricingTokenClass,
+  ProfileExpectedHashes,
+  ProfileSyncConflict,
   PromptTemplate,
   PromptTemplateHistory,
   ProviderName,
@@ -6040,6 +6042,12 @@ export async function updateAgentProfile(
     avatar?: AgentAvatar | null;
   },
   meta?: VersionMeta,
+  guard?: {
+    /** Per-field compare-and-set token; see {@link ProfileExpectedHashes}. */
+    expectedHashes?: ProfileExpectedHashes;
+    /** Called once per field dropped because its expected hash was stale. */
+    onConflict?: (conflict: ProfileSyncConflict) => void;
+  },
 ): Promise<Agent | null> {
   return await getDbClient().transaction(async (tx) => {
     // Get current agent state for version comparison
@@ -6078,8 +6086,35 @@ export async function updateAgentProfile(
       }
     }
 
+    // Compare-and-set. A writer that edits a copy of a field (a session's
+    // materialized CLAUDE.md) sends the hash that copy was based on. If the DB
+    // moved since — a sibling session's sync, an `update-profile` — the copy is
+    // stale and writing it would revert the newer value, so the field is dropped
+    // (no version, no column write). An edit on top of the current value applies,
+    // including a deliberate revert to an earlier version. Without a token the
+    // write is unconditional, as before.
+    //
+    // Runs BEFORE the budget check: a stale copy of an older, longer value must be
+    // dropped, not rejected — a budget rejection throws and would also roll back
+    // the other fields of the same update.
+    const writable = { ...updates };
+    for (const field of VERSIONABLE_FIELDS) {
+      const expectedHash = guard?.expectedHashes?.[field];
+      if (expectedHash === undefined) continue;
+      if (writable[field] === undefined || writable[field] === null) continue;
+
+      const currentHash = computeContentHash(current[field] ?? "");
+      if (currentHash === expectedHash) continue;
+
+      console.warn(
+        `[profile-sync] agent ${id}: ${field} dropped — based on ${expectedHash.slice(0, 12)}, DB is at ${currentHash.slice(0, 12)}`,
+      );
+      delete writable[field];
+      guard?.onConflict?.({ field, expectedHash, currentHash });
+    }
+
     for (const field of BUDGETED_IDENTITY_FIELDS) {
-      const nextValue = updates[field];
+      const nextValue = writable[field];
       if (nextValue === undefined) continue;
 
       const result = checkIdentityFieldBudget({
@@ -6104,9 +6139,9 @@ export async function updateAgentProfile(
       if (existingAgent) throw new Error("Agent name already exists");
     }
 
-    // Create context versions for changed fields
+    // Create context versions for changed fields (stale copies already dropped)
     for (const field of VERSIONABLE_FIELDS) {
-      const newValue = updates[field];
+      const newValue = writable[field];
       if (newValue === undefined || newValue === null) continue;
 
       const currentValue = current[field] ?? "";
@@ -6163,12 +6198,12 @@ export async function updateAgentProfile(
         updates.description ?? null,
         updates.role ?? null,
         updates.capabilities ? JSON.stringify(updates.capabilities) : null,
-        updates.claudeMd ?? null,
-        updates.soulMd ?? null,
-        updates.identityMd ?? null,
-        updates.setupScript ?? null,
-        updates.toolsMd ?? null,
-        updates.heartbeatMd ?? null,
+        writable.claudeMd ?? null,
+        writable.soulMd ?? null,
+        writable.identityMd ?? null,
+        writable.setupScript ?? null,
+        writable.toolsMd ?? null,
+        writable.heartbeatMd ?? null,
         avatarProvided ? 1 : 0,
         avatarJson,
         now,

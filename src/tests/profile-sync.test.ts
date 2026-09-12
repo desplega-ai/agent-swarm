@@ -1,8 +1,13 @@
 import { describe, expect, spyOn, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   buildIdentityPayload,
   buildIndependentIdentityPayloads,
+  CLAUDE_MD_LINEAGE_PATH,
   CLAUDE_MD_PATH,
+  CLAUDE_MD_PENDING_RECORD,
   collectProfilePayloads,
   contentSha256,
   extractSetupScriptContent,
@@ -23,6 +28,7 @@ import {
 import { profileSyncAuditExitCode, runProfileSyncAudit } from "../commands/profile-sync-audit";
 import { MAX_PROFILE_FILE_LENGTH } from "../utils/constants";
 import { IDENTITY_FIELD_BUDGETS } from "../utils/identity-field-budget";
+import { holdFileLock } from "./fixtures/hold-file-lock";
 
 const MARKER_START = "# === Agent-managed setup (from DB) ===";
 const MARKER_END = "# === End agent-managed setup ===";
@@ -478,6 +484,35 @@ describe("postProfileUpdate (non-2xx is surfaced, not swallowed)", () => {
 });
 
 describe("syncProfileFilesToServer (orchestration is non-fatal)", () => {
+  test("skips the personal CLAUDE.md, reading nothing, while its lock is held", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "claude-md-lock-"));
+    const lockPath = join(dir, "CLAUDE.md.lock");
+    const release = await holdFileLock(lockPath);
+    const sent: string[] = [];
+    const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      sent.push(String(init?.body));
+      return new Response("{}", { status: 200 });
+    }) as typeof fetch;
+    try {
+      await syncProfileFilesToServer({
+        agentId: "agent-1",
+        apiUrl: "https://api.example.test",
+        apiKey: "secret-key",
+        changeSource: "session_sync",
+        fields: ["claude"],
+        claudeMdLock: { path: lockPath, waitMs: 100 },
+        fetchImpl,
+      });
+      expect(sent).toEqual([]);
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("no CLAUDE.md lock (busy)"));
+    } finally {
+      await release();
+      warnSpy.mockRestore();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   test("resolves without throwing even when every POST fails", async () => {
     const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
     const errSpy = spyOn(console, "error").mockImplementation(() => {});
@@ -490,6 +525,7 @@ describe("syncProfileFilesToServer (orchestration is non-fatal)", () => {
           apiKey: "secret-key",
           changeSource: "session_sync",
           // No files on a CI box → typically no payloads; still must never throw.
+          claudeMdLock: { path: join(tmpdir(), `claude-md-${crypto.randomUUID()}.lock`) },
           fetchImpl,
         }),
       ).resolves.toBeUndefined();
@@ -646,6 +682,96 @@ describe("collectProfilePayloads (baseline integration)", () => {
     const payloads = await collectProfilePayloads(["claude"], "session_sync", files);
     expect(payloads).toHaveLength(1);
     expect(payloads[0]?.body.claudeMd).toBe("modified claude md");
+    // The personal file is hook-owned and can hold any session's copy: the
+    // runner's backstop sends its boot baseline as the compare-and-set token.
+    expect(payloads[0]?.body.expectedHashes).toEqual({ claudeMd: contentSha256("original") });
+  });
+
+  test("the runner backstop skips content the Claude hook itself wrote", async () => {
+    // After a Stop the hook has restored the `.bak`: the file holds a copy a
+    // hook wrote (this session's or a sibling's), not an edit.
+    const files = reader({
+      [CLAUDE_MD_PATH]: "restored by a hook",
+      [IDENTITY_BASELINES_PATH]: JSON.stringify({ claudeMd: contentSha256("boot") }),
+      [CLAUDE_MD_LINEAGE_PATH]: JSON.stringify({
+        written: contentSha256("restored by a hook"),
+        base: contentSha256("restored by a hook"),
+      }),
+    });
+
+    expect(await collectProfilePayloads(["claude"], "session_sync", files)).toEqual([]);
+  });
+
+  test("the runner backstop does not push when the lineage record is unreadable", async () => {
+    const files = reader({
+      [CLAUDE_MD_PATH]: "edited",
+      [IDENTITY_BASELINES_PATH]: JSON.stringify({ claudeMd: contentSha256("boot") }),
+      [CLAUDE_MD_LINEAGE_PATH]: "{not json",
+    });
+
+    expect(await collectProfilePayloads(["claude"], "session_sync", files)).toEqual([]);
+  });
+
+  test("the runner backstop does not push when the record holds a non-sha256 value", async () => {
+    const files = reader({
+      [CLAUDE_MD_PATH]: "hook materialization",
+      [IDENTITY_BASELINES_PATH]: JSON.stringify({ claudeMd: contentSha256("boot") }),
+      [CLAUDE_MD_LINEAGE_PATH]: JSON.stringify({ written: "not-a-sha256", base: null }),
+    });
+
+    expect(await collectProfilePayloads(["claude"], "session_sync", files)).toEqual([]);
+  });
+
+  test("the runner backstop does not push while a hook write is pending", async () => {
+    // A hook write whose lineage never landed leaves the record marked pending:
+    // whatever is on disk then counts as hook-written, for the backstop too.
+    const files = reader({
+      [CLAUDE_MD_PATH]: "edited",
+      [IDENTITY_BASELINES_PATH]: JSON.stringify({ claudeMd: contentSha256("boot") }),
+      [CLAUDE_MD_LINEAGE_PATH]: CLAUDE_MD_PENDING_RECORD,
+    });
+
+    expect(await collectProfilePayloads(["claude"], "session_sync", files)).toEqual([]);
+  });
+
+  test("the runner backstop sends an edit against the base the hook recorded", async () => {
+    const files = reader({
+      [CLAUDE_MD_PATH]: "edited",
+      [IDENTITY_BASELINES_PATH]: JSON.stringify({ claudeMd: contentSha256("boot") }),
+      [CLAUDE_MD_LINEAGE_PATH]: JSON.stringify({
+        written: contentSha256("materialized"),
+        base: contentSha256("materialized"),
+      }),
+    });
+
+    const payloads = await collectProfilePayloads(["claude"], "session_sync", files);
+    expect(payloads.map((p) => p.body)).toEqual([
+      {
+        claudeMd: "edited",
+        changeSource: "session_sync",
+        expectedHashes: { claudeMd: contentSha256("materialized") },
+      },
+    ]);
+  });
+
+  test("session_sync of the workspace CLAUDE.md stays unconditional", async () => {
+    // Non-Claude harnesses edit /workspace/CLAUDE.md directly and nothing
+    // rematerializes it mid-life, so the boot baseline is not a valid base.
+    const baselines: IdentityBaselines = { claudeMd: contentSha256("original") };
+    const files = reader({
+      [WORKSPACE_CLAUDE_MD_PATH]: "modified workspace md",
+      [IDENTITY_BASELINES_PATH]: JSON.stringify(baselines),
+    });
+
+    const payloads = await collectProfilePayloads(
+      ["claude"],
+      "session_sync",
+      files,
+      WORKSPACE_CLAUDE_MD_PATH,
+    );
+    expect(payloads.map((p) => p.body)).toEqual([
+      { claudeMd: "modified workspace md", changeSource: "session_sync" },
+    ]);
   });
 
   test("session_sync proceeds normally when baselines file is missing", async () => {
