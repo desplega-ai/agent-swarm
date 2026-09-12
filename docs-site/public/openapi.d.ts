@@ -10398,6 +10398,7 @@ export interface paths {
                                 taskId: string;
                                 task: components["schemas"]["AgentTask"];
                                 requestedBy?: {
+                                    id?: string;
                                     name: string;
                                     email?: string;
                                     role?: string;
@@ -10418,6 +10419,7 @@ export interface paths {
                                     }[];
                                 };
                                 requestedBy?: {
+                                    id?: string;
                                     name: string;
                                     email?: string;
                                     role?: string;
@@ -11518,6 +11520,7 @@ export interface paths {
                                 /** Format: date-time */
                                 nextRunAt?: string;
                                 createdByAgentId?: string;
+                                parentTaskId?: string;
                                 /** @default UTC */
                                 timezone: string;
                                 /** @default 0 */
@@ -11580,6 +11583,7 @@ export interface paths {
                                 /** Format: date-time */
                                 nextRunAt?: string;
                                 createdByAgentId?: string;
+                                parentTaskId?: string;
                                 /** @default UTC */
                                 timezone: string;
                                 /** @default 0 */
@@ -11703,6 +11707,7 @@ export interface paths {
                             /** Format: date-time */
                             nextRunAt?: string;
                             createdByAgentId?: string;
+                            parentTaskId?: string;
                             /** @default UTC */
                             timezone: string;
                             /** @default 0 */
@@ -11821,6 +11826,7 @@ export interface paths {
                                 /** Format: date-time */
                                 nextRunAt?: string;
                                 createdByAgentId?: string;
+                                parentTaskId?: string;
                                 /** @default UTC */
                                 timezone: string;
                                 /** @default 0 */
@@ -11939,6 +11945,7 @@ export interface paths {
                             /** Format: date-time */
                             nextRunAt?: string;
                             createdByAgentId?: string;
+                            parentTaskId?: string;
                             /** @default UTC */
                             timezone: string;
                             /** @default 0 */
@@ -12067,6 +12074,7 @@ export interface paths {
                             /** Format: date-time */
                             nextRunAt?: string;
                             createdByAgentId?: string;
+                            parentTaskId?: string;
                             /** @default UTC */
                             timezone: string;
                             /** @default 0 */
@@ -12254,6 +12262,7 @@ export interface paths {
                             /** Format: date-time */
                             nextRunAt?: string;
                             createdByAgentId?: string;
+                            parentTaskId?: string;
                             /** @default UTC */
                             timezone: string;
                             /** @default 0 */
@@ -15243,6 +15252,7 @@ export interface paths {
                                 /** Format: date-time */
                                 nextRunAt?: string;
                                 createdByAgentId?: string;
+                                parentTaskId?: string;
                                 /** @default UTC */
                                 timezone: string;
                                 /** @default 0 */

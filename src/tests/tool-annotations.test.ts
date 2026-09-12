@@ -199,8 +199,8 @@ describe("Tool Annotations & Classification", () => {
     expect(overlap).toEqual([]);
   });
 
-  test("CORE_TOOLS contains exactly 25 tools", () => {
-    expect(CORE_TOOLS.size).toBe(25);
+  test("CORE_TOOLS contains exactly 26 tools", () => {
+    expect(CORE_TOOLS.size).toBe(26);
   });
 
   test("ALL_TOOLS equals CORE_TOOLS union DEFERRED_TOOLS", () => {
@@ -251,6 +251,7 @@ describe("Tool Annotations & Classification", () => {
       "task-action",
       "send-task",
       "get-tasks",
+      "defer-task",
     ];
     for (const tool of lifecycleTools) {
       expect(CORE_TOOLS.has(tool)).toBe(true);
@@ -377,7 +378,7 @@ describe("Tool Annotations & Classification", () => {
     // Includes 11 skill tools, 7 MCP server tools, reusable script tools, and the
     // native Kapso/WhatsApp tools (register/unregister number + send/reply message).
     expect(count).toBeGreaterThanOrEqual(45);
-    expect(count).toBeLessThanOrEqual(140);
+    expect(count).toBeLessThanOrEqual(141);
   });
 
   test("core tools are fewer than deferred tools", () => {

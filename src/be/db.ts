@@ -8188,6 +8188,7 @@ type ScheduledTaskRow = {
   lastRunAt: string | null;
   nextRunAt: string | null;
   createdByAgentId: string | null;
+  parentTaskId: string | null;
   timezone: string;
   consecutiveErrors: number | null;
   lastErrorAt: string | null;
@@ -8240,6 +8241,7 @@ function rowToScheduledTask(row: ScheduledTaskRow): ScheduledTask {
     lastRunAt: normalizeDate(row.lastRunAt) ?? undefined,
     nextRunAt: normalizeDate(row.nextRunAt) ?? undefined,
     createdByAgentId: row.createdByAgentId ?? undefined,
+    parentTaskId: row.parentTaskId ?? undefined,
     timezone: row.timezone,
     consecutiveErrors: row.consecutiveErrors ?? 0,
     lastErrorAt: normalizeDate(row.lastErrorAt) ?? undefined,
@@ -8389,6 +8391,8 @@ export interface CreateScheduledTaskData {
   enabled?: boolean;
   nextRunAt?: string;
   createdByAgentId?: string;
+  /** Only `defer-task` sets this — the task the schedule's run continues. */
+  parentTaskId?: string;
   timezone?: string;
   model?: string;
   modelTier?: ModelTier;
@@ -8411,11 +8415,11 @@ export async function createScheduledTask(data: CreateScheduledTaskData): Promis
     `INSERT INTO scheduled_tasks (
         id, "key", name, description, cronExpression, intervalMs, taskTemplate,
         taskType, tags, priority, targetAgentId, enabled, nextRunAt,
-        createdByAgentId, timezone, model, modelTier, scheduleType, targetType,
-        workflowId, scriptName, scriptArgs, params, requiredParams, requires,
+        createdByAgentId, parentTaskId, timezone, model, modelTier, scheduleType,
+        targetType, workflowId, scriptName, scriptArgs, params, requiredParams, requires,
         createdAt, lastUpdatedAt,
         created_by, updated_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     [
       id,
       normalizeAssetKey(data.key ?? defaultAssetKey("schedule", id)),
@@ -8431,6 +8435,7 @@ export async function createScheduledTask(data: CreateScheduledTaskData): Promis
       data.enabled !== false ? 1 : 0,
       data.nextRunAt ?? null,
       data.createdByAgentId ?? null,
+      data.parentTaskId ?? null,
       data.timezone ?? "UTC",
       data.model ?? null,
       data.modelTier ?? null,

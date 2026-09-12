@@ -12,6 +12,7 @@ export const SDK_TOOL_NAME_MAP = {
   task_list: "get-tasks",
   task_get: "get-task-details",
   task_storeProgress: "store-progress",
+  task_defer: "defer-task",
   task_poll: "poll-task",
   task_send: "send-task",
   task_cancel: "cancel-task", // destructive
