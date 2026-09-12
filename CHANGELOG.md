@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.146.0] - 2026-09-12
+
+### Added
+- **The session composer accepts drag-and-drop attachments**, with file-type and 50 MB size checks before upload (#1432).
+- **The E2E runner discovers scenarios automatically**, enforces unique names and execution order, and supports group selection. Slack visual reports can publish on fork PRs through validated artifacts (#1439).
+
+### Changed
+- **Document delivery defaults to Markdown in agent-fs**, or Markdown task attachments when agent-fs is unavailable. Pages are reserved for polished shared artifacts or explicit requests (#1437).
+
+### Fixed
+- **Credentialed CORS uses a hosted/dev allowlist by default**. Custom dashboards must configure `CORS_ALLOWED_ORIGINS`; the deployment-only compatibility flag does not grant cookie credentials to unlisted origins (#1436).
+- **ACP prompt usage persists for token accounting**, including reported token counters (#1431).
+- **Persisted ACP tool updates render without transcript noise** in session logs (#1429).
+
 ## [1.145.0] - 2026-09-11
 
 ### Added
