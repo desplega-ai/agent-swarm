@@ -52,6 +52,8 @@ It runs deterministic HTTP and MCP scenarios with simulated agents. It does not 
 The runner discovers route and MCP tool coverage from the running server.
 It writes `./e2e-results.json` by default.
 
+The runner discovers exported scenarios in `scripts/e2e/scenarios/*.ts` and sorts them by their explicit numeric `order`. New scenarios need a unique name and order; duplicate values or a scenario file with no valid export fail discovery. Use optional `groups` tags and `--group` to select related scenarios without editing the runner or workflow lists.
+
 Every run also boots an in-process `@desplega.ai/slack-mock` before the API and starts the server with `NODE_ENV=test`,
 so Bolt connects to the mock over Socket Mode (the socket-mode guard refuses `NODE_ENV=development`).
 Scenarios drive that Slack workspace through `ctx.slack`.
@@ -65,6 +67,7 @@ reuses the run's database, port, API key, secrets, agent-fs directory, and Slack
 bun run e2e
 bun run e2e --list
 bun run e2e --only health,auth
+bun run e2e --group visuals-v2
 bun run e2e --only slack-mention
 bun run e2e --only slack-relay-restart
 bun run e2e --skip workflow-script-node
