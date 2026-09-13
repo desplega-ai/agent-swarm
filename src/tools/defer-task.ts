@@ -143,9 +143,9 @@ export const registerDeferTaskTool = (server: McpServer) => {
       try {
         const committed = await getDbClient().transaction(async () => {
           const schedule = await createScheduledTask({
-            // Unique name (`getScheduledTaskByName` is a unique lookup). The ms
-            // timestamp keeps repeated deferrals of the same task from colliding.
-            name: `deferred-${taskId.slice(0, 8)}-${Date.now()}`,
+            // Unique name (`getScheduledTaskByName` is a unique lookup). The UUID
+            // prevents concurrent deferrals of the same task from colliding.
+            name: `deferred-${taskId.slice(0, 8)}-${Date.now()}-${crypto.randomUUID()}`,
             description: note,
             taskTemplate,
             targetType: "agent-task",
