@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildAttachmentsSection } from "../commands/runner";
+import { buildAttachmentsSection } from "../commands/attachments-section";
 
 describe("buildAttachmentsSection", () => {
   test("returns empty string when there are no attachments", () => {

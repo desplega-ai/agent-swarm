@@ -8,7 +8,8 @@
  * Scope of THIS module (step-3):
  *   - `auth_mode === 'public'`: ungated. HTML responses inline-inject the
  *     `BROWSER_SDK_JS` constant from `src/artifact-sdk/browser-sdk.ts` (reused
- *     verbatim — no token-injection hook on the client). JSON responses
+ *     verbatim — no token-injection hook on the client). SVG responses serve
+ *     raw bytes with a restrictive CSP and no injected scripts. JSON responses
  *     302-redirect to the SPA `/pages/:id` route (the JSON renderer lives
  *     in the SPA, not the API — step-6/7).
  *   - `auth_mode === 'authed'`: returns 401. step-4 narrows this to also
@@ -52,14 +53,14 @@ const publicPageRoute = route({
   method: "get",
   path: "/p/{id}",
   pattern: ["p", null],
-  summary: "Render a page (HTML inline; JSON redirects to SPA)",
+  summary: "Render a page (HTML/SVG inline; JSON redirects to SPA)",
   tags: ["Pages"],
   params: z.object({ id: z.string() }),
   responses: {
     200: {
-      description: "Rendered HTML page",
+      description: "Rendered HTML page or raw SVG image",
       unstructured:
-        "Serves the page's raw agent-authored HTML body (SDK-injected) or, for ?print=1 on a JSON-content page, a standalone printable HTML document — not a JSON shape",
+        "Serves raw image/svg+xml bytes, the page's agent-authored HTML body (SDK-injected) or, for ?print=1 on a JSON-content page, a standalone printable HTML document — not a JSON shape",
     },
     302: { description: "Redirect to SPA for JSON content" },
     401: { description: "Page requires an authenticated session" },
@@ -589,6 +590,21 @@ export async function handlePagesPublic(
       authMode: page.authMode,
       body: page.body,
     });
+    await bumpViewCount(page.id);
+    return true;
+  }
+
+  // SVG stays byte-for-byte intact, including when ?print=1 is supplied.
+  if (page.contentType === "image/svg+xml") {
+    const headers: Record<string, string> = {
+      "Content-Type": "image/svg+xml",
+      "Cache-Control": page.authMode === "public" ? "public, max-age=1800" : "private, no-store",
+      "X-Content-Type-Options": "nosniff",
+      "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+    };
+    if (inlineSetCookie) headers["Set-Cookie"] = inlineSetCookie;
+    res.writeHead(200, headers);
+    res.end(page.body);
     await bumpViewCount(page.id);
     return true;
   }

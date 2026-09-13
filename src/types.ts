@@ -1145,8 +1145,8 @@ export type AgentLatestModel = z.infer<typeof AgentLatestModelSchema>;
 
 /**
  * Worker-reported Bedrock enumeration block. Only present when the pi harness
- * is in Bedrock SDK mode (`BEDROCK_AUTH_MODE=sdk` or
- * `MODEL_OVERRIDE=amazon-bedrock/*`). Rides inside `cred_status` JSON (no new
+ * is in a Bedrock mode (`BEDROCK_AUTH_MODE=sdk`, `BEDROCK_AUTH_MODE=bearer`,
+ * or `MODEL_OVERRIDE=amazon-bedrock/*`). Rides inside `cred_status` JSON (no new
  * DB column). `models` is the intersection of the models invocable by this
  * account/region (on-demand/ACTIVE foundation models ∪ inference profiles) with
  * the set the pi-ai Converse harness can actually drive — Converse-incompatible
@@ -1614,6 +1614,9 @@ export const ScheduledTaskSchema = z
     lastRunAt: z.iso.datetime().optional(),
     nextRunAt: z.iso.datetime().optional(),
     createdByAgentId: z.string().optional(),
+    // Set only by `defer-task`: the task this schedule wakes up to continue.
+    // Passed through as the created task's `parentTaskId`.
+    parentTaskId: z.string().optional(),
     timezone: z.string().default("UTC"),
     consecutiveErrors: z.number().int().min(0).default(0),
     lastErrorAt: z.iso.datetime().optional(),
@@ -1706,6 +1709,21 @@ export const RepoGuidelinesSchema = z
   .openapi("RepoGuidelines");
 
 export type RepoGuidelines = z.infer<typeof RepoGuidelinesSchema>;
+
+/** Upper bound per guideline list. The repository prompt section renders every
+ * entry outside the bootstrap budget, so the cap lives at the write boundary. */
+export const REPO_GUIDELINES_MAX_ENTRIES = 50;
+
+/** Write-side guidelines schema: same shape, bounded lists. Reads keep the
+ * unbounded `RepoGuidelinesSchema` so an older row never fails a response. */
+export const RepoGuidelinesInputSchema = z
+  .object({
+    prChecks: z.array(z.string()).max(REPO_GUIDELINES_MAX_ENTRIES),
+    mergeChecks: z.array(z.string()).max(REPO_GUIDELINES_MAX_ENTRIES),
+    allowMerge: z.boolean().optional().default(false),
+    review: z.array(z.string()).max(REPO_GUIDELINES_MAX_ENTRIES),
+  })
+  .openapi("RepoGuidelinesInput");
 
 export const RepoHooksSchema = z
   .object({
@@ -2227,10 +2245,10 @@ export type WorkflowVersion = z.infer<typeof WorkflowVersionSchema>;
 // Pages — DB-backed lightweight artifacts (HTML or JSON spec) stored in
 // SQLite and served at /p/:id. See plan: thoughts/taras/plans/2026-05-12-db-backed-pages/.
 // PageContentTypeSchema + PageAuthModeSchema MUST stay in sync with the SQL
-// CHECK constraints in src/be/migrations/059_pages.sql.
+// CHECK constraints in src/be/migrations/148_pages_svg.sql.
 // ---------------------------------------------------------------------------
 
-export const PageContentTypeSchema = z.enum(["text/html", "application/json"]);
+export const PageContentTypeSchema = z.enum(["text/html", "application/json", "image/svg+xml"]);
 export type PageContentType = z.infer<typeof PageContentTypeSchema>;
 
 export const PageAuthModeSchema = z.enum(["public", "authed", "password"]);

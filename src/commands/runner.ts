@@ -65,6 +65,7 @@ import { isSteeringEnabled } from "../utils/steering-enabled.ts";
 import { interpolate } from "../utils/template.ts";
 import { detectVcsProvider } from "../vcs/index.ts";
 import { validateJsonSchema } from "../workflows/json-schema-validator.ts";
+import { buildAttachmentsSection } from "./attachments-section.ts";
 import { buildContextPreamble, buildResumeContextPreamble } from "./context-preamble.ts";
 import {
   awaitCredentials,
@@ -84,12 +85,12 @@ import {
 import {
   buildCredStatusReport,
   buildLatestModelReport,
-  isBedrockSdkMode,
   isCredCheckDisabled,
   reportAcpStatus,
   reportCredStatus,
   reportLatestModel,
   sendCredStatusReport,
+  shouldRefreshBedrockStatus,
 } from "./provider-credentials.ts";
 import {
   type ResumeSessionCandidate,
@@ -98,6 +99,8 @@ import {
 } from "./resume-session.ts";
 // Side-effect import: registers runner trigger/resumption templates
 import "./templates.ts";
+
+export { buildAttachmentsSection } from "./attachments-section.ts";
 
 /** Throttle interval for progress updates (3 seconds). */
 const PROGRESS_THROTTLE_MS = 3000;
@@ -249,6 +252,9 @@ async function listSwarmAutostashes(clonePath: string, role: string): Promise<Sw
  *    src/tasks/worker-follow-up.ts after a task completes/fails or needs
  *    re-delegation; they inherit the parent's vcsRepo/branch context via
  *    createTaskExtended's parentTaskId inheritance (src/be/db.ts).
+ *  - "deferred": the wake-up task a `defer-task` schedule creates
+ *    (src/tools/defer-task.ts) — it carries the deferred task as its
+ *    `parentTaskId` and resumes that work on the same clone.
  *  - "agentmail-reply": AgentMail follow-up on an EXISTING thread
  *    (src/agentmail/handlers.ts) — always carries `parentTaskId` pointing at
  *    the task it's continuing (as opposed to "agentmail-message", which fires
@@ -260,6 +266,10 @@ async function listSwarmAutostashes(clonePath: string, role: string): Promise<Sw
  */
 const CONTINUATION_TASK_TYPES = new Set([
   "resume",
+  // "deferred": a `defer-task` wake-up continues the parent's work on the same
+  // clone. The parent is already `completed`, so the parent-status check alone
+  // would read this as a first kickoff and hard-reset the clone.
+  "deferred",
   "follow-up",
   "reroute-decision",
   "agentmail-reply",
@@ -2004,11 +2014,13 @@ async function pauseTaskViaAPI(config: ApiConfig, role: string, taskId: string):
 }
 
 /** Fetch paused tasks from API for this agent */
-async function getPausedTasksFromAPI(config: ApiConfig): Promise<
+export async function getPausedTasksFromAPI(config: ApiConfig): Promise<
   Array<{
     id: string;
     task: string;
     progress?: string;
+    attachments?: unknown[];
+    outputSchema?: Record<string, unknown>;
     claudeSessionId?: string;
     provider?: ProviderName;
     providerMeta?: Record<string, unknown>;
@@ -2044,6 +2056,8 @@ async function getPausedTasksFromAPI(config: ApiConfig): Promise<
         id: string;
         task: string;
         progress?: string;
+        attachments?: unknown[];
+        outputSchema?: Record<string, unknown>;
         claudeSessionId?: string;
         provider?: ProviderName;
         providerMeta?: Record<string, unknown>;
@@ -2085,20 +2099,26 @@ async function resumeTaskViaAPI(config: ApiConfig, taskId: string): Promise<bool
 }
 
 /** Build prompt for a resumed task */
-async function buildResumePrompt(
-  task: { id: string; task: string; progress?: string },
+export async function buildResumePrompt(
+  task: {
+    id: string;
+    task: string;
+    progress?: string;
+    attachments?: unknown[];
+    outputSchema?: Record<string, unknown>;
+  },
   fmt: (cmd: string) => string = (cmd) => `/${cmd}`,
   options?: { hasMcp?: boolean },
 ): Promise<string> {
   const hasMcp = options?.hasMcp !== false;
-  const completionInstructions = hasMcp
-    ? '\n\nWhen done, use `store-progress` with status: "completed" and include your output.'
-    : "";
+  const completionInstructions = await buildTaskOutputInstructions(task.outputSchema, hasMcp);
+  const attachmentsSection = buildAttachmentsSection(task.id, task.attachments);
   if (task.progress) {
     const result = await resolveTemplateAsync("task.resumption.with_progress", {
       work_on_task_cmd: hasMcp ? fmt("work-on-task") : "",
       task_id: hasMcp ? task.id : "",
       task_description: task.task,
+      attachments_section: attachmentsSection,
       progress: task.progress,
       completion_instructions: completionInstructions,
     });
@@ -2109,6 +2129,7 @@ async function buildResumePrompt(
     work_on_task_cmd: hasMcp ? fmt("work-on-task") : "",
     task_id: hasMcp ? task.id : "",
     task_description: task.task,
+    attachments_section: attachmentsSection,
     completion_instructions: completionInstructions,
   });
   return result.text;
@@ -2776,6 +2797,8 @@ interface Trigger {
   }>;
   cursorUpdates?: Array<{ channelId: string; ts: string }>; // Deferred cursor commits for channel_activity
   requestedBy?: {
+    /** `users.id`; absent for the UNKNOWN-identity sentinel (Slack-only requester). */
+    id?: string;
     name: string;
     email?: string;
     role?: string;
@@ -2975,41 +2998,19 @@ async function pollForTriggerOnce(opts: PollOptions): Promise<Trigger | null> {
   return null; // Timeout reached, no trigger found
 }
 
-/**
- * Build a ready-to-run fetch recipe for each task attachment, so the agent
- * can download the bytes in one call via the provider-agnostic
- * `/api/fs/tasks/{taskId}/files/{attachmentId}/raw` route — instead of having
- * to discover the file's storage provider/org/drive itself (e.g. guessing at
- * the `agent-fs` CLI with no org context). MCP_BASE_URL/API_KEY/AGENT_ID are
- * already present in every worker container's env.
- */
-export function buildAttachmentsSection(
-  taskId: string | undefined,
-  attachmentsRaw: unknown,
-): string {
-  if (!taskId || !Array.isArray(attachmentsRaw) || attachmentsRaw.length === 0) return "";
-
-  const lines = attachmentsRaw
-    .filter((a): a is Record<string, unknown> => !!a && typeof a === "object")
-    .map((a) => {
-      const id = typeof a.id === "string" ? a.id : undefined;
-      const name = typeof a.name === "string" ? a.name : id;
-      if (!id || !name) return null;
-      const details = [
-        typeof a.mimeType === "string" ? a.mimeType : null,
-        typeof a.sizeBytes === "number" ? `${a.sizeBytes} bytes` : null,
-      ]
-        .filter(Boolean)
-        .join(", ");
-      const url = `$MCP_BASE_URL/api/fs/tasks/${taskId}/files/${id}/raw`;
-      const cmd = `curl -s -H "Authorization: Bearer \${AGENT_SWARM_API_KEY:-$API_KEY}" -H "X-Agent-ID: $AGENT_ID" "${url}" -o /tmp/${name}`;
-      return `- ${name}${details ? ` (${details})` : ""}: \`${cmd}\``;
-    })
-    .filter((line): line is string => line !== null);
-
-  if (lines.length === 0) return "";
-
-  return `\n\n📎 Attachment(s) — fetch directly, no need to discover the storage path yourself:\n${lines.join("\n")}`;
+/** Share the output contract between initial dispatch and deployment resume. */
+async function buildTaskOutputInstructions(
+  outputSchema: unknown,
+  hasMcp: boolean,
+): Promise<string> {
+  if (!hasMcp) return "";
+  const result =
+    outputSchema && typeof outputSchema === "object"
+      ? await resolveTemplateAsync("task.output.schema", {
+          schema: JSON.stringify(outputSchema, null, 2),
+        })
+      : await resolveTemplateAsync("task.output.generic", {});
+  return result.text;
 }
 
 /** Build prompt based on trigger type */
@@ -3032,20 +3033,16 @@ async function buildPromptForTrigger(
       // Build output instructions — use outputSchema if present, otherwise generic.
       // Skip store-progress references for providers without MCP (e.g. Devin).
       const taskObj = trigger.task as Record<string, unknown> | undefined;
-      let outputInstructions: string;
-      if (!hasMcp) {
-        outputInstructions = "";
-      } else if (taskObj?.outputSchema && typeof taskObj.outputSchema === "object") {
-        outputInstructions = `\n\n**Required Output Format**: When completing this task, you MUST call store-progress with output that is valid JSON conforming to this schema:\n\`\`\`json\n${JSON.stringify(taskObj.outputSchema, null, 2)}\n\`\`\`\nCall store-progress with status "completed" and your JSON output. If your output doesn't match the schema, the tool call will fail and you should fix and retry.`;
-      } else {
-        outputInstructions =
-          '\n\nWhen done, use `store-progress` with status: "completed" and include your output.';
-      }
+      const outputInstructions = await buildTaskOutputInstructions(taskObj?.outputSchema, hasMcp);
 
       // Include requesting user info if available from the poll trigger
       const requestedBy = trigger.requestedBy;
+      const requesterDetails = [
+        requestedBy?.email,
+        requestedBy?.id ? `user ${requestedBy.id}` : undefined,
+      ].filter(Boolean);
       const requestedBySection = requestedBy
-        ? `\n\nRequested by: ${requestedBy.name}${requestedBy.email ? ` (${requestedBy.email})` : ""}`
+        ? `\n\nRequested by: ${requestedBy.name}${requesterDetails.length > 0 ? ` (${requesterDetails.join(", ")})` : ""}`
         : "";
 
       const attachmentsSection = buildAttachmentsSection(trigger.taskId, taskObj?.attachments);
@@ -5928,9 +5925,13 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             console.warn(`[${role}] cred_status post_task report failed (non-fatal): ${err}`),
           );
       } else if (
-        currentHarness === "pi" &&
-        isBedrockSdkMode(process.env) &&
-        Date.now() - lastBedrockRefreshAt > BEDROCK_REFRESH_INTERVAL_MS
+        shouldRefreshBedrockStatus({
+          harnessProvider: currentHarness,
+          env: process.env,
+          lastRefreshAt: lastBedrockRefreshAt,
+          now: Date.now(),
+          intervalMs: BEDROCK_REFRESH_INTERVAL_MS,
+        })
       ) {
         // Bedrock enumeration drifts independently of the harness_provider:
         // access granted (or revoked) in the AWS console after boot won't flip

@@ -1,0 +1,14 @@
+{
+  "kind": "skill",
+  "name": "work-on-task",
+  "displayName": "Work On Task",
+  "slug": "work-on-task",
+  "title": "Work On Task",
+  "description": "Turn prompt for an assigned swarm task: find the task, gather context when the message lacks it, use the skill the task names, finish with one of the four endings.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "systemDefault": true,
+  "tags": ["tasks", "turn-prompt", "worker"]
+}

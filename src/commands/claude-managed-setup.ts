@@ -33,6 +33,7 @@ import type { BetaEnvironment } from "@anthropic-ai/sdk/resources/beta/environme
 import type { SkillCreateResponse } from "@anthropic-ai/sdk/resources/beta/skills";
 import { toFile } from "@anthropic-ai/sdk/uploads";
 
+import { buildSkillContent, type SkillTemplateConfig } from "../be/seed-skills/render";
 import { getApiKey } from "../utils/api-key";
 import { promptHiddenInput } from "./codex-login.js";
 
@@ -66,7 +67,19 @@ export type ClaudeManagedSetupResult = {
 
 const DEFAULT_AGENT_MODEL = "claude-sonnet-5";
 const SKILLS_DIR_RELATIVE = "plugin/commands";
+const SEEDED_SKILLS_DIR_RELATIVE = "templates/skills";
 const SKILLS_BETA_HEADER = "skills-2025-10-02";
+
+/**
+ * Seeded skills that must also ship in the managed-agent definition.
+ *
+ * The runner opens every assigned task with `/work-on-task` and every offered
+ * task with `/review-offered-task`. Both live in `templates/skills/` and reach
+ * a normal worker through the DB → filesystem sync. Managed agents run in
+ * Anthropic's sandbox with no entrypoint sync, so they only ever see skills
+ * uploaded here.
+ */
+const SEEDED_SKILLS_TO_UPLOAD = ["work-on-task", "review-offered-task"];
 
 // Config keys persisted to `swarm_config`. The docker-entrypoint hydrates env
 // vars from these on worker boot.
@@ -116,7 +129,8 @@ Options:
 
 This command:
   1. Creates an Anthropic-side environment (cloud, unrestricted networking).
-  2. Uploads each plugin/commands/*.md as a managed-agents skill (skips on 409).
+  2. Uploads each plugin/commands/*.md plus the turn-prompt skills under
+     templates/skills/ as managed-agents skills (skips on 409).
   3. Creates a managed-agents agent referencing the uploaded skills + the
      swarm MCP server (MCP_BASE_URL/mcp).
   4. Persists the resulting IDs to swarm_config (managed_agent_id,
@@ -207,6 +221,26 @@ async function loadSkillFiles(
     const absPath = path.join(skillsDir, filename);
     const content = await readFile(absPath, "utf8");
     out.push({ slug: skillSlugFromFilename(filename), absPath, content });
+  }
+  return out;
+}
+
+/**
+ * Load `SEEDED_SKILLS_TO_UPLOAD` from `templates/skills/<name>/` and render
+ * each as a SKILL.md, using the same frontmatter renderer the seeder uses.
+ */
+async function loadSeededSkillFiles(
+  templatesDir: string,
+  names: string[] = SEEDED_SKILLS_TO_UPLOAD,
+): Promise<Array<{ slug: string; absPath: string; content: string }>> {
+  const out: Array<{ slug: string; absPath: string; content: string }> = [];
+  for (const name of names) {
+    const dir = path.join(templatesDir, name);
+    const config = JSON.parse(
+      await readFile(path.join(dir, "config.json"), "utf8"),
+    ) as SkillTemplateConfig;
+    const body = await readFile(path.join(dir, "content.md"), "utf8");
+    out.push({ slug: name, absPath: dir, content: buildSkillContent(config, body) });
   }
   return out;
 }
@@ -438,8 +472,10 @@ export type RunClaudeManagedSetupDeps = {
   fetchConfig?: typeof fetchConfigByKey;
   upsert?: typeof upsertConfig;
   loadSkills?: typeof loadSkillFiles;
+  loadSeededSkills?: typeof loadSeededSkillFiles;
   uploadOne?: typeof uploadSkill;
   skillsDir?: string;
+  seededSkillsDir?: string;
   log?: (msg: string) => void;
 };
 
@@ -459,8 +495,11 @@ export async function runClaudeManagedSetupFlow(
   const fetchCfg = deps.fetchConfig ?? fetchConfigByKey;
   const upsert = deps.upsert ?? upsertConfig;
   const loadSkills = deps.loadSkills ?? loadSkillFiles;
+  const loadSeededSkills = deps.loadSeededSkills ?? loadSeededSkillFiles;
   const uploadOne = deps.uploadOne ?? uploadSkill;
   const skillsDir = deps.skillsDir ?? path.resolve(process.cwd(), SKILLS_DIR_RELATIVE);
+  const seededSkillsDir =
+    deps.seededSkillsDir ?? path.resolve(process.cwd(), SEEDED_SKILLS_DIR_RELATIVE);
 
   // Idempotency check: if an agent ID is already persisted, short-circuit
   // unless --force was passed.
@@ -495,8 +534,11 @@ export async function runClaudeManagedSetupFlow(
   log(`  + environment id=${env.id}`);
 
   // 2. Upload skills.
-  log(`Uploading skills from ${skillsDir} ...`);
-  const skillFiles = await loadSkills(skillsDir);
+  log(`Uploading skills from ${skillsDir} and ${seededSkillsDir} ...`);
+  const skillFiles = [
+    ...(await loadSkills(skillsDir)),
+    ...(await loadSeededSkills(seededSkillsDir)),
+  ];
   log(`  found ${skillFiles.length} skill markdown file(s)`);
   // Pre-fetch existing custom skills so we can reuse their IDs on rerun. The
   // API returns 400 (not 409) on display_title collision and skill IDs aren't
