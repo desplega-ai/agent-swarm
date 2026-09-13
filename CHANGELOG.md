@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.147.0] - 2026-09-13
+
+### Added
+- **Pages support cached SVG images**, with direct serving and seeded scripts for live star-history charts (#1448).
+- **Task deferral completes work now and schedules a linked wake-up** for the same agent (#1442).
+- **The pi credential check supports Bedrock bearer authentication** through `BEDROCK_AUTH_MODE=bearer` and `AWS_BEARER_TOKEN_BEDROCK` (#1430).
+
+### Changed
+- **Task turn prompts are seeded skills**, allowing updates without rebuilding worker images (#1442).
+- **Runner attachment formatting is isolated from runner imports**, reducing module side effects for callers (#1444).
+- **Merge-gate test jobs have a runtime cap** to bound stalled CI runs (#1447).
+
+### Fixed
+- **Deployment resumes preserve task attachments and output schemas**, and deferred wake-ups retain repository continuation context (#1442).
+- **E2E visual staging preserves nested frame directories**, preventing flattened artifact paths (#1446).
+
 ## [1.146.0] - 2026-09-12
 
 ### Added

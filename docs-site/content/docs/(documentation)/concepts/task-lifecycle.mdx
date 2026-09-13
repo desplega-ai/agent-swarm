@@ -37,6 +37,16 @@ stateDiagram-v2
 | `failed` | Task could not be completed |
 | `cancelled` | Task was cancelled by the lead or creator |
 
+## Deferring work
+
+Use `defer-task` when a build, deploy, or reply needs time. Supply the current task ID, either `delayMs` or a future `runAt`, a progress `summary`, and a `note` with what to check. Optional `checks` list the wake-up verification steps. The tool completes the current task and atomically creates a one-time schedule for the same agent. The wake-up creates a child task with `parentTaskId` pointing to the completed task and preserves the repository continuation context. Deferral is not a new task state.
+
+Only the assignee can defer. Workflow-owned tasks and tasks requiring structured `outputSchema` results cannot use the prose deferral output. See [`defer-task`](/docs/reference/mcp-tools#defer-task) for the tool contract.
+
+## Task turn prompts and resume context
+
+`work-on-task` and `review-offered-task` are seeded skills, so their instructions can be updated through the skills system without rebuilding worker images. When a paused task resumes after deployment, its prompt includes its attachments and required output schema alongside the saved progress.
+
 ## Task Creation
 
 Tasks can be created in several ways:
