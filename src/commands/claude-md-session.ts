@@ -170,9 +170,12 @@ async function writeUnderPendingRecord(
  * Whether `content` may be an agent's edit whose base is unknown: the record is
  * there but is no lineage — a pending marker naming other content, or an
  * unreadable record. Such content is never pushed, so it must not be discarded.
+ * Blank content counts: clearing the file is an edit too, and one that is never
+ * pushed at all (`planClaudeMdSync` skips it), so the copy is the only record of
+ * it. No record at all is excluded: that content is pushed, not saved.
  */
 function hasUnknownLineage(content: string, rawRecord: string | undefined): boolean {
-  if (rawRecord === undefined || !content.trim()) return false;
+  if (rawRecord === undefined) return false;
   if (parseClaudeMdLineage(rawRecord)) return false;
   return parseClaudeMdPendingRecord(rawRecord) !== contentSha256(content);
 }

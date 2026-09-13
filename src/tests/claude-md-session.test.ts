@@ -506,6 +506,27 @@ describe("a lineage write that fails leaves nothing pushable", () => {
     expect(await unsynced("real edit").text()).toBe("real edit");
   });
 
+  test("an emptied file under a pending record is saved before the Stop deletes it", async () => {
+    // Clearing CLAUDE.md is an edit too, and blank content is never pushed at
+    // all (`planClaudeMdSync` skips it), so the copy is the only record of it.
+    await materializeClaudeMd(V2, paths, failLineageCommit);
+    await Bun.write(paths.file, ""); // the agent cleared the file
+
+    expect(await stop()).toBeNull();
+    expect(await Bun.file(paths.file).exists()).toBe(false); // no `.bak`: removed
+    expect(await unsynced("").text()).toBe("");
+  });
+
+  test("a whitespace-only edit under a pending record survives the restore", async () => {
+    await Bun.write(paths.file, V1); // before the session
+    await materializeClaudeMd(V2, paths, failLineageCommit);
+    await Bun.write(paths.file, "  \n\t\n");
+
+    expect(await stop()).toBeNull();
+    expect(await Bun.file(paths.file).text()).toBe(V1); // restored over the edit
+    expect(await unsynced("  \n\t\n").text()).toBe("  \n\t\n");
+  });
+
   test("a Stop that cannot save an unsynced edit leaves it in place", async () => {
     await materializeClaudeMd(V2, paths, failLineageCommit);
     await Bun.write(paths.file, "real edit");
