@@ -40,7 +40,7 @@ const EXPECTED_INVENTORY: InventoryEntry[] = [
     kind: "consumer",
   },
   {
-    file: "src/be/db.ts",
+    file: "src/be/db/tasks/read.ts",
     owner: "rowToAgentTask",
     syntax: "ShorthandPropertyAssignment",
     count: 1,

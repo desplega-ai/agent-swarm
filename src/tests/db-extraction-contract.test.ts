@@ -2,11 +2,20 @@ import { expect, test } from "bun:test";
 import * as db from "../be/db";
 import * as agents from "../be/db/agents";
 import * as context from "../be/db/context-versions";
+import * as taskRead from "../be/db/tasks/read";
 import { CHILD_PROCESS_TEST_BUDGET_MS, expectChildOk, runChild } from "./test-proc";
 
 test("facade exposes repository bindings without internal exports", () => {
-  for (const [name, value] of Object.entries({ ...agents, ...context })) {
-    if (name === "rowToAgent" || name === "configureAgentDependencies") {
+  for (const [name, value] of Object.entries({ ...agents, ...context, ...taskRead })) {
+    if (
+      [
+        "rowToAgent",
+        "configureAgentDependencies",
+        "rowToAgentTask",
+        "rowToAgentTaskSummary",
+        "configureTaskReadDependencies",
+      ].includes(name)
+    ) {
       expect(name in db).toBe(false);
     } else {
       expect((db as Record<string, unknown>)[name]).toBe(value);
