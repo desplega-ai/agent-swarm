@@ -17,7 +17,8 @@
 set -euo pipefail
 
 ALLOWLIST=(
-  src/be/db.ts                                  # seam owner + initDb boot path
+  src/be/db.ts                                  # remaining sync sites until db-12-facade-cleanup
+  src/be/db/runtime.ts                          # singleton lifecycle + async client seam owner
   src/be/db-client.ts                           # the seam implementation
   src/be/migrations/runner.ts                   # boot: SQL migrations
   src/be/oauth-encryption-backfill.ts           # boot: one-time backfill
