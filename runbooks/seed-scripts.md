@@ -129,6 +129,14 @@ bytes, cache for 1800 seconds, and include nosniff and a sandboxed CSP with
 `default-src 'none'; style-src 'unsafe-inline'`. Protected SVGs retain the
 normal page access gate and use `private, no-store`.
 
-Deployment sequence: review/merge the page support and seed, publish and verify
-both production image URLs, then separately wire the hourly schedule and swap the
-README embeds. The existing weekly workflow remains until that cutover.
+The live pages are published and Lead-owned:
+
+- Light: https://api.desplega.agent-swarm.dev/p/4b5cdc17c45e4a63845fb0a71ed9609c
+- Dark: https://api.desplega.agent-swarm.dev/p/e3473addceb348c0bed6cb93bd5aa532
+
+The hourly schedule `star-history-refresh-hourly` (id
+`3ef2c51c-5d21-4c1b-a19b-fd10d0c57022`) runs at `23 * * * *` UTC with
+`targetType: "script"`. The schedule must stay created by Lead
+`d454d1a5-4df9-49bd-8a89-e58d6a657dc3`: script schedules execute as
+`createdByAgentId`, and pages upsert by `(agentId, slug)`. A different creator
+mints new page ids and silently breaks the README embed.
