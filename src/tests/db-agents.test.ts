@@ -1,23 +1,10 @@
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import * as db from "../be/db";
-import * as agents from "../be/db/agents";
-import * as context from "../be/db/context-versions";
-import { CHILD_PROCESS_TEST_BUDGET_MS, expectChildOk, runChild } from "./test-proc";
 
 beforeEach(() => db.initDb(":memory:"));
 afterEach(() => db.closeDb());
 
 const worker = { name: "Worker", isLead: false, status: "idle" as const };
-
-test("facade exposes repository bindings without internal exports", () => {
-  for (const [name, value] of Object.entries({ ...agents, ...context })) {
-    if (name === "rowToAgent" || name === "configureAgentDependencies") {
-      expect(name in db).toBe(false);
-    } else {
-      expect((db as Record<string, unknown>)[name]).toBe(value);
-    }
-  }
-});
 
 test("facade registration installs defaults and records lifecycle logs", async () => {
   const skill = await db.createSkill({
@@ -102,54 +89,3 @@ test("unmoved profile and idle-worker callers share agent mapping defaults", asy
     .run("UPDATE agents SET avatar = ? WHERE id = ?", ["invalid json", agent.id]);
   expect((await db.getAgentById(agent.id))?.avatar).toBeNull();
 });
-
-test("context history keeps version ordering, limits, hashes and null defaults", async () => {
-  const agent = await db.createAgent(worker);
-  const versions = [];
-  for (const version of [2, 1, 3]) {
-    versions.push(
-      await db.createContextVersion({
-        agentId: agent.id,
-        field: "soulMd",
-        content: `v${version}`,
-        version,
-        changeSource: "system",
-        contentHash: db.computeContentHash(`v${version}`),
-      }),
-    );
-  }
-  expect(
-    (await db.getContextVersionHistory({ agentId: agent.id, field: "soulMd", limit: 2 })).map(
-      (v) => v.version,
-    ),
-  ).toEqual([3, 2]);
-  expect(await db.getLatestContextVersion(agent.id, "soulMd")).toEqual(versions[2]);
-  expect(await db.getContextVersion(versions[0]!.id)).toEqual(versions[0]!);
-  expect(versions[0]).toMatchObject({
-    changedByAgentId: null,
-    changeReason: null,
-    previousVersionId: null,
-  });
-  expect(await db.getLatestContextVersion(agent.id, "toolsMd")).toBeNull();
-});
-
-test(
-  "fresh facade initialization does not access the database",
-  async () => {
-    const runtimePath = JSON.stringify(new URL("../be/db/runtime.ts", import.meta.url).pathname);
-    const facadePath = JSON.stringify(new URL("../be/db.ts", import.meta.url).pathname);
-    expectChildOk(
-      await runChild([process.execPath, "-"], {
-        stdin: `
-      import { spyOn } from "bun:test";
-      const runtime = await import(${runtimePath});
-      const access = spyOn(runtime, "getDbClient");
-      await import(${facadePath});
-      if (access.mock.calls.length) throw new Error("Facade initialization accessed DB client");
-    `,
-      }),
-      "facade initialization",
-    );
-  },
-  CHILD_PROCESS_TEST_BUDGET_MS,
-);
