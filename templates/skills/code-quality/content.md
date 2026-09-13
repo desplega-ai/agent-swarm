@@ -38,11 +38,14 @@ The Repository Guidelines carry `allowMerge` and `mergeChecks`.
 
 ## Review a PR
 
-1. CI status first. Failing CI is a REQUEST_CHANGES. Name the failing checks in the review.
-2. Tests second. A code change without new or updated tests is a REQUEST_CHANGES. Name the tests you expect. Exceptions: documentation-only, configuration-only, and dependency-bump PRs.
-3. Apply the "Review Guidance" entries from the Repository Guidelines.
-4. Read the diff for security (injection, secrets in code), logic (null handling, off-by-one, edge cases), performance (N+1, leaks), and code shape (naming, duplication, error handling). Run the test suite and the type check locally when you can.
-5. Post the review with the verdict first. One finding per comment, with file and line, and what to change.
+1. CI status first, including the fork checks below before treating CI as evidence. Failing CI is a REQUEST_CHANGES. Name the failing checks in the review.
+2. Detect a GitHub fork PR with `gh pr view <number> --json isCrossRepository --jq .isCrossRepository`.
+3. For a GitHub fork PR, inspect held runs with `SHA=$(gh pr view <number> --json headRefOid --jq .headRefOid); gh api --paginate "repos/<owner>/<repo>/actions/runs?head_sha=$SHA" --jq '.workflow_runs[] | "\(.conclusion // .status)|\(.name)"'`; `gh pr checks` and `statusCheckRollup` can omit them.
+4. Treat any `action_required` run or no substantive run executed on that SHA as a CI blocker. Keep run handling read-only: REQUEST_CHANGES naming the held or unexecuted run, and report the blocker so an explicitly authorized maintainer or the application-controlled GitHub integration can approve the run after validating the workflow and its trust boundary. Do not APPROVE on omitted runs.
+5. Tests second. A code change without new or updated tests is a REQUEST_CHANGES. Name the tests you expect. Exceptions: documentation-only, configuration-only, and dependency-bump PRs.
+6. Apply the "Review Guidance" entries from the Repository Guidelines.
+7. Read the diff for security (injection, secrets in code), logic (null handling, off-by-one, edge cases), performance (N+1, leaks), and code shape (naming, duplication, error handling). Run the test suite and the type check locally when you can.
+8. Post the review with the verdict first. One finding per comment, with file and line, and what to change.
 
 ## GitHub review-reply provenance
 

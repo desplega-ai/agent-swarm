@@ -96,7 +96,7 @@ Read [CONTRIBUTING.md](./CONTRIBUTING.md), fork the repository, create a branch,
 
 ## Star History
 
-<picture><source media="(prefers-color-scheme: dark)" srcset="./assets/star-history-dark.svg" /> <source media="(prefers-color-scheme: light)" srcset="./assets/star-history-light.svg" /> <img alt="Star History Chart" src="./assets/star-history-light.svg" /></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="https://api.desplega.agent-swarm.dev/p/e3473addceb348c0bed6cb93bd5aa532" /> <source media="(prefers-color-scheme: light)" srcset="https://api.desplega.agent-swarm.dev/p/4b5cdc17c45e4a63845fb0a71ed9609c" /> <img alt="Star History Chart" src="https://api.desplega.agent-swarm.dev/p/4b5cdc17c45e4a63845fb0a71ed9609c" /></picture>
 
 ## License
 

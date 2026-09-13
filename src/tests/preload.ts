@@ -14,6 +14,8 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { closeDb, getDb, initDb } from "../be/db";
+// Populate the registry before hashing the template cache; runtime boot loads this lazily.
+import "../be/seed-prompt-templates";
 import { getAllTemplateDefinitions } from "../prompts/registry";
 import { clearVolatileSecretsForTesting } from "../utils/secret-scrubber";
 
@@ -102,6 +104,7 @@ function migrationTemplateCacheKey(): string {
   const inputs = [
     join(import.meta.dir, "preload.ts"),
     join(import.meta.dir, "../be/db.ts"),
+    join(import.meta.dir, "../be/db/runtime.ts"),
     join(import.meta.dir, "../be/seed-prompt-templates.ts"),
   ];
   const migrationsDir = join(import.meta.dir, "../be/migrations");
@@ -114,7 +117,7 @@ function migrationTemplateCacheKey(): string {
     hash.update("\n");
   }
   // seedDefaultTemplates bakes the prompt-template registry into the DB; the
-  // registry is populated by side-effect imports (db.ts -> seed-prompt-templates),
+  // registry is populated by the explicit seed-prompt-templates import above,
   // so its current content is hashed directly instead of guessing source files.
   hash.update(JSON.stringify(getAllTemplateDefinitions()));
   return hash.digest("hex").slice(0, 32);
