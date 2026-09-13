@@ -94,11 +94,14 @@ const PollTriggerAttachmentSchema = TaskAttachmentSchema.pick({
 // user's identity fields, or (when no `requestedByUserId` is recorded) just a
 // rendered `name` for the UNKNOWN-identity sentinel.
 const PollRequestedBySchema = UserSchema.pick({
+  id: true,
   name: true,
   email: true,
   role: true,
   notes: true,
 }).extend({
+  // Absent for the UNKNOWN-identity sentinel (Slack-only requester, no users row).
+  id: z.string().optional(),
   // Structured communication preferences from `users.metadata.comms`.
   comms: UserCommsPrefsSchema.optional(),
 });
@@ -195,6 +198,7 @@ async function buildTriggerRequestedBy(task: {
   const user = task.requestedByUserId ? await getUserById(task.requestedByUserId) : undefined;
   if (user) {
     return {
+      id: user.id,
       name: user.name,
       email: user.email,
       role: user.role,

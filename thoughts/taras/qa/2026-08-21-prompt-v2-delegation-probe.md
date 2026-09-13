@@ -29,7 +29,7 @@ Correctness saturates at 1.0 whenever a report exists, on every harness and prom
 
 ## Reading
 
-At n=3 the cells are noisy (half-CI up to ±0.45). claude and codex are at parity or better on v2. pi and opencode (deepseek-v4-flash) lose some attempts on v2 to the self-research penalty and, for opencode, to duplicate dispatches (`send-task` x6 per run) and `get-tasks` scans. The v1 lead block named `send-task`, `get-tasks`, `get-task-details` with one-line descriptions; the v2 block names `get-swarm`, `manage-user`, `update-profile`, and the skills. A weak model may benefit from the explicit tool names. Candidate follow-up, not applied: one line in the lead block, "Delegate with `send-task`; read a child's result with `get-task-details`."
+At n=3 the cells are noisy (half-CI up to ±0.45). claude and codex are at parity or better on v2. pi and opencode (deepseek-v4-flash) lose some attempts on v2 to the self-research penalty and, for opencode, to `get-tasks` scans. (Correction 2026-08-21: the "`send-task` x6 per run" read in an earlier draft was a raw-event count. opencode emits three `message.part.updated` rows per tool call, pending, running, completed. Every opencode attempt in both v2 runs made exactly 2 `send-task` calls and `tasks.json` holds exactly 2 child tasks with distinct IDs. No duplicate dispatch happened, and `src/tools/task-dedup.ts` needs no change.) The v1 lead block named `send-task`, `get-tasks`, `get-task-details` with one-line descriptions; the v2 block names `get-swarm`, `manage-user`, `update-profile`, and the skills. A weak model may benefit from the explicit tool names. Candidate follow-up, not applied: one line in the lead block, "Delegate with `send-task`; read a child's result with `get-task-details`."
 
 ## Reproduce
 

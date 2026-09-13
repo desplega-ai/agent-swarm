@@ -23,6 +23,12 @@ When a dashboard tab authenticates with a user-bound `aswt_` token, the dashboar
 
 The Tasks page keeps its filters in the URL so views can be bookmarked and shared. In addition to status, agent, schedule, heartbeat visibility, and text search, the **Requested by** facet can show work attributed to a specific user, **Me** for the current dashboard identity, or **Unattributed** for tasks without a canonical requester. The requester filter is single-select and is never enabled by default.
 
+## File attachments
+
+Drop files onto the session composer or use its paperclip button to attach them. The composer lists selected files before sending; remove a file with its **×** button.
+
+Each file can be up to 50 MB. The composer accepts PDF, text, Markdown, CSV, JSON, Word, Excel, PowerPoint, PNG, JPEG, GIF, WebP, and ZIP files. Unsupported types and oversized files show an error before upload; valid files in the same batch remain attachable. Add a message before sending.
+
 ## Hosted dashboard
 
 We host the latest build at **[app.agent-swarm.dev](https://app.agent-swarm.dev)**.
@@ -44,6 +50,8 @@ bun run build   # outputs apps/ui/dist/
 ```
 
 Deploy the `dist/` directory to your static host of choice (Vercel, Netlify, nginx, S3 + CDN, ...).
+
+For a custom dashboard origin, set `CORS_ALLOWED_ORIGINS` on the API. A custom list replaces the built-in hosted/dev defaults, so include every trusted dashboard origin you use. See the [CORS deployment guide](/docs/guides/kubernetes#cors).
 
 Self-hosted builds contain no analytics. The hosted dashboard sets the build-time flag `VITE_PLAUSIBLE_ANALYTICS=1`, which injects a [Plausible](https://plausible.io) snippet; leave it unset to keep your build analytics-free. `VITE_PLAUSIBLE_SCRIPT_ID` selects the Plausible site for a second deployment such as the public demo.
 

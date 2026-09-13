@@ -133,7 +133,7 @@ registerTemplate({
 
 **RESUMED TASK** - This task was interrupted during a deployment and is being resumed.
 
-Task: "{{task_description}}"
+Task: "{{task_description}}"{{attachments_section}}
 
 Previous Progress:
 {{progress}}
@@ -143,6 +143,7 @@ Continue from where you left off. Review the progress above and complete the rem
     { name: "work_on_task_cmd", description: "Formatted /work-on-task command" },
     { name: "task_id", description: "Task ID" },
     { name: "task_description", description: "Original task description" },
+    { name: "attachments_section", description: "Task attachment fetch recipes" },
     { name: "progress", description: "Previous progress text" },
     {
       name: "completion_instructions",
@@ -159,17 +160,39 @@ registerTemplate({
 
 **RESUMED TASK** - This task was interrupted during a deployment and is being resumed.
 
-Task: "{{task_description}}"
+Task: "{{task_description}}"{{attachments_section}}
 
 No progress was saved before the interruption. Start the task fresh but be aware files may have been partially modified.{{completion_instructions}}`,
   variables: [
     { name: "work_on_task_cmd", description: "Formatted /work-on-task command" },
     { name: "task_id", description: "Task ID" },
     { name: "task_description", description: "Original task description" },
+    { name: "attachments_section", description: "Task attachment fetch recipes" },
     {
       name: "completion_instructions",
       description: "Completion instructions (empty for providers without MCP)",
     },
   ],
+  category: "task_lifecycle",
+});
+
+registerTemplate({
+  eventType: "task.output.schema",
+  header: "",
+  defaultBody: `\n\n**Required Output Format**: When completing this task, you MUST call store-progress with output that is valid JSON conforming to this schema:
+\`\`\`json
+{{schema}}
+\`\`\`
+Call store-progress with status "completed" and your JSON output. If your output doesn't match the schema, the tool call will fail and you should fix and retry.`,
+  variables: [{ name: "schema", description: "Required output JSON schema" }],
+  category: "task_lifecycle",
+});
+
+registerTemplate({
+  eventType: "task.output.generic",
+  header: "",
+  defaultBody:
+    '\n\nWhen done, use `store-progress` with status: "completed" and include your output.',
+  variables: [],
   category: "task_lifecycle",
 });

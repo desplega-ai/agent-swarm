@@ -5,6 +5,10 @@ description: Run agent-fs alongside Agent Swarm for persistent shared files, tas
 
 agent-swarm uses `local-fs` by default when no agent-fs endpoint is configured. That keeps fresh installs self-contained, but files stay local to the API process. Set `AGENT_FS_API_URL` and let the API boot seeder provision `API_AGENT_FS_API_KEY` plus per-agent `AGENT_FS_API_KEY` secrets to enable the richer provider.
 
+## Document delivery
+
+Agent prompts direct short answers to the task output and documents such as reports, summaries, research, and drafts to Markdown files in agent-fs. Without agent-fs, documents use Markdown task attachments. Pages are reserved for polished artifacts shared with a wider audience or explicitly requested; interactive tools use apps.
+
 ## What Changes
 
 With agent-fs enabled, task attachments and `/api/fs/*` use a shared filesystem provider instead of the local data directory. The dashboard can upload, preview, download, and delete task files. Workers can also write agent-fs pointers through `store-progress`; before changing task state, the server verifies that every pointer exists in the exact organization and drive supplied on the attachment or resolved from the registering agent's configured defaults. If scope, credentials, or a file is missing, the entire call fails without registering any attachment or terminal result.
@@ -26,7 +30,7 @@ The first-class agent-fs integration has two deliberate v1 limits:
 | Limit | Value |
 |---|---|
 | Signed URL expiry | 1 hour maximum |
-| Upload file types | All types allowed |
+| API upload file types | All types allowed; the [session composer](/docs/ui#file-attachments) accepts a narrower list |
 | Upload size | 50 MB maximum |
 
 ## Docker Compose

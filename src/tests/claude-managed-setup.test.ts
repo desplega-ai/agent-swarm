@@ -1,4 +1,5 @@
 import { describe, expect, mock, test } from "bun:test";
+import { join } from "node:path";
 
 import {
   resolveClaudeManagedSetupConfig,
@@ -42,8 +43,19 @@ const baseConfig = {
 };
 
 const fakeSkillFiles = [
-  { slug: "work-on-task", absPath: "/x/work-on-task.md", content: "# work-on-task\n" },
+  { slug: "start-worker", absPath: "/x/start-worker.md", content: "# start-worker\n" },
   { slug: "create-pr", absPath: "/x/create-pr.md", content: "# create-pr\n" },
+];
+
+// The turn-prompt skills live in templates/skills/, not plugin/commands/.
+// Managed agents get no entrypoint skill sync, so they must be uploaded too.
+const fakeSeededSkillFiles = [
+  { slug: "work-on-task", absPath: "/t/work-on-task", content: "# work-on-task\n" },
+  {
+    slug: "review-offered-task",
+    absPath: "/t/review-offered-task",
+    content: "# review-offered-task\n",
+  },
 ];
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -55,6 +67,7 @@ describe("runClaudeManagedSetupFlow — happy path", () => {
     const fetchConfig = mock(async () => null);
     const upsert = mock(async () => undefined);
     const loadSkills = mock(async () => fakeSkillFiles);
+    const loadSeededSkills = mock(async () => fakeSeededSkillFiles);
     const uploadOne = mock(async (_c: unknown, slug: string) => `skill_${slug}`);
     const log = mock((_msg: string) => undefined);
 
@@ -63,6 +76,7 @@ describe("runClaudeManagedSetupFlow — happy path", () => {
       fetchConfig,
       upsert,
       loadSkills,
+      loadSeededSkills,
       uploadOne,
       log,
     });
@@ -70,7 +84,12 @@ describe("runClaudeManagedSetupFlow — happy path", () => {
     expect(result.alreadyConfigured).toBe(false);
     expect(result.agentId).toBe("agent_test_xyz");
     expect(result.environmentId).toBe("env_test_123");
-    expect(result.skillIds).toEqual(["skill_work-on-task", "skill_create-pr"]);
+    expect(result.skillIds).toEqual([
+      "skill_start-worker",
+      "skill_create-pr",
+      "skill_work-on-task",
+      "skill_review-offered-task",
+    ]);
 
     expect(environmentsCreate).toHaveBeenCalledTimes(1);
     const envCallArgs = environmentsCreate.mock.calls[0]?.[0] as {
@@ -81,7 +100,7 @@ describe("runClaudeManagedSetupFlow — happy path", () => {
     expect(envCallArgs.config.type).toBe("cloud");
     expect(envCallArgs.config.networking.type).toBe("unrestricted");
 
-    expect(uploadOne).toHaveBeenCalledTimes(fakeSkillFiles.length);
+    expect(uploadOne).toHaveBeenCalledTimes(fakeSkillFiles.length + fakeSeededSkillFiles.length);
 
     expect(agentsCreate).toHaveBeenCalledTimes(1);
     const agentCallArgs = agentsCreate.mock.calls[0]?.[0] as {
@@ -104,8 +123,10 @@ describe("runClaudeManagedSetupFlow — happy path", () => {
       expect(tool.default_config?.permission_policy?.type).toBe("always_allow");
     }
     expect(agentCallArgs.skills.map((s) => s.skill_id)).toEqual([
-      "skill_work-on-task",
+      "skill_start-worker",
       "skill_create-pr",
+      "skill_work-on-task",
+      "skill_review-offered-task",
     ]);
     expect(agentCallArgs.mcp_servers[0]?.url).toBe("https://swarm.example.com/mcp");
 
@@ -135,6 +156,7 @@ describe("runClaudeManagedSetupFlow — happy path", () => {
         fetchConfig: mock(async () => null),
         upsert: mock(async () => undefined),
         loadSkills: mock(async () => []),
+        loadSeededSkills: mock(async () => []),
         uploadOne: mock(async () => null),
         log: mock(() => undefined),
       },
@@ -143,6 +165,31 @@ describe("runClaudeManagedSetupFlow — happy path", () => {
       mcp_servers: Array<{ url: string }>;
     };
     expect(agentCallArgs.mcp_servers[0]?.url).toBe("https://swarm.example.com/mcp");
+  });
+
+  test("uploads the real turn-prompt skills from templates/skills with frontmatter", async () => {
+    const { client } = makeMockClient();
+    const uploaded: Array<{ slug: string; content: string }> = [];
+
+    await runClaudeManagedSetupFlow(baseConfig, {
+      client: client as any,
+      fetchConfig: mock(async () => null),
+      upsert: mock(async () => undefined),
+      loadSkills: mock(async () => []),
+      seededSkillsDir: join(import.meta.dir, "../../templates/skills"),
+      uploadOne: mock(async (_c: unknown, slug: string, content: string) => {
+        uploaded.push({ slug, content });
+        return `skill_${slug}`;
+      }),
+      log: mock(() => undefined),
+    });
+
+    expect(uploaded.map((u) => u.slug)).toEqual(["work-on-task", "review-offered-task"]);
+    for (const { slug, content } of uploaded) {
+      expect(content).toStartWith("---\n");
+      expect(content).toContain(`name: ${slug}`);
+      expect(content).toContain("description: ");
+    }
   });
 });
 
@@ -209,6 +256,7 @@ describe("runClaudeManagedSetupFlow — idempotent re-run", () => {
         fetchConfig,
         upsert,
         loadSkills: mock(async () => []),
+        loadSeededSkills: mock(async () => []),
         uploadOne: mock(async () => null),
         log: mock(() => undefined),
       },

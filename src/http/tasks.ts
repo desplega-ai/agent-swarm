@@ -515,7 +515,9 @@ const listPausedTasks = route({
   responses: {
     200: {
       description: "Paused task list",
-      schema: z.object({ tasks: z.array(AgentTaskSchema) }),
+      schema: z.object({
+        tasks: z.array(AgentTaskSchema.extend({ attachments: z.array(TaskAttachmentSchema) })),
+      }),
     },
   },
 });
@@ -1449,7 +1451,13 @@ export async function handleTasks(
       return true;
     }
     const pausedTasks = await getPausedTasksForAgent(myAgentId);
-    listPausedTasks.respond(res, 200, { tasks: pausedTasks });
+    const tasks = await Promise.all(
+      pausedTasks.map(async (task) => ({
+        ...task,
+        attachments: await getTaskAttachments(task.id),
+      })),
+    );
+    listPausedTasks.respond(res, 200, { tasks });
     return true;
   }
 

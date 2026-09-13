@@ -18,7 +18,15 @@ import { join } from "node:path";
 const COMMANDS_DIR = join(import.meta.dir, "commands");
 const PI_SKILLS_DIR = join(import.meta.dir, "pi-skills");
 
-/** All commands to convert to pi-mono skills */
+/**
+ * Skill names pi invokes as `/skill:<name>`.
+ *
+ * Doubles as (a) the allowlist of `plugin/commands/*.md` files converted here
+ * and (b) the vocabulary for the cross-reference rewrite in step 4.
+ * `work-on-task` and `review-offered-task` are seeded skills
+ * (`templates/skills/<name>/`), not commands — they have no source file to
+ * convert, but other commands link to them, so they must stay in this list.
+ */
 const SKILLS_TO_CONVERT = [
   "work-on-task",
   "start-worker",

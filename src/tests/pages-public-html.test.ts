@@ -114,6 +114,49 @@ describe("GET /p/:id — HTML public path", () => {
     expect(text).toContain("--swarm-text: #111827");
   });
 
+  for (const authMode of ["public", "authed", "password"]) {
+    test(`SVG bytes and security headers survive ${authMode} access`, async () => {
+      const svg = '<svg xmlns="http://www.w3.org/2000/svg"><text>★ &amp; stars</text></svg>\n';
+      const post = await fetch(`${BASE}/api/pages`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          slug: `svg-${authMode}`,
+          title: "Stars",
+          body: svg,
+          contentType: "image/svg+xml",
+          authMode,
+          ...(authMode === "password" ? { password: "test-key" } : {}),
+        }),
+      });
+      expect(post.status).toBe(201);
+      const { id } = (await post.json()) as { id: string };
+      let cookie = "";
+      if (authMode !== "public") {
+        expect((await fetch(`${BASE}/p/${id}`)).status).toBe(401);
+        if (authMode === "authed") {
+          const launch = await fetch(`${BASE}/api/pages/${id}/launch`, { method: "POST", headers });
+          expect(launch.status).toBe(204);
+          cookie = launch.headers.get("set-cookie")!.split(";")[0]!;
+        }
+      }
+      const query = authMode === "password" ? "?key=test-key&print=1" : "?print=1";
+      const res = await fetch(`${BASE}/p/${id}${query}`, {
+        headers: cookie ? { Cookie: cookie } : {},
+      });
+      expect(res.status).toBe(200);
+      expect(await res.text()).toBe(svg);
+      expect(res.headers.get("content-type")).toBe("image/svg+xml");
+      expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(res.headers.get("content-security-policy")).toBe(
+        "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+      );
+      expect(res.headers.get("cache-control")).toBe(
+        authMode === "public" ? "public, max-age=1800" : "private, no-store",
+      );
+    });
+  }
+
   test("CSP frame ancestors include deprecated DASHBOARD_URL alias", async () => {
     const prevApp = process.env.APP_URL;
     const prevDashboard = process.env.DASHBOARD_URL;

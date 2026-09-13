@@ -22,6 +22,8 @@ export { getFreePort };
 export const REPO_ROOT = join(import.meta.dir, "../..");
 export const E2E_API_KEY = "rbac-e2e-key";
 
+const SERVER_LOG_TAIL_BYTES = 8 * 1024;
+
 export const LEAD = "11111111-1111-4111-8111-111111111111";
 export const WORKER_A = "22222222-2222-4222-8222-222222222222";
 export const WORKER_B = "33333333-3333-4333-8333-333333333333";
@@ -115,7 +117,7 @@ export async function waitForListen(server: SwarmServer, deadlineMs = 90_000): P
   while (Date.now() - start < deadlineMs) {
     if (server.proc.exitCode !== null) {
       throw new Error(
-        `server exited with code ${server.proc.exitCode} before listening — see ${server.logPath}`,
+        `server exited with code ${server.proc.exitCode} before listening — see ${server.logPath}${await serverLogTail(server.logPath)}`,
       );
     }
     try {
@@ -126,7 +128,22 @@ export async function waitForListen(server: SwarmServer, deadlineMs = 90_000): P
     }
     await Bun.sleep(200);
   }
-  throw new Error(`server did not listen within ${deadlineMs}ms — see ${server.logPath}`);
+  throw new Error(
+    `server did not listen within ${deadlineMs}ms — see ${server.logPath}${await serverLogTail(server.logPath)}`,
+  );
+}
+
+async function serverLogTail(logPath: string): Promise<string> {
+  try {
+    const log = Bun.file(logPath);
+    if (!(await log.exists())) throw new Error("file does not exist");
+    const size = log.size;
+    const tail = await log.slice(Math.max(0, size - SERVER_LOG_TAIL_BYTES), size).text();
+    return `\n\nLog tail (up to ${SERVER_LOG_TAIL_BYTES} bytes):\n${tail}`;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return `\n\nCould not read server log at ${logPath}: ${reason}`;
+  }
 }
 
 // ── HTTP helpers ─────────────────────────────────────────────────────────────

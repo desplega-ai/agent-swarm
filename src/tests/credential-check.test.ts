@@ -2,8 +2,11 @@ import { describe, expect, mock, test } from "bun:test";
 import {
   buildCredStatusReport,
   checkProviderCredentials,
+  isBedrockMode,
   isCredCheckDisabled,
   REQUIRED_CRED_VARS_BY_PROVIDER,
+  shouldRefreshBedrockStatus,
+  validateProviderCredentials,
 } from "../commands/provider-credentials";
 import { checkClaudeCredentials } from "../providers/claude-adapter";
 import { checkClaudeManagedCredentials } from "../providers/claude-managed-adapter";
@@ -410,21 +413,69 @@ describe("checkPiMonoCredentials", () => {
     expect(status.ready).toBe(false);
   });
 
-  test("BEDROCK_AUTH_MODE=bearer: does NOT trigger the sdk probe (falls through)", async () => {
-    // The bearer path is declared/validated but the full implementation is
-    // not implemented yet. With no other credentials set it should be not-ready
-    // via the standard permissive check, not via the sdk probe.
-    const env = { BEDROCK_AUTH_MODE: "bearer" };
-    // No other keys set, no auth.json → not-ready from the permissive path.
-    const status = await checkPiMonoCredentials(env, { homeDir: HOME, fs: noFiles });
+  // ─── BEDROCK_AUTH_MODE=bearer: explicit Bedrock API key ─────────────────────
+
+  test("BEDROCK_AUTH_MODE=bearer: missing AWS_BEARER_TOKEN_BEDROCK → not ready, no probe, no fall-through", async () => {
+    let probed = false;
+    // A standard key must not satisfy the bearer mode: it does not apply to Bedrock.
+    const env = { BEDROCK_AUTH_MODE: "bearer", AWS_REGION: "us-east-1", ANTHROPIC_API_KEY: "x" };
+    const status = await checkPiMonoCredentials(env, {
+      homeDir: HOME,
+      fs: noFiles,
+      bedrockProbe: async () => {
+        probed = true;
+      },
+    });
     expect(status.ready).toBe(false);
-    // Satisfying via any standard key still works for the bearer mode today.
-    const withKey = await checkPiMonoCredentials(
-      { BEDROCK_AUTH_MODE: "bearer", ANTHROPIC_API_KEY: "x" },
-      { homeDir: HOME, fs: noFiles },
-    );
-    expect(withKey.ready).toBe(true);
-    expect(withKey.satisfiedBy).toBe("env");
+    expect(status.missing).toEqual(["AWS_BEARER_TOKEN_BEDROCK"]);
+    expect(status.hint).toContain("AWS_BEARER_TOKEN_BEDROCK");
+    expect(probed).toBe(false);
+  });
+
+  test("BEDROCK_AUTH_MODE=bearer: token without AWS_REGION → not ready with the region hint", async () => {
+    const env = { BEDROCK_AUTH_MODE: "bearer", AWS_BEARER_TOKEN_BEDROCK: "bedrock-api-key" };
+    const status = await checkPiMonoCredentials(env, {
+      homeDir: HOME,
+      fs: noFiles,
+      bedrockProbe: bedrockProbeSuccess,
+    });
+    expect(status.ready).toBe(false);
+    expect(status.hint).toContain("AWS_REGION");
+    expect(status.bedrockRegion).toBe("");
+  });
+
+  test("BEDROCK_AUTH_MODE=bearer: token + region → probe runs, ready via env", async () => {
+    const env = {
+      BEDROCK_AUTH_MODE: "bearer",
+      AWS_BEARER_TOKEN_BEDROCK: "bedrock-api-key",
+      AWS_REGION: "eu-central-1",
+    };
+    const status = await checkPiMonoCredentials(env, {
+      homeDir: HOME,
+      fs: noFiles,
+      bedrockProbe: async () => [{ id: "anthropic.claude-sonnet", name: "Claude Sonnet" }],
+    });
+    expect(status.ready).toBe(true);
+    expect(status.satisfiedBy).toBe("env");
+    expect(status.bedrockRegion).toBe("eu-central-1");
+    expect(status.bedrockModels).toEqual([
+      { id: "anthropic.claude-sonnet", name: "Claude Sonnet" },
+    ]);
+  });
+
+  test("BEDROCK_AUTH_MODE=bearer: probe failure → ready:false with the classified hint", async () => {
+    const env = {
+      BEDROCK_AUTH_MODE: "bearer",
+      AWS_BEARER_TOKEN_BEDROCK: "bedrock-api-key",
+      AWS_REGION: "us-east-1",
+    };
+    const status = await checkPiMonoCredentials(env, {
+      homeDir: HOME,
+      fs: noFiles,
+      bedrockProbe: bedrockProbeAuthFail,
+    });
+    expect(status.ready).toBe(false);
+    expect(status.bedrockRegion).toBe("us-east-1");
   });
 
   test("BEDROCK_AUTH_MODE absent + no MODEL_OVERRIDE=amazon-bedrock: no probe", async () => {
@@ -688,6 +739,98 @@ describe("snapshot: every provider", () => {
 });
 
 // ─── REQUIRED_CRED_VARS_BY_PROVIDER documentation map ────────────────────────
+
+describe("isBedrockMode (shared gate for the live test and the refresh loop)", () => {
+  test("recognizes both explicit modes and the MODEL_OVERRIDE prefix inference", () => {
+    expect(isBedrockMode({ BEDROCK_AUTH_MODE: "sdk" })).toBe(true);
+    expect(isBedrockMode({ BEDROCK_AUTH_MODE: "bearer" })).toBe(true);
+    expect(isBedrockMode({ BEDROCK_AUTH_MODE: "Bearer", MODEL_OVERRIDE: "some-model" })).toBe(true);
+    expect(isBedrockMode({ MODEL_OVERRIDE: "amazon-bedrock/anthropic.claude" })).toBe(true);
+    expect(isBedrockMode({ MODEL_OVERRIDE: "anthropic/claude" })).toBe(false);
+    expect(isBedrockMode({})).toBe(false);
+  });
+});
+
+describe("shouldRefreshBedrockStatus (runner post-task refresh gate)", () => {
+  const INTERVAL = 5 * 60 * 1000;
+  const base = { harnessProvider: "pi", lastRefreshAt: 1_000, intervalMs: INTERVAL };
+
+  test("bearer-only pi configuration is refreshed once the interval has elapsed", () => {
+    const env = {
+      BEDROCK_AUTH_MODE: "bearer",
+      AWS_BEARER_TOKEN_BEDROCK: "tok",
+      AWS_REGION: "us-east-1",
+    };
+    expect(shouldRefreshBedrockStatus({ ...base, env, now: 1_000 + INTERVAL + 1 })).toBe(true);
+  });
+
+  test("bearer mode stays throttled inside the interval", () => {
+    const env = {
+      BEDROCK_AUTH_MODE: "bearer",
+      AWS_BEARER_TOKEN_BEDROCK: "tok",
+      AWS_REGION: "us-east-1",
+    };
+    expect(shouldRefreshBedrockStatus({ ...base, env, now: 1_000 + INTERVAL })).toBe(false);
+    expect(shouldRefreshBedrockStatus({ ...base, env, now: 1_000 + 1 })).toBe(false);
+  });
+
+  test("sdk mode and the amazon-bedrock/ prefix inference refresh the same way", () => {
+    const now = 1_000 + INTERVAL + 1;
+    expect(shouldRefreshBedrockStatus({ ...base, env: { BEDROCK_AUTH_MODE: "sdk" }, now })).toBe(
+      true,
+    );
+    expect(
+      shouldRefreshBedrockStatus({
+        ...base,
+        env: { MODEL_OVERRIDE: "amazon-bedrock/anthropic.claude" },
+        now,
+      }),
+    ).toBe(true);
+  });
+
+  test("never fires outside Bedrock mode or for a non-pi harness", () => {
+    const now = 1_000 + INTERVAL + 1;
+    expect(shouldRefreshBedrockStatus({ ...base, env: { ANTHROPIC_API_KEY: "sk" }, now })).toBe(
+      false,
+    );
+    expect(
+      shouldRefreshBedrockStatus({ ...base, env: { MODEL_OVERRIDE: "anthropic/claude" }, now }),
+    ).toBe(false);
+    expect(
+      shouldRefreshBedrockStatus({
+        ...base,
+        harnessProvider: "claude",
+        env: { BEDROCK_AUTH_MODE: "bearer" },
+        now,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("validateProviderCredentials: pi Bedrock pass-through", () => {
+  const saved = { ...process.env };
+  const restore = () => {
+    for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key];
+    Object.assign(process.env, saved);
+  };
+
+  test("bearer mode is a pass-through like sdk mode: no provider-key live test is issued", async () => {
+    const realFetch = globalThis.fetch;
+    // A stray provider key must not be live-tested: the Bedrock enumeration already ran.
+    process.env.BEDROCK_AUTH_MODE = "bearer";
+    process.env.AWS_BEARER_TOKEN_BEDROCK = "bedrock-api-key";
+    process.env.ANTHROPIC_API_KEY = "x";
+    globalThis.fetch = (async () => {
+      throw new Error("live test must not reach the network in Bedrock mode");
+    }) as typeof fetch;
+    try {
+      expect(await validateProviderCredentials("pi")).toEqual({ ok: true, latency_ms: 0 });
+    } finally {
+      globalThis.fetch = realFetch;
+      restore();
+    }
+  });
+});
 
 describe("REQUIRED_CRED_VARS_BY_PROVIDER", () => {
   test("covers every supported provider", () => {
