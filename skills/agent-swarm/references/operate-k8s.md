@@ -106,7 +106,9 @@ curl -fsS http://localhost:3013/health
 
 ```bash
 helm uninstall swarm -n agent-swarm
+kubectl -n agent-swarm get pvc --show-labels                              # confirm every claim you expect is listed
 kubectl -n agent-swarm delete pvc -l app.kubernetes.io/name=agent-swarm   # destroys the database, agent identities, and local agent-fs objects
 ```
 
+The label selector matches all three kinds of claim. The standalone agent-fs PVC carries the chart labels directly, and the StatefulSet controller copies its selector labels (`app.kubernetes.io/name`, `app.kubernetes.io/instance`) onto every PVC it creates from `volumeClaimTemplates`, so the API `api-data-*` and pool `personal-*` claims match too. If the `get pvc` listing shows a claim without that label, delete it by name.
 Helm does not delete PVCs. Keep them to reinstall with the same data and agents.
