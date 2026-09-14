@@ -115,6 +115,7 @@ export async function emitBudgetRefusalSideEffects(
 
         const followUp = await createTaskExtended(resolved.text, {
           agentId: leadAgent.id,
+          routingReason: "skill",
           source: "system",
           taskType: "follow-up",
           parentTaskId: ctx.task.id,

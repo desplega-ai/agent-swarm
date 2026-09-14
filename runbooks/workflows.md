@@ -68,6 +68,8 @@ Do not include patch bodies, diff hunks, raw `git log --stat` output, downloaded
 - `template` (required)
 - `outputSchema`
 - `agentId`
+- `routingReason` (optional; a configured `agentId` defaults to `human_pinned`: `skill`, `continuity`, `overflow`, `human_pinned`, or `reroute_fault`)
+- `routingNote` (optional, maximum 200 characters)
 - `tags`
 - `priority` (0–100, default 50)
 - `offerMode`

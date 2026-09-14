@@ -614,6 +614,7 @@ export async function handleAgentSessionEvent(event: Record<string, unknown>): P
 
   const task = await createTaskWithSiblingAwareness(templateResult.text, {
     agentId: lead?.id ?? "",
+    routingReason: lead ? "skill" : undefined,
     source: "linear",
     taskType: "linear-issue",
     requestedByUserId,
@@ -897,6 +898,7 @@ export async function handleAgentSessionPrompted(event: Record<string, unknown>)
 
   const task = await createTaskWithSiblingAwareness(followupResult.text, {
     agentId: lead?.id ?? "",
+    routingReason: lead ? "skill" : undefined,
     source: "linear",
     taskType: "linear-issue",
     requestedByUserId: promptedRequestedByUserId,

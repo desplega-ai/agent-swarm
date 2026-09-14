@@ -85,6 +85,7 @@ describe("task tool ctx", () => {
     const result = await sendTaskHandler(ownerCtx({ agentId: sender.id }), {
       task: "ordinary direct assignment",
       agentId: lead.id,
+      routingReason: "skill",
       offerMode: false,
       allowDuplicate: false,
     });
@@ -106,6 +107,7 @@ describe("task tool ctx", () => {
     const result = await sendTaskHandler(ownerCtx({ agentId: sender.id }), {
       task: "ordinary offer",
       agentId: lead.id,
+      routingReason: "skill",
       offerMode: true,
       allowDuplicate: false,
     });

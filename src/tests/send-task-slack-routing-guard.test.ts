@@ -275,6 +275,7 @@ describe("send-task: Slack-routing coherence guard", () => {
       {
         task: "direct assign with wrong channel",
         agentId: WORKER_ID,
+        routingReason: "human_pinned",
         slackChannelId: "C_WRONG_DIRECT",
         slackThreadTs: "555.555",
         allowDuplicate: true,
@@ -299,6 +300,7 @@ describe("send-task: Slack-routing coherence guard", () => {
       {
         task: "offer with wrong channel",
         agentId: WORKER_ID,
+        routingReason: "human_pinned",
         offerMode: true,
         slackChannelId: "C_WRONG_OFFER",
         slackThreadTs: "666.666",

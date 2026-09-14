@@ -166,6 +166,7 @@ export function createAssistant(): Assistant {
             renderedMessageText,
             {
               agentId: workingAgent.id,
+              routingReason: "continuity",
               source: "slack",
               slackChannelId: channelId,
               slackThreadTs: threadTs,
@@ -247,6 +248,7 @@ export function createAssistant(): Assistant {
           renderedMessageText + channelContext,
           {
             agentId: lead.id,
+            routingReason: "skill",
             source: "slack",
             slackChannelId: channelId,
             slackThreadTs: threadTs,

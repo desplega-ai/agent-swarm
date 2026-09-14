@@ -760,6 +760,12 @@ export async function runRebootSweep(): Promise<void> {
           const retryTask = await createTaskExtended(task.task, {
             parentTaskId: task.id,
             agentId: preferredAgentId,
+            routingReason:
+              preferredAgentId === undefined
+                ? undefined
+                : preferredAgentId === task.agentId
+                  ? "continuity"
+                  : "reroute_fault",
             tags,
             priority: task.priority,
             source: task.source,
@@ -1368,6 +1374,7 @@ export async function checkHeartbeatChecklist(): Promise<void> {
 
   await createTaskExtended(result.text, {
     agentId: lead.id,
+    routingReason: "skill",
     taskType: "heartbeat-checklist",
     tags: ["checklist", "auto-generated"],
     priority: 60,
@@ -1584,6 +1591,7 @@ export async function createBootTriageTask(): Promise<void> {
 
   await createTaskExtended(result.text, {
     agentId: lead.id,
+    routingReason: "skill",
     taskType: "boot-triage",
     tags: ["boot", "triage", "auto-generated"],
     priority: 70, // Higher than regular checklist (60)

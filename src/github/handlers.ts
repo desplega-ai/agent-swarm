@@ -257,6 +257,7 @@ export async function handlePullRequest(
 
     const task = await createTaskWithSiblingAwareness(result.text, {
       agentId: lead?.id ?? "",
+      routingReason: lead ? "skill" : undefined,
       source: "github",
       vcsProvider: "github",
       taskType: "github-pr",
@@ -370,6 +371,7 @@ export async function handlePullRequest(
 
     const task = await createTaskWithSiblingAwareness(result.text, {
       agentId: lead?.id ?? "",
+      routingReason: lead ? "skill" : undefined,
       source: "github",
       vcsProvider: "github",
       taskType: "github-pr",
@@ -478,6 +480,7 @@ export async function handlePullRequest(
 
     const task = await createTaskWithSiblingAwareness(result.text, {
       agentId: lead?.id ?? "",
+      routingReason: lead ? "skill" : undefined,
       source: "github",
       vcsProvider: "github",
       taskType: "github-pr",
@@ -573,6 +576,7 @@ export async function handlePullRequest(
   // Create task (assigned to lead if available, otherwise unassigned)
   const task = await createTaskWithSiblingAwareness(result.text, {
     agentId: lead?.id ?? "",
+    routingReason: lead ? "skill" : undefined,
     source: "github",
     vcsProvider: "github",
     taskType: "github-pr",
@@ -657,6 +661,7 @@ export async function handleIssue(
 
     const task = await createTaskWithSiblingAwareness(result.text, {
       agentId: lead?.id ?? "",
+      routingReason: lead ? "skill" : undefined,
       source: "github",
       vcsProvider: "github",
       taskType: "github-issue",
@@ -758,6 +763,7 @@ export async function handleIssue(
 
     const task = await createTaskWithSiblingAwareness(result.text, {
       agentId: lead?.id ?? "",
+      routingReason: lead ? "skill" : undefined,
       source: "github",
       vcsProvider: "github",
       taskType: "github-issue",
@@ -835,6 +841,7 @@ export async function handleIssue(
   // Create task (assigned to lead if available, otherwise unassigned)
   const task = await createTaskWithSiblingAwareness(result.text, {
     agentId: lead?.id ?? "",
+    routingReason: lead ? "skill" : undefined,
     source: "github",
     vcsProvider: "github",
     taskType: "github-issue",
@@ -946,6 +953,7 @@ export async function handleComment(
   // Create task (assigned to lead if available, otherwise unassigned)
   const task = await createTaskWithSiblingAwareness(result.text, {
     agentId: lead?.id ?? "",
+    routingReason: lead ? "skill" : undefined,
     source: "github",
     vcsProvider: "github",
     taskType: "github-comment",
@@ -1260,6 +1268,7 @@ export async function handlePullRequestReview(
   // Create task (assigned to lead if available, otherwise unassigned)
   const task = await createTaskWithSiblingAwareness(result.text, {
     agentId: lead?.id ?? "",
+    routingReason: lead ? "skill" : undefined,
     source: "github",
     vcsProvider: "github",
     taskType: "github-review",

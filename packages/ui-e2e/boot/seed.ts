@@ -97,7 +97,13 @@ async function ensureTask(
     (task) => task.key === normalizedKey && task.task === body.task,
   );
   if (existing) return existing;
-  return request<Task>(options, "POST", "/api/tasks", { body: { key, ...body } });
+  return request<Task>(options, "POST", "/api/tasks", {
+    body: {
+      key,
+      routingReason: body.agentId || body.offeredTo ? "human_pinned" : undefined,
+      ...body,
+    },
+  });
 }
 
 async function ensurePage(

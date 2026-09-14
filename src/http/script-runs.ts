@@ -30,6 +30,7 @@ import {
 } from "../script-workflows/supervisor";
 import {
   AgentTaskStatusSchema,
+  RoutingReasonSchema,
   ScriptRunJournalEntrySchema,
   ScriptRunListItemSchema,
   ScriptRunSchema,
@@ -92,6 +93,8 @@ const agentTaskBodySchema = z.object({
   template: z.string().optional(),
   task: z.string().optional(),
   agentId: z.string().optional(),
+  routingReason: RoutingReasonSchema.optional(),
+  routingNote: z.string().max(200).optional(),
   tags: z.array(z.string()).optional(),
   priority: z.number().int().min(0).max(100).optional(),
   offerMode: z.boolean().optional(),
@@ -619,6 +622,9 @@ export async function handleScriptRuns(
         parsed.body.template ?? parsed.body.task ?? parsed.body.stepKey,
         {
           agentId: parsed.body.agentId,
+          routingReason:
+            parsed.body.routingReason ?? (parsed.body.agentId ? "human_pinned" : undefined),
+          routingNote: parsed.body.routingNote,
           tags: parsed.body.tags,
           priority: parsed.body.priority,
           offeredTo: parsed.body.offerMode ? parsed.body.agentId : undefined,

@@ -32,6 +32,8 @@ type AgentTaskConfig = {
   template?: string;
   task?: string;
   agentId?: string;
+  routingReason?: "skill" | "continuity" | "overflow" | "human_pinned" | "reroute_fault";
+  routingNote?: string;
   tags?: string[];
   priority?: number;
   offerMode?: boolean;

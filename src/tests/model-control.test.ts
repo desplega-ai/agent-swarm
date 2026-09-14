@@ -557,8 +557,12 @@ describe("Model Control - Priority Resolution Logic", () => {
 describe("Model Control - Zod Validation Schema", () => {
   test("task tools accept freeform concrete models and model tiers", () => {
     expect(
-      sendTaskInputSchema.parse({ agentId: crypto.randomUUID(), task: "x", model: "gpt-5.5" })
-        .model,
+      sendTaskInputSchema.parse({
+        agentId: crypto.randomUUID(),
+        routingReason: "human_pinned",
+        task: "x",
+        model: "gpt-5.5",
+      }).model,
     ).toBe("gpt-5.5");
     expect(
       taskActionInputSchema.parse({ action: "create", task: "x", modelTier: "ultra" }).modelTier,
@@ -576,11 +580,20 @@ describe("Model Control - Zod Validation Schema", () => {
 
   test("task tools accept valid reasoning effort and reject invalid effort", () => {
     expect(
-      sendTaskInputSchema.parse({ agentId: crypto.randomUUID(), task: "x", effort: "xhigh" })
-        .effort,
+      sendTaskInputSchema.parse({
+        agentId: crypto.randomUUID(),
+        routingReason: "human_pinned",
+        task: "x",
+        effort: "xhigh",
+      }).effort,
     ).toBe("xhigh");
     expect(
-      sendTaskInputSchema.parse({ agentId: crypto.randomUUID(), task: "x", effort: "max" }).effort,
+      sendTaskInputSchema.parse({
+        agentId: crypto.randomUUID(),
+        routingReason: "human_pinned",
+        task: "x",
+        effort: "max",
+      }).effort,
     ).toBe("max");
     expect(taskActionInputSchema.parse({ action: "create", task: "x", effort: "off" }).effort).toBe(
       "off",

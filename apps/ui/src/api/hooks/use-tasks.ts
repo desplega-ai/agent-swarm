@@ -11,6 +11,7 @@ import type {
   AgentTask,
   AgentTaskSource,
   AgentTaskStatus,
+  RoutingReason,
   SteerMode,
   SteerResult,
   TaskWithLogs,
@@ -111,6 +112,8 @@ interface CreateTaskInput {
   task: string;
   key?: string;
   agentId?: string;
+  routingReason?: RoutingReason;
+  routingNote?: string;
   taskType?: string;
   tags?: string[];
   priority?: number;
@@ -253,6 +256,8 @@ function optimisticCreatedTask(input: CreateTaskInput): TaskWithLogs {
     task: input.task,
     status: input.agentId ? "pending" : "unassigned",
     source: (input.source as AgentTaskSource | undefined) ?? "ui",
+    routingReason: input.routingReason,
+    routingNote: input.routingNote,
     key: input.key ?? `shared/task:${id}/`,
     taskType: input.taskType,
     tags: input.tags ?? [],

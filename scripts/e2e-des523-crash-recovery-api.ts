@@ -225,7 +225,7 @@ try {
   // ════════════════════════════════════════════════════════════════════════════
   section("Scenario 1: gone-agent → reaper escalates to Lead reroute-decision (#3)");
 
-  const t2r = await api("POST", "/api/tasks", { body: { task: "DES-523 E2E gone-agent task", agentId: A, source: "api" } });
+  const t2r = await api("POST", "/api/tasks", { body: { task: "DES-523 E2E gone-agent task", routingReason: "human_pinned", agentId: A, source: "api" } });
   check(t2r.status === 201, "created task T2 pinned to A", t2r.status);
   const t2 = t2r.body?.id;
   check(t2r.body?.status === "pending" && t2r.body?.agentId === A, "T2 is pending + agentId=A", { status: t2r.body?.status, agentId: t2r.body?.agentId });
@@ -280,7 +280,7 @@ try {
   // ════════════════════════════════════════════════════════════════════════════
   section("Scenario 2: crash pin → A reclaims, B cannot (#1, #2, #4)");
 
-  const t1r = await api("POST", "/api/tasks", { body: { task: "DES-523 E2E reclaim task", agentId: A, source: "api" } });
+  const t1r = await api("POST", "/api/tasks", { body: { task: "DES-523 E2E reclaim task", routingReason: "human_pinned", agentId: A, source: "api" } });
   check(t1r.status === 201, "created task T1 pinned to A", t1r.status);
   const t1 = t1r.body?.id;
 

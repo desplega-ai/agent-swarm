@@ -2,7 +2,14 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { closeDb, createAgent, createUser, getTaskById, initDb } from "../be/db";
+import {
+  closeDb,
+  createAgent,
+  createTaskExtended,
+  createUser,
+  getTaskById,
+  initDb,
+} from "../be/db";
 import { createUserServer, userSendTaskInputSchema } from "../server-user";
 import { registerSendTaskTool, sendTaskInputSchema } from "../tools/send-task";
 
@@ -160,6 +167,7 @@ describe("send-task: outputSchema propagation", () => {
     expect(s.success).toBe(true);
     const created = await getTaskById(s.task!.id);
     expect(created?.outputSchema).toEqual(schema);
+    expect(created?.routingReason).toBeUndefined();
   });
 
   test("a provided outputSchema is persisted when the task is offered to an agent", async () => {
@@ -175,6 +183,7 @@ describe("send-task: outputSchema propagation", () => {
       {
         task: "offered task with a schema",
         agentId: worker.id,
+        routingReason: "human_pinned",
         offerMode: true,
         outputSchema: schema,
         allowDuplicate: true,
@@ -204,6 +213,7 @@ describe("send-task: outputSchema propagation", () => {
       {
         task: "directly assigned task with a schema",
         agentId: worker.id,
+        routingReason: "human_pinned",
         outputSchema: schema,
         allowDuplicate: true,
       },
@@ -213,6 +223,61 @@ describe("send-task: outputSchema propagation", () => {
     expect(s.success).toBe(true);
     const created = await getTaskById(s.task!.id);
     expect(created?.outputSchema).toEqual(schema);
+    expect(created?.routingReason).toBe("human_pinned");
+  });
+
+  test("implicit parent routing stamps continuity while pool creation omits a reason", async () => {
+    const worker = await createAgent({
+      name: "Continuity worker",
+      isLead: false,
+      status: "idle",
+      maxTasks: 2,
+    });
+    const parent = await createTaskExtended("continuity parent", {
+      agentId: worker.id,
+      routingReason: "human_pinned",
+    });
+    const continued = await callSendTask(
+      server,
+      {
+        task: "continue implicitly",
+        parentTaskId: parent.id,
+        allowDuplicate: true,
+      },
+      LEAD_ID,
+    );
+    const continuedTask = await getTaskById(structuredOf(continued).task!.id);
+    expect(continuedTask?.agentId).toBe(worker.id);
+    expect(continuedTask?.routingReason).toBe("continuity");
+
+    const pooled = await callSendTask(
+      server,
+      { task: "stay pooled", allowDuplicate: true },
+      LEAD_ID,
+    );
+    expect((await getTaskById(structuredOf(pooled).task!.id))?.routingReason).toBeUndefined();
+  });
+
+  test("direct routing note is persisted", async () => {
+    const worker = await createAgent({
+      name: "Noted worker",
+      isLead: false,
+      status: "idle",
+      maxTasks: 1,
+    });
+    const result = await callSendTask(
+      server,
+      {
+        task: "direct task with routing note",
+        agentId: worker.id,
+        routingReason: "skill",
+        routingNote: "matches the required runtime specialization",
+        allowDuplicate: true,
+      },
+      LEAD_ID,
+    );
+    const created = await getTaskById(structuredOf(result).task!.id);
+    expect(created?.routingNote).toBe("matches the required runtime specialization");
   });
 });
 

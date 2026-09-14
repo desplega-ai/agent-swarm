@@ -32,7 +32,7 @@ The swarm ships named scripts at global scope. Each one replaces a multi-step to
 | `task-context-gathering` | `{ taskId, queries: [...] }` | the task plus a deduplicated multi-query memory recall |
 | `smart-recall` | `{ queries: [...] }` | multi-query memory recall without the task |
 | `memory-dedup-check` | `{ text, threshold? }` | near-duplicates before you store a memory |
-| `delegate` | `{ agentName, task, parentTaskId? }` | a subtask for an agent by name, returns `{ taskId }` |
+| `delegate` | `{ agentName, task, routingReason, parentTaskId? }` | a subtask for an agent by name, returns `{ taskId }` |
 | `wait-for-task` | `{ taskId }` | waits up to about 25 s for a terminal state, returns `{ done, status, output }`; call again while `done` is false |
 | `get-child-outputs` | `{ parentTaskId }` | every child with status and output |
 | `complete-task` | `{ taskId, output }` | finish a task from inside a script |
@@ -69,6 +69,7 @@ export default async function (args: z.infer<typeof argsSchema>, ctx: ScriptCont
 ### What `ctx` holds
 
 - `ctx.swarm.*`: the swarm SDK. `task_get`, `task_send`, `task_storeProgress`, `task_action`, `task_list`, `slack_reply`, `memory_search`, `memory_store`, `kv_get`, `kv_getOrNull`, `kv_set`, `kv_delete`, `kv_incr`, `kv_list`, `swarm_get`, `agent_info`, `db_query`, and more. `kv_getOrNull` returns the entry, `null` on a missing key, and throws on other errors.
+- `ctx.swarm.task_send` requires `routingReason` whenever `agentId` is present. Use `human_pinned` for an explicit/configured choice, `skill` for a role or specialization match, `continuity` for the same worker/session, `reroute_fault` for a fault handoff, or `overflow` for capacity/pool escalation. Omit both `agentId` and routing fields for the pool.
 - `ctx.swarm.config`: `apiKey`, `agentId`, `mcpBaseUrl`, and `ctx.swarm.config.get("KEY")` for user config values. All are `Redacted` wrappers that stringify to `<redacted>`. Never unwrap one into a return value, a log line, or a request body you build by hand.
 - `ctx.api.<slug>` and `ctx.mcp.<slug>`: typed clients for registered connections. They exist only for registered connections. Introspect with `Object.keys(ctx.api ?? {})` and `Object.keys(ctx.mcp ?? {})`.
 - `ctx.stdlib`: `fetch`, `fetchJson` (retries, 30 s timeout), `grep`, `glob`, `table`, `Redacted`.
@@ -76,7 +77,7 @@ export default async function (args: z.infer<typeof argsSchema>, ctx: ScriptCont
 
 ### Durable workflow scripts
 
-`launch-script-run` runs a script as a durable, journaled run with a different `ctx`: `ctx.run` (`id`, `agentId`, `args`) and `ctx.step.rawLlm(label, config)`, `ctx.step.agentTask(label, config)`, `ctx.step.swarmScript(label, config)`, plus `ctx.swarm.*`, `ctx.stdlib`, `ctx.logger`. Durable runs have no `ctx.api`, no `ctx.mcp`, and no `ctx.swarm.config`. Call a connection from an inner script through `ctx.step.swarmScript`. See the `script-workflows` skill.
+`launch-script-run` runs a script as a durable, journaled run with a different `ctx`: `ctx.run` (`id`, `agentId`, `args`) and `ctx.step.rawLlm(label, config)`, `ctx.step.agentTask(label, config)`, `ctx.step.swarmScript(label, config)`, plus `ctx.swarm.*`, `ctx.stdlib`, `ctx.logger`. Durable runs have no `ctx.api`, no `ctx.mcp`, and no `ctx.swarm.config`. A configured `ctx.step.agentTask` `agentId` records `human_pinned` unless `routingReason` is supplied. Call a connection from an inner script through `ctx.step.swarmScript`. See the `script-workflows` skill.
 
 ## Inline script pattern
 

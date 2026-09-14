@@ -31,6 +31,7 @@ import {
   FollowUpConfigSchema,
   ModelTierSchema,
   ReasoningEffortSchema,
+  RoutingReasonSchema,
   splitLegacyModelAlias,
 } from "@/types";
 import { findJsonSchemaShapeErrors } from "@/workflows/json-schema-validator";
@@ -61,6 +62,14 @@ export const sendTaskInputSchema = z
       .string()
       .optional()
       .describe("The agent to assign/offer task to. Omit to create unassigned task for pool."),
+    routingReason: RoutingReasonSchema.optional().describe(
+      "Why this agent was selected. Required when agentId is supplied; omit for pool routing.",
+    ),
+    routingNote: z
+      .string()
+      .max(200)
+      .optional()
+      .describe("Optional routing context (maximum 200 characters)."),
     task: z.string().min(1).describe("The task description to send."),
     key: AssetKeySchema.optional().describe(
       "Logical namespace key. Child tasks inherit their parent namespace when provided.",
@@ -174,6 +183,13 @@ export const sendTaskInputSchema = z
         path: [hasChannel ? "slackThreadTs" : "slackChannelId"],
       });
     }
+    if (data.agentId !== undefined && data.routingReason === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "routingReason is required when agentId is supplied.",
+        path: ["routingReason"],
+      });
+    }
     checkOutputSchemaShape(data.outputSchema, ctx);
   });
 
@@ -222,6 +238,8 @@ export async function sendTaskHandler(
   ctx: ToolCtx,
   {
     agentId,
+    routingReason,
+    routingNote,
     task,
     key,
     offerMode,
@@ -247,6 +265,10 @@ export async function sendTaskHandler(
     outputSchema,
   }: SendTaskArgs,
 ): Promise<SwarmToolResult> {
+  // Defense in depth for direct TypeScript callers that bypass MCP schema parsing.
+  if (agentId !== undefined && routingReason === undefined) {
+    return toolErr("routingReason is required when agentId is supplied.");
+  }
   if (ctx.kind === "owner" && !ctx.agentId) {
     return toolErr('Agent ID not found. The MCP client should define the "X-Agent-ID" header.', {
       data: { yourAgentId: ctx.agentId },
@@ -339,6 +361,9 @@ export async function sendTaskHandler(
       effectiveAgentId = effectiveParentTask.agentId;
     }
   }
+  const effectiveRoutingReason =
+    agentId !== undefined ? routingReason : effectiveAgentId ? "continuity" : undefined;
+  const effectiveRoutingNote = effectiveRoutingReason ? routingNote : undefined;
 
   // The three dedup guards are pure reads, so they run twice: once here as a
   // fast path (keeping this tool's existing early-exit responses), and once
@@ -470,6 +495,8 @@ export async function sendTaskHandler(
         overrideSlackContext,
         followUpConfig,
         outputSchema,
+        routingReason: effectiveRoutingReason,
+        routingNote: effectiveRoutingNote,
         routingAffinity:
           effectiveLeadOnly || requiredCapabilities?.length
             ? { leadOnly: effectiveLeadOnly, capabilities: requiredCapabilities ?? [] }
@@ -537,6 +564,8 @@ export async function sendTaskHandler(
         overrideSlackContext,
         followUpConfig,
         outputSchema,
+        routingReason: effectiveRoutingReason,
+        routingNote: effectiveRoutingNote,
         routingAffinity:
           effectiveLeadOnly || requiredCapabilities?.length
             ? { leadOnly: effectiveLeadOnly, capabilities: requiredCapabilities ?? [] }
@@ -578,6 +607,8 @@ export async function sendTaskHandler(
       overrideSlackContext,
       followUpConfig,
       outputSchema,
+      routingReason: effectiveRoutingReason,
+      routingNote: effectiveRoutingNote,
       routingAffinity:
         effectiveLeadOnly || requiredCapabilities?.length
           ? { leadOnly: effectiveLeadOnly, capabilities: requiredCapabilities ?? [] }

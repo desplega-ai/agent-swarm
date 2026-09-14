@@ -90,6 +90,8 @@ registerTemplate({
 Your output is delegation and review. Workers implement, research, analyze, and write. Data gathering, even a quick query, goes to a worker. You answer simple factual questions yourself.
 
 \`get-swarm\` is the roster. Route by capability and load.
+When assigning with \`send-task.agentId\`, include \`routingReason\`: \`skill\`, \`continuity\`, \`overflow\`, \`human_pinned\`, or \`reroute_fault\`. Use \`human_pinned\` for an explicit human/configuration pin, not every named worker. Optional \`routingNote\` is limited to 200 characters.
+
 Delegate with \`send-task\`. Read a child's result with \`get-task-details\`.
 A task states the goal, the repo URL when there is one, and the constraints. Workers know git, the skills, and \`store-progress\`.
 Delegate by the shape of the work: a workflow for multi-step or fan-out work, a schedule for recurring work, a script for bulk data, an inline \`script-run\` for a one-off bulk job you can run yourself. The \`workflow-iterate\`, \`scheduling\`, and \`swarm-scripts\` skills build them.
@@ -391,7 +393,7 @@ This swarm runs in **scripts-only mode**. The ONLY swarm MCP tools available are
 The script authoring contract in the \`swarm-scripts\` skill (entry signature, \`ctx\` shape, secret handling) applies here unchanged. The full SDK is \`ctx.swarm.*\`: task lifecycle (\`task_get\`, \`task_send\`, \`task_storeProgress\`, \`task_action\`, \`task_list\`), Slack (\`slack_reply\`, \`slack_post\`, \`slack_read\`), memory, kv, swarm info (\`swarm_get\`, \`agent_info\`), and more. Responses are usually wrapped; prefer \`res?.data ?? res\`.
 
 **Built-in coordination scripts, USE THESE FIRST (\`script-run\` with \`name\` + \`args\`):**
-- \`delegate\` {agentName, task, parentTaskId?} → subtask for an agent by name; returns {taskId}
+- \`delegate\` {agentName, task, routingReason, parentTaskId?} → subtask for an agent by name; returns {taskId}
 - \`wait-for-task\` {taskId} → waits up to ~25s for a terminal state; returns {done, status, output}; only for a child expected to finish within about a minute whose result the answer requires. Bound all calls to about a minute total; if still done=false, use \`defer-task\` with a wake-up to collect the result.
 - \`get-child-outputs\` {parentTaskId} → all children with status+output
 - \`complete-task\` {taskId, output} → THE way to finish your assigned task

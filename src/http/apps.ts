@@ -1413,6 +1413,7 @@ export async function handleApps(
     const task = await createTaskWithSiblingAwareness(taskPrompt.text, {
       source: "api",
       agentId: action.agentId ?? lead?.id,
+      routingReason: action.agentId ? "human_pinned" : lead ? "skill" : undefined,
       // App-spawned tasks group under the app's asset namespace so a
       // swarm-tasks source can pull them back via config.assetKey.
       key: normalizeAssetKey(`shared/app:${app.id}/action:${parsed.params.name}/`),

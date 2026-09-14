@@ -108,7 +108,12 @@ describe("asset namespace REST contract", () => {
     const task = await api(
       "POST",
       "/api/tasks",
-      { task: "namespaced task", agentId, key: "Shared/Team" },
+      {
+        task: "namespaced task",
+        agentId,
+        routingReason: "human_pinned",
+        key: "Shared/Team",
+      },
       { agentId },
     );
     expect(task.status).toBe(201);
@@ -245,6 +250,7 @@ describe("asset namespace REST contract", () => {
       {
         task: "personal task",
         agentId,
+        routingReason: "human_pinned",
         key: `personal/${userId}/drafts/`,
       },
       { agentId, sourceTaskId },
@@ -258,6 +264,7 @@ describe("asset namespace REST contract", () => {
       {
         task: "wrong personal task",
         agentId,
+        routingReason: "human_pinned",
         key: `personal/${secondUserId}/drafts/`,
       },
       { agentId, sourceTaskId },
@@ -270,6 +277,7 @@ describe("asset namespace REST contract", () => {
       {
         task: "unattributed personal task",
         agentId: secondAgentId,
+        routingReason: "human_pinned",
         key: `personal/${secondUserId}/drafts/`,
       },
       { agentId: secondAgentId },
@@ -281,7 +289,12 @@ describe("asset namespace REST contract", () => {
     const task = await api(
       "POST",
       "/api/tasks",
-      { task: "move target", agentId, key: "shared/inbox/" },
+      {
+        task: "move target",
+        agentId,
+        routingReason: "human_pinned",
+        key: "shared/inbox/",
+      },
       { agentId },
     );
     const move = await api(

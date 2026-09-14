@@ -270,7 +270,7 @@ async function testBasic() {
   // Create task: write hello.txt with 'opencode-e2e-ok'
   const taskResult = await api("POST", "/api/tasks", {
     task: "Write a file at /workspace/hello.txt with the exact content: opencode-e2e-ok",
-    agentId,
+    routingReason: "human_pinned", agentId,
     source: "api",
   });
   const taskId = taskResult?.task?.id ?? taskResult?.id;
@@ -368,12 +368,12 @@ async function testIsolation() {
   // Create two tasks
   const task1 = await api("POST", "/api/tasks", {
     task: "Write a file at /workspace/iso-task-1.txt with the content: task-one-done",
-    agentId: agentId1,
+    routingReason: "human_pinned", agentId: agentId1,
     source: "api",
   });
   const task2 = await api("POST", "/api/tasks", {
     task: "Write a file at /workspace/iso-task-2.txt with the content: task-two-done",
-    agentId: agentId2,
+    routingReason: "human_pinned", agentId: agentId2,
     source: "api",
   });
   const taskId1 = task1?.task?.id ?? task1?.id;

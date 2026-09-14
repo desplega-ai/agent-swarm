@@ -473,6 +473,7 @@ export default function TasksPage() {
     createTask.mutate({
       task: data.task,
       agentId: data.agentId,
+      routingReason: data.agentId ? "human_pinned" : undefined,
       ...(data.taskType && { taskType: data.taskType }),
       ...(tags.length > 0 && { tags }),
       ...(data.priority !== 50 && { priority: data.priority }),

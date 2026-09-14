@@ -165,7 +165,12 @@ describe("session-UI follow-up → Lead → onward delegation", () => {
     // provenance, not a requirement.
     const delegated = await callSendTask(
       mcpServer,
-      { task: "please pick this up", agentId: differentWorkerId, allowDuplicate: true },
+      {
+        task: "please pick this up",
+        agentId: differentWorkerId,
+        routingReason: "human_pinned",
+        allowDuplicate: true,
+      },
       leadAgentId,
       followUp.body.id,
     );

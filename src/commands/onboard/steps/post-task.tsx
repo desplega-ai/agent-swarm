@@ -57,6 +57,7 @@ export function PostTaskStep({ state, addLog, goToNext }: StepProps) {
                   body: JSON.stringify({
                     task,
                     agentId: leadAgentId || undefined,
+                    routingReason: leadAgentId ? "skill" : undefined,
                   }),
                 });
                 if (!res.ok) {

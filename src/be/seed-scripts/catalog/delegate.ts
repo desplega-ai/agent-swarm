@@ -2,6 +2,8 @@ import { z } from "zod";
 
 export const argsSchema = z.object({
   agentName: z.string().describe("Target agent's name (case-insensitive) — resolved to its id"),
+  routingReason: z.enum(["skill", "continuity", "overflow", "human_pinned", "reroute_fault"]),
+  routingNote: z.string().max(200).optional(),
   task: z.string().describe("Full task prompt for the target agent"),
   parentTaskId: z
     .string()
@@ -15,7 +17,7 @@ export const argsSchema = z.object({
 export default async function delegate(args: any, ctx: any) {
   const parsed = argsSchema.safeParse(args);
   if (!parsed.success) return { ok: false, error: "invalid args: " + parsed.error.message };
-  const { agentName, task, parentTaskId, priority, tags } = parsed.data;
+  const { agentName, task, routingReason, routingNote, parentTaskId, priority, tags } = parsed.data;
 
   const res: any = await ctx.swarm.swarm_get({ includeFull: true });
   const agents: any[] = res?.data?.agents ?? res?.agents ?? [];
@@ -26,6 +28,8 @@ export default async function delegate(args: any, ctx: any) {
 
   const sent: any = await ctx.swarm.task_send({
     agentId: agent.id,
+    routingReason,
+    routingNote,
     task,
     ...(parentTaskId ? { parentTaskId } : {}),
     ...(priority != null ? { priority } : {}),

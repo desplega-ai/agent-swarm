@@ -18,6 +18,7 @@ import type {
   AgentLogEventType,
   AgentMcpServer,
   AgentSkill,
+  AgentStatus,
   AgentTask,
   AgentTaskStatus,
   AgentTaskSummary,
@@ -2051,6 +2052,103 @@ export async function findRecentSimilarTasks(opts: {
   return rows.map(rowToAgentTask);
 }
 
+type RoutingDecisionWorkerStatus = {
+  agentId: string;
+  status: AgentStatus;
+  activeTaskCount: number;
+  openTaskCount: number;
+};
+
+type RoutingDecisionCandidate = {
+  taskId: string;
+  agentId: string;
+};
+
+type RoutingDecisionSnapshot = {
+  capturedAt: string;
+  workerStatuses: RoutingDecisionWorkerStatus[];
+  continuityCandidates: {
+    samePr: RoutingDecisionCandidate | null;
+    sameThread: RoutingDecisionCandidate | null;
+    sameRepo: RoutingDecisionCandidate | null;
+  };
+};
+
+const ROUTING_HOLDER_SQL = `CASE
+  WHEN status IN ('draft', 'offered', 'reviewing') AND offeredTo IS NOT NULL THEN offeredTo
+  ELSE COALESCE(agentId, offeredTo)
+END`;
+
+async function findLatestRoutingCandidate(
+  where: string,
+  params: Array<string | number>,
+): Promise<RoutingDecisionCandidate | null> {
+  const row = await getDbClient().get<RoutingDecisionCandidate>(
+    `SELECT id AS taskId, ${ROUTING_HOLDER_SQL} AS agentId
+       FROM agent_tasks
+       WHERE ${where}
+         AND ${ROUTING_HOLDER_SQL} IN (SELECT id FROM agents WHERE isLead = 0)
+       ORDER BY createdAt DESC, rowid DESC
+       LIMIT 1`,
+    params,
+  );
+  return row ?? null;
+}
+
+async function captureRoutingDecisionSnapshot(
+  options: CreateTaskOptions,
+): Promise<RoutingDecisionSnapshot> {
+  const workerStatuses = await getDbClient().query<RoutingDecisionWorkerStatus>(
+    `SELECT agent.id AS agentId, agent.status,
+         COUNT(task.id) AS openTaskCount,
+         SUM(CASE WHEN task.status IN ('in_progress', 'reviewing') THEN 1 ELSE 0 END) AS activeTaskCount
+       FROM agents agent
+       LEFT JOIN agent_tasks task ON
+         (task.agentId = agent.id OR task.offeredTo = agent.id)
+         AND task.status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
+       WHERE agent.isLead = 0
+       GROUP BY agent.id, agent.status
+       ORDER BY agent.id`,
+  );
+
+  const samePr =
+    options.vcsRepo && options.vcsNumber != null
+      ? await findLatestRoutingCandidate("vcsRepo = ? AND vcsNumber = ?", [
+          options.vcsRepo,
+          options.vcsNumber,
+        ])
+      : null;
+
+  let sameThread: RoutingDecisionCandidate | null = null;
+  if (options.slackChannelId && options.slackThreadTs) {
+    sameThread = await findLatestRoutingCandidate("slackChannelId = ? AND slackThreadTs = ?", [
+      options.slackChannelId,
+      options.slackThreadTs,
+    ]);
+  } else if (options.agentmailThreadId) {
+    sameThread = await findLatestRoutingCandidate("agentmailThreadId = ?", [
+      options.agentmailThreadId,
+    ]);
+  }
+
+  const sameRepo = options.vcsRepo
+    ? await findLatestRoutingCandidate("vcsRepo = ?", [options.vcsRepo])
+    : null;
+
+  return {
+    capturedAt: new Date().toISOString(),
+    workerStatuses,
+    continuityCandidates: { samePr, sameThread, sameRepo },
+  };
+}
+
+function logRoutingDecisionFailure(taskId: string, stage: "capture" | "write", error: unknown) {
+  console.warn(
+    `[routing-decision] Failed to ${stage} snapshot for task ${taskId}:`,
+    scrubSecrets(error instanceof Error ? error.message : String(error)),
+  );
+}
+
 export async function createTaskExtended(
   task: string,
   options?: CreateTaskOptions,
@@ -2417,9 +2515,16 @@ export async function createTaskExtended(
       : await findExistingLinearTrackerContextWork(options?.contextKey);
     if (existingTrackerWork) return { existing: existingTrackerWork };
 
+    let routingDecisionSnapshot: RoutingDecisionSnapshot | null = null;
+    try {
+      routingDecisionSnapshot = await captureRoutingDecisionSnapshot(options);
+    } catch (error) {
+      logRoutingDecisionFailure(id, "capture", error);
+    }
+
     const inserted = await getDbClient().get<AgentTaskRow>(
       `INSERT INTO agent_tasks (
-        id, "key", agentId, creatorAgentId, task, status, source,
+        id, "key", agentId, creatorAgentId, task, status, source, routing_reason, routing_note,
         taskType, tags, priority, dependsOn, offeredTo, offeredAt,
         slackChannelId, slackThreadTs, slackTriggerMessageTs, slackUserId,
         vcsProvider, vcsRepo, vcsEventType, vcsNumber, vcsCommentId, vcsAuthor, vcsUrl,
@@ -2427,7 +2532,7 @@ export async function createTaskExtended(
         agentmailInboxId, agentmailMessageId, agentmailThreadId,
         mentionMessageId, mentionChannelId, dir, parentTaskId, model, modelTier, effort, scheduleId,
         workflowRunId, workflowRunStepId, outputSchema, followUpConfig, requestedByUserId, requestedByUserIdInherited, contextKey, routingAffinity, swarmVersion, createdAt, lastUpdatedAt, created_by, updated_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
       [
         id,
         assetKey,
@@ -2436,6 +2541,8 @@ export async function createTaskExtended(
         task,
         status,
         options?.source ?? "mcp",
+        options?.routingReason ?? null,
+        options?.routingNote ?? null,
         options?.taskType ?? null,
         JSON.stringify(options?.tags ?? []),
         options?.priority ?? 50,
@@ -2482,6 +2589,28 @@ export async function createTaskExtended(
       ],
     );
     if (!inserted) throw new Error("Failed to create task");
+
+    if (routingDecisionSnapshot) {
+      try {
+        await getDbClient().run(
+          `INSERT INTO routing_decisions (
+             task_id, selected_agent_id, captured_at, worker_statuses,
+             continuity_candidates, created_by, updated_by
+           ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [
+            id,
+            options.offeredTo ?? options.agentId ?? null,
+            routingDecisionSnapshot.capturedAt,
+            JSON.stringify(routingDecisionSnapshot.workerStatuses),
+            JSON.stringify(routingDecisionSnapshot.continuityCandidates),
+            auditUserId,
+            auditUserId,
+          ],
+        );
+      } catch (error) {
+        logRoutingDecisionFailure(id, "write", error);
+      }
+    }
     return { row: inserted };
   });
 
@@ -3520,6 +3649,7 @@ export async function postMessage(
 
       const task = await createTaskExtended(taskDescription, {
         agentId: mentionedAgentId, // Direct assignment
+        routingReason: "human_pinned",
         creatorAgentId: agentId ?? undefined,
         source: "mcp",
         taskType: "task",

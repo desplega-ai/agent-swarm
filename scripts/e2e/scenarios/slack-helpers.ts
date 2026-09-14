@@ -155,7 +155,7 @@ export async function createChildTask(
   task: string,
 ): Promise<string> {
   const response = await ctx.api("POST", "/api/tasks", {
-    body: { task, agentId: workerId, parentTaskId, source: "api" },
+    body: { task, routingReason: "human_pinned", agentId: workerId, parentTaskId, source: "api" },
   });
   expectStatus(response, [201], `create delegated child under ${parentTaskId}`);
   const childId = asRecord(response.json).id;

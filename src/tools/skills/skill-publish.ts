@@ -71,6 +71,7 @@ To reject: close this task with a rejection reason.`;
 
       const task = await createTaskExtended(taskDescription, {
         agentId: leadAgent.id,
+        routingReason: "skill",
         creatorAgentId: requestInfo.agentId,
         source: "mcp",
         taskType: "skill-approval",

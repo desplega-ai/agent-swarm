@@ -412,6 +412,8 @@ class ApiClient {
     task: string;
     key?: string;
     agentId?: string;
+    routingReason?: "skill" | "continuity" | "overflow" | "human_pinned" | "reroute_fault";
+    routingNote?: string;
     taskType?: string;
     tags?: string[];
     priority?: number;

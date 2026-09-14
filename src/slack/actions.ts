@@ -84,6 +84,7 @@ export function registerActionHandlers(app: App): void {
     });
     const followUpTask = await createTaskWithSiblingAwareness(followUpText, {
       agentId: lead?.id,
+      routingReason: lead ? "skill" : undefined,
       source: "slack",
       parentTaskId: taskId,
       slackChannelId: originalTask.slackChannelId,

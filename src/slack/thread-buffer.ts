@@ -209,6 +209,8 @@ async function slackFlush(
   const mostRecentTask = await getMostRecentTaskInThread(channelId, threadTs);
   const task = await createTaskWithSiblingAwareness(fullDescription, {
     agentId: lead?.id,
+    routingReason:
+      lead && mostRecentTask?.agentId === lead.id ? "continuity" : lead ? "skill" : undefined,
     source: "slack",
     slackChannelId: channelId,
     slackThreadTs: threadTs,

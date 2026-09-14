@@ -103,7 +103,7 @@ export class SwarmClient {
   }): Promise<SwarmTask> {
     const res = await this.request<Record<string, unknown>>("POST", "/api/tasks", {
       task: opts.task,
-      ...(opts.agentId ? { agentId: opts.agentId } : {}),
+      ...(opts.agentId ? { agentId: opts.agentId, routingReason: "human_pinned" } : {}),
       source: "api",
       ...(opts.dependsOn ? { dependsOn: opts.dependsOn } : {}),
       ...(opts.outputSchema ? { outputSchema: opts.outputSchema } : {}),

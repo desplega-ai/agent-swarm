@@ -9,6 +9,7 @@ import type {
   ProviderName,
   ReasoningEffort,
   RoutingAffinity,
+  RoutingReason,
 } from "../../../types";
 import {
   FollowUpConfigSchema,
@@ -45,6 +46,8 @@ export type AgentTaskRow = {
   title: string | null;
   status: AgentTaskStatus;
   source: AgentTaskSource;
+  routing_reason: RoutingReason | null;
+  routing_note: string | null;
   taskType: string | null;
   tags: string | null;
   priority: number;
@@ -165,6 +168,8 @@ export function rowToAgentTask(row: AgentTaskRow): AgentTask {
     title: row.title ?? undefined,
     status: row.status,
     source: row.source,
+    routingReason: row.routing_reason ?? undefined,
+    routingNote: row.routing_note ?? undefined,
     taskType: row.taskType ?? undefined,
     tags: row.tags ? JSON.parse(row.tags) : [],
     priority: row.priority ?? 50,

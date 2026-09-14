@@ -303,7 +303,7 @@ async function testBasic(provider: string, portOffset: number) {
   // Create task
   const taskResult = await api("POST", "/api/tasks", {
     task: "Say 'hello world' and nothing else. Do not use any tools. Just output text.",
-    agentId,
+    routingReason: "human_pinned", agentId,
     source: "api",
   });
   const taskId = taskResult?.task?.id || taskResult?.id || taskResult?.id;
@@ -455,7 +455,7 @@ async function testCancel(provider: string, portOffset: number) {
   // Create a task that takes a while (uses tools, so cancellation hook fires)
   const taskResult = await api("POST", "/api/tasks", {
     task: "List all files in the current directory recursively. Then create a file called 'test-output.txt' with the listing.",
-    agentId,
+    routingReason: "human_pinned", agentId,
     source: "api",
   });
   const taskId = taskResult?.task?.id || taskResult?.id;
@@ -532,7 +532,7 @@ async function testResume(provider: string, portOffset: number) {
   // Create a multi-step task
   const taskResult = await api("POST", "/api/tasks", {
     task: "Step 1: Create a file /workspace/resume-test-1.txt with content 'step1'. Step 2: Create a file /workspace/resume-test-2.txt with content 'step2'. Step 3: Create a file /workspace/resume-test-3.txt with content 'step3'.",
-    agentId,
+    routingReason: "human_pinned", agentId,
     source: "api",
   });
   const taskId = taskResult?.task?.id || taskResult?.id;
@@ -640,7 +640,7 @@ async function testToolLoop(provider: string, portOffset: number) {
   // Create a task likely to trigger tool loops
   const taskResult = await api("POST", "/api/tasks", {
     task: "Read the file /workspace/nonexistent-file.txt and tell me its contents. Keep trying until you succeed. Do not give up.",
-    agentId,
+    routingReason: "human_pinned", agentId,
     source: "api",
   });
   const taskId = taskResult?.task?.id || taskResult?.id;
@@ -704,7 +704,7 @@ async function testSummarize(provider: string, portOffset: number) {
   // Create a task with enough substance to summarize
   const taskResult = await api("POST", "/api/tasks", {
     task: "Create a file /workspace/summary-test.txt explaining what 2+2 equals and why. Use the Write tool.",
-    agentId,
+    routingReason: "human_pinned", agentId,
     source: "api",
   });
   const taskId = taskResult?.task?.id || taskResult?.id;

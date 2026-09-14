@@ -16,6 +16,7 @@ export async function createStandaloneScheduleTask(
     tags: [...schedule.tags, "scheduled", `schedule:${schedule.name}`, ...extraTags],
     priority: schedule.priority,
     agentId: schedule.targetAgentId,
+    routingReason: schedule.targetAgentId ? "human_pinned" : undefined,
     model: schedule.model,
     modelTier: schedule.modelTier,
     scheduleId: schedule.id,

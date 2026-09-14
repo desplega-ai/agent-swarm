@@ -154,6 +154,7 @@ export async function routeKapsoInbound(payload: KapsoWebhookPayload): Promise<K
 
   const task = await createTaskWithSiblingAwareness(await buildTaskDescription(payload), {
     agentId: mapping.agentId ?? null,
+    routingReason: mapping.agentId ? "human_pinned" : undefined,
     source: "system",
     taskType: "kapso-inbound",
     tags: ["kapso-whatsapp", "inbound"],

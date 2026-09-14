@@ -76,6 +76,7 @@ describe("asset namespace MCP exposure", () => {
       "send-task",
       {
         agentId: targetAgentId,
+        routingReason: "human_pinned",
         task: `inherited namespace ${Date.now()}`,
         allowDuplicate: true,
       },
@@ -90,6 +91,7 @@ describe("asset namespace MCP exposure", () => {
       "send-task",
       {
         agentId: targetAgentId,
+        routingReason: "human_pinned",
         task: `wrong namespace ${Date.now()}`,
         key: `personal/${otherUserId}/drafts/`,
         allowDuplicate: true,

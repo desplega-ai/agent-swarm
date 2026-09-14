@@ -340,6 +340,15 @@ export const AgentTaskSourceSchema = z.enum([
 ]);
 export type AgentTaskSource = z.infer<typeof AgentTaskSourceSchema>;
 
+export const RoutingReasonSchema = z.enum([
+  "skill",
+  "continuity",
+  "overflow",
+  "human_pinned",
+  "reroute_fault",
+]);
+export type RoutingReason = z.infer<typeof RoutingReasonSchema>;
+
 // ---------------------------------------------------------------------------
 // Harness Provider
 // ---------------------------------------------------------------------------
@@ -504,6 +513,8 @@ export const AgentTaskSchema = z
     title: z.string().optional(), // Human-facing display title override (e.g. session rename); falls back to `task` when unset
     status: AgentTaskStatusSchema,
     source: AgentTaskSourceSchema.default("mcp"),
+    routingReason: RoutingReasonSchema.optional(),
+    routingNote: z.string().max(200).optional(),
 
     // Task metadata
     taskType: z.string().max(50).optional(), // e.g., "bug", "feature", "chore"
@@ -664,6 +675,8 @@ export const CreateTaskOptionsSchema = z.object({
   agentId: z.string().nullable().optional(),
   creatorAgentId: z.string().optional(),
   source: AgentTaskSourceSchema.optional(),
+  routingReason: RoutingReasonSchema.optional(),
+  routingNote: z.string().max(200).optional(),
   taskType: z.string().max(50).optional(),
   tags: z.array(z.string()).optional(),
   priority: z.number().int().min(0).max(100).optional(),
@@ -1936,7 +1949,7 @@ export const WorkflowNodeSchema = z
     config: z
       .record(z.string(), z.unknown())
       .describe(
-        "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. " +
+        "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. " +
           "For script: { runtime, script, args?, timeout? }. " +
           "For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. " +
           "Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. " +

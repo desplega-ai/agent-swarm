@@ -544,11 +544,25 @@ describe("Tasks", () => {
       body: {
         task: "Integration test task 2",
         agentId: ids.workerAgent,
+        routingReason: "human_pinned",
       },
     });
     expect(status).toBe(201);
     expect(body.agentId).toBe(ids.workerAgent);
+    expect(body.routingReason).toBe("human_pinned");
     ids.task2 = body.id;
+  });
+
+  test("POST /api/tasks — rejects explicit assignment without routingReason", async () => {
+    const { status, body } = await post("/api/tasks", {
+      agentId: ids.leadAgent,
+      body: {
+        task: "Missing routing reason",
+        agentId: ids.workerAgent,
+      },
+    });
+    expect(status).toBe(400);
+    expect(body.error).toContain("routingReason");
   });
 
   test("GET /api/tasks — list all tasks", async () => {
@@ -690,7 +704,7 @@ describe("Tasks", () => {
 
     const created = await post("/api/tasks", {
       agentId: ids.leadAgent,
-      body: { task: "Terminal finish guard test", agentId },
+      body: { task: "Terminal finish guard test", agentId, routingReason: "human_pinned" },
     });
     expect(created.status).toBe(201);
     const taskId = created.body.id as string;
@@ -761,7 +775,11 @@ describe("Tasks", () => {
     // Create a task for worker, try to finish as worker2
     const createRes = await post("/api/tasks", {
       agentId: ids.leadAgent,
-      body: { task: "Forbidden finish test", agentId: ids.workerAgent },
+      body: {
+        task: "Forbidden finish test",
+        agentId: ids.workerAgent,
+        routingReason: "human_pinned",
+      },
     });
     const taskId = createRes.body.id;
     const { status } = await post(`/api/tasks/${taskId}/finish`, {
@@ -790,7 +808,11 @@ describe("Task Pause & Resume", () => {
   test("create a task to pause", async () => {
     const { body } = await post("/api/tasks", {
       agentId: ids.leadAgent,
-      body: { task: "Pause test task", agentId: ids.workerAgent2 },
+      body: {
+        task: "Pause test task",
+        agentId: ids.workerAgent2,
+        routingReason: "human_pinned",
+      },
     });
     pauseTaskId = body.id;
   });
@@ -1162,7 +1184,11 @@ describe("Polling", () => {
 
     const created = await post("/api/tasks", {
       agentId: ids.leadAgent,
-      body: { task: "Task with an attachment", agentId: attachAgent },
+      body: {
+        task: "Task with an attachment",
+        agentId: attachAgent,
+        routingReason: "human_pinned",
+      },
     });
     expect(created.status).toBe(201);
     const taskId = created.body.id as string;
@@ -1651,6 +1677,7 @@ describe("Memory", () => {
         body: {
           task: `Automatic memory integration test: ${taskCase.label}`,
           agentId: ids.workerAgent,
+          routingReason: "human_pinned",
           source: taskCase.source,
           taskType: taskCase.taskType,
           tags: taskCase.tags,
@@ -1681,6 +1708,7 @@ describe("Memory", () => {
       body: {
         task: "Scheduled memory integration opt-in test",
         agentId: ids.workerAgent,
+        routingReason: "human_pinned",
         source: "schedule",
         taskType: "daily-digest",
         tags: ["schedule:test"],
@@ -1710,6 +1738,7 @@ describe("Memory", () => {
       body: {
         task: "Manual memory integration test",
         agentId: ids.workerAgent,
+        routingReason: "human_pinned",
       },
     });
     expect(task.status).toBe(201);

@@ -26,6 +26,7 @@ export type AgentTaskSource =
   | "workflow"
   | "linear"
   | "jira";
+export type RoutingReason = "skill" | "continuity" | "overflow" | "human_pinned" | "reroute_fault";
 export type ChannelType = "public" | "dm";
 export type ModelTier = "smol" | "regular" | "smart" | "ultra";
 /** Mirrors `REASONING_EFFORT_LEVELS` in `src/providers/reasoning-effort.ts` (backend). */
@@ -222,6 +223,8 @@ export interface AgentTask {
   title?: string;
   status: AgentTaskStatus;
   source: AgentTaskSource;
+  routingReason?: RoutingReason;
+  routingNote?: string;
   taskType?: string;
   tags: string[];
   priority: number;

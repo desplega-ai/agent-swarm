@@ -401,6 +401,37 @@ describe("/api/script-runs HTTP", () => {
     expect(stepCount.c).toBe(1);
   });
 
+  test("agent-task dispatch preserves existing author pins and records human_pinned", async () => {
+    const created = await dispatch("/api/script-runs", {
+      method: "POST",
+      agentId,
+      body: createBody(),
+    });
+    const { id: runId } = (await created.json()) as { id: string };
+
+    const responsePromise = dispatch(`/api/internal/script-runs/${runId}/agent-task`, {
+      method: "POST",
+      agentId,
+      body: JSON.stringify({ stepKey: "pinned", task: "do pinned work", agentId }),
+    });
+
+    let dispatched = await getLatestScriptRunStepTaskByContextKey(`script-run:${runId}:pinned`);
+    for (let i = 0; i < 50 && !dispatched; i++) {
+      await Bun.sleep(20);
+      dispatched = await getLatestScriptRunStepTaskByContextKey(`script-run:${runId}:pinned`);
+    }
+    expect(dispatched).not.toBeNull();
+    await completeTask(dispatched!.id, "done");
+    const response = await responsePromise;
+    expect(response.status).toBe(200);
+    const { taskId } = (await response.json()) as { taskId: string };
+    expect(
+      await getDbClient().get("SELECT agentId, routing_reason FROM agent_tasks WHERE id = ?", [
+        taskId,
+      ]),
+    ).toEqual({ agentId, routing_reason: "human_pinned" });
+  });
+
   test("agent-task polling returns the step output when a newer completed follow-up shares its context key", async () => {
     const created = await dispatch("/api/script-runs", {
       method: "POST",

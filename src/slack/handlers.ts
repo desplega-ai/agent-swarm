@@ -624,6 +624,7 @@ export function registerMessageHandler(app: App): void {
         fullTaskDescription,
         {
           agentId: lead?.id,
+          routingReason: lead ? "skill" : undefined,
           source: "slack",
           slackChannelId: msg.channel,
           slackThreadTs: threadTs,
@@ -739,6 +740,7 @@ export function registerMessageHandler(app: App): void {
             fullTaskDescription,
             {
               agentId: agent.id,
+              routingReason: "human_pinned",
               source: "slack",
               slackChannelId: msg.channel,
               slackThreadTs: threadTs,
@@ -762,6 +764,7 @@ export function registerMessageHandler(app: App): void {
           fullTaskDescription,
           {
             agentId: agent.id,
+            routingReason: "human_pinned",
             source: "slack",
             slackChannelId: msg.channel,
             slackThreadTs: threadTs,

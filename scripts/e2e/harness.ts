@@ -362,7 +362,7 @@ async function runHarnessAttempt(
     const create = await api("POST", "/api/tasks", {
       body: {
         task: `Reply with exactly the text ${marker} and nothing else. Do not use any tools.`,
-        agentId,
+        routingReason: "human_pinned", agentId,
         source: "api",
         dir: workspaceDir,
       },

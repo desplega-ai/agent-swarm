@@ -91,7 +91,7 @@ const prompt =
   "Write an extremely detailed ~1500 word technical essay explaining, step by step, how a distributed " +
   "multi-agent task system detects and recovers from a worker that crashes mid-task. Cover heartbeats, " +
   "active-session tracking, stall detection, and same-agent resume pinning. Be thorough; write the full essay.";
-const created = await api("POST", "/api/tasks", { task: prompt, agentId: A, source: "api" });
+const created = await api("POST", "/api/tasks", { task: prompt, routingReason: "human_pinned", agentId: A, source: "api" });
 check(created.status === 201, "task created & pinned to A", { status: created.status });
 const taskId = created.body?.id;
 console.log(`  task ${taskId?.slice(0, 8)} created (status=${created.body?.status})`);

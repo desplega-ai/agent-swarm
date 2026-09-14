@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import {
   closeDb,
+  createAgent,
   createWorkflow,
   createWorkflowRun,
   createWorkflowRunStep,
@@ -9,7 +10,7 @@ import {
   initDb,
 } from "../be/db";
 import type { ExecutorMeta } from "../types";
-import { AgentTaskExecutor } from "../workflows/executors/agent-task";
+import { AgentTaskConfigSchema, AgentTaskExecutor } from "../workflows/executors/agent-task";
 import type { ExecutorDependencies } from "../workflows/executors/base";
 
 const TEST_DB_PATH = "./test-workflow-agent-task.sqlite";
@@ -94,6 +95,20 @@ afterAll(async () => {
 // ─── Tests ───────────────────────────────────────────────────
 
 describe("AgentTaskExecutor — workspace scoping", () => {
+  test("existing configured agent pins accept optional routing metadata", () => {
+    expect(AgentTaskConfigSchema.safeParse({ template: "work", agentId: "worker" }).success).toBe(
+      true,
+    );
+    expect(
+      AgentTaskConfigSchema.safeParse({
+        template: "work",
+        agentId: "worker",
+        routingReason: "human_pinned",
+        routingNote: "workflow author chose this worker",
+      }).success,
+    ).toBe(true);
+  });
+
   test("config schema accepts dir, vcsRepo, model, modelTier, parentTaskId", () => {
     const executor = new AgentTaskExecutor(mockDeps);
     const config = {
@@ -146,7 +161,13 @@ describe("AgentTaskExecutor — workspace scoping", () => {
 
   test("execute() creates task with workspace fields forwarded", async () => {
     const executor = new AgentTaskExecutor(mockDeps);
+    const worker = await createAgent({
+      name: "Pinned workflow worker",
+      isLead: false,
+      status: "idle",
+    });
     const config = {
+      agentId: worker.id,
       template: "List files in workspace",
       dir: "/workspace/repos/agent-swarm",
       vcsRepo: "desplega-ai/agent-swarm",
@@ -173,6 +194,8 @@ describe("AgentTaskExecutor — workspace scoping", () => {
     expect(task!.model).toBeUndefined();
     expect(task!.modelTier).toBe("regular");
     expect(task!.source).toBe("workflow");
+    expect(task!.agentId).toBe(worker.id);
+    expect(task!.routingReason).toBe("human_pinned");
   });
 
   test("execute() creates task without workspace fields (backward compat)", async () => {

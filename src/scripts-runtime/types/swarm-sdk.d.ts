@@ -10,6 +10,41 @@ declare module "swarm-sdk" {
   export type ScriptFsMode = "none" | "workspace-rw";
   export type ScriptApiRawOptions = { raw: true };
   export type ScriptApiDefaultOptions = { raw?: false };
+  export type RoutingReason =
+    | "skill"
+    | "continuity"
+    | "overflow"
+    | "human_pinned"
+    | "reroute_fault";
+  export type TaskSendArgs = Record<string, unknown> & {
+    task: string;
+    routingNote?: string;
+  } & (
+      | { agentId: string; routingReason: RoutingReason }
+      | { agentId?: never; routingReason?: never }
+    );
+  export type AgentTaskStepConfig = {
+    template?: string;
+    task?: string;
+    agentId?: string;
+    routingReason?: RoutingReason;
+    routingNote?: string;
+    tags?: string[];
+    priority?: number;
+    offerMode?: boolean;
+    dir?: string;
+    vcsRepo?: string;
+    model?: string;
+    parentTaskId?: string;
+    requestedByUserId?: string;
+    outputSchema?: Record<string, unknown>;
+    /** Wait for the dispatched task to reach a terminal status before resolving. Default: true. */
+    waitForCompletion?: boolean;
+    /** Max ms to wait for a terminal status before throwing. Default: 2h. Only used when waitForCompletion is true. */
+    timeoutMs?: number;
+    /** Throw when the task ends failed/cancelled/superseded (default), or resolve with {taskId,status,error} when false. */
+    failOnTaskFailure?: boolean;
+  };
 
   export interface ScriptApiRawResult {
     ok: boolean;
@@ -356,7 +391,7 @@ declare module "swarm-sdk" {
     }): Promise<unknown>;
 
     // --- write: tasks ---
-    task_send(args: Record<string, unknown>): Promise<unknown>;
+    task_send(args: TaskSendArgs): Promise<unknown>;
     task_cancel(args: { taskId: string }): Promise<unknown>;
     task_steer(args: {
       taskId: string;
@@ -562,29 +597,7 @@ declare module "swarm-sdk" {
       label: string,
       config: { prompt: string; model?: string; schema?: Record<string, unknown> },
     ): Promise<unknown>;
-    agentTask(
-      label: string,
-      config: {
-        template?: string;
-        task?: string;
-        agentId?: string;
-        tags?: string[];
-        priority?: number;
-        offerMode?: boolean;
-        dir?: string;
-        vcsRepo?: string;
-        model?: string;
-        parentTaskId?: string;
-        requestedByUserId?: string;
-        outputSchema?: Record<string, unknown>;
-        /** Wait for the dispatched task to reach a terminal status before resolving. Default: true. */
-        waitForCompletion?: boolean;
-        /** Max ms to wait for a terminal status before throwing. Default: 2h. Only used when waitForCompletion is true. */
-        timeoutMs?: number;
-        /** Throw when the task ends failed/cancelled/superseded (default), or resolve with {taskId,status,error} when false. */
-        failOnTaskFailure?: boolean;
-      },
-    ): Promise<unknown>;
+    agentTask(label: string, config: AgentTaskStepConfig): Promise<unknown>;
     swarmScript(
       label: string,
       config: {
