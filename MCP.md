@@ -309,9 +309,9 @@ Stores the progress of a specific task. Can also mark task as completed or faile
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `taskId` | `uuid` | Yes | - | The ID of the task to update progress for. |
+| `taskId` | `uuid` | No | - | Full task UUID. Defaults to the caller-owned task in X-Source-Task-Id; required outside task context. |
 | `progress` | `string` | No | - | The progress update to store. |
-| `status` | `completed \| failed` | No | - | Set to 'completed' or 'failed' to finish the task. |
+| `status` | `completed \| failed \| in_progress \| pending` | No | - | Set to 'completed' or 'failed' to finish the task. 'in_progress' and 'pending' store progress only and do not change task status. |
 | `output` | `string` | No | - | The task result (used when completing). For Slack-originated tasks, this is published verbatim in the thread's outcome card: provide a concrete summary scaled to what was asked, including only the outcome and any links or IDs the human needs—not process narration, a transcript, or a restatement of the brief. |
 | `failureReason` | `string` | No | - | The reason for failure (used when failing). |
 | `attachments` | `array` | No | - | Pointer-based artifacts produced by this step — agent-fs path, URL, shared-fs path, or swarm Page. No inline file data; upload to agent-fs first and attach by path. Agent-fs pointers are verified before task state changes, using the explicit org/drive pair or the registering agent's configured defaults. May be sent on any call (progress or completion) and accumulates across calls; duplicates are de-duped by sha256 (when present) or by (kind, pointer, name). |
@@ -1028,7 +1028,7 @@ Search your accumulated memories using natural language. Returns summaries with 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `query` | `string` | Yes | - | Natural language search query. |
-| `intent` | `string` | Yes | - | Why you are searching for this memory. Required. E.g. 'looking for auth pattern to fix login bug'. |
+| `intent` | `string` | No | - | Optional reason for searching for this memory. E.g. 'looking for auth pattern to fix login bug'. |
 | `scope` | `all \| agent \| swarm` | No | "all" | Search scope: 'all' (own + swarm), 'agent' (own only), 'swarm' (shared only). |
 | `limit` | `number` | No | 10 | Max results to return. |
 | `source` | `manual \| file_index \| session_summary \| task_completion` | No | - | Filter by memory source type. |
@@ -1042,9 +1042,9 @@ Store a learning as a searchable memory: a fix, a pattern, a gotcha, a fact abou
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `content` | `string` | Yes | - | The memory body. Markdown is fine. State the fact, the context it applies to, and the evidence. |
-| `name` | `string` | Yes | - | Short title, one line, used in search results and the UI. |
+| `name` | `string` | No | - | Short title used in search results and the UI. Defaults to the first non-empty content line (up to 200 characters). |
 | `scope` | `agent \| swarm` | No | "agent" | 'agent' (default): only you can recall it. 'swarm': every agent can recall it. |
-| `tags` | `array` | No | - | Free-form tags, for example a repo name or a topic. |
+| `tags` | `unknown` | No | - | Free-form tags as an array or a comma-separated string, for example a repo name or a topic. |
 | `taskId` | `uuid` | No | - | The task this learning came from, when there is one. |
 | `intent` | `string` | No | - | Why this is worth remembering. Kept in the audit trail. |
 
@@ -1056,8 +1056,9 @@ Retrieve the full content of a specific memory by its ID. Use memory-search to f
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `memoryId` | `uuid` | Yes | - | The ID of the memory to retrieve. |
-| `intent` | `string` | Yes | - | Why you are retrieving this memory. Required. E.g. 'need full details of the auth fix pattern'. |
+| `memoryId` | `uuid` | No | - | The ID of the memory to retrieve (or use id). |
+| `id` | `uuid` | No | - | Alias for memoryId, matching memory-search results. |
+| `intent` | `string` | No | - | Optional reason for retrieving this memory. E.g. 'need full details of the auth fix pattern'. |
 
 ### memory-edit
 
@@ -1095,9 +1096,10 @@ Rate a memory you used in the current task. Call this when a retrieved memory wa
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `id` | `string` | Yes | - | Memory ID returned by memory_search. |
+| `id` | `string` | No | - | Memory ID returned by memory-search (or use memoryId). |
+| `memoryId` | `string` | No | - | Alias for id, matching memory-get. |
 | `useful` | `boolean` | Yes | - | true = this memory helped solve the task; false = misled or wasted time. |
-| `note` | `string` | No | - | Short reason. Captured for telemetry; not surfaced to other agents. |
+| `note` | `string` | No | - | Reason, stored up to 500 characters for telemetry; not surfaced to other agents. |
 | `referencesSource` | `string` | No | - | Optional external source ID this memory references. Free-form string, convention "<source>:<identifier>" (e.g. "github:owner/repo#N", "linear:KEY-N", "customer:<slug>", "slack:<channel>:<ts>", "agentmail:<thread-id>"). Pick any prefix that fits — no closed enum. When present, an edge from this memory to the external source is created/updated. |
 
 ### inject-learning

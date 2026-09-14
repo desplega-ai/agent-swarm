@@ -24,14 +24,19 @@ export const registerMemoryStoreTool = (server: McpServer) => {
           .string()
           .min(1)
           .max(200)
-          .describe("Short title, one line, used in search results and the UI."),
+          .optional()
+          .describe(
+            "Short title used in search results and the UI. Defaults to the first non-empty content line (up to 200 characters).",
+          ),
         scope: AgentMemoryScopeSchema.default("agent").describe(
           "'agent' (default): only you can recall it. 'swarm': every agent can recall it.",
         ),
         tags: z
-          .array(z.string())
+          .union([z.array(z.string()), z.string()])
           .optional()
-          .describe("Free-form tags, for example a repo name or a topic."),
+          .describe(
+            "Free-form tags as an array or a comma-separated string, for example a repo name or a topic.",
+          ),
         taskId: z
           .uuid()
           .optional()
@@ -49,7 +54,22 @@ export const registerMemoryStoreTool = (server: McpServer) => {
         queued: z.boolean().optional(),
       }),
     },
-    async ({ content, name, scope, tags, taskId, intent }, requestInfo, _meta) => {
+    async ({ content, name: requestedName, scope, tags, taskId, intent }, requestInfo, _meta) => {
+      const name =
+        requestedName ??
+        content
+          .split(/\r?\n/)
+          .find((line) => line.trim())
+          ?.trim()
+          .slice(0, 200) ??
+        "Untitled memory";
+      const normalizedTags =
+        typeof tags === "string"
+          ? tags
+              .split(",")
+              .map((tag) => tag.trim())
+              .filter(Boolean)
+          : tags;
       if (!requestInfo.agentId) {
         return toolErr("Agent ID required. Are you registered in the swarm?");
       }
@@ -64,7 +84,7 @@ export const registerMemoryStoreTool = (server: McpServer) => {
           scope,
           source: "manual",
           sourceTaskId: taskId ?? null,
-          tags,
+          tags: normalizedTags,
           intent,
         });
 

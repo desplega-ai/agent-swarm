@@ -84,8 +84,9 @@ export const registerMemorySearchTool = (server: McpServer) => {
         intent: z
           .string()
           .min(1)
+          .optional()
           .describe(
-            "Why you are searching for this memory. Required. E.g. 'looking for auth pattern to fix login bug'.",
+            "Optional reason for searching for this memory. E.g. 'looking for auth pattern to fix login bug'.",
           ),
         scope: z
           .enum(["all", "agent", "swarm"])

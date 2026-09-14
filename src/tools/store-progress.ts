@@ -68,12 +68,19 @@ export const registerStoreProgressTool = (server: McpServer) => {
       annotations: { idempotentHint: true },
 
       inputSchema: z.object({
-        taskId: z.uuid().describe("The ID of the task to update progress for."),
+        taskId: z
+          .uuid()
+          .optional()
+          .describe(
+            "Full task UUID. Defaults to the caller-owned task in X-Source-Task-Id; required outside task context.",
+          ),
         progress: z.string().optional().describe("The progress update to store."),
         status: z
-          .enum(["completed", "failed"])
+          .enum(["completed", "failed", "in_progress", "pending"])
           .optional()
-          .describe("Set to 'completed' or 'failed' to finish the task."),
+          .describe(
+            "Set to 'completed' or 'failed' to finish the task. 'in_progress' and 'pending' store progress only and do not change task status.",
+          ),
         output: z
           .string()
           .optional()
@@ -111,13 +118,37 @@ export const registerStoreProgressTool = (server: McpServer) => {
       outputSchema: storeProgressOutputSchema,
     },
     async (
-      { taskId, progress, status, output, failureReason, attachments, persistMemory, force },
+      {
+        taskId: requestedTaskId,
+        progress,
+        status: requestedStatus,
+        output,
+        failureReason,
+        attachments,
+        persistMemory,
+        force,
+      },
       requestInfo,
       _meta,
     ) => {
       if (!requestInfo.agentId) {
         return toolErr('Agent ID not found. The MCP client should define the "X-Agent-ID" header.');
       }
+
+      const taskId = requestedTaskId ?? requestInfo.sourceTaskId;
+      if (!taskId || !z.uuid().safeParse(taskId).success) {
+        return toolErr("Supply taskId as the full task UUID; no valid task context is available.");
+      }
+      if (!requestedTaskId) {
+        const contextTask = await getTaskById(taskId);
+        if (!contextTask || contextTask.agentId !== requestInfo.agentId) {
+          return toolErr("Omitted taskId requires a source task assigned to the calling agent.");
+        }
+      }
+      const status =
+        requestedStatus === "completed" || requestedStatus === "failed"
+          ? requestedStatus
+          : undefined;
 
       // Verify agent-fs pointers before opening the write transaction. The
       // registering agent's resolved config selects both credentials and the

@@ -80,12 +80,14 @@ export const registerMemoryGetTool = (server: McpServer) => {
       annotations: { readOnlyHint: true },
 
       inputSchema: z.object({
-        memoryId: z.uuid().describe("The ID of the memory to retrieve."),
+        memoryId: z.uuid().optional().describe("The ID of the memory to retrieve (or use id)."),
+        id: z.uuid().optional().describe("Alias for memoryId, matching memory-search results."),
         intent: z
           .string()
           .min(1)
+          .optional()
           .describe(
-            "Why you are retrieving this memory. Required. E.g. 'need full details of the auth fix pattern'.",
+            "Optional reason for retrieving this memory. E.g. 'need full details of the auth fix pattern'.",
           ),
       }),
       outputSchema: swarmToolOutputSchema({
@@ -102,7 +104,12 @@ export const registerMemoryGetTool = (server: McpServer) => {
         rateHint: z.string().optional(),
       }),
     },
-    async ({ memoryId, intent }, requestInfo, _meta) => {
+    async ({ memoryId: requestedMemoryId, id, intent }, requestInfo, _meta) => {
+      if (requestedMemoryId && id && requestedMemoryId !== id) {
+        return toolErr("memoryId and id must identify the same memory; supply only one.");
+      }
+      const memoryId = requestedMemoryId ?? id;
+      if (!memoryId) return toolErr("Supply memoryId (or its alias id) from memory-search.");
       const store = getMemoryStore();
       const memoryForAuth = await store.peek(memoryId);
 

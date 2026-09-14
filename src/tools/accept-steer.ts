@@ -16,7 +16,6 @@ export const acceptSteerInputSchema = z.object({
   steeringMessageId: z.uuid().describe("The steering message ID to acknowledge."),
   note: z
     .string()
-    .max(500)
     .optional()
     .describe("Optional short note describing how the steering was incorporated."),
 });

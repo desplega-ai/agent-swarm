@@ -42,15 +42,21 @@ export const registerMemoryRateTool = (server: McpServer) => {
         "the swarm learns to surface better memories next time.",
       annotations: { destructiveHint: false },
       inputSchema: z.object({
-        id: z.string().describe("Memory ID returned by memory_search."),
+        id: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("Memory ID returned by memory-search (or use memoryId)."),
+        memoryId: z.string().min(1).optional().describe("Alias for id, matching memory-get."),
         useful: z
           .boolean()
           .describe("true = this memory helped solve the task; false = misled or wasted time."),
         note: z
           .string()
-          .max(280)
           .optional()
-          .describe("Short reason. Captured for telemetry; not surfaced to other agents."),
+          .describe(
+            "Reason, stored up to 500 characters for telemetry; not surfaced to other agents.",
+          ),
         referencesSource: z
           .string()
           .min(1)
@@ -60,7 +66,13 @@ export const registerMemoryRateTool = (server: McpServer) => {
       }),
       outputSchema: swarmToolOutputSchema(),
     },
-    async ({ id, useful, note, referencesSource }, requestInfo, _meta) => {
+    async ({ id, memoryId, useful, note, referencesSource }, requestInfo, _meta) => {
+      if (id && memoryId && id !== memoryId) {
+        return toolErr("id and memoryId must identify the same memory; supply only one.");
+      }
+      const resolvedMemoryId = id ?? memoryId;
+      if (!resolvedMemoryId)
+        return toolErr("Supply id (or its alias memoryId) from memory-search.");
       if (!requestInfo.agentId) {
         return toolErr("Agent ID required. Are you registered in the swarm?");
       }
@@ -85,11 +97,11 @@ export const registerMemoryRateTool = (server: McpServer) => {
       const apiKey = getApiKey();
 
       const event = {
-        memoryId: id,
+        memoryId: resolvedMemoryId,
         signal: useful ? 1 : -1,
         weight: 1.0,
         source: "explicit-self" as const,
-        reasoning: note ?? "",
+        reasoning: (note ?? "").slice(0, 500),
         taskId: requestInfo.sourceTaskId,
         ...(cleanedReferencesSource !== undefined
           ? { referencesSource: cleanedReferencesSource }
@@ -129,7 +141,7 @@ export const registerMemoryRateTool = (server: McpServer) => {
           return toolErr(`Memory rating failed (HTTP ${response.status}).`);
         }
 
-        return toolOk(`Memory ${id} rated as ${useful ? "useful" : "not useful"}.`);
+        return toolOk(`Memory ${resolvedMemoryId} rated as ${useful ? "useful" : "not useful"}.`);
       } catch (err) {
         return toolErr(`Memory rating failed: ${(err as Error).message}`);
       }

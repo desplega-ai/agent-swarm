@@ -148,7 +148,7 @@ export const sendTaskInputSchema = z
       ),
     requestedByUserId: z
       .string()
-      .uuid()
+      .min(1)
       .optional()
       .describe(
         "ID of the human user who originally requested this task chain. When omitted, inherited from the caller's current task so the attribution flows through multi-hop delegation automatically.",
