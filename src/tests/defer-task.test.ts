@@ -22,6 +22,7 @@ import {
   createWorkflow,
   createWorkflowRun,
   createWorkflowRunStep,
+  getLogsByTaskId,
   getScheduledTasks,
   getTaskById,
   initDb,
@@ -183,7 +184,9 @@ describe("defer-task handler", () => {
     const stored = await getTaskById(task.id);
     expect(stored?.status).toBe("completed");
     // Summary first, then the deferral status line, then the checks.
-    expect(stored?.output?.startsWith(`${SUMMARY}\n\n`)).toBe(true);
+    expect(stored?.output).toBe(
+      `${SUMMARY}\n\nDeferred until ${schedule.nextRunAt} (schedule ${schedule.id}). Pending: deploy 42 is still running\n\nChecks:\n- deploy 42 status is green\n- smoke tests pass`,
+    );
     expect(stored?.output).toContain("Pending: deploy 42 is still running");
     expect(stored?.output).toContain(schedule.nextRunAt!);
     expect(stored?.output).toContain(schedule.id);
@@ -313,7 +316,7 @@ describe("defer-task handler", () => {
     expect((await getTaskById(task.id))?.status).toBe("in_progress");
   });
 
-  test("a task with an outputSchema refuses a prose deferral and books no schedule", async () => {
+  test("a task with an outputSchema requires explicit output and books no schedule", async () => {
     const task = await startedTask("structured output task", agentId, {
       outputSchema: {
         type: "object",
@@ -328,11 +331,101 @@ describe("defer-task handler", () => {
     )) as DeferTaskResult;
 
     expect(result.structuredContent.success).toBe(false);
-    expect(result.structuredContent.message).toContain("outputSchema");
+    expect(result.structuredContent.message).toContain(
+      "Call defer-task with output: a JSON string",
+    );
     expect((await schedulesForTask(task.id)).length).toBe(0);
     const stored = await getTaskById(task.id);
     expect(stored?.status).toBe("in_progress");
     expect(stored?.output).toBeFalsy();
+  });
+
+  test("valid schema output is preserved verbatim and deferral details are logged", async () => {
+    const task = await startedTask("structured deferral", agentId, {
+      outputSchema: {
+        type: "object",
+        required: ["result"],
+        properties: { result: { type: "string" } },
+      },
+    });
+    const output = ' { "result": "deploy pending" }\n';
+    const result = (await buildTool().handler(
+      {
+        taskId: task.id,
+        delayMs: 60_000,
+        summary: SUMMARY,
+        note: "pending deploy",
+        checks: ["check deploy"],
+        output,
+      },
+      meta(),
+    )) as DeferTaskResult;
+
+    expect(result.structuredContent.success).toBe(true);
+    const stored = await getTaskById(task.id);
+    expect(stored?.status).toBe("completed");
+    expect(stored?.output).toBe(output);
+    const schedules = await schedulesForTask(task.id);
+    expect(schedules).toHaveLength(1);
+    const schedule = schedules[0]!;
+    expect(schedule.taskTemplate).toBe(
+      `Resume task ${task.id}: pending deploy\n\nChecks:\n- check deploy`,
+    );
+    const logs = (await getLogsByTaskId(task.id)).filter(
+      (log) => log.eventType === "task_progress",
+    );
+    expect(logs).toHaveLength(1);
+    expect(logs[0]!.newValue).toBe(
+      `${SUMMARY}\n\nDeferred until ${schedule.nextRunAt} (schedule ${schedule.id}). Pending: pending deploy\n\nChecks:\n- check deploy`,
+    );
+  });
+
+  test.each([
+    "not JSON",
+    '{"result": 42}',
+  ])("invalid schema output %s has no side effects", async (output) => {
+    const task = await startedTask("invalid structured deferral", agentId, {
+      outputSchema: {
+        type: "object",
+        required: ["result"],
+        properties: { result: { type: "string" } },
+      },
+    });
+    const result = (await buildTool().handler(
+      { taskId: task.id, delayMs: 60_000, summary: SUMMARY, note: "pending", output },
+      meta(),
+    )) as DeferTaskResult;
+    expect(result.structuredContent.success).toBe(false);
+    expect(result.structuredContent.message).toContain("outputSchema");
+    expect(await schedulesForTask(task.id)).toHaveLength(0);
+    expect((await getTaskById(task.id))?.status).toBe("in_progress");
+    expect((await getTaskById(task.id))?.output).toBeFalsy();
+    expect(
+      (await getLogsByTaskId(task.id)).filter((log) => log.eventType === "task_progress"),
+    ).toHaveLength(0);
+  });
+
+  test("JSON string schema output can defer", async () => {
+    const task = await startedTask("string output", agentId, { outputSchema: { type: "string" } });
+    const output = '"pending"';
+    const result = (await buildTool().handler(
+      { taskId: task.id, delayMs: 60_000, summary: SUMMARY, note: "pending", output },
+      meta(),
+    )) as DeferTaskResult;
+    expect(result.structuredContent.success).toBe(true);
+    expect((await getTaskById(task.id))?.output).toBe(output);
+  });
+
+  test("explicit output is ignored without a schema", async () => {
+    const task = await startedTask("unstructured output");
+    const result = (await buildTool().handler(
+      { taskId: task.id, delayMs: 60_000, summary: SUMMARY, note: "pending", output: '"ignored"' },
+      meta(),
+    )) as DeferTaskResult;
+    expect(result.structuredContent.success).toBe(true);
+    expect((await getTaskById(task.id))?.output).toBe(
+      `${SUMMARY}\n\nDeferred until ${result.structuredContent.nextRunAt} (schedule ${result.structuredContent.scheduleId}). Pending: pending`,
+    );
   });
 
   test("the wake-up schedule carries modelTier but never the parent's concrete model", async () => {
@@ -353,15 +446,27 @@ describe("defer-task handler", () => {
   });
 
   test("a competing terminal transition between schedule creation and completion aborts the loser and books no orphan schedule", async () => {
-    const task = await startedTask("race target");
+    const task = await startedTask("race target", agentId, { outputSchema: { type: "string" } });
 
     const [first, second] = (await Promise.all([
       buildTool().handler(
-        { taskId: task.id, delayMs: 60_000, summary: "first writer", note: "pending A" },
+        {
+          taskId: task.id,
+          delayMs: 60_000,
+          summary: "first writer",
+          note: "pending A",
+          output: '"first"',
+        },
         meta(),
       ),
       buildTool().handler(
-        { taskId: task.id, delayMs: 90_000, summary: "second writer", note: "pending B" },
+        {
+          taskId: task.id,
+          delayMs: 90_000,
+          summary: "second writer",
+          note: "pending B",
+          output: '"second"',
+        },
         meta(),
       ),
     ])) as [DeferTaskResult, DeferTaskResult];
@@ -377,6 +482,12 @@ describe("defer-task handler", () => {
     expect(succeeded.length).toBe(1);
     expect(failed.length).toBe(1);
     expect(failed[0]!.structuredContent.message).toContain("terminal state");
+
+    const logs = (await getLogsByTaskId(task.id)).filter(
+      (log) => log.eventType === "task_progress",
+    );
+    expect(logs).toHaveLength(1);
+    expect(logs[0]!.newValue).toContain(succeeded[0]!.structuredContent.scheduleId!);
 
     // The loser's schedule INSERT rolled back with its transaction — only
     // the winner's wake-up was committed. No orphan schedule.

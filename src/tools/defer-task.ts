@@ -4,6 +4,7 @@ import * as z from "zod";
 import { resolveTaskAuditUserId } from "@/be/audit-user";
 import {
   completeTask,
+  createLogEntry,
   createScheduledTask,
   getAgentById,
   getDbClient,
@@ -32,7 +33,7 @@ export const registerDeferTaskTool = (server: McpServer) => {
       title: "Defer Task",
       annotations: { destructiveHint: false, idempotentHint: false },
       description:
-        "Completes this task now with status `completed` and books a wake-up for you. Use when the result needs time: a build, a deploy, a reply. The task reaches its final state on this call; the lead sees your summary as its output. A one-off schedule wakes you up later with a child task that carries this task as its parent. Provide delayMs or runAt, a summary of what you did, and a note that says what is pending and what to check.",
+        "Completes this task now with status `completed` and books a wake-up for you. Use when the result needs time: a build, a deploy, a reply. The task reaches its final state on this call; the lead sees your summary as its output unless the task has an outputSchema. For a task with an outputSchema, provide output as a JSON string matching that schema; it is stored verbatim as terminal output, while deferral details remain visible in the task log. A one-off schedule wakes you up later with a child task that carries this task as its parent. Provide delayMs or runAt, a summary of what you did, and a note that says what is pending and what to check.",
       inputSchema: z.object({
         taskId: z.string().describe("The ID of the task you are working on."),
         delayMs: z
@@ -51,7 +52,13 @@ export const registerDeferTaskTool = (server: McpServer) => {
           .min(1)
           .max(4000)
           .describe(
-            "What you did so far and where things stand. This becomes the task's output; the lead and your wake-up run both read it.",
+            "What you did so far and where things stand. Stored in the task log for tasks with an outputSchema; otherwise becomes the task's output.",
+          ),
+        output: z
+          .string()
+          .optional()
+          .describe(
+            "Required when the task has an outputSchema: a JSON string matching that schema, stored verbatim as terminal output. Ignored for tasks without an outputSchema.",
           ),
         note: z
           .string()
@@ -71,7 +78,7 @@ export const registerDeferTaskTool = (server: McpServer) => {
         nextRunAt: z.string().optional(),
       }),
     },
-    async ({ taskId, delayMs, runAt, summary, note, checks }, requestInfo, _meta) => {
+    async ({ taskId, delayMs, runAt, summary, output, note, checks }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
         return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
       }
@@ -127,17 +134,15 @@ export const registerDeferTaskTool = (server: McpServer) => {
       const createdBy =
         (await resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId)) ?? undefined;
 
-      // The deferral note is written as the task's FINAL output — a task with
-      // an outputSchema must satisfy it on completion (store-progress enforces
-      // the same rule). Validate before creating anything: the real schedule
-      // id isn't known yet, but it never changes whether this prose is valid
-      // JSON against the schema, so a placeholder stands in for it here.
-      const previewOutput = `${summary}\n\nDeferred until ${nextRunAt} (schedule pending). Pending: ${note}${checksBlock}`;
-      const outputValidationError = getTaskOutputValidationError(task.outputSchema, previewOutput);
-      if (outputValidationError) {
-        return toolErr(
-          `Task ${taskId} has an outputSchema; its terminal output must satisfy it, but a deferral note cannot. ${outputValidationError}`,
-        );
+      // Validate before creating the schedule or changing the task.
+      if (task.outputSchema) {
+        if (!output) {
+          return toolErr(
+            `Task ${taskId} has an outputSchema. Call defer-task with output: a JSON string matching that schema. Summary and note are stored separately in the task log.`,
+          );
+        }
+        const outputValidationError = getTaskOutputValidationError(task.outputSchema, output);
+        if (outputValidationError) return toolErr(outputValidationError);
       }
 
       try {
@@ -165,12 +170,10 @@ export const registerDeferTaskTool = (server: McpServer) => {
             createdBy,
           });
 
-          const output = `${summary}\n\nDeferred until ${nextRunAt} (schedule ${schedule.id}). Pending: ${note}${checksBlock}`;
+          const deferralDetails = `${summary}\n\nDeferred until ${nextRunAt} (schedule ${schedule.id}). Pending: ${note}${checksBlock}`;
 
-          // Deliberately NOT running `getTaskOutputValidationError` again here:
-          // already validated above against a placeholder id; re-run would be
-          // redundant since the id never affects JSON-shape validity.
-          const completed = await completeTask(taskId, output);
+          const terminalOutput = task.outputSchema ? output! : deferralDetails;
+          const completed = await completeTask(taskId, terminalOutput);
           if (!completed) {
             // Another writer terminally completed/failed/cancelled this task
             // between our early check and this transaction's write. Abort:
@@ -180,6 +183,15 @@ export const registerDeferTaskTool = (server: McpServer) => {
             throw new DeferAbortedError(
               `Task ${taskId} reached a terminal state before this deferral committed.`,
             );
+          }
+
+          if (task.outputSchema) {
+            await createLogEntry({
+              eventType: "task_progress",
+              taskId,
+              agentId: requestInfo.agentId,
+              newValue: deferralDetails,
+            });
           }
 
           // afterCommit: the transaction can still roll back; business-use must
@@ -207,7 +219,7 @@ export const registerDeferTaskTool = (server: McpServer) => {
             await updateAgentStatusFromCapacity(task.agentId);
           }
 
-          return { scheduleId: schedule.id, output, completed };
+          return { scheduleId: schedule.id, output: terminalOutput, completed };
         });
 
         await runTaskTerminalEffects({
