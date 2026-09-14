@@ -61,6 +61,7 @@ import {
   resolveClaudeTransport,
 } from "../utils/claude-transport";
 import { MAX_PROFILE_FILE_LENGTH } from "../utils/constants";
+import { HeartbeatExpiryError } from "../utils/heartbeat-expiry";
 import {
   type BudgetedIdentityField,
   IDENTITY_FIELD_BUDGETS,
@@ -876,6 +877,10 @@ export async function handleAgentsRest(
         },
       );
     } catch (error) {
+      if (error instanceof HeartbeatExpiryError) {
+        jsonError(res, error.message, 400);
+        return true;
+      }
       if (error instanceof IdentityFieldBudgetError) {
         if (
           versionMeta?.changeSource === "self_edit" ||

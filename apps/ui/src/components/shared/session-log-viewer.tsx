@@ -1696,6 +1696,10 @@ function GenericMetaBubble({ block }: { block: ProviderMetaBlock }) {
     );
   }
 
+  // For a codex item.type "unknown", `detail` is a one-line summary derived from
+  // the preserved originalType/value payload (see unknownEventData in logs-parser).
+  const detail = block.kind === "unknown" ? stringValue(block.data.detail) : undefined;
+
   return (
     <MetaPanel
       icon={<Activity className="size-3" />}
@@ -1711,6 +1715,7 @@ function GenericMetaBubble({ block }: { block: ProviderMetaBlock }) {
           className="bg-muted/50"
         />
       )}
+      {detail && <p className="truncate text-xs text-muted-foreground">{detail}</p>}
     </MetaPanel>
   );
 }

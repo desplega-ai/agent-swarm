@@ -4,6 +4,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { getAgentById, getResolvedConfig } from "@/be/db";
 import { createServer } from "@/server";
+import { getRequestAuth } from "@/utils/request-auth-context";
 import { resolveScriptsOnlyMode } from "@/utils/scripts-only-mode";
 
 export type McpTransportActivity = Record<string, number>;
@@ -64,6 +65,34 @@ function unauthorized(res: ServerResponse, message = "Unauthorized"): true {
   return true;
 }
 
+function forbidden(res: ServerResponse, message: string): true {
+  res.writeHead(403, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ error: message }));
+  return true;
+}
+
+/**
+ * When a request is authenticated via an aseph_ session token (kind: "agent"),
+ * the X-Agent-ID and X-Source-Task-Id headers MUST match the token's bound
+ * agentId and taskId. A valid token cannot be used on behalf of a different
+ * agent or task.
+ */
+function validateAgentTokenIdentity(req: IncomingMessage, res: ServerResponse): true | undefined {
+  const auth = getRequestAuth(req);
+  if (!auth || auth.kind !== "agent") return undefined;
+
+  const agentId = headerValue(req.headers["x-agent-id"]);
+  const taskId = headerValue(req.headers["x-source-task-id"]);
+
+  if (!agentId || agentId !== auth.agentId) {
+    return forbidden(res, "X-Agent-ID does not match session token");
+  }
+  if (!taskId || taskId !== auth.taskId) {
+    return forbidden(res, "X-Source-Task-Id does not match session token");
+  }
+  return undefined;
+}
+
 function headerValue(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
@@ -110,6 +139,9 @@ export async function handleMcp(
   if (req.url !== "/mcp") {
     return false;
   }
+
+  const tokenIdentityMismatch = validateAgentTokenIdentity(req, res);
+  if (tokenIdentityMismatch) return true;
 
   const agentMismatch = validateBoundAgent(req, res, sessionId, sessionAgents);
   if (agentMismatch) return true;

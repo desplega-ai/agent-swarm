@@ -1,6 +1,11 @@
 import type { IncomingMessage } from "node:http";
 import { getPage } from "../be/db";
-import { findUserById, fingerprintApiKey, resolveUserByToken } from "../be/users";
+import {
+  findUserById,
+  fingerprintApiKey,
+  resolveBySessionToken,
+  resolveUserByToken,
+} from "../be/users";
 import type { User } from "../types";
 import { verifyPageSession } from "../utils/page-session";
 import type { HttpRequestAuth } from "../utils/request-auth-context";
@@ -49,6 +54,13 @@ export async function resolveHttpRequestAuth(
     const user = await resolveUserByToken(bearer);
     if (isActiveUser(user)) {
       return { kind: "user", userId: user.id, user };
+    }
+  }
+
+  if (bearer.startsWith("aseph_")) {
+    const principal = await resolveBySessionToken(bearer);
+    if (principal) {
+      return { kind: "agent", agentId: principal.agentId, taskId: principal.taskId };
     }
   }
 

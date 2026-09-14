@@ -14,9 +14,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Task turn prompts use seeded skills**, and resumed tasks retain attachment fetch instructions and required output schemas (#1442).
 
 ### Changed
+- **Task transitions live in a dedicated database repository**, preserving task lifecycle behavior (#1456).
 - **Database repositories isolate runtime lifecycle, agents, context versions, and task reads**, preserving the public database facade (#1450, #1454, #1455).
 
 ### Fixed
+- **New heartbeat tracked items require an expiry**, preventing unbounded tracking entries (#1458).
+- **ACP target processes receive an ephemeral session credential**, scoped to the agent and task and revoked when the session ends (#1417).
+- **Codex unknown log items show their original type and a readable summary** (#1459).
 - **Slack files reach workers as task attachments**, both when shared with the bot and when fetched by task-scoped Slack tools (#1438).
 - **Concurrent Claude sessions cannot overwrite newer profile content with stale files**, using lineage-aware compare-and-set synchronization (#1433).
 - **Deferred tasks create uniquely named wake-up schedules** to avoid collisions (#1451).
