@@ -24,14 +24,22 @@ import {
 import { buildScriptCredentialBindings } from "@/be/script-credential-broker";
 import { getScript } from "@/be/scripts/db";
 import { runScript } from "@/scripts-runtime/loader";
-import { scheduleContextKey } from "@/tasks/context-key";
-import { createTaskWithSiblingAwareness } from "@/tasks/sibling-awareness";
 import { telemetry } from "@/telemetry";
 import type { AgentTask, ScheduledTask } from "@/types";
 import { getExecutorRegistry as getWorkflowExecutorRegistry } from "@/workflows";
 import { startWorkflowExecution } from "@/workflows/engine";
 import type { ExecutorRegistry } from "@/workflows/executors/registry";
 import { handleScheduleTrigger } from "@/workflows/triggers";
+
+import {
+  dispatchDeferredTaskWait,
+  initDeferredTaskWaits,
+  reconcileDeferredTaskWaits,
+  stopDeferredTaskWaits,
+} from "./deferred-task-waits";
+import { createStandaloneScheduleTask } from "./schedule-task";
+
+export { createStandaloneScheduleTask } from "./schedule-task";
 
 let schedulerInterval: ReturnType<typeof setInterval> | null = null;
 let isProcessing = false;
@@ -51,33 +59,6 @@ function resolveExecutorRegistry(): ExecutorRegistry | null {
   } catch {
     return null;
   }
-}
-
-export async function createStandaloneScheduleTask(
-  schedule: ScheduledTask,
-  extraTags: string[] = [],
-): Promise<AgentTask> {
-  if (!schedule.taskTemplate) {
-    throw new Error(`Schedule "${schedule.name}" has no taskTemplate (targetType=agent-task)`);
-  }
-  return await createTaskWithSiblingAwareness(schedule.taskTemplate, {
-    key: schedule.key,
-    creatorAgentId: schedule.createdByAgentId,
-    taskType: schedule.taskType,
-    tags: [...schedule.tags, "scheduled", `schedule:${schedule.name}`, ...extraTags],
-    priority: schedule.priority,
-    agentId: schedule.targetAgentId,
-    model: schedule.model,
-    modelTier: schedule.modelTier,
-    scheduleId: schedule.id,
-    source: "schedule",
-    requestedByUserId: schedule.createdBy,
-    contextKey: scheduleContextKey({ scheduleId: schedule.id }),
-    // Set only by `defer-task`. An explicit parent wins over the sibling-awareness
-    // auto-wiring (see withSiblingAwareness in src/tasks/sibling-awareness.ts), so
-    // the wake-up run continues the deferred task rather than a random sibling.
-    parentTaskId: schedule.parentTaskId,
-  });
 }
 
 /**
@@ -151,6 +132,9 @@ export async function dispatchScheduleTarget(
   schedule: ScheduledTask,
   extraTags: string[] = [],
 ): Promise<DispatchScheduleResult> {
+  const deferred = await dispatchDeferredTaskWait(schedule.id, "ceiling", extraTags);
+  if (deferred) return { triggeredWorkflows: false, ...deferred };
+
   const preflight = preflightAutomation(
     schedulePreflightInput(schedule),
     await getAutomationSetupStates(),
@@ -489,7 +473,10 @@ export function startScheduler(
   console.log(`[Scheduler] Starting with ${intervalMs}ms polling interval`);
 
   // Recover missed schedules from downtime, then run normal processing
-  void recoverMissedSchedules().then(() => processSchedules());
+  void initDeferredTaskWaits()
+    .then(() => recoverMissedSchedules())
+    .then(() => processSchedules())
+    .catch((err) => console.error("[Scheduler] Recovery failed:", err));
 
   schedulerInterval = setInterval(async () => {
     await processSchedules();
@@ -523,6 +510,7 @@ async function processSchedules(): Promise<void> {
   isProcessing = true;
 
   try {
+    await reconcileDeferredTaskWaits();
     const dueSchedules = await getDueScheduledTasks();
 
     for (const schedule of dueSchedules) {
@@ -541,6 +529,7 @@ async function processSchedules(): Promise<void> {
  * Stop the scheduler polling loop.
  */
 export function stopScheduler(): void {
+  stopDeferredTaskWaits();
   if (schedulerInterval) {
     clearInterval(schedulerInterval);
     schedulerInterval = null;

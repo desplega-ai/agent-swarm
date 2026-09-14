@@ -922,16 +922,19 @@ Create a new scheduled task. For recurring: provide cronExpression or intervalMs
 
 **Defer Task**
 
-Completes this task now with status `completed` and books a wake-up for you. Use when the result needs time: a build, a deploy, a reply. The task reaches its final state on this call; the lead sees your summary as its output. A one-off schedule wakes you up later with a child task that carries this task as its parent. Provide delayMs or runAt, a summary of what you did, and a note that says what is pending and what to check.
+Completes this task now with status `completed` and books a wake-up for you. Use when the result needs time: a build, a deploy, a reply. The task reaches its final state on this call; the lead sees your summary as its output. A one-off schedule wakes you up later with a child task that carries this task as its parent. Optionally provide wakeOn to wake early when another task completes or fails; delayMs or runAt remains required as the ceiling. Provide delayMs or runAt, a summary of what you did, and a note that says what is pending and what to check.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `taskId` | `string` | Yes | - | The ID of the task you are working on. |
 | `delayMs` | `number` | No | - | Wake up after this many milliseconds (e.g. 1800000 for 30 min). |
 | `runAt` | `string` | No | - | Wake up at this ISO datetime (e.g. '2026-03-06T15:00:00Z'). Must be future. |
+| `wakeOn` | `object` | No | - | `{ event: "task.completed" \| "task.failed" \| "settled", taskId: string }`. Wake early on another task. |
 | `summary` | `string` | Yes | - | What you did so far and where things stand. This becomes the task's output; the lead and your wake-up run both read it. |
 | `note` | `string` | Yes | - | What is pending, and what to check on wake-up. |
 | `checks` | `array` | No | - | Concrete things to verify on wake-up, one per entry. |
+
+Use `wakeOn: { "event": "settled", "taskId": "<producer-task-id>" }` to wake on completion or failure. `task.completed` and `task.failed` match only that outcome. Exactly one of `delayMs` / `runAt` is required even with `wakeOn`; it is the fallback ceiling. The event and ceiling atomically claim the same wait and create one continuation child. Its context names the wake-up cause. Pending waits survive restarts and reconcile terminal producer state at startup and during scheduler polling. Already-terminal, missing, and self-watched tasks are rejected without completing the current task. Cancellation does not emit either supported event, so it falls back to the ceiling.
 
 ### update-schedule
 
