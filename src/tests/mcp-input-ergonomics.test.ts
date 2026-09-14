@@ -322,6 +322,57 @@ test("send-task accepts actual registry user IDs without UUID hyphens", async ()
   expect((await getTaskById(created.id))?.requestedByUserId).toBe(user.id);
 });
 
+test("send-task rejects unknown requester IDs without creating a task", async () => {
+  const before = await getDbClient().get<{ count: number }>(
+    "SELECT COUNT(*) AS count FROM agent_tasks",
+  );
+  const result = await call("send-task", {
+    task: "unknown requester",
+    requestedByUserId: "f".repeat(32),
+    allowDuplicate: true,
+  });
+  expect(result.structuredContent?.success).toBe(false);
+  expect(result.structuredContent?.message).toContain("existing registered user");
+  expect(
+    await getDbClient().get<{ count: number }>("SELECT COUNT(*) AS count FROM agent_tasks"),
+  ).toEqual(before);
+});
+
+test("send-task preserves inherited attribution when explicit requester is omitted", async () => {
+  const { id: requesterId } = await createUser({
+    name: "Inherited requester",
+    email: "inherited-requester@example.test",
+  });
+  const parent = await createTaskExtended("historical requester", {
+    agentId,
+    requestedByUserId: requesterId,
+  });
+  await startTask(parent.id);
+  const result = await call(
+    "send-task",
+    { task: "inherit requester", allowDuplicate: true, offerMode: true },
+    parent.id,
+  );
+  expect(result.structuredContent?.success).toBe(true);
+  const created = result.structuredContent?.task as { id: string };
+  expect((await getTaskById(created.id))?.requestedByUserId).toBe(requesterId);
+});
+
+test("send-task requester format rejects arbitrary strings and hyphenated UUIDs", () => {
+  for (const requestedByUserId of [
+    "requester",
+    agentId,
+    "A".repeat(32),
+    "x".repeat(32),
+    "",
+    "f".repeat(31),
+  ]) {
+    expect(
+      sendTaskInputSchema.safeParse({ task: "invalid requester", requestedByUserId }).success,
+    ).toBe(false);
+  }
+});
+
 test("task UUIDs, parent references, and asset namespaces remain strict", () => {
   expect(
     getTaskDetailsInputSchema.safeParse({ taskId: "00dd3d42-0000-0000-0000-000000000000" }).success,

@@ -11,6 +11,7 @@ import {
   getAgentById,
   getDbClient,
   getTaskById,
+  getUserById,
   hasCapacity,
 } from "@/be/db";
 import { repointTrackerSyncBySwarmId } from "@/be/db-queries/tracker";
@@ -148,10 +149,10 @@ export const sendTaskInputSchema = z
       ),
     requestedByUserId: z
       .string()
-      .min(1)
+      .regex(/^[a-f0-9]{32}$/, "Expected a registry user ID (32 lowercase hexadecimal characters).")
       .optional()
       .describe(
-        "ID of the human user who originally requested this task chain. When omitted, inherited from the caller's current task so the attribution flows through multi-hop delegation automatically.",
+        "Registered requester ID (32 lowercase hexadecimal characters). When omitted, inherited from the caller's current task so the attribution flows through multi-hop delegation automatically.",
       ),
     followUpConfig: FollowUpConfigSchema.optional().describe(
       "Control the lead follow-up created when this task finishes. When to use `followUpConfig`: set `disabled: true` when you'll wait for this task to complete inline and no follow-up is needed; set `onCompleted` / `onFailed` with specific instructions when you need to follow up effectively on a particular outcome of a long-running flow; for normal one-shot tasks, leave it unset because defaults are fine. It is most valuable for long-running / complex flows.",
@@ -256,6 +257,12 @@ export async function sendTaskHandler(
   const sourceTaskId = ctx.kind === "owner" ? ctx.sourceTaskId : undefined;
   const requestedByUserId =
     ctx.kind === "user" ? ctx.userId : (inputRequestedByUserId ?? undefined);
+
+  if (ctx.kind === "owner" && requestedByUserId && !(await getUserById(requestedByUserId))) {
+    return toolErr("requestedByUserId must identify an existing registered user.", {
+      data: { yourAgentId: creatorAgentId },
+    });
+  }
 
   if (ctx.kind === "owner" && agentId === ctx.agentId) {
     return toolErr("Cannot send a task to yourself, are you drunk?", {
