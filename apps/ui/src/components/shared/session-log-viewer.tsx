@@ -9,6 +9,7 @@ import {
   Gauge,
   Scissors,
   Search,
+  Sparkles,
   Wrench,
 } from "lucide-react";
 import { Highlight, themes } from "prism-react-renderer";
@@ -58,7 +59,7 @@ import {
 
 // --- Stream model ---
 
-type ToolKind = "mcp" | "bash" | "file" | "web" | "task" | "other";
+type ToolKind = "mcp" | "bash" | "file" | "web" | "task" | "skill" | "other";
 
 interface ToolEntry {
   id: string;
@@ -170,6 +171,45 @@ function formatDur(ms: number): string {
   return `${m}m${s ? ` ${s}s` : ""}`;
 }
 
+// Providers without native skill/slash-command support (codex, opencode — see
+// resolveSlashSkillPrompt in src/providers/codex-skill-resolver.ts) inline the
+// full SKILL.md body ahead of the turn's actual ask, joined by this literal
+// delimiter, before the prompt ever reaches the model. That's the text the
+// harness echoes back into the transcript, so the "You" bubble for that turn
+// is dominated by skill boilerplate with the real task buried at the bottom.
+const SKILL_EXPANSION_DELIMITER = "\n\n---\n\nUser request: ";
+const SKILL_TITLE_RE = /^#\s+(.+)$/m;
+// Providers with native skill support (claude, pi) never rewrite the prompt —
+// the model receives the literal slash line and is expected to invoke the
+// Skill tool itself. Recognize that line so it can be labeled distinctly too.
+const SLASH_COMMAND_LINE_RE = /^\/([a-z0-9:_-]+)(?:\s+(.*))?$/;
+
+interface SkillPrompt {
+  skillTitle: string;
+  skillBody: string;
+  taskBrief: string;
+}
+
+function parseSkillExpandedPrompt(md: string): SkillPrompt | null {
+  const idx = md.indexOf(SKILL_EXPANSION_DELIMITER);
+  if (idx === -1) return null;
+  const skillBody = md.slice(0, idx);
+  const taskBrief = md.slice(idx + SKILL_EXPANSION_DELIMITER.length);
+  const titleMatch = SKILL_TITLE_RE.exec(skillBody);
+  return {
+    skillTitle: titleMatch?.[1]?.trim() || "Skill",
+    skillBody,
+    taskBrief,
+  };
+}
+
+function parseSlashCommandLine(md: string): { command: string; rest: string } | null {
+  const firstLine = md.split("\n", 1)[0]?.trim() ?? "";
+  const match = SLASH_COMMAND_LINE_RE.exec(firstLine);
+  if (!match?.[1]) return null;
+  return { command: match[1], rest: md.slice(firstLine.length).replace(/^\n+/, "") };
+}
+
 function shortDetail(input: unknown): string {
   if (!input || typeof input !== "object") return "";
   const obj = input as Record<string, unknown>;
@@ -242,6 +282,16 @@ function classifyTool(
       server: "",
       title: name,
       detail: String(inp.url ?? inp.query ?? ""),
+    };
+  }
+  if (name === "Skill") {
+    const skillName = String(inp.command ?? inp.name ?? inp.skill ?? "").trim();
+    return {
+      kind: "skill",
+      name: skillName || "Skill",
+      server: "",
+      title: skillName ? `Skill: ${skillName}` : "Skill",
+      detail: shortDetail(inp),
     };
   }
   if (name === "Task") {
@@ -1841,7 +1891,13 @@ function ToolRow({
             open && "rotate-90",
           )}
         />
-        <span className="shrink-0 whitespace-nowrap font-mono text-xs text-foreground">
+        {tool.kind === "skill" && <Sparkles className="size-3 shrink-0 text-status-info-strong" />}
+        <span
+          className={cn(
+            "shrink-0 whitespace-nowrap font-mono text-xs",
+            tool.kind === "skill" ? "text-status-info-strong" : "text-foreground",
+          )}
+        >
           {tool.kind === "mcp" && tool.server ? (
             <>
               <span className="text-muted-foreground">{tool.server}.</span>
@@ -2358,6 +2414,26 @@ export function SessionLogViewer({
       if (row.type === "agent") {
         const isUser = row.role === "user";
         const isSystem = row.role === "system";
+        const skillPrompt = isUser ? parseSkillExpandedPrompt(row.md) : null;
+        const slashCommand = isUser && !skillPrompt ? parseSlashCommandLine(row.md) : null;
+        if (skillPrompt) {
+          return (
+            <RowShell
+              time={row.time}
+              iso={row.iso}
+              flash={flash}
+              isNew={row.isNew}
+              highlight={row.isNew && atBottomRef.current}
+              streamDelayMs={streamDelayMs}
+            >
+              <SkillPromptRow prompt={skillPrompt} />
+              <CopyIconButton
+                text={row.md}
+                className="absolute right-0 top-px cursor-pointer bg-card opacity-0 transition-opacity group-hover:opacity-60 hover:!opacity-100"
+              />
+            </RowShell>
+          );
+        }
         return (
           <RowShell
             time={row.time}
@@ -2368,12 +2444,16 @@ export function SessionLogViewer({
             streamDelayMs={streamDelayMs}
           >
             {(isUser || isSystem) && (
-              <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-[0.04em] text-muted-foreground">
-                {isUser ? "You" : "System"}
+              <span className="mb-0.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.04em] text-muted-foreground">
+                {isUser
+                  ? slashCommand
+                    ? `Task prompt · /${slashCommand.command}`
+                    : "You"
+                  : "System"}
               </span>
             )}
             <div className="prose-chat prose-session-log mt-[3px] break-words text-foreground">
-              <LogMarkdown>{row.md}</LogMarkdown>
+              <LogMarkdown>{slashCommand ? slashCommand.rest || row.md : row.md}</LogMarkdown>
             </div>
             <CopyIconButton
               text={row.md}
@@ -2712,6 +2792,53 @@ function ThinkingRow({ text }: { text: string }) {
           </div>
         </div>
       </AnimatedReveal>
+    </div>
+  );
+}
+
+/**
+ * Renders a turn prompt whose harness inlined a full SKILL.md body ahead of
+ * the actual ask (codex, opencode — see resolveSlashSkillPrompt). The skill
+ * body is collapsed by default so it doesn't bury the task brief the way the
+ * raw "You" bubble did; the brief itself is always shown, unindented.
+ */
+function SkillPromptRow({ prompt }: { prompt: SkillPrompt }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="overflow-hidden rounded-lg border border-border/60 bg-muted/30">
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          className="flex w-full min-w-0 cursor-pointer items-center gap-2 px-2.5 py-1.5 text-left"
+        >
+          <ChevronRight
+            className={cn(
+              "size-3 shrink-0 text-muted-foreground transition-transform duration-200",
+              open && "rotate-90",
+            )}
+          />
+          <Sparkles className="size-3 shrink-0 text-status-info-strong" />
+          <span className="shrink-0 text-[12px] font-medium text-status-info-strong">
+            Skill invoked · {prompt.skillTitle}
+          </span>
+        </button>
+        <AnimatedReveal open={open} speed="fast">
+          <div className="border-t border-border/60 px-2.5 py-2">
+            <div className="prose-chat prose-session-log text-xs text-muted-foreground">
+              <LogMarkdown>{prompt.skillBody}</LogMarkdown>
+            </div>
+          </div>
+        </AnimatedReveal>
+      </div>
+      <div>
+        <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-[0.04em] text-muted-foreground">
+          Task prompt
+        </span>
+        <div className="prose-chat prose-session-log mt-[3px] break-words text-foreground">
+          <LogMarkdown>{prompt.taskBrief}</LogMarkdown>
+        </div>
+      </div>
     </div>
   );
 }
