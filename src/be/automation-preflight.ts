@@ -380,7 +380,7 @@ export async function recordWorkflowPreflightFailure(input: {
   failureReason: string;
   createdBy?: string;
   now?: Date;
-}): Promise<string> {
+}): Promise<{ runId: string; recorded: boolean }> {
   const now = input.now ?? new Date();
   const bounds = utcDayBounds(now);
   return await getDbClient().transaction(async (tx) => {
@@ -392,7 +392,7 @@ export async function recordWorkflowPreflightFailure(input: {
        ORDER BY startedAt ASC LIMIT 1`,
       [input.workflowId, bounds.start, bounds.end],
     );
-    if (existing) return existing.id;
+    if (existing) return { runId: existing.id, recorded: false };
 
     const runId = crypto.randomUUID();
     const timestamp = now.toISOString();
@@ -413,6 +413,6 @@ export async function recordWorkflowPreflightFailure(input: {
         timestamp,
       ],
     );
-    return runId;
+    return { runId, recorded: true };
   });
 }

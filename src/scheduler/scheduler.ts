@@ -1,5 +1,6 @@
 import { ensure } from "@desplega.ai/business-use";
 import { CronExpressionParser } from "cron-parser";
+import { notifyAutomationPreflightFailure } from "@/automation-preflight-alert";
 import {
   getAutomationSetupStates,
   isNeedsSetupFailure,
@@ -156,7 +157,8 @@ export async function dispatchScheduleTarget(
     await getAutomationSetupStates(),
   );
   if (preflight.state === "needs_setup") {
-    await recordSchedulePreflightFailure(schedule.id, preflight.failureReason!);
+    const recorded = await recordSchedulePreflightFailure(schedule.id, preflight.failureReason!);
+    if (recorded) await notifyAutomationPreflightFailure(preflight);
     throw new AutomationNeedsSetupError(preflight.failureReason!);
   }
   // Params are safe and integrations are ready. Only now render values into

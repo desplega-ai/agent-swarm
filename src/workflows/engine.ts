@@ -1,3 +1,4 @@
+import { notifyAutomationPreflightFailure } from "../automation-preflight-alert";
 import {
   getAutomationSetupStates,
   preflightAutomation,
@@ -91,13 +92,15 @@ export async function startWorkflowExecution(
     await getAutomationSetupStates(),
   );
   if (preflight.state === "needs_setup") {
-    return await recordWorkflowPreflightFailure({
+    const { runId, recorded } = await recordWorkflowPreflightFailure({
       workflowId: workflow.id,
       triggerType: options.triggerType ?? "manual",
       triggerData,
       failureReason: preflight.failureReason!,
       createdBy: options.requestedByUserId,
     });
+    if (recorded) await notifyAutomationPreflightFailure(preflight);
+    return runId;
   }
 
   // Templates can consume install params outside the graph definition (most

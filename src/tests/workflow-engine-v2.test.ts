@@ -1,6 +1,17 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  setSystemTime,
+  spyOn,
+  test,
+} from "bun:test";
 import { unlink } from "node:fs/promises";
 import { z } from "zod";
+import * as preflightAlerts from "../automation-preflight-alert";
 import {
   closeDb,
   createWorkflow,
@@ -264,6 +275,21 @@ describe("Workflow Engine v2 (Phase 3)", () => {
   // ─── Linear Workflow ──────────────────────────────────────
 
   describe("Automation preflight", () => {
+    let notify: ReturnType<
+      typeof spyOn<typeof preflightAlerts, "notifyAutomationPreflightFailure">
+    >;
+
+    beforeEach(() => {
+      notify = spyOn(preflightAlerts, "notifyAutomationPreflightFailure").mockResolvedValue(
+        undefined,
+      );
+    });
+
+    afterEach(() => {
+      notify.mockRestore();
+      setSystemTime();
+    });
+
     test("records one failed run per workflow/day despite reason changes and creates no tasks", async () => {
       const registry = createTestRegistry();
       const workflow = await makeWorkflow(
@@ -285,7 +311,13 @@ describe("Workflow Engine v2 (Phase 3)", () => {
         finishedAt: new Date().toISOString(),
       });
 
-      const firstRunId = await startWorkflowExecution(workflow, {}, registry);
+      const firstRunId = await startWorkflowExecution(workflow, {}, registry, {
+        triggerType: "schedule",
+      });
+      expect(notify).toHaveBeenCalledTimes(1);
+      expect(notify).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "workflow", name: workflow.name, state: "needs_setup" }),
+      );
       const secondRunId = await startWorkflowExecution(
         { ...workflow, requiredParams: ["OTHER_PARAM"] },
         {},
@@ -297,6 +329,7 @@ describe("Workflow Engine v2 (Phase 3)", () => {
       );
 
       expect(secondRunId).toBe(firstRunId);
+      expect(notify).toHaveBeenCalledTimes(1);
       expect(firstRunId).not.toBe(ordinaryRunId);
       expect(run?.status).toBe("failed");
       expect(run?.error).toBe("needs_setup: params=[REPO_URL] integrations=[]");
@@ -310,6 +343,29 @@ describe("Workflow Engine v2 (Phase 3)", () => {
           [workflow.id],
         ),
       ).toEqual({ total: 2, preflight: 1 });
+    });
+
+    test("alerts once for concurrent workflow refusals and again after UTC midnight", async () => {
+      setSystemTime(new Date("2026-09-14T23:59:59Z"));
+      const registry = createTestRegistry();
+      const workflow = await makeWorkflow(
+        { nodes: [{ id: "start", type: "echo", config: { message: "{{REPO_URL}}" } }] },
+        { requiredParams: ["REPO_URL"] },
+      );
+      const [firstRunId, repeatedRunId] = await Promise.all([
+        startWorkflowExecution(workflow, {}, registry, { triggerType: "schedule" }),
+        startWorkflowExecution(workflow, {}, registry, { triggerType: "schedule" }),
+      ]);
+      expect(repeatedRunId).toBe(firstRunId);
+      expect(notify).toHaveBeenCalledTimes(1);
+
+      setSystemTime(new Date("2026-09-15T00:00:00Z"));
+      const nextRunId = await startWorkflowExecution(workflow, {}, registry, {
+        triggerType: "schedule",
+      });
+      expect(nextRunId).not.toBe(firstRunId);
+      expect(notify).toHaveBeenCalledTimes(2);
+      expect((await getWorkflowRun(nextRunId))?.error).toContain("needs_setup:");
     });
 
     test("renders parameters across workflow runtime fields and preserves input value types", async () => {
