@@ -226,7 +226,7 @@ describe("Session templates: MUST pointers", () => {
   test("the lead contract names the delegation tools", () => {
     const result = resolveTemplate("system.agent.lead", {});
     expect(result.text).toContain(
-      "Delegate with `send-task`. Read a child's result with `get-task-details`.",
+      "`send-task`: include `routingReason` with `agentId`. Read results via `get-task-details`.",
     );
   });
 
