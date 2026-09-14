@@ -2,9 +2,9 @@
  * Universal context preamble for follow-up task continuity.
  *
  * Builds a bounded text summary of prior task context (parent → ancestor chain)
- * and prepends it to the child task's prompt. This makes follow-up continuity
- * uniform across ALL harness providers — not just those that support native
- * session resume (claude/codex).
+ * and inserts it after the child task's leading skill invocation. This makes
+ * follow-up continuity uniform across ALL harness providers — not just those
+ * that support native session resume (claude/codex).
  *
  * Token budget (CONTEXT_PREAMBLE_MAX_TOKENS, default 2000) prevents the
  * SIGTERM-143 context-saturation failure mode seen with unbounded session
@@ -15,6 +15,18 @@ import type { TaskAttachment } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { isSteeringEnabled } from "../utils/steering-enabled";
 import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
+
+/** Keep slash skills on line one so native and adapter resolvers can expand them. */
+export function prependContextPreamble(prompt: string, preamble: string): string {
+  if (!preamble) return prompt;
+  const newline = prompt.indexOf("\n");
+  const firstLine = newline === -1 ? prompt : prompt.slice(0, newline);
+  if (!/^\/[a-z0-9:_-]+(?:[ \t].*)?$/.test(firstLine.trim())) {
+    return preamble + prompt;
+  }
+  const rest = newline === -1 ? "" : prompt.slice(newline + 1);
+  return `${firstLine}\n${preamble}${rest}`;
+}
 
 export const CONTEXT_PREAMBLE_MAX_TOKENS = Number(
   process.env.CONTEXT_PREAMBLE_MAX_TOKENS || "2000",

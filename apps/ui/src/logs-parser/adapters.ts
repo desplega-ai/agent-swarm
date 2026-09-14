@@ -317,6 +317,7 @@ export function normalizeCodex(ordered: DecodedRecord[]): NormalizedItem[] {
   const items: NormalizedItem[] = [];
   const toolCallById = new Map<string, NormalizedItem>();
   const textByItemId = new Map<string, NormalizedItem>();
+  const unknownById = new Map<string, NormalizedItem>();
   const completedTextKeys = new Set<string>();
 
   for (const d of ordered) {
@@ -362,7 +363,7 @@ export function normalizeCodex(ordered: DecodedRecord[]): NormalizedItem[] {
             if (userMessage) {
               upsertCodexText(items, textByItemId, d, item, "user", userMessage, "replace");
             } else {
-              items.push(makeItem(d, "unknown", { role: "system", raw: ev }));
+              upsertCodexUnknown(items, unknownById, d, ev, item, "running");
             }
           }
         }
@@ -374,7 +375,7 @@ export function normalizeCodex(ordered: DecodedRecord[]): NormalizedItem[] {
           // existing call in place so the transcript shows one current list.
           upsertCodexToolCall(items, toolCallById, d, item);
         } else {
-          items.push(makeItem(d, "unknown", { role: "system", raw: ev }));
+          upsertCodexUnknown(items, unknownById, d, ev, item, "running");
         }
         break;
       }
@@ -481,7 +482,11 @@ export function normalizeCodex(ordered: DecodedRecord[]): NormalizedItem[] {
             if (userMessage) {
               upsertCodexText(items, textByItemId, d, item, "user", userMessage, "replace");
             } else {
-              items.push(makeItem(d, "unknown", { role: "system", raw: ev }));
+              const failed =
+                (typeof item.exit_code === "number" && item.exit_code !== 0) ||
+                item.status === "failed" ||
+                item.error != null;
+              upsertCodexUnknown(items, unknownById, d, ev, item, failed ? "failed" : "completed");
             }
             break;
           }
@@ -946,6 +951,30 @@ function upsertCodexToolCall(
   });
   items.push(normalized);
   if (id) toolCallById.set(id, normalized);
+}
+
+function upsertCodexUnknown(
+  items: NormalizedItem[],
+  unknownById: Map<string, NormalizedItem>,
+  d: DecodedRecord,
+  ev: Record<string, unknown>,
+  item: Record<string, unknown> | undefined,
+  status: "running" | "completed" | "failed",
+): void {
+  const id = item ? asString(item.id) : undefined;
+  const key = id ? codexTextKey(d, id) : undefined;
+  const existing = key ? unknownById.get(key) : undefined;
+  if (existing) {
+    existing.raw = ev;
+    existing.status = status;
+    if (status !== "running") existing.durationMs = Math.max(0, d.t - existing.t);
+    existing.coveredRecIds = [...new Set([...(existing.coveredRecIds ?? []), d.rec.id])];
+    return;
+  }
+
+  const normalized = makeItem(d, "unknown", { role: "system", raw: ev, status });
+  items.push(normalized);
+  if (key) unknownById.set(key, normalized);
 }
 
 function emitStderr(

@@ -131,7 +131,11 @@ function itemToBlock(item: NormalizedItem): ContentBlock | null {
       return metaBlock(item, "parse_error", { raw: item.raw });
     }
     case "unknown": {
-      return metaBlock(item, "unknown", unknownEventData(item.raw));
+      return metaBlock(item, "unknown", {
+        ...unknownEventData(item.raw),
+        status: item.status,
+        durationMs: item.durationMs,
+      });
     }
   }
 }

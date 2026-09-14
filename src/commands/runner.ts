@@ -66,7 +66,11 @@ import { interpolate } from "../utils/template.ts";
 import { detectVcsProvider } from "../vcs/index.ts";
 import { validateJsonSchema } from "../workflows/json-schema-validator.ts";
 import { buildAttachmentsSection } from "./attachments-section.ts";
-import { buildContextPreamble, buildResumeContextPreamble } from "./context-preamble.ts";
+import {
+  buildContextPreamble,
+  buildResumeContextPreamble,
+  prependContextPreamble,
+} from "./context-preamble.ts";
 import {
   awaitCredentials,
   BootMaxWaitExceededError,
@@ -5668,7 +5672,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         if (task.parentTaskId && apiUrl) {
           const contextPreamble = await buildContextPreamble(apiUrl, apiKey, task.parentTaskId);
           if (contextPreamble) {
-            resumePrompt = contextPreamble + resumePrompt;
+            resumePrompt = prependContextPreamble(resumePrompt, contextPreamble);
             console.log(
               `[${role}] Injected context preamble into resumed follow-up task prompt (parent: ${task.parentTaskId.slice(0, 8)})`,
             );
@@ -6136,7 +6140,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             ? await buildResumeContextPreamble(apiUrl, apiKey, taskObj.parentTaskId)
             : await buildContextPreamble(apiUrl, apiKey, taskObj.parentTaskId);
           if (contextPreamble) {
-            triggerPrompt = contextPreamble + triggerPrompt;
+            triggerPrompt = prependContextPreamble(triggerPrompt, contextPreamble);
             console.log(
               `[${role}] Injected ${isResumeTask ? "resume" : "context"} preamble for ${
                 isResumeTask ? "resume" : "follow-up"

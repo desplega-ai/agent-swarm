@@ -1618,8 +1618,8 @@ Stores an HTML or JSON page in the swarm and returns shareable URLs. Calls are u
 | `key` | `unknown` | No | - | Logical namespace. Defaults to a shared/page:<id>/ resource key. |
 | `title` | `string` | Yes | - | Human-readable title shown in listings. |
 | `slug` | `string` | No | - | URL slug. Defaults to the kebab-cased title. Same slug → updates the existing row. |
-| `body` | `string` | Yes | - | Full page body (HTML document or JSON-render spec, per contentType). |
-| `contentType` | `text/html \| application/json` | Yes | - | 'text/html' renders directly at /p/:id; 'application/json' is rendered by the SPA. |
+| `body` | `string` | Yes | - | Full page body (HTML document, SVG image, or JSON-render spec, per contentType). |
+| `contentType` | `text/html \| application/json \| image/svg+xml` | Yes | - | 'text/html' and 'image/svg+xml' render directly at /p/:id; 'application/json' is rendered by the SPA. |
 | `authMode` | `public \| authed \| password` | No | "authed" | 'authed' — requires page-session cookie (default); 'public' — no gate and must be explicit; 'password' — requires key. |
 | `password` | `string` | No | - | Plaintext password, hashed before storage. Only meaningful for authMode='password'. |
 | `description` | `string` | No | - | Optional short description, used in listings + OG-tag unfurl. |

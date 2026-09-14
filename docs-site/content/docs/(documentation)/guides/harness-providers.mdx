@@ -205,15 +205,15 @@ Bedrock SDK mode is active when **either**:
 1. `BEDROCK_AUTH_MODE=sdk` is set in `swarm_config` (explicit), **or**
 2. `BEDROCK_AUTH_MODE` is absent and `MODEL_OVERRIDE` starts with `amazon-bedrock/` (prefix-inference fallback — preserves the earlier prefix-inference behavior).
 
-`BEDROCK_AUTH_MODE=bearer` is a declared/validated value reserved for future bearer-token support; for now, workers in `bearer` mode fall through to the standard credential check (key / auth.json).
+Set `BEDROCK_AUTH_MODE=bearer` to authenticate with a Bedrock API key in `AWS_BEARER_TOKEN_BEDROCK`. The worker reports that token as missing when it is unset, even if another provider API key is configured. Both Bedrock modes require `AWS_REGION` and run the same live model enumeration probe.
 
 `BEDROCK_AUTH_MODE` is a validated optional `swarm_config` key (values: `sdk` | `bearer`; see `src/be/swarm-config-guard.ts`) and a reloadable env key (see `src/commands/runner.ts`).
 
 #### Credential probe
 
-When Bedrock SDK mode is active, the worker runs a **real** `ListFoundationModels` call via `@aws-sdk/client-bedrock` (dynamically imported — the API binary never loads the SDK):
+When either Bedrock mode is active, the worker runs a **real** `ListFoundationModels` call via `@aws-sdk/client-bedrock` (dynamically imported — the API binary never loads the SDK):
 
-- **Success** → `ready: true, satisfiedBy: "sdk-delegated"`. The worker proceeds to claim tasks.
+- **Success** → `ready: true`, with `satisfiedBy: "sdk-delegated"` in SDK mode or `"env"` in bearer mode. The worker proceeds to claim tasks.
 - **Failure** → `ready: false` with a classified error hint. The worker parks in `credential-wait` until credentials are fixed.
 
 Error categories classified by `classifyAwsSdkError` (`src/utils/aws-error-classifier.ts`):
@@ -227,7 +227,7 @@ Error categories classified by `classifyAwsSdkError` (`src/utils/aws-error-class
 
 #### Accepted credential sources
 
-Anything the AWS SDK accepts:
+In bearer mode, supply `AWS_BEARER_TOKEN_BEDROCK`. In SDK mode, use any credential source the AWS SDK accepts:
 
 - `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` (+ optional `AWS_SESSION_TOKEN`)
 - `AWS_PROFILE` resolved against `~/.aws/credentials` and `~/.aws/config`
@@ -241,6 +241,7 @@ Anything the AWS SDK accepts:
 | Key | Values | Default |
 |---|---|---|
 | `BEDROCK_AUTH_MODE` | `sdk` \| `bearer` | inferred from `MODEL_OVERRIDE` prefix |
+| `AWS_BEARER_TOKEN_BEDROCK` | Bedrock API key | **required in bearer mode** |
 | `AWS_REGION` | any Bedrock-enabled region | **required** — unset reports a not-ready Bedrock state (no region is fabricated) |
 
 `AWS_REGION` must be set explicitly so enumeration runs against the same region as inference. When it is unset, the worker reports a not-ready Bedrock state with a "set AWS_REGION" hint and does **not** guess a region.
@@ -669,6 +670,8 @@ Skills are the swarm's portable procedural knowledge — reusable markdown files
     This is the template to follow if your provider lacks native skill support.
   </Tab>
 </Tabs>
+
+Follow-up and resumed task prompts keep the skill invocation on the first line, with the bounded prior-context block after it. Persisted profile-sync warnings also follow the invocation and stay ahead of prior context. Claude and the OpenCode ACP target expand the leading command natively; Codex and OpenCode use the adapter resolver. Prepending context before the command leaves it as plain text.
 
 ### Where skill files come from
 

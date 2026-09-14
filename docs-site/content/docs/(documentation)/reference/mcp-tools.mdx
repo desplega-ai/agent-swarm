@@ -737,7 +737,7 @@ HTML pages receive fonts, basic layout styles, and Tailwind utilities when serve
 |-----------|------|----------|-------------|
 | `title` | string | Yes | Human-readable title shown in listings |
 | `body` | string | Yes | Full page body (HTML document or JSON-render spec, per `contentType`) |
-| `contentType` | enum | Yes | `text/html` (renders at `/p/:id`) or `application/json` (rendered by the SPA) |
+| `contentType` | enum | Yes | `text/html` or `image/svg+xml` (served directly at `/p/:id`), or `application/json` (rendered by the SPA) |
 | `slug` | string | No | URL slug. Defaults to kebab-cased title. Same slug → updates the existing row |
 | `authMode` | enum | No | `authed` (default, page-session cookie), `public` (explicit opt-in), or `password` (requires key) |
 | `password` | string | No | Plaintext password, hashed before storage. Only meaningful for `authMode='password'` |

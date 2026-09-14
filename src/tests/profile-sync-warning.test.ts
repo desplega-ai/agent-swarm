@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { prependContextPreamble } from "../commands/context-preamble";
 import {
   contentSha256,
   fetchProfileSyncRejectionBanner,
@@ -86,6 +87,21 @@ describe("profile sync rejection session warning", () => {
     expect(result.injected).toBeTrue();
     expect(result.prompt).toContain("PERSISTED PROFILE SYNC REJECTION");
     expect(result.prompt).toEndWith("ORIGINAL TASK PROMPT");
+
+    const context = "\n## Prior Conversation Context\nParent evidence\n\n";
+    const taskPrompt = "/work-on-task child-id\n\nTask: follow up";
+    const followUp = await prependProfileSyncRejectionBanner(
+      prependContextPreamble(taskPrompt, context),
+      { apiUrl: "https://api.example.test", apiKey: "secret-key", agentId: "agent-1" },
+      fetchImpl,
+    );
+    expect(followUp.prompt).toStartWith("/work-on-task child-id\n");
+    expect(followUp.prompt).toContain(context);
+    expect(followUp.prompt).toContain("PERSISTED PROFILE SYNC REJECTION");
+    expect(followUp.prompt).toEndWith("Task: follow up");
+    expect(followUp.prompt.indexOf("PERSISTED PROFILE SYNC REJECTION")).toBeLessThan(
+      followUp.prompt.indexOf("## Prior Conversation Context"),
+    );
   });
 
   test("stops warning after the stored field changes", async () => {

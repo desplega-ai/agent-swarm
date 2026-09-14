@@ -5,6 +5,7 @@ import {
   CONTEXT_PREAMBLE_MAX_CHARS,
   CONTEXT_PREAMBLE_MAX_TOKENS,
   fetchTaskContextForPreamble,
+  prependContextPreamble,
   type TaskContextForPreamble,
 } from "../commands/context-preamble";
 import { listenOnFreePort } from "./test-net";
@@ -50,6 +51,35 @@ afterAll(() => {
 function seedTask(task: TaskContextForPreamble): void {
   mockTasks[task.id] = task;
 }
+
+describe("prependContextPreamble", () => {
+  const preamble = "\n---\n## Prior Conversation Context\nParent task evidence\n\n";
+
+  test.each([
+    "/work-on-task",
+    "/skill:work-on-task",
+    "/review-offered-task",
+  ])("preserves the leading %s invocation and the full task body", (command) => {
+    const prompt = `${command} task-id\n\nTask: follow up\nAttachments: artifact\n`;
+    expect(prependContextPreamble(prompt, preamble)).toBe(
+      `${command} task-id\n${preamble}\nTask: follow up\nAttachments: artifact\n`,
+    );
+  });
+
+  test("preserves a command-only prompt and leaves empty context unchanged", () => {
+    expect(prependContextPreamble("/work-on-task task-id", preamble)).toBe(
+      `/work-on-task task-id\n${preamble}`,
+    );
+    expect(prependContextPreamble("/work-on-task task-id\n\nTask", "")).toBe(
+      "/work-on-task task-id\n\nTask",
+    );
+  });
+
+  test("prepends context normally when there is no leading skill", () => {
+    const prompt = "Continue the task\n/work-on-task is quoted here";
+    expect(prependContextPreamble(prompt, preamble)).toBe(preamble + prompt);
+  });
+});
 
 describe("fetchTaskContextForPreamble", () => {
   test("returns null on 404", async () => {
