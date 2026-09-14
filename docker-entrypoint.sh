@@ -317,6 +317,30 @@ elif [ "$HARNESS_PROVIDER" = "opencode" ]; then
         exit 1
     fi
     echo "opencode CLI: $(command -v "$OPENCODE_BIN")"
+elif [ "$HARNESS_PROVIDER" = "acp" ]; then
+    ACP_TARGET_NAME="${ACP_TARGET:-opencode}"
+    if [ "$ACP_TARGET_NAME" = "custom" ]; then
+        ACP_CMD="${ACP_TARGET_COMMAND:-$ACP_COMMAND}"
+        if [ -z "$ACP_CMD" ]; then
+            echo "FATAL: No ACP target configured. Set ACP_TARGET_COMMAND to an ACP-compatible executable before using HARNESS_PROVIDER=acp."
+            exit 1
+        fi
+        ACP_BIN_EXEC=$(echo "$ACP_CMD" | awk '{print $1}')
+        if ! command -v "$ACP_BIN_EXEC" > /dev/null 2>&1; then
+            echo "FATAL: ACP target CLI not found: '$ACP_BIN_EXEC' (from ACP_TARGET_COMMAND='$ACP_CMD')"
+            echo "  PATH=$PATH"
+            exit 1
+        fi
+        echo "ACP target CLI: $(command -v "$ACP_BIN_EXEC") (custom target: '$ACP_CMD')"
+    else
+        ACP_BIN="${OPENCODE_BINARY:-opencode}"
+        if ! command -v "$ACP_BIN" > /dev/null 2>&1; then
+            echo "FATAL: ACP target CLI not found: '$ACP_BIN' (target='$ACP_TARGET_NAME')"
+            echo "  PATH=$PATH"
+            exit 1
+        fi
+        echo "ACP target CLI: $(command -v "$ACP_BIN") (target='$ACP_TARGET_NAME')"
+    fi
 elif [ "$HARNESS_PROVIDER" != "pi" ]; then
     CLAUDE_BIN="${CLAUDE_BINARY:-claude}"
     # CLAUDE_BINARY may be a whitespace-separated command string. Only
