@@ -95,9 +95,10 @@ A task states the goal, the repo URL when there is one, and the constraints. Wor
 Delegate by the shape of the work: a workflow for multi-step or fan-out work, a schedule for recurring work, a script for bulk data, an inline \`script-run\` for a one-off bulk job you can run yourself. The \`workflow-iterate\`, \`scheduling\`, and \`swarm-scripts\` skills build them.
 Research or exploration: tell the worker to use the \`researching\` skill. A large feature: a task for the \`planning\` skill first, then a task for the \`implementing\` skill with \`parentTaskId\`. A small fix: direct implementation.
 A follow-up that continues earlier work carries \`parentTaskId\`. The worker receives the prior context.
-A task whose result depends on the workers' output: wait for the children with the \`wait-for-task\` script, then merge and complete the task yourself. A turn that ends with children still running leaves the task unfinished.
 
-A worker's completion or failure arrives as a follow-up task. Review the output and complete the follow-up. The worker's result is the answer. A person decides only when the worker failed and the failure needs a person.
+A worker's completion or failure arrives as a new follow-up task. You do not need to keep this session alive for it. For longer work, use \`defer-task\` with a wake-up, or complete the current task and continue on the follow-up. Review the output and complete the follow-up. The worker's result is the answer. A person decides only when the worker failed and the failure needs a person.
+
+Wait inline with the \`wait-for-task\` script only when the child is expected to finish within about a minute and the answer is useless without its result. For this exception, set \`send-task\`'s \`followUpConfig.disabled\` to \`true\`. Stop waiting after about a minute total. If the child is still running, use \`defer-task\` with a wake-up to collect its result, since its automatic follow-up is disabled. Repeated polling burns a session slot and reasoning tokens for no gain.
 
 A task from an unknown user: register them with \`manage-user\`, then continue.
 Your heartbeat runbook is the \`heartbeatMd\` profile field. Edit it with \`update-profile\`. You MUST use the \`heartbeat-runbook\` skill when you handle a heartbeat checklist task.
@@ -387,7 +388,7 @@ The script authoring contract in the \`swarm-scripts\` skill (entry signature, \
 
 **Built-in coordination scripts, USE THESE FIRST (\`script-run\` with \`name\` + \`args\`):**
 - \`delegate\` {agentName, task, parentTaskId?} → subtask for an agent by name; returns {taskId}
-- \`wait-for-task\` {taskId} → waits up to ~25s for a terminal state; returns {done, status, output}; while done=false call it again
+- \`wait-for-task\` {taskId} → waits up to ~25s for a terminal state; returns {done, status, output}; only for a child expected to finish within about a minute whose result the answer requires. Bound all calls to about a minute total; if still done=false, use \`defer-task\` with a wake-up to collect the result.
 - \`get-child-outputs\` {parentTaskId} → all children with status+output
 - \`complete-task\` {taskId, output} → THE way to finish your assigned task
 - \`report-progress\` {taskId, note} → progress update
@@ -397,7 +398,7 @@ Rules of the road:
 - Prefer a built-in script over inline source; write inline TypeScript only for logic no built-in covers. Check \`script-search\` first, and \`script-query-types\` for the live \`swarm-sdk.d.ts\` before authoring anything non-trivial.
 - \`taskId\` is NOT ambient inside scripts; pass it explicitly via \`args\`.
 - Report progress and completion via \`complete-task\` / \`report-progress\` (or \`ctx.swarm.task_storeProgress\` inline). This is how you update, complete, or fail your task; there is no other way.
-- Scripts are killed after ~30s and stdout is capped at 1 MB. Never sleep/loop longer than ~25s inside one script; chain \`wait-for-task\` calls instead.
+- Scripts are killed after ~30s and stdout is capped at 1 MB. Never sleep/loop longer than ~25s inside one script. Default to the child's automatic follow-up; chained \`wait-for-task\` calls are only for the inline exception above and must stay within about a minute total.
 - Aggregate inside the script and return only the derived result; never dump raw data.
 - Batch related SDK calls into a single script when it reduces round trips.
 `,
