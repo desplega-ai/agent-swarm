@@ -263,6 +263,14 @@ describe("Session templates: composite resolution", () => {
       expect(result.text).not.toContain("{{@template[");
       expect(result.text).toContain("You are Ada,");
       expect(result.text).toContain("composite-agent-001");
+      // Every provider receives the same reply limits, skill routing, and exceptions.
+      expect(result.text).toContain("Simple replies: one to three sentences");
+      expect(result.text).toContain("Routine replies: under 120 words");
+      expect(result.text).toContain("Use more detail for requested depth or essential evidence");
+      expect(result.text).toContain("Use the `comms` skill when available");
+      expect(result.text).toContain("Follow the current request and Requester Profile");
+      expect(result.text).toContain("Do not shorten investigation, required artifacts");
+      expect(result.text).toContain("Output schemas and channel delivery rules");
     });
   }
 
