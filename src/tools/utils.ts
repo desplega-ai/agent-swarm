@@ -246,6 +246,22 @@ const slackReadNudge = (r: SwarmToolResult): string | undefined => {
     : undefined;
 };
 
+function formatIdleDuration(ms: number): string {
+  const minutes = Math.round(ms / 60_000);
+  if (minutes < 1) return "under a minute";
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const remMinutes = minutes % 60;
+  return remMinutes > 0 ? `${hours}h${remMinutes}m` : `${hours}h`;
+}
+
+const storeProgressBlockedWaitingNudge = (r: SwarmToolResult): string | undefined => {
+  if (!r.ok) return undefined;
+  const ms = (r.data as { blockedWaitingElapsedMs?: unknown } | undefined)?.blockedWaitingElapsedMs;
+  if (typeof ms !== "number") return undefined;
+  return `That reads as blocked-waiting, ${formatIdleDuration(ms)} since your last update — call defer-task so a wake-up task resumes you instead of polling manually.`;
+};
+
 const workflowLongScriptTimeoutNudge = (r: SwarmToolResult): string | undefined => {
   if (!r.ok) return undefined;
   const hint = (r.data as { longScriptTimeoutHint?: unknown } | undefined)?.longScriptTimeoutHint;
@@ -260,6 +276,7 @@ const workflowLongScriptTimeoutNudge = (r: SwarmToolResult): string | undefined 
 export const NUDGES: Record<string, (result: SwarmToolResult) => string | undefined> = {
   "defer-task": (r) =>
     r.ok ? "Stop working on this task now; the wake-up task will carry your note." : undefined,
+  "store-progress": storeProgressBlockedWaitingNudge,
   "script-run": scriptRunNudge,
   "script-upsert": scriptAuthoringNudge,
   "launch-script-run": scriptAuthoringNudge,

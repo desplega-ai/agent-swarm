@@ -29,6 +29,13 @@ import { scrubSecrets } from "@/utils/secret-scrubber";
 // echoed the schema example, producing noise rows keyed `mcp-<taskId>-<ts>`
 // that double-counted alongside the harness's authoritative entry.
 
+// Deliberately narrow and phrase-based (not a bare "wait"/"block" substring
+// match) to under-fire rather than over-fire: measured against 196 real
+// progress rows across all statuses, this matched 0 — see PR body for the
+// full false-positive measurement methodology.
+const BLOCKED_WAITING_PATTERN =
+  /\b(waiting (for|on)|blocked (on|until|by)|still waiting|awaiting)\b/i;
+
 export const storeProgressOutputSchema = swarmToolOutputSchema({
   // Bounded confirmation only. The handler keeps the full task row internally
   // for completion memory, raters, and follow-up creation, but never echoes it
@@ -55,6 +62,12 @@ export const storeProgressOutputSchema = swarmToolOutputSchema({
     .optional()
     .describe(
       "True when force: true replaced output and/or failureReason on an already-terminal task without replaying completion side effects.",
+    ),
+  blockedWaitingElapsedMs: z
+    .number()
+    .optional()
+    .describe(
+      "Present only when this progress text reads as blocked-waiting: milliseconds since the task's prior update. Drives the store-progress nudge toward defer-task.",
     ),
 });
 
@@ -252,6 +265,16 @@ export const registerStoreProgressTool = (server: McpServer) => {
         let updatedTask = existingTask;
         const isTerminal = isTerminalTaskStatus(existingTask.status);
 
+        // Computed against the task's state as of BEFORE this call's update,
+        // so "elapsed" reads as time since the prior check-in, not zero.
+        let blockedWaitingElapsedMs: number | undefined;
+        if (progress && !isTerminal && BLOCKED_WAITING_PATTERN.test(progress)) {
+          const referenceIso = existingTask.lastUpdatedAt ?? existingTask.createdAt;
+          if (referenceIso) {
+            blockedWaitingElapsedMs = Math.max(0, Date.now() - new Date(referenceIso).getTime());
+          }
+        }
+
         // Attachments — pointer-based, append-only. Insert each row inside
         // this transaction; the helper dedups by sha256 (when present) or by
         // (kind, pointer, name), so idempotent re-calls don't fan out
@@ -422,6 +445,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
             ? `Task "${taskId}" marked as ${status}.`
             : `Progress stored for task "${taskId}".`,
           task: updatedTask,
+          blockedWaitingElapsedMs,
         };
       });
 
@@ -462,6 +486,10 @@ export const registerStoreProgressTool = (server: McpServer) => {
         ...("wasNoOp" in result && result.wasNoOp ? { wasNoOp: true } : {}),
         ...("wasForcedOverwrite" in result && result.wasForcedOverwrite
           ? { wasForcedOverwrite: true }
+          : {}),
+        ...("blockedWaitingElapsedMs" in result &&
+        typeof result.blockedWaitingElapsedMs === "number"
+          ? { blockedWaitingElapsedMs: result.blockedWaitingElapsedMs }
           : {}),
       };
       return success ? toolOk(message, { data }) : toolErr(message, { data });

@@ -317,6 +317,30 @@ describe("finalizeSwarmToolResult", () => {
     expect((withoutHint.structuredContent as { nudge?: string }).nudge).toBeUndefined();
   });
 
+  test("NUDGES map: store-progress steers to defer-task only when blocked-waiting was detected", async () => {
+    const blocked = await finalizeSwarmToolResult("store-progress", {
+      ok: true,
+      message: 'Progress stored for task "t-1".',
+      data: { task: { id: "t-1", status: "in_progress" }, blockedWaitingElapsedMs: 5 * 60_000 },
+    });
+    const nudge = (blocked.structuredContent as { nudge?: string }).nudge;
+    expect(nudge).toContain("defer-task");
+    expect(nudge).toContain("5m");
+
+    const ordinary = await finalizeSwarmToolResult("store-progress", {
+      ok: true,
+      message: 'Progress stored for task "t-1".',
+      data: { task: { id: "t-1", status: "in_progress" } },
+    });
+    expect((ordinary.structuredContent as { nudge?: string }).nudge).toBeUndefined();
+
+    const failed = await finalizeSwarmToolResult("store-progress", {
+      ok: false,
+      message: "Task not found.",
+    });
+    expect((failed.structuredContent as { nudge?: string }).nudge).toBeUndefined();
+  });
+
   test("data with no details auto-renders into the text channel (completeness guarantee)", async () => {
     const result = await finalizeSwarmToolResult("some-tool", {
       ok: true,
