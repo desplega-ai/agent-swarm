@@ -47,6 +47,17 @@ afterAll(async () => {
 });
 
 describe("typecheckScript", () => {
+  test("task_defer accepts task wakeOn with a required caller-supplied ceiling", async () => {
+    const result = await typecheckScript(`
+      import type { ScriptContext } from "swarm-sdk";
+      export default async function(args: unknown, ctx: ScriptContext) {
+        return ctx.swarm.task_defer({ taskId: "parent", delayMs: 60000,
+          wakeOn: { event: "settled", taskId: "producer" }, summary: "submitted", note: "check result" });
+      }
+    `);
+    expect(result).toEqual({ ok: true });
+  });
+
   test("accepts ES2022 globals: JSON, Math, Date, Number, String, Error, isFinite, encodeURIComponent, parseInt, parseFloat", async () => {
     const source = `
       export default async () => {

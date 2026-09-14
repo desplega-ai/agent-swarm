@@ -1,0 +1,18 @@
+{
+  "category": "skills",
+  "description": "Re-express something so it lands — re-explain your last reply in plain casual language, show the current topic visually (diagram, code-shape sketch, HTML artifact), do both at once, or rewrite artifact text into unambiguous ASD-STE100 English. Use when the user runs /desplega:comms, types /bro, says 'say it simpler', 'bro what', 'I don't follow', 'show me', 'draw this', 'visualize', 'disambiguate this', or 'STE100 rewrite'. Not for creative or marketing copy.",
+  "displayName": "Comms",
+  "kind": "skill",
+  "name": "comms",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "slug": "comms",
+  "systemDefault": true,
+  "tags": [
+    "ai-toolbox",
+    "agents",
+    "workflow"
+  ],
+  "title": "Comms",
+  "version": "1.0.0"
+}

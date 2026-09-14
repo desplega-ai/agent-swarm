@@ -12,11 +12,22 @@
  * - HTTP route cross-field validation (create + update) for workflow/script targets.
  */
 import { Database } from "bun:sqlite";
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  setSystemTime,
+  spyOn,
+  test,
+} from "bun:test";
 import { unlink } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import { z } from "zod";
+import * as preflightAlerts from "../automation-preflight-alert";
 import {
   type AutomationSetupStates,
   preflightAutomation,
@@ -88,6 +99,16 @@ class EchoExecutor extends BaseExecutor<typeof EchoExecutor.schema, typeof EchoE
 
 let savedEnv: NodeJS.ProcessEnv;
 let agentId: string;
+let notify: ReturnType<typeof spyOn<typeof preflightAlerts, "notifyAutomationPreflightFailure">>;
+
+beforeEach(() => {
+  notify = spyOn(preflightAlerts, "notifyAutomationPreflightFailure").mockResolvedValue(undefined);
+});
+
+afterEach(() => {
+  notify.mockRestore();
+  setSystemTime();
+});
 
 async function removeDbFiles(): Promise<void> {
   for (const suffix of ["", "-wal", "-shm"]) {
@@ -617,6 +638,10 @@ describe("dispatchScheduleTarget — automation preflight", () => {
 
     await executeSchedule(schedule);
     const first = (await getScheduledTaskById(schedule.id))!;
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "schedule", name: schedule.name, state: "needs_setup" }),
+    );
     await executeSchedule(first);
     const second = (await getScheduledTaskById(schedule.id))!;
     const after = await getDbClient().get<{ count: number }>(
@@ -624,12 +649,34 @@ describe("dispatchScheduleTarget — automation preflight", () => {
     );
 
     expect(after?.count).toBe(before?.count);
+    expect(notify).toHaveBeenCalledTimes(1);
     expect(second.lastErrorAt).toBe(first.lastErrorAt);
     expect(second.lastErrorMessage).toBe("needs_setup: params=[REPO_URL] integrations=[]");
     expect(second.consecutiveErrors).toBe(0);
     expect(second.enabled).toBe(true);
     expect(second.lastRunAt).toBeUndefined();
     expect(new Date(second.nextRunAt!).getTime()).toBeGreaterThan(Date.now());
+  });
+
+  test("alerts once for concurrent schedule refusals and again after UTC midnight", async () => {
+    setSystemTime(new Date("2026-09-14T23:59:59Z"));
+    const schedule = await createScheduledTask({
+      name: `dispatch-daily-alert-${crypto.randomUUID()}`,
+      intervalMs: 60_000,
+      taskTemplate: "Review {{REPO_URL}}",
+      requiredParams: ["REPO_URL"],
+    });
+
+    const refusals = await Promise.allSettled([
+      dispatchScheduleTarget(schedule),
+      dispatchScheduleTarget(schedule),
+    ]);
+    expect(refusals.every((result) => result.status === "rejected")).toBe(true);
+    expect(notify).toHaveBeenCalledTimes(1);
+
+    setSystemTime(new Date("2026-09-15T00:00:00Z"));
+    await expect(dispatchScheduleTarget(schedule)).rejects.toThrow("needs_setup:");
+    expect(notify).toHaveBeenCalledTimes(2);
   });
 
   test("advances a cron schedule while its required timezone is still unset", async () => {

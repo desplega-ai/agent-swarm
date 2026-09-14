@@ -147,6 +147,7 @@ declare module "swarm-sdk" {
       taskId: string;
       delayMs?: number;
       runAt?: string;
+      wakeOn?: { event: "task.completed" | "task.failed" | "settled"; taskId: string };
       summary: string;
       note: string;
       checks?: string[];

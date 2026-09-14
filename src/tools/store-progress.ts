@@ -29,6 +29,17 @@ import { scrubSecrets } from "@/utils/secret-scrubber";
 // echoed the schema example, producing noise rows keyed `mcp-<taskId>-<ts>`
 // that double-counted alongside the harness's authoritative entry.
 
+// Deliberately narrow and phrase-based (not a bare "wait"/"block" substring
+// match) to under-fire rather than over-fire: measured against 196 real
+// progress rows across all statuses, this matched 0 — see PR body for the
+// full false-positive measurement methodology.
+const BLOCKED_WAITING_PATTERN =
+  /\b(waiting (for|on)|blocked (on|until|by)|still waiting|awaiting)\b/i;
+
+// Below this, two check-ins are close enough together that "blocked" reads as
+// noise and calling defer-task buys nothing over checking in again shortly.
+const BLOCKED_WAITING_MIN_ELAPSED_MS = 3 * 60 * 1000;
+
 export const storeProgressOutputSchema = swarmToolOutputSchema({
   // Bounded confirmation only. The handler keeps the full task row internally
   // for completion memory, raters, and follow-up creation, but never echoes it
@@ -55,6 +66,12 @@ export const storeProgressOutputSchema = swarmToolOutputSchema({
     .optional()
     .describe(
       "True when force: true replaced output and/or failureReason on an already-terminal task without replaying completion side effects.",
+    ),
+  blockedWaitingElapsedMs: z
+    .number()
+    .optional()
+    .describe(
+      "Present only when this progress text reads as blocked-waiting: milliseconds since the task's prior update. Drives the store-progress nudge toward defer-task.",
     ),
 });
 
@@ -251,6 +268,27 @@ export const registerStoreProgressTool = (server: McpServer) => {
 
         let updatedTask = existingTask;
         const isTerminal = isTerminalTaskStatus(existingTask.status);
+        // This call's own status can finish the task even though existingTask
+        // (its state before this call) is not yet terminal — gate on both so a
+        // completing call carrying blocked-waiting-shaped text (e.g. "awaiting
+        // review") never nudges toward defer-task.
+        const goingTerminal = status !== undefined && isTerminalTaskStatus(status);
+
+        // Computed against the task's state as of BEFORE this call's update,
+        // so "elapsed" reads as time since the prior check-in, not zero.
+        let blockedWaitingElapsedMs: number | undefined;
+        if (progress && !isTerminal && !goingTerminal && BLOCKED_WAITING_PATTERN.test(progress)) {
+          const referenceIso = existingTask.lastUpdatedAt ?? existingTask.createdAt;
+          if (referenceIso) {
+            const elapsed = Date.now() - new Date(referenceIso).getTime();
+            // Below the floor, a sub-minute check-in reads as "blocked" purely
+            // from noise, and defer-task buys nothing over just checking in
+            // again shortly — so treat it as not blocked-waiting yet.
+            if (elapsed >= BLOCKED_WAITING_MIN_ELAPSED_MS) {
+              blockedWaitingElapsedMs = elapsed;
+            }
+          }
+        }
 
         // Attachments — pointer-based, append-only. Insert each row inside
         // this transaction; the helper dedups by sha256 (when present) or by
@@ -422,6 +460,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
             ? `Task "${taskId}" marked as ${status}.`
             : `Progress stored for task "${taskId}".`,
           task: updatedTask,
+          blockedWaitingElapsedMs,
         };
       });
 
@@ -462,6 +501,10 @@ export const registerStoreProgressTool = (server: McpServer) => {
         ...("wasNoOp" in result && result.wasNoOp ? { wasNoOp: true } : {}),
         ...("wasForcedOverwrite" in result && result.wasForcedOverwrite
           ? { wasForcedOverwrite: true }
+          : {}),
+        ...("blockedWaitingElapsedMs" in result &&
+        typeof result.blockedWaitingElapsedMs === "number"
+          ? { blockedWaitingElapsedMs: result.blockedWaitingElapsedMs }
           : {}),
       };
       return success ? toolOk(message, { data }) : toolErr(message, { data });

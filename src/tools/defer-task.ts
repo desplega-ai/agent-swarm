@@ -11,6 +11,7 @@ import {
   getTaskById,
   updateAgentStatusFromCapacity,
 } from "@/be/db";
+import { reconcileDeferredTaskWaits } from "@/scheduler/deferred-task-waits";
 import { runTaskTerminalEffects } from "@/tasks/task-terminal-effects";
 import { getTaskOutputValidationError } from "@/tasks/terminal-result-guard";
 import { assertOwnsTask, ownerCtx } from "@/tools/task-tool-ctx";
@@ -33,7 +34,7 @@ export const registerDeferTaskTool = (server: McpServer) => {
       title: "Defer Task",
       annotations: { destructiveHint: false, idempotentHint: false },
       description:
-        "Completes this task now with status `completed` and books a wake-up for you. Use when the result needs time: a build, a deploy, a reply. The task reaches its final state on this call; the lead sees your summary as its output unless the task has an outputSchema. For a task with an outputSchema, provide output as a JSON string matching that schema; it is stored verbatim as terminal output, while deferral details remain visible in the task log. A one-off schedule wakes you up later with a child task that carries this task as its parent. Provide delayMs or runAt, a summary of what you did, and a note that says what is pending and what to check.",
+        "Completes this task now with status `completed` and books a wake-up for you. Use when the result needs time: a build, a deploy, a reply. The task reaches its final state on this call; the lead sees your summary as its output unless the task has an outputSchema. For a task with an outputSchema, provide output as a JSON string matching that schema; it is stored verbatim as terminal output, while deferral details remain visible in the task log. A one-off schedule wakes you up later with a child task that carries this task as its parent. Optionally provide wakeOn to wake early when another task completes or fails; delayMs or runAt remains required as the ceiling. Provide delayMs or runAt, a summary of what you did, and a note that says what is pending and what to check.",
       inputSchema: z.object({
         taskId: z.string().describe("The ID of the task you are working on."),
         delayMs: z
@@ -47,6 +48,16 @@ export const registerDeferTaskTool = (server: McpServer) => {
           .datetime()
           .optional()
           .describe("Wake up at this ISO datetime (e.g. '2026-03-06T15:00:00Z'). Must be future."),
+        wakeOn: z
+          .object({
+            event: z.enum(["task.completed", "task.failed", "settled"]),
+            taskId: z.string().min(1),
+          })
+          .strict()
+          .optional()
+          .describe(
+            "Wake early on this task event. settled covers completed or failed. Already-terminal tasks are rejected; a delayMs/runAt ceiling is still required.",
+          ),
         summary: z
           .string()
           .min(1)
@@ -78,7 +89,11 @@ export const registerDeferTaskTool = (server: McpServer) => {
         nextRunAt: z.string().optional(),
       }),
     },
-    async ({ taskId, delayMs, runAt, summary, output, note, checks }, requestInfo, _meta) => {
+    async (
+      { taskId, delayMs, runAt, wakeOn, summary, output, note, checks },
+      requestInfo,
+      _meta,
+    ) => {
       if (!requestInfo.agentId) {
         return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
       }
@@ -129,6 +144,9 @@ export const registerDeferTaskTool = (server: McpServer) => {
       }
       const nextRunAt = delayMs ? new Date(Date.now() + delayMs).toISOString() : runAt!;
 
+      const wakeDescription = wakeOn
+        ? `on ${wakeOn.event} for task ${wakeOn.taskId}, or by ${nextRunAt}`
+        : `at ${nextRunAt}`;
       const checksBlock = renderChecks(checks);
       const taskTemplate = `Resume task ${taskId}: ${note}${checksBlock}`;
       const createdBy =
@@ -147,6 +165,16 @@ export const registerDeferTaskTool = (server: McpServer) => {
 
       try {
         const committed = await getDbClient().transaction(async () => {
+          if (wakeOn) {
+            if (wakeOn.taskId === taskId)
+              throw new DeferAbortedError("Cannot wake on the task being deferred.");
+            const watched = await getTaskById(wakeOn.taskId);
+            if (!watched) throw new DeferAbortedError(`Watched task ${wakeOn.taskId} not found.`);
+            if (isTerminalTaskStatus(watched.status))
+              throw new DeferAbortedError(
+                `Watched task ${wakeOn.taskId} is already ${watched.status}; read its result instead of deferring.`,
+              );
+          }
           const schedule = await createScheduledTask({
             // Unique name (`getScheduledTaskByName` is a unique lookup). The UUID
             // prevents concurrent deferrals of the same task from colliding.
@@ -169,6 +197,18 @@ export const registerDeferTaskTool = (server: McpServer) => {
             parentTaskId: taskId,
             createdBy,
           });
+
+          if (wakeOn) {
+            await getDbClient().run(
+              "INSERT INTO deferred_task_waits (scheduleId, taskId, eventName, created_by, updated_by) VALUES (?, ?, ?, ?, ?)",
+              [schedule.id, wakeOn.taskId, wakeOn.event, createdBy ?? null, createdBy ?? null],
+            );
+            getDbClient().afterCommit(() => {
+              void reconcileDeferredTaskWaits(wakeOn.taskId).catch((err) => {
+                console.error("[defer-task] Event wake reconciliation failed:", err);
+              });
+            });
+          }
 
           const deferralDetails = `${summary}\n\nDeferred until ${nextRunAt} (schedule ${schedule.id}). Pending: ${note}${checksBlock}`;
 
@@ -230,7 +270,7 @@ export const registerDeferTaskTool = (server: McpServer) => {
         });
 
         return toolOk(
-          `Task ${taskId} completed and deferred. Wake-up at ${nextRunAt} (schedule ${committed.scheduleId}). This task is final; the wake-up task continues the work.`,
+          `Task ${taskId} completed and deferred. Wake-up ${wakeDescription} (schedule ${committed.scheduleId}). This task is final; the wake-up task continues the work.`,
           {
             data: {
               yourAgentId: requestInfo.agentId,

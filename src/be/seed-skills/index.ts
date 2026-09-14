@@ -50,6 +50,8 @@ import codeReviewingConfig from "../../../templates/skills/code-reviewing/config
 import codeReviewingContent from "../../../templates/skills/code-reviewing/content.md" with {
   type: "text",
 };
+import commsConfig from "../../../templates/skills/comms/config.json" with { type: "text" };
+import commsContent from "../../../templates/skills/comms/content.md" with { type: "text" };
 import composioConfig from "../../../templates/skills/composio/config.json" with { type: "text" };
 import composioContent from "../../../templates/skills/composio/content.md" with { type: "text" };
 import composioGmailConfig from "../../../templates/skills/composio-gmail/config.json" with {
@@ -318,6 +320,7 @@ const BUILT_IN_SKILL_SOURCES = [
   { config: brainstormingConfig, body: brainstormingContent },
   { config: codeQualityConfig, body: codeQualityContent },
   { config: codeReviewingConfig, body: codeReviewingContent },
+  { config: commsConfig, body: commsContent },
   { config: composioConfig, body: composioContent },
   { config: composioGmailConfig, body: composioGmailContent },
   { config: composioGoogleCalendarConfig, body: composioGoogleCalendarContent },
