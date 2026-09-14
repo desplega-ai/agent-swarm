@@ -246,9 +246,10 @@ const slackReadNudge = (r: SwarmToolResult): string | undefined => {
     : undefined;
 };
 
+// Sole caller (storeProgressBlockedWaitingNudge) only reaches this once ms is
+// past BLOCKED_WAITING_MIN_ELAPSED_MS (3 minutes), so there's no sub-minute case.
 function formatIdleDuration(ms: number): string {
   const minutes = Math.round(ms / 60_000);
-  if (minutes < 1) return "under a minute";
   if (minutes < 60) return `${minutes}m`;
   const hours = Math.floor(minutes / 60);
   const remMinutes = minutes % 60;

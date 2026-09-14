@@ -36,6 +36,10 @@ import { scrubSecrets } from "@/utils/secret-scrubber";
 const BLOCKED_WAITING_PATTERN =
   /\b(waiting (for|on)|blocked (on|until|by)|still waiting|awaiting)\b/i;
 
+// Below this, two check-ins are close enough together that "blocked" reads as
+// noise and calling defer-task buys nothing over checking in again shortly.
+const BLOCKED_WAITING_MIN_ELAPSED_MS = 3 * 60 * 1000;
+
 export const storeProgressOutputSchema = swarmToolOutputSchema({
   // Bounded confirmation only. The handler keeps the full task row internally
   // for completion memory, raters, and follow-up creation, but never echoes it
@@ -264,14 +268,25 @@ export const registerStoreProgressTool = (server: McpServer) => {
 
         let updatedTask = existingTask;
         const isTerminal = isTerminalTaskStatus(existingTask.status);
+        // This call's own status can finish the task even though existingTask
+        // (its state before this call) is not yet terminal — gate on both so a
+        // completing call carrying blocked-waiting-shaped text (e.g. "awaiting
+        // review") never nudges toward defer-task.
+        const goingTerminal = status !== undefined && isTerminalTaskStatus(status);
 
         // Computed against the task's state as of BEFORE this call's update,
         // so "elapsed" reads as time since the prior check-in, not zero.
         let blockedWaitingElapsedMs: number | undefined;
-        if (progress && !isTerminal && BLOCKED_WAITING_PATTERN.test(progress)) {
+        if (progress && !isTerminal && !goingTerminal && BLOCKED_WAITING_PATTERN.test(progress)) {
           const referenceIso = existingTask.lastUpdatedAt ?? existingTask.createdAt;
           if (referenceIso) {
-            blockedWaitingElapsedMs = Math.max(0, Date.now() - new Date(referenceIso).getTime());
+            const elapsed = Date.now() - new Date(referenceIso).getTime();
+            // Below the floor, a sub-minute check-in reads as "blocked" purely
+            // from noise, and defer-task buys nothing over just checking in
+            // again shortly — so treat it as not blocked-waiting yet.
+            if (elapsed >= BLOCKED_WAITING_MIN_ELAPSED_MS) {
+              blockedWaitingElapsedMs = elapsed;
+            }
           }
         }
 
