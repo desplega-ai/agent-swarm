@@ -51,6 +51,7 @@ describe("SwarmClient.createTask dependsOn passthrough (v6 §0.7)", () => {
     expect(req.body).toEqual({
       task: "title\n\nbody",
       agentId: "agent-1",
+      routingReason: "human_pinned",
       source: "api",
       dependsOn: deps,
     });
