@@ -1,5 +1,5 @@
 {
-  "commit": "a4e5e77923eaabc644f8290396ef341d041cdce1",
+  "commit": "9748aabf7252c258378302240d73f7516d113777",
   "excludedSkills": [
     "feedback"
   ],
@@ -11,6 +11,10 @@
     "templates/skills/brainstorming/files/template.md": "ae0aabc02a307db0550f9026aca33fb471608c31f7a0b65ecc781073f17cc953",
     "templates/skills/code-reviewing/config.json": "dde1298b15d55428b898a0421033d1aa140ef152d335d49345059e29deab96f2",
     "templates/skills/code-reviewing/content.md": "85e9aa3b276384ab3f3bc570aece2e8c103a8614c19129378cf4dfec3457a18b",
+    "templates/skills/comms/config.json": "5561ee129f68a03e89b21458afebcd79afd2a8c177c0ba5dad00ffa21ee57bc3",
+    "templates/skills/comms/content.md": "bd1d33b4af13eb36dfd87552bb35ecd200ac0a0dd40d409b50dff448708ce5ea",
+    "templates/skills/comms/files/references/ste-rules.md": "6ee2ed5d6b49d2e421b6c9d22310a5b589fa1abe81de06213e4b89fbc1271e74",
+    "templates/skills/comms/files/references/visual-shapes.md": "5e07e9250ad4cdc877af2281525185f0de89c01f90a077463a2c77c8a7b998e8",
     "templates/skills/delegate-work/config.json": "5b1542eb0be359bb8a17117fcf87917e0607d1b939ae3266ddffacdc14efb281",
     "templates/skills/delegate-work/content.md": "c9562bd17846d3595d40172ecfdc6f85bb99eaf23597eb9d5aa9635d5c14d079",
     "templates/skills/delegate-work/files/scripts/codex-exec.sh": "c2222986c46ac608403f28f201230cb34c7d7ac41a2262dc2c8dbd99c8645dbb",
@@ -74,6 +78,7 @@
     "ask-user",
     "brainstorming",
     "code-reviewing",
+    "comms",
     "delegate-work",
     "design-docs",
     "engineering-standards",
