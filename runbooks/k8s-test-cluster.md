@@ -17,12 +17,26 @@ Create two A records pointing at the VPS: one for the API, one for agent-fs. Exa
 
 ## 2. Cluster and add-ons
 
+Pin both installers. The k3s installer script is downloaded to disk so you can read it before it runs as root, and `INSTALL_K3S_VERSION` selects a fixed release whose binary the script verifies against the release's published `sha256sum`. Helm comes from a versioned tarball checked against its published checksum; nothing from a `main` branch is piped into a shell. Versions below are the ones this runbook was validated with; bump them deliberately.
+
 ```bash
 ssh <vps>
-curl -sfL https://get.k3s.io | sudo INSTALL_K3S_EXEC="--disable traefik --disable servicelb" sh -
+K3S_VERSION=v1.36.4+k3s1
+HELM_VERSION=v3.22.0
+
+curl -fsSLo /tmp/k3s-install.sh https://get.k3s.io
+less /tmp/k3s-install.sh                                   # read it; it is short
+sudo INSTALL_K3S_VERSION="$K3S_VERSION" INSTALL_K3S_EXEC="--disable traefik --disable servicelb" sh /tmp/k3s-install.sh
 sudo chmod 644 /etc/rancher/k3s/k3s.yaml
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | sudo bash
+
+cd /tmp
+curl -fsSLO "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz"
+curl -fsSLO "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz.sha256sum"
+sha256sum -c "helm-${HELM_VERSION}-linux-amd64.tar.gz.sha256sum"   # must print OK
+tar -xzf "helm-${HELM_VERSION}-linux-amd64.tar.gz"
+sudo install -m 0755 linux-amd64/helm /usr/local/bin/helm
+cd -
 
 helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
 helm repo add jetstack https://charts.jetstack.io

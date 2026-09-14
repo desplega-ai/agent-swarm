@@ -683,7 +683,10 @@ services:
   # entries above).
   # ---------------------------------------------------------------------------
   caddy:
-    image: caddy:2
+    # Pinned by digest: this container terminates TLS for the API, so a floating
+    # tag must not pull an unreviewed image. Human-readable version: caddy 2.11.4.
+    # Bump the tag and digest together (docker buildx imagetools inspect caddy:<tag>).
+    image: caddy:2.11.4@sha256:13ba145cba2f3e28fa801994876e4c086d1b95d5aa2a520a734765ffb6b12017
     profiles: ["tls"]
     depends_on:
       api:
