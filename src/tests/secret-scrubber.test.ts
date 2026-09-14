@@ -28,6 +28,18 @@ afterEach(() => {
 });
 
 describe("scrubSecrets — edge cases", () => {
+  test("redacts ACP session tokens in plain text and escaped session logs", () => {
+    const token = `aseph_${"aB3".repeat(11)}`;
+    const github = `ghp_${"gH4".repeat(12)}`;
+    for (const prefix of ["Bearer ", "\\n", "\\t", '"']) {
+      const input = `${prefix}${token} tail ${github}`;
+      const output = scrubSecrets(input);
+      expect(output).not.toContain(github);
+      expect(output).toBe(`${prefix}[REDACTED:acp_session_token] tail [REDACTED:github_token]`);
+      expect(scrubObject({ output: input })).toEqual({ output });
+    }
+  });
+
   test("empty string passes through", () => {
     expect(scrubSecrets("")).toBe("");
   });

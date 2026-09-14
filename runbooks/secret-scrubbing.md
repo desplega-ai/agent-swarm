@@ -29,7 +29,7 @@ It covers:
 
 - **Env-sourced values:** any env value ≥12 chars exact-match, plus comma-separated pool components.
 - **Runtime config values:** successful secret `swarm_config` writes register values ≥12 chars for immediate, process-local exact-match scrubbing.
-- **Structural patterns:** GitHub PATs, Anthropic/OpenAI/OpenRouter `sk-*`, Slack `xox*`, JWTs, AWS access keys, Google API keys.
+- **Structural patterns:** GitHub PATs, ACP session tokens (`aseph_`), Anthropic/OpenAI/OpenRouter `sk-*`, Slack `xox*`, JWTs, AWS access keys, Google API keys.
 
 ## Adding a new secret shape
 

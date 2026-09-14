@@ -48,11 +48,19 @@ function singleHeader(req: IncomingMessage, name: string): string | undefined {
   return Array.isArray(raw) ? raw[0] : raw;
 }
 
-async function userMayReadSecrets(req: IncomingMessage): Promise<boolean> {
+async function requestMayReadSecrets(req: IncomingMessage): Promise<boolean> {
   const auth = getRequestAuth(req);
   if (auth?.kind === "operator") return true;
-  // Agent/no-user HTTP reads keep their pre-RBAC behavior; MCP get-config has
-  // the per-agent config.read.secrets gate.
+  if (auth?.kind === "agent") {
+    const agent = await getAgentById(auth.agentId);
+    return can({
+      principal: { kind: "agent", agentId: auth.agentId, isLead: agent?.isLead ?? false },
+      verb: "config.read.secrets",
+      resource: { kind: "none" },
+      source: "http",
+    }).allow;
+  }
+  // Preserve legacy reads without a user or session-token principal.
   if (auth?.kind !== "user") return true;
   if (!isRbacEnabled()) return true;
 
@@ -61,7 +69,7 @@ async function userMayReadSecrets(req: IncomingMessage): Promise<boolean> {
 }
 
 async function resolveSecretsRead(req: IncomingMessage, includeSecrets: boolean) {
-  if (!includeSecrets || (await userMayReadSecrets(req))) {
+  if (!includeSecrets || (await requestMayReadSecrets(req))) {
     return { effectiveIncludeSecrets: includeSecrets, secretsNote: "" };
   }
   return { effectiveIncludeSecrets: false, secretsNote: SECRETS_FORCE_MASK_NOTE };
@@ -75,7 +83,8 @@ async function resolveSecretsRead(req: IncomingMessage, includeSecrets: boolean)
  * operator/user-before-agent ordering used by fs.ts (Appendix A row 36). This
  * preserves every existing HTTP caller (dashboard, codex-oauth token refresh,
  * devin playbook cache — all operate as operator). Only an agent-context
- * principal (X-Agent-ID without operator/user request auth) is gated to lead;
+ * principal is gated to lead, using the authenticated session identity ahead
+ * of the legacy X-Agent-ID fallback;
  * the real per-agent enforcement lives on the MCP set-config/delete-config
  * tools, where the principal is always an agent.
  *
@@ -89,7 +98,7 @@ async function ensureConfigAdmin(
 ): Promise<boolean> {
   const auth = getRequestAuth(req);
   if (auth?.kind === "operator" || auth?.kind === "user") return true;
-  const agentId = singleHeader(req, "x-agent-id");
+  const agentId = auth?.kind === "agent" ? auth.agentId : singleHeader(req, "x-agent-id");
   const agent = agentId ? await getAgentById(agentId) : undefined;
   const decision = can({
     principal: { kind: "agent", agentId: agentId ?? "", isLead: agent?.isLead ?? false },

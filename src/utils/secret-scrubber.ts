@@ -104,6 +104,8 @@ const TOKEN_REGEXES: ReadonlyArray<{ name: string; re: RegExp }> = [
   { name: "github_pat", re: /github_pat_[A-Za-z0-9_]{20,}/g },
   // GitHub classic/OAuth tokens (ghp_, gho_, ghu_, ghs_, ghr_)
   { name: "github_token", re: new RegExp(String.raw`${TB}gh[pousr]_[A-Za-z0-9]{20,}\b`, "g") },
+  // ACP ephemeral session tokens (base62 payload)
+  { name: "acp_session_token", re: new RegExp(String.raw`${TB}aseph_[A-Za-z0-9]{20,}\b`, "g") },
   // GitLab personal access tokens
   { name: "gitlab_pat", re: new RegExp(String.raw`${TB}glpat-[A-Za-z0-9_-]{20,}\b`, "g") },
   // Anthropic API keys (must match before the generic sk- rule below)

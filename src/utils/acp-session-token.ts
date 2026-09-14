@@ -5,6 +5,9 @@
  * key for a short-lived aseph_ bearer before handing credentials to the
  * ACP target process.
  */
+import { scrubSecrets } from "./secret-scrubber";
+
+const REVOKE_TIMEOUT_MS = 5000;
 
 /** Wall-clock TTL for a session token: 24 hours. Long enough for any realistic
  * ACP session; the token is actively revoked when the session finishes anyway. */
@@ -38,7 +41,8 @@ export async function mintAcpSessionToken(
 
 /**
  * Ask the swarm API to revoke a previously-minted `aseph_` token. Best-effort:
- * errors are logged but never propagated to the caller.
+ * the request is bounded, and errors are logged but never propagated to the
+ * caller. ACP completion does not wait for this cleanup.
  */
 export async function revokeAcpSessionToken(
   apiUrl: string,
@@ -46,11 +50,17 @@ export async function revokeAcpSessionToken(
   tokenId: string,
 ): Promise<void> {
   try {
-    await fetch(`${apiUrl.replace(/\/+$/, "")}/api/sessions/tokens/${tokenId}`, {
+    const res = await fetch(`${apiUrl.replace(/\/+$/, "")}/api/sessions/tokens/${tokenId}`, {
       method: "DELETE",
       headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(REVOKE_TIMEOUT_MS),
     });
-  } catch {
-    // best-effort — token will expire on its own
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  } catch (error) {
+    console.warn(
+      scrubSecrets(
+        `[acp] Session token revoke failed: ${error instanceof Error ? error.message : String(error)}`,
+      ),
+    );
   }
 }

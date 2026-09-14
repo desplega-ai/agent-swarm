@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
@@ -688,7 +688,7 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
     expect(toAcpMcpServers(null)).toEqual([]);
   });
 
-  test("mints an ephemeral token and revokes it when the session ends", async () => {
+  test("completes before the revoke response and logs a failed revocation", async () => {
     const cwd = makeTempDir();
     const agentPath = join(cwd, "fake-acp-ephem-agent.ts");
     const sdkPath = join(process.cwd(), "node_modules/@agentclientprotocol/sdk/dist/acp.js");
@@ -734,6 +734,22 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
     let mintCalled = false;
     let revokeCalled = false;
     let mintBody: Record<string, unknown> = {};
+    let revokeResponse: ServerResponse | undefined;
+    let resolveRevokeRequested!: () => void;
+    const revokeRequested = new Promise<void>((resolve) => {
+      resolveRevokeRequested = resolve;
+    });
+    let resolveWarning!: () => void;
+    const warned = new Promise<void>((resolve) => {
+      resolveWarning = resolve;
+    });
+    const revokeWarnings: string[] = [];
+    const warning = spyOn(console, "warn").mockImplementation((message) => {
+      if (String(message).includes("Session token revoke failed")) {
+        revokeWarnings.push(String(message));
+        resolveWarning();
+      }
+    });
 
     const swarmServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
       if (req.method === "POST" && req.url === "/api/sessions/tokens") {
@@ -749,8 +765,8 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
         res.end(JSON.stringify({ tokenId: FAKE_TOKEN_ID, plaintext: FAKE_TOKEN }));
       } else if (req.method === "DELETE" && req.url === `/api/sessions/tokens/${FAKE_TOKEN_ID}`) {
         revokeCalled = true;
-        res.writeHead(204);
-        res.end();
+        revokeResponse = res;
+        resolveRevokeRequested();
       } else {
         res.writeHead(404);
         res.end();
@@ -778,8 +794,19 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
       const events: ProviderEvent[] = [];
       session.onEvent((e) => events.push(e));
       const result = await session.waitForCompletion();
-      // Give the revoke call (fire-and-forget) a moment to complete.
-      await Bun.sleep(100);
+      // Withhold the HTTP response until completion: cleanup must never block it.
+      await revokeRequested;
+      expect(revokeWarnings).toEqual([]);
+      expect(revokeResponse!.destroyed).toBe(false);
+      expect(revokeResponse!.writableEnded).toBe(false);
+      revokeResponse!.writeHead(503).end();
+      const observed = await Promise.race([
+        warned.then(() => true),
+        Bun.sleep(1000).then(() => false),
+      ]);
+      expect(observed).toBe(true);
+      expect(revokeWarnings).toHaveLength(1);
+      expect(revokeWarnings[0]).toContain("HTTP 503");
 
       expect(result.exitCode).toBe(0);
 
@@ -799,6 +826,8 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
       const captured = await Bun.file(captureFile).text();
       expect(captured).toBe(`Bearer ${FAKE_TOKEN}`);
     } finally {
+      warning.mockRestore();
+      revokeResponse?.end();
       await new Promise<void>((resolve) => swarmServer.close(() => resolve()));
     }
   });
