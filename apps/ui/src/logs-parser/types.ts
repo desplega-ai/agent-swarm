@@ -60,6 +60,10 @@ export interface NormalizedItem {
   raw?: unknown;
   /** Extra source-row ids aggregated into this item (e.g. opencode stream deltas). */
   coveredRecIds?: string[];
+  /** Lifecycle state for items merged across started/completed events by id (e.g. codex unknown items). */
+  status?: "running" | "completed" | "failed";
+  /** Wall-clock span from the started to the terminal event, set once a merged item reaches status. */
+  durationMs?: number;
 }
 
 export interface ParseGate {

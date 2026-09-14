@@ -862,6 +862,106 @@ describe("ui logs parser", () => {
     ]);
   });
 
+  test("groups a codex unknown item's started and completed events into one row", () => {
+    const items = normalizeSessionLogs([
+      log(
+        "sleep-start",
+        "codex",
+        1,
+        {
+          type: "item.started",
+          item: {
+            id: "sleep-1",
+            type: "unknown",
+            originalType: "sleep",
+            value: { durationMs: 45000 },
+          },
+        },
+        "2026-06-01T09:32:48.000Z",
+      ),
+      log(
+        "sleep-done",
+        "codex",
+        2,
+        {
+          type: "item.completed",
+          item: {
+            id: "sleep-1",
+            type: "unknown",
+            originalType: "sleep",
+            value: { durationMs: 45000 },
+          },
+        },
+        "2026-06-01T09:33:33.000Z",
+      ),
+    ]).items;
+
+    expect(items.filter((item) => item.kind === "unknown")).toHaveLength(1);
+    expect(items[0]).toEqual(
+      expect.objectContaining({ kind: "unknown", status: "completed", durationMs: 45000 }),
+    );
+  });
+
+  test("shows a codex unknown item as running before its terminal event arrives", () => {
+    const items = normalizeSessionLogs([
+      log("collab-start", "codex", 1, {
+        type: "item.started",
+        item: {
+          id: "collab-1",
+          type: "unknown",
+          originalType: "collabAgentToolCall",
+          value: { tool: "wait", status: "pending" },
+        },
+      }),
+    ]).items;
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toEqual(expect.objectContaining({ kind: "unknown", status: "running" }));
+    expect(items[0].durationMs).toBeUndefined();
+  });
+
+  test("marks a codex unknown item failed when its completed event carries a failure signal", () => {
+    const items = normalizeSessionLogs([
+      log("collab-start", "codex", 1, {
+        type: "item.started",
+        item: {
+          id: "collab-1",
+          type: "unknown",
+          originalType: "collabAgentToolCall",
+          value: { tool: "wait", status: "pending" },
+        },
+      }),
+      log("collab-done", "codex", 2, {
+        type: "item.completed",
+        item: {
+          id: "collab-1",
+          type: "unknown",
+          originalType: "collabAgentToolCall",
+          status: "failed",
+          value: { tool: "wait", status: "failed" },
+        },
+      }),
+    ]).items;
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toEqual(expect.objectContaining({ kind: "unknown", status: "failed" }));
+  });
+
+  test("keeps id-less codex unknown items as separate one-off rows", () => {
+    const items = normalizeSessionLogs([
+      log("no-id-start", "codex", 1, {
+        type: "item.started",
+        item: { type: "unknown", originalType: "sleep", value: { durationMs: 1000 } },
+      }),
+      log("no-id-done", "codex", 2, {
+        type: "item.completed",
+        item: { type: "unknown", originalType: "sleep", value: { durationMs: 1000 } },
+      }),
+    ]).items;
+
+    expect(items.filter((item) => item.kind === "unknown")).toHaveLength(2);
+  });
+
   test("normalizes claude-managed raw SSE events without unknown noise", () => {
     const result = normalizeSessionLogs([
       log("status", "claude-managed", 1, {

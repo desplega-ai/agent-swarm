@@ -2,13 +2,18 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   Activity,
   ArrowDown,
+  Bot,
   Brain,
   Check,
   ChevronRight,
+  Clock,
   Copy,
   Gauge,
+  Image as ImageIcon,
+  Loader2,
   Scissors,
   Search,
+  Users,
   Wrench,
 } from "lucide-react";
 import { Highlight, themes } from "prism-react-renderer";
@@ -1696,16 +1701,54 @@ function GenericMetaBubble({ block }: { block: ProviderMetaBlock }) {
     );
   }
 
-  // For a codex item.type "unknown", `detail` is a one-line summary derived from
-  // the preserved originalType/value payload (see unknownEventData in logs-parser).
+  // For a codex item.type "unknown", `detail` is a one-line summary derived from the
+  // preserved originalType/value payload, `status` tracks its lifecycle across
+  // started/completed events merged by item id, and `durationMs` spans that
+  // lifecycle once it reaches a terminal state (see unknownEventData and
+  // upsertCodexUnknown in logs-parser).
   const detail = block.kind === "unknown" ? stringValue(block.data.detail) : undefined;
+  const itemType = block.kind === "unknown" ? stringValue(block.data.itemType) : undefined;
+  const status = block.kind === "unknown" ? stringValue(block.data.status) : undefined;
+  const durationMs = block.kind === "unknown" ? numberValue(block.data.durationMs) : undefined;
+  const statusTone: Record<string, "info" | "success" | "error"> = {
+    running: "info",
+    completed: "success",
+    failed: "error",
+  };
+  const tone = block.kind === "parse_error" ? "error" : (status && statusTone[status]) || "muted";
+  // A resolved item type drops the generic "Unknown" prefix — that literal word is
+  // what reads as still-broken to a user even after the type/detail are correct.
+  const title =
+    block.kind === "unknown" && itemType
+      ? unknownItemTypeLabel(itemType)
+      : eventName
+        ? `${kindLabel[block.kind]} · ${eventName}`
+        : kindLabel[block.kind];
 
   return (
     <MetaPanel
-      icon={<Activity className="size-3" />}
-      title={eventName ? `${kindLabel[block.kind]} · ${eventName}` : kindLabel[block.kind]}
+      icon={
+        block.kind === "unknown" ? (
+          unknownItemIcon(itemType, status)
+        ) : (
+          <Activity className="size-3" />
+        )
+      }
+      title={title}
+      badge={
+        status ? (
+          <span className="inline-flex items-center gap-1.5">
+            {durationMs ? (
+              <span className="font-mono text-[11px] text-muted-foreground">
+                {formatDur(durationMs)}
+              </span>
+            ) : null}
+            <ProviderStatusPill value={status} />
+          </span>
+        ) : undefined
+      }
       raw={block.data}
-      tone={block.kind === "parse_error" ? "error" : "muted"}
+      tone={tone}
     >
       {block.kind === "parse_error" && (
         <JsonTree
@@ -1718,6 +1761,39 @@ function GenericMetaBubble({ block }: { block: ProviderMetaBlock }) {
       {detail && <p className="truncate text-xs text-muted-foreground">{detail}</p>}
     </MetaPanel>
   );
+}
+
+// Type icon leads; a still-running item shows a spinner instead so a grouped
+// started/completed row reads as one row moving through its lifecycle.
+function unknownItemIcon(itemType: string | undefined, status: string | undefined) {
+  if (status === "running") return <Loader2 className="size-3 animate-spin" />;
+  switch (itemType) {
+    case "sleep":
+      return <Clock className="size-3" />;
+    case "imageView":
+      return <ImageIcon className="size-3" />;
+    case "subAgentActivity":
+      return <Bot className="size-3" />;
+    case "collabAgentToolCall":
+      return <Users className="size-3" />;
+    default:
+      return <Activity className="size-3" />;
+  }
+}
+
+function unknownItemTypeLabel(itemType: string): string {
+  switch (itemType) {
+    case "sleep":
+      return "Sleep";
+    case "imageView":
+      return "Image View";
+    case "subAgentActivity":
+      return "Sub Agent Activity";
+    case "collabAgentToolCall":
+      return "Collab Tool Call";
+    default:
+      return itemType;
+  }
 }
 
 // Shared 2-column [time | content] row scaffold (prose / thinking / meta / tool group).
