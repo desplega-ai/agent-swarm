@@ -185,3 +185,51 @@ doesn't pin pool pods in Init forever.
       echo "API never came up after 5 minutes; check the API pod"
       exit 1
 {{- end }}
+
+{{/*
+True when an ingress block will serve HTTPS: explicit tls entries or a
+cert-manager issuer. Pass the ingress values map.
+*/}}
+{{- define "agent-swarm.ingressHasTls" -}}
+{{- if or (gt (len .tls) 0) (and .certManager (or .certManager.clusterIssuer .certManager.issuer)) -}}true{{- end -}}
+{{- end }}
+
+{{/*
+Ingress annotations: user annotations merged with the cert-manager issuer
+annotation when certManager is set. Pass the ingress values map.
+*/}}
+{{- define "agent-swarm.ingressAnnotations" -}}
+{{- $ann := dict }}
+{{- /* The API answers 401 on `/` (fail-closed auth), so load balancers that
+       probe the default path mark the target unhealthy. AWS ALB reads its
+       probe path from this annotation; default it to the unauthenticated
+       /health. User annotations still override. */ -}}
+{{- if eq (default "" .className) "alb" }}
+{{- $_ := set $ann "alb.ingress.kubernetes.io/healthcheck-path" "/health" }}
+{{- end }}
+{{- if .certManager }}
+{{- if .certManager.clusterIssuer }}
+{{- $_ := set $ann "cert-manager.io/cluster-issuer" .certManager.clusterIssuer }}
+{{- else if .certManager.issuer }}
+{{- $_ := set $ann "cert-manager.io/issuer" .certManager.issuer }}
+{{- end }}
+{{- end }}
+{{- /* sprig merge keeps existing keys in the first arg, so user annotations go first and win. */ -}}
+{{- $ann = merge (deepCopy (default dict .annotations)) $ann }}
+{{- toYaml $ann }}
+{{- end }}
+
+{{/*
+Ingress tls block: explicit entries win; otherwise a cert-manager issuer
+yields one entry for `host` in `secretName`.
+Pass dict {ingress, secretName}.
+*/}}
+{{- define "agent-swarm.ingressTls" -}}
+{{- if gt (len .ingress.tls) 0 }}
+{{- toYaml .ingress.tls }}
+{{- else if and .ingress.certManager (or .ingress.certManager.clusterIssuer .ingress.certManager.issuer) -}}
+- hosts:
+    - {{ .ingress.host | quote }}
+  secretName: {{ .secretName }}
+{{- end }}
+{{- end }}

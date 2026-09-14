@@ -33,8 +33,8 @@ DISCOVERABILITY_AGENT_ID
 Set `MCP_BASE_URL=http://localhost:3013` in `.env`. The API container uses this address for internal calls.
 Workers in the example already use `http://api:3013` for `MCP_BASE_URL`.
 External clients need their own reachable API URL. Set `APP_URL` to the admin UI URL.
-For public callbacks, add `PUBLIC_MCP_BASE_URL=<public-api-url>` to the API service's `environment` list in `docker-compose.example.yml`.
-Replace the placeholder with your public API URL. Adding this variable only to `.env` does not pass it into the API container.
+For public callbacks and the hosted dashboard, set `PUBLIC_MCP_BASE_URL=<public-https-api-url>` in `.env`. The example passes it to the API service.
+For automatic certificates, use the Caddy `tls` profile described in the [HTTPS procedure](https://github.com/desplega-ai/agent-swarm/blob/main/skills/agent-swarm/references/https.md).
 Read the [URL definitions](https://github.com/desplega-ai/agent-swarm/blob/main/src/utils/constants.ts) for internal calls, OAuth redirects, and webhooks.
 Apply the [component minimums](https://github.com/desplega-ai/agent-swarm/blob/main/skills/agent-swarm/references/components.md) before starting services.
 Remove unused example values from `.env`. Keep non-boot configuration in swarm config where supported.

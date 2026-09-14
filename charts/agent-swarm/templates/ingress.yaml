@@ -6,17 +6,19 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "agent-swarm.labels" . | nindent 4 }}
-  {{- with .Values.ingress.annotations }}
+  {{- with (include "agent-swarm.ingressAnnotations" .Values.ingress) }}
+  {{- if ne . "{}" }}
   annotations:
-    {{- toYaml . | nindent 4 }}
+    {{- . | nindent 4 }}
+  {{- end }}
   {{- end }}
 spec:
   {{- if .Values.ingress.className }}
   ingressClassName: {{ .Values.ingress.className }}
   {{- end }}
-  {{- with .Values.ingress.tls }}
+  {{- with (include "agent-swarm.ingressTls" (dict "ingress" .Values.ingress "secretName" (printf "%s-api-tls" (include "agent-swarm.fullname" .)))) }}
   tls:
-    {{- toYaml . | nindent 4 }}
+    {{- . | nindent 4 }}
   {{- end }}
   rules:
     - host: {{ .Values.ingress.host | quote }}
@@ -40,17 +42,19 @@ metadata:
   labels:
     {{- include "agent-swarm.labels" . | nindent 4 }}
     app.kubernetes.io/component: agent-fs
-  {{- with .Values.agentFs.ingress.annotations }}
+  {{- with (include "agent-swarm.ingressAnnotations" .Values.agentFs.ingress) }}
+  {{- if ne . "{}" }}
   annotations:
-    {{- toYaml . | nindent 4 }}
+    {{- . | nindent 4 }}
+  {{- end }}
   {{- end }}
 spec:
   {{- if .Values.agentFs.ingress.className }}
   ingressClassName: {{ .Values.agentFs.ingress.className }}
   {{- end }}
-  {{- with .Values.agentFs.ingress.tls }}
+  {{- with (include "agent-swarm.ingressTls" (dict "ingress" .Values.agentFs.ingress "secretName" (printf "%s-agent-fs-tls" (include "agent-swarm.fullname" .)))) }}
   tls:
-    {{- toYaml . | nindent 4 }}
+    {{- . | nindent 4 }}
   {{- end }}
   rules:
     - host: {{ .Values.agentFs.ingress.host | quote }}

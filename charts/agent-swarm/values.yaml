@@ -227,7 +227,17 @@ ingress:
   className: ""
   annotations: {}
   host: ""
+  # -- Explicit TLS entries (`hosts` + `secretName`). Leave empty when using
+  # `certManager` below; the chart then generates the entry for `host`.
   tls: []
+  # -- HTTPS shortcut for clusters running cert-manager. Set ONE of
+  # `clusterIssuer` or `issuer` to the name of an existing Issuer. The chart
+  # adds the cert-manager annotation, requests a certificate for `host`
+  # into the Secret `<release>-api-tls`, and derives an https public URL.
+  # No TLS Secret needs to be created by hand.
+  certManager:
+    clusterIssuer: ""
+    issuer: ""
 
 # agent-fs — optional persistent shared filesystem service.
 #
@@ -246,25 +256,38 @@ agentFs:
     pullPolicy: IfNotPresent
     tag: 0.13.5
   port: 7433
+  # -- Blob storage backend for agent-fs. `s3` (default) stores objects in
+  # the bucket configured below. `local` stores objects on the agent-fs PVC
+  # under /data/storage (single replica, no S3 credentials needed); the
+  # `bucket` and `s3.*` values are ignored.
+  storageProvider: s3
   # -- Optional API-owned bootstrap key for agent-fs. When blank, the swarm API
   # boot seeder registers a service user and persists its generated key in
   # encrypted swarm_config as API_AGENT_FS_API_KEY.
   apiKey: ""
   # -- Public app URL used by agent-fs when it emits browser-facing file links.
   appUrl: ""
-  # -- Bucket name for agent-fs's object storage backend.
+  # -- Bucket name for agent-fs's object storage backend (storageProvider=s3).
   bucket: ""
   resources: {}
   storage:
     size: 10Gi
     storageClassName: ""
+  # Public ingress for agent-fs. Needed when browsers open agent-fs file links
+  # (signed URLs point at agent-fs itself when storageProvider=local).
   ingress:
     enabled: false
     className: ""
     annotations: {}
     host: ""
     tls: []
-  # S3-compatible credentials. Either inline or pre-existing Secret.
+    # -- Same semantics as `ingress.certManager`; certificate lands in
+    # `<release>-agent-fs-tls`.
+    certManager:
+      clusterIssuer: ""
+      issuer: ""
+  # S3-compatible credentials (storageProvider=s3). Either inline or
+  # pre-existing Secret.
   s3:
     accessKeyId: ""
     secretAccessKey: ""

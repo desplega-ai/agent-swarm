@@ -1,0 +1,20 @@
+{
+  "name": "agent-swarm",
+  "interface": {
+    "displayName": "Agent Swarm"
+  },
+  "plugins": [
+    {
+      "name": "agent-swarm",
+      "source": {
+        "source": "url",
+        "url": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

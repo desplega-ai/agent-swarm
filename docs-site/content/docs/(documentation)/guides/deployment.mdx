@@ -107,6 +107,30 @@ You should see the lead and workers listed with `status: "idle"`.
 The bundled worker image already includes the Ubuntu runtime libraries required by Playwright's Chromium binary. Browser-driven tasks such as `agent-browser` sessions, Playwright smoke tests, and screenshot workflows no longer need a per-agent `apt install` workaround just to launch the bundled browser.
 </Callout>
 
+### Step 6: HTTPS with Caddy (optional, needed for the hosted dashboard)
+
+The dashboard at [app.agent-swarm.dev](https://app.agent-swarm.dev) is served over HTTPS, so browsers block a plain-HTTP API. OAuth callbacks, webhooks, and page links also need a public HTTPS origin. The Compose example ships an optional Caddy reverse proxy that obtains Let's Encrypt certificates automatically.
+
+1. Point DNS for an API domain and an agent-fs domain at this host, and open ports 80 and 443.
+2. Add to `.env`:
+
+```bash
+SWARM_API_DOMAIN=swarm-api.example.com
+AGENT_FS_DOMAIN=swarm-files.example.com
+PUBLIC_MCP_BASE_URL=https://swarm-api.example.com
+```
+
+3. Start with the `tls` profile:
+
+```bash
+docker compose --profile tls up -d
+curl -fsS https://swarm-api.example.com/health
+```
+
+Caddy proxies the API domain to `api:3013` and the agent-fs domain to `agent-fs:7433`. Once it runs, stop exposing ports 3013 and 7433 on a public interface (firewall them or remove the `ports` entries). Certificates persist in the `caddy_data` volume. Requires Docker Compose v2.23.1 or newer for the inline Caddyfile.
+
+If you already run a reverse proxy (Caddy, nginx, Traefik, Cloudflare Tunnel), skip the profile and set only `PUBLIC_MCP_BASE_URL` to the HTTPS origin that proxy serves. When self-hosting the dashboard on your own domain, also set `CORS_ALLOWED_ORIGINS` to that origin.
+
 ### Startup-script privilege boundary
 
 Since v1.106.0, per-agent `setupScript` / `/workspace/start-up.*` hooks run as the non-root `worker` user after the container drops privileges, and the worker image no longer grants blanket passwordless sudo. This was a security hardening change for the setup-script privilege boundary.

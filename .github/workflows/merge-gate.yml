@@ -1111,6 +1111,9 @@ jobs:
       - name: Check operator skill
         run: bun run check:operator-skill
 
+      - name: Check harness plugin descriptor versions
+        run: bun run check:plugin-versions
+
   gate:
     name: Merge Gate
     needs: [detect-changes, restore-timings, lint-and-typecheck, test, e2e-contract, pi-skills-freshness, seed-skills, script-types-freshness, openapi-freshness, vendored-openapi, docker-build, ui-lint, template-workflow-validation, operator-skill]

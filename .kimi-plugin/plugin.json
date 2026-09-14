@@ -1,0 +1,35 @@
+{
+  "name": "agent-swarm",
+  "version": "1.148.0",
+  "description": "Install, deploy, and operate agent-swarm: Docker Compose, Kubernetes with Helm, HTTPS, agent-fs, integrations, and the API for coding agents",
+  "author": {
+    "name": "desplega.sh",
+    "email": "contact@desplega.sh",
+    "url": "https://github.com/desplega-ai"
+  },
+  "homepage": "https://github.com/desplega-ai/agent-swarm",
+  "license": "MIT",
+  "keywords": [
+    "agent-swarm",
+    "agents",
+    "orchestration",
+    "kubernetes",
+    "helm",
+    "docker-compose",
+    "deployment",
+    "mcp",
+    "operations"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Agent Swarm",
+    "shortDescription": "Deploy and operate an agent-swarm from your coding agent",
+    "developerName": "desplega.sh",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://agent-swarm.dev"
+  }
+}

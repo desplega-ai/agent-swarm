@@ -367,7 +367,7 @@ Full rulebook: [apps/evals/SCENARIO-AUTHORING.md](./apps/evals/SCENARIO-AUTHORIN
 ## Related
 
 - [runbooks/db-retention.md](./runbooks/db-retention.md) — opt-in retention for non-critical SQLite log tables
-- [runbooks/](./runbooks/) — ci, release, local-development, testing, workflows, skills, memory-system, secret-scrubbing, harness-providers, seed-scripts, heartbeat-crash-recovery
+- [runbooks/](./runbooks/) — ci, release, local-development, testing, k8s-test-cluster, workflows, skills, memory-system, secret-scrubbing, harness-providers, seed-scripts, heartbeat-crash-recovery
 - [LOCAL_TESTING.md](./LOCAL_TESTING.md) — unit / E2E / entrypoint / MCP / UI testing recipes
 - [BUSINESS_USE.md](./BUSINESS_USE.md) — flow diagrams and instrumentation
 - [MCP.md](./MCP.md) — MCP tools reference

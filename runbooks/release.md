@@ -15,7 +15,8 @@ bun run prepare-release
 bun run lint && bun run tsc:check && bun run test:root
 
 # 4. Commit the bump + ALL regenerated files together, open a PR, merge to main
-git add package.json charts/agent-swarm/Chart.yaml openapi.json docs-site/content/docs/api-reference
+git add package.json charts/agent-swarm/Chart.yaml openapi.json docs-site/content/docs/api-reference \
+  .claude-plugin .codex-plugin .cursor-plugin .devin-plugin .kimi-plugin gemini-extension.json
 git commit -m "chore(release): vX.Y.Z"
 ```
 
@@ -23,11 +24,12 @@ Merging to `main` does the rest (see [What happens on merge](#what-happens-on-me
 
 ## `bun run prepare-release`
 
-`scripts/prepare-release.ts` regenerates the two version-derived artifacts CI gates on, in one shot, and prints the changed files to commit:
+`scripts/prepare-release.ts` regenerates the three version-derived artifacts CI gates on, in one shot, and prints the changed files to commit:
 
 | Step | Command it runs | Regenerates | Gated by |
 |---|---|---|---|
 | Helm chart sync | `sync-chart-version` | `charts/agent-swarm/Chart.yaml` (`version` + `appVersion`) | `helm-publish.yml` (`check-chart-version`), `docker-and-deploy.yml` (`sync-chart-version --check`) |
+| Harness plugin descriptors | `sync-plugin-versions` | `version` in `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `.codex-plugin/`, `.cursor-plugin/`, `.devin-plugin/`, `.kimi-plugin/`, `gemini-extension.json` | `merge-gate.yml` (`Operator Skill Check`, `check:plugin-versions`) |
 | OpenAPI + docs | `docs:openapi` | `openapi.json` + `docs-site/content/docs/api-reference/**` | `merge-gate.yml` (`OpenAPI Spec Freshness Check`) |
 
 It does **not** stage or commit anything — it regenerates and reports. Commit the listed files yourself alongside the version bump.

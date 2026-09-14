@@ -13,7 +13,7 @@ data:
   {{- if .Values.config.publicMcpBaseUrl }}
   PUBLIC_MCP_BASE_URL: {{ .Values.config.publicMcpBaseUrl | quote }}
   {{- else if and .Values.ingress.enabled .Values.ingress.host }}
-  {{- $publicMcpScheme := ternary "https" "http" (gt (len .Values.ingress.tls) 0) }}
+  {{- $publicMcpScheme := ternary "https" "http" (eq (include "agent-swarm.ingressHasTls" .Values.ingress) "true") }}
   PUBLIC_MCP_BASE_URL: {{ printf "%s://%s" $publicMcpScheme .Values.ingress.host | quote }}
   {{- end }}
   {{- if .Values.config.slackAllowedEmailDomains }}

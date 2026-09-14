@@ -61,8 +61,15 @@ spec:
               value: {{ .Values.agentFs.port | quote }}
             - name: SERVER_PORT
               value: {{ .Values.agentFs.port | quote }}
+            {{- if eq .Values.agentFs.storageProvider "local" }}
+            - name: AGENT_FS_STORAGE_PROVIDER
+              value: local
+            - name: AGENT_FS_LOCAL_ROOT
+              value: /data/storage
+            {{- else }}
             - name: S3_BUCKET
               value: {{ .Values.agentFs.bucket | quote }}
+            {{- end }}
             - name: EMBEDDING_PROVIDER
               value: {{ .Values.agentFs.embedding.provider | quote }}
             - name: EMBEDDING_MODEL

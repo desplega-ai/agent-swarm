@@ -36,3 +36,6 @@ The resource names above assume release `swarm` without a name override.
 Keep port forwarding active while you execute the [API checks](https://github.com/desplega-ai/agent-swarm/blob/main/skills/agent-swarm/references/usage.md).
 
 agent-fs, shared RWX storage, ingress, and Litestream are optional. Configure them through the [chart README](https://github.com/desplega-ai/agent-swarm/blob/main/charts/agent-swarm/README.md).
+For a public API with HTTPS, set `ingress.host` and `ingress.certManager.clusterIssuer`, or set `config.publicMcpBaseUrl` when TLS terminates elsewhere. Execute the [HTTPS procedure](https://github.com/desplega-ai/agent-swarm/blob/main/skills/agent-swarm/references/https.md).
+A full values file with every official pool, agent-fs on local disk, and cert-manager is in [values-all-workers-agent-fs.yaml](https://github.com/desplega-ai/agent-swarm/blob/main/charts/agent-swarm/examples/values-all-workers-agent-fs.yaml).
+After installation, follow the [Kubernetes operations procedure](https://github.com/desplega-ai/agent-swarm/blob/main/skills/agent-swarm/references/operate-k8s.md) for upgrades, scaling, rotation, backups, and troubleshooting.

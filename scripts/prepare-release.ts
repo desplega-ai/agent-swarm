@@ -6,7 +6,8 @@
  * Run this after bumping the `version` field in package.json, then commit the
  * regenerated files alongside the bump. These are the artifacts CI gates on:
  *
- *   - sync-chart-version → charts/agent-swarm/Chart.yaml (helm-publish + docker-and-deploy)
+ *   - sync-chart-version   → charts/agent-swarm/Chart.yaml (helm-publish + docker-and-deploy)
+ *   - sync-plugin-versions → .claude-plugin/*, .codex-plugin/*, ... (merge-gate)
  *   - docs:openapi       → openapi.json + docs-site/content/docs/api-reference/** (merge-gate)
  *
  * Usage: bun run prepare-release
@@ -22,12 +23,19 @@ type Step = {
 
 const STEPS: Step[] = [
   { name: "Sync Helm chart version", run: ["sync-chart-version"] },
+  { name: "Sync harness plugin descriptor versions", run: ["sync-plugin-versions"] },
   { name: "Regenerate OpenAPI spec + API reference docs", run: ["docs:openapi"] },
 ];
 
 /** Paths touched by the steps above — surfaced at the end so you know what to commit. */
 const GENERATED_PATHS = [
   "charts/agent-swarm/Chart.yaml",
+  ".claude-plugin",
+  ".codex-plugin",
+  ".cursor-plugin",
+  ".devin-plugin",
+  ".kimi-plugin",
+  "gemini-extension.json",
   "openapi.json",
   "docs-site/content/docs/api-reference",
 ];

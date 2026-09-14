@@ -66,6 +66,17 @@ Give your coding agent the operator skill for Docker Compose or Kubernetes:
 npx skills add desplega-ai/agent-swarm
 ```
 
+Or install it as a plugin in your harness:
+
+| Harness | Command |
+|---|---|
+| Claude Code | `/plugin marketplace add desplega-ai/agent-swarm` then `/plugin install agent-swarm@agent-swarm` |
+| Codex | `codex plugin add https://github.com/desplega-ai/agent-swarm` (or use `npx skills` above) |
+| Cursor | `/add-plugin desplega-ai/agent-swarm` |
+| Gemini CLI | `gemini extensions install https://github.com/desplega-ai/agent-swarm` |
+| Antigravity / Factory Droid | `droid plugin marketplace add https://github.com/desplega-ai/agent-swarm` then `droid plugin install agent-swarm@agent-swarm` |
+| OpenCode, pi, Devin, Kimi, others | `npx skills add desplega-ai/agent-swarm` |
+
 Or use the examples directly:
 
 ```bash

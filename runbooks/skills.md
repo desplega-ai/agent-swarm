@@ -25,6 +25,8 @@ Keep `swarm-local-e2e` canonical in `.claude/internal-skills/swarm-local-e2e/`. 
 
 Public skills use absolute GitHub blob or documentation URLs because installed copies exist outside the repository. The skill must instruct agents to re-fetch current files from `main` before acting. Place long procedures in `references/*.md`.
 
+The same skill is exposed as a harness plugin through the descriptor files at the repository root: `.claude-plugin/plugin.json` + `marketplace.json` (Claude Code), `.codex-plugin/`, `.cursor-plugin/`, `.devin-plugin/`, `.kimi-plugin/`, `gemini-extension.json`, and `.agents/plugins/marketplace.json` (Antigravity / Factory Droid). Every descriptor points at `./skills/`, so the plugin contains exactly the operator skill and nothing from `plugin/`. Their `version` fields must equal `package.json`; `bun run prepare-release` rewrites them and `bun run check:plugin-versions` gates drift in the Operator Skill Check job.
+
 Run `bun run check:operator-skill` after changing public skills or their referenced files. Merge Gate checks frontmatter, tracked GitHub targets, and documentation URLs through HEAD requests with two retries. It also checks bundled reference files.
 
 Verify discovery from a scratch directory:

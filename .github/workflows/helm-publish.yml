@@ -76,6 +76,12 @@ jobs:
             --set ingress.host=swarm.example.com \
             > /dev/null
 
+      - name: Render — agent-fs local storage example
+        run: |
+          helm template release ${{ env.CHART_PATH }} \
+            -f ${{ env.CHART_PATH }}/examples/values-all-workers-agent-fs.yaml \
+            > /dev/null
+
   publish:
     name: Publish to GHCR
     needs: lint-and-render

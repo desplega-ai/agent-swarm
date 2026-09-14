@@ -137,16 +137,22 @@ spec:
             {{- end }}
           # Pool pods are pure outbound pollers (no HTTP listener). Probe
           # the agent process directly; harness CLIs only spawn per task.
+          # timeoutSeconds is raised from the 1s default: pgrep walks /proc,
+          # and on a node booting a dozen pools at once (skill sync, image
+          # unpack) that can exceed 1s. A failing readiness probe on ordinal 0
+          # blocks the StatefulSet from ever creating ordinal 1.
           livenessProbe:
             exec:
               command: ["pgrep", "-f", "agent-swarm"]
             initialDelaySeconds: 60
             periodSeconds: 30
+            timeoutSeconds: 5
           readinessProbe:
             exec:
               command: ["pgrep", "-f", "agent-swarm"]
             initialDelaySeconds: 30
             periodSeconds: 10
+            timeoutSeconds: 5
           lifecycle:
             preStop:
               exec:

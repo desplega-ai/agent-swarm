@@ -1,0 +1,21 @@
+{
+  "name": "agent-swarm",
+  "description": "Marketplace for the agent-swarm operator skill",
+  "owner": {
+    "name": "desplega.sh",
+    "email": "contact@desplega.sh"
+  },
+  "plugins": [
+    {
+      "name": "agent-swarm",
+      "description": "Install, deploy, and operate agent-swarm: Docker Compose, Kubernetes with Helm, HTTPS, agent-fs, integrations, and the API for coding agents",
+      "version": "1.148.0",
+      "source": "./",
+      "author": {
+        "name": "desplega.sh",
+        "email": "contact@desplega.sh",
+        "url": "https://github.com/desplega-ai"
+      }
+    }
+  ]
+}

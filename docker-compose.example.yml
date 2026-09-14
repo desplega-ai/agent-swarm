@@ -16,6 +16,13 @@
 #  In isolated environments where each container has its own network namespace,
 #  you may map all services to the same port (e.g. 3000:3000).
 #
+# HTTPS (optional):
+#  Start with `--profile tls` to add a Caddy reverse proxy that obtains
+#  Let's Encrypt certificates automatically for SWARM_API_DOMAIN (-> api)
+#  and AGENT_FS_DOMAIN (-> agent-fs). Set both domains, point their DNS at
+#  this host, open ports 80/443, and set PUBLIC_MCP_BASE_URL=https://<api domain>.
+#  Requires Docker Compose v2.23.1+ (inline `configs.content`).
+#
 # Provider mapping: claude -> claude, openai -> codex, openrouter -> pi,
 # bedrock -> pi (AWS Bedrock (alpha)).
 # Alpha: session summaries, memory rating, spend tracking and model tiers may be missing on Bedrock.
@@ -154,6 +161,12 @@ services:
 
       - MCP_BASE_URL=${MCP_BASE_URL}
       - APP_URL=${APP_URL}
+      # Browser/externally reachable API origin (OAuth redirects, webhooks,
+      # dashboard). Required when the API is behind HTTPS (see `--profile tls`).
+      - PUBLIC_MCP_BASE_URL=${PUBLIC_MCP_BASE_URL:-}
+      # Blank keeps the default allowlist (app.agent-swarm.dev + localhost UI).
+      # Set to your own dashboard origin when self-hosting the UI.
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-}
       # Provider credentials are also needed by workflow LLM nodes in the API service.
       - MODEL_OVERRIDE=${MODEL_OVERRIDE:-}
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
@@ -662,6 +675,44 @@ services:
 
     restart: unless-stopped
 
+  # ---------------------------------------------------------------------------
+  # Optional HTTPS front door. Only starts with `docker compose --profile tls`.
+  # Caddy terminates TLS with automatic Let's Encrypt certificates and proxies
+  # to the API and agent-fs over the compose network. When you use it, stop
+  # publishing 3013/7433 on a public interface (firewall or remove the `ports`
+  # entries above).
+  # ---------------------------------------------------------------------------
+  caddy:
+    image: caddy:2
+    profiles: ["tls"]
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      - SWARM_API_DOMAIN=${SWARM_API_DOMAIN:-}
+      - AGENT_FS_DOMAIN=${AGENT_FS_DOMAIN:-}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    configs:
+      - source: caddyfile
+        target: /etc/caddy/Caddyfile
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+
+configs:
+  caddyfile:
+    content: |
+      {$$SWARM_API_DOMAIN:swarm-api.localhost} {
+        reverse_proxy api:3013
+      }
+      {$$AGENT_FS_DOMAIN:swarm-files.localhost} {
+        reverse_proxy agent-fs:7433
+      }
+
 secrets:
   # Base64-encoded 32-byte AES-256-GCM key for swarm_config at-rest encryption.
   # Create with: `openssl rand -base64 32 > ./encryption_key` then chmod 600.
@@ -673,6 +724,8 @@ secrets:
 volumes:
   agent_fs_minio:
   agent_fs_data:
+  caddy_data:
+  caddy_config:
   swarm_api:
   swarm_logs:
   swarm_shared:

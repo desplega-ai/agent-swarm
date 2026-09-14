@@ -85,12 +85,33 @@ The chart exposes these API ingress values:
 
 The template routes `/` with `pathType: Prefix` to the API Service on `api.port` (default `3013`). This exposes the swarm API, including `/api/*` and `/mcp`; it does not serve the dashboard. The optional `agentFs.ingress` values control a separate service.
 
+### HTTPS with cert-manager
+
+The dashboard is served over HTTPS, so the API must be too; browsers block mixed content. The simplest path is [cert-manager](https://cert-manager.io/docs/installation/) with a ClusterIssuer. Name the issuer in the chart and skip the manual TLS Secret:
+
+```yaml
+ingress:
+  enabled: true
+  className: nginx
+  host: swarm-api.example.com
+  certManager:
+    clusterIssuer: letsencrypt-prod   # or `issuer:` for a namespaced Issuer
+```
+
+The chart adds the `cert-manager.io/cluster-issuer` annotation, generates a `tls` entry for `host` with the Secret `<release>-api-tls`, and derives `PUBLIC_MCP_BASE_URL` as `https://swarm-api.example.com`. Explicit `ingress.tls` entries take precedence when both are set. The same `certManager` block exists under `agentFs.ingress` (Secret `<release>-agent-fs-tls`).
+
+If your ingress controller issues certificates itself (Traefik, Caddy ingress controller) or TLS terminates in a proxy in front of the cluster, leave `certManager` blank, add the controller's annotations, and set `config.publicMcpBaseUrl` explicitly as described below.
+
+### Load balancer health checks
+
+The API returns `401` on `/`, so a load balancer that probes the default path marks every target unhealthy and the ingress never forwards traffic. Probe `/health`, which is unauthenticated. With `ingress.className: alb` the chart sets `alb.ingress.kubernetes.io/healthcheck-path: /health` automatically (also on the agent-fs ingress). For GKE, attach a `BackendConfig` with `healthCheck.requestPath: /health` through `ingress.annotations`. ingress-nginx and Traefik do not probe a path.
+
 ### Public API URL
 
 The chart keeps worker traffic on the internal `MCP_BASE_URL`. It sets `PUBLIC_MCP_BASE_URL`, used for OAuth callbacks and webhook URLs, in this order:
 
 1. Use `config.publicMcpBaseUrl` when explicitly set.
-2. Otherwise, when `ingress.enabled` is true and `ingress.host` is nonempty, derive the URL from that host: `https://` if `ingress.tls` has at least one entry, or `http://` if it is empty.
+2. Otherwise, when `ingress.enabled` is true and `ingress.host` is nonempty, derive the URL from that host: `https://` if `ingress.tls` has at least one entry or `ingress.certManager` names an issuer, or `http://` otherwise.
 3. Otherwise, leave `PUBLIC_MCP_BASE_URL` unset. The API falls back to the chart's internal `MCP_BASE_URL`.
 
 **An empty `ingress.tls` produces an `http://` public URL**, even when a load balancer terminates HTTPS elsewhere. The chart does not infer HTTPS from annotations or an external proxy. If TLS terminates outside ingress, or another gateway provides the public address, set the externally reachable API origin explicitly:
@@ -104,7 +125,7 @@ config:
 
 The API ingress does not expose agent-fs. Enable both `agentFs.enabled` and `agentFs.ingress.enabled` to create its separate Ingress. It routes `/` with `pathType: Prefix` to the agent-fs Service on `agentFs.port` (default `7433`).
 
-The `agentFs.ingress.enabled`, `className`, `annotations`, `host`, and `tls` fields have the same meanings and defaults as the API ingress fields above. Use a separate hostname and matching TLS Secret:
+The `agentFs.ingress.enabled`, `className`, `annotations`, `host`, `tls`, and `certManager` fields have the same meanings and defaults as the API ingress fields above. Use a separate hostname and matching TLS Secret:
 
 ```yaml
 # Merge with your agent-fs bucket and S3 credential configuration.

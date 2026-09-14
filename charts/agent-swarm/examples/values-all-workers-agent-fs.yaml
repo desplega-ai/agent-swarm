@@ -1,0 +1,291 @@
+# Sample values.yaml: one pool per official template, agent-fs (local disk) enabled.
+#
+# Install:
+#   kubectl create ns swarm
+#   helm install swarm ./charts/agent-swarm -n swarm -f charts/agent-swarm/examples/values-all-workers-agent-fs.yaml
+#
+# Replace every "CHANGE_ME" value before installing. For production, move
+# credentials into pre-created Secrets and set auth.existingSecret plus
+# agentFs.s3.existingSecret instead of inline values.
+
+image:
+  registry: ghcr.io
+  repository: desplega-ai/agent-swarm
+  pullPolicy: IfNotPresent
+  tag: ""            # empty = Chart.AppVersion
+
+workerImage:
+  registry: ghcr.io
+  repository: desplega-ai/agent-swarm-worker
+  pullPolicy: IfNotPresent
+  tag: ""            # empty = Chart.AppVersion; use "slim" for a smaller image without browser tooling
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# ---------------------------------------------------------------------------
+# Credentials (inline for quickstart; use existingSecret in production)
+# ---------------------------------------------------------------------------
+auth:
+  apiKey: CHANGE_ME_SWARM_API_KEY              # bearer between API and pool pods
+  claudeCodeOauthToken: CHANGE_ME              # claude harness (default provider)
+  anthropicApiKey: ""                          # pi / claude-managed providers
+  openaiApiKey: ""                             # codex provider
+  openrouterApiKey: ""                         # any provider via OpenRouter
+  githubToken: CHANGE_ME_GITHUB_PAT            # git clone / push / PRs inside agents
+  githubWebhookSecret: ""
+  slackBotToken: ""
+  slackAppToken: ""
+  slackSigningSecret: ""
+  secretsEncryptionKey: CHANGE_ME_BASE64_32_BYTES   # `openssl rand -base64 32`; required for agent-fs bootstrap key at rest
+  existingSecret: ""                           # set to a Secret name to ignore all inline values above
+
+config:
+  slackAllowedEmailDomains: ""
+  slackAllowedUserIds: ""
+  githubBotName: swarm-bot
+  githubEmail: swarm-bot@example.com
+  githubName: Swarm Bot
+  appUrl: https://app.agent-swarm.dev          # hosted dashboard (default)
+  publicMcpBaseUrl: https://swarm-api.example.com
+  extraEnv: {}
+
+# ---------------------------------------------------------------------------
+# API control plane (single replica, SQLite)
+# ---------------------------------------------------------------------------
+api:
+  replicas: 1
+  port: 3013
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      memory: 2Gi
+  runtimeClassName: ""
+  storage:
+    size: 10Gi
+    storageClassName: ""
+  terminationGracePeriodSeconds: 60
+
+service:
+  type: ClusterIP
+
+# HTTPS via cert-manager: the chart adds the issuer annotation, requests the
+# certificate, and derives an https public URL. Needs cert-manager plus a
+# ClusterIssuer named below (e.g. Let's Encrypt HTTP-01). If TLS terminates
+# elsewhere (Caddy, Traefik ACME, a cloud LB), leave certManager blank and
+# keep config.publicMcpBaseUrl set to the https origin.
+ingress:
+  enabled: true
+  className: nginx
+  annotations: {}
+  host: swarm-api.example.com
+  tls: []
+  certManager:
+    clusterIssuer: letsencrypt-prod
+
+# ---------------------------------------------------------------------------
+# Pool defaults
+# ---------------------------------------------------------------------------
+poolDefaults:
+  storage:
+    personalSize: 20Gi
+    storageClassName: ""
+  emptyDir:
+    sharedSizeLimit: 1Gi
+    logsSizeLimit: 1Gi
+  harnessProvider: claude    # claude | codex | opencode | pi | claude-managed | devin
+  yolo: true
+  terminationGracePeriodSeconds: 120
+  updateStrategy:
+    maxUnavailable: 50%
+
+# ---------------------------------------------------------------------------
+# Pools: one StatefulSet per official template.
+# Per-pool overrides: harnessProvider, modelOverride, storage.personalSize,
+# storage.storageClassName, emptyDir.*, devinMaxAcuLimit, systemPromptConfigMap.
+# ---------------------------------------------------------------------------
+pools:
+  # Orchestrator. Exactly one pool may have role: lead, with replicas: 1.
+  lead:
+    replicas: 1
+    role: lead
+    templateId: official/lead
+    maxConcurrentTasks: 5
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        memory: 4Gi
+
+  # Engineering
+  coder:
+    replicas: 2
+    templateId: official/coder
+    maxConcurrentTasks: 3
+    storage:
+      personalSize: 40Gi      # clones repos
+    emptyDir:
+      sharedSizeLimit: 4Gi
+    resources:
+      requests:
+        cpu: 1
+        memory: 2Gi
+      limits:
+        memory: 6Gi
+
+  reviewer:
+    replicas: 1
+    templateId: official/reviewer
+    maxConcurrentTasks: 3
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        memory: 4Gi
+
+  researcher:
+    replicas: 1
+    templateId: official/researcher
+    maxConcurrentTasks: 3
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        memory: 4Gi
+
+  tester:
+    replicas: 1
+    templateId: official/tester
+    maxConcurrentTasks: 2
+    resources:               # runs headless Chromium via agent-browser
+      requests:
+        cpu: 1
+        memory: 2Gi
+      limits:
+        memory: 6Gi
+
+  forward-deployed-engineer:
+    replicas: 1
+    templateId: official/forward-deployed-engineer
+    maxConcurrentTasks: 2
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        memory: 4Gi
+
+  # Frontend / web
+  ux-principles:
+    replicas: 1
+    templateId: official/ux-principles
+    maxConcurrentTasks: 2
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        memory: 4Gi
+
+  discoverability-optimizer:
+    replicas: 1
+    templateId: official/discoverability-optimizer
+    maxConcurrentTasks: 2
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        memory: 4Gi
+
+  # Content
+  content-strategist:
+    replicas: 1
+    templateId: official/content-strategist
+    maxConcurrentTasks: 2
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        memory: 2Gi
+
+  content-writer:
+    replicas: 1
+    templateId: official/content-writer
+    maxConcurrentTasks: 2
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        memory: 2Gi
+
+  content-reviewer:
+    replicas: 1
+    templateId: official/content-reviewer
+    maxConcurrentTasks: 2
+    # LLM-as-judge: the template expects a different model than the writer.
+    # Uncomment to run the judge on another harness (needs its credential in auth.*).
+    # harnessProvider: codex
+    # modelOverride: gpt-5.4
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        memory: 2Gi
+
+# ---------------------------------------------------------------------------
+# agent-fs: shared, searchable filesystem for all agents
+# ---------------------------------------------------------------------------
+agentFs:
+  enabled: true
+  image:
+    registry: ghcr.io
+    repository: desplega-ai/agent-fs
+    pullPolicy: IfNotPresent
+    tag: 0.13.5
+  port: 7433
+  storageProvider: local          # objects live on the agent-fs PVC at /data/storage; no S3 needed
+  apiKey: ""                      # blank = API boot seeder mints and stores the bootstrap key
+  appUrl: https://live.agent-fs.dev         # hosted agent-fs app (default)
+  bucket: ""                      # only used when storageProvider: s3
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 2Gi
+  storage:
+    size: 50Gi                    # holds the SQLite index AND every stored object
+    storageClassName: ""
+  # Public HTTPS for agent-fs so file links open in a browser.
+  ingress:
+    enabled: true
+    className: nginx
+    annotations: {}
+    host: swarm-files.example.com
+    tls: []
+    certManager:
+      clusterIssuer: letsencrypt-prod
+  s3: {}                          # ignored when storageProvider: local
+  embedding:
+    provider: local                 # local | openai | gemini
+    model: ""
+    apiKey: ""
+
+# Not needed when agent-fs is enabled.
+sharedVolume:
+  existingClaim: ""
+
+# Optional continuous SQLite backup to S3.
+litestream:
+  enabled: false

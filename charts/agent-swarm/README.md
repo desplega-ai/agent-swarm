@@ -96,6 +96,16 @@ agentFs:
     provider: local                         # Or openai/gemini + apiKey
 ```
 
+Local-disk variant (no bucket; objects live on the agent-fs PVC, so keep that PVC backed up):
+
+```yaml
+agentFs:
+  enabled: true
+  storageProvider: local
+  storage:
+    size: 50Gi
+```
+
 ### Option 2 — RWX shared volume
 
 If your cluster has a `ReadWriteMany`-capable storage class (NFS, EFS, Filestore, Azure Files, or any CSI driver advertising RWX), pre-create a PVC and point the chart at it:
@@ -106,6 +116,38 @@ sharedVolume:
 ```
 
 Every pool pod mounts that claim at `/workspace/shared`. Simpler than agent-fs but lacks search, comments, and conflict primitives — and the upstream agents won't automatically know about the shared mount unless you configure them to.
+
+## HTTPS
+
+The hosted dashboard at app.agent-swarm.dev is served over HTTPS, so browsers refuse a plain-HTTP API (mixed content). OAuth callbacks, webhooks, and page links also need a public HTTPS origin. Pick one path:
+
+**cert-manager (recommended).** Install [cert-manager](https://cert-manager.io/docs/installation/), create a ClusterIssuer, then name it in the chart. The chart adds the annotation, requests the certificate, and derives `PUBLIC_MCP_BASE_URL=https://<host>`:
+
+```yaml
+ingress:
+  enabled: true
+  className: nginx
+  host: swarm-api.example.com
+  certManager:
+    clusterIssuer: letsencrypt-prod
+agentFs:
+  ingress:
+    enabled: true
+    className: nginx
+    host: files.example.com
+    certManager:
+      clusterIssuer: letsencrypt-prod
+```
+
+**Ingress controller with built-in ACME (Traefik, Caddy ingress controller).** Set the controller's annotations under `ingress.annotations` and set `config.publicMcpBaseUrl: https://<host>` explicitly. An empty `ingress.tls` otherwise derives an `http://` public URL.
+
+**TLS terminated outside the cluster (Caddy or a cloud load balancer in front).** Keep `ingress.tls` empty and set `config.publicMcpBaseUrl: https://<host>` explicitly.
+
+Verify with `curl -fsS https://<host>/health` and check `PUBLIC_MCP_BASE_URL` in the API ConfigMap.
+
+### Load balancer health checks
+
+The API answers `401` on `/` (unknown paths are fail-closed), so a load balancer that probes `/` marks every target unhealthy and the ingress never forwards traffic. Probe the unauthenticated `/health` instead. With `ingress.className: alb` the chart sets `alb.ingress.kubernetes.io/healthcheck-path: /health` for you (same for the agent-fs ingress; agent-fs also serves `/health`). Other controllers that probe a path need the equivalent under `ingress.annotations`, for example GKE via a `BackendConfig` with `healthCheck.requestPath: /health`. ingress-nginx and Traefik do not probe a path and need nothing.
 
 ## Authentication
 

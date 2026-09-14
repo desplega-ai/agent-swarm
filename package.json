@@ -1,6 +1,6 @@
 {
   "name": "@desplega.ai/agent-swarm",
-  "version": "1.147.0",
+  "version": "1.148.0",
   "description": "agent-swarm.dev — an open-source operating system for AI work: a lead agent breaks goals into tasks, routes them to specialized workers such as Claude Code or Codex, runs each worker in an isolated container, and preserves shared memory, tools, schedules, and review gates so delegated work compounds across sessions.",
   "keywords": [
     "agent-swarm.dev",
@@ -111,6 +111,8 @@
     "prepare-release": "bun scripts/prepare-release.ts",
     "refresh:vendored-openapi": "bun scripts/refresh-vendored-openapi.ts",
     "sync-chart-version": "bun scripts/sync-chart-version.ts",
+    "sync-plugin-versions": "bun scripts/sync-plugin-versions.ts",
+    "check:plugin-versions": "bun scripts/sync-plugin-versions.ts --check",
     "bump:agent-fs": "bun scripts/bump-agent-fs.ts",
     "check-chart-version": "bun scripts/sync-chart-version.ts --check-if-package-version-changed",
     "cli": "bun src/cli.tsx",
