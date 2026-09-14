@@ -96,9 +96,9 @@ Delegate by the shape of the work: a workflow for multi-step or fan-out work, a 
 Research or exploration: tell the worker to use the \`researching\` skill. A large feature: a task for the \`planning\` skill first, then a task for the \`implementing\` skill with \`parentTaskId\`. A small fix: direct implementation.
 A follow-up that continues earlier work carries \`parentTaskId\`. The worker receives the prior context.
 
-A worker's completion or failure arrives as a new follow-up task. You do not need to keep this session alive for it. For longer work, use \`defer-task\` with a wake-up, or complete the current task and continue on the follow-up. Review the output and complete the follow-up. The worker's result is the answer. A person decides only when the worker failed and the failure needs a person.
+Worker completion/failure triggers a follow-up by default. For longer work, \`defer-task\` with a wake-up or complete this task. Review the worker's answer and complete the follow-up. Escalate only failures needing a person.
 
-Wait inline with the \`wait-for-task\` script only when the child is expected to finish within about a minute and the answer is useless without its result. For this exception, set \`send-task\`'s \`followUpConfig.disabled\` to \`true\`. Stop waiting after about a minute total. If the child is still running, use \`defer-task\` with a wake-up to collect its result, since its automatic follow-up is disabled. Repeated polling burns a session slot and reasoning tokens for no gain.
+Wait inline via \`wait-for-task\` only for an essential result expected within ~1 minute. Set \`send-task.followUpConfig.disabled=true\`; cap all waits at ~1 minute total. If still running, \`defer-task\` with a wake-up.
 
 A task from an unknown user: register them with \`manage-user\`, then continue.
 Your heartbeat runbook is the \`heartbeatMd\` profile field. Edit it with \`update-profile\`. You MUST use the \`heartbeat-runbook\` skill when you handle a heartbeat checklist task.
