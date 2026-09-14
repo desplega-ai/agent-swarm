@@ -5,7 +5,7 @@ topic: "Swarm extensions"
 tags: [brainstorm, extensions, events, runtime, pi]
 status: complete
 exploration_type: idea
-last_updated: 2026-09-12
+last_updated: 2026-09-14
 last_updated_by: Claude
 ---
 
@@ -445,6 +445,20 @@ RBAC `can()` gets a real subject and audit columns record which extension acted.
 Disable keeps the row but marks it inactive so history stays readable.
 `callOrigin: "extension"` also skips the wire limit in `ctxControlMiddleware` and is the mark the tool hooks use to bypass `pre.tool.call`.
 
+### Q: Should extensions be shaped as bundles?
+
+Taras raised this during the plan review on 2026-09-14: extensions could later come from a marketplace and could install schedules, workflows, and skills alongside hooks.
+He selected a bundle-shaped v1 with hooks-only content.
+
+**Insights:** The unit is a bundle: a JSON `manifest` plus a `files` map.
+`manifest.assets` names each asset by kind. v1 accepts only `hooks` (one TypeScript file).
+`skills`, `workflows`, and `schedules` are reserved keys. v1 rejects them with a clear message.
+The manifest is JSON so a marketplace can index it without evaluating code.
+The hooks file exports the default factory and an optional `config` Zod schema for typing and validation.
+Verbs are install and uninstall. Enable and disable stay as they are.
+Storage keeps one row per bundle plus a files table, so multi-asset bundles need no schema rename later.
+A remote source (git tag or npm tarball) is the v2 marketplace path and folds into the deferred external-package decision.
+
 ## Synthesis
 
 ### Contract sketch
@@ -575,11 +589,12 @@ A handler that returns a `modify` with the wrong shape, or registers a `worker` 
 - Handlers for one event run sequentially by ascending priority (default 100, ties by name). Each modify feeds the next handler. First block wins.
 - Failures fail open: a throw or a 5 second timeout counts as continue, is logged, and increments a consecutive-failure counter. Five in a row auto-disable the extension until an operator re-enables it. Known limit: a timeout in an enforcement rule such as a `pre.tool.call` style check lets that call through. The run log is the audit trail.
 - `ctx` exposes `swarm` (script tool surface, in-process, system identity), `state` (extension-scoped KV), `config`, `log` (scrubbed), `signal`, and `event`. No raw DB client.
-- Storage: new `extensions` and `extension_versions` tables shaped like `scripts` and `script_versions`, with lifecycle columns. Rollback re-activates an older version row.
+- Bundle-shaped unit: `{ manifest, files }`. `manifest` is JSON with `name`, `description`, `version`, `runtime`, `assets`. v1 supports `assets.hooks` only; `skills`, `workflows`, `schedules` are reserved and rejected. Verbs: install, uninstall, enable, disable, activate-version.
+- Storage: new `extensions`, `extension_files`, `extension_versions`, and `extension_runs` tables. A version snapshots manifest plus files. Rollback re-activates an older version row.
 - Loading: write source to a hash-named temp file and `await import()` it. Bun's runtime transpiles TypeScript inside the compiled binary (verified). Reload at once on any write. Load all enabled extensions at boot.
 - Imports: the scripts allowlist (`zod`, `stdlib`) plus `swarm-extension`, resolved through the existing bare-import shim writer. No relative imports in v1. npm packages are v2.
-- Surfaces: REST routes, a Settings → Extensions dashboard page, and `extension-upsert` / `extension-list` MCP tools. Agents author, operators activate. MCP upserts land disabled.
-- Activation on upsert: an operator REST upsert of an enabled extension activates the new version at once, because the operator holds the activate permission. An MCP upsert never changes `enabled` or `activeVersion`. A new version of a disabled extension stays disabled from either surface.
+- Surfaces: REST routes, a Settings → Extensions dashboard page, and `extension-install` / `extension-list` MCP tools. Agents author, operators activate. MCP upserts land disabled.
+- Activation on install: an operator REST install of an enabled extension activates the new version at once, because the operator holds the activate permission. An MCP install never changes `enabled` or `activeVersion`. A new version of a disabled extension stays disabled from either surface.
 - Identity: enable creates a system agent `ext:<name>`. Its id signs every `ctx.swarm.*` call with `callOrigin: "extension"`. Disable marks it inactive.
 - `pre.task.create` modify payload is the input-only subset of `CreateTaskOptions` listed in the research facts. The boundary drops derived fields from a modify result and logs each dropped field.
 - `pre.heartbeat.remediate` payload is a new struct `{ task, classification: "no-session" | "stale-session" | "fresh-stalled", proposedAction: "supersede-resume" | "fail" | "record" }`. Modify may change `proposedAction`; block skips remediation for that task.

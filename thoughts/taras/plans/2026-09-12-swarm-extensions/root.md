@@ -3,7 +3,7 @@ date: 2026-09-12T00:00:00+02:00
 author: Taras
 plan_type: dag
 status: in-progress
-last_updated: 2026-09-12
+last_updated: 2026-09-14
 last_updated_by: Claude
 autonomy: critical
 ---
@@ -12,7 +12,7 @@ autonomy: critical
 
 ## Overview
 
-Add a swarm-level extension system: single-file TypeScript extensions stored in the DB, loaded in-process in the API server, that receive `pre.*` events (continue, modify, or block) and `post.*` events (observe) at fixed orchestration boundaries.
+Add a swarm-level extension system: bundle-shaped extensions (`{ manifest, files }`) stored in the DB, loaded in-process in the API server, that receive `pre.*` events (continue, modify, or block) and `post.*` events (observe) at fixed orchestration boundaries. v1 bundles carry one asset, `hooks.ts`; the manifest reserves `skills`, `workflows`, and `schedules` for v2 and a marketplace source.
 
 - **Motivation**: operators need to change routing, follow-up, heartbeat, tool-call, and task-creation behavior without a core change per customization. Five motivating examples are in the brainstorm.
 - **Related**: `thoughts/taras/brainstorms/2026-09-10-swarm-extensions.md` (all decisions, contract sketch, v1 events table, verified facts). Read its Synthesis section before any step.
@@ -49,7 +49,7 @@ Add a swarm-level extension system: single-file TypeScript extensions stored in 
 
 ## Desired End State
 
-An operator saves a single-file TypeScript extension through REST, the dashboard, or an MCP tool. Upsert runs the import allowlist and a typecheck against a generated `swarm-extension.d.ts`. Enable creates a system agent `ext:<name>`, imports the source in-process, and registers its handlers. From then on:
+An operator installs a bundle (`manifest` JSON + `files["hooks.ts"]`) through REST, the dashboard, or an MCP tool. Install validates the manifest, runs the import allowlist, and typechecks the hooks file against a generated `swarm-extension.d.ts`. Enable creates a system agent `ext:<name>`, imports the source in-process, and registers its handlers. From then on:
 
 - `pre.task.create`, `pre.task.followUp`, `pre.slack.route`, `pre.heartbeat.remediate`, and `pre.tool.call` run the enabled handlers by priority, first block wins, each modify feeding the next, never inside a DB transaction.
 - `post.task.*`, `post.slack.message`, and `post.tool.call` fan out after commit from the existing bus and the registrar.
@@ -61,9 +61,10 @@ Verification: the per-step suites, `bun run e2e --only extensions`, and an `agen
 
 ## What We're NOT Doing
 
-- No worker-side loader or worker events (`runtime: "worker"` is rejected on upsert in v1).
+- No worker-side loader or worker events (`runtime: "worker"` is rejected on install in v1).
 - No Pi extension compatibility shim. Pi workers keep their native `extensionFactories` path untouched.
-- No npm packages or multi-file extensions. Imports are `swarm-extension`, `zod`, `stdlib`.
+- No npm packages. Imports are `swarm-extension`, `zod`, `stdlib`.
+- No assets other than `hooks` in v1: `manifest.assets.skills`, `.workflows`, `.schedules` are rejected with a clear message. No remote bundle source (git/npm marketplace).
 - No `pre.task.claim`, `pre.prompt.resolve`, `pre.slack.send`, or `pre.heartbeat.classify`.
 - No `pre.slack.route` on the Slack assistant API, modal actions, or thread-buffer flush.
 - No host isolation. Extensions are trusted operator code.
@@ -73,6 +74,7 @@ Verification: the per-step suites, `bun run e2e --only extensions`, and an `agen
 ## Implementation Approach
 
 - Copy the scripts feature layer by layer: migration, `src/be/extensions/db.ts`, `src/http/extensions.ts`, MCP tools, Monaco page.
+- Bundle shape from day one: JSON manifest + files map, an `extension_files` table, install/uninstall verbs. v1 only implements the `hooks` asset so later asset kinds add rows and a handler, not a rename.
 - Keep the contract in one file, `src/extensions/contract.ts`, and generate `swarm-extension.d.ts` from it so the typecheck, the loader, and the UI editor share one source of truth.
 - One dispatcher module, `src/extensions/dispatcher.ts`, owns the registry, the priority chain, the 5 s cap, fail-open, the failure counter, and the run log. Boundaries call `dispatchPre(name, payload)` / `dispatchPost(name, payload)` and apply the result; they never touch the registry.
 - `pre.*` dispatch happens at entry points before any transaction. `isInTransaction()` guards every dispatch and logs a violation.
@@ -107,7 +109,7 @@ graph TD
     step-4[step-4: pre.slack.route]
     step-5[step-5: pre.heartbeat.remediate]
     step-6[step-6: pre.tool.call + post.tool.call]
-    step-7[step-7: MCP tools extension-upsert / extension-list]
+    step-7[step-7: MCP tools extension-install / extension-list]
     step-8[step-8: Dashboard Settings → Extensions page]
     step-9[step-9: Integration: e2e scenario, docs, drift checks]
     step-1 --> step-2
@@ -134,7 +136,7 @@ graph TD
 | step-4 | pre.slack.route | step-2 | ready | [step-4.md](./step-4.md) |
 | step-5 | pre.heartbeat.remediate | step-2 | ready | [step-5.md](./step-5.md) |
 | step-6 | pre.tool.call + post.tool.call | step-2 | ready | [step-6.md](./step-6.md) |
-| step-7 | MCP tools extension-upsert / extension-list | step-2 | ready | [step-7.md](./step-7.md) |
+| step-7 | MCP tools extension-install / extension-list | step-2 | ready | [step-7.md](./step-7.md) |
 | step-8 | Dashboard Settings → Extensions page | step-2 | ready | [step-8.md](./step-8.md) |
 | step-9 | Integration: e2e scenario, docs, drift checks | step-3, step-4, step-5, step-6, step-7 | ready | [step-9.md](./step-9.md) |
 
@@ -180,9 +182,9 @@ export DATABASE_PATH=/tmp/ext-e2e.sqlite; rm -f $DATABASE_PATH*
 bun run start:http &                                   # API on :3013, key 123123
 API=http://localhost:3013; KEY=123123
 
-# 1. Upsert the Slack-routing example
-curl -s -X POST $API/api/extensions/upsert -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
-  -d @src/tests/fixtures/extensions/route-slack-channel.json          # {name, source, config}
+# 1. Install the Slack-routing example bundle
+curl -s -X POST $API/api/extensions/install -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
+  -d @src/tests/fixtures/extensions/route-slack-channel.bundle.json   # {manifest, files: {"hooks.ts": "..."}, config}
 # 2. Enable it (operator key)
 curl -s -X POST $API/api/extensions/<id>/enable -H "Authorization: Bearer $KEY"
 # 3. Confirm the ext agent exists and the extension is loaded
@@ -191,7 +193,7 @@ curl -s $API/api/extensions/<id> -H "Authorization: Bearer $KEY" | jq '{status, 
 # 4. Trigger a task creation and read the run log
 curl -s -X POST $API/api/tasks -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' -d '{"task":{"task":"hello from e2e"}}'
 curl -s $API/api/extensions/<id>/runs -H "Authorization: Bearer $KEY" | jq '.[0]'
-# 5. Break it: upsert a version that throws, enable, create 5 tasks, expect status auto-disabled
+# 5. Break it: install a version whose hooks.ts throws, enable, create 5 tasks, expect status auto-disabled
 curl -s $API/api/extensions/<id> -H "Authorization: Bearer $KEY" | jq '.status'
 # 6. Roll back
 curl -s -X POST $API/api/extensions/<id>/activate-version -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' -d '{"version":1}'
@@ -201,7 +203,7 @@ agent-browser open http://localhost:5274/settings/extensions && agent-browser sc
 
 ## Appendix
 
-- **Follow-up plans**: v2 worker loader + worker events; `pre.heartbeat.classify`; `pre.task.claim` / `pre.prompt.resolve` / `pre.slack.send`; npm package imports; seeded examples.
+- **Follow-up plans**: bundle assets `skills` / `workflows` / `schedules` installed through the existing skills, workflow, and schedule APIs with uninstall cleanup; marketplace = remote bundle source (git tag / npm tarball) with signature or pin; v2 worker loader + worker events; `pre.heartbeat.classify`; `pre.task.claim` / `pre.prompt.resolve` / `pre.slack.send`; npm package imports; seeded examples.
 - **Derail notes**: `src/tools/send-task.ts` re-runs `evaluateDedupGuards` inside its transaction; a `pre.task.create` modify that changes the description changes the dedup key, which is correct but worth a test. `POST /api/scripts/run` has no `rbac` key in the route def; not touched here.
 - **References**:
   - Brainstorm: `thoughts/taras/brainstorms/2026-09-10-swarm-extensions.md`
