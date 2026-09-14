@@ -85,6 +85,10 @@ The chart exposes these API ingress values:
 
 The template routes `/` with `pathType: Prefix` to the API Service on `api.port` (default `3013`). This exposes the swarm API, including `/api/*` and `/mcp`; it does not serve the dashboard. The optional `agentFs.ingress` values control a separate service.
 
+### Load balancer health checks
+
+Configure a cloud load balancer to probe `/health`, not `/`. The ingress route uses `/` for API traffic, but that endpoint requires authentication and returns `401` to an unauthenticated health check, so the load balancer never marks the backend healthy. For AWS ALB, set `alb.ingress.kubernetes.io/healthcheck-path: /health` and `alb.ingress.kubernetes.io/success-codes: "200"` in the ingress annotations. For GCE, point `cloud.google.com/backend-config` at a BackendConfig whose `healthCheck.requestPath` is `/health`. Apply the same setting to `agentFs.ingress.annotations` when you expose agent-fs through its own load balancer.
+
 ### Public API URL
 
 The chart keeps worker traffic on the internal `MCP_BASE_URL`. It sets `PUBLIC_MCP_BASE_URL`, used for OAuth callbacks and webhook URLs, in this order:

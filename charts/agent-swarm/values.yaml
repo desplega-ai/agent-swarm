@@ -226,6 +226,11 @@ ingress:
   # -- IngressClass name. Common values: nginx, traefik, alb, gce.
   className: ""
   annotations: {}
+  # Example ALB health-check annotations (replace `annotations: {}`):
+  # annotations:
+  #   alb.ingress.kubernetes.io/healthcheck-path: /health
+  #   alb.ingress.kubernetes.io/success-codes: "200"
+  # GCE: cloud.google.com/backend-config: '{"default": "agent-swarm-healthcheck"}' (BackendConfig healthCheck.requestPath: /health).
   host: ""
   tls: []
 
@@ -262,6 +267,11 @@ agentFs:
     enabled: false
     className: ""
     annotations: {}
+    # Example ALB health-check annotations (replace `annotations: {}`):
+    # annotations:
+    #   alb.ingress.kubernetes.io/healthcheck-path: /health
+    #   alb.ingress.kubernetes.io/success-codes: "200"
+    # GCE: cloud.google.com/backend-config: '{"default": "agent-swarm-healthcheck"}' (BackendConfig healthCheck.requestPath: /health).
     host: ""
     tls: []
   # S3-compatible credentials. Either inline or pre-existing Secret.
