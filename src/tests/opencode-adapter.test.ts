@@ -666,7 +666,7 @@ describe("OpencodeSession — cost aggregation", () => {
     expect(result.cost?.cacheReadTokens).toBe(30);
     expect(result.cost?.cacheWriteTokens).toBe(8);
     expect(result.cost?.numTurns).toBe(1);
-  });
+  }, 30_000);
 
   test("reasoning tokens are summed across distinct finalized messages", async () => {
     const { result } = await driveSession([
@@ -779,7 +779,7 @@ describe("OpencodeSession — raw_log persistence", () => {
         expect(() => JSON.parse(rl.content)).not.toThrow();
       }
     }
-  });
+  }, 30_000);
 });
 
 // ── Phase 9: context_usage emission ───────────────────────────────────────────

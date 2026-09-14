@@ -11,6 +11,7 @@ import {
   createTaskExtended,
   failTask,
   getDbClient,
+  getLogsByTaskId,
   getScheduledTaskById,
   getTaskById,
   initDb,
@@ -124,6 +125,46 @@ async function awaitChild(scheduleId: string) {
 }
 
 describe("defer-task wakeOn", () => {
+  test("schema output stays verbatim while a task event wakes the continuation", async () => {
+    const parent = await createTaskExtended("structured deferral", {
+      agentId,
+      outputSchema: { type: "string" },
+    });
+    await startTask(parent.id);
+    const producer = await activeTask();
+
+    for (const output of [undefined, "not JSON", "42"]) {
+      const result = await defer(parent.id, producer.id, "settled", { output });
+      expect(result.structuredContent.success).toBe(false);
+      expect((await getTaskById(parent.id))?.status).toBe("in_progress");
+      expect(
+        await getDbClient().query("SELECT id FROM scheduled_tasks WHERE parentTaskId = ?", [
+          parent.id,
+        ]),
+      ).toHaveLength(0);
+    }
+
+    const output = ' "deploy pending"\n';
+    const result = await defer(parent.id, producer.id, "settled", { output });
+    expect(result.structuredContent.success).toBe(true);
+    expect((await getTaskById(parent.id))?.output).toBe(output);
+    const scheduleId = result.structuredContent.scheduleId!;
+    const logs = (await getLogsByTaskId(parent.id)).filter(
+      (log) => log.eventType === "task_progress",
+    );
+    expect(logs).toHaveLength(1);
+    expect(logs[0]!.newValue).toContain("Work submitted");
+    expect(logs[0]!.newValue).toContain(scheduleId);
+
+    await completeTask(producer.id, "ready");
+    await reconcileDeferredTaskWaits(producer.id);
+    const found = await children(scheduleId);
+    expect(found).toHaveLength(1);
+    expect(found[0]!.parentTaskId).toBe(parent.id);
+    expect(found[0]!.task).toContain("Wake-up cause: task.completed");
+    expect((await getTaskById(parent.id))?.output).toBe(output);
+  });
+
   test("event fires first: completion bus wakes the normal child and consumes the ceiling", async () => {
     await initDeferredTaskWaits();
     const { parent, producer, schedule } = await fixture("task.completed");
