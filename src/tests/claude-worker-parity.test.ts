@@ -235,6 +235,7 @@ async function runTransport(transport: "cli" | "sdk", agentId: string): Promise<
   const created = await api("POST", "/api/tasks", {
     body: {
       task: `Run the deterministic Claude ${transport} transport parity fixture and report completion.`,
+      routingReason: "human_pinned",
       agentId,
       source: "api",
     },
@@ -373,6 +374,7 @@ async function runCredentialRotation(): Promise<void> {
   const firstCreated = await api("POST", "/api/tasks", {
     body: {
       task: "Run the first deterministic credential rotation fixture task.",
+      routingReason: "human_pinned",
       agentId: ROTATION_AGENT_ID,
       source: "api",
     },
@@ -483,6 +485,7 @@ async function runCredentialRotation(): Promise<void> {
     const secondCreated = await api("POST", "/api/tasks", {
       body: {
         task: "Run the second deterministic credential rotation fixture task.",
+        routingReason: "human_pinned",
         agentId: ROTATION_AGENT_ID,
         source: "api",
       },

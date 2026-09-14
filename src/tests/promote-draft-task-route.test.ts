@@ -123,6 +123,7 @@ describe("POST /api/tasks draft:true + /promote-draft (#1240)", () => {
   test("draft:true creates a task in draft status, invisible to the assigned agent's dispatch queue", async () => {
     const created = await api("POST", "/api/tasks", {
       task: "session with attachments uploading",
+      routingReason: "human_pinned",
       agentId: leadAgentId,
       source: "ui",
       draft: true,
@@ -138,6 +139,7 @@ describe("POST /api/tasks draft:true + /promote-draft (#1240)", () => {
   test("promote-draft transitions draft -> pending for an owned task", async () => {
     const created = await api("POST", "/api/tasks", {
       task: "another draft session",
+      routingReason: "human_pinned",
       agentId: leadAgentId,
       source: "ui",
       draft: true,
@@ -153,6 +155,7 @@ describe("POST /api/tasks draft:true + /promote-draft (#1240)", () => {
   test("promote-draft is idempotent — a second call returns the already-promoted task", async () => {
     const created = await api("POST", "/api/tasks", {
       task: "idempotency check",
+      routingReason: "human_pinned",
       agentId: leadAgentId,
       source: "ui",
       draft: true,
@@ -188,6 +191,7 @@ describe("POST /api/tasks draft:true + /promote-draft (#1240)", () => {
       "/api/tasks",
       {
         task: "owned draft session",
+        routingReason: "human_pinned",
         agentId: leadAgentId,
         source: "ui",
         draft: true,

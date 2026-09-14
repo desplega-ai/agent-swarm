@@ -370,7 +370,7 @@ describe("MCP gate matrix", () => {
     const create = async () => {
       const res = await api(base, "POST", "/api/tasks", {
         agentId: WORKER_A, // X-Agent-ID of the create request records creatorAgentId
-        body: { task: "e2e cancel target", agentId: WORKER_B },
+        body: { task: "e2e cancel target", routingReason: "human_pinned", agentId: WORKER_B },
       });
       expect([200, 201]).toContain(res.status);
       return (res.body.id ?? res.body.task?.id) as string;
@@ -522,7 +522,7 @@ describe("HTTP gates", () => {
   test("fs mutate: operator and user allowed; invalid bearer dies at auth layer", async () => {
     const created = await api(base, "POST", "/api/tasks", {
       agentId: WORKER_A,
-      body: { task: "e2e fs target", agentId: WORKER_B },
+      body: { task: "e2e fs target", routingReason: "human_pinned", agentId: WORKER_B },
     });
     const taskId = (created.body.id ?? created.body.task?.id) as string;
 

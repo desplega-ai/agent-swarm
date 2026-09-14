@@ -568,6 +568,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "148_pages_svg.sql");
       // 151 repairs scheduled_tasks, which this migration-112-only fixture does not create.
       markMigrationApplied(database, "151_repair_scheduled_task_required_params.sql");
+      // 152 indexes task routing context absent from this migration-112-only fixture.
+      markMigrationApplied(database, "152_routing_decisions.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

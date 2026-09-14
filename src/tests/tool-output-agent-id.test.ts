@@ -164,6 +164,7 @@ describe("agent-id fields accept non-UUID agent ids", () => {
   test("send-task input accepts a slug agentId target", () => {
     const parsed = sendTaskInputSchema.parse({
       agentId: SLUG_WORKER_ID,
+      routingReason: "skill",
       task: "do the thing",
     });
     expect(parsed.agentId).toBe(SLUG_WORKER_ID);
