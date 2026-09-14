@@ -36,6 +36,7 @@ import {
   IDENTITY_FIELD_BUDGETS,
 } from "../utils/identity-field-budget.ts";
 import { scrubSecrets } from "../utils/secret-scrubber.ts";
+import { prependContextPreamble } from "./context-preamble.ts";
 import "./templates.ts";
 
 export const SOUL_MD_PATH = "/workspace/SOUL.md";
@@ -278,7 +279,9 @@ export async function prependProfileSyncRejectionBanner(
   readFile: FileReader = readFileIfExists,
 ): Promise<{ prompt: string; injected: boolean }> {
   const banner = await fetchProfileSyncRejectionBanner(config, fetchImpl, readFile);
-  return banner ? { prompt: banner + prompt, injected: true } : { prompt, injected: false };
+  return banner
+    ? { prompt: prependContextPreamble(prompt, banner), injected: true }
+    : { prompt, injected: false };
 }
 
 export async function writeIdentityBaselines(baselines: IdentityBaselines): Promise<void> {

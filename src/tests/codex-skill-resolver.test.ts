@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { prependContextPreamble } from "../commands/context-preamble";
 import { resolveCodexPrompt } from "../providers/codex-skill-resolver";
 import type { ProviderEvent } from "../providers/types";
 
@@ -41,6 +42,24 @@ async function writeSkill(name: string, content: string): Promise<void> {
 }
 
 describe("resolveCodexPrompt", () => {
+  test("expands a follow-up skill while preserving parent context and current task", async () => {
+    const skillBody = await Bun.file(
+      new URL("../../templates/skills/work-on-task/SKILL.md", import.meta.url),
+    ).text();
+    await writeSkill("work-on-task", skillBody);
+    const prompt = "/work-on-task child-id\n\nTask: continue work\n";
+    const preamble = "\n---\n## Prior Conversation Context\nParent: parent-id\n\n";
+
+    // The old ordering makes the resolver pass through an unexpanded slash line.
+    expect(await resolveCodexPrompt(preamble + prompt, skillsDir)).toBe(preamble + prompt);
+    const resolved = await resolveCodexPrompt(prependContextPreamble(prompt, preamble), skillsDir);
+    expect(resolved.startsWith(skillBody)).toBe(true);
+    expect(resolved).toContain("User request: child-id");
+    expect(resolved).toContain(preamble);
+    expect(resolved).toContain("Task: continue work");
+    expect(resolved).not.toContain("/work-on-task child-id");
+  });
+
   test("inlines known skill and preserves trailing args + body", async () => {
     const skillBody = "You are a task worker. Follow these steps carefully.";
     await writeSkill("work-on-task", skillBody);
