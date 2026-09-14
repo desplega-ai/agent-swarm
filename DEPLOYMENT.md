@@ -572,6 +572,8 @@ uses the swarm context preamble.
 
 Enable Slack for task creation and agent communication via direct messages.
 
+Files shared with the bot, and files fetched by task-scoped `slack-read` or `slack-download-file` calls, are stored through the file provider as task attachments. Workers fetch them with the returned command and need no disk shared with the API. Without a task, downloads remain on the API server: mount the shared volume at the fallback path if workers need to read those files (see the volume comments in `docker-compose.example.yml`).
+
 ### Setup
 
 1. Create a Slack App at https://api.slack.com/apps (or import `slack-manifest.json` from the repo root)
