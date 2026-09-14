@@ -786,6 +786,82 @@ describe("ui logs parser", () => {
     ]);
   });
 
+  test("surfaces originalType and a value summary for codex item.type unknown", () => {
+    const messages = parseSessionLogs([
+      log("sleep", "codex", 1, {
+        type: "item.completed",
+        item: {
+          id: "call-1",
+          type: "unknown",
+          originalType: "sleep",
+          value: { durationMs: 30000 },
+        },
+      }),
+      log("image", "codex", 2, {
+        type: "item.completed",
+        item: {
+          id: "exec-1",
+          type: "unknown",
+          originalType: "imageView",
+          value: { path: "/workspace/personal/meme/spongebob.jpg" },
+        },
+      }),
+      log("subagent", "codex", 3, {
+        type: "item.completed",
+        item: {
+          id: "subagent-1",
+          type: "unknown",
+          originalType: "subAgentActivity",
+          value: { kind: "completed", agentPath: "/root/standards_review" },
+        },
+      }),
+      log("collab", "codex", 4, {
+        type: "item.completed",
+        item: {
+          id: "collab-1",
+          type: "unknown",
+          originalType: "collabAgentToolCall",
+          value: { tool: "wait", status: "completed" },
+        },
+      }),
+    ]);
+
+    expect(messages.map((message) => message.content[0])).toEqual([
+      expect.objectContaining({
+        kind: "unknown",
+        data: expect.objectContaining({
+          type: "item.completed · sleep",
+          itemType: "sleep",
+          detail: "sleep 30s",
+        }),
+      }),
+      expect.objectContaining({
+        kind: "unknown",
+        data: expect.objectContaining({
+          type: "item.completed · imageView",
+          itemType: "imageView",
+          detail: "spongebob.jpg",
+        }),
+      }),
+      expect.objectContaining({
+        kind: "unknown",
+        data: expect.objectContaining({
+          type: "item.completed · subAgentActivity",
+          itemType: "subAgentActivity",
+          detail: "completed · /root/standards_review",
+        }),
+      }),
+      expect.objectContaining({
+        kind: "unknown",
+        data: expect.objectContaining({
+          type: "item.completed · collabAgentToolCall",
+          itemType: "collabAgentToolCall",
+          detail: "wait · completed",
+        }),
+      }),
+    ]);
+  });
+
   test("normalizes claude-managed raw SSE events without unknown noise", () => {
     const result = normalizeSessionLogs([
       log("status", "claude-managed", 1, {
