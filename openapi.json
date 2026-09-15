@@ -1688,7 +1688,8 @@
               "credential_missing",
               "broken_task",
               "to_read",
-              "to_start_template"
+              "to_start_template",
+              "notification"
             ]
           },
           "itemId": {
@@ -16529,7 +16530,8 @@
                 "credential_missing",
                 "broken_task",
                 "to_read",
-                "to_start_template"
+                "to_start_template",
+                "notification"
               ]
             },
             "required": false,
@@ -16607,7 +16609,8 @@
                       "credential_missing",
                       "broken_task",
                       "to_read",
-                      "to_start_template"
+                      "to_start_template",
+                      "notification"
                     ]
                   },
                   "itemId": {

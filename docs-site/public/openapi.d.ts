@@ -6168,7 +6168,7 @@ export interface paths {
                 query: {
                     userId: string;
                     status?: "open" | "snoozed" | "dismissed" | "done";
-                    itemType?: "approval" | "credential_missing" | "broken_task" | "to_read" | "to_start_template";
+                    itemType?: "approval" | "credential_missing" | "broken_task" | "to_read" | "to_start_template" | "notification";
                 };
                 header?: never;
                 path?: never;
@@ -6225,7 +6225,7 @@ export interface paths {
                     "application/json": {
                         userId: string;
                         /** @enum {string} */
-                        itemType: "approval" | "credential_missing" | "broken_task" | "to_read" | "to_start_template";
+                        itemType: "approval" | "credential_missing" | "broken_task" | "to_read" | "to_start_template" | "notification";
                         itemId: string;
                         /** @enum {string} */
                         status: "open" | "snoozed" | "dismissed" | "done";
@@ -20922,7 +20922,7 @@ export interface components {
             id: string;
             userId: string;
             /** @enum {string} */
-            itemType: "approval" | "credential_missing" | "broken_task" | "to_read" | "to_start_template";
+            itemType: "approval" | "credential_missing" | "broken_task" | "to_read" | "to_start_template" | "notification";
             itemId: string;
             /** @enum {string} */
             status: "open" | "snoozed" | "dismissed" | "done";
