@@ -101,8 +101,8 @@ describe("getAllTasks / getTasksCount requestedByUserId filter", () => {
 // `GET /api/tasks` handler actually translates the `?requestedByUserId=none`
 // sentinel into `requestedByUserIdIsNull`, or that the omitted-param path
 // stays backwards compatible.
-const ROUTE_TEST_DB_PATH = "./test-tasks-requested-by-filter-route.sqlite";
-const ROUTE_API_KEY = "test-tasks-requested-by-filter-route";
+const ROUTE_TEST_DB_PATH = "./example-test-tasks-requested-by-filter-route.sqlite";
+const ROUTE_API_KEY = "example-test-tasks-requested-by-filter-route";
 
 async function removeDbFiles(path: string): Promise<void> {
   for (const suffix of ["", "-wal", "-shm"]) {

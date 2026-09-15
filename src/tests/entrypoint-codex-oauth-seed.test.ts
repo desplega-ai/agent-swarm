@@ -90,8 +90,8 @@ describe("docker-entrypoint.sh: codex_oauth boot-seed jq transform", () => {
         OPENAI_API_KEY: null,
         tokens: {
           id_token: "id-tok",
-          access_token: "access-tok",
-          refresh_token: "live-refresh-tok",
+          access_token: "example-access-tok",
+          refresh_token: "example-live-refresh-tok",
           account_id: "acct-123",
         },
         last_refresh: "2026-07-01T00:00:00.000Z",
@@ -109,7 +109,7 @@ describe("docker-entrypoint.sh: codex_oauth boot-seed jq transform", () => {
       expect(result.tokens.refresh_token).toBe("");
       expect(result.auth_mode).toBe("chatgpt");
       expect(result.tokens.id_token).toBe("id-tok");
-      expect(result.tokens.access_token).toBe("access-tok");
+      expect(result.tokens.access_token).toBe("example-access-tok");
       expect(result.tokens.account_id).toBe("acct-123");
       expect(result.last_refresh).toBe("2026-07-01T00:00:00.000Z");
     },
@@ -120,8 +120,8 @@ describe("docker-entrypoint.sh: codex_oauth boot-seed jq transform", () => {
     "blanks refresh_token for a flat {access,refresh,accountId,expires} input",
     async () => {
       const result = (await runJqFilter(filter, {
-        access: "access-tok",
-        refresh: "live-refresh-tok",
+        access: "example-access-tok",
+        refresh: "example-live-refresh-tok",
         accountId: "acct-456",
         expires: 1_800_000_000_000,
       })) as {
@@ -136,8 +136,8 @@ describe("docker-entrypoint.sh: codex_oauth boot-seed jq transform", () => {
 
       expect(result.tokens.refresh_token).toBe("");
       expect(result.auth_mode).toBe("chatgpt");
-      expect(result.tokens.id_token).toBe("access-tok");
-      expect(result.tokens.access_token).toBe("access-tok");
+      expect(result.tokens.id_token).toBe("example-access-tok");
+      expect(result.tokens.access_token).toBe("example-access-tok");
       expect(result.tokens.account_id).toBe("acct-456");
     },
     CHILD_PROCESS_TEST_BUDGET_MS,
@@ -163,8 +163,8 @@ describe("docker-entrypoint.sh: codex_oauth boot-seed jq transform", () => {
           OPENAI_API_KEY: null,
           tokens: {
             id_token: "id-tok",
-            access_token: "access-tok",
-            refresh_token: "live-refresh-tok",
+            access_token: "example-access-tok",
+            refresh_token: "example-live-refresh-tok",
             account_id: "acct-123",
           },
           last_refresh: "2026-07-01T00:00:00.000Z",
@@ -174,7 +174,7 @@ describe("docker-entrypoint.sh: codex_oauth boot-seed jq transform", () => {
         tokens: { refresh_token: string };
       };
 
-      expect(result.tokens.refresh_token).toBe("live-refresh-tok");
+      expect(result.tokens.refresh_token).toBe("example-live-refresh-tok");
     },
     CHILD_PROCESS_TEST_BUDGET_MS,
   );
@@ -185,8 +185,8 @@ describe("docker-entrypoint.sh: codex_oauth boot-seed jq transform", () => {
       const result = (await runJqFilter(
         filter,
         {
-          access: "access-tok",
-          refresh: "live-refresh-tok",
+          access: "example-access-tok",
+          refresh: "example-live-refresh-tok",
           accountId: "acct-456",
           expires: 1_800_000_000_000,
         },
@@ -195,7 +195,7 @@ describe("docker-entrypoint.sh: codex_oauth boot-seed jq transform", () => {
         tokens: { refresh_token: string };
       };
 
-      expect(result.tokens.refresh_token).toBe("live-refresh-tok");
+      expect(result.tokens.refresh_token).toBe("example-live-refresh-tok");
     },
     CHILD_PROCESS_TEST_BUDGET_MS,
   );

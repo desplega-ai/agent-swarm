@@ -18,7 +18,7 @@ import { listenOnFreePort } from "./test-net";
 // WITHOUT agentId — so the bootstrap admin key reached every worker.
 
 const TEST_DB_PATH = "./test-config-api-only-keys.sqlite";
-const API_KEY = "test-config-key";
+const API_KEY = "example-test-config-key";
 const BOOTSTRAP_KEY = "API_AGENT_FS_API_KEY";
 const BOOTSTRAP_VALUE = "af_bootstrap_secret_should_never_leak";
 

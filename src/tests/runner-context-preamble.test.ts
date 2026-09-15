@@ -11,7 +11,7 @@ import {
 import { listenOnFreePort } from "./test-net";
 
 let API_URL = "";
-const API_KEY = "test-key";
+const API_KEY = "example-test-key";
 
 // In-memory task store for the mock server
 const mockTasks: Record<string, TaskContextForPreamble> = {};

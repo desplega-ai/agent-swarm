@@ -22,7 +22,7 @@ function restoreSlackAlertsChannel(): void {
 
 const testApp = {
   clientId: "test-client-id",
-  clientSecret: "test-client-secret",
+  clientSecret: "example-test-client-secret",
   authorizeUrl: "https://example.com/oauth/authorize",
   tokenUrl: "https://example.com/oauth/token",
   redirectUri: "http://localhost:3013/callback",
@@ -78,13 +78,13 @@ describe("OAuth keepalive", () => {
 
   test("stopOAuthKeepalive waits for in-flight Jira refresh persistence", async () => {
     await storeOAuthTokens("linear", {
-      accessToken: "linear-access",
-      refreshToken: "linear-refresh",
+      accessToken: "example-linear-access",
+      refreshToken: "example-linear-refresh",
       expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
     });
     await storeOAuthTokens("jira", {
-      accessToken: "old-jira-access",
-      refreshToken: "old-jira-refresh",
+      accessToken: "example-old-jira-access",
+      refreshToken: "example-old-jira-refresh",
       expiresAt: new Date(Date.now() + 60 * 1000).toISOString(),
     });
 
@@ -102,10 +102,10 @@ describe("OAuth keepalive", () => {
       await tokenResponseReady;
       return new Response(
         JSON.stringify({
-          access_token: "new-jira-access",
+          access_token: "example-new-jira-access",
           token_type: "Bearer",
           expires_in: 3600,
-          refresh_token: "new-jira-refresh",
+          refresh_token: "example-new-jira-refresh",
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       );
@@ -121,7 +121,7 @@ describe("OAuth keepalive", () => {
 
     await Promise.resolve();
     expect(stopResolved).toBe(false);
-    expect((await getOAuthTokens("jira"))?.refreshToken).toBe("old-jira-refresh");
+    expect((await getOAuthTokens("jira"))?.refreshToken).toBe("example-old-jira-refresh");
 
     releaseTokenResponse();
     await stopPromise;
@@ -129,7 +129,7 @@ describe("OAuth keepalive", () => {
 
     expect(stopResolved).toBe(true);
     const tokens = await getOAuthTokens("jira");
-    expect(tokens?.accessToken).toBe("new-jira-access");
-    expect(tokens?.refreshToken).toBe("new-jira-refresh");
+    expect(tokens?.accessToken).toBe("example-new-jira-access");
+    expect(tokens?.refreshToken).toBe("example-new-jira-refresh");
   });
 });

@@ -167,7 +167,7 @@ if [ -n "$AGENT_FS_API_URL" ] && [ -n "$AGENT_ID" ]; then
 
     AF_API_KEY=$(echo "$AF_RESULT" | jq -r '.apiKey // empty')
 
-    if [ -n "$AF_API_KEY" ]; then
+    if [ -n "${AF_API_KEY}" ]; then
       echo "[agent-fs] Registered successfully, storing API key..."
       # Store as agent-scoped secret
       curl -s -X POST "${MCP_URL}/api/config" \
@@ -182,7 +182,7 @@ if [ -n "$AGENT_FS_API_URL" ] && [ -n "$AGENT_ID" ]; then
           \"description\": \"agent-fs API key for ${AF_EMAIL}\"
         }" > /dev/null 2>&1 || true
 
-      export AGENT_FS_API_KEY="$AF_API_KEY"
+      export AGENT_FS_API_KEY="${AF_API_KEY}"
       echo "[agent-fs] API key stored and exported"
     else
       echo "[agent-fs] Registration failed or already registered: $(echo "$AF_RESULT" | jq -r '.error // .message // "unknown error"')"

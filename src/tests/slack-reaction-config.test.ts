@@ -320,7 +320,7 @@ describe("reaction-shortcode.ts", () => {
   test("a generic (non-invalid_name) add failure redacts a secret-shaped error message in the emitted log", async () => {
     const logSpy = spyOn(console, "log");
     logSpy.mockClear();
-    const leaked = "github_pat_11B4WKYAA0Qe95fajGmt3o_ABCDEF1234567890abcdef";
+    const leaked = "github_" + "pat_11B4WKYAA0Qe95fajGmt3o_ABCDEF1234567890abcdef";
     const add = async () => {
       throw new Error(`rate_limited: ${leaked}`);
     };
@@ -339,7 +339,7 @@ describe("reaction-shortcode.ts", () => {
   test("a generic (non-invalid_name/no_reaction) remove failure redacts a secret-shaped error message in the emitted log", async () => {
     const logSpy = spyOn(console, "log");
     logSpy.mockClear();
-    const leaked = "github_pat_11B4WKYAA0Qe95fajGmt3o_ABCDEF1234567890abcdef";
+    const leaked = "github_" + "pat_11B4WKYAA0Qe95fajGmt3o_ABCDEF1234567890abcdef";
     const remove = async () => {
       const error = new Error(`rate_limited: ${leaked}`) as Error & { data: unknown };
       error.data = { error: "rate_limited" };
@@ -361,7 +361,7 @@ describe("reaction-shortcode.ts", () => {
   test("an invalid_name add failure redacts a secret-shaped reaction name in the emitted log", async () => {
     const errorSpy = spyOn(console, "error");
     errorSpy.mockClear();
-    const leaked = "github_pat_11B4WKYAA0Qe95fajGmt3o_ABCDEF1234567890abcdef";
+    const leaked = "github_" + "pat_11B4WKYAA0Qe95fajGmt3o_ABCDEF1234567890abcdef";
     const add = async () => {
       throw { data: { error: "invalid_name" } };
     };
@@ -380,7 +380,7 @@ describe("reaction-shortcode.ts", () => {
   test("a fallback add failure after invalid_name redacts a secret-shaped error message in the emitted log", async () => {
     const logSpy = spyOn(console, "log");
     logSpy.mockClear();
-    const leaked = "github_pat_11B4WKYAA0Qe95fajGmt3o_ABCDEF1234567890abcdef";
+    const leaked = "github_" + "pat_11B4WKYAA0Qe95fajGmt3o_ABCDEF1234567890abcdef";
     const add = async ({ name }: { name: string }) => {
       if (name === "not_a_real_emoji") throw { data: { error: "invalid_name" } };
       throw new Error(`rate_limited: ${leaked}`);

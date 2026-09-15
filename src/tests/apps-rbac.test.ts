@@ -22,7 +22,7 @@ import { registerAppPatchTool } from "../tools/app-patch";
 import { setRequestAuth } from "../utils/request-auth-context";
 
 const TEST_DB_PATH = `/private/tmp/test-apps-rbac-${process.pid}.sqlite`;
-const API_KEY = "apps-rbac-test-key";
+const API_KEY = "example-apps-rbac-test-key";
 const AGENT_ID = crypto.randomUUID();
 const LEAD_ID = crypto.randomUUID();
 const OPERATOR_ACTOR: IdentityActor = { kind: "operator", id: "apps-rbac-test" };

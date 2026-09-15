@@ -14,7 +14,7 @@ import { registerScriptApisTool } from "../tools/script-apis";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
 
 const TEST_DB_PATH = "./test-script-apis-mcp.sqlite";
-const API_KEY = "test-script-apis-mcp-key-1234567890";
+const API_KEY = "example-test-script-apis-mcp-key-1234567890";
 
 const noOpEmbeddingProvider = {
   name: "test/noop-script-embedding",

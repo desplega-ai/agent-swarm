@@ -31,7 +31,7 @@ import type { CodexOAuthCredentials } from "../providers/codex-oauth/types.js";
 
 const TEST_DB_PATH = "./test-codex-oauth-refresh-lock.sqlite";
 const MOCK_API_URL = "http://localhost:3013";
-const MOCK_API_KEY = "test-api-key";
+const MOCK_API_KEY = "example-test-api-key";
 
 process.env.SECRETS_ENCRYPTION_KEY = Buffer.alloc(32, 3).toString("base64");
 

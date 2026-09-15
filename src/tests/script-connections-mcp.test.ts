@@ -30,7 +30,7 @@ import { registerScriptConnectionsTool } from "../tools/script-connections";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
 
 const TEST_DB_PATH = "./test-script-connections-mcp.sqlite";
-const API_KEY = "test-script-connections-mcp-key-1234567890";
+const API_KEY = "example-test-script-connections-mcp-key-1234567890";
 const SECRET_VALUE = "mcp-secret-value-1234567890";
 
 type RegisteredTool = {

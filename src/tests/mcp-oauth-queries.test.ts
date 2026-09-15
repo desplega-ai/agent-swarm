@@ -53,8 +53,8 @@ function makeServer(name: string) {
 
 const base = (mcpServerId: string) => ({
   mcpServerId,
-  accessToken: "access-123",
-  refreshToken: "refresh-456",
+  accessToken: "example-access-123",
+  refreshToken: "example-refresh-456",
   tokenType: "Bearer",
   expiresAt: new Date(Date.now() + 3600_000).toISOString(),
   scope: "read write",
@@ -64,7 +64,7 @@ const base = (mcpServerId: string) => ({
   tokenUrl: "https://as.example.com/token",
   revocationUrl: null,
   dcrClientId: "client-abc",
-  dcrClientSecret: "dcr-secret-xyz",
+  dcrClientSecret: "example-dcr-secret-xyz",
   clientSource: "dcr" as const,
   status: "connected" as const,
 });
@@ -76,9 +76,9 @@ describe("mcp_oauth_tokens encryption roundtrip", () => {
     const token = await getMcpOAuthToken(server.id);
 
     expect(token).not.toBeNull();
-    expect(token!.accessToken).toBe("access-123");
-    expect(token!.refreshToken).toBe("refresh-456");
-    expect(token!.dcrClientSecret).toBe("dcr-secret-xyz");
+    expect(token!.accessToken).toBe("example-access-123");
+    expect(token!.refreshToken).toBe("example-refresh-456");
+    expect(token!.dcrClientSecret).toBe("example-dcr-secret-xyz");
     expect(token!.tokenVersion).toBe(1);
     expect(token!.status).toBe("connected");
     const app = await getDbClient().get<{ source: string; metadata: string }>(
@@ -91,7 +91,10 @@ describe("mcp_oauth_tokens encryption roundtrip", () => {
 
   test("access token is encrypted at rest (not stored plaintext)", async () => {
     const server = await makeServer("mcp-enc-at-rest");
-    await upsertMcpOAuthToken({ ...base(server.id), accessToken: "UNIQUE_PLAINTEXT_TOKEN_ABC" });
+    await upsertMcpOAuthToken({
+      ...base(server.id),
+      accessToken: "example-UNIQUE_PLAINTEXT_TOKEN_ABC",
+    });
 
     // Use raw SQL to inspect the row bypassing the decrypt helper.
     const row = (await getDbClient().get(
@@ -105,7 +108,7 @@ describe("mcp_oauth_tokens encryption roundtrip", () => {
     )) as { accessToken: string } | null;
 
     expect(row).not.toBeNull();
-    expect(row!.accessToken).not.toBe("UNIQUE_PLAINTEXT_TOKEN_ABC");
+    expect(row!.accessToken).not.toBe("example-UNIQUE_PLAINTEXT_TOKEN_ABC");
     expect(row!.accessToken.length).toBeGreaterThan(24);
   });
 
@@ -114,15 +117,15 @@ describe("mcp_oauth_tokens encryption roundtrip", () => {
     await upsertMcpOAuthToken(base(server.id));
     await upsertMcpOAuthToken({
       ...base(server.id),
-      accessToken: "access-updated",
+      accessToken: "example-access-updated",
       refreshToken: undefined,
       scope: "read",
     });
     const token = await getMcpOAuthToken(server.id);
-    expect(token!.accessToken).toBe("access-updated");
+    expect(token!.accessToken).toBe("example-access-updated");
     // COALESCE behaviour on refreshToken: not overridden when updater omits it
     // (we re-pass the same refresh above, so expect it intact).
-    expect(token!.refreshToken).toBe("refresh-456");
+    expect(token!.refreshToken).toBe("example-refresh-456");
   });
 
   test("refresh CAS uses the tokenVersion observed before the provider request", async () => {
@@ -132,20 +135,20 @@ describe("mcp_oauth_tokens encryption roundtrip", () => {
 
     await upsertMcpOAuthToken({
       ...base(server.id),
-      accessToken: "concurrent-winner",
-      refreshToken: "refresh-456",
+      accessToken: "example-concurrent-winner",
+      refreshToken: "example-refresh-456",
     });
 
     await expect(
       applyMcpOAuthRefresh(observed.id, {
-        accessToken: "stale-refresh-result",
-        refreshToken: "stale-refresh-token",
+        accessToken: "example-stale-refresh-result",
+        refreshToken: "example-stale-refresh-token",
         expectedTokenVersion: observed.tokenVersion,
       }),
     ).rejects.toThrow(/token version changed during refresh/);
     expect(await getMcpOAuthToken(server.id)).toMatchObject({
-      accessToken: "concurrent-winner",
-      refreshToken: "refresh-456",
+      accessToken: "example-concurrent-winner",
+      refreshToken: "example-refresh-456",
     });
   });
 });
@@ -178,13 +181,13 @@ describe("markMcpOAuthTokenStatus + deleteMcpOAuthToken", () => {
 
     await upsertMcpOAuthToken({
       ...base(server.id),
-      accessToken: "reconnected-access",
-      refreshToken: "reconnected-refresh",
+      accessToken: "example-reconnected-access",
+      refreshToken: "example-reconnected-refresh",
     });
     expect(await getMcpOAuthToken(server.id)).toMatchObject({
       id: original.id,
-      accessToken: "reconnected-access",
-      refreshToken: "reconnected-refresh",
+      accessToken: "example-reconnected-access",
+      refreshToken: "example-reconnected-refresh",
       status: "connected",
     });
   });
@@ -264,13 +267,13 @@ describe("mcp_oauth_pending (state PK)", () => {
       tokenUrl: "https://as.example.com/token",
       redirectUri: "https://swarm.example.com/cb",
       dcrClientId: "client-abc",
-      dcrClientSecret: "secret-xyz",
+      dcrClientSecret: "example-secret-xyz",
     });
 
     const consumed = await consumeMcpOAuthPending("state-1");
     expect(consumed).not.toBeNull();
     expect(consumed!.codeVerifier).toBe("verifier-plain-1");
-    expect(consumed!.dcrClientSecret).toBe("secret-xyz");
+    expect(consumed!.dcrClientSecret).toBe("example-secret-xyz");
     expect(consumed!.mcpServerId).toBe(server.id);
 
     // Second consume returns null (row deleted).
@@ -297,7 +300,7 @@ describe("mcp_oauth_pending (state PK)", () => {
         authorizeUrl: `https://issuer-${suffix}.example.com/authorize`,
         tokenUrl: `https://issuer-${suffix}.example.com/token`,
         dcrClientId: `client-${suffix}`,
-        dcrClientSecret: `secret-${suffix}`,
+        dcrClientSecret: `example-secret-${suffix}`,
         redirectUri: "https://swarm.example.com/cb",
       });
     }
@@ -306,13 +309,13 @@ describe("mcp_oauth_pending (state PK)", () => {
       resourceUrl: "https://resource-b.example.com",
       tokenUrl: "https://issuer-b.example.com/token",
       dcrClientId: "client-b",
-      dcrClientSecret: "secret-b",
+      dcrClientSecret: "example-secret-b",
     });
     expect(await consumeMcpOAuthPending("state-a")).toMatchObject({
       resourceUrl: "https://resource-a.example.com",
       tokenUrl: "https://issuer-a.example.com/token",
       dcrClientId: "client-a",
-      dcrClientSecret: "secret-a",
+      dcrClientSecret: "example-secret-a",
     });
   });
 
@@ -328,7 +331,7 @@ describe("mcp_oauth_pending (state PK)", () => {
       authorizeUrl: "https://replacement-issuer.example.com/authorize",
       tokenUrl: "https://replacement-issuer.example.com/token",
       dcrClientId: "replacement-client",
-      dcrClientSecret: "replacement-secret",
+      dcrClientSecret: "example-replacement-secret",
       redirectUri: "https://swarm.example.com/cb",
     });
 
@@ -394,7 +397,7 @@ describe("findReusableMcpOAuthClient / invalidateMcpOAuthClient", () => {
     const reusable = await findReusableMcpOAuthClient(server.id);
     expect(reusable).toMatchObject({
       clientId: "client-abc",
-      clientSecret: "dcr-secret-xyz",
+      clientSecret: "example-dcr-secret-xyz",
       authorizationServerIssuer: "https://issuer.example.com",
       registrationEndpoint: "https://issuer.example.com/register",
       clientSource: "dcr",
@@ -431,7 +434,7 @@ describe("findReusableMcpOAuthClient / invalidateMcpOAuthClient", () => {
       authorizeUrl: "https://issuer.example.com/authorize",
       tokenUrl: "https://issuer.example.com/token",
       dcrClientId: "pending-client",
-      dcrClientSecret: "pending-secret",
+      dcrClientSecret: "example-pending-secret",
       redirectUri: "https://swarm.example.com/cb",
     });
 
@@ -440,7 +443,7 @@ describe("findReusableMcpOAuthClient / invalidateMcpOAuthClient", () => {
     const reusable = await findReusableMcpOAuthClient(server.id);
     expect(reusable).toMatchObject({
       clientId: "pending-client",
-      clientSecret: "pending-secret",
+      clientSecret: "example-pending-secret",
       authorizationServerIssuer: "https://issuer.example.com",
       registrationEndpoint: "https://issuer.example.com/register",
     });
@@ -463,7 +466,7 @@ describe("findReusableMcpOAuthClient / invalidateMcpOAuthClient", () => {
       authorizeUrl: "https://issuer.example.com/authorize",
       tokenUrl: "https://issuer.example.com/token",
       dcrClientId: "pending-client",
-      dcrClientSecret: "pending-secret",
+      dcrClientSecret: "example-pending-secret",
       redirectUri: "https://swarm.example.com/cb",
     });
     const after = (
@@ -491,7 +494,7 @@ describe("findReusableMcpOAuthClient / invalidateMcpOAuthClient", () => {
 
     // A fresh legitimate write (e.g. re-registering after invalidation)
     // clears the flag again.
-    await upsertMcpOAuthToken({ ...base(server.id), accessToken: "fresh-access" });
+    await upsertMcpOAuthToken({ ...base(server.id), accessToken: "example-fresh-access" });
     expect(await findReusableMcpOAuthClient(server.id)).not.toBeNull();
   });
 

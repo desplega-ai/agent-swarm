@@ -19,8 +19,8 @@ import { handleSessionData } from "../http/session-data";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { listenOnFreePort } from "./test-net";
 
-const TEST_DB_PATH = "./test-model-key-normalize.sqlite";
-const API_KEY = "test-model-key-normalize";
+const TEST_DB_PATH = "./example-test-model-key-normalize.sqlite";
+const API_KEY = "example-test-model-key-normalize";
 
 async function removeDbFiles(path: string): Promise<void> {
   for (const suffix of ["", "-wal", "-shm"]) {

@@ -427,7 +427,7 @@ describe("/api/script-connections HTTP", () => {
   test("oauth-apps GET never includes clientSecret", async () => {
     await upsertOAuthApp("vendor_oauth", {
       clientId: "vendor-client",
-      clientSecret: "oauth-client-secret-should-not-leak",
+      clientSecret: "example-oauth-client-secret-should-not-leak",
       authorizeUrl: "https://oauth.vendor.test/authorize",
       tokenUrl: "https://oauth.vendor.test/token",
       redirectUri: "https://api.public.test/api/oauth/vendor_oauth/callback",
@@ -447,21 +447,21 @@ describe("/api/script-connections HTTP", () => {
     expect(body.oauthApps[0]?.clientId).toBe("vendor-client");
     expect(body.oauthApps[0]).not.toHaveProperty("clientSecret");
     expect(body.oauthApps[0]?.lastRefreshedAt).toBeNull();
-    expect(JSON.stringify(body)).not.toContain("oauth-client-secret-should-not-leak");
+    expect(JSON.stringify(body)).not.toContain("example-oauth-client-secret-should-not-leak");
   });
 
   test("oauth-apps GET includes lastRefreshedAt when tokens are stored", async () => {
     await upsertOAuthApp("vendor_oauth", {
       clientId: "vendor-client",
-      clientSecret: "oauth-client-secret-should-not-leak",
+      clientSecret: "example-oauth-client-secret-should-not-leak",
       authorizeUrl: "https://oauth.vendor.test/authorize",
       tokenUrl: "https://oauth.vendor.test/token",
       redirectUri: "https://api.public.test/api/oauth/vendor_oauth/callback",
       scopes: "read,write",
     });
     await storeOAuthTokens("vendor_oauth", {
-      accessToken: "access-token-should-not-leak",
-      refreshToken: "refresh-token-should-not-leak",
+      accessToken: "example-access-token-should-not-leak",
+      refreshToken: "example-refresh-token-should-not-leak",
       expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
       scope: "read,write",
     });
@@ -474,8 +474,8 @@ describe("/api/script-connections HTTP", () => {
     expect(body.oauthApps[0]?.lastRefreshedAt).toBe(
       (await getOAuthTokens("vendor_oauth"))?.updatedAt,
     );
-    expect(res.text).not.toContain("access-token-should-not-leak");
-    expect(res.text).not.toContain("refresh-token-should-not-leak");
+    expect(res.text).not.toContain("example-access-token-should-not-leak");
+    expect(res.text).not.toContain("example-refresh-token-should-not-leak");
   });
 
   test("detail returns operations and generated types without secrets", async () => {
@@ -546,15 +546,15 @@ describe("/api/script-connections HTTP", () => {
   test("DELETE oauth app removes app and tokens", async () => {
     await upsertOAuthApp("vendor_oauth", {
       clientId: "vendor-client",
-      clientSecret: "oauth-client-secret",
+      clientSecret: "example-oauth-client-secret",
       authorizeUrl: "https://oauth.vendor.test/authorize",
       tokenUrl: "https://oauth.vendor.test/token",
       redirectUri: "https://api.public.test/api/oauth/vendor_oauth/callback",
       scopes: "read,write",
     });
     await storeOAuthTokens("vendor_oauth", {
-      accessToken: "access-token",
-      refreshToken: "refresh-token",
+      accessToken: "example-access-token",
+      refreshToken: "example-refresh-token",
       expiresAt: "2035-01-01T00:00:00.000Z",
       scope: "read write",
     });
@@ -573,7 +573,7 @@ describe("/api/script-connections HTTP", () => {
     // First (oldest) app for the provider + its default authorization.
     await upsertOAuthApp("sibling_oauth", {
       clientId: "first-client",
-      clientSecret: "first-secret",
+      clientSecret: "example-first-secret",
       authorizeUrl: "https://oauth.vendor.test/authorize",
       tokenUrl: "https://oauth.vendor.test/token",
       redirectUri: "https://api.public.test/api/oauth/callback",
@@ -583,7 +583,7 @@ describe("/api/script-connections HTTP", () => {
     if (!first) throw new Error("first app not created");
     const firstAuth = await upsertAuthorization({
       appId: first.id,
-      accessToken: "first-access-token",
+      accessToken: "example-first-access-token",
       status: "active",
     });
 
@@ -594,14 +594,14 @@ describe("/api/script-connections HTTP", () => {
       `INSERT INTO oauth_apps
          (id, provider, clientId, clientSecret, clientSecretEncrypted,
           authorizeUrl, tokenUrl, redirectUri, scopes, createdAt)
-       VALUES (?, 'sibling_oauth', 'second-client', 'second-secret', 0,
+       VALUES (?, 'sibling_oauth', 'second-client', 'example-second-secret', 0,
                'https://oauth.vendor.test/authorize', 'https://oauth.vendor.test/token',
                'https://api.public.test/api/oauth/callback', '[]', ?)`,
       [secondId, "2035-06-01T00:00:00.000Z"],
     );
     const secondAuth = await upsertAuthorization({
       appId: secondId,
-      accessToken: "second-access-token",
+      accessToken: "example-second-access-token",
       status: "active",
     });
 
@@ -625,7 +625,7 @@ describe("/api/script-connections HTTP", () => {
   test("manual authorization refresh failure scrubs echoed secrets from the error", async () => {
     await upsertOAuthApp("leaky_oauth", {
       clientId: "leaky-client",
-      clientSecret: "leaky-client-secret-should-not-leak",
+      clientSecret: "example-leaky-client-secret-should-not-leak",
       authorizeUrl: "https://oauth.vendor.test/authorize",
       tokenUrl: "https://oauth.vendor.test/token",
       redirectUri: "https://api.public.test/api/oauth/callback",
@@ -635,8 +635,8 @@ describe("/api/script-connections HTTP", () => {
     if (!app) throw new Error("app not created");
     const authorization = await upsertAuthorization({
       appId: app.id,
-      accessToken: "leaky-access-token",
-      refreshToken: "refresh-secret-should-not-leak",
+      accessToken: "example-leaky-access-token",
+      refreshToken: "example-refresh-secret-should-not-leak",
       status: "active",
     });
 
@@ -647,7 +647,7 @@ describe("/api/script-connections HTTP", () => {
         JSON.stringify({
           error: "invalid_grant",
           error_description:
-            "bad refresh_token=refresh-secret-should-not-leak client_secret=leaky-client-secret-should-not-leak",
+            "bad refresh_token=example-refresh-secret-should-not-leak client_secret=example-leaky-client-secret-should-not-leak",
         }),
         { status: 400, headers: { "content-type": "application/json" } },
       )) as typeof fetch;
@@ -657,8 +657,8 @@ describe("/api/script-connections HTTP", () => {
       agentId: leadAgentId,
     });
     expect(res.status).toBe(502);
-    expect(res.text).not.toContain("refresh-secret-should-not-leak");
-    expect(res.text).not.toContain("leaky-client-secret-should-not-leak");
+    expect(res.text).not.toContain("example-refresh-secret-should-not-leak");
+    expect(res.text).not.toContain("example-leaky-client-secret-should-not-leak");
   });
 
   test("oauth app edit (by id) without clientSecret keeps existing secret", async () => {
@@ -666,7 +666,7 @@ describe("/api/script-connections HTTP", () => {
     // no-id create must NOT — that path always inserts (see the create tests).
     await upsertOAuthApp("vendor_oauth", {
       clientId: "vendor-client",
-      clientSecret: "existing-client-secret",
+      clientSecret: "example-existing-client-secret",
       authorizeUrl: "https://oauth.vendor.test/authorize",
       tokenUrl: "https://oauth.vendor.test/token",
       redirectUri: "https://api.public.test/api/oauth/vendor_oauth/callback",
@@ -690,9 +690,9 @@ describe("/api/script-connections HTTP", () => {
     expect(res.status).toBe(200);
     const app = await getOAuthAppById(existing.id);
     expect(app?.clientId).toBe("updated-client");
-    expect(app?.clientSecret).toBe("existing-client-secret");
+    expect(app?.clientSecret).toBe("example-existing-client-secret");
     expect(app?.scopes).toBe("");
-    expect(JSON.stringify(await res.json())).not.toContain("existing-client-secret");
+    expect(JSON.stringify(await res.json())).not.toContain("example-existing-client-secret");
   });
 
   test("POST without id always creates a new row and never clobbers a same-provider sibling", async () => {
@@ -702,7 +702,7 @@ describe("/api/script-connections HTTP", () => {
       body: {
         provider: "multi_vendor",
         clientId: "first-client",
-        clientSecret: "first-secret",
+        clientSecret: "example-first-secret",
         authorizeUrl: "https://oauth.vendor.test/authorize",
         tokenUrl: "https://oauth.vendor.test/token",
         scopes: ["read"],
@@ -718,7 +718,7 @@ describe("/api/script-connections HTTP", () => {
       body: {
         provider: "multi_vendor",
         clientId: "second-client",
-        clientSecret: "second-secret",
+        clientSecret: "example-second-secret",
         authorizeUrl: "https://oauth.vendor.test/authorize2",
         tokenUrl: "https://oauth.vendor.test/token2",
         scopes: ["write"],
@@ -732,10 +732,10 @@ describe("/api/script-connections HTTP", () => {
     const firstApp = await getOAuthAppById(firstId);
     const secondApp = await getOAuthAppById(secondId);
     expect(firstApp?.clientId).toBe("first-client");
-    expect(firstApp?.clientSecret).toBe("first-secret");
+    expect(firstApp?.clientSecret).toBe("example-first-secret");
     expect(firstApp?.authorizeUrl).toBe("https://oauth.vendor.test/authorize");
     expect(secondApp?.clientId).toBe("second-client");
-    expect(secondApp?.clientSecret).toBe("second-secret");
+    expect(secondApp?.clientSecret).toBe("example-second-secret");
   });
 
   test("POST with id updates only the targeted row, leaving siblings intact", async () => {
@@ -745,7 +745,7 @@ describe("/api/script-connections HTTP", () => {
       body: {
         provider: "target_vendor",
         clientId: "orig-a",
-        clientSecret: "secret-a",
+        clientSecret: "example-secret-a",
         authorizeUrl: "https://oauth.vendor.test/authorize",
         tokenUrl: "https://oauth.vendor.test/token",
         scopes: ["read"],
@@ -758,7 +758,7 @@ describe("/api/script-connections HTTP", () => {
       body: {
         provider: "target_vendor",
         clientId: "orig-b",
-        clientSecret: "secret-b",
+        clientSecret: "example-secret-b",
         authorizeUrl: "https://oauth.vendor.test/authorize",
         tokenUrl: "https://oauth.vendor.test/token",
         scopes: ["read"],
@@ -773,7 +773,7 @@ describe("/api/script-connections HTTP", () => {
         id: firstId,
         provider: "target_vendor",
         clientId: "edited-a",
-        clientSecret: "secret-a-new",
+        clientSecret: "example-secret-a-new",
         authorizeUrl: "https://oauth.vendor.test/authorize",
         tokenUrl: "https://oauth.vendor.test/token",
         scopes: ["read"],
@@ -781,10 +781,10 @@ describe("/api/script-connections HTTP", () => {
     });
     expect(edit.status).toBe(200);
     expect((await getOAuthAppById(firstId))?.clientId).toBe("edited-a");
-    expect((await getOAuthAppById(firstId))?.clientSecret).toBe("secret-a-new");
+    expect((await getOAuthAppById(firstId))?.clientSecret).toBe("example-secret-a-new");
     // Sibling is untouched.
     expect((await getOAuthAppById(secondId))?.clientId).toBe("orig-b");
-    expect((await getOAuthAppById(secondId))?.clientSecret).toBe("secret-b");
+    expect((await getOAuthAppById(secondId))?.clientSecret).toBe("example-secret-b");
   });
 
   test("POST without id and without clientSecret is rejected (create requires a secret)", async () => {
@@ -792,7 +792,7 @@ describe("/api/script-connections HTTP", () => {
     // fallback for a no-id create.
     await upsertOAuthApp("needs_secret", {
       clientId: "sibling-client",
-      clientSecret: "sibling-secret",
+      clientSecret: "example-sibling-secret",
       authorizeUrl: "https://oauth.vendor.test/authorize",
       tokenUrl: "https://oauth.vendor.test/token",
       redirectUri: "https://api.public.test/api/oauth/needs_secret/callback",
@@ -821,7 +821,7 @@ describe("/api/script-connections HTTP", () => {
       body: {
         provider: "linear",
         clientId: "linear-client",
-        clientSecret: "linear-secret",
+        clientSecret: "example-linear-secret",
         authorizeUrl: "https://oauth.vendor.test/authorize",
         tokenUrl: "https://oauth.vendor.test/token",
         scopes: [],
@@ -843,7 +843,7 @@ describe("/api/script-connections HTTP", () => {
         body: {
           provider: "unsafe_vendor",
           clientId: "unsafe-client",
-          clientSecret: "unsafe-secret",
+          clientSecret: "example-unsafe-secret",
           authorizeUrl: "https://oauth.vendor.test/authorize",
           tokenUrl: "http://127.0.0.1/token",
           scopes: [],
@@ -859,7 +859,7 @@ describe("/api/script-connections HTTP", () => {
         body: {
           provider: "safe_vendor",
           clientId: "safe-client",
-          clientSecret: "safe-secret",
+          clientSecret: "example-safe-secret",
           authorizeUrl: "https://oauth.vendor.test/authorize",
           tokenUrl: "https://oauth.vendor.test/token",
           scopes: [],
@@ -1193,7 +1193,7 @@ describe("/api/script-connections HTTP", () => {
 });
 
 describe("DELETE /api/oauth-apps/{provider}/tokens", () => {
-  const ACCESS_TOKEN = "access-token-should-not-leak";
+  const ACCESS_TOKEN = "example-access-token-should-not-leak";
   const realFetch = globalThis.fetch;
 
   afterEach(() => {
@@ -1203,7 +1203,7 @@ describe("DELETE /api/oauth-apps/{provider}/tokens", () => {
   async function seedOAuthApp(metadata?: Record<string, unknown>) {
     await upsertOAuthApp("vendor_oauth", {
       clientId: "vendor-client",
-      clientSecret: "oauth-client-secret-should-not-leak",
+      clientSecret: "example-oauth-client-secret-should-not-leak",
       authorizeUrl: "https://oauth.vendor.test/authorize",
       tokenUrl: "https://oauth.vendor.test/token",
       redirectUri: "https://api.public.test/api/oauth/vendor_oauth/callback",
@@ -1215,7 +1215,7 @@ describe("DELETE /api/oauth-apps/{provider}/tokens", () => {
   async function seedTokens() {
     await storeOAuthTokens("vendor_oauth", {
       accessToken: ACCESS_TOKEN,
-      refreshToken: "refresh-token-should-not-leak",
+      refreshToken: "example-refresh-token-should-not-leak",
       expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
       scope: "read,write",
     });
@@ -1282,13 +1282,13 @@ describe("DELETE /api/oauth-apps/{provider}/tokens", () => {
     expect(captured?.body).toContain(`token=${ACCESS_TOKEN}`);
     // Tokens and secrets must never leak into the HTTP response.
     expect(res.text).not.toContain(ACCESS_TOKEN);
-    expect(res.text).not.toContain("oauth-client-secret-should-not-leak");
+    expect(res.text).not.toContain("example-oauth-client-secret-should-not-leak");
   });
 });
 
 describe("POST /api/oauth-apps/{provider}/refresh", () => {
-  const ACCESS_TOKEN = "access-token-should-not-leak";
-  const REFRESH_TOKEN = "refresh-token-should-not-leak";
+  const ACCESS_TOKEN = "example-access-token-should-not-leak";
+  const REFRESH_TOKEN = "example-refresh-token-should-not-leak";
   const realFetch = globalThis.fetch;
 
   afterEach(() => {
@@ -1298,7 +1298,7 @@ describe("POST /api/oauth-apps/{provider}/refresh", () => {
   async function seedOAuthApp() {
     await upsertOAuthApp("vendor_oauth", {
       clientId: "vendor-client",
-      clientSecret: "oauth-client-secret-should-not-leak",
+      clientSecret: "example-oauth-client-secret-should-not-leak",
       authorizeUrl: "https://oauth.vendor.test/authorize",
       tokenUrl: "https://oauth.vendor.test/token",
       redirectUri: "https://api.public.test/api/oauth/vendor_oauth/callback",
@@ -1356,10 +1356,10 @@ describe("POST /api/oauth-apps/{provider}/refresh", () => {
       };
       return new Response(
         JSON.stringify({
-          access_token: "new-access-token-should-not-leak",
+          access_token: "example-new-access-token-should-not-leak",
           token_type: "bearer",
           expires_in: 7200,
-          refresh_token: "new-refresh-token-should-not-leak",
+          refresh_token: "example-new-refresh-token-should-not-leak",
           scope: "read,write",
         }),
         { status: 200, headers: { "content-type": "application/json" } },
@@ -1387,16 +1387,16 @@ describe("POST /api/oauth-apps/{provider}/refresh", () => {
 
     // Response carries the NEW expiry from the mocked expires_in=7200.
     const stored = await getOAuthTokens("vendor_oauth");
-    expect(stored?.accessToken).toBe("new-access-token-should-not-leak");
+    expect(stored?.accessToken).toBe("example-new-access-token-should-not-leak");
     expect(body.expiresAt).toBe(stored?.expiresAt ?? "");
     expect(new Date(body.expiresAt ?? 0).getTime()).toBeGreaterThan(Date.now() + 3_600_000);
 
     // No token values in the HTTP response.
     expect(res.text).not.toContain(ACCESS_TOKEN);
     expect(res.text).not.toContain(REFRESH_TOKEN);
-    expect(res.text).not.toContain("new-access-token-should-not-leak");
-    expect(res.text).not.toContain("new-refresh-token-should-not-leak");
-    expect(res.text).not.toContain("oauth-client-secret-should-not-leak");
+    expect(res.text).not.toContain("example-new-access-token-should-not-leak");
+    expect(res.text).not.toContain("example-new-refresh-token-should-not-leak");
+    expect(res.text).not.toContain("example-oauth-client-secret-should-not-leak");
   });
 
   test("502 when the provider token endpoint rejects the refresh", async () => {
@@ -1434,7 +1434,7 @@ describe("POST /api/oauth-authorizations/{id}/refresh", () => {
   async function seedRotatingAuthorization() {
     await upsertOAuthApp("rotator", {
       clientId: "rotator-client",
-      clientSecret: "rotator-secret-should-not-leak",
+      clientSecret: "example-rotator-secret-should-not-leak",
       authorizeUrl: "https://rotator.test/authorize",
       tokenUrl: "https://rotator.test/token",
       redirectUri: "https://api.public.test/api/oauth/callback",
@@ -1445,8 +1445,8 @@ describe("POST /api/oauth-authorizations/{id}/refresh", () => {
     if (!app) throw new Error("app not created");
     return upsertAuthorization({
       appId: app.id,
-      accessToken: "old-access-should-not-leak",
-      refreshToken: "old-refresh-should-not-leak",
+      accessToken: "example-old-access-should-not-leak",
+      refreshToken: "example-old-refresh-should-not-leak",
       status: "active",
     });
   }
@@ -1458,7 +1458,10 @@ describe("POST /api/oauth-authorizations/{id}/refresh", () => {
     // refresh token.
     globalThis.fetch = (async () =>
       new Response(
-        JSON.stringify({ access_token: "new-access-should-not-leak", token_type: "bearer" }),
+        JSON.stringify({
+          access_token: "example-new-access-should-not-leak",
+          token_type: "bearer",
+        }),
         { status: 200, headers: { "content-type": "application/json" } },
       )) as typeof fetch;
 
@@ -1475,8 +1478,8 @@ describe("POST /api/oauth-authorizations/{id}/refresh", () => {
     // token may be provider-invalidated, so the sweep must retry it.
     const after = await getAuthorizationById(authorization.id);
     expect(after?.lastRefreshedAt).toBeNull();
-    expect(after?.accessToken).toBe("old-access-should-not-leak");
-    expect(after?.refreshToken).toBe("old-refresh-should-not-leak");
+    expect(after?.accessToken).toBe("example-old-access-should-not-leak");
+    expect(after?.refreshToken).toBe("example-old-refresh-should-not-leak");
     expect(after?.status).toBe("refresh-failed");
   });
 
@@ -1485,10 +1488,10 @@ describe("POST /api/oauth-authorizations/{id}/refresh", () => {
     globalThis.fetch = (async () =>
       new Response(
         JSON.stringify({
-          access_token: "new-access-should-not-leak",
+          access_token: "example-new-access-should-not-leak",
           token_type: "bearer",
           expires_in: 7200,
-          refresh_token: "rotated-refresh-should-not-leak",
+          refresh_token: "example-rotated-refresh-should-not-leak",
           scope: "read,write",
         }),
         { status: 200, headers: { "content-type": "application/json" } },
@@ -1500,7 +1503,7 @@ describe("POST /api/oauth-authorizations/{id}/refresh", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(res.text).not.toContain("rotated-refresh-should-not-leak");
+    expect(res.text).not.toContain("example-rotated-refresh-should-not-leak");
     const body = (await res.json()) as { ok: boolean; status: string };
     expect(body.ok).toBe(true);
     const after = await getAuthorizationById(authorization.id);

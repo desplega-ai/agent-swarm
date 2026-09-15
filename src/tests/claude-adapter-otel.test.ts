@@ -246,7 +246,7 @@ describe("ClaudeSession spawn env — SWARM_ENABLE_CLAUDE_CODE_OTEL", () => {
     const adapter = new ClaudeAdapter();
     await adapter.createSession(
       makeConfig({
-        env: { SWARM_ENABLE_CLAUDE_CODE_OTEL: "1", CLAUDE_CODE_OAUTH_TOKEN: "test-token" },
+        env: { SWARM_ENABLE_CLAUDE_CODE_OTEL: "1", CLAUDE_CODE_OAUTH_TOKEN: "example-test-token" },
       }),
     );
 
@@ -261,7 +261,9 @@ describe("ClaudeSession spawn env — SWARM_ENABLE_CLAUDE_CODE_OTEL", () => {
 
   test("gate unset → spawn env carries NO TRACEPARENT (behavior unchanged)", async () => {
     const adapter = new ClaudeAdapter();
-    await adapter.createSession(makeConfig({ env: { CLAUDE_CODE_OAUTH_TOKEN: "test-token" } }));
+    await adapter.createSession(
+      makeConfig({ env: { CLAUDE_CODE_OAUTH_TOKEN: "example-test-token" } }),
+    );
 
     expect(spawnedEnvs).toHaveLength(1);
     const env = spawnedEnvs[0];
@@ -269,12 +271,14 @@ describe("ClaudeSession spawn env — SWARM_ENABLE_CLAUDE_CODE_OTEL", () => {
     expect(env?.OTEL_LOG_USER_PROMPTS).toBeUndefined();
     // Existing env wiring is untouched.
     expect(env?.ENABLE_PROMPT_CACHING_1H).toBe("1");
-    expect(env?.CLAUDE_CODE_OAUTH_TOKEN).toBe("test-token");
+    expect(env?.CLAUDE_CODE_OAUTH_TOKEN).toBe("example-test-token");
   });
 
   test("spawn env carries Claude Code runtime guardrails", async () => {
     const adapter = new ClaudeAdapter();
-    await adapter.createSession(makeConfig({ env: { CLAUDE_CODE_OAUTH_TOKEN: "test-token" } }));
+    await adapter.createSession(
+      makeConfig({ env: { CLAUDE_CODE_OAUTH_TOKEN: "example-test-token" } }),
+    );
 
     expect(spawnedEnvs).toHaveLength(1);
     const env = spawnedEnvs[0];
@@ -294,7 +298,7 @@ describe("ClaudeSession spawn env — SWARM_ENABLE_CLAUDE_CODE_OTEL", () => {
     await adapter.createSession(
       makeConfig({
         env: {
-          CLAUDE_CODE_OAUTH_TOKEN: "test-token",
+          CLAUDE_CODE_OAUTH_TOKEN: "example-test-token",
           CLAUDE_CODE_ENABLE_TELEMETRY: "1",
           OTEL_EXPORTER_OTLP_ENDPOINT: "https://otel.example.test",
         },

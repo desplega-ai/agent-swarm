@@ -35,8 +35,9 @@ async function seedTokens(
   opts: { expiresInMs: number; refreshToken?: string | null } = { expiresInMs: 3_600_000 },
 ): Promise<void> {
   await storeOAuthTokens(provider, {
-    accessToken: `${provider}-old-access-token`,
-    refreshToken: opts.refreshToken === undefined ? `${provider}-refresh-token` : opts.refreshToken,
+    accessToken: `example-${provider}-old-access-token`,
+    refreshToken:
+      opts.refreshToken === undefined ? `example-${provider}-refresh-token` : opts.refreshToken,
     expiresAt: new Date(Date.now() + opts.expiresInMs).toISOString(),
     scope: "read,write",
   });
@@ -68,10 +69,10 @@ function mockTokenEndpoint(failUrls: string[] = []): CapturedTokenRequest[] {
     }
     return new Response(
       JSON.stringify({
-        access_token: "new-access-token",
+        access_token: "example-new-access-token",
         token_type: "bearer",
         expires_in: 3600,
-        refresh_token: "new-refresh-token",
+        refresh_token: "example-new-refresh-token",
         scope: "read,write",
       }),
       { status: 200, headers: { "content-type": "application/json" } },
@@ -111,7 +112,7 @@ describe("sweepOAuthTokenRefresh", () => {
     expect(captured).toHaveLength(1);
     expect(captured[0]?.url).toBe("https://oauth.vendor_a.test/token");
     expect(captured[0]?.body).toContain("grant_type=refresh_token");
-    expect((await getOAuthTokens("vendor_a"))?.accessToken).toBe("new-access-token");
+    expect((await getOAuthTokens("vendor_a"))?.accessToken).toBe("example-new-access-token");
   });
 
   test("skips rows with no refresh token", async () => {
@@ -123,7 +124,9 @@ describe("sweepOAuthTokenRefresh", () => {
 
     expect(result).toEqual({ checked: 1, refreshed: 0, skipped: 1, failed: [] });
     expect(captured).toHaveLength(0);
-    expect((await getOAuthTokens("vendor_a"))?.accessToken).toBe("vendor_a-old-access-token");
+    expect((await getOAuthTokens("vendor_a"))?.accessToken).toBe(
+      "example-vendor_a-old-access-token",
+    );
   });
 
   test("skips a non-expiring (NULL expiry) row instead of proactively refreshing it", async () => {
@@ -133,8 +136,8 @@ describe("sweepOAuthTokenRefresh", () => {
     // expiring, must not refresh it proactively, and must never mark it
     // refresh-failed.
     await storeOAuthTokens("vendor_a", {
-      accessToken: "vendor_a-old-access-token",
-      refreshToken: "vendor_a-refresh-token",
+      accessToken: "example-vendor_a-old-access-token",
+      refreshToken: "example-vendor_a-refresh-token",
       expiresAt: null,
       scope: "read,write",
     });
@@ -145,7 +148,9 @@ describe("sweepOAuthTokenRefresh", () => {
     expect(result).toEqual({ checked: 1, refreshed: 0, skipped: 1, failed: [] });
     expect(captured).toHaveLength(0);
     expect(await authorizationStatus("vendor_a")).toBe("active");
-    expect((await getOAuthTokens("vendor_a"))?.accessToken).toBe("vendor_a-old-access-token");
+    expect((await getOAuthTokens("vendor_a"))?.accessToken).toBe(
+      "example-vendor_a-old-access-token",
+    );
   });
 
   test("skips fresh rows that are neither expiring nor stale", async () => {
@@ -169,7 +174,7 @@ describe("sweepOAuthTokenRefresh", () => {
 
     expect(result).toEqual({ checked: 1, refreshed: 1, skipped: 0, failed: [] });
     expect(captured).toHaveLength(1);
-    expect((await getOAuthTokens("vendor_a"))?.accessToken).toBe("new-access-token");
+    expect((await getOAuthTokens("vendor_a"))?.accessToken).toBe("example-new-access-token");
   });
 
   test("survives a failing provider and still refreshes the others", async () => {
@@ -190,8 +195,10 @@ describe("sweepOAuthTokenRefresh", () => {
       "https://oauth.a_broken.test/token",
       "https://oauth.b_healthy.test/token",
     ]);
-    expect((await getOAuthTokens("a_broken"))?.accessToken).toBe("a_broken-old-access-token");
-    expect((await getOAuthTokens("b_healthy"))?.accessToken).toBe("new-access-token");
+    expect((await getOAuthTokens("a_broken"))?.accessToken).toBe(
+      "example-a_broken-old-access-token",
+    );
+    expect((await getOAuthTokens("b_healthy"))?.accessToken).toBe("example-new-access-token");
     // A failing refresh persists refresh-failed on the authorization; the
     // healthy one stays active.
     expect(await authorizationStatus("a_broken")).toBe("refresh-failed");
@@ -232,6 +239,6 @@ describe("sweepOAuthTokenRefresh", () => {
     expect(second.refreshed).toBe(1);
     expect(second.failed).toHaveLength(0);
     expect(await authorizationStatus("vendor_a")).toBe("active");
-    expect((await getOAuthTokens("vendor_a"))?.accessToken).toBe("new-access-token");
+    expect((await getOAuthTokens("vendor_a"))?.accessToken).toBe("example-new-access-token");
   });
 });

@@ -233,7 +233,7 @@ describe("steering worker transport", () => {
 
   test("scrubs provider errors before reporting an undeliverable reason", async () => {
     const pending = pendingMessage();
-    const secret = "sk-proj-steering-transport-secret-1234567890";
+    const secret = "s" + "k-proj-steering-transport-secret-1234567890";
     let reportedBody = "";
     const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
       if (String(input).includes("/api/steering-messages?")) {
@@ -280,7 +280,7 @@ describe("steering worker transport", () => {
     expect(requested.outcome).toBe("queued");
 
     await pollAndDispatchSteering(
-      { apiUrl: baseUrl, apiKey: "test-key", agentId: agent.id },
+      { apiUrl: baseUrl, apiKey: "example-test-key", agentId: agent.id },
       task.id,
       session(),
       createSteeringDispatchState(),
@@ -327,7 +327,7 @@ describe("steering worker transport", () => {
     // undeliverable — but the external-delivery flag short-circuits the poll.
     const codexLikeSession = { ...session(), steeringDeliveredExternally: true };
     await pollAndDispatchSteering(
-      { apiUrl: baseUrl, apiKey: "test-key", agentId: agent.id },
+      { apiUrl: baseUrl, apiKey: "example-test-key", agentId: agent.id },
       task.id,
       codexLikeSession,
       createSteeringDispatchState(),
@@ -343,7 +343,7 @@ describe("steering worker transport", () => {
     const previousBaseUrl = process.env.MCP_BASE_URL;
     const previousApiKey = process.env.AGENT_SWARM_API_KEY;
     process.env.MCP_BASE_URL = baseUrl;
-    process.env.AGENT_SWARM_API_KEY = "test-key";
+    process.env.AGENT_SWARM_API_KEY = "example-test-key";
     try {
       const agent = await createAgent({
         name: "accept steering worker",

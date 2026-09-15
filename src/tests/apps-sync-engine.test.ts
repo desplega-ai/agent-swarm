@@ -61,7 +61,7 @@ const spawnDescribe = describe.skipIf(SKIP_SANDBOX_SPAWN_TESTS);
 const skip = test.skipIf(SKIP_SANDBOX_SPAWN_TESTS);
 
 const TEST_DB_PATH = `/private/tmp/test-apps-sync-engine-${process.pid}.sqlite`;
-const API_KEY = "apps-sync-engine-test-key-0123456789";
+const API_KEY = "example-apps-sync-engine-test-key-0123456789";
 const OWNER_AGENT_ID = crypto.randomUUID();
 const LEAD_AGENT_ID = crypto.randomUUID();
 const savedEnv = { ...process.env };
@@ -933,7 +933,7 @@ describe("swarm-tasks source", () => {
   });
 
   test("engine-generated warnings carrying a known secret come back redacted", async () => {
-    const secret = "fixture-secret-value-0123456789";
+    const secret = "example-fixture-secret-value-0123456789";
     process.env.APPS_SYNC_FIXTURE_TOKEN = secret;
     refreshSecretScrubberCache();
     try {
@@ -968,7 +968,7 @@ describe("swarm-tasks source", () => {
   });
 
   test("an engine-generated pass error carrying a known secret is redacted in the status KV", async () => {
-    const secret = "fixture-secret-value-0123456789";
+    const secret = "example-fixture-secret-value-0123456789";
     process.env.APPS_SYNC_FIXTURE_TOKEN = secret;
     refreshSecretScrubberCache();
     try {
@@ -1429,7 +1429,7 @@ spawnDescribe("pass snapshot consistency", () => {
 
 spawnDescribe("secret hygiene and sync status", () => {
   test("a pass error carrying a known secret comes back redacted", async () => {
-    const secret = "fixture-secret-value-0123456789";
+    const secret = "example-fixture-secret-value-0123456789";
     process.env.APPS_SYNC_FIXTURE_TOKEN = secret;
     refreshSecretScrubberCache();
     try {
@@ -1588,7 +1588,7 @@ spawnDescribe("secret hygiene and sync status", () => {
   });
 
   test("a pulled field carrying a known secret is redacted before it lands in a row", async () => {
-    const secret = "fixture-secret-value-0123456789";
+    const secret = "example-fixture-secret-value-0123456789";
     process.env.APPS_SYNC_FIXTURE_TOKEN = secret;
     refreshSecretScrubberCache();
     try {
@@ -1610,7 +1610,7 @@ spawnDescribe("secret hygiene and sync status", () => {
   });
 
   test("a secret straddling the prompt cap is scrubbed before truncation", async () => {
-    const secret = "fixture-secret-value-0123456789";
+    const secret = "example-fixture-secret-value-0123456789";
     process.env.APPS_SYNC_FIXTURE_TOKEN = secret;
     refreshSecretScrubberCache();
     try {
@@ -1643,7 +1643,7 @@ spawnDescribe("secret hygiene and sync status", () => {
   });
 
   test("a secret straddling the stderr cap is scrubbed before truncation", async () => {
-    const secret = "fixture-secret-value-0123456789";
+    const secret = "example-fixture-secret-value-0123456789";
     process.env.APPS_SYNC_FIXTURE_TOKEN = secret;
     refreshSecretScrubberCache();
     try {
@@ -2376,7 +2376,7 @@ spawnDescribe("a sync source against a dummy GitHub through the real sandbox", (
   // that is the point of these tests: GITHUB_TOKEN's binding is allowlisted to
   // api.github.com, so an active binding exists while the fixture host does not
   // match it — the placeholder must therefore leave the sandbox unsubstituted.
-  const FIXTURE_TOKEN = "ghp_fixture_secret_value_9876543210";
+  const FIXTURE_TOKEN = "example-ghp_fixture_secret_value_9876543210";
 
   let fixture: ReturnType<typeof Bun.serve>;
   let origin = "";

@@ -81,7 +81,7 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
     await setMcpServerAuthMethod(mcp.id, "oauth");
     await upsertMcpOAuthToken({
       mcpServerId: mcp.id,
-      accessToken: "bearer-live-123",
+      accessToken: "example-bearer-live-123",
       refreshToken: null,
       expiresAt: new Date(Date.now() + 3600_000).toISOString(), // fresh, no refresh path
       resourceUrl: "https://mcp.example.com/",
@@ -96,7 +96,7 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
     const match = result.servers.find((s) => s.id === mcp.id);
     expect(match).toBeTruthy();
     expect(match!.authMethod).toBe("oauth");
-    expect(match!.resolvedHeaders?.Authorization).toBe("Bearer bearer-live-123");
+    expect(match!.resolvedHeaders?.Authorization).toBe("Bearer example-bearer-live-123");
     expect(match!.authError).toBeNull();
   });
 
@@ -122,7 +122,7 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
     await setMcpServerAuthMethod(mcp.id, "oauth");
     await upsertMcpOAuthToken({
       mcpServerId: mcp.id,
-      accessToken: "lowercase-token-xyz",
+      accessToken: "example-lowercase-token-xyz",
       refreshToken: null,
       tokenType: "bearer", // lowercase, as RFC 6749 prescribes
       expiresAt: new Date(Date.now() + 3600_000).toISOString(),
@@ -137,7 +137,7 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
     const result = await agentMcpServers(agent.id);
     const match = result.servers.find((s) => s.id === mcp.id);
     expect(match).toBeTruthy();
-    expect(match!.resolvedHeaders?.Authorization).toBe("Bearer lowercase-token-xyz");
+    expect(match!.resolvedHeaders?.Authorization).toBe("Bearer example-lowercase-token-xyz");
     expect(match!.resolvedHeaders?.Authorization?.startsWith("Bearer ")).toBe(true);
   });
 
@@ -161,7 +161,7 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
     await setMcpServerAuthMethod(mcp.id, "oauth");
     await upsertMcpOAuthToken({
       mcpServerId: mcp.id,
-      accessToken: "mac-token-xyz",
+      accessToken: "example-mac-token-xyz",
       refreshToken: null,
       tokenType: "MAC",
       expiresAt: new Date(Date.now() + 3600_000).toISOString(),
@@ -176,7 +176,7 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
     const result = await agentMcpServers(agent.id);
     const match = result.servers.find((s) => s.id === mcp.id);
     expect(match).toBeTruthy();
-    expect(match!.resolvedHeaders?.Authorization).toBe("MAC mac-token-xyz");
+    expect(match!.resolvedHeaders?.Authorization).toBe("MAC example-mac-token-xyz");
   });
 
   test("OAuth server without token row surfaces authError", async () => {
@@ -261,7 +261,7 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
     await setMcpServerAuthMethod(mcp.id, "oauth");
     await upsertMcpOAuthToken({
       mcpServerId: mcp.id,
-      accessToken: "new-bearer",
+      accessToken: "example-new-bearer",
       refreshToken: null,
       expiresAt: new Date(Date.now() + 3600_000).toISOString(),
       resourceUrl: "https://mcp.example.com/",
@@ -274,7 +274,7 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
 
     const result = await agentMcpServers(agent.id);
     const match = result.servers.find((s) => s.id === mcp.id);
-    expect(match!.resolvedHeaders?.Authorization).toBe("Bearer new-bearer");
+    expect(match!.resolvedHeaders?.Authorization).toBe("Bearer example-new-bearer");
   });
 
   test("static server retains default authError=null in the response shape", async () => {

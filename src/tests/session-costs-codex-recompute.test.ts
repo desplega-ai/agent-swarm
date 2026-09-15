@@ -22,7 +22,7 @@ import { getPathSegments, parseQueryParams } from "../http/utils";
 import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-session-costs-codex-recompute.sqlite";
-const API_KEY = "test-codex-recompute-secret";
+const API_KEY = "example-test-codex-recompute-secret";
 
 async function removeDbFiles(path: string): Promise<void> {
   for (const suffix of ["", "-wal", "-shm"]) {

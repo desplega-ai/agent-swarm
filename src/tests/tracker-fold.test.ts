@@ -154,7 +154,7 @@ beforeAll(async () => {
           expires_in: 3600,
           scope: "read write",
         };
-        if (includeRefreshToken) body.refresh_token = "rotated-refresh-token";
+        if (includeRefreshToken) body.refresh_token = "example-rotated-refresh-token";
         return Response.json(body);
       }
       return new Response("not found", { status: 404 });
@@ -227,7 +227,7 @@ describe("step-8: tracker fold onto the unified OAuth core", () => {
     // possible since the carve-out removal made the linear row user-manageable.
     await upsertOAuthApp("linear", {
       clientId: "pre-existing",
-      clientSecret: "pre-existing-secret",
+      clientSecret: "example-pre-existing-secret",
       authorizeUrl: "https://linear.app/oauth/authorize",
       tokenUrl: "https://api.linear.app/oauth/token",
       redirectUri: `${appBase}/api/trackers/linear/callback`,
@@ -345,8 +345,8 @@ describe("step-8: tracker fold onto the unified OAuth core", () => {
     const authorization = await upsertAuthorization({
       appId,
       label: "default",
-      accessToken: "stale-access",
-      refreshToken: "old-refresh",
+      accessToken: "example-stale-access",
+      refreshToken: "example-old-refresh",
       expiresAt: new Date(Date.now() - 60_000).toISOString(),
       status: "active",
     });
@@ -366,7 +366,7 @@ describe("step-8: tracker fold onto the unified OAuth core", () => {
       body: JSON.stringify({
         provider: "linear",
         clientId: "generic-linear-client",
-        clientSecret: "generic-linear-secret",
+        clientSecret: "example-generic-linear-secret",
         authorizeUrl: "https://linear.app/oauth/authorize",
         tokenUrl: "https://api.linear.app/oauth/token",
         scopes: ["read", "write"],
@@ -389,8 +389,8 @@ describe("step-8: tracker fold onto the unified OAuth core", () => {
     const authorization = await upsertAuthorization({
       appId,
       label: "default",
-      accessToken: "initial-access",
-      refreshToken: "linear-refresh",
+      accessToken: "example-initial-access",
+      refreshToken: "example-linear-refresh",
       expiresAt: new Date(Date.now() - 60_000).toISOString(),
       status: "active",
     });

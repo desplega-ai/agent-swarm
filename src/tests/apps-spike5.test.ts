@@ -1806,7 +1806,7 @@ describe("apps spike 5 lifecycle", () => {
     const appId = await createApp(migrationDefinition);
     const row = await createRow(appId, { title: "MCP failure", status: "open" });
     const namespace = appsNamespace(appId);
-    const secret = "phase2-migration-secret-value";
+    const secret = "example-phase2-migration-secret-value";
     process.env.SPIKE5_MIGRATION_SECRET = secret;
     refreshSecretScrubberCache();
     await getDbClient().run(`

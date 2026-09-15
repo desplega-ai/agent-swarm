@@ -733,7 +733,7 @@ describe("ClaudeManagedAdapter (Phase 4) — repo provisioning + cost data", () 
   });
 
   test("createSession includes resources[github_repository] when config.vcsRepo is set", async () => {
-    process.env.MANAGED_GITHUB_TOKEN = "ghp_test_pat";
+    process.env.MANAGED_GITHUB_TOKEN = "example-ghp_test_pat";
     const events: Array<Record<string, unknown>> = [
       {
         type: "session.status_idle",
@@ -764,7 +764,7 @@ describe("ClaudeManagedAdapter (Phase 4) — repo provisioning + cost data", () 
     const repo = resources![0]!;
     expect(repo.type).toBe("github_repository");
     expect(repo.url).toBe("https://github.com/desplega-ai/agent-swarm");
-    expect(repo.authorization_token).toBe("ghp_test_pat");
+    expect(repo.authorization_token).toBe("example-ghp_test_pat");
     const checkout = repo.checkout as Record<string, unknown> | undefined;
     expect(checkout?.type).toBe("branch");
     expect(checkout?.name).toBe("main");
@@ -1126,7 +1126,7 @@ describe("ClaudeManagedAdapter (Phase 5) — cancellation + tool-loop detection"
         logFile: join(tmpLogDir, "cancel-poll.log"),
         // Provide the API context so the swarm-event handler attaches.
         apiUrl: "http://test-api",
-        apiKey: "test-key",
+        apiKey: "example-test-key",
         taskId,
       }),
     );
@@ -1224,7 +1224,7 @@ describe("ClaudeManagedAdapter (Phase 5) — cancellation + tool-loop detection"
         tConfig({
           logFile: join(tmpLogDir, "tool-loop.log"),
           apiUrl: "http://test-api",
-          apiKey: "test-key",
+          apiKey: "example-test-key",
           taskId,
         }),
       );

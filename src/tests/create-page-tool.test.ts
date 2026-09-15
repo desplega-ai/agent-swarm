@@ -184,14 +184,14 @@ describe("create_page MCP tool", () => {
         body: "secret",
         contentType: "text/html",
         authMode: "password",
-        password: "open-sesame",
+        password: "example-open-sesame",
       },
       fakeMeta,
     );
     const row = await getPageBySlug(agentId, "pw-tool");
     expect(row?.passwordHash).toBeDefined();
-    expect(row?.passwordHash).not.toBe("open-sesame");
-    expect(await Bun.password.verify("open-sesame", row!.passwordHash!)).toBe(true);
+    expect(row?.passwordHash).not.toBe("example-open-sesame");
+    expect(await Bun.password.verify("example-open-sesame", row!.passwordHash!)).toBe(true);
   });
 });
 

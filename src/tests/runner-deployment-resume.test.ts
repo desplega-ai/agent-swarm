@@ -71,7 +71,7 @@ describe("deployment resume context", () => {
         mimeType: "text/plain",
         sizeBytes: 42,
       });
-      const tasks = await getPausedTasksFromAPI({ apiUrl, apiKey: "test-key", agentId });
+      const tasks = await getPausedTasksFromAPI({ apiUrl, apiKey: "example-test-key", agentId });
       const paused = tasks.find((row) => row.id === task.id);
       expect(paused).toBeDefined();
       if (!paused) throw new Error("Paused task missing");

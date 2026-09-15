@@ -20,7 +20,7 @@ import { getFreePort } from "./test-net";
 export { getFreePort };
 
 export const REPO_ROOT = join(import.meta.dir, "../..");
-export const E2E_API_KEY = "rbac-e2e-key";
+export const E2E_API_KEY = "example-rbac-e2e-key";
 
 const SERVER_LOG_TAIL_BYTES = 8 * 1024;
 

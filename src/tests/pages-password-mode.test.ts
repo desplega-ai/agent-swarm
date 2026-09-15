@@ -58,7 +58,7 @@ describe("GET /p/:id — password mode (step-5)", () => {
   const headers = { "Content-Type": "application/json", "X-Agent-ID": agentId };
 
   beforeAll(async () => {
-    process.env.PAGE_SESSION_SECRET = "test-password-mode-secret";
+    process.env.PAGE_SESSION_SECRET = "example-test-password-mode-secret";
     for (const suffix of ["", "-wal", "-shm"]) {
       try {
         await unlink(`${TEST_DB_PATH}${suffix}`);

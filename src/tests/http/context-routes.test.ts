@@ -30,8 +30,8 @@ import { handleCore } from "../../http/core";
 import { getPathSegments, parseQueryParams } from "../../http/utils";
 import { listenOnFreePort } from "../test-net";
 
-const TEST_DB_PATH = "./test-context-routes.sqlite";
-const API_KEY = "test-context-routes";
+const TEST_DB_PATH = "./example-test-context-routes.sqlite";
+const API_KEY = "example-test-context-routes";
 
 async function removeDbFiles(path: string): Promise<void> {
   for (const suffix of ["", "-wal", "-shm"]) {

@@ -256,7 +256,7 @@ function serveOpenapiSpec(initialBody: string, initialEtag = '"v1"') {
 }
 
 beforeEach(() => {
-  process.env.AGENT_SWARM_API_KEY = "script-connections-test-key";
+  process.env.AGENT_SWARM_API_KEY = "example-script-connections-test-key";
   delete process.env.API_KEY;
   process.env.MCP_BASE_URL = "http://localhost:3013";
   setOpenapiSpecFetchForTesting(fixtureOpenapiFetch);

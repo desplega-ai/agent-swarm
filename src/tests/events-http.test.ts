@@ -6,7 +6,7 @@ import { getFreePort, SERVER_BOOT_HOOK_TIMEOUT_MS } from "./test-net";
 let TEST_PORT = 0;
 const TEST_DB_PATH = `/tmp/test-events-http-${Date.now()}.sqlite`;
 let BASE = "";
-const TEST_API_KEY = "test-events-http-key";
+const TEST_API_KEY = "example-test-events-http-key";
 
 let serverProc: Subprocess;
 

@@ -70,9 +70,9 @@ describe("E2B env helpers", () => {
     delete process.env.API_KEY;
     delete process.env.AGENT_SWARM_API_KEY;
     try {
-      expect(resolveSwarmApiKey({ API_KEY: "legacy", AGENT_SWARM_API_KEY: "preferred" })).toBe(
-        "preferred",
-      );
+      expect(
+        resolveSwarmApiKey({ API_KEY: "legacy", AGENT_SWARM_API_KEY: "example-preferred" }),
+      ).toBe("example-preferred");
       expect(resolveSwarmApiKey({ API_KEY: "legacy" }, "explicit")).toBe("explicit");
       expect(() => resolveSwarmApiKey({})).toThrow("Missing swarm API key");
     } finally {
@@ -92,14 +92,16 @@ describe("E2B env helpers", () => {
   test("selectEnv and redactWithEnv keep secrets out of logs", () => {
     const selected = selectEnv(
       {
-        API_KEY: "super-secret-value",
-        E2B_API_KEY: "controller-secret",
+        API_KEY: "example-super-secret-value",
+        E2B_API_KEY: "example-controller-secret",
         PATH: "/bin",
       },
       ["API_KEY", "PATH"],
     );
-    expect(selected).toEqual({ API_KEY: "super-secret-value", PATH: "/bin" });
-    expect(redactWithEnv("token=super-secret-value", selected)).toContain("[REDACTED:API_KEY]");
+    expect(selected).toEqual({ API_KEY: "example-super-secret-value", PATH: "/bin" });
+    expect(redactWithEnv("token=example-super-secret-value", selected)).toContain(
+      "[REDACTED:API_KEY]",
+    );
   });
 
   test("redactObjectWithEnv redacts token-like response fields", () => {
@@ -107,8 +109,8 @@ describe("E2B env helpers", () => {
       redactObjectWithEnv(
         {
           sandboxID: "sbx123",
-          envdAccessToken: "controller-token-that-should-not-print",
-          nested: { trafficAccessToken: "traffic-token-that-should-not-print" },
+          envdAccessToken: "example-controller-token-that-should-not-print",
+          nested: { trafficAccessToken: "example-traffic-token-that-should-not-print" },
         },
         {},
       ),
@@ -232,7 +234,7 @@ describe("E2B dispatch helpers", () => {
   test("E2B SDK connection options preserve loaded controller endpoints", () => {
     expect(
       e2bSdkConnectionOptions(
-        "controller-key",
+        "example-controller-key",
         {
           E2B_DOMAIN: "sandbox.example.com",
           E2B_SANDBOX_URL: "https://sandbox.sandbox.example.com",
@@ -240,7 +242,7 @@ describe("E2B dispatch helpers", () => {
         "https://api.sandbox.example.com",
       ),
     ).toEqual({
-      apiKey: "controller-key",
+      apiKey: "example-controller-key",
       domain: "sandbox.example.com",
       sandboxUrl: "https://sandbox.sandbox.example.com",
       apiUrl: "https://api.sandbox.example.com",
@@ -360,7 +362,7 @@ describe("E2B dispatch helpers", () => {
         name: "agent swarm/worker",
         public: true,
         e2bEnv: {
-          E2B_API_KEY: "controller-secret",
+          E2B_API_KEY: "example-controller-secret",
           E2B_API_URL: "https://api.e2b.example",
         },
       });
@@ -370,7 +372,7 @@ describe("E2B dispatch helpers", () => {
       expect(calls[0]?.init?.method).toBe("PATCH");
       expect(calls[0]?.init?.headers).toMatchObject({
         "Content-Type": "application/json",
-        "X-API-Key": "controller-secret",
+        "X-API-Key": "example-controller-secret",
       });
       expect(calls[0]?.init?.body).toBe(JSON.stringify({ public: true }));
       expect(result.stdout).toBe(
@@ -826,7 +828,7 @@ describe("E2B swarm grouping + deep-link (Phase 4)", () => {
 
   test("e2b dashboard deep-link uses camelCase params and hides the key by default", () => {
     const masked = buildDashboardDeepLink(
-      { apiUrl: "https://api.example.com", apiKey: "super-secret-key", name: "demo" },
+      { apiUrl: "https://api.example.com", apiKey: "example-super-secret-key", name: "demo" },
       false,
     );
     // camelCase params the SPA reads.
@@ -834,7 +836,7 @@ describe("E2B swarm grouping + deep-link (Phase 4)", () => {
     expect(masked).toContain("name=demo");
     // Key hidden — the real value MUST NOT appear.
     expect(masked).toContain("apiKey=<hidden — pass --reveal-key>");
-    expect(masked).not.toContain("super-secret-key");
+    expect(masked).not.toContain("example-super-secret-key");
     // Never snake_case.
     expect(masked).not.toContain("api_url");
     expect(masked).not.toContain("api_key");
@@ -842,10 +844,10 @@ describe("E2B swarm grouping + deep-link (Phase 4)", () => {
 
   test("e2b dashboard deep-link embeds the real key only when revealed", () => {
     const revealed = buildDashboardDeepLink(
-      { apiUrl: "https://api.example.com", apiKey: "super-secret-key", name: "demo" },
+      { apiUrl: "https://api.example.com", apiKey: "example-super-secret-key", name: "demo" },
       true,
     );
-    expect(revealed).toContain("apiKey=super-secret-key");
+    expect(revealed).toContain("apiKey=example-super-secret-key");
     expect(revealed).not.toContain("<hidden");
     expect(revealed).toContain("apiUrl=https%3A%2F%2Fapi.example.com");
   });
@@ -876,10 +878,10 @@ describe("E2B swarm grouping + deep-link (Phase 4)", () => {
   test("onboarding dashboard builder emits camelCase apiUrl/apiKey (not snake_case)", () => {
     const url = buildOnboardDashboardUrl({
       apiUrl: "http://localhost:3013",
-      apiKey: "onboard-key",
+      apiKey: "example-onboard-key",
     });
     expect(url).toContain("apiUrl=http%3A%2F%2Flocalhost%3A3013");
-    expect(url).toContain("apiKey=onboard-key");
+    expect(url).toContain("apiKey=example-onboard-key");
     // The bug we fixed: snake_case is silently ignored by the SPA.
     expect(url).not.toContain("api_url");
     expect(url).not.toContain("api_key");

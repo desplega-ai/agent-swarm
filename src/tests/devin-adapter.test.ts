@@ -18,7 +18,7 @@ import { listenOnFreePort } from "./test-net";
 
 let TEST_BASE_URL = "";
 const ORG_ID = "org-adapter-test";
-const API_KEY = "cog_adapter_key";
+const API_KEY = "example-cog_adapter_key";
 
 // ---------------------------------------------------------------------------
 // Controllable mock state

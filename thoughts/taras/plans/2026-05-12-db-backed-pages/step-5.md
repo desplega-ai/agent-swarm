@@ -39,11 +39,11 @@ Same flow applies to `/p/:id.json` so the SPA can fetch metadata after Basic aut
 #### 4. Tests
 **File**: `src/tests/pages-password-mode.test.ts` (new)
 **Changes**:
-- Create a password page with `password: "swordfish"` (verify `pages.passwordHash` row != "swordfish").
+- Create a password page with `password: "example-swordfish"` (verify `pages.passwordHash` row != "example-swordfish").
 - `GET /p/:id` → 401 + `WWW-Authenticate: Basic`.
 - `GET /p/:id?key=wrong` → 401.
-- `GET /p/:id?key=swordfish` → 200 + Set-Cookie + body served + SDK injected.
-- `GET /p/:id` with `Authorization: Basic $(echo -n 'x:swordfish' | base64)` → 200 + Set-Cookie.
+- `GET /p/:id?key=example-swordfish` → 200 + Set-Cookie + body served + SDK injected.
+- `GET /p/:id` with `Authorization: Basic $(echo -n 'x:example-swordfish' | base64)` → 200 + Set-Cookie.
 - `GET /p/:id` with the issued cookie → 200 (no re-prompt).
 - `GET /p/:id.json` after cookie → 200 with metadata.
 
@@ -63,12 +63,12 @@ Same flow applies to `/p/:id.json` so the SPA can fetch metadata after Basic aut
   ```bash
   curl -sS -X POST http://localhost:3013/api/pages \
     -H "Authorization: Bearer 123123" -H "Content-Type: application/json" \
-    -d '{"title":"Locked","contentType":"text/html","authMode":"password","password":"swordfish","body":"<h1>vault</h1>"}'
+    -d '{"title":"Locked","contentType":"text/html","authMode":"password","password":"example-swordfish","body":"<h1>vault</h1>"}'
   # id=<X>
   curl -sS -i http://localhost:3013/p/<X>                 # → 401 + WWW-Authenticate
   curl -sS http://localhost:3013/p/<X>?key=wrong          # → 401
-  curl -sS -i http://localhost:3013/p/<X>?key=swordfish   # → 200 + Set-Cookie
-  curl -sS -u x:swordfish http://localhost:3013/p/<X>     # → 200 (Basic auth header path)
+  curl -sS -i http://localhost:3013/p/<X>?key=example-swordfish   # → 200 + Set-Cookie
+  curl -sS -u x:example-swordfish http://localhost:3013/p/<X>     # → 200 (Basic auth header path)
   ```
   (Each step covered by an in-process fetch() equivalent in `pages-password-mode.test.ts`.)
 - [x] Cookie reuse: capture cookie from `?key=` response, hit `/p/:id` without `?key=` → 200.

@@ -6,7 +6,7 @@ import { resolveHttpRequestAuth } from "../http/auth";
 import { signPageSession } from "../utils/page-session";
 
 const TEST_DB_PATH = `/tmp/test-page-viewer-auth-${Date.now()}.sqlite`;
-const API_KEY = "test-page-viewer-auth-key";
+const API_KEY = "example-test-page-viewer-auth-key";
 let PAGE_ID = "";
 const PAGE_AGENT_ID = crypto.randomUUID();
 const ACTOR: IdentityActor = { kind: "operator", id: "test" };
@@ -17,7 +17,7 @@ function request(headers: Record<string, string>) {
 
 describe("page-session viewer auth", () => {
   beforeAll(async () => {
-    process.env.PAGE_SESSION_SECRET = "test-page-viewer-auth-secret";
+    process.env.PAGE_SESSION_SECRET = "example-test-page-viewer-auth-secret";
     initDb(TEST_DB_PATH);
     const page = await createPage({
       agentId: PAGE_AGENT_ID,

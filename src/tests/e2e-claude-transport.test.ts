@@ -93,7 +93,7 @@ describe("Claude E2E transport harness", () => {
   });
 
   test("writes the agent override and validates transport metadata and Claude costs", async () => {
-    process.env.ANTHROPIC_API_KEY = "test-anthropic-key";
+    process.env.ANTHROPIC_API_KEY = "example-test-anthropic-key";
     process.env.E2E_CLAUDE_BINARY = "/opt/claude-pinned";
     process.env.E2E_WORKER_BINARY = "/opt/agent-swarm";
     const spawnCalls: Parameters<typeof Bun.spawn>[] = [];
@@ -141,7 +141,7 @@ describe("Claude E2E transport harness", () => {
   });
 
   test("fails when Claude metadata or costs do not prove the selected transport", async () => {
-    process.env.ANTHROPIC_API_KEY = "test-anthropic-key";
+    process.env.ANTHROPIC_API_KEY = "example-test-anthropic-key";
     process.env.E2E_CLAUDE_TRANSPORT = "sdk";
     process.env.E2E_COST_TIMEOUT_MS = "1";
     const spawnSpy = spyOn(Bun, "spawn").mockImplementation((() =>
@@ -184,7 +184,7 @@ describe("Claude E2E transport harness", () => {
 
   test("does not validate the Claude flag for non-Claude legs", async () => {
     process.env.E2E_CLAUDE_TRANSPORT = "invalid";
-    process.env.OPENROUTER_API_KEY = "test-openrouter-key";
+    process.env.OPENROUTER_API_KEY = "example-test-openrouter-key";
     const spawnSpy = spyOn(Bun, "spawn").mockImplementation((() =>
       fakeWorker()) as typeof Bun.spawn);
 

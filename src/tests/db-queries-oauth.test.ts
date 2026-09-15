@@ -40,7 +40,7 @@ describe("OAuth Apps CRUD", () => {
   test("upsertOAuthApp creates a new app", async () => {
     await upsertOAuthApp("test-provider", {
       clientId: "client-123",
-      clientSecret: "secret-456",
+      clientSecret: "example-secret-456",
       authorizeUrl: "https://example.com/authorize",
       tokenUrl: "https://example.com/token",
       redirectUri: "https://example.com/callback",
@@ -51,7 +51,7 @@ describe("OAuth Apps CRUD", () => {
     expect(app).not.toBeNull();
     expect(app!.provider).toBe("test-provider");
     expect(app!.clientId).toBe("client-123");
-    expect(app!.clientSecret).toBe("secret-456");
+    expect(app!.clientSecret).toBe("example-secret-456");
     expect(app!.authorizeUrl).toBe("https://example.com/authorize");
     expect(app!.tokenUrl).toBe("https://example.com/token");
     expect(app!.redirectUri).toBe("https://example.com/callback");
@@ -62,7 +62,7 @@ describe("OAuth Apps CRUD", () => {
   test("upsertOAuthApp updates existing app on conflict", async () => {
     await upsertOAuthApp("test-provider", {
       clientId: "client-updated",
-      clientSecret: "secret-updated",
+      clientSecret: "example-secret-updated",
       authorizeUrl: "https://example.com/authorize-v2",
       tokenUrl: "https://example.com/token-v2",
       redirectUri: "https://example.com/callback-v2",
@@ -80,7 +80,7 @@ describe("OAuth Apps CRUD", () => {
   test("multiple providers can coexist", async () => {
     await upsertOAuthApp("provider-a", {
       clientId: "a-client",
-      clientSecret: "a-secret",
+      clientSecret: "example-a-secret",
       authorizeUrl: "https://a.com/authorize",
       tokenUrl: "https://a.com/token",
       redirectUri: "https://a.com/callback",
@@ -88,7 +88,7 @@ describe("OAuth Apps CRUD", () => {
     });
     await upsertOAuthApp("provider-b", {
       clientId: "b-client",
-      clientSecret: "b-secret",
+      clientSecret: "example-b-secret",
       authorizeUrl: "https://b.com/authorize",
       tokenUrl: "https://b.com/token",
       redirectUri: "https://b.com/callback",
@@ -162,8 +162,8 @@ describe("OAuth Tokens CRUD", () => {
 
     const futureDate = new Date(Date.now() + 3600000).toISOString();
     await storeOAuthTokens("token-test", {
-      accessToken: "access-abc",
-      refreshToken: "refresh-xyz",
+      accessToken: "example-access-abc",
+      refreshToken: "example-refresh-xyz",
       expiresAt: futureDate,
       scope: "read,write",
     });
@@ -171,94 +171,94 @@ describe("OAuth Tokens CRUD", () => {
     const tokens = await getOAuthTokens("token-test");
     expect(tokens).not.toBeNull();
     expect(tokens!.provider).toBe("token-test");
-    expect(tokens!.accessToken).toBe("access-abc");
-    expect(tokens!.refreshToken).toBe("refresh-xyz");
+    expect(tokens!.accessToken).toBe("example-access-abc");
+    expect(tokens!.refreshToken).toBe("example-refresh-xyz");
     expect(tokens!.scope).toBe("read,write");
   });
 
   test("storeOAuthTokens updates existing tokens (upsert)", async () => {
     const futureDate = new Date(Date.now() + 7200000).toISOString();
     await storeOAuthTokens("token-test", {
-      accessToken: "access-updated",
+      accessToken: "example-access-updated",
       expiresAt: futureDate,
     });
 
     const tokens = await getOAuthTokens("token-test");
-    expect(tokens!.accessToken).toBe("access-updated");
+    expect(tokens!.accessToken).toBe("example-access-updated");
     // refreshToken should be preserved (COALESCE)
-    expect(tokens!.refreshToken).toBe("refresh-xyz");
+    expect(tokens!.refreshToken).toBe("example-refresh-xyz");
   });
 
   test("updateOAuthTokensAfterRefresh replaces the rotated refresh token atomically", async () => {
     const futureDate = new Date(Date.now() + 7200000).toISOString();
     await storeOAuthTokens("token-test", {
-      accessToken: "access-before-refresh",
-      refreshToken: "refresh-before-refresh",
+      accessToken: "example-access-before-refresh",
+      refreshToken: "example-refresh-before-refresh",
       expiresAt: new Date(Date.now() + 60000).toISOString(),
     });
     const observed = (await getOAuthTokens("token-test"))!;
 
-    await updateOAuthTokensAfterRefresh("token-test", "refresh-before-refresh", {
-      accessToken: "access-after-refresh",
-      refreshToken: "refresh-after-refresh",
+    await updateOAuthTokensAfterRefresh("token-test", "example-refresh-before-refresh", {
+      accessToken: "example-access-after-refresh",
+      refreshToken: "example-refresh-after-refresh",
       expiresAt: futureDate,
       scope: "read,write",
       expectedTokenVersion: observed.tokenVersion,
     });
 
     const tokens = await getOAuthTokens("token-test");
-    expect(tokens!.accessToken).toBe("access-after-refresh");
-    expect(tokens!.refreshToken).toBe("refresh-after-refresh");
+    expect(tokens!.accessToken).toBe("example-access-after-refresh");
+    expect(tokens!.refreshToken).toBe("example-refresh-after-refresh");
     expect(tokens!.expiresAt).toBe(futureDate);
     expect(tokens!.scope).toBe("read,write");
   });
 
   test("updateOAuthTokensAfterRefresh refuses to overwrite a concurrently rotated token", async () => {
     await storeOAuthTokens("token-test", {
-      accessToken: "access-current",
-      refreshToken: "refresh-current",
+      accessToken: "example-access-current",
+      refreshToken: "example-refresh-current",
       expiresAt: new Date(Date.now() + 60000).toISOString(),
     });
 
     await expect(
       updateOAuthTokensAfterRefresh("token-test", "refresh-stale", {
-        accessToken: "access-stale-result",
-        refreshToken: "refresh-stale-result",
+        accessToken: "example-access-stale-result",
+        refreshToken: "example-refresh-stale-result",
         expiresAt: new Date(Date.now() + 7200000).toISOString(),
       }),
     ).rejects.toThrow(/stored refresh token changed during refresh/);
 
     const tokens = await getOAuthTokens("token-test");
-    expect(tokens!.accessToken).toBe("access-current");
-    expect(tokens!.refreshToken).toBe("refresh-current");
+    expect(tokens!.accessToken).toBe("example-access-current");
+    expect(tokens!.refreshToken).toBe("example-refresh-current");
   });
 
   test("updateOAuthTokensAfterRefresh rejects a stale version even when the refresh token is unchanged", async () => {
     await storeOAuthTokens("token-test", {
-      accessToken: "access-observed",
-      refreshToken: "refresh-stable",
+      accessToken: "example-access-observed",
+      refreshToken: "example-refresh-stable",
       expiresAt: new Date(Date.now() + 60000).toISOString(),
     });
     const observed = (await getOAuthTokens("token-test"))!;
 
     await storeOAuthTokens("token-test", {
-      accessToken: "access-concurrent-winner",
-      refreshToken: "refresh-stable",
+      accessToken: "example-access-concurrent-winner",
+      refreshToken: "example-refresh-stable",
       expiresAt: new Date(Date.now() + 3600000).toISOString(),
     });
 
     await expect(
-      updateOAuthTokensAfterRefresh("token-test", "refresh-stable", {
-        accessToken: "access-stale-result",
-        refreshToken: "refresh-stale-result",
+      updateOAuthTokensAfterRefresh("token-test", "example-refresh-stable", {
+        accessToken: "example-access-stale-result",
+        refreshToken: "example-refresh-stale-result",
         expiresAt: new Date(Date.now() + 7200000).toISOString(),
         expectedTokenVersion: observed.tokenVersion,
       }),
     ).rejects.toThrow(/no rows updated/);
 
     const tokens = await getOAuthTokens("token-test");
-    expect(tokens?.accessToken).toBe("access-concurrent-winner");
-    expect(tokens?.refreshToken).toBe("refresh-stable");
+    expect(tokens?.accessToken).toBe("example-access-concurrent-winner");
+    expect(tokens?.refreshToken).toBe("example-refresh-stable");
   });
 
   test("listAuthorizationSweepRows normalizes legacy bare expiresAt values", async () => {
@@ -282,15 +282,15 @@ describe("OAuth Tokens CRUD", () => {
   test("deleteOAuthTokens revokes in place and reconnect reuses the authorization id", async () => {
     await upsertOAuthApp("disconnect-continuity", {
       clientId: "client-dc",
-      clientSecret: "secret-dc",
+      clientSecret: "example-secret-dc",
       authorizeUrl: "https://example.com/authorize",
       tokenUrl: "https://example.com/token",
       redirectUri: "https://example.com/callback",
       scopes: "read",
     });
     await storeOAuthTokens("disconnect-continuity", {
-      accessToken: "access-original",
-      refreshToken: "refresh-original",
+      accessToken: "example-access-original",
+      refreshToken: "example-refresh-original",
       expiresAt: new Date(Date.now() + 3600000).toISOString(),
     });
     const originalId = await getDefaultAuthorizationIdForProvider("disconnect-continuity");
@@ -303,15 +303,15 @@ describe("OAuth Tokens CRUD", () => {
     expect(await getDefaultAuthorizationIdForProvider("disconnect-continuity")).toBe(originalId);
 
     await storeOAuthTokens("disconnect-continuity", {
-      accessToken: "access-reconnected",
-      refreshToken: "refresh-reconnected",
+      accessToken: "example-access-reconnected",
+      refreshToken: "example-refresh-reconnected",
       expiresAt: new Date(Date.now() + 3600000).toISOString(),
     });
     // Reconnect reuses the same authorization id.
     expect(await getDefaultAuthorizationIdForProvider("disconnect-continuity")).toBe(originalId);
     const reconnected = await getOAuthTokens("disconnect-continuity");
     expect(reconnected?.id).toBe(originalId);
-    expect(reconnected?.accessToken).toBe("access-reconnected");
+    expect(reconnected?.accessToken).toBe("example-access-reconnected");
   });
 });
 

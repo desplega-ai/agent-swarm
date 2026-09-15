@@ -42,8 +42,8 @@ describe("generateCompose", () => {
       "worker-coder-1": "bbb-coder-1",
       "worker-coder-2": "ccc-coder-2",
     },
-    apiKey: "test-api-key",
-    claudeOAuthToken: "test-oauth",
+    apiKey: "example-test-api-key",
+    claudeOAuthToken: "example-test-oauth",
   });
 
   test("static example passes every supported provider variable to all agents", async () => {

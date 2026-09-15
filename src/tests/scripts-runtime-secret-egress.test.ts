@@ -14,7 +14,7 @@ const savedEnv = { ...process.env };
 const spawnTest = test.skipIf(SKIP_SANDBOX_SPAWN_TESTS);
 
 beforeEach(() => {
-  process.env.AGENT_SWARM_API_KEY = "runtime-egress-secret-1234567890";
+  process.env.AGENT_SWARM_API_KEY = "example-runtime-egress-secret-1234567890";
   refreshSecretScrubberCache();
 });
 

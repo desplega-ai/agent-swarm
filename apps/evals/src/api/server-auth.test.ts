@@ -41,14 +41,14 @@ afterEach(() => {
 
 describe("evals API auth and run cap", () => {
   test("EVALS_API_KEY protects /api/* and accepts the correct bearer token", async () => {
-    process.env.EVALS_API_KEY = "test-master-key";
+    process.env.EVALS_API_KEY = "example-test-master-key";
     const server = await startServer(0);
     try {
       const unauthenticated = await fetch(`${baseUrl(server)}/api/runs`);
       expect(unauthenticated.status).toBe(401);
 
       const authenticated = await fetch(`${baseUrl(server)}/api/runs`, {
-        headers: { Authorization: "Bearer test-master-key" },
+        headers: { Authorization: "Bearer example-test-master-key" },
       });
       expect(authenticated.status).toBe(200);
       expect(await authenticated.json()).toEqual([]);
@@ -68,7 +68,7 @@ describe("evals API auth and run cap", () => {
   });
 
   test("POST /api/runs returns 429 when active runs are at EVALS_MAX_CONCURRENT_RUNS", async () => {
-    process.env.EVALS_API_KEY = "test-master-key";
+    process.env.EVALS_API_KEY = "example-test-master-key";
     process.env.EVALS_MAX_CONCURRENT_RUNS = "1";
     addActiveRunForTests("already-running");
     const server = await startServer(0);
@@ -76,7 +76,7 @@ describe("evals API auth and run cap", () => {
       const res = await fetch(`${baseUrl(server)}/api/runs`, {
         method: "POST",
         headers: {
-          Authorization: "Bearer test-master-key",
+          Authorization: "Bearer example-test-master-key",
           "Content-Type": "application/json",
         },
         body: JSON.stringify({}),

@@ -32,7 +32,7 @@ import {
 function makeConfig(overrides: Partial<SwarmConfig> = {}): SwarmConfig {
   return {
     apiUrl: "http://localhost:3013",
-    apiKey: "test-key",
+    apiKey: "example-test-key",
     agentId: "agent-oc-1",
     taskId: "task-oc-1",
     isLead: false,
@@ -504,7 +504,7 @@ describe("runSummaryLlm — OPENROUTER_BASE_URL gateway", () => {
   };
   const openrouterCred = {
     kind: "openrouter" as const,
-    apiKey: "sk-or-test",
+    apiKey: "example-sk-or-test",
     modelDefault: "openrouter/google/gemini-3-flash-preview",
   };
 

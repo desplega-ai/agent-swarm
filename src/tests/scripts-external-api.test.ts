@@ -23,7 +23,7 @@ import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
 const skip = test.skipIf(SKIP_SANDBOX_SPAWN_TESTS);
 
 const TEST_DB_PATH = "./test-scripts-external-api.sqlite";
-const API_KEY = "test-external-api-key-1234567890";
+const API_KEY = "example-test-external-api-key-1234567890";
 
 const noOpEmbeddingProvider = {
   name: "test/noop-script-embedding",

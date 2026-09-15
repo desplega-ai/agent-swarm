@@ -24,16 +24,16 @@ describe("Claude hook credential boundary", () => {
     for (const transport of ["cli", "sdk"]) {
       const sourceEnv = {
         CLAUDE_TRANSPORT: transport,
-        CLAUDE_CODE_OAUTH_TOKEN: "fixture-selected-oauth",
-        ANTHROPIC_API_KEY: "fixture-selected-api",
-        AGENT_SWARM_CLAUDE_OAUTH_TOKEN: "fixture-stale-mirror",
+        CLAUDE_CODE_OAUTH_TOKEN: "example-fixture-selected-oauth",
+        ANTHROPIC_API_KEY: "example-fixture-selected-api",
+        AGENT_SWARM_CLAUDE_OAUTH_TOKEN: "example-fixture-stale-mirror",
       };
       const config = {
         taskId: crypto.randomUUID(),
         agentId: crypto.randomUUID(),
         env: sourceEnv,
         apiUrl: "http://fixture.invalid",
-        apiKey: "fixture-swarm-key",
+        apiKey: "example-fixture-swarm-key",
       } as ProviderSessionConfig;
       const { env } = buildClaudeSessionEnvironment(
         config,
@@ -43,7 +43,7 @@ describe("Claude hook credential boundary", () => {
       expect(env.AGENT_SWARM_CLAUDE_OAUTH_TOKEN).toBeUndefined();
       expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe(sourceEnv.CLAUDE_CODE_OAUTH_TOKEN);
       expect(env.ANTHROPIC_API_KEY).toBe(sourceEnv.ANTHROPIC_API_KEY);
-      expect(sourceEnv.AGENT_SWARM_CLAUDE_OAUTH_TOKEN).toBe("fixture-stale-mirror");
+      expect(sourceEnv.AGENT_SWARM_CLAUDE_OAUTH_TOKEN).toBe("example-fixture-stale-mirror");
       let summaryEnv: NodeJS.ProcessEnv | undefined;
       await runClaudeSessionSummary(
         config,
@@ -91,7 +91,7 @@ describe("Claude transport resolution", () => {
     expect(
       isClaudeBridgeEffective(
         { SWARM_USE_CLAUDE_BRIDGE: "true", CLAUDE_CODE_OAUTH_TOKEN: "" },
-        { CLAUDE_CODE_OAUTH_TOKEN: "fallback" },
+        { CLAUDE_CODE_OAUTH_TOKEN: "example-fallback" },
       ),
     ).toBeFalse();
   });

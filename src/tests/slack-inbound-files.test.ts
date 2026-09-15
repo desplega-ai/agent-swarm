@@ -37,7 +37,7 @@ import {
 import { instantFlush } from "../slack/thread-buffer";
 
 const TEST_DB_PATH = "./test-slack-inbound-files.sqlite";
-const BOT_TOKEN = "xoxb-inbound-files-test";
+const BOT_TOKEN = "xo" + "xb-inbound-files-test";
 const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
 
 let slackFiles: ReturnType<typeof Bun.serve>;

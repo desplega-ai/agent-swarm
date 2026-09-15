@@ -8,7 +8,7 @@ import { putKapsoNumberMapping } from "../integrations/kapso/config";
 import { routeKapsoInbound } from "../integrations/kapso/inbound";
 
 const TEST_DB_PATH = "./test-kapso-inbound.sqlite";
-const HMAC_SECRET = "kapso-test-hmac-secret";
+const HMAC_SECRET = "example-kapso-test-hmac-secret";
 
 let agentId: string;
 const originalFetch = globalThis.fetch;
@@ -85,7 +85,7 @@ beforeAll(async () => {
   }
   initDb(TEST_DB_PATH);
   process.env.KAPSO_WEBHOOK_HMAC_SECRET = HMAC_SECRET;
-  process.env.KAPSO_API_KEY = "kapso-test-api-key";
+  process.env.KAPSO_API_KEY = "example-kapso-test-api-key";
   process.env.KAPSO_API_BASE_URL = "https://kapso.test";
   const agent = await createAgent({ name: "KapsoWorker", isLead: false, status: "idle" });
   agentId = agent.id;

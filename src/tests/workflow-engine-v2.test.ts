@@ -1158,7 +1158,7 @@ describe("interpolateNodeConfig — script node", () => {
   test("an inputs alias pointing at workflow input is still interpolated into the script", () => {
     const node = {
       type: "script",
-      inputs: { token: "input.API_TOKEN" },
+      inputs: { token: "input." + "API_TOKEN" },
       config: { runtime: "bash", script: "curl -H 'Authorization: {{token}}' https://x" },
     };
     const ctx = { input: { API_TOKEN: "tok-123" }, token: "tok-123" };

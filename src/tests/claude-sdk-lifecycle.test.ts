@@ -33,7 +33,7 @@ function config(
     logFile: join(directory, `${mode}.jsonl`),
     env: {
       PATH: process.env.PATH ?? "/usr/bin:/bin",
-      CLAUDE_CODE_OAUTH_TOKEN: "fixture-oauth-token",
+      CLAUDE_CODE_OAUTH_TOKEN: "example-fixture-oauth-token",
       CLAUDE_TRANSPORT: "sdk",
       CLAUDE_QUEUE_STEERING: "1",
       CLAUDE_BINARY: `${process.execPath} ${fixturePath}`,

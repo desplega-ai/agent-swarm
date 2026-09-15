@@ -126,7 +126,7 @@ describe("GET /p/:id — HTML public path", () => {
           body: svg,
           contentType: "image/svg+xml",
           authMode,
-          ...(authMode === "password" ? { password: "test-key" } : {}),
+          ...(authMode === "password" ? { password: "example-test-key" } : {}),
         }),
       });
       expect(post.status).toBe(201);
@@ -140,7 +140,7 @@ describe("GET /p/:id — HTML public path", () => {
           cookie = launch.headers.get("set-cookie")!.split(";")[0]!;
         }
       }
-      const query = authMode === "password" ? "?key=test-key&print=1" : "?print=1";
+      const query = authMode === "password" ? "?key=example-test-key&print=1" : "?print=1";
       const res = await fetch(`${BASE}/p/${id}${query}`, {
         headers: cookie ? { Cookie: cookie } : {},
       });

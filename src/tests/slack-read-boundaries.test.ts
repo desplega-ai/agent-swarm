@@ -9,7 +9,7 @@ import { mcpOverflowNamespace } from "../tools/utils";
 import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
 
 const TEST_DB_PATH = "./test-slack-read-boundaries.sqlite";
-const API_KEY = "test-slack-read-boundaries-key-1234567890";
+const API_KEY = "example-test-slack-read-boundaries-key-1234567890";
 const AGENT_ID = "aaaaaaaa-0000-4000-8000-000000000001";
 const CHANNEL_ID = "C_BUSY_BOUNDARY";
 const FULL_MESSAGE_COUNT = 20;

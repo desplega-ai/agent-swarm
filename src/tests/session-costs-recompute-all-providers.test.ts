@@ -17,7 +17,7 @@ import { getPathSegments, parseQueryParams } from "../http/utils";
 import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-recompute-all-providers.sqlite";
-const API_KEY = "test-recompute-all";
+const API_KEY = "example-test-recompute-all";
 
 async function removeDbFiles(path: string): Promise<void> {
   for (const suffix of ["", "-wal", "-shm"]) {

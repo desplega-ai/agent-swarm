@@ -29,7 +29,7 @@ import { listenOnFreePort } from "./test-net";
 const TEST_DB_PATH = "./test-budget-user-scope.sqlite";
 const NOW = new Date("2026-04-28T15:30:00.000Z");
 const TODAY = "2026-04-28";
-const API_KEY = "test-budget-user-scope-key";
+const API_KEY = "example-test-budget-user-scope-key";
 const ACTOR: IdentityActor = { kind: "operator", id: "phase6-test" };
 
 async function removeDbFiles(path: string): Promise<void> {

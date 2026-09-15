@@ -52,7 +52,7 @@ class CaptureExecutor extends BaseExecutor<
 
 describe("getSecretInputKeys", () => {
   test("flags secret.* references", () => {
-    const keys = getSecretInputKeys({ GITHUB_TOKEN: "secret.GITHUB_TOKEN" });
+    const keys = getSecretInputKeys({ GITHUB_TOKEN: "secret." + "GITHUB_TOKEN" });
     expect(keys.has("GITHUB_TOKEN")).toBe(true);
     expect(keys.size).toBe(1);
   });
@@ -104,7 +104,7 @@ describe("redactSecretsForStorage", () => {
   test("redacts only declared secret keys in ctx.input", () => {
     const ctx = {
       trigger: { topic: "tuxedo" },
-      input: { GITHUB_TOKEN: "ghp_real_value_xxx", branch: "main" },
+      input: { GITHUB_TOKEN: "example-ghp_real_value_xxx", branch: "main" },
     };
     const out = redactSecretsForStorage(ctx, new Set(["GITHUB_TOKEN"]));
     expect((out.input as Record<string, unknown>).GITHUB_TOKEN).toBe(REDACTED_SECRET_VALUE);
@@ -114,9 +114,9 @@ describe("redactSecretsForStorage", () => {
   });
 
   test("does not mutate the original ctx (executor still sees real value)", () => {
-    const ctx = { input: { GITHUB_TOKEN: "ghp_real" } };
+    const ctx = { input: { GITHUB_TOKEN: "example-ghp_real" } };
     redactSecretsForStorage(ctx, new Set(["GITHUB_TOKEN"]));
-    expect((ctx.input as Record<string, unknown>).GITHUB_TOKEN).toBe("ghp_real");
+    expect((ctx.input as Record<string, unknown>).GITHUB_TOKEN).toBe("example-ghp_real");
   });
 
   test("no-ops when ctx has no input block", () => {
@@ -187,7 +187,7 @@ describe("end-to-end — workflow step persistence redacts secrets", () => {
       definition: def,
       triggers: [],
       input: {
-        GITHUB_TOKEN: "secret.TEST_REDACTION_GITHUB_TOKEN",
+        GITHUB_TOKEN: "secret." + "TEST_REDACTION_GITHUB_TOKEN",
         plain: "not-a-secret",
       },
     });

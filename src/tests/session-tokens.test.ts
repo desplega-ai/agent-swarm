@@ -23,7 +23,7 @@ import { handleSessions } from "../http/sessions";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { listenOnFreePort } from "./test-net";
 
-const API_KEY = "test-session-token-key";
+const API_KEY = "example-test-session-token-key";
 
 function createTestServer(apiKey: string): Server {
   return createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {

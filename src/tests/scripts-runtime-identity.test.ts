@@ -30,7 +30,7 @@ import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-scripts-runtime-identity.sqlite";
 let baseUrl = "";
-const API_KEY = "scripts-runtime-identity-key-1234567890";
+const API_KEY = "example-scripts-runtime-identity-key-1234567890";
 const spawnTest = test.skipIf(SKIP_SANDBOX_SPAWN_TESTS);
 
 const savedEnv = { ...process.env };

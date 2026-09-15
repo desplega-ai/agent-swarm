@@ -11,11 +11,13 @@ describe("getApiKey", () => {
   });
 
   test("returns AGENT_SWARM_API_KEY when only preferred var is set", () => {
-    expect(getApiKey({ AGENT_SWARM_API_KEY: "preferred" })).toBe("preferred");
+    expect(getApiKey({ AGENT_SWARM_API_KEY: "example-preferred" })).toBe("example-preferred");
   });
 
   test("prefers AGENT_SWARM_API_KEY over API_KEY when both set", () => {
-    expect(getApiKey({ AGENT_SWARM_API_KEY: "preferred", API_KEY: "legacy" })).toBe("preferred");
+    expect(getApiKey({ AGENT_SWARM_API_KEY: "example-preferred", API_KEY: "legacy" })).toBe(
+      "example-preferred",
+    );
   });
 
   test("falls back to API_KEY if AGENT_SWARM_API_KEY is undefined", () => {

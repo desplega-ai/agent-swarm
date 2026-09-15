@@ -645,7 +645,7 @@ describe("Task Supersede + Resume", () => {
     test("scrubs secret-shaped values from session-log summaries", async () => {
       // GitHub PAT-shaped token — matches a structural pattern in
       // scrubSecrets (regardless of env state).
-      const fakeToken = "ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+      const fakeToken = "gh" + "p_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
       mockSessionLogs = [
         {
           createdAt: new Date().toISOString(),

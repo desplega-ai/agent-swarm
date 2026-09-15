@@ -20,7 +20,7 @@ import { CODEX_MODEL_PRICING } from "../providers/codex-models";
 import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-pricing-routes.sqlite";
-const API_KEY = "test-pricing-secret-key";
+const API_KEY = "example-test-pricing-secret-key";
 
 async function removeDbFiles(path: string): Promise<void> {
   for (const suffix of ["", "-wal", "-shm"]) {

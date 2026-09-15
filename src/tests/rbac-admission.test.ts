@@ -26,7 +26,7 @@ import { decideAdmission, decideToolAdmission, type PermissionVerb } from "../rb
 import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-rbac-admission.sqlite";
-const API_KEY = "test-api-key";
+const API_KEY = "example-test-api-key";
 const LEAD_ID = "aaaa7000-0000-4000-8000-000000000001";
 const ACTOR: IdentityActor = { kind: "operator", id: "op:test" };
 const MISSING_TASK_ID = "00000000-0000-4000-8000-000000000000";

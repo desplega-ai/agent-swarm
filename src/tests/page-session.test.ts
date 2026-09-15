@@ -31,7 +31,7 @@ async function forgeToken(payload: PageSessionPayload, secret: string): Promise<
 }
 
 beforeAll(() => {
-  process.env.PAGE_SESSION_SECRET = "test-secret-fixed-vector-key";
+  process.env.PAGE_SESSION_SECRET = "example-test-secret-fixed-vector-key";
 });
 
 afterAll(() => {
@@ -81,7 +81,7 @@ describe("page-session HMAC helpers", () => {
     ).toString("base64url");
     const key = await crypto.subtle.importKey(
       "raw",
-      new TextEncoder().encode("test-secret-fixed-vector-key"),
+      new TextEncoder().encode("example-test-secret-fixed-vector-key"),
       { name: "HMAC", hash: "SHA-256" },
       false,
       ["sign"],
@@ -147,12 +147,12 @@ describe("page-session HMAC helpers", () => {
     const payload = { pageId: "abc123", exp: Math.floor(Date.now() / 1000) + 3600 };
     const token = await signPageSession(payload);
 
-    process.env.PAGE_SESSION_SECRET = "different-secret-after-rotation";
+    process.env.PAGE_SESSION_SECRET = "example-different-secret-after-rotation";
     try {
       const got = await verifyPageSession(token);
       expect(got).toBeNull();
     } finally {
-      process.env.PAGE_SESSION_SECRET = "test-secret-fixed-vector-key";
+      process.env.PAGE_SESSION_SECRET = "example-test-secret-fixed-vector-key";
     }
   });
 
@@ -184,7 +184,7 @@ describe("page-session HMAC helpers", () => {
         const forged = await forgeToken(payload, "123123");
         expect(await verifyPageSession(forged)).toBeNull();
       } finally {
-        process.env.PAGE_SESSION_SECRET = "test-secret-fixed-vector-key";
+        process.env.PAGE_SESSION_SECRET = "example-test-secret-fixed-vector-key";
       }
     });
 
@@ -217,12 +217,12 @@ describe("page-session HMAC helpers", () => {
         expect(await verifyPageSession(token2)).toEqual({ ...payload, pageId: "generated-2" });
         expect(await verifyPageSession(token)).toEqual(payload);
       } finally {
-        process.env.PAGE_SESSION_SECRET = "test-secret-fixed-vector-key";
+        process.env.PAGE_SESSION_SECRET = "example-test-secret-fixed-vector-key";
       }
     });
   });
 
-  test("known-vector regression: payload {pageId:'abc',exp:1893456000} with secret 'test-secret-fixed-vector-key' verifies", async () => {
+  test("known-vector regression: payload {pageId:'abc',exp:1893456000} with secret 'example-test-secret-fixed-vector-key' verifies", async () => {
     const payload = { pageId: "abc", exp: 1893456000 };
     const token = await signPageSession(payload);
     // We don't pin the exact bytes here (Buffer base64url ordering is stable

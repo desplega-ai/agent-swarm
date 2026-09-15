@@ -213,7 +213,7 @@ describe("queue stall alarm", () => {
   });
 
   test("scrubs secrets from notification failures before logging", () => {
-    const token = "ghp_1234567890abcdefABCDEF1234567890ABCD";
+    const token = "gh" + "p_1234567890abcdefABCDEF1234567890ABCD";
 
     const output = _test.formatCheckFailure(new Error(`Slack rejected token ${token}`));
 

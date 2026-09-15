@@ -31,7 +31,7 @@ beforeAll(async () => {
   initDb(TEST_DB_PATH);
   await upsertOAuthApp("jira", {
     clientId: "client-id",
-    clientSecret: "client-secret",
+    clientSecret: "example-client-secret",
     authorizeUrl: "https://auth.atlassian.com/authorize",
     tokenUrl: "https://auth.atlassian.com/oauth/token",
     redirectUri: "http://localhost:3013/api/trackers/jira/callback",
@@ -54,8 +54,8 @@ beforeEach(async () => {
   exchangeCodeSpy.mockClear();
   exchangeCodeSpy.mockImplementation(() =>
     Promise.resolve({
-      accessToken: "access-1",
-      refreshToken: "refresh-1",
+      accessToken: "example-access-1",
+      refreshToken: "example-refresh-1",
       expiresIn: 3600,
       scope: "read:jira-work",
     }),
@@ -94,13 +94,13 @@ describe("handleJiraCallback", () => {
 
     // exchangeCode invoked with our config + code/state
     expect(exchangeCodeSpy).toHaveBeenCalledTimes(1);
-    expect(result.accessToken).toBe("access-1");
+    expect(result.accessToken).toBe("example-access-1");
     expect(result.cloudId).toBe("cloud-abc");
     expect(result.siteUrl).toBe("https://example.atlassian.net");
 
     // accessible-resources URL hit with the right Authorization
     expect(fetchedUrl).toBe("https://api.atlassian.com/oauth/token/accessible-resources");
-    expect(fetchedHeaders?.Authorization).toBe("Bearer access-1");
+    expect(fetchedHeaders?.Authorization).toBe("Bearer example-access-1");
 
     // Metadata persisted via updateJiraMetadata
     const meta = await getJiraMetadata();

@@ -51,10 +51,10 @@ function mockTokenEndpoint(failFor: string[] = []): void {
     }
     return new Response(
       JSON.stringify({
-        access_token: "healed-access-token",
+        access_token: "example-healed-access-token",
         token_type: "bearer",
         expires_in: 3600,
-        refresh_token: "rotated-refresh-token",
+        refresh_token: "example-rotated-refresh-token",
         scope: "read,write",
       }),
       { status: 200, headers: { "content-type": "application/json" } },
@@ -141,7 +141,7 @@ describe("OAuth refresh failure semantics", () => {
     const healed = await getAuthorizationById(authId);
     expect(healed?.status).toBe("active");
     expect(healed?.lastErrorMessage).toBeNull();
-    expect(healed?.accessToken).toBe("healed-access-token");
+    expect(healed?.accessToken).toBe("example-healed-access-token");
   });
 
   test("the broker surfaces a failed OAuth binding while other bindings still resolve", async () => {
@@ -232,21 +232,21 @@ describe("OAuth refresh failure semantics", () => {
     const broken = await upsertAuthorization({
       appId: app.id,
       label: "default",
-      accessToken: "broken-access",
-      refreshToken: "broken-refresh",
+      accessToken: "example-broken-access",
+      refreshToken: "example-broken-refresh",
       expiresAt: new Date(Date.now() + 60 * 1000).toISOString(),
       status: "active",
     });
     const healthy = await upsertAuthorization({
       appId: app.id,
       label: "secondary",
-      accessToken: "healthy-access",
-      refreshToken: "healthy-refresh",
+      accessToken: "example-healthy-access",
+      refreshToken: "example-healthy-refresh",
       expiresAt: new Date(Date.now() + 60 * 1000).toISOString(),
       status: "active",
     });
 
-    mockTokenEndpoint(["broken-refresh"]);
+    mockTokenEndpoint(["example-broken-refresh"]);
 
     const [brokenResult, healthyResult] = await Promise.allSettled([
       ensureAuthorizationTokenOrThrow(broken.id),
@@ -262,6 +262,6 @@ describe("OAuth refresh failure semantics", () => {
     expect((await getAuthorizationById(broken.id))?.status).toBe("refresh-failed");
     const healed = await getAuthorizationById(healthy.id);
     expect(healed?.status).toBe("active");
-    expect(healed?.accessToken).toBe("healed-access-token");
+    expect(healed?.accessToken).toBe("example-healed-access-token");
   });
 });

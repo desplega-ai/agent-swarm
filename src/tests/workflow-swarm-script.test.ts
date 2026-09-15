@@ -35,7 +35,7 @@ import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
 const skip = test.skipIf(SKIP_SANDBOX_SPAWN_TESTS);
 
 const TEST_DB_PATH = "./test-workflow-swarm-script.sqlite";
-const API_KEY = "test-workflow-swarm-script-key-1234567890";
+const API_KEY = "example-test-workflow-swarm-script-key-1234567890";
 
 const noOpEmbeddingProvider = {
   name: "test/noop-workflow-script-embedding",

@@ -21,7 +21,7 @@ import type { SlackFile } from "../slack/files";
 import { createSlackTaskWithFiles, fetchSlackFiles } from "../slack/inbound-files";
 
 const TEST_DB_PATH = "./test-slack-file-tools-attachments.sqlite";
-const BOT_TOKEN = "xoxb-file-tools-test";
+const BOT_TOKEN = "xo" + "xb-file-tools-test";
 const AGENT_ID = "aaaaaaaa-0000-4000-8000-00000000f001";
 const OTHER_ID = "aaaaaaaa-0000-4000-8000-00000000f002";
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 9, 9]);

@@ -75,7 +75,7 @@ describe("provider process groups", () => {
         logFile,
         env: {
           PATH: process.env.PATH ?? "/usr/bin:/bin",
-          CLAUDE_CODE_OAUTH_TOKEN: "test-oauth-token",
+          CLAUDE_CODE_OAUTH_TOKEN: "example-test-oauth-token",
           CLAUDE_BINARY: `bun ${fixturePath}`,
           GRANDCHILD_PID_FILE: grandchildPidPath,
         },

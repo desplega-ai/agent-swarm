@@ -295,7 +295,7 @@ describe("resolveClaudeManagedSetupConfig", () => {
   test("rejects http:// MCP_BASE_URL fail-fast", async () => {
     await expect(
       resolveClaudeManagedSetupConfig([], {
-        env: { ANTHROPIC_API_KEY: "sk-ant-x", MCP_BASE_URL: "http://insecure.local" },
+        env: { ANTHROPIC_API_KEY: "example-sk-ant-x", MCP_BASE_URL: "http://insecure.local" },
         isInteractive: false,
       }),
     ).rejects.toThrow(/must start with https/);
@@ -304,7 +304,7 @@ describe("resolveClaudeManagedSetupConfig", () => {
   test("rejects missing MCP_BASE_URL", async () => {
     await expect(
       resolveClaudeManagedSetupConfig([], {
-        env: { ANTHROPIC_API_KEY: "sk-ant-x" },
+        env: { ANTHROPIC_API_KEY: "example-sk-ant-x" },
         isInteractive: false,
       }),
     ).rejects.toThrow(/MCP_BASE_URL is not set/);
@@ -313,7 +313,7 @@ describe("resolveClaudeManagedSetupConfig", () => {
   test("--force flag is parsed", async () => {
     const result = await resolveClaudeManagedSetupConfig(["--force"], {
       env: {
-        ANTHROPIC_API_KEY: "sk-ant-x",
+        ANTHROPIC_API_KEY: "example-sk-ant-x",
         MCP_BASE_URL: "https://example.com",
       },
       isInteractive: false,

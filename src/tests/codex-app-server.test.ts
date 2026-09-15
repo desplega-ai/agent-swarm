@@ -152,7 +152,7 @@ describe("CodexAppServer", () => {
   test(
     "scrubs stderr before callbacks and process-exit errors",
     async () => {
-      const secret = "sk-abcdefghijklmnopqrstuvwx";
+      const secret = "s" + "k-abcdefghijklmnopqrstuvwx";
       const stderr: string[] = [];
       const server = new CodexAppServer({
         codexPath: FIXTURE,

@@ -7,8 +7,8 @@ import { handleSessions } from "../http/sessions";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { listenOnFreePort } from "./test-net";
 
-const API_KEY = "config-session-test-operator";
-const SECRET = "config-session-test-secret-value";
+const API_KEY = "example-config-session-test-operator";
+const SECRET = "example-config-session-test-secret-value";
 let server: Server;
 let baseUrl: string;
 let workerId: string;

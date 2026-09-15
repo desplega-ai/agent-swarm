@@ -28,7 +28,7 @@ describe("resolveCodexLoginConfig", () => {
 
   it("prompts for api url and api key in interactive mode", async () => {
     const promptText = mock(async () => "https://swarm.example.com");
-    const promptSecret = mock(async () => "super-secret");
+    const promptSecret = mock(async () => "example-super-secret");
 
     const result = await resolveCodexLoginConfig([], {
       env: {},
@@ -39,7 +39,7 @@ describe("resolveCodexLoginConfig", () => {
 
     expect(result).toEqual({
       apiUrl: "https://swarm.example.com",
-      apiKey: "super-secret",
+      apiKey: "example-super-secret",
     });
     expect(promptText).toHaveBeenCalledWith("Swarm API URL", "http://localhost:3013");
     expect(promptSecret).toHaveBeenCalledWith(
@@ -56,7 +56,7 @@ describe("resolveCodexLoginConfig", () => {
     const result = await resolveCodexLoginConfig([], {
       env: {
         MCP_BASE_URL: "https://env.example.com",
-        API_KEY: "env-secret",
+        API_KEY: "example-env-secret",
       },
       isInteractive: true,
       promptText,
@@ -65,11 +65,11 @@ describe("resolveCodexLoginConfig", () => {
 
     expect(result).toEqual({
       apiUrl: "https://env.example.com",
-      apiKey: "env-secret",
+      apiKey: "example-env-secret",
     });
     expect(promptSecret).toHaveBeenCalledWith(
       "Swarm API key",
-      "env-secret",
+      "example-env-secret",
       "Press Enter to use AGENT_SWARM_API_KEY/API_KEY from the environment",
     );
   });
@@ -83,11 +83,11 @@ describe("resolveCodexLoginConfig", () => {
     });
 
     const result = await resolveCodexLoginConfig(
-      ["--api-url", "https://flag.example.com", "--api-key", "flag-secret"],
+      ["--api-url", "https://flag.example.com", "--api-key", "example-flag-secret"],
       {
         env: {
           MCP_BASE_URL: "https://env.example.com",
-          API_KEY: "env-secret",
+          API_KEY: "example-env-secret",
         },
         isInteractive: true,
         promptText,
@@ -97,7 +97,7 @@ describe("resolveCodexLoginConfig", () => {
 
     expect(result).toEqual({
       apiUrl: "https://flag.example.com",
-      apiKey: "flag-secret",
+      apiKey: "example-flag-secret",
     });
     expect(promptText).not.toHaveBeenCalled();
     expect(promptSecret).not.toHaveBeenCalled();
@@ -107,7 +107,7 @@ describe("resolveCodexLoginConfig", () => {
     const promptText = mock(async () => {
       throw new Error("should not prompt for api url");
     });
-    const promptSecret = mock(async () => "prompted-secret");
+    const promptSecret = mock(async () => "example-prompted-secret");
 
     const result = await resolveCodexLoginConfig(["--api-url", "https://flag.example.com"], {
       env: {},
@@ -118,7 +118,7 @@ describe("resolveCodexLoginConfig", () => {
 
     expect(result).toEqual({
       apiUrl: "https://flag.example.com",
-      apiKey: "prompted-secret",
+      apiKey: "example-prompted-secret",
     });
     expect(promptText).not.toHaveBeenCalled();
     expect(promptSecret).toHaveBeenCalledTimes(1);
@@ -186,7 +186,7 @@ describe("runCodexLogin", () => {
     await runCodexLogin([], {
       resolveConfig: async () => ({
         apiUrl: "http://localhost:3013",
-        apiKey: "test-key",
+        apiKey: "example-test-key",
         slot: 3,
       }),
       login: mock(async () => ({
@@ -214,7 +214,7 @@ describe("runCodexLogin", () => {
     await runCodexLogin([], {
       resolveConfig: async () => ({
         apiUrl: "http://localhost:3013",
-        apiKey: "test-key",
+        apiKey: "example-test-key",
         slot: undefined,
       }),
       login: mock(async () => ({
@@ -245,7 +245,7 @@ describe("runCodexLogin", () => {
     await runCodexLogin([], {
       resolveConfig: async () => ({
         apiUrl: "http://localhost:3013",
-        apiKey: "test-key",
+        apiKey: "example-test-key",
         slot: 101,
       }),
       login: mock(async () => {
@@ -274,7 +274,7 @@ describe("runCodexLogin", () => {
     await runCodexLogin([], {
       resolveConfig: async () => ({
         apiUrl: "http://localhost:3013",
-        apiKey: "test-key",
+        apiKey: "example-test-key",
         slot: 10,
       }),
       login: mock(async () => ({
@@ -306,7 +306,7 @@ describe("runCodexLogin", () => {
     await runCodexLogin([], {
       resolveConfig: async () => ({
         apiUrl: "http://localhost:3013",
-        apiKey: "test-key",
+        apiKey: "example-test-key",
         slot: undefined,
       }),
       login: mock(async () => {

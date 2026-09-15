@@ -14,7 +14,7 @@ import { getPathSegments, parseQueryParams } from "../http/utils";
 import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-user-token-routes.sqlite";
-const API_KEY = "test-user-token-key";
+const API_KEY = "example-test-user-token-key";
 const ORIGINAL_API_KEY = process.env.AGENT_SWARM_API_KEY;
 
 async function removeDbFiles(path: string): Promise<void> {

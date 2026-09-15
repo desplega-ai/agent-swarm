@@ -85,10 +85,10 @@ beforeAll(async () => {
       if (url.pathname === "/token") {
         lastTokenBody = await req.text();
         return Response.json({
-          access_token: "mock-access-token",
+          access_token: "example-mock-access-token",
           token_type: "Bearer",
           expires_in: 3600,
-          refresh_token: "mock-refresh-token",
+          refresh_token: "example-mock-refresh-token",
           scope: "read write",
         });
       }
@@ -98,7 +98,7 @@ beforeAll(async () => {
         // fabricated one.
         lastTokenBody = await req.text();
         return Response.json({
-          access_token: "mock-access-token",
+          access_token: "example-mock-access-token",
           token_type: "bearer",
           scope: "read",
         });
@@ -183,8 +183,8 @@ describe("static OAuth callback + multi-authorization flow", () => {
     expect(supportAuth.accountEmail).toBe("connected@example.test");
     // Tokens are encrypted at rest but decrypt to the mock values on read.
     expect(supportAuth.tokensEncrypted).toBe(true);
-    expect(supportAuth.accessToken).toBe("mock-access-token");
-    expect(supportAuth.refreshToken).toBe("mock-refresh-token");
+    expect(supportAuth.accessToken).toBe("example-mock-access-token");
+    expect(supportAuth.refreshToken).toBe("example-mock-refresh-token");
 
     // Second label: "sales" — first authorization must be untouched.
     const sales = await buildAuthorizationUrl(config, { appId, label: "sales", flow: "generic" });
@@ -383,7 +383,7 @@ describe("static OAuth callback + multi-authorization flow", () => {
       tokenUrl: `${providerBase}/token`,
       scopes: "read",
       dcrClientId: "mcp-client",
-      dcrClientSecret: "mcp-secret",
+      dcrClientSecret: "example-mcp-secret",
       redirectUri: `${appBase}/api/oauth/callback`,
     });
 
@@ -464,7 +464,7 @@ describe("step-4 security hardening", () => {
     try {
       const identity = await captureIdentity({
         userinfoUrl: "http://127.0.0.1/userinfo",
-        accessToken: "live-bearer",
+        accessToken: "example-live-bearer",
       });
       expect(identity).toBeNull();
     } finally {
@@ -476,7 +476,7 @@ describe("step-4 security hardening", () => {
   test("captureIdentity does not follow a redirect to a private host", async () => {
     const identity = await captureIdentity({
       userinfoUrl: `${providerBase}/userinfo-redirect`,
-      accessToken: "live-bearer",
+      accessToken: "example-live-bearer",
     });
     // The 302 is not followed (redirect: manual → not .ok), so no identity.
     expect(identity).toBeNull();

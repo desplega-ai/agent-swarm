@@ -34,7 +34,7 @@ describe("tracker-status (DB layer)", () => {
   test("returns token info after storing tokens", async () => {
     await upsertOAuthApp("linear", {
       clientId: "test-client",
-      clientSecret: "test-secret",
+      clientSecret: "example-test-secret",
       authorizeUrl: "https://linear.app/oauth/authorize",
       tokenUrl: "https://api.linear.app/oauth/token",
       redirectUri: "http://localhost:3013/api/trackers/linear/callback",
@@ -42,8 +42,8 @@ describe("tracker-status (DB layer)", () => {
     });
 
     await storeOAuthTokens("linear", {
-      accessToken: "test-token",
-      refreshToken: "test-refresh",
+      accessToken: "example-test-token",
+      refreshToken: "example-test-refresh",
       expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
       scope: "read,write",
     });

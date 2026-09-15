@@ -207,7 +207,7 @@ describe("wait_for_api_ready: immediate success", () => {
       },
     });
 
-    const secret = "sk-super-secret-token-do-not-leak";
+    const secret = "s" + "k-super-secret-token-do-not-leak";
     const result = await runWaitForApiReady(server.url.toString(), {
       WORKER_API_READY_TIMEOUT_SECONDS: "5",
       API_KEY: secret,

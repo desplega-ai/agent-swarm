@@ -68,7 +68,7 @@ import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
 const skip = test.skipIf(SKIP_SANDBOX_SPAWN_TESTS);
 
 const TEST_DB_PATH = "./test-schedule-target-type.sqlite";
-const API_KEY = "test-schedule-target-type-key-1234567890";
+const API_KEY = "example-test-schedule-target-type-key-1234567890";
 
 const noOpEmbeddingProvider = {
   name: "test/noop-schedule-target-type-embedding",

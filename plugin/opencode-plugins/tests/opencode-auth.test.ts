@@ -196,13 +196,13 @@ describe("resolveOpencodeAuth", () => {
     const result = await resolveOpencodeAuth({
       authFilePath: "/fake/auth.json",
       readAuthFile: async () => ({
-        openai: { type: "wellknown", key: "key", token: "sk-from-wellknown" },
+        openai: { type: "wellknown", key: "key", token: "example-sk-from-wellknown" },
       }),
     });
     expect(result).not.toBeNull();
     expect(result!.kind).toBe("openai");
     if (result!.kind !== "claude-cli") {
-      expect(result!.apiKey).toBe("sk-from-wellknown");
+      expect(result!.apiKey).toBe("example-sk-from-wellknown");
     }
   });
 

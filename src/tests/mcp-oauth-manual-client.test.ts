@@ -8,7 +8,7 @@ import { handleCore } from "../http/core";
 import { handleMcpOAuth } from "../http/mcp-oauth";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 
-const API_KEY = "test-secret-key";
+const API_KEY = "example-test-secret-key";
 const TEST_DB_PATH = "./test-mcp-oauth-manual-client.sqlite";
 
 async function removeDbFiles(): Promise<void> {
@@ -137,10 +137,10 @@ describe("MCP OAuth manual client flow", () => {
         capturedTokenHeaders = (init?.headers as Record<string, string> | undefined) ?? null;
         return new Response(
           JSON.stringify({
-            access_token: "sf-access-token",
+            access_token: "example-sf-access-token",
             token_type: "Bearer",
             expires_in: 3600,
-            ...(includeRefreshToken ? { refresh_token: "sf-refresh-token" } : {}),
+            ...(includeRefreshToken ? { refresh_token: "example-sf-refresh-token" } : {}),
             scope: "mcp_api refresh_token",
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
@@ -173,7 +173,11 @@ describe("MCP OAuth manual client flow", () => {
     const res = await dispatch(`/api/mcp-oauth/${mcpServer.id}/manual-client`, {
       method: "POST",
       headers: { Authorization: `Bearer ${API_KEY}` },
-      body: JSON.stringify({ clientId: "disc-client", clientSecret: "disc-secret", ...body }),
+      body: JSON.stringify({
+        clientId: "disc-client",
+        clientSecret: "example-disc-secret",
+        ...body,
+      }),
     });
     expect(res.status).toBe(200);
     return mcpServer;
@@ -234,7 +238,7 @@ describe("MCP OAuth manual client flow", () => {
       headers: { Authorization: `Bearer ${API_KEY}` },
       body: JSON.stringify({
         clientId: "manual-client-id",
-        clientSecret: "manual-client-secret",
+        clientSecret: "example-manual-client-secret",
         authorizationServerIssuer: "https://as.example.com",
         authorizeUrl: "https://as.example.com/authorize",
         tokenUrl: "https://as.example.com/token",
@@ -260,7 +264,7 @@ describe("MCP OAuth manual client flow", () => {
       headers: { Authorization: `Bearer ${API_KEY}` },
       body: JSON.stringify({
         clientId: "manual-client-id",
-        clientSecret: "manual-client-secret",
+        clientSecret: "example-manual-client-secret",
         authorizationServerIssuer: "https://as.example.com",
         authorizeUrl: "https://as.example.com/authorize",
         tokenUrl: "https://as.example.com/token",
@@ -289,7 +293,7 @@ describe("MCP OAuth manual client flow", () => {
       },
       body: JSON.stringify({
         clientId: "sf-client-id",
-        clientSecret: "sf-client-secret",
+        clientSecret: "example-sf-client-secret",
         authorizationServerIssuer: "https://login.salesforce.com",
         authorizeUrl: "https://login.salesforce.com/services/oauth2/authorize",
         tokenUrl: "https://login.salesforce.com/services/oauth2/token",
@@ -341,7 +345,7 @@ describe("MCP OAuth manual client flow", () => {
     // the body-post behavior that worked before the auth-method field existed.
     const tokenRequest = new URLSearchParams(capturedTokenBody ?? "");
     expect(tokenRequest.get("client_id")).toBe("sf-client-id");
-    expect(tokenRequest.get("client_secret")).toBe("sf-client-secret");
+    expect(tokenRequest.get("client_secret")).toBe("example-sf-client-secret");
     expect(tokenRequest.get("resource")).toBe(mcpServer.url);
     expect(tokenRequest.get("redirect_uri")).toBe(
       "https://swarm.example.test/api/mcp-oauth/callback",
@@ -351,10 +355,10 @@ describe("MCP OAuth manual client flow", () => {
     const connectedToken = await getMcpOAuthToken(mcpServer.id);
     expect(connectedToken?.clientSource).toBe("manual");
     expect(connectedToken?.status).toBe("connected");
-    expect(connectedToken?.accessToken).toBe("sf-access-token");
-    expect(connectedToken?.refreshToken).toBe("sf-refresh-token");
+    expect(connectedToken?.accessToken).toBe("example-sf-access-token");
+    expect(connectedToken?.refreshToken).toBe("example-sf-refresh-token");
     expect(connectedToken?.dcrClientId).toBe("sf-client-id");
-    expect(connectedToken?.dcrClientSecret).toBe("sf-client-secret");
+    expect(connectedToken?.dcrClientSecret).toBe("example-sf-client-secret");
 
     includeRefreshToken = false;
     const reconnectAuthorizeRes = await dispatch(`/api/mcp-oauth/${mcpServer.id}/authorize-url`, {
@@ -371,6 +375,6 @@ describe("MCP OAuth manual client flow", () => {
       `/api/mcp-oauth/callback?state=${encodeURIComponent(reconnectState!)}&code=sf-reconnect-code`,
     );
     expect(reconnectCallbackRes.status).toBe(302);
-    expect((await getMcpOAuthToken(mcpServer.id))?.refreshToken).toBe("sf-refresh-token");
+    expect((await getMcpOAuthToken(mcpServer.id))?.refreshToken).toBe("example-sf-refresh-token");
   });
 });

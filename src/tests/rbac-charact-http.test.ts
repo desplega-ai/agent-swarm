@@ -50,7 +50,7 @@ import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-rbac-charact-http.sqlite";
 const TEST_FS_DIR = "./test-rbac-charact-http-data";
-const API_KEY = "test-rbac-http-key";
+const API_KEY = "example-test-rbac-http-key";
 const ACTOR: IdentityActor = { kind: "operator", id: "test" };
 
 async function removeDbFiles(path: string): Promise<void> {

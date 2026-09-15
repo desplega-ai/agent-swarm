@@ -16,7 +16,7 @@ function makeConfig(overrides: Partial<ProviderSessionConfig> = {}): ProviderSes
     agentId: "test-agent-id",
     taskId: "test-task-id",
     apiUrl: "http://localhost:3013",
-    apiKey: "test-key",
+    apiKey: "example-test-key",
     cwd: "/tmp",
     logFile: "/tmp/test-claude-adapter.jsonl",
     ...overrides,
@@ -95,7 +95,7 @@ describe("ClaudeSession spawn env — reasoning_effort", () => {
   // MAX_THINKING_TOKENS) would leak through and pollute the `toBeUndefined()`
   // assertions. Passing an explicit, minimal `env` sidesteps both — deterministic
   // regardless of the ambient process env the test happens to run in.
-  const CLEAN_ENV: Record<string, string> = { CLAUDE_CODE_OAUTH_TOKEN: "test-oauth-token" };
+  const CLEAN_ENV: Record<string, string> = { CLAUDE_CODE_OAUTH_TOKEN: "example-test-oauth-token" };
 
   beforeEach(() => {
     spawnedEnvs = [];
@@ -195,7 +195,7 @@ describe("Claude stream-json event parsing", () => {
 // regression here is caught instead of silently shipping the wrong text.
 describe("ClaudeSession processStreams — ProviderResult.output capture", () => {
   let spawnSpy: ReturnType<typeof spyOn>;
-  const CLEAN_ENV: Record<string, string> = { CLAUDE_CODE_OAUTH_TOKEN: "test-oauth-token" };
+  const CLEAN_ENV: Record<string, string> = { CLAUDE_CODE_OAUTH_TOKEN: "example-test-oauth-token" };
 
   /** Fake Bun.Subprocess whose stdout streams the given NDJSON lines, then closes. */
   function makeStreamingFakeProc(lines: string[]): ReturnType<typeof Bun.spawn> {
@@ -285,7 +285,7 @@ describe("ClaudeSession processStreams — ProviderResult.output capture", () =>
     expect(summaryOpts!.transcript).toContain('Tool[Read] started: {"file_path":"/tmp/source.ts"}');
     expect(summaryOpts!.transcript).toContain("Tool result: export const value = 1");
     expect(summaryOpts!.transcriptPath).toBeUndefined();
-    expect(summaryOpts!.env?.CLAUDE_CODE_OAUTH_TOKEN).toBe("test-oauth-token");
+    expect(summaryOpts!.env?.CLAUDE_CODE_OAUTH_TOKEN).toBe("example-test-oauth-token");
     expect(summaryOpts!.env?.AGENT_SWARM_TASK_ID).toBe("test-task-id");
   });
 

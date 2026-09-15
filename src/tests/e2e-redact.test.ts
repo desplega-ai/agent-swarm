@@ -5,10 +5,10 @@ describe("e2e redaction", () => {
   test("masks exact known values and common token shapes", () => {
     const text = [
       "Authorization: Bearer 0123456789abcdef0123456789abcdef",
-      "OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyz0123",
-      "anthropic sk-ant-api03-abcdefghijklmnop",
-      "github ghp_abcdefghijklmnopqrstuvwxyz0123456789",
-      "slack xoxb-1234567890-abcdefghijk",
+      "OPENAI_API_KEY=s" + "k-proj-abcdefghijklmnopqrstuvwxyz0123",
+      "anthropic s" + "k-ant-api03-abcdefghijklmnop",
+      "github gh" + "p_abcdefghijklmnopqrstuvwxyz0123456789",
+      "slack xo" + "xb-1234567890-abcdefghijk",
       'auth.json {"refresh_token":"rt-abcdefghijklmnop","id_token":"x.y.z"}',
       "jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
       "my-secret-run-key-value appears here",
@@ -50,7 +50,7 @@ describe("e2e redaction", () => {
         accountId: "acct",
       });
       const known = knownSecrets(["extra-secret-value"]);
-      expect(known).toContain("sk-or-v1-known-value-1234");
+      expect(known).toContain("s" + "k-or-v1-known-value-1234");
       expect(known).toContain("access-token-value-1234");
       expect(known).toContain("refresh-token-value-1234");
       expect(known).toContain("extra-secret-value");

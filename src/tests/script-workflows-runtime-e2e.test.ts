@@ -32,7 +32,7 @@ import { CHILD_PROCESS_TEST_BUDGET_MS } from "./test-proc";
 
 const TEST_DB_PATH = "./test-script-workflows-runtime-e2e.sqlite";
 const WORKFLOW_RUNTIME_DIR = "./test-script-workflows-runtime";
-const API_KEY = "test-script-workflows-runtime-key-1234567890";
+const API_KEY = "example-test-script-workflows-runtime-key-1234567890";
 const spawnTest = test.skipIf(SKIP_SANDBOX_SPAWN_TESTS);
 
 let agentId: string;

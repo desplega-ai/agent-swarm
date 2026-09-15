@@ -26,7 +26,7 @@ import { getTemplateDefinition } from "../prompts/registry";
 import { linearContextKey } from "../tasks/context-key";
 
 const TEST_DB_PATH = "./test-linear-webhook.sqlite";
-const TEST_SECRET = "test-webhook-secret-123";
+const TEST_SECRET = "example-test-webhook-secret-123";
 
 function signPayload(payload: string, secret: string): string {
   return createHmac("sha256", secret).update(payload).digest("hex");

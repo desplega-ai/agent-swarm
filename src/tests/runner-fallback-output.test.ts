@@ -48,7 +48,7 @@ function resetMocks() {
 function makeConfig(): ApiConfig {
   return {
     apiUrl: "http://runner-fallback.test",
-    apiKey: "test-key",
+    apiKey: "example-test-key",
     agentId: "test-agent-id",
   };
 }

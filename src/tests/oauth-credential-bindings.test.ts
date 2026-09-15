@@ -144,7 +144,7 @@ describe("OAuth credential bindings", () => {
 
     await upsertOAuthApp("phase2-roundtrip", testApp("phase2-roundtrip"));
     await storeOAuthTokens("phase2-roundtrip", {
-      accessToken: "roundtrip-access",
+      accessToken: "example-roundtrip-access",
       expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
     });
     const authorizationId = (await getOAuthTokens("phase2-roundtrip"))!.id;
@@ -170,8 +170,8 @@ describe("OAuth credential bindings", () => {
   test("OAuth binding resolves through the stored access token", async () => {
     await upsertOAuthApp("phase2-resolve", testApp("phase2-resolve"));
     await storeOAuthTokens("phase2-resolve", {
-      accessToken: "stored-oauth-access",
-      refreshToken: "stored-oauth-refresh",
+      accessToken: "example-stored-oauth-access",
+      refreshToken: "example-stored-oauth-refresh",
       expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
     });
     await upsertCredentialBinding({
@@ -188,7 +188,7 @@ describe("OAuth credential bindings", () => {
     expect(bindings).toContainEqual(
       expect.objectContaining({
         configKey: "PHASE2_RESOLVE_OAUTH",
-        value: "stored-oauth-access",
+        value: "example-stored-oauth-access",
       }),
     );
   });
@@ -196,8 +196,8 @@ describe("OAuth credential bindings", () => {
   test("expiring OAuth binding token is refreshed before resolution", async () => {
     await upsertOAuthApp("phase2-refresh", testApp("phase2-refresh"));
     await storeOAuthTokens("phase2-refresh", {
-      accessToken: "old-access-token",
-      refreshToken: "old-refresh-token",
+      accessToken: "example-old-access-token",
+      refreshToken: "example-old-refresh-token",
       expiresAt: new Date(Date.now() + 60 * 1000).toISOString(),
     });
     await upsertCredentialBinding({
@@ -215,13 +215,13 @@ describe("OAuth credential bindings", () => {
       }
       expect(init?.method).toBe("POST");
       expect(String(init?.body)).toContain("grant_type=refresh_token");
-      expect(String(init?.body)).toContain("refresh_token=old-refresh-token");
+      expect(String(init?.body)).toContain("refresh_token=example-old-refresh-token");
       return Promise.resolve(
         Response.json({
-          access_token: "new-access-token",
+          access_token: "example-new-access-token",
           token_type: "Bearer",
           expires_in: 3600,
-          refresh_token: "new-refresh-token",
+          refresh_token: "example-new-refresh-token",
         }),
       );
     });
@@ -233,10 +233,12 @@ describe("OAuth credential bindings", () => {
     expect(bindings).toContainEqual(
       expect.objectContaining({
         configKey: "PHASE2_REFRESH_OAUTH",
-        value: "new-access-token",
+        value: "example-new-access-token",
       }),
     );
-    expect((await getOAuthTokens("phase2-refresh"))?.refreshToken).toBe("new-refresh-token");
+    expect((await getOAuthTokens("phase2-refresh"))?.refreshToken).toBe(
+      "example-new-refresh-token",
+    );
   });
 
   test("basic tokenAuthStyle + json tokenBodyFormat reach the token endpoint (Notion-style)", async () => {
@@ -245,8 +247,8 @@ describe("OAuth credential bindings", () => {
       metadata: JSON.stringify({ tokenAuthStyle: "basic", tokenBodyFormat: "json" }),
     });
     await storeOAuthTokens("phase2-basic", {
-      accessToken: "old-basic-access",
-      refreshToken: "old-basic-refresh",
+      accessToken: "example-old-basic-access",
+      refreshToken: "example-old-basic-refresh",
       expiresAt: new Date(Date.now() + 60 * 1000).toISOString(),
     });
     await upsertCredentialBinding({
@@ -272,16 +274,16 @@ describe("OAuth credential bindings", () => {
       expect(headers.get("content-type")).toBe("application/json");
       const body = JSON.parse(String(init?.body)) as Record<string, string>;
       expect(body.grant_type).toBe("refresh_token");
-      expect(body.refresh_token).toBe("old-basic-refresh");
+      expect(body.refresh_token).toBe("example-old-basic-refresh");
       // Basic auth carries the client credentials — they must NOT be in the body
       expect(body.client_id).toBeUndefined();
       expect(body.client_secret).toBeUndefined();
       return Promise.resolve(
         Response.json({
-          access_token: "new-basic-access",
+          access_token: "example-new-basic-access",
           token_type: "Bearer",
           expires_in: 3600,
-          refresh_token: "new-basic-refresh",
+          refresh_token: "example-new-basic-refresh",
         }),
       );
     });
@@ -293,7 +295,7 @@ describe("OAuth credential bindings", () => {
     expect(bindings).toContainEqual(
       expect.objectContaining({
         configKey: "PHASE2_BASIC_OAUTH",
-        value: "new-basic-access",
+        value: "example-new-basic-access",
       }),
     );
   });
@@ -323,7 +325,7 @@ describe("OAuth credential bindings", () => {
         action: "oauth-app-upsert",
         provider: "jira",
         clientId: "jira-client",
-        clientSecret: "jira-secret",
+        clientSecret: "example-jira-secret",
         authorizeUrl: "https://oauth.example.test/authorize",
         tokenUrl: "https://oauth.example.test/token",
         scopes: [],
@@ -345,7 +347,7 @@ describe("OAuth credential bindings", () => {
         action: "oauth-app-upsert",
         provider: "phase2-tool-unsafe",
         clientId: "unsafe-client",
-        clientSecret: "unsafe-secret",
+        clientSecret: "example-unsafe-secret",
         authorizeUrl: "https://oauth.example.test/authorize",
         tokenUrl: "http://127.0.0.1/token",
         scopes: [],
@@ -362,7 +364,7 @@ describe("OAuth credential bindings", () => {
         action: "oauth-app-upsert",
         provider: "phase2-tool-safe",
         clientId: "safe-client",
-        clientSecret: "safe-secret",
+        clientSecret: "example-safe-secret",
         authorizeUrl: "https://oauth.example.test/authorize",
         tokenUrl: "https://oauth.example.test/token",
         scopes: ["read"],
@@ -377,8 +379,8 @@ describe("OAuth credential bindings", () => {
   test("failed OAuth token refresh skips only that binding, others still resolve", async () => {
     await upsertOAuthApp("phase2-broken", testApp("phase2-broken"));
     await storeOAuthTokens("phase2-broken", {
-      accessToken: "stale-access-token",
-      refreshToken: "stale-refresh-token",
+      accessToken: "example-stale-access-token",
+      refreshToken: "example-stale-refresh-token",
       expiresAt: new Date(Date.now() + 60 * 1000).toISOString(),
     });
     await upsertCredentialBinding({
@@ -419,7 +421,7 @@ describe("OAuth credential bindings", () => {
   test("revoked OAuth token skips binding resolution and list reports revoked", async () => {
     await upsertOAuthApp("phase2-missing", testApp("phase2-missing"));
     await storeOAuthTokens("phase2-missing", {
-      accessToken: "soon-deleted",
+      accessToken: "example-soon-deleted",
       expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
     });
     const authorizationId = (await getOAuthTokens("phase2-missing"))!.id;
@@ -465,10 +467,10 @@ describe("OAuth credential bindings", () => {
       expect(String(init?.body)).toContain("grant_type=authorization_code");
       expect(String(init?.body)).toContain("code=callback-code");
       return Response.json({
-        access_token: "callback-access-token",
+        access_token: "example-callback-access-token",
         token_type: "Bearer",
         expires_in: 3600,
-        refresh_token: "callback-refresh-token",
+        refresh_token: "example-callback-refresh-token",
         scope: "read write",
       });
     }) as typeof fetch;
@@ -483,8 +485,8 @@ describe("OAuth credential bindings", () => {
       expect(res.status).toBe(200);
       expect(await res.text()).toContain("You can close this tab.");
       const tokens = await getOAuthTokens(provider);
-      expect(tokens?.accessToken).toBe("callback-access-token");
-      expect(tokens?.refreshToken).toBe("callback-refresh-token");
+      expect(tokens?.accessToken).toBe("example-callback-access-token");
+      expect(tokens?.refreshToken).toBe("example-callback-refresh-token");
     } finally {
       server.close();
     }

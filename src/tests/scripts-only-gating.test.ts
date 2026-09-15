@@ -193,8 +193,8 @@ beforeEach(async () => {
   await scriptsOnlyEnvQueue;
   savedSlackBotToken = process.env.SLACK_BOT_TOKEN;
   savedSlackAppToken = process.env.SLACK_APP_TOKEN;
-  process.env.SLACK_BOT_TOKEN = "test-bot-token";
-  process.env.SLACK_APP_TOKEN = "test-app-token";
+  process.env.SLACK_BOT_TOKEN = "example-test-bot-token";
+  process.env.SLACK_APP_TOKEN = "example-test-app-token";
   await getDbClient().run("DELETE FROM swarm_config WHERE key = 'SCRIPTS_ONLY_MCP'");
 });
 

@@ -22,7 +22,7 @@ import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
 import "../prompts/session-templates";
 
 const TEST_DB_PATH = "./test-scripts-mcp-e2e.sqlite";
-const API_KEY = "test-scripts-mcp-key-1234567890";
+const API_KEY = "example-test-scripts-mcp-key-1234567890";
 const spawnTest = test.skipIf(SKIP_SANDBOX_SPAWN_TESTS);
 
 function fakeEmbedding(text: string): Float32Array {

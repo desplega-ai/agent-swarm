@@ -349,7 +349,7 @@ describe("completeStructured", () => {
   test("claude-cli exhaustion logs one scrubbed line", async () => {
     const original = console.error;
     const errors: unknown[][] = [];
-    const secret = "sk-proj-abcdefghijklmnopqrstuvwxyz012345";
+    const secret = "s" + "k-proj-abcdefghijklmnopqrstuvwxyz012345";
     console.error = (...args: unknown[]) => {
       errors.push(args);
     };

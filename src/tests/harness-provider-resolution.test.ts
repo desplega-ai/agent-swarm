@@ -118,18 +118,18 @@ describe("resolveHarnessProvider", () => {
   });
 
   test("prefers 'pi' when unset and only an OpenRouter key is present (fallbackEnv)", () => {
-    expect(resolveHarnessProvider({}, { OPENROUTER_API_KEY: "sk-or-v1-xxx" })).toBe("pi");
+    expect(resolveHarnessProvider({}, { OPENROUTER_API_KEY: "example-sk-or-v1-xxx" })).toBe("pi");
   });
 
   test("prefers 'pi' when unset and only an OpenRouter key is present (resolvedEnv)", () => {
-    expect(resolveHarnessProvider({ OPENROUTER_API_KEY: "sk-or-v1-xxx" }, {})).toBe("pi");
+    expect(resolveHarnessProvider({ OPENROUTER_API_KEY: "example-sk-or-v1-xxx" }, {})).toBe("pi");
   });
 
   test("prefers 'pi' when invalid and only an OpenRouter key is present", () => {
     expect(
       resolveHarnessProvider(
         { HARNESS_PROVIDER: "not-a-provider" },
-        { OPENROUTER_API_KEY: "sk-or-v1-xxx" },
+        { OPENROUTER_API_KEY: "example-sk-or-v1-xxx" },
       ),
     ).toBe("pi");
   });
@@ -138,7 +138,7 @@ describe("resolveHarnessProvider", () => {
     expect(
       resolveHarnessProvider(
         {},
-        { OPENROUTER_API_KEY: "sk-or-v1-xxx", ANTHROPIC_API_KEY: "sk-ant-xxx" },
+        { OPENROUTER_API_KEY: "example-sk-or-v1-xxx", ANTHROPIC_API_KEY: "example-sk-ant-xxx" },
       ),
     ).toBe("claude");
   });
@@ -147,7 +147,10 @@ describe("resolveHarnessProvider", () => {
     expect(
       resolveHarnessProvider(
         {},
-        { OPENROUTER_API_KEY: "sk-or-v1-xxx", CLAUDE_CODE_OAUTH_TOKEN: "token-xxx" },
+        {
+          OPENROUTER_API_KEY: "example-sk-or-v1-xxx",
+          CLAUDE_CODE_OAUTH_TOKEN: "example-token-xxx",
+        },
       ),
     ).toBe("claude");
   });

@@ -43,7 +43,7 @@ describe("POST /api/pages/:id/launch — password mode rejection (step-4)", () =
   const headers = { "Content-Type": "application/json", "X-Agent-ID": agentId };
 
   beforeAll(async () => {
-    process.env.PAGE_SESSION_SECRET = "test-launch-password-rejection-secret";
+    process.env.PAGE_SESSION_SECRET = "example-test-launch-password-rejection-secret";
     for (const suffix of ["", "-wal", "-shm"]) {
       try {
         await unlink(`${TEST_DB_PATH}${suffix}`);
@@ -74,7 +74,7 @@ describe("POST /api/pages/:id/launch — password mode rejection (step-4)", () =
         title: "Password",
         contentType: "text/html",
         authMode: "password",
-        password: "swordfish",
+        password: "example-swordfish",
         body: "<h1>locked</h1>",
       }),
     });

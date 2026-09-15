@@ -332,7 +332,7 @@ export async function postComment(
 4. Add to `.env`:
    ```bash
    GITHUB_APP_ID=2645773
-   GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"
+   GITHUB_APP_PRIVATE_KEY="[REDACTED:github_app_private_key]"
    ```
 
 ### Success Criteria:

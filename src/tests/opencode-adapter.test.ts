@@ -28,7 +28,7 @@ function testConfig(overrides: Partial<ProviderSessionConfig> = {}): ProviderSes
     agentId: "agent-1",
     taskId: "task-1",
     apiUrl: "http://localhost:0",
-    apiKey: "test-key",
+    apiKey: "example-test-key",
     cwd: "/tmp/test",
     logFile: "/tmp/test.log",
     ...overrides,

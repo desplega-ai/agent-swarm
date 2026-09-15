@@ -205,7 +205,7 @@ describe("PiMonoAdapter.createSession — MCP runtime identity header", () => {
       agentId: "test-agent",
       taskId: "test-task",
       apiUrl,
-      apiKey: "test-key",
+      apiKey: "example-test-key",
       cwd: "/tmp",
       logFile: `/tmp/pi-mcp-header-test-${Date.now()}-${Math.random().toString(36).slice(2)}.log`,
     };
@@ -438,28 +438,28 @@ describe("resolveModel — OpenRouter reroute for anthropic shortnames", () => {
 
 describe("createPiRuntimeAuth", () => {
   test("threads resolved OpenRouter key into pi runtime auth without process.env", async () => {
-    const modelRuntime = await createPiRuntimeAuth({ OPENROUTER_API_KEY: "sk-or-runtime" });
+    const modelRuntime = await createPiRuntimeAuth({ OPENROUTER_API_KEY: "example-sk-or-runtime" });
 
     await expect(modelRuntime.getAuth("openrouter")).resolves.toMatchObject({
-      auth: { apiKey: "sk-or-runtime" },
+      auth: { apiKey: "example-sk-or-runtime" },
     });
   });
 
   test("supports all pi env-backed providers", async () => {
     const modelRuntime = await createPiRuntimeAuth({
-      ANTHROPIC_API_KEY: "sk-ant-runtime",
-      OPENAI_API_KEY: "sk-openai-runtime",
-      GOOGLE_API_KEY: "sk-google-runtime",
+      ANTHROPIC_API_KEY: "example-sk-ant-runtime",
+      OPENAI_API_KEY: "example-sk-openai-runtime",
+      GOOGLE_API_KEY: "example-sk-google-runtime",
     });
 
     await expect(modelRuntime.getAuth("anthropic")).resolves.toMatchObject({
-      auth: { apiKey: "sk-ant-runtime" },
+      auth: { apiKey: "example-sk-ant-runtime" },
     });
     await expect(modelRuntime.getAuth("openai")).resolves.toMatchObject({
-      auth: { apiKey: "sk-openai-runtime" },
+      auth: { apiKey: "example-sk-openai-runtime" },
     });
     await expect(modelRuntime.getAuth("google")).resolves.toMatchObject({
-      auth: { apiKey: "sk-google-runtime" },
+      auth: { apiKey: "example-sk-google-runtime" },
     });
   });
 });
@@ -641,7 +641,7 @@ function makeSessionConfig(logFile: string): ProviderSessionConfig {
     agentId: "test-agent-id",
     taskId: "test-task-id",
     apiUrl: "http://localhost:3013",
-    apiKey: "test-key",
+    apiKey: "example-test-key",
     cwd: "/tmp",
     logFile,
     iteration: 1,

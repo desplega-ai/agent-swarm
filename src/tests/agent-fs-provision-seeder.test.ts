@@ -99,13 +99,13 @@ function createFetchStub(
         body.email !== "admin@example.test"
       ) {
         return Response.json({
-          apiKey: "afs-agent-key",
+          apiKey: "example-afs-agent-key",
           userId: "agent-user",
           orgId: "agent-personal-org",
         });
       }
       return Response.json({
-        apiKey: "afs-admin-key",
+        apiKey: "example-afs-admin-key",
         userId: "admin-user",
         orgId: "personal-org",
       });
@@ -208,7 +208,7 @@ describe("agent-fs provisioning seeder", () => {
 
     expect(result.failed).toEqual([]);
     expect(result.created).toBe(1);
-    expect(await configValue("API_AGENT_FS_API_KEY")).toBe("afs-admin-key");
+    expect(await configValue("API_AGENT_FS_API_KEY")).toBe("example-afs-admin-key");
     expect(
       (await getSwarmConfigs({ scope: "global", key: "API_AGENT_FS_API_KEY" }))[0]?.encrypted,
     ).toBe(true);
@@ -216,7 +216,7 @@ describe("agent-fs provisioning seeder", () => {
     expect(await configValue("AGENT_FS_DEFAULT_ORG_ID")).toBe("shared-org");
     expect(await configValue("AGENT_FS_SHARED_ORG_ID")).toBe("shared-org");
     expect(await configValue("AGENT_FS_DEFAULT_DRIVE_ID")).toBe("shared-drive");
-    expect(process.env.API_AGENT_FS_API_KEY).toBe("afs-admin-key");
+    expect(process.env.API_AGENT_FS_API_KEY).toBe("example-afs-admin-key");
 
     const register = records.find((r) => r.path === "/auth/register");
     expect(register?.body).toEqual({ email: "admin@example.test" });
@@ -255,7 +255,7 @@ describe("agent-fs provisioning seeder", () => {
     await upsertSwarmConfig({
       scope: "global",
       key: "API_AGENT_FS_API_KEY",
-      value: "afs-admin-key",
+      value: "example-afs-admin-key",
       isSecret: true,
     });
     await upsertSwarmConfig({
@@ -324,7 +324,7 @@ describe("agent-fs provisioning seeder", () => {
     await upsertSwarmConfig({
       scope: "global",
       key: "API_AGENT_FS_API_KEY",
-      value: "afs-admin-key",
+      value: "example-afs-admin-key",
       isSecret: true,
     });
     await upsertSwarmConfig({
@@ -388,7 +388,7 @@ describe("agent-fs provisioning seeder", () => {
     await upsertSwarmConfig({
       scope: "global",
       key: "API_AGENT_FS_API_KEY",
-      value: "afs-admin-key",
+      value: "example-afs-admin-key",
       isSecret: true,
     });
     await upsertSwarmConfig({
@@ -438,7 +438,7 @@ describe("agent-fs provisioning seeder", () => {
     await upsertSwarmConfig({
       scope: "global",
       key: "API_AGENT_FS_API_KEY",
-      value: "afs-admin-key",
+      value: "example-afs-admin-key",
       isSecret: true,
     });
     await upsertSwarmConfig({
@@ -492,7 +492,7 @@ describe("agent-fs provisioning seeder", () => {
         key: "AGENT_FS_API_KEY",
       })
     )[0];
-    expect(agentKey?.value).toBe("afs-agent-key");
+    expect(agentKey?.value).toBe("example-afs-agent-key");
     expect(agentKey?.encrypted).toBe(true);
     expect(records.find((r) => r.path === "/auth/register")?.body).toEqual({
       email: `custom-worker-${suffix}@example.test`,
@@ -516,7 +516,7 @@ describe("agent-fs provisioning seeder", () => {
     await upsertSwarmConfig({
       scope: "global",
       key: "API_AGENT_FS_API_KEY",
-      value: "afs-admin-key",
+      value: "example-afs-admin-key",
       isSecret: true,
     });
     await upsertSwarmConfig({
@@ -570,7 +570,7 @@ describe("agent-fs provisioning seeder", () => {
           key: "AGENT_FS_API_KEY",
         })
       )[0]?.value,
-    ).toBe("afs-agent-key");
+    ).toBe("example-afs-agent-key");
 
     const registrations = records
       .filter((record) => record.path === "/auth/register")
@@ -595,7 +595,7 @@ describe("agent-fs provisioning seeder", () => {
     const invite = records.find((r) => r.path === "/orgs/shared-org/members/invite");
     expect(invite?.method).toBe("POST");
     expect(invite?.body).toEqual({ email: "Customer@Example.test", role: "admin" });
-    expect(invite?.authorization).toBe("Bearer afs-admin-key");
+    expect(invite?.authorization).toBe("Bearer example-afs-admin-key");
   });
 
   test("does not re-invite an external email whose current role already covers the request", async () => {

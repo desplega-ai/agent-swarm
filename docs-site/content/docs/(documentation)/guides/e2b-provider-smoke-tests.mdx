@@ -116,7 +116,7 @@ bun run src/cli.tsx e2b start-worker \
   --api-key "$SWARM_E2E_API_KEY" \
   --agent-id "smoke-codex-${DEPLOYMENT_SHA}" \
   --provider codex \
-  --secret OPENAI_API_KEY="$OPENAI_API_KEY" \
+  --secret OPENAI_API_KEY="${OPENAI_API_KEY}" \
   --timeout-sec 900 \
   --json
 ```

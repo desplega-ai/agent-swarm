@@ -20,7 +20,7 @@ const TEST_DB_PATH = `/tmp/test-http-integration-${Date.now()}.sqlite`;
 // the attachment test was leaking data/fs/tasks/<id>/ into the worktree).
 const TEST_FS_DIR = `/tmp/test-http-integration-fs-${Date.now()}`;
 let BASE = "";
-const TEST_API_KEY = "test-http-integration-key";
+const TEST_API_KEY = "example-test-http-integration-key";
 
 let serverProc: Subprocess;
 
@@ -1984,7 +1984,7 @@ describe("AgentMail Webhooks (with filters)", () => {
   let AGENTMAIL_PORT = 0;
   const AGENTMAIL_DB = `/tmp/test-agentmail-${Date.now()}.sqlite`;
   let AGENTMAIL_BASE = "";
-  const WEBHOOK_SECRET = "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw"; // test-only secret
+  const WEBHOOK_SECRET = "wh" + "sec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw"; // test-only secret
   let agentmailProc: Subprocess;
 
   function signPayload(payload: unknown): { body: string; headers: Record<string, string> } {

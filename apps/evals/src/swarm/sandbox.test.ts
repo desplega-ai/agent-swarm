@@ -32,42 +32,42 @@ function workerEnvFor(config: HarnessConfig): Record<string, string> {
 
 describe("workerRuntimeEnv credential gating (v7.6 §A2 — interim claude OPENROUTER injection removed)", () => {
   test("claude provider + OPENROUTER_API_KEY in controller env → NOT injected (1.97.0 templates ship the SKIP_SESSION_SUMMARY root fix; the summarizer-recursion guard is gone)", () => {
-    process.env.OPENROUTER_API_KEY = "or-test-key";
-    process.env.CLAUDE_CODE_OAUTH_TOKEN = "oauth-test";
+    process.env.OPENROUTER_API_KEY = "example-or-test-key";
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "example-oauth-test";
     const env = workerEnvFor({ id: "claude-haiku", provider: "claude", model: "haiku" });
     expect(env.OPENROUTER_API_KEY).toBeUndefined();
     // Harness credential gating unchanged: OAuth token still present.
-    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe("oauth-test");
+    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe("example-oauth-test");
   });
 
   test("non-claude provider with anthropic-prefixed model → OPENROUTER_API_KEY NOT injected (credential gating stays config-driven)", () => {
-    process.env.OPENROUTER_API_KEY = "or-test-key";
-    process.env.ANTHROPIC_API_KEY = "ant-test-key";
+    process.env.OPENROUTER_API_KEY = "example-or-test-key";
+    process.env.ANTHROPIC_API_KEY = "example-ant-test-key";
     const env = workerEnvFor({
       id: "pi-haiku",
       provider: "pi",
       model: "anthropic/claude-haiku-4-5",
     });
     expect(env.OPENROUTER_API_KEY).toBeUndefined();
-    expect(env.ANTHROPIC_API_KEY).toBe("ant-test-key");
+    expect(env.ANTHROPIC_API_KEY).toBe("example-ant-test-key");
   });
 
   test("config.env can still supply OPENROUTER_API_KEY explicitly (merge order intact)", () => {
     delete process.env.OPENROUTER_API_KEY;
-    process.env.CLAUDE_CODE_OAUTH_TOKEN = "oauth-test";
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "example-oauth-test";
     const env = workerEnvFor({
       id: "claude-haiku",
       provider: "claude",
       model: "haiku",
-      env: { OPENROUTER_API_KEY: "per-config-key" },
+      env: { OPENROUTER_API_KEY: "example-per-config-key" },
     });
-    expect(env.OPENROUTER_API_KEY).toBe("per-config-key");
+    expect(env.OPENROUTER_API_KEY).toBe("example-per-config-key");
   });
 });
 
 describe("workerRuntimeEnv v7 member env (§9.3 frozen merge order)", () => {
   test("pins eval telemetry to the test cohort after config and spec env merges", () => {
-    process.env.CLAUDE_CODE_OAUTH_TOKEN = "oauth-test";
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "example-oauth-test";
     const env = workerRuntimeEnv({
       swarmKey: "k",
       apiUrl: "https://api.example",
@@ -84,7 +84,7 @@ describe("workerRuntimeEnv v7 member env (§9.3 frozen merge order)", () => {
   });
 
   test("identity envs map from the typed spec fields (TEMPLATE_ID / AGENT_NAME / SYSTEM_PROMPT)", () => {
-    process.env.CLAUDE_CODE_OAUTH_TOKEN = "oauth-test";
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "example-oauth-test";
     const env = workerRuntimeEnv({
       swarmKey: "k",
       apiUrl: "https://api.example",
@@ -98,7 +98,7 @@ describe("workerRuntimeEnv v7 member env (§9.3 frozen merge order)", () => {
   });
 
   test("default worker: NO TEMPLATE_ID (a template would rewrite the eval subject's prompt), AGENT_NAME defaults to Worker 0, AGENT_ROLE=worker, MAX_CONCURRENT_TASKS=1", () => {
-    process.env.CLAUDE_CODE_OAUTH_TOKEN = "oauth-test";
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "example-oauth-test";
     const env = workerEnvFor({ id: "claude-haiku", provider: "claude", model: "haiku" });
     expect(env.TEMPLATE_ID).toBeUndefined();
     // v7.5 item 7: AGENT_NAME is now always emitted so agents stop registering
@@ -110,7 +110,7 @@ describe("workerRuntimeEnv v7 member env (§9.3 frozen merge order)", () => {
   });
 
   test("default worker name follows the 0-based member index (matches sandbox indices + UI workerLabel)", () => {
-    process.env.CLAUDE_CODE_OAUTH_TOKEN = "oauth-test";
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "example-oauth-test";
     const env = workerRuntimeEnv({
       swarmKey: "k",
       apiUrl: "https://api.example",
@@ -123,7 +123,7 @@ describe("workerRuntimeEnv v7 member env (§9.3 frozen merge order)", () => {
   });
 
   test("lead member: AGENT_ROLE=lead with the entrypoint's lead default MAX_CONCURRENT_TASKS=2; default TEMPLATE_ID=official/lead, spec.name wins over the Lead default", () => {
-    process.env.CLAUDE_CODE_OAUTH_TOKEN = "oauth-test";
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "example-oauth-test";
     const env = workerRuntimeEnv({
       swarmKey: "k",
       apiUrl: "https://api.example",
@@ -141,7 +141,7 @@ describe("workerRuntimeEnv v7 member env (§9.3 frozen merge order)", () => {
   });
 
   test("default lead ({} spec): TEMPLATE_ID=official/lead, AGENT_NAME=Lead (deterministic even if the registry fetch fails)", () => {
-    process.env.CLAUDE_CODE_OAUTH_TOKEN = "oauth-test";
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "example-oauth-test";
     const env = workerRuntimeEnv({
       swarmKey: "k",
       apiUrl: "https://api.example",
@@ -156,7 +156,7 @@ describe("workerRuntimeEnv v7 member env (§9.3 frozen merge order)", () => {
   });
 
   test("explicit spec.template wins over the lead's official/lead default", () => {
-    process.env.CLAUDE_CODE_OAUTH_TOKEN = "oauth-test";
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "example-oauth-test";
     const env = workerRuntimeEnv({
       swarmKey: "k",
       apiUrl: "https://api.example",
@@ -170,7 +170,7 @@ describe("workerRuntimeEnv v7 member env (§9.3 frozen merge order)", () => {
   });
 
   test("spec.env merges LAST (over config.env)", () => {
-    process.env.CLAUDE_CODE_OAUTH_TOKEN = "oauth-test";
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "example-oauth-test";
     const env = workerRuntimeEnv({
       swarmKey: "k",
       apiUrl: "https://api.example",
@@ -188,8 +188,8 @@ describe("workerRuntimeEnv v7 member env (§9.3 frozen merge order)", () => {
   });
 
   test("credential isolation follows the EFFECTIVE config (pi override on a claude host env)", () => {
-    process.env.CLAUDE_CODE_OAUTH_TOKEN = "oauth-test";
-    process.env.OPENROUTER_API_KEY = "or-test-key";
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "example-oauth-test";
+    process.env.OPENROUTER_API_KEY = "example-or-test-key";
     // Member overridden to pi/openrouter: gets OPENROUTER_API_KEY, never the
     // claude OAuth token (claude creds in env win inside the harness).
     const env = workerRuntimeEnv({
@@ -205,7 +205,7 @@ describe("workerRuntimeEnv v7 member env (§9.3 frozen merge order)", () => {
     });
     expect(env.HARNESS_PROVIDER).toBe("pi");
     expect(env.MODEL_OVERRIDE).toBe("openrouter/deepseek/deepseek-v4-flash");
-    expect(env.OPENROUTER_API_KEY).toBe("or-test-key");
+    expect(env.OPENROUTER_API_KEY).toBe("example-or-test-key");
     expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
   });
 });
@@ -222,11 +222,11 @@ describe("apiRuntimeEnv", () => {
   });
 
   test("EMBEDDING_API_KEY / EMBEDDING_MODEL / EMBEDDING_API_BASE_URL pass through when set", () => {
-    process.env.EMBEDDING_API_KEY = "emb-test-key";
+    process.env.EMBEDDING_API_KEY = "example-emb-test-key";
     process.env.EMBEDDING_MODEL = "text-embedding-3-small";
     process.env.EMBEDDING_API_BASE_URL = "https://embed.example/v1";
     const env = apiRuntimeEnv("k");
-    expect(env.EMBEDDING_API_KEY).toBe("emb-test-key");
+    expect(env.EMBEDDING_API_KEY).toBe("example-emb-test-key");
     expect(env.EMBEDDING_MODEL).toBe("text-embedding-3-small");
     expect(env.EMBEDDING_API_BASE_URL).toBe("https://embed.example/v1");
   });
@@ -242,10 +242,10 @@ describe("apiRuntimeEnv", () => {
   });
 
   test("OPENAI_API_KEY is NOT forwarded to the API sandbox (embeddings no longer rely on the server-side OPENAI_API_KEY fallback)", () => {
-    process.env.OPENAI_API_KEY = "oa-test-key";
-    process.env.EMBEDDING_API_KEY = "emb-test-key";
+    process.env.OPENAI_API_KEY = "example-oa-test-key";
+    process.env.EMBEDDING_API_KEY = "example-emb-test-key";
     const env = apiRuntimeEnv("k");
     expect(env.OPENAI_API_KEY).toBeUndefined();
-    expect(env.EMBEDDING_API_KEY).toBe("emb-test-key");
+    expect(env.EMBEDDING_API_KEY).toBe("example-emb-test-key");
   });
 });

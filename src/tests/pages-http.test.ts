@@ -129,7 +129,7 @@ describe("Pages HTTP API", () => {
   });
 
   test("POST /api/pages with password hashes the password", async () => {
-    const password = "open-sesame-9";
+    const password = "example-open-sesame-9";
     const res = await fetch(`${baseUrl}/api/pages`, {
       method: "POST",
       headers,

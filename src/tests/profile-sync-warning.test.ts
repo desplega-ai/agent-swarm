@@ -72,7 +72,7 @@ describe("profile sync rejection session warning", () => {
       "ORIGINAL TASK PROMPT",
       {
         apiUrl: "https://api.example.test",
-        apiKey: "secret-key",
+        apiKey: "example-secret-key",
         agentId: "agent-1",
       },
       fetchImpl,
@@ -92,7 +92,7 @@ describe("profile sync rejection session warning", () => {
     const taskPrompt = "/work-on-task child-id\n\nTask: follow up";
     const followUp = await prependProfileSyncRejectionBanner(
       prependContextPreamble(taskPrompt, context),
-      { apiUrl: "https://api.example.test", apiKey: "secret-key", agentId: "agent-1" },
+      { apiUrl: "https://api.example.test", apiKey: "example-secret-key", agentId: "agent-1" },
       fetchImpl,
     );
     expect(followUp.prompt).toStartWith("/work-on-task child-id\n");
@@ -120,7 +120,7 @@ describe("profile sync rejection session warning", () => {
     const banner = await fetchProfileSyncRejectionBanner(
       {
         apiUrl: "https://api.example.test",
-        apiKey: "secret-key",
+        apiKey: "example-secret-key",
         agentId: "agent-1",
       },
       fetchImpl,
@@ -153,7 +153,7 @@ describe("profile sync rejection session warning", () => {
     const banner = await fetchProfileSyncRejectionBanner(
       {
         apiUrl: "https://api.example.test",
-        apiKey: "secret-key",
+        apiKey: "example-secret-key",
         agentId: "agent-1",
       },
       fetchImpl,
@@ -190,7 +190,7 @@ describe("profile sync rejection session warning", () => {
     const banner = await fetchProfileSyncRejectionBanner(
       {
         apiUrl: "https://api.example.test",
-        apiKey: "secret-key",
+        apiKey: "example-secret-key",
         agentId: "agent-1",
       },
       fetchImpl,
@@ -219,7 +219,7 @@ describe("profile sync rejection session warning", () => {
     }) as typeof fetch;
     const config = {
       apiUrl: "https://api.example.test",
-      apiKey: "secret-key",
+      apiKey: "example-secret-key",
       agentId: "agent-1",
       claudeMdPath: WORKSPACE_CLAUDE_MD_PATH,
     };
@@ -266,7 +266,7 @@ describe("profile sync rejection session warning", () => {
     const banner = await fetchProfileSyncRejectionBanner(
       {
         apiUrl: "https://api.example.test",
-        apiKey: "secret-key",
+        apiKey: "example-secret-key",
         agentId: "agent-1",
       },
       fetchImpl,
@@ -282,7 +282,7 @@ describe("profile sync rejection session warning", () => {
     const banner = await fetchProfileSyncRejectionBanner(
       {
         apiUrl: "https://api.example.test",
-        apiKey: "secret-key",
+        apiKey: "example-secret-key",
         agentId: "agent-1",
       },
       (async () => new Response("unavailable", { status: 503 })) as typeof fetch,

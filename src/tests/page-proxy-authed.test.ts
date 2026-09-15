@@ -20,8 +20,8 @@ import { getFreePort, SERVER_BOOT_HOOK_TIMEOUT_MS, waitForServer } from "./test-
 let TEST_PORT = 0;
 const TEST_DB_PATH = `/tmp/test-page-proxy-authed-${Date.now()}.sqlite`;
 let BASE = "";
-const API_KEY = "test-page-proxy-authed-key";
-const PAGE_SECRET = "test-page-proxy-authed-secret";
+const API_KEY = "example-test-page-proxy-authed-key";
+const PAGE_SECRET = "example-test-page-proxy-authed-secret";
 
 let serverProc: Subprocess;
 const agentId = randomUUID();

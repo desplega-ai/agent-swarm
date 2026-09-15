@@ -13,7 +13,7 @@ const TEST_DB_PATH = "./test-oauth-wrapper.sqlite";
 const testConfig: OAuthProviderConfig = {
   provider: "test-provider",
   clientId: "test-client-id",
-  clientSecret: "test-client-secret",
+  clientSecret: "example-test-client-secret",
   authorizeUrl: "https://example.com/oauth/authorize",
   tokenUrl: "https://example.com/oauth/token",
   redirectUri: "http://localhost:3013/api/oauth/callback",

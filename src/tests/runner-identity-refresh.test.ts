@@ -32,7 +32,7 @@ async function runFixture(scenario: string): Promise<FixtureResult> {
             PATH: process.env.PATH,
             HOME: directory,
             AGENT_ID: "11111111-1111-4111-8111-111111111111",
-            API_KEY: "fixture-key",
+            API_KEY: "example-fixture-key",
             MCP_BASE_URL: "http://runner.invalid",
             HARNESS_PROVIDER: "pi",
             CRED_CHECK_DISABLE: "1",

@@ -12,7 +12,7 @@ import { getPathSegments, parseQueryParams } from "../http/utils";
 // DCR registration on every call" defect. Uses the same dispatch() harness
 // as mcp-oauth-manual-client.test.ts.
 
-const API_KEY = "test-secret-key";
+const API_KEY = "example-test-secret-key";
 const TEST_DB_PATH = "./test-mcp-oauth-dcr-reuse.sqlite";
 
 async function removeDbFiles(): Promise<void> {
@@ -146,7 +146,7 @@ describe("MCP OAuth DCR client reuse", () => {
         return Response.json(
           {
             client_id: `client-${issuerHost}-${dcrCallCount}`,
-            client_secret: `secret-${issuerHost}-${dcrCallCount}`,
+            client_secret: `example-secret-${issuerHost}-${dcrCallCount}`,
           },
           { status: 201 },
         );
@@ -161,10 +161,10 @@ describe("MCP OAuth DCR client reuse", () => {
           );
         }
         return Response.json({
-          access_token: "mock-access-token",
+          access_token: "example-mock-access-token",
           token_type: "Bearer",
           expires_in: 3600,
-          refresh_token: "mock-refresh-token",
+          refresh_token: "example-mock-refresh-token",
           scope: "read",
         });
       }
@@ -660,7 +660,7 @@ describe("MCP OAuth DCR client reuse", () => {
     // The provider echoes every credential the exchange transmitted. Both
     // callback sinks (console.error and error_description on the redirect)
     // receive the thrown message verbatim, so none of these may survive.
-    const clientSecret = "secret-as-1.example.test-1";
+    const clientSecret = "example-secret-as-1.example.test-1";
     const encodedSecret = new URLSearchParams({ v: clientSecret }).toString().slice(2);
     const basicBlob = Buffer.from(
       `${new URLSearchParams({ v: "client-as-1.example.test-1" }).toString().slice(2)}:${encodedSecret}`,
@@ -730,7 +730,7 @@ describe("MCP OAuth DCR client reuse", () => {
     const body = new URLSearchParams(capturedTokenBody);
     expect(capturedTokenHeaders.Authorization).toBeUndefined();
     expect(body.get("client_id")).toBe("client-as-1.example.test-1");
-    expect(body.get("client_secret")).toBe("secret-as-1.example.test-1");
+    expect(body.get("client_secret")).toBe("example-secret-as-1.example.test-1");
 
     // And the resolution is persisted, so later refreshes stay consistent.
     expect((await getMcpOAuthToken(server.id))?.tokenEndpointAuthMethod).toBe("client_secret_post");

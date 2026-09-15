@@ -19,7 +19,7 @@ const originalFetch = globalThis.fetch;
 function buildOpts(override: Partial<CodexSwarmEventHandlerOpts> = {}): CodexSwarmEventHandlerOpts {
   return {
     apiUrl: "http://test-api",
-    apiKey: "test-key",
+    apiKey: "example-test-key",
     agentId: "agent-1",
     taskId: "task-1",
     abortRef: { current: null },

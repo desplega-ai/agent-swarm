@@ -60,9 +60,9 @@ for (const transport of ["cli", "sdk"] as const) {
             CLAUDECODE: "",
             CONTEXT_MODE_DISABLED: "true",
             // Synthetic values ensure this probe cannot authenticate or incur model charges.
-            CLAUDE_CODE_OAUTH_TOKEN: "synthetic-not-an-oauth-token",
-            ANTHROPIC_API_KEY: "synthetic-not-an-api-key",
-            AGENT_SWARM_CLAUDE_OAUTH_TOKEN: "synthetic-legacy-mirror",
+            CLAUDE_CODE_OAUTH_TOKEN: "example-synthetic-not-an-oauth-token",
+            ANTHROPIC_API_KEY: "example-synthetic-not-an-api-key",
+            AGENT_SWARM_CLAUDE_OAUTH_TOKEN: "example-synthetic-legacy-mirror",
           },
         });
         abortTimer = setTimeout(() => void session?.abort("hook probe timeout"), 20_000);

@@ -21,8 +21,8 @@ import { getPathSegments, parseQueryParams } from "../http/utils";
 import type { PricingProvider, PricingTokenClass } from "../types";
 import { listenOnFreePort } from "./test-net";
 
-const TEST_DB_PATH = "./test-session-costs-golden.sqlite";
-const API_KEY = "test-session-costs-golden";
+const TEST_DB_PATH = "./example-test-session-costs-golden.sqlite";
+const API_KEY = "example-test-session-costs-golden";
 const RATE_EFFECTIVE_AT = 1_800_000_000_000;
 const FIXTURE_CREATED_AT = RATE_EFFECTIVE_AT + 1;
 const EPSILON = 1e-9;

@@ -17,11 +17,11 @@ describe("resolveWorkflowLlmConfig", () => {
 
   test("routes OpenAI credentials to the SDK default endpoint", async () => {
     const config = await resolveWorkflowLlmConfig(undefined, {
-      OPENAI_API_KEY: "sk-openai-test",
+      OPENAI_API_KEY: "example-sk-openai-test",
     });
 
     expect(config).toEqual({
-      apiKey: "sk-openai-test",
+      apiKey: "example-sk-openai-test",
       baseURL: undefined,
       model: "gpt-5.4-mini",
     });
@@ -32,7 +32,7 @@ describe("resolveWorkflowLlmConfig", () => {
     process.env.MEMORY_RATER_MODEL = "openrouter/anthropic/claude-sonnet-4-5";
     try {
       const config = await resolveWorkflowLlmConfig(undefined, {
-        OPENAI_API_KEY: "sk-openai-test",
+        OPENAI_API_KEY: "example-sk-openai-test",
       });
       expect(config.model).toBe("gpt-5.4-mini");
     } finally {
@@ -43,7 +43,7 @@ describe("resolveWorkflowLlmConfig", () => {
 
   test("preserves an explicit provider-compatible model", async () => {
     const config = await resolveWorkflowLlmConfig("openai/gpt-5.4", {
-      OPENAI_API_KEY: "sk-openai-test",
+      OPENAI_API_KEY: "example-sk-openai-test",
     });
 
     expect(config.model).toBe("gpt-5.4");
@@ -51,7 +51,7 @@ describe("resolveWorkflowLlmConfig", () => {
 
   test("rejects credential kinds without an OpenAI-compatible endpoint", async () => {
     await expect(
-      resolveWorkflowLlmConfig(undefined, { ANTHROPIC_API_KEY: "sk-ant-test" }),
+      resolveWorkflowLlmConfig(undefined, { ANTHROPIC_API_KEY: "example-sk-ant-test" }),
     ).rejects.toThrow("do not support the resolved anthropic credential yet");
   });
 });

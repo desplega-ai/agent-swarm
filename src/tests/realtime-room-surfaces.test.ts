@@ -23,7 +23,7 @@ import { registerRoomDecodeTool } from "../tools/rooms";
 import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-realtime-room-surfaces.sqlite";
-const API_KEY = "test-realtime-room-key";
+const API_KEY = "example-test-realtime-room-key";
 
 async function removeDbFiles(): Promise<void> {
   for (const suffix of ["", "-wal", "-shm"]) {
