@@ -82,22 +82,26 @@ export function registerActionHandlers(app: App): void {
       sampleEventType: "view_submission",
       sampleContext: view.callback_id || "follow_up_submit",
     });
-    const followUpTask = await createTaskWithSiblingAwareness(followUpText, {
-      agentId: lead?.id,
-      routingReason: lead ? "skill" : undefined,
-      source: "slack",
-      parentTaskId: taskId,
-      slackChannelId: originalTask.slackChannelId,
-      slackThreadTs: originalTask.slackThreadTs,
-      slackUserId: body.user.id,
-      requestedByUserId,
-      contextKey: originalTask.slackThreadTs
-        ? slackContextKey({
-            channelId: originalTask.slackChannelId,
-            threadTs: originalTask.slackThreadTs,
-          })
-        : undefined,
-    });
+    const followUpTask = await createTaskWithSiblingAwareness(
+      followUpText,
+      {
+        agentId: lead?.id,
+        routingReason: lead ? "skill" : undefined,
+        source: "slack",
+        parentTaskId: taskId,
+        slackChannelId: originalTask.slackChannelId,
+        slackThreadTs: originalTask.slackThreadTs,
+        slackUserId: body.user.id,
+        requestedByUserId,
+        contextKey: originalTask.slackThreadTs
+          ? slackContextKey({
+              channelId: originalTask.slackChannelId,
+              threadTs: originalTask.slackThreadTs,
+            })
+          : undefined,
+      },
+      { origin: "slack" },
+    );
 
     if (isSlackRenderV2Enabled()) {
       await ensureSlackThreadTree([followUpTask.id]);

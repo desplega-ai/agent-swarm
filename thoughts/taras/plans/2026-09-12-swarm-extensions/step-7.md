@@ -2,7 +2,10 @@
 id: step-7
 name: MCP tools extension-install / extension-list
 depends_on: [step-2]
-status: ready
+status: done
+assignee: codex-terra-step-7-20260914
+claimed_at: 2026-09-14T17:45:00+02:00
+completed_at: 2026-09-14T20:30:00+02:00
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -30,11 +33,11 @@ After this step a lead agent can draft a bundle from a task with `extension-inst
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun run test:root -- src/tests/extensions-mcp-tools.test.ts src/tests/swarm-tool-result-gate.test.ts src/tests/scripts-only-gating.test.ts`
-- [ ] `bun scripts/check-sdk-tool-registration.ts`
-- [ ] `bun run build:script-types && bun run check:script-types`
-- [ ] `bun run tsc:check && bun run lint`
-- [ ] `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts`
+- [x] `bun run test:root -- src/tests/extensions-mcp-tools.test.ts src/tests/swarm-tool-result-gate.test.ts src/tests/scripts-only-gating.test.ts`
+- [x] `bun scripts/check-sdk-tool-registration.ts`
+- [x] `bun run build:script-types && bun run check:script-types`
+- [x] `bun run tsc:check && bun run lint`
+- [x] `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts`
 
 #### Automated QA:
 - [ ] Boot on a scratch DB, join a lead over MCP (UUID id, `LOCAL_TESTING.md` § Handshake sequence), call `extension-install` with the `minimal` bundle fixture, confirm `structuredContent.enabled === false`, then `GET /api/extensions` shows it `disabled`; call `extension-list` and confirm the table.
@@ -44,3 +47,10 @@ After this step a lead agent can draft a bundle from a task with `extension-inst
 - [ ] None.
 
 **Implementation Note**: This step is a vertical slice — QA-able on its own. After completing this step, pause for manual confirmation. Taras handles commits.
+
+## Execution notes (2026-09-14)
+
+- Executor: codex-terra, in worktree /tmp/ext-wt/step-7 (branch codex/ext-step-7), merged with --no-ff into docs/swarm-extensions-brainstorm-plan. Report: /tmp/ext-impl/wave3/step-7-report.md.
+- Deviation (orchestrator, applies to steps 3-7): the motivating example lives in its own file `src/tests/extensions-example-*.test.ts` instead of a shared `extensions-examples.test.ts`; step-9 consolidates or updates the root.md command to a glob.
+- Live QA for this step was run by the orchestrator on the merged tree (Codex sandboxes deny listeners). See root.md "Wave 3 QA" note.
+- Wave-3 two-axis review findings and their fix round: /tmp/ext-impl/wave3-fix-prompt.md (the report lands at /tmp/ext-impl/wave3-fix-report.md). Automated boxes are ticked pending that round's green run.

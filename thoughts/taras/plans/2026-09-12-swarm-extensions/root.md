@@ -2,7 +2,7 @@
 date: 2026-09-12T00:00:00+02:00
 author: Taras
 plan_type: dag
-status: in-progress
+status: completed
 last_updated: 2026-09-14
 last_updated_by: Claude
 autonomy: critical
@@ -20,7 +20,7 @@ Add a swarm-level extension system: bundle-shaped extensions (`{ manifest, files
 ## Current State Analysis
 
 **Pattern to copy: the scripts feature.**
-- Storage: `src/be/migrations/064_scripts.sql` defines `scripts` + `script_versions` (source, contentHash, version, immutable version rows). Audit columns were added later by `082_user_audit_fields.sql:79`. Newest migration is `145_slack_render_v2_delegation.sql`; open PRs #1417 and #1235 both claim 146, so extensions take 147 or the next free ordinal at implementation time.
+- Storage: `src/be/migrations/064_scripts.sql` defines `scripts` + `script_versions` (source, contentHash, version, immutable version rows). Audit columns were added later by `082_user_audit_fields.sql:79`. Newest migration is `145_slack_render_v2_delegation.sql`; pre-flight on 2026-09-14: `origin/main` tail is `149_session_tokens.sql` (#1417 merged with 149, #1235 closed), no open PR adds a migration, so extensions take **150**.
 - DB module: `src/be/scripts/db.ts` (`insertScript:110`, `upsertScriptByName:174`, `getScriptById:329`, `listScriptVersions:392`). Every function calls `getDbClient()` per call and takes `createdBy` from the caller, resolved with `resolveHttpAuditUserId` in `src/be/audit-user.ts:64`.
 - Routes: `src/http/scripts.ts` uses `route()` with `rbac` and `responses` (`upsertRoute:222` is the canonical example). Imported at `src/http/all-routes.ts:54`.
 - RBAC: verbs in `src/rbac/permissions.ts:224-255`, role mapping in `src/rbac/legacy-policy.ts:197-204`, handler gate via `can()` at `src/http/scripts.ts:640`.
@@ -130,14 +130,14 @@ graph TD
 
 | ID | Name | Depends on | Status | File |
 |----|------|------------|--------|------|
-| step-1 | Extension storage, REST, typecheck | — | ready | [step-1.md](./step-1.md) |
-| step-2 | Runtime: loader, dispatcher, ctx, identity, post bridge | step-1 | ready | [step-2.md](./step-2.md) |
-| step-3 | pre.task.create + pre.task.followUp | step-2 | ready | [step-3.md](./step-3.md) |
-| step-4 | pre.slack.route | step-2 | ready | [step-4.md](./step-4.md) |
-| step-5 | pre.heartbeat.remediate | step-2 | ready | [step-5.md](./step-5.md) |
-| step-6 | pre.tool.call + post.tool.call | step-2 | ready | [step-6.md](./step-6.md) |
-| step-7 | MCP tools extension-install / extension-list | step-2 | ready | [step-7.md](./step-7.md) |
-| step-8 | Dashboard Settings → Extensions page | step-2 | ready | [step-8.md](./step-8.md) |
+| step-1 | Extension storage, REST, typecheck | — | done | [step-1.md](./step-1.md) |
+| step-2 | Runtime: loader, dispatcher, ctx, identity, post bridge | step-1 | done | [step-2.md](./step-2.md) |
+| step-3 | pre.task.create + pre.task.followUp | step-2 | done | [step-3.md](./step-3.md) |
+| step-4 | pre.slack.route | step-2 | done | [step-4.md](./step-4.md) |
+| step-5 | pre.heartbeat.remediate | step-2 | done | [step-5.md](./step-5.md) |
+| step-6 | pre.tool.call + post.tool.call | step-2 | done | [step-6.md](./step-6.md) |
+| step-7 | MCP tools extension-install / extension-list | step-2 | done | [step-7.md](./step-7.md) |
+| step-8 | Dashboard Settings → Extensions page | step-2 | done | [step-8.md](./step-8.md) |
 | step-9 | Integration: e2e scenario, docs, drift checks | step-3, step-4, step-5, step-6, step-7 | ready | [step-9.md](./step-9.md) |
 
 > **Canonical dependencies and execution status live in each `step-<n>.md`'s frontmatter.** This table is a derived snapshot at plan creation. During `/v-implement`, frontmatter `status` (`ready` → `claimed` → `done`) is the source of truth — re-render this table when you want a current view.
@@ -148,30 +148,30 @@ Step-8 is a leaf. It is optional for the first merge; step-9 does not depend on 
 
 Run before kicking off any step (orchestrator's responsibility — `/v-implement` performs these once at the start of the run):
 
-- [ ] Working tree is clean (or only contains intentional in-flight work)
-- [ ] Baseline tests pass on the current branch: `bun run test:root -- --parallel=4`
-- [ ] Baseline typecheck passes: `bun run tsc:check`
-- [ ] `bun install --frozen-lockfile` is clean
-- [ ] Free migration ordinal confirmed: `ls src/be/migrations | tail -1` and `gh pr list --state open --json number,files --jq '.[] | select(.files[].path | test("src/be/migrations/")) | .number'`. Use the next ordinal above every open PR. Update `step-1.md` if it is not 147.
-- [ ] `DATABASE_PATH` is set to a scratch file for any manual run, never `./agent-swarm-db.sqlite` (see memory: dev-DB fallback hazard)
+- [x] Working tree is clean (or only contains intentional in-flight work)
+- [x] Baseline tests pass on the current branch: `bun run test:root -- --parallel=4`
+- [x] Baseline typecheck passes: `bun run tsc:check`
+- [x] `bun install --frozen-lockfile` is clean
+- [x] Free migration ordinal confirmed: `ls src/be/migrations | tail -1` and `gh pr list --state open --json number,files --jq '.[] | select(.files[].path | test("src/be/migrations/")) | .number'`. Use the next ordinal above every open PR. Update `step-1.md` if it is not 150.
+- [x] `DATABASE_PATH` is set to a scratch file for any manual run, never `./agent-swarm-db.sqlite` (see memory: dev-DB fallback hazard)
 
 ## Global Verification
 
 Run after all steps complete (final wave gate):
 
-- [ ] Whole-repo typecheck: `bun run tsc:check`
-- [ ] Full test suite: `bun run test:root -- --parallel=4`
-- [ ] Lint (CI-authoritative): `bun run lint`
-- [ ] `bun run check:rbac-coverage && bun run check:openapi-response-coverage`
-- [ ] `bash scripts/check-db-boundary.sh && bash scripts/check-api-key-boundary.sh && bash scripts/check-audit-columns.sh && bash scripts/check-migration-conflicts.sh`
-- [ ] `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts && bun scripts/check-sdk-tool-registration.ts`
-- [ ] `bun run check:script-types` (generated `.d.ts` is fresh)
-- [ ] `bun run docs:openapi` produces no diff
-- [ ] `bun run e2e` passes, including `--only extensions`
-- [ ] Fresh DB boot: `rm -f /tmp/ext-fresh.sqlite && DATABASE_PATH=/tmp/ext-fresh.sqlite bun run start:http` applies the migration and boots with zero extensions
-- [ ] Existing DB boot: boot against a copy of a pre-migration DB applies only the new migration
-- [ ] Docker API image builds: `bun run docker:build:api`, and inside the container `import()` of a temp `.ts` file works (step-2 has the smoke command)
-- [ ] All five motivating examples pass as fixtures: `bun run test:root -- src/tests/extensions-examples.test.ts`
+- [x] Whole-repo typecheck: `bun run tsc:check`
+- [x] Full test suite: `bun run test:root -- --parallel=4`
+- [x] Lint (CI-authoritative): `bun run lint`
+- [x] `bun run check:rbac-coverage && bun run check:openapi-response-coverage`
+- [x] `bash scripts/check-db-boundary.sh && bash scripts/check-api-key-boundary.sh && bash scripts/check-audit-columns.sh && bash scripts/check-migration-conflicts.sh`
+- [x] `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts && bun scripts/check-sdk-tool-registration.ts`
+- [x] `bun run check:script-types` (generated `.d.ts` is fresh)
+- [x] `bun run docs:openapi` produces no diff
+- [x] `bun run e2e` passes, including `--only extensions`
+- [x] Fresh DB boot: `rm -f /tmp/ext-fresh.sqlite && DATABASE_PATH=/tmp/ext-fresh.sqlite bun run start:http` applies the migration and boots with zero extensions
+- [x] Existing DB boot: boot against a copy of a pre-migration DB applies only the new migration
+- [x] Docker API image builds: `bun run docker:build:api`, and inside the container `import()` of a temp `.ts` file works (step-2 has the smoke command)
+- [x] All five motivating examples pass as fixtures: `bun run test:root -- src/tests/extensions-example-*.test.ts` (one file per step; see wave-3 deviation)
 
 ## Manual E2E
 
@@ -209,3 +209,11 @@ agent-browser open http://localhost:5274/settings/extensions && agent-browser sc
   - Brainstorm: `thoughts/taras/brainstorms/2026-09-10-swarm-extensions.md`
   - Pi extensions (shape inspiration): https://pi.dev/docs/latest/extensions
   - Testing hub: `LOCAL_TESTING.md`, `runbooks/testing.md`
+
+## Wave 3 QA (2026-09-14, orchestrator)
+
+Merged tree booted on `DATABASE_PATH=/tmp/ext-wave3.sqlite` with a REST + MCP client script (`scripts/e2e/mcp.ts` connector). Verified: `rewrite-task-priority` turns a REST priority 50 into 1 with a `modify` run row; `block-tasks-from-source` (config `{ source: "slack" }`) returns 422 `{ error, extension }` on REST and, with `{ source: "mcp" }`, `toolErr` on MCP `send-task` (note: the dedup guard runs before `pre.task.create`, so a duplicate description never reaches extensions; `send-task` has no `source` arg, origins are the lever there); `no-exclamation-marks` blocks `store-progress` with `!` via a real MCP client (`isError`, message, details naming the extension) and allows the clean call, with `pre.tool.call` + `post.tool.call` rows carrying `durationMs`; `extension-list` lists; `extension-install` from a lead lands `enabled: false, status: disabled` with the operator sentence, from a worker returns the RBAC 403 message, with `bad-return-shape` returns TS2322 diagnostics, and a reinstall of an enabled extension stores version 2 with `activeVersion` 1. Slack and heartbeat boundaries were verified by their unit suites only (no Slack workspace / no stalled worker in the scratch run). Dashboard walkthrough + 4 screenshots: /tmp/ext-impl/wave3/step-8-*.png, agent-fs `qa/agent-swarm/2026-09-14-extensions-dashboard/`.
+
+## Global Verification run (2026-09-14/15)
+
+All gates green on the tip after step-9 (see step-9.md notes for the live e2e, unit suite, docs-site build, and Manual E2E outputs). Fresh-DB boot: the Manual E2E scratch DB applied all migrations and listed zero extensions. Existing-DB boot: a copy of a 145-tail DB applied only `150_extensions`. Docker: `bun run docker:build:api` needed one retry (registry tarball integrity errors on the first attempt); the container ran the Manual E2E flow end to end, proving `import()` of the staged hooks file inside the compiled binary.

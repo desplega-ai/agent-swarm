@@ -207,19 +207,23 @@ async function slackFlush(
   const dependsOn = !immediate && latestActiveTask ? [latestActiveTask.id] : undefined;
 
   const mostRecentTask = await getMostRecentTaskInThread(channelId, threadTs);
-  const task = await createTaskWithSiblingAwareness(fullDescription, {
-    agentId: lead?.id,
-    routingReason:
-      lead && mostRecentTask?.agentId === lead.id ? "continuity" : lead ? "skill" : undefined,
-    source: "slack",
-    slackChannelId: channelId,
-    slackThreadTs: threadTs,
-    slackTriggerMessageTs: items.at(-1)!.ts,
-    slackUserId: originalRequesterId,
-    dependsOn,
-    parentTaskId: mostRecentTask?.id,
-    contextKey: slackContextKey({ channelId, threadTs }),
-  });
+  const task = await createTaskWithSiblingAwareness(
+    fullDescription,
+    {
+      agentId: lead?.id,
+      routingReason:
+        lead && mostRecentTask?.agentId === lead.id ? "continuity" : lead ? "skill" : undefined,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      slackTriggerMessageTs: items.at(-1)!.ts,
+      slackUserId: originalRequesterId,
+      dependsOn,
+      parentTaskId: mostRecentTask?.id,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    },
+    { origin: "slack" },
+  );
 
   console.log(
     `[Slack] Buffer flushed → task ${task.id} (dependsOn: ${dependsOn ? dependsOn.join(", ") : "none"})`,

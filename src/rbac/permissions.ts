@@ -257,6 +257,14 @@ export const PERMISSIONS = {
     description: "Delete an external script API endpoint.",
     namespace: "script",
   },
+  "extension.write": {
+    description: "Install, update, or uninstall a swarm extension.",
+    namespace: "extension",
+  },
+  "extension.activate": {
+    description: "Enable, disable, or activate a version of a swarm extension.",
+    namespace: "extension",
+  },
 } as const satisfies Record<string, { description: string; namespace: string }>;
 
 export type PermissionVerb = keyof typeof PERMISSIONS;

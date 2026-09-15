@@ -1,0 +1,9 @@
+{
+  "name": "rewrite-task-priority",
+  "description": "Rewrites task priority to one",
+  "version": "1.0.0",
+  "runtime": "api",
+  "assets": {
+    "hooks": "hooks.ts"
+  }
+}

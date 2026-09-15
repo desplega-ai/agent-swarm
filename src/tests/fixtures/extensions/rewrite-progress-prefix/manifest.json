@@ -1,0 +1,9 @@
+{
+  "name": "rewrite-progress-prefix",
+  "description": "Adds a configured prefix to progress text",
+  "version": "1.0.0",
+  "runtime": "api",
+  "assets": {
+    "hooks": "hooks.ts"
+  }
+}

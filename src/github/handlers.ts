@@ -255,21 +255,25 @@ export async function handlePullRequest(
       return { created: false };
     }
 
-    const task = await createTaskWithSiblingAwareness(result.text, {
-      agentId: lead?.id ?? "",
-      routingReason: lead ? "skill" : undefined,
-      source: "github",
-      vcsProvider: "github",
-      taskType: "github-pr",
-      vcsRepo: repository.full_name,
-      vcsEventType: "pull_request",
-      vcsNumber: pr.number,
-      vcsAuthor: sender.login,
-      requestedByUserId,
-      vcsUrl: pr.html_url,
-      vcsInstallationId: installation?.id,
-      contextKey: buildGithubContextKey(repository.full_name, "pr", pr.number),
-    });
+    const task = await createTaskWithSiblingAwareness(
+      result.text,
+      {
+        agentId: lead?.id ?? "",
+        routingReason: lead ? "skill" : undefined,
+        source: "github",
+        vcsProvider: "github",
+        taskType: "github-pr",
+        vcsRepo: repository.full_name,
+        vcsEventType: "pull_request",
+        vcsNumber: pr.number,
+        vcsAuthor: sender.login,
+        requestedByUserId,
+        vcsUrl: pr.html_url,
+        vcsInstallationId: installation?.id,
+        contextKey: buildGithubContextKey(repository.full_name, "pr", pr.number),
+      },
+      { origin: "webhook" },
+    );
 
     if (lead) {
       console.log(
@@ -369,21 +373,25 @@ export async function handlePullRequest(
       return { created: false };
     }
 
-    const task = await createTaskWithSiblingAwareness(result.text, {
-      agentId: lead?.id ?? "",
-      routingReason: lead ? "skill" : undefined,
-      source: "github",
-      vcsProvider: "github",
-      taskType: "github-pr",
-      vcsRepo: repository.full_name,
-      vcsEventType: "pull_request",
-      vcsNumber: pr.number,
-      vcsAuthor: sender.login,
-      requestedByUserId,
-      vcsUrl: pr.html_url,
-      vcsInstallationId: installation?.id,
-      contextKey: buildGithubContextKey(repository.full_name, "pr", pr.number),
-    });
+    const task = await createTaskWithSiblingAwareness(
+      result.text,
+      {
+        agentId: lead?.id ?? "",
+        routingReason: lead ? "skill" : undefined,
+        source: "github",
+        vcsProvider: "github",
+        taskType: "github-pr",
+        vcsRepo: repository.full_name,
+        vcsEventType: "pull_request",
+        vcsNumber: pr.number,
+        vcsAuthor: sender.login,
+        requestedByUserId,
+        vcsUrl: pr.html_url,
+        vcsInstallationId: installation?.id,
+        contextKey: buildGithubContextKey(repository.full_name, "pr", pr.number),
+      },
+      { origin: "webhook" },
+    );
 
     if (lead) {
       console.log(
@@ -478,21 +486,25 @@ export async function handlePullRequest(
       return { created: false };
     }
 
-    const task = await createTaskWithSiblingAwareness(result.text, {
-      agentId: lead?.id ?? "",
-      routingReason: lead ? "skill" : undefined,
-      source: "github",
-      vcsProvider: "github",
-      taskType: "github-pr",
-      vcsRepo: repository.full_name,
-      vcsEventType: "pull_request",
-      vcsNumber: pr.number,
-      vcsAuthor: sender.login,
-      requestedByUserId,
-      vcsUrl: pr.html_url,
-      vcsInstallationId: installation?.id,
-      contextKey: buildGithubContextKey(repository.full_name, "pr", pr.number),
-    });
+    const task = await createTaskWithSiblingAwareness(
+      result.text,
+      {
+        agentId: lead?.id ?? "",
+        routingReason: lead ? "skill" : undefined,
+        source: "github",
+        vcsProvider: "github",
+        taskType: "github-pr",
+        vcsRepo: repository.full_name,
+        vcsEventType: "pull_request",
+        vcsNumber: pr.number,
+        vcsAuthor: sender.login,
+        requestedByUserId,
+        vcsUrl: pr.html_url,
+        vcsInstallationId: installation?.id,
+        contextKey: buildGithubContextKey(repository.full_name, "pr", pr.number),
+      },
+      { origin: "webhook" },
+    );
 
     if (lead) {
       console.log(
@@ -574,21 +586,25 @@ export async function handlePullRequest(
   }
 
   // Create task (assigned to lead if available, otherwise unassigned)
-  const task = await createTaskWithSiblingAwareness(result.text, {
-    agentId: lead?.id ?? "",
-    routingReason: lead ? "skill" : undefined,
-    source: "github",
-    vcsProvider: "github",
-    taskType: "github-pr",
-    vcsRepo: repository.full_name,
-    vcsEventType: "pull_request",
-    vcsNumber: pr.number,
-    vcsAuthor: sender.login,
-    vcsUrl: pr.html_url,
-    vcsInstallationId: installation?.id,
-    contextKey: buildGithubContextKey(repository.full_name, "pr", pr.number),
-    requestedByUserId,
-  });
+  const task = await createTaskWithSiblingAwareness(
+    result.text,
+    {
+      agentId: lead?.id ?? "",
+      routingReason: lead ? "skill" : undefined,
+      source: "github",
+      vcsProvider: "github",
+      taskType: "github-pr",
+      vcsRepo: repository.full_name,
+      vcsEventType: "pull_request",
+      vcsNumber: pr.number,
+      vcsAuthor: sender.login,
+      vcsUrl: pr.html_url,
+      vcsInstallationId: installation?.id,
+      contextKey: buildGithubContextKey(repository.full_name, "pr", pr.number),
+      requestedByUserId,
+    },
+    { origin: "webhook" },
+  );
 
   if (lead) {
     console.log(`[GitHub] Created task ${task.id} for PR #${pr.number} -> ${lead.name}`);
@@ -659,21 +675,25 @@ export async function handleIssue(
       return { created: false };
     }
 
-    const task = await createTaskWithSiblingAwareness(result.text, {
-      agentId: lead?.id ?? "",
-      routingReason: lead ? "skill" : undefined,
-      source: "github",
-      vcsProvider: "github",
-      taskType: "github-issue",
-      vcsRepo: repository.full_name,
-      vcsEventType: "issues",
-      vcsNumber: issue.number,
-      vcsAuthor: sender.login,
-      requestedByUserId,
-      vcsUrl: issue.html_url,
-      vcsInstallationId: installation?.id,
-      contextKey: buildGithubContextKey(repository.full_name, "issue", issue.number),
-    });
+    const task = await createTaskWithSiblingAwareness(
+      result.text,
+      {
+        agentId: lead?.id ?? "",
+        routingReason: lead ? "skill" : undefined,
+        source: "github",
+        vcsProvider: "github",
+        taskType: "github-issue",
+        vcsRepo: repository.full_name,
+        vcsEventType: "issues",
+        vcsNumber: issue.number,
+        vcsAuthor: sender.login,
+        requestedByUserId,
+        vcsUrl: issue.html_url,
+        vcsInstallationId: installation?.id,
+        contextKey: buildGithubContextKey(repository.full_name, "issue", issue.number),
+      },
+      { origin: "webhook" },
+    );
 
     if (lead) {
       console.log(
@@ -761,21 +781,25 @@ export async function handleIssue(
       return { created: false };
     }
 
-    const task = await createTaskWithSiblingAwareness(result.text, {
-      agentId: lead?.id ?? "",
-      routingReason: lead ? "skill" : undefined,
-      source: "github",
-      vcsProvider: "github",
-      taskType: "github-issue",
-      vcsRepo: repository.full_name,
-      vcsEventType: "issues",
-      vcsNumber: issue.number,
-      vcsAuthor: sender.login,
-      requestedByUserId,
-      vcsUrl: issue.html_url,
-      vcsInstallationId: installation?.id,
-      contextKey: buildGithubContextKey(repository.full_name, "issue", issue.number),
-    });
+    const task = await createTaskWithSiblingAwareness(
+      result.text,
+      {
+        agentId: lead?.id ?? "",
+        routingReason: lead ? "skill" : undefined,
+        source: "github",
+        vcsProvider: "github",
+        taskType: "github-issue",
+        vcsRepo: repository.full_name,
+        vcsEventType: "issues",
+        vcsNumber: issue.number,
+        vcsAuthor: sender.login,
+        requestedByUserId,
+        vcsUrl: issue.html_url,
+        vcsInstallationId: installation?.id,
+        contextKey: buildGithubContextKey(repository.full_name, "issue", issue.number),
+      },
+      { origin: "webhook" },
+    );
 
     if (lead) {
       console.log(
@@ -839,21 +863,25 @@ export async function handleIssue(
   }
 
   // Create task (assigned to lead if available, otherwise unassigned)
-  const task = await createTaskWithSiblingAwareness(result.text, {
-    agentId: lead?.id ?? "",
-    routingReason: lead ? "skill" : undefined,
-    source: "github",
-    vcsProvider: "github",
-    taskType: "github-issue",
-    vcsRepo: repository.full_name,
-    vcsEventType: "issues",
-    vcsNumber: issue.number,
-    vcsAuthor: sender.login,
-    vcsUrl: issue.html_url,
-    vcsInstallationId: installation?.id,
-    contextKey: buildGithubContextKey(repository.full_name, "issue", issue.number),
-    requestedByUserId,
-  });
+  const task = await createTaskWithSiblingAwareness(
+    result.text,
+    {
+      agentId: lead?.id ?? "",
+      routingReason: lead ? "skill" : undefined,
+      source: "github",
+      vcsProvider: "github",
+      taskType: "github-issue",
+      vcsRepo: repository.full_name,
+      vcsEventType: "issues",
+      vcsNumber: issue.number,
+      vcsAuthor: sender.login,
+      vcsUrl: issue.html_url,
+      vcsInstallationId: installation?.id,
+      contextKey: buildGithubContextKey(repository.full_name, "issue", issue.number),
+      requestedByUserId,
+    },
+    { origin: "webhook" },
+  );
 
   if (lead) {
     console.log(`[GitHub] Created task ${task.id} for issue #${issue.number} -> ${lead.name}`);
@@ -951,25 +979,29 @@ export async function handleComment(
   }
 
   // Create task (assigned to lead if available, otherwise unassigned)
-  const task = await createTaskWithSiblingAwareness(result.text, {
-    agentId: lead?.id ?? "",
-    routingReason: lead ? "skill" : undefined,
-    source: "github",
-    vcsProvider: "github",
-    taskType: "github-comment",
-    vcsRepo: repository.full_name,
-    vcsEventType: eventType,
-    vcsNumber: targetNumber,
-    vcsCommentId: comment.id,
-    vcsAuthor: sender.login,
-    requestedByUserId,
-    vcsUrl: targetUrl,
-    vcsInstallationId: installation?.id,
-    vcsNodeId: comment.node_id,
-    contextKey: targetNumber
-      ? buildGithubContextKey(repository.full_name, pull_request ? "pr" : "issue", targetNumber)
-      : undefined,
-  });
+  const task = await createTaskWithSiblingAwareness(
+    result.text,
+    {
+      agentId: lead?.id ?? "",
+      routingReason: lead ? "skill" : undefined,
+      source: "github",
+      vcsProvider: "github",
+      taskType: "github-comment",
+      vcsRepo: repository.full_name,
+      vcsEventType: eventType,
+      vcsNumber: targetNumber,
+      vcsCommentId: comment.id,
+      vcsAuthor: sender.login,
+      requestedByUserId,
+      vcsUrl: targetUrl,
+      vcsInstallationId: installation?.id,
+      vcsNodeId: comment.node_id,
+      contextKey: targetNumber
+        ? buildGithubContextKey(repository.full_name, pull_request ? "pr" : "issue", targetNumber)
+        : undefined,
+    },
+    { origin: "webhook" },
+  );
 
   if (lead) {
     console.log(`[GitHub] Created task ${task.id} for comment on #${targetNumber} -> ${lead.name}`);
@@ -1266,22 +1298,26 @@ export async function handlePullRequestReview(
   }
 
   // Create task (assigned to lead if available, otherwise unassigned)
-  const task = await createTaskWithSiblingAwareness(result.text, {
-    agentId: lead?.id ?? "",
-    routingReason: lead ? "skill" : undefined,
-    source: "github",
-    vcsProvider: "github",
-    taskType: "github-review",
-    vcsRepo: repository.full_name,
-    vcsEventType: "pull_request_review",
-    vcsNumber: pr.number,
-    vcsAuthor: sender.login,
-    requestedByUserId,
-    vcsUrl: review.html_url,
-    vcsInstallationId: installation?.id,
-    vcsNodeId: review.node_id,
-    contextKey: buildGithubContextKey(repository.full_name, "pr", pr.number),
-  });
+  const task = await createTaskWithSiblingAwareness(
+    result.text,
+    {
+      agentId: lead?.id ?? "",
+      routingReason: lead ? "skill" : undefined,
+      source: "github",
+      vcsProvider: "github",
+      taskType: "github-review",
+      vcsRepo: repository.full_name,
+      vcsEventType: "pull_request_review",
+      vcsNumber: pr.number,
+      vcsAuthor: sender.login,
+      requestedByUserId,
+      vcsUrl: review.html_url,
+      vcsInstallationId: installation?.id,
+      vcsNodeId: review.node_id,
+      contextKey: buildGithubContextKey(repository.full_name, "pr", pr.number),
+    },
+    { origin: "webhook" },
+  );
 
   if (lead) {
     console.log(

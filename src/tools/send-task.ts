@@ -15,6 +15,7 @@ import {
   hasCapacity,
 } from "@/be/db";
 import { repointTrackerSyncBySwarmId } from "@/be/db-queries/tracker";
+import { applyPreTaskCreate } from "@/extensions/apply-task-create";
 import { checkSlackRoutingCoherence } from "@/tasks/slack-routing";
 import { findDuplicateTask } from "@/tools/task-dedup";
 import { ownerCtx, type ToolCtx } from "@/tools/task-tool-ctx";
@@ -28,6 +29,7 @@ import {
 import {
   type AgentTask,
   AssetKeySchema,
+  type CreateTaskOptions,
   FollowUpConfigSchema,
   ModelTierSchema,
   ReasoningEffortSchema,
@@ -365,6 +367,52 @@ export async function sendTaskHandler(
     agentId !== undefined ? routingReason : effectiveAgentId ? "continuity" : undefined;
   const effectiveRoutingNote = effectiveRoutingReason ? routingNote : undefined;
 
+  const requestedTaskOptions: CreateTaskOptions = {
+    key: assetKey,
+    agentId: offerMode ? undefined : effectiveAgentId,
+    offeredTo: offerMode ? effectiveAgentId : undefined,
+    creatorAgentId,
+    requestedByUserId,
+    source: "mcp",
+    sourceTaskId,
+    taskType,
+    tags,
+    priority,
+    dependsOn,
+    dir,
+    parentTaskId: effectiveParentTaskId,
+    vcsRepo: effectiveVcsRepo,
+    model: normalizedModel.model,
+    modelTier: normalizedModel.modelTier,
+    effort,
+    slackChannelId,
+    slackThreadTs,
+    slackUserId,
+    overrideSlackContext,
+    followUpConfig,
+    outputSchema,
+    routingReason: effectiveRoutingReason,
+    routingNote: effectiveRoutingNote,
+    routingAffinity:
+      effectiveLeadOnly || requiredCapabilities?.length
+        ? { leadOnly: effectiveLeadOnly, capabilities: requiredCapabilities ?? [] }
+        : undefined,
+  };
+  const preCreate = await applyPreTaskCreate({
+    description: task,
+    options: requestedTaskOptions,
+    origin: "mcp",
+    requestInfo: ctx.kind === "owner" ? ctx.requestInfo : undefined,
+  });
+  if (preCreate.kind === "blocked") {
+    return toolErr(preCreate.reason, {
+      data: { yourAgentId: creatorAgentId },
+      details: JSON.stringify({ extension: preCreate.extension }),
+    });
+  }
+  const taskDescription = preCreate.description;
+  const taskOptions = preCreate.options;
+
   // The three dedup guards are pure reads, so they run twice: once here as a
   // fast path (keeping this tool's existing early-exit responses), and once
   // inside the write transaction below, where the check is authoritative.
@@ -388,9 +436,9 @@ export async function sendTaskHandler(
     // Dedup guard: check for similar recent tasks
     if (!allowDuplicate && creatorAgentId) {
       const duplicate = await findDuplicateTask({
-        taskDescription: task,
-        creatorAgentId,
-        targetAgentId: effectiveAgentId ?? undefined,
+        taskDescription,
+        creatorAgentId: taskOptions.creatorAgentId ?? creatorAgentId,
+        targetAgentId: taskOptions.agentId ?? taskOptions.offeredTo,
       });
       if (duplicate) {
         return {
@@ -470,41 +518,13 @@ export async function sendTaskHandler(
     const raced = await evaluateDedupGuards();
     if (raced) return { success: raced.ok, message: raced.message, task: raced.task };
 
-    const finalTags = tags;
-
     // If no agentId (and no auto-routed agentId), create an unassigned task for the pool
-    if (!effectiveAgentId) {
-      const newTask = await createTaskExtended(task, {
-        key: assetKey,
-        creatorAgentId,
-        requestedByUserId,
-        sourceTaskId,
-        taskType,
-        tags: finalTags,
-        priority,
-        dependsOn,
-        dir,
-        parentTaskId: effectiveParentTaskId,
-        vcsRepo: effectiveVcsRepo,
-        model: normalizedModel.model,
-        modelTier: normalizedModel.modelTier,
-        effort,
-        slackChannelId,
-        slackThreadTs,
-        slackUserId,
-        overrideSlackContext,
-        followUpConfig,
-        outputSchema,
-        routingReason: effectiveRoutingReason,
-        routingNote: effectiveRoutingNote,
-        routingAffinity:
-          effectiveLeadOnly || requiredCapabilities?.length
-            ? { leadOnly: effectiveLeadOnly, capabilities: requiredCapabilities ?? [] }
-            : undefined,
-      });
+    const targetAgentId = taskOptions.offeredTo ?? taskOptions.agentId ?? undefined;
+    if (!targetAgentId) {
+      const newTask = await createTaskExtended(taskDescription, taskOptions);
       await transferTrackerSyncToResumeChild({
-        parentTaskId: effectiveParentTaskId,
-        taskType,
+        parentTaskId: taskOptions.parentTaskId,
+        taskType: taskOptions.taskType,
         child: newTask,
       });
 
@@ -515,16 +535,16 @@ export async function sendTaskHandler(
       };
     }
 
-    const agent = await getAgentById(effectiveAgentId);
+    const agent = await getAgentById(targetAgentId);
 
     if (!agent) {
       return {
         success: false,
-        message: `Agent with ID "${effectiveAgentId}" not found.`,
+        message: `Agent with ID "${targetAgentId}" not found.`,
       };
     }
 
-    if (effectiveLeadOnly && !agent.isLead) {
+    if (taskOptions.routingAffinity?.leadOnly && !agent.isLead) {
       return {
         success: false,
         message: `Lead-only task requires a Lead agent; "${agent.name}" is not a Lead.`,
@@ -532,48 +552,20 @@ export async function sendTaskHandler(
     }
 
     // For direct assignment (not offer), check if agent has capacity
-    if (!offerMode && !(await hasCapacity(effectiveAgentId))) {
-      const activeCount = await getActiveTaskCount(effectiveAgentId);
+    if (!taskOptions.offeredTo && !(await hasCapacity(targetAgentId))) {
+      const activeCount = await getActiveTaskCount(targetAgentId);
       return {
         success: false,
         message: `Agent "${agent.name}" is at capacity (${activeCount}/${agent.maxTasks ?? 1} tasks). Use offerMode: true to offer the task instead, or wait for a task to complete.`,
       };
     }
 
-    if (offerMode) {
+    if (taskOptions.offeredTo) {
       // Offer the task to the agent (they must accept/reject)
-      const newTask = await createTaskExtended(task, {
-        key: assetKey,
-        offeredTo: effectiveAgentId,
-        creatorAgentId,
-        requestedByUserId,
-        sourceTaskId,
-        taskType,
-        tags: finalTags,
-        priority,
-        dependsOn,
-        dir,
-        parentTaskId: effectiveParentTaskId,
-        vcsRepo: effectiveVcsRepo,
-        model: normalizedModel.model,
-        modelTier: normalizedModel.modelTier,
-        effort,
-        slackChannelId,
-        slackThreadTs,
-        slackUserId,
-        overrideSlackContext,
-        followUpConfig,
-        outputSchema,
-        routingReason: effectiveRoutingReason,
-        routingNote: effectiveRoutingNote,
-        routingAffinity:
-          effectiveLeadOnly || requiredCapabilities?.length
-            ? { leadOnly: effectiveLeadOnly, capabilities: requiredCapabilities ?? [] }
-            : undefined,
-      });
+      const newTask = await createTaskExtended(taskDescription, taskOptions);
       await transferTrackerSyncToResumeChild({
-        parentTaskId: effectiveParentTaskId,
-        taskType,
+        parentTaskId: taskOptions.parentTaskId,
+        taskType: taskOptions.taskType,
         child: newTask,
       });
 
@@ -585,38 +577,10 @@ export async function sendTaskHandler(
     }
 
     // Direct assignment
-    const newTask = await createTaskExtended(task, {
-      key: assetKey,
-      agentId: effectiveAgentId,
-      creatorAgentId,
-      requestedByUserId,
-      sourceTaskId,
-      taskType,
-      tags: finalTags,
-      priority,
-      dependsOn,
-      dir,
-      parentTaskId: effectiveParentTaskId,
-      vcsRepo: effectiveVcsRepo,
-      model: normalizedModel.model,
-      modelTier: normalizedModel.modelTier,
-      effort,
-      slackChannelId,
-      slackThreadTs,
-      slackUserId,
-      overrideSlackContext,
-      followUpConfig,
-      outputSchema,
-      routingReason: effectiveRoutingReason,
-      routingNote: effectiveRoutingNote,
-      routingAffinity:
-        effectiveLeadOnly || requiredCapabilities?.length
-          ? { leadOnly: effectiveLeadOnly, capabilities: requiredCapabilities ?? [] }
-          : undefined,
-    });
+    const newTask = await createTaskExtended(taskDescription, taskOptions);
     await transferTrackerSyncToResumeChild({
-      parentTaskId: effectiveParentTaskId,
-      taskType,
+      parentTaskId: taskOptions.parentTaskId,
+      taskType: taskOptions.taskType,
       child: newTask,
     });
 

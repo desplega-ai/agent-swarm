@@ -24,6 +24,8 @@ const ConnectionsPage = lazy(() => import("@/pages/settings/connections-page"));
 const AppearancePage = lazy(() => import("@/pages/settings/appearance-page"));
 const SecretsPage = lazy(() => import("@/pages/settings/secrets-page"));
 const ConfigurationPage = lazy(() => import("@/pages/settings/configuration-page"));
+const ExtensionsPage = lazy(() => import("@/pages/settings/extensions-page"));
+const ExtensionDetailPage = lazy(() => import("@/pages/settings/extension-detail-page"));
 const IntegrationsPage = lazy(() => import("@/pages/integrations/page"));
 const IntegrationDetailPage = lazy(() => import("@/pages/integrations/[id]/page"));
 const ReposPage = lazy(() => import("@/pages/repos/page"));
@@ -161,6 +163,8 @@ export const router = createBrowserRouter([
           { path: "integrations", element: <IntegrationsPage /> },
           { path: "integrations/:id", element: <IntegrationDetailPage /> },
           { path: "configuration", element: <ConfigurationPage /> },
+          { path: "extensions", element: <ExtensionsPage /> },
+          { path: "extensions/:id", element: <ExtensionDetailPage /> },
           { path: "repos", element: <ReposPage /> },
           { path: "debug", element: <DebugPage /> },
         ],

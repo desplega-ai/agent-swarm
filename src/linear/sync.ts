@@ -612,14 +612,18 @@ export async function handleAgentSessionEvent(event: Record<string, unknown>): P
     return;
   }
 
-  const task = await createTaskWithSiblingAwareness(templateResult.text, {
-    agentId: lead?.id ?? "",
-    routingReason: lead ? "skill" : undefined,
-    source: "linear",
-    taskType: "linear-issue",
-    requestedByUserId,
-    contextKey,
-  });
+  const task = await createTaskWithSiblingAwareness(
+    templateResult.text,
+    {
+      agentId: lead?.id ?? "",
+      routingReason: lead ? "skill" : undefined,
+      source: "linear",
+      taskType: "linear-issue",
+      requestedByUserId,
+      contextKey,
+    },
+    { origin: "webhook" },
+  );
 
   // Delete old tracker_sync before creating new one (UNIQUE constraint)
   if (existing) {
@@ -896,14 +900,18 @@ export async function handleAgentSessionPrompted(event: Record<string, unknown>)
     return;
   }
 
-  const task = await createTaskWithSiblingAwareness(followupResult.text, {
-    agentId: lead?.id ?? "",
-    routingReason: lead ? "skill" : undefined,
-    source: "linear",
-    taskType: "linear-issue",
-    requestedByUserId: promptedRequestedByUserId,
-    contextKey,
-  });
+  const task = await createTaskWithSiblingAwareness(
+    followupResult.text,
+    {
+      agentId: lead?.id ?? "",
+      routingReason: lead ? "skill" : undefined,
+      source: "linear",
+      taskType: "linear-issue",
+      requestedByUserId: promptedRequestedByUserId,
+      contextKey,
+    },
+    { origin: "webhook" },
+  );
 
   // Repoint the existing tracker_sync to the new follow-up task (can't create a
   // duplicate due to UNIQUE(provider, entityType, externalId) constraint)

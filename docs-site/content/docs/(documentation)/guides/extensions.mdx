@@ -1,0 +1,301 @@
+---
+title: Extensions
+description: Install trusted TypeScript hooks that change swarm orchestration at defined event boundaries.
+---
+
+Extensions let operators change swarm behavior without changing the API server source.
+Each extension is a bundle with a JSON manifest and a files map.
+
+Version 1 accepts one `hooks` asset.
+The `skills`, `workflows`, and `schedules` asset keys are reserved.
+The installer rejects bundles that use those keys.
+
+## Trust model
+
+Extensions run inside the API server process.
+They are trusted operator code and have no host isolation.
+Only operators and dashboard users can activate an extension.
+Lead agents can install a draft through MCP, but the draft stays disabled.
+
+The installer accepts imports from `swarm-extension`, `zod`, and `stdlib`.
+It rejects relative imports and other package imports.
+It also rejects computed `import()` and `require()` expressions.
+
+## Bundle format
+
+Send the manifest and every referenced file in one request:
+
+```json
+{
+  "manifest": {
+    "name": "route-channel-to-agent",
+    "description": "Routes one Slack channel to a configured agent",
+    "version": "1.0.0",
+    "runtime": "api",
+    "assets": { "hooks": "hooks.ts" }
+  },
+  "files": {
+    "hooks.ts": "import type { SwarmExtension } from \"swarm-extension\";\nconst extension: SwarmExtension = (api) => { /* handlers */ };\nexport default extension;"
+  },
+  "config": {
+    "channelId": "C01234567",
+    "agentId": "2ce0c478-c7c4-4df7-bc68-1fb4e2f2a12c"
+  }
+}
+```
+
+The install path validates the manifest, bundle paths, imports, and TypeScript types.
+Each changed bundle creates an immutable version snapshot.
+An operator can activate any stored version.
+
+The hooks file exports one default `SwarmExtension` function.
+It can also export a Zod schema named `config`.
+The server validates stored configuration against that schema during activation.
+
+Read responses scrub secrets from `configJson`.
+The API stores the original values.
+A PATCH request can submit unchanged `[REDACTED:...]` placeholders.
+The server replaces those placeholders with the stored values before validation.
+
+## Contract
+
+Register handlers with `api.on(event, handler, options)`.
+Lower priority numbers run first.
+The stored extension priority applies when a handler omits its own priority.
+
+```ts
+import { modify, type SwarmExtension } from "swarm-extension";
+import { z } from "zod";
+
+export const config = z.object({ channelId: z.string(), agentId: z.string() });
+
+const manifest = {
+  name: "route-channel-to-agent",
+  description: "Routes one Slack channel to a configured agent",
+  version: "1.0.0",
+  runtime: "api",
+  assets: { hooks: "hooks.ts" },
+  config,
+} as const;
+
+const extension: SwarmExtension<typeof manifest> = (api) => {
+  api.on("pre.slack.route", (event, ctx) => {
+    if (event.channelId !== ctx.config.channelId) return;
+    return modify({ target: { kind: "agent", agentId: ctx.config.agentId } });
+  });
+};
+
+export default extension;
+```
+
+A `pre.*` handler can return one of these results:
+
+- `undefined` or `{ action: "continue" }`
+- `{ action: "modify", data }`
+- `{ action: "block", reason }`
+
+A `post.*` handler returns nothing.
+Task post handlers observe committed changes.
+Tool post handlers run after result finalization.
+The Slack post event fires after authorization and before routing.
+
+## Version 1 events
+
+| Event | Boundary | Event payload | Modify shape | Block effect |
+| --- | --- | --- | --- | --- |
+| `pre.task.create` | Task creation entry points | `{ options, description, origin, requestInfo? }` | Input fields from `CreateTaskOptions`, plus `description?` | The caller receives a skipped result. No task is created. |
+| `pre.task.followUp` | Worker follow-up entry point | `{ completedTask, status, output?, failureReason?, workerAgentId, leadAgentId, summary }` | `{ description?, agentId?, priority?, followUpConfig? }` | No lead follow-up task is created. |
+| `pre.slack.route` | Slack message handler | `{ channelId, userId, text, threadTs?, botMentioned, threadContext? }` | `{ target }` for an agent, lead, or broadcast | The message creates no task or reply. |
+| `pre.heartbeat.remediate` | Stalled-task remediation | `{ task, session?, classification, proposedAction, reason, taskAgeMs, sessionHeartbeatAgeMs? }` | `{ proposedAction }` | The sweep records the finding but performs no remediation. |
+| `pre.tool.call` | Agent-facing MCP call | `{ tool, args, requestInfo }` | `{ args }` | The tool returns an error and does not run. |
+| `post.task.created` | Task event bus after commit | `{ task }` | None | None |
+| `post.task.completed` | Task event bus after commit | `{ task, output }` | None | None |
+| `post.task.failed` | Task event bus after commit | `{ task, failureReason }` | None | None |
+| `post.task.cancelled` | Task event bus after commit | `{ task }` | None | None |
+| `post.task.superseded` | Task event bus after commit | `{ task, supersededBy }` | None | None |
+| `post.task.progress` | Task event bus after commit | `{ task, progress }` | None | None |
+| `post.slack.message` | Slack message handler after authorization, before routing | `{ channelId, userId, text, threadTs?, taskId? }` | None | None |
+| `post.tool.call` | Agent-facing MCP call after finalization | `{ tool, args, result, requestInfo, durationMs }` | None | None |
+
+`pre.task.create` origins include REST, apps, MCP, Slack, schedules, workflows, webhooks, follow-ups, and extensions.
+Heartbeat classification values are `no-session`, `stale-session`, and `fresh-stalled`.
+Heartbeat actions are `supersede-resume`, `fail`, and `record`.
+
+## Handler context
+
+Each handler receives a context with these fields:
+
+- `ctx.swarm` exposes the script SDK through loopback HTTP.
+- `ctx.state` exposes extension-scoped `get`, `set`, `incr`, and `del` operations.
+- `ctx.config` contains the validated operator configuration.
+- `ctx.log` writes scrubbed log messages.
+- `ctx.signal` aborts when the handler reaches its time limit.
+- `ctx.event` identifies the event, extension, version, and dispatch time.
+
+The extension runs as the system agent `ext:<name>`.
+Its `ctx.swarm` calls use `callOrigin: "extension"`.
+These calls bypass `pre.tool.call` to prevent recursion.
+Tasks created by an extension also skip that extension's own handlers.
+
+## Ordering and failures
+
+Handlers run in ascending priority order.
+Handlers with equal priority run by extension name.
+Each valid modification becomes the next handler's input.
+The first block result stops the chain.
+
+The dispatcher rejects `pre.*` dispatch inside a database transaction.
+It logs the violation and continues without calling handlers.
+
+A throw, invalid result, invalid modification, or timeout fails open.
+The default timeout is five seconds.
+The dispatcher records the failure and continues the operation.
+A successful handler resets that extension's consecutive failure count.
+Five consecutive failures set the extension status to `auto-disabled`.
+An operator must enable it again.
+
+## Install and operate
+
+Use REST for complete lifecycle control:
+
+```bash
+curl -X POST "$API/api/extensions/install" \
+  -H "Authorization: Bearer $KEY" \
+  -H "Content-Type: application/json" \
+  --data-binary @bundle.json
+
+curl -X POST "$API/api/extensions/<id>/enable" \
+  -H "Authorization: Bearer $KEY"
+
+curl "$API/api/extensions/<id>/runs" \
+  -H "Authorization: Bearer $KEY"
+
+curl -X POST "$API/api/extensions/<id>/activate-version" \
+  -H "Authorization: Bearer $KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"version":1}'
+```
+
+The Settings page provides install, edit, activation, version, and run-log controls.
+Agents can use the `extension-install` and `extension-list` MCP tools.
+The MCP install tool never activates a version.
+
+## Example hooks
+
+These examples come from the extension test fixtures.
+
+### Rewrite task priority
+
+```ts
+import { modify, type SwarmExtension } from "swarm-extension";
+
+const extension: SwarmExtension = (api) => {
+  api.on("pre.task.create", () => modify({ priority: 1 }));
+};
+
+export default extension;
+```
+
+### Suppress Slack follow-ups
+
+```ts
+import { block, type SwarmExtension } from "swarm-extension";
+
+const extension: SwarmExtension = (api) => {
+  api.on("pre.task.followUp", (event) => {
+    if (event.completedTask.source === "slack") {
+      return block("Slack tasks report in the original thread");
+    }
+  });
+};
+
+export default extension;
+```
+
+### Route a Slack channel
+
+```ts
+import { modify, type SwarmExtension } from "swarm-extension";
+import { z } from "zod";
+
+export const config = z.object({ channelId: z.string(), agentId: z.string() });
+
+const manifest = {
+  name: "route-channel-to-agent",
+  description: "Routes one Slack channel to a configured agent",
+  version: "1.0.0",
+  runtime: "api",
+  assets: { hooks: "hooks.ts" },
+  config,
+} as const;
+
+const extension: SwarmExtension<typeof manifest> = (api) => {
+  api.on("pre.slack.route", (event, ctx) => {
+    if (event.channelId !== ctx.config.channelId) return;
+    return modify({ target: { kind: "agent", agentId: ctx.config.agentId } });
+  });
+
+  api.on("post.slack.message", async (event, ctx) => {
+    await ctx.state.set(`slack:${event.channelId}`, event.userId);
+  });
+};
+
+export default extension;
+```
+
+### Record instead of failing long tasks
+
+```ts
+import { modify, type SwarmExtension } from "swarm-extension";
+
+const extension: SwarmExtension = (api) => {
+  api.on("pre.heartbeat.remediate", (event) => {
+    if (event.proposedAction === "fail") {
+      return modify({ proposedAction: "record" });
+    }
+  });
+};
+
+export default extension;
+```
+
+### Reject exclamation marks
+
+```ts
+import { block, type SwarmExtension } from "swarm-extension";
+
+const extension: SwarmExtension = (api) => {
+  api.on("pre.tool.call", (event) => {
+    if (event.tool !== "store-progress") return;
+    if (!event.args || typeof event.args !== "object") return;
+    const progress = (event.args as { progress?: unknown }).progress;
+    if (typeof progress === "string" && progress.includes("!")) {
+      return block("Progress text must not contain exclamation marks.");
+    }
+  });
+
+  api.on("post.tool.call", async (event, ctx) => {
+    await ctx.state.set("last-post", {
+      tool: event.tool,
+      args: event.args,
+      result: event.result,
+      durationMs: event.durationMs,
+    });
+  });
+};
+
+export default extension;
+```
+
+## Version 1 limits
+
+- Only API runtime hooks can run.
+- Only the hooks asset can install.
+- Tool events cover agent-facing MCP calls only.
+- Slack route events cover the Slack message handler only.
+- Heartbeat hooks can change remediation only after the sweep finds a stalled task.
+- The loader runs in one API process. Other replicas can remain stale for 30 seconds.
+- Disposal removes temporary source files. Bun retains imported modules in its registry.
+- A failed PATCH reload leaves the extension enabled with `status: "error"` until the next enable request.
+
+Use the [contributor runbook](https://github.com/desplega-ai/agent-swarm/blob/main/runbooks/extensions.md) for implementation rules.

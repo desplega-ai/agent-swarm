@@ -2,7 +2,10 @@
 id: step-5
 name: pre.heartbeat.remediate
 depends_on: [step-2]
-status: ready
+status: done
+assignee: codex-sol-step-5-20260914
+claimed_at: 2026-09-14T17:45:00+02:00
+completed_at: 2026-09-14T20:30:00+02:00
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -38,11 +41,11 @@ After this step an enabled extension sees every stalled task the heartbeat sweep
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun run test:root -- src/tests/extensions-heartbeat.test.ts src/tests/extensions-examples.test.ts`
-- [ ] `bun run test:root -- src/tests/heartbeat.test.ts src/tests/heartbeat-supersede-resume.test.ts src/tests/heartbeat-reroute-decision.test.ts` (existing behavior unchanged with no extension enabled)
-- [ ] `bun run tsc:check && bun run lint`
-- [ ] `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts`
-- [ ] `git diff --stat runbooks/heartbeat-crash-recovery.md` shows the runbook changed
+- [x] `bun run test:root -- src/tests/extensions-heartbeat.test.ts src/tests/extensions-examples.test.ts`
+- [x] `bun run test:root -- src/tests/heartbeat.test.ts src/tests/heartbeat-supersede-resume.test.ts src/tests/heartbeat-reroute-decision.test.ts` (existing behavior unchanged with no extension enabled)
+- [x] `bun run tsc:check && bun run lint`
+- [x] `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts`
+- [x] `git diff --stat runbooks/heartbeat-crash-recovery.md` shows the runbook changed
 
 #### Automated QA:
 - [ ] Boot on a scratch DB with `HEARTBEAT_STALL_NO_SESSION_MIN=0.05 HEARTBEAT_INTERVAL_MS=5000` (fractional minutes are accepted, see memory: heartbeat E2E gotchas), create a task, claim it over MCP with a UUID agent id, never send progress, wait for a sweep, and confirm: with `record-only-on-tag` enabled and the task tagged `manual`, `GET /api/tasks/{id}` is still `in_progress` and the extension run log shows a `block`; with it disabled the sweep supersedes the task.
@@ -51,3 +54,10 @@ After this step an enabled extension sees every stalled task the heartbeat sweep
 - [ ] Taras reads the runbook diff and confirms the diagram matches the new flow.
 
 **Implementation Note**: This step is a vertical slice — QA-able on its own. After completing this step, pause for manual confirmation. Taras handles commits.
+
+## Execution notes (2026-09-14)
+
+- Executor: codex-sol, in worktree /tmp/ext-wt/step-5 (branch codex/ext-step-5), merged with --no-ff into docs/swarm-extensions-brainstorm-plan. Report: /tmp/ext-impl/wave3/step-5-report.md.
+- Deviation (orchestrator, applies to steps 3-7): the motivating example lives in its own file `src/tests/extensions-example-*.test.ts` instead of a shared `extensions-examples.test.ts`; step-9 consolidates or updates the root.md command to a glob.
+- Live QA for this step was run by the orchestrator on the merged tree (Codex sandboxes deny listeners). See root.md "Wave 3 QA" note.
+- Wave-3 two-axis review findings and their fix round: /tmp/ext-impl/wave3-fix-prompt.md (the report lands at /tmp/ext-impl/wave3-fix-report.md). Automated boxes are ticked pending that round's green run.

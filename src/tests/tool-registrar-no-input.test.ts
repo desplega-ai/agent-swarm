@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { createToolRegistrar } from "../tools/utils";
+import {
+  createToolRegistrar,
+  finalizeSwarmToolResult,
+  markExtensionRequestOrigin,
+} from "../tools/utils";
 
 describe("createToolRegistrar with no inputSchema", () => {
   test("handler receives requestInfo from meta when no inputSchema is defined", async () => {
@@ -116,5 +120,42 @@ describe("createToolRegistrar with no inputSchema", () => {
       callOrigin: "mcp",
     });
     expect(result).toBeDefined();
+  });
+
+  test("server-marked extension calls carry extension origin", async () => {
+    const server = new McpServer({ name: "test-extension-origin", version: "1.0.0" });
+    let callOrigin: string | undefined;
+    createToolRegistrar(server)(
+      "test-extension-origin-tool",
+      {
+        inputSchema: z.object({}),
+        outputSchema: z.looseObject({}),
+      },
+      async (_args, requestInfo) => {
+        callOrigin = requestInfo.callOrigin;
+        return { ok: true, message: "ok" };
+      },
+    );
+    const registeredTools = (server as Record<string, unknown>)._registeredTools as Record<
+      string,
+      { handler: (args: unknown, extra: unknown) => Promise<unknown> }
+    >;
+    const extra = markExtensionRequestOrigin({
+      sessionId: "extension",
+      requestInfo: { headers: { "x-agent-id": "extension-agent" } },
+    });
+
+    await registeredTools["test-extension-origin-tool"]!.handler({}, extra);
+    expect(callOrigin).toBe("extension");
+  });
+
+  test("extension calls bypass the model context ceiling", async () => {
+    const result = await finalizeSwarmToolResult(
+      "large-extension-result",
+      { ok: true, message: "ok", data: { value: "x".repeat(1_100_000) } },
+      { agentId: "extension-agent", callOrigin: "extension" },
+    );
+    expect(result.structuredContent?.truncation).toBeUndefined();
+    expect((result.structuredContent?.value as string).length).toBe(1_100_000);
   });
 });

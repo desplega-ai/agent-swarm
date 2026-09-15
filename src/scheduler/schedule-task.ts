@@ -10,25 +10,29 @@ export async function createStandaloneScheduleTask(
   if (!schedule.taskTemplate) {
     throw new Error(`Schedule "${schedule.name}" has no taskTemplate (targetType=agent-task)`);
   }
-  const task = await createTaskWithSiblingAwareness(schedule.taskTemplate, {
-    key: schedule.key,
-    creatorAgentId: schedule.createdByAgentId,
-    taskType: schedule.taskType,
-    tags: [...schedule.tags, "scheduled", `schedule:${schedule.name}`, ...extraTags],
-    priority: schedule.priority,
-    agentId: schedule.targetAgentId,
-    routingReason: schedule.targetAgentId ? "human_pinned" : undefined,
-    model: schedule.model,
-    modelTier: schedule.modelTier,
-    scheduleId: schedule.id,
-    source: "schedule",
-    requestedByUserId: schedule.createdBy,
-    contextKey: scheduleContextKey({ scheduleId: schedule.id }),
-    // Set only by `defer-task`. An explicit parent wins over the sibling-awareness
-    // auto-wiring (see withSiblingAwareness in src/tasks/sibling-awareness.ts), so
-    // the wake-up run continues the deferred task rather than a random sibling.
-    parentTaskId: schedule.parentTaskId,
-  });
+  const task = await createTaskWithSiblingAwareness(
+    schedule.taskTemplate,
+    {
+      key: schedule.key,
+      creatorAgentId: schedule.createdByAgentId,
+      taskType: schedule.taskType,
+      tags: [...schedule.tags, "scheduled", `schedule:${schedule.name}`, ...extraTags],
+      priority: schedule.priority,
+      agentId: schedule.targetAgentId,
+      routingReason: schedule.targetAgentId ? "human_pinned" : undefined,
+      model: schedule.model,
+      modelTier: schedule.modelTier,
+      scheduleId: schedule.id,
+      source: "schedule",
+      requestedByUserId: schedule.createdBy,
+      contextKey: scheduleContextKey({ scheduleId: schedule.id }),
+      // Set only by `defer-task`. An explicit parent wins over the sibling-awareness
+      // auto-wiring (see withSiblingAwareness in src/tasks/sibling-awareness.ts), so
+      // the wake-up run continues the deferred task rather than a random sibling.
+      parentTaskId: schedule.parentTaskId,
+    },
+    { origin: "schedule" },
+  );
   // Both timer and event dispatch wrap this helper in a transaction. Transfer
   // pending watchers before the resume task becomes visible or its schedule is
   // disabled; their own schedules retain the original ceilings.

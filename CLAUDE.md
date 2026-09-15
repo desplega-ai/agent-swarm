@@ -49,6 +49,18 @@ New MCP tools: when adding a tool, register it in `SDK_TOOL_NAME_MAP` (`src/scri
 
 </important>
 
+<important if="you are modifying the extension system (src/extensions/*, src/be/extensions/*, src/http/extensions.ts, src/tools/extension-*.ts) or adding a pre/post event">
+
+Dispatch pre hooks only at entry points outside transactions. `dispatchPre()` uses `isInTransaction()` as a defensive guard.
+Add an event contract in `src/extensions/contract.ts`, then run `bun run build:extension-types`.
+Add one `dispatchPre` or `dispatchPost` call at the entry point.
+Add a fixture under `src/tests/fixtures/extensions/` and add the operator guide table row.
+Extension SDK calls use `callOrigin: "extension"`. This origin bypasses tool hooks and prevents recursion.
+Run `bun run test:root -- src/tests/extensions-*.test.ts`.
+Full rules: [runbooks/extensions.md](./runbooks/extensions.md).
+
+</important>
+
 <important if="you need to run commands to build, test, lint, start the server, or generate code">
 
 ## Commands
@@ -367,7 +379,8 @@ Full rulebook: [apps/evals/SCENARIO-AUTHORING.md](./apps/evals/SCENARIO-AUTHORIN
 ## Related
 
 - [runbooks/db-retention.md](./runbooks/db-retention.md) — opt-in retention for non-critical SQLite log tables
-- [runbooks/](./runbooks/) — ci, release, local-development, testing, k8s-test-cluster, workflows, skills, memory-system, secret-scrubbing, harness-providers, seed-scripts, heartbeat-crash-recovery
+- [runbooks/extensions.md](./runbooks/extensions.md): extension lifecycle, dispatch, identity, and failure rules
+- [runbooks/](./runbooks/) — ci, release, local-development, testing, k8s-test-cluster, workflows, skills, memory-system, secret-scrubbing, harness-providers, seed-scripts, heartbeat-crash-recovery, extensions
 - [LOCAL_TESTING.md](./LOCAL_TESTING.md) — unit / E2E / entrypoint / MCP / UI testing recipes
 - [BUSINESS_USE.md](./BUSINESS_USE.md) — flow diagrams and instrumentation
 - [MCP.md](./MCP.md) — MCP tools reference

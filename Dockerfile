@@ -42,7 +42,10 @@ RUN mkdir -p scripts-runtime script-workflows-runtime && \
       --outfile ./scripts-runtime/swarm-sdk.bundle.js && \
     bun build ./node_modules/zod/index.js \
       --target bun --no-splitting \
-      --outfile ./scripts-runtime/zod.bundle.js
+      --outfile ./scripts-runtime/zod.bundle.js && \
+    bun build ./src/extensions/contract-runtime.ts \
+      --target bun --no-splitting \
+      --outfile ./scripts-runtime/extensions-contract.bundle.js
 
 # Copy TypeScript lib .d.ts files for script typecheck in compiled binary mode.
 # The compiled binary embeds .js modules in /$bunfs/ but not .d.ts files, so

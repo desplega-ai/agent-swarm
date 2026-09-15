@@ -30,6 +30,26 @@ const leadOnly: LegacyRule = {
   evaluate: (principal) => principal.kind === "agent" && principal.isLead,
 };
 
+/**
+ * Human principals: the shared API key (operator) and dashboard session users.
+ * Dashboard users carry no admin flag today, so they are treated like the
+ * operator, matching the config routes (`src/http/config.ts`).
+ */
+const operatorOrUser: LegacyRule = {
+  name: "operator-or-user",
+  denyReason: "requires operator or user authentication",
+  evaluate: (principal) => principal.kind === "operator" || principal.kind === "user",
+};
+
+const leadOrOperatorOrUser: LegacyRule = {
+  name: "lead-or-operator-or-user",
+  denyReason: "requires lead agent, operator, or user authentication",
+  evaluate: (principal) =>
+    principal.kind === "operator" ||
+    principal.kind === "user" ||
+    (principal.kind === "agent" && principal.isLead),
+};
+
 const leadOrTaskCreator: LegacyRule = {
   name: "lead-or-task-creator",
   denyReason: "requires lead agent or task creator",
@@ -132,6 +152,8 @@ const taskFsMutate: LegacyRule = {
 
 /** All named (non-composite) rule kinds, keyed by identifier. */
 export const LEGACY_RULES = {
+  "operator-or-user": operatorOrUser,
+  "lead-or-operator-or-user": leadOrOperatorOrUser,
   "lead-only": leadOnly,
   "lead-or-task-creator": leadOrTaskCreator,
   "lead-or-resource-owner": leadOrResourceOwner,
@@ -203,4 +225,6 @@ export const LEGACY_POLICY = {
   "script.api.update": leadOnly,
   "script.api.rotate": leadOnly,
   "script.api.delete": leadOnly,
+  "extension.write": leadOrOperatorOrUser,
+  "extension.activate": operatorOrUser,
 } as const satisfies Record<PermissionVerb, LegacyRule>;

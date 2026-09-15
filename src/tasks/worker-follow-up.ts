@@ -12,10 +12,12 @@ import {
   isAgentEligibleForTask,
 } from "../be/db";
 import { repointTrackerSyncBySwarmId } from "../be/db-queries/tracker";
+import { dispatchPre } from "../extensions/dispatcher";
 import { resolveTemplate } from "../prompts/resolver";
 import type { Agent, AgentTask, ResumeReason, RoutingAffinity, TaskAttachment } from "../types";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
+import { createTaskWithSiblingAwareness } from "./sibling-awareness";
 // Side-effect import: registers task lifecycle templates in the in-memory registry.
 import "../tools/templates";
 
@@ -217,16 +219,35 @@ export async function createWorkerTaskFollowUp(args: {
     }
   }
 
-  return await createTaskExtended(followUpDescription, {
-    agentId: leadAgent.id,
-    routingReason: "skill",
-    source: "system",
-    taskType: "follow-up",
-    parentTaskId: task.id,
-    slackChannelId: task.slackChannelId,
-    slackThreadTs: task.slackThreadTs,
-    slackUserId: task.slackUserId,
+  const preFollowUp = await dispatchPre("pre.task.followUp", {
+    completedTask: task,
+    status,
+    output,
+    failureReason,
+    workerAgentId: taskAgent.id,
+    leadAgentId: leadAgent.id,
+    summary: followUpDescription,
   });
+  if (preFollowUp.action === "block") return null;
+
+  const changes = preFollowUp.action === "modify" ? preFollowUp.data : {};
+  const followUpAgentId = changes.agentId === undefined ? leadAgent.id : changes.agentId;
+  return await createTaskWithSiblingAwareness(
+    changes.description ?? followUpDescription,
+    {
+      agentId: followUpAgentId,
+      routingReason: followUpAgentId ? "skill" : undefined,
+      source: "system",
+      taskType: "follow-up",
+      priority: changes.priority,
+      parentTaskId: task.id,
+      slackChannelId: task.slackChannelId,
+      slackThreadTs: task.slackThreadTs,
+      slackUserId: task.slackUserId,
+      followUpConfig: changes.followUpConfig,
+    },
+    { origin: "followUp" },
+  );
 }
 
 /** Result of `createResumeFollowUp`. */

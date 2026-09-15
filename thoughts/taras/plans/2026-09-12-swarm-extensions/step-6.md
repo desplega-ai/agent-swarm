@@ -2,7 +2,10 @@
 id: step-6
 name: pre.tool.call + post.tool.call
 depends_on: [step-2]
-status: ready
+status: done
+assignee: codex-sol-step-6-20260914
+claimed_at: 2026-09-14T17:45:00+02:00
+completed_at: 2026-09-14T20:30:00+02:00
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -34,10 +37,10 @@ After this step an enabled extension can inspect, rewrite, or reject any agent-f
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun run test:root -- src/tests/extensions-tool-call.test.ts src/tests/extensions-examples.test.ts`
-- [ ] `bun run test:root -- src/tests/tool-registrar-no-input.test.ts src/tests/swarm-tool-result-gate.test.ts src/tests/multi-runtime-registration.test.ts src/tests/scripts-mcp-e2e.test.ts`
-- [ ] `bun run tsc:check && bun run lint && bun run check:dep-graph`
-- [ ] `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts`
+- [x] `bun run test:root -- src/tests/extensions-tool-call.test.ts src/tests/extensions-examples.test.ts`
+- [x] `bun run test:root -- src/tests/tool-registrar-no-input.test.ts src/tests/swarm-tool-result-gate.test.ts src/tests/multi-runtime-registration.test.ts src/tests/scripts-mcp-e2e.test.ts`
+- [x] `bun run tsc:check && bun run lint && bun run check:dep-graph`
+- [x] `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts`
 
 #### Automated QA:
 - [ ] Boot on a scratch DB, enable `no-exclamation-marks`, run the MCP handshake from `LOCAL_TESTING.md` § Handshake sequence with a UUID agent id, call `store-progress` with `"done!"` and confirm the JSON-RPC result has `isError: true` and names the extension; call again with `"done."` and confirm success plus a `post.tool.call` run row.
@@ -47,3 +50,10 @@ After this step an enabled extension can inspect, rewrite, or reject any agent-f
 - [ ] None.
 
 **Implementation Note**: This step is a vertical slice — QA-able on its own. After completing this step, pause for manual confirmation. Taras handles commits.
+
+## Execution notes (2026-09-14)
+
+- Executor: codex-sol, in worktree /tmp/ext-wt/step-6 (branch codex/ext-step-6), merged with --no-ff into docs/swarm-extensions-brainstorm-plan. Report: /tmp/ext-impl/wave3/step-6-report.md.
+- Deviation (orchestrator, applies to steps 3-7): the motivating example lives in its own file `src/tests/extensions-example-*.test.ts` instead of a shared `extensions-examples.test.ts`; step-9 consolidates or updates the root.md command to a glob.
+- Live QA for this step was run by the orchestrator on the merged tree (Codex sandboxes deny listeners). See root.md "Wave 3 QA" note.
+- Wave-3 two-axis review findings and their fix round: /tmp/ext-impl/wave3-fix-prompt.md (the report lands at /tmp/ext-impl/wave3-fix-report.md). Automated boxes are ticked pending that round's green run.

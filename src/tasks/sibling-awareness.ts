@@ -17,7 +17,10 @@ import {
   getAgentById,
   getInProgressTasksByContextKey,
 } from "../be/db";
+import { applyPreTaskCreate } from "../extensions/apply-task-create";
+import type { TaskCreateOrigin } from "../extensions/contract";
 import type { AgentTask } from "../types";
+import { TaskCreationBlockedError } from "./errors";
 import {
   pickResumeParent,
   prependSiblingBlock,
@@ -139,7 +142,20 @@ export async function withSiblingAwareness(
 export async function createTaskWithSiblingAwareness(
   description: string,
   options: CreateTaskOptions,
+  args: { origin?: TaskCreateOrigin } = {},
 ): Promise<AgentTask> {
-  const { description: d, options: o } = await withSiblingAwareness(description, options);
+  const preCreate = await applyPreTaskCreate({
+    description,
+    options,
+    // Preserve the plan's REST default for callers without an explicit ingress origin.
+    origin: args.origin ?? "rest",
+  });
+  if (preCreate.kind === "blocked") {
+    throw new TaskCreationBlockedError(preCreate.reason, preCreate.extension);
+  }
+  const { description: d, options: o } = await withSiblingAwareness(
+    preCreate.description,
+    preCreate.options,
+  );
   return await createTaskExtended(d, o);
 }

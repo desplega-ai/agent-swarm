@@ -8,8 +8,13 @@ import {
 } from "@modelcontextprotocol/sdk/server/zod-compat.js";
 import { z } from "zod";
 import { createServer } from "@/server";
+import { isExtensionAgentId } from "../extensions/dispatcher";
 import { isMcpToolAllowedForScripts } from "../scripts-runtime/sdk-allowlist";
-import { markScriptSdkRequestOrigin } from "../tools/utils";
+import {
+  markExtensionRequestOrigin,
+  markScriptSdkRequestOrigin,
+  type RequestInfo,
+} from "../tools/utils";
 import { route, runtimeInstanceHeader } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -34,6 +39,78 @@ type RegisteredTool = {
 };
 
 type ToolRegistry = Record<string, RegisteredTool>;
+
+export class InProcessToolInvocationError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = "InProcessToolInvocationError";
+  }
+}
+
+export async function invokeToolInProcess(args: {
+  toolName: string;
+  args?: unknown;
+  agentId?: string;
+  sourceTaskId?: string;
+  runtimeInstanceId?: string;
+  callOrigin: Extract<RequestInfo["callOrigin"], "script-sdk" | "extension">;
+}): Promise<unknown> {
+  if (!isMcpToolAllowedForScripts(args.toolName)) {
+    throw new InProcessToolInvocationError(
+      `Tool '${args.toolName}' is not in the SDK allowlist`,
+      403,
+    );
+  }
+
+  const server = await getBridgeServer();
+  const tools = (server as unknown as { _registeredTools: ToolRegistry })._registeredTools;
+  const tool = tools[args.toolName];
+  if (!tool) {
+    throw new InProcessToolInvocationError(
+      `Tool '${args.toolName}' not found in the MCP registry`,
+      404,
+    );
+  }
+  if (tool.enabled === false) {
+    throw new InProcessToolInvocationError(`Tool '${args.toolName}' is disabled`, 400);
+  }
+
+  const baseExtra = {
+    sessionId: args.callOrigin === "extension" ? "extension" : "mcp-bridge",
+    requestInfo: {
+      headers: {
+        "x-agent-id": args.agentId ?? "",
+        ...(args.sourceTaskId ? { "x-source-task-id": args.sourceTaskId } : {}),
+        ...(args.runtimeInstanceId ? { "x-runtime-instance-id": args.runtimeInstanceId } : {}),
+      },
+    },
+  };
+  const extra =
+    args.callOrigin === "extension"
+      ? markExtensionRequestOrigin(baseExtra)
+      : markScriptSdkRequestOrigin(baseExtra);
+
+  let handlerArgs: unknown = args.args ?? {};
+  if (tool.inputSchema) {
+    const inputObj = normalizeObjectSchema(tool.inputSchema);
+    const parseResult = await safeParseAsync(inputObj ?? tool.inputSchema, handlerArgs);
+    if (!parseResult.success) {
+      const parseError = "error" in parseResult ? parseResult.error : "Unknown error";
+      throw new InProcessToolInvocationError(
+        `Invalid arguments for tool '${args.toolName}': ${getParseErrorMessage(parseError)}`,
+        400,
+      );
+    }
+    handlerArgs = parseResult.data;
+  }
+
+  return tool.inputSchema
+    ? await Promise.resolve(tool.handler(handlerArgs, extra))
+    : await Promise.resolve(tool.handler(extra));
+}
 
 const mcpBridgeRoute = route({
   method: "post",
@@ -72,25 +149,6 @@ export async function handleMcpBridge(
 
   const { tool: toolName, args } = parsed.body;
 
-  if (!isMcpToolAllowedForScripts(toolName)) {
-    jsonError(res, `Tool '${toolName}' is not in the SDK allowlist`, 403);
-    return true;
-  }
-
-  const server = await getBridgeServer();
-  const tools = (server as unknown as { _registeredTools: ToolRegistry })._registeredTools;
-
-  const tool = tools[toolName];
-  if (!tool) {
-    jsonError(res, `Tool '${toolName}' not found in the MCP registry`, 404);
-    return true;
-  }
-
-  if (tool.enabled === false) {
-    jsonError(res, `Tool '${toolName}' is disabled`, 400);
-    return true;
-  }
-
   const sourceTaskId = Array.isArray(req.headers["x-source-task-id"])
     ? req.headers["x-source-task-id"][0]
     : (req.headers["x-source-task-id"] as string | undefined);
@@ -100,42 +158,15 @@ export async function handleMcpBridge(
     ? req.headers["x-runtime-instance-id"][0]
     : (req.headers["x-runtime-instance-id"] as string | undefined);
 
-  const extra = markScriptSdkRequestOrigin({
-    sessionId: "mcp-bridge",
-    requestInfo: {
-      headers: {
-        "x-agent-id": myAgentId ?? "",
-        ...(sourceTaskId ? { "x-source-task-id": sourceTaskId } : {}),
-        ...(runtimeInstanceId ? { "x-runtime-instance-id": runtimeInstanceId } : {}),
-      },
-    },
-  });
-
-  // Mirror the SDK's own tools/call validation (`validateToolInput` in
-  // @modelcontextprotocol/sdk server/mcp.js). The bridge bypasses the MCP
-  // transport, so without this parse raw script args reach handlers
-  // unchecked (2026-08-18 priority='high' incident) and the schema's
-  // `.default()`/`.transform()` never apply.
-  let handlerArgs: unknown = args;
-  if (tool.inputSchema) {
-    const inputObj = normalizeObjectSchema(tool.inputSchema);
-    const parseResult = await safeParseAsync(inputObj ?? tool.inputSchema, args);
-    if (!parseResult.success) {
-      const parseError = "error" in parseResult ? parseResult.error : "Unknown error";
-      jsonError(
-        res,
-        `Invalid arguments for tool '${toolName}': ${getParseErrorMessage(parseError)}`,
-        400,
-      );
-      return true;
-    }
-    handlerArgs = parseResult.data;
-  }
-
   try {
-    const result = tool.inputSchema
-      ? await Promise.resolve(tool.handler(handlerArgs, extra))
-      : await Promise.resolve(tool.handler(extra));
+    const result = await invokeToolInProcess({
+      toolName,
+      args,
+      agentId: myAgentId,
+      sourceTaskId,
+      runtimeInstanceId,
+      callOrigin: isExtensionAgentId(myAgentId) ? "extension" : "script-sdk",
+    });
 
     if (result && typeof result === "object" && "structuredContent" in result) {
       json(res, result.structuredContent);
@@ -155,7 +186,7 @@ export async function handleMcpBridge(
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    jsonError(res, message, 500);
+    jsonError(res, message, err instanceof InProcessToolInvocationError ? err.status : 500);
   }
   return true;
 }

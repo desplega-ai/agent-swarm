@@ -2,7 +2,10 @@
 id: step-2
 name: "Runtime: loader, dispatcher, ctx, identity, post bridge"
 depends_on: [step-1]
-status: ready
+status: done
+assignee: codex-sol-step-2-20260914
+claimed_at: 2026-09-14T17:20:00+02:00
+completed_at: 2026-09-14T19:40:00+02:00
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -58,20 +61,34 @@ After this step an enabled extension actually runs. Enable creates the `ext:<nam
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun run test:root -- src/tests/extensions-loader.test.ts src/tests/extensions-dispatcher.test.ts src/tests/extensions-lifecycle.test.ts`
-- [ ] `bun run test:root -- src/tests/extensions-http.test.ts` still green (enable / disable / activate now real)
-- [ ] `bun run tsc:check && bun run lint`
-- [ ] `bash scripts/check-db-boundary.sh && bash scripts/check-api-key-boundary.sh`
-- [ ] `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts`
-- [ ] `bun run docker:build:api`
+- [x] `bun run test:root -- src/tests/extensions-loader.test.ts src/tests/extensions-dispatcher.test.ts src/tests/extensions-lifecycle.test.ts`
+- [x] `bun run test:root -- src/tests/extensions-http.test.ts` still green (enable / disable / activate now real)
+- [x] `bun run tsc:check && bun run lint`
+- [x] `bash scripts/check-db-boundary.sh && bash scripts/check-api-key-boundary.sh`
+- [x] `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts`
+- [x] `bun run docker:build:api`
 
 #### Automated QA:
-- [ ] Boot the API on a scratch DB, install the `post-logger` bundle, enable it, confirm `GET /api/agents` lists `ext:post-logger` with `status: "offline"`, `POST /api/tasks`, then `GET /api/extensions/{id}/runs` shows a `post.task.created` row with `action: "continue"`.
-- [ ] Install `throws`, enable, create 5 tasks, confirm `status: "auto-disabled"` and `consecutiveFailures: 5`; re-enable resets to 0.
-- [ ] Compiled-binary smoke: `docker run --rm -e DATABASE_PATH=/tmp/x.sqlite agent-swarm-api:latest` boots, then the same install + enable + task flow via curl against the container succeeds (proves `import()` and the shims work in `/$bunfs` mode).
-- [ ] Restart the API with the extension enabled and confirm it is loaded at boot (`GET /api/extensions/{id}` shows `status: "enabled"`, and a new task produces a run row).
+- [x] Boot the API on a scratch DB, install the `post-logger` bundle, enable it, confirm `GET /api/agents` lists `ext:post-logger` with `status: "offline"`, `POST /api/tasks`, then `GET /api/extensions/{id}/runs` shows a `post.task.created` row with `action: "continue"`.
+- [x] Install `throws`, enable, create 5 tasks, confirm `status: "auto-disabled"` and `consecutiveFailures: 5`; re-enable resets to 0.
+- [x] Compiled-binary smoke: `docker run --rm -e DATABASE_PATH=/tmp/x.sqlite agent-swarm-api:latest` boots, then the same install + enable + task flow via curl against the container succeeds (proves `import()` and the shims work in `/$bunfs` mode).
+- [x] Restart the API with the extension enabled and confirm it is loaded at boot (`GET /api/extensions/{id}` shows `status: "enabled"`, and a new task produces a run row).
 
 #### Manual Verification:
 - [ ] None.
 
 **Implementation Note**: This step is a vertical slice — QA-able on its own. After completing this step, pause for manual confirmation. Taras handles commits.
+
+## Execution notes (2026-09-14)
+
+- Executor: Codex gpt-5.6-sol (high), one fix round after a two-axis Opus review. Live HTTP QA, boot-reload QA, and the compiled-binary container smoke were run by the orchestrator (Codex's sandbox denies listeners and Docker); all pass, including `ctx.swarm.task_get` from a handler inside the container.
+- `ctx.swarm` is the script SDK itself (`createSwarmSdk` from `src/scripts-runtime/swarm-sdk.ts`) over loopback HTTP (`http://127.0.0.1:<bound port>`, set from the `listen` callback via `setExtensionLoopbackBaseUrl`), signed as the `ext:<name>` agent. The bridge marks `callOrigin: "extension"` server-side via `isExtensionAgentId` (in-memory set kept by the registry), never from a header. `ctx.state` stays in-process through `invokeToolInProcess` with tool names from `SDK_TOOL_NAME_MAP`.
+- `ctx.signal`: state, swarm, and log calls throw `ExtensionAbortedError` once the handler timed out or the extension was unregistered, so a late handler cannot mutate state.
+- Bundle paths are validated (`src/extensions/bundle-path.ts`): relative POSIX, no `..`, no leading `/`, applied to `assets.hooks` (schema refine) and every `files` key, plus a defensive check in the loader.
+- Tmp root is per process: `${tmpdir()}/swarm-extensions/<pid>`; boot removes dead sibling pid dirs; shutdown removes its own.
+- Run log: `insertExtensionRun` is a single awaited insert; `pruneExtensionRuns` (keep 500) runs at boot and after each poll tick. The 30 s poll is a self-rescheduling timer with an in-flight guard; shutdown awaits it.
+- Self-recursion: the post bridge maps `task.creatorAgentId` to an extension via `extensionIdForAgent` and passes `skipExtensionId`. Steps 3-6 must do the same for `pre.*` using `requestInfo.agentId` / the caller's agent id.
+- `EXTENSION_HANDLER_TIMEOUT_MS` (5000) and `EXTENSION_MAX_CONSECUTIVE_FAILURES` (5) are registered in the configuration catalog, `VALIDATED_KEYS`, and the configuration docs page.
+- Exports for steps 3-7: `dispatchPre`, `dispatchPost`, `extensionIdForAgent`, `isExtensionAgentId`, `isRegistered`, `ExtensionAbortedError` (`src/extensions/dispatcher.ts`); `enableExtension`, `disableExtension`, `activateVersion`, `reloadExtension`, `loadEnabledExtensions`, `stopExtensionRuntime`, `get/setExtensionLoopbackBaseUrl`, `ExtensionLifecycleError` (`src/extensions/lifecycle.ts`).
+- `dispatchPre` modify merge per event: `pre.task.create` puts `description` at the top level and merges other fields into `options`; `pre.task.followUp` merges shallowly and mirrors `description` into `summary`; `pre.slack.route` replaces `target`; `pre.heartbeat.remediate` replaces `proposedAction`; `pre.tool.call` replaces `args`. Boundaries re-validate the merged payload with their own schemas.
+- Known limits (documented, not bugs): `dispose()` removes the source dir but Bun keeps the module in its registry (no unload); a failed reload after PATCH leaves `enabled = 1, status = "error"` until the next enable.

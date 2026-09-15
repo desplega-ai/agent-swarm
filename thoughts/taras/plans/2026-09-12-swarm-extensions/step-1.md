@@ -2,7 +2,10 @@
 id: step-1
 name: Extension storage, REST, typecheck
 depends_on: []
-status: ready
+status: done
+assignee: codex-sol-step-1-20260914
+claimed_at: 2026-09-14T15:10:00+02:00
+completed_at: 2026-09-14T17:05:00+02:00
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -24,7 +27,7 @@ After this step an operator can `POST /api/extensions/install` a bundle (`{ mani
 **Changes**: Emit declarations for `src/extensions/contract.ts` with `ts.createProgram({ declaration: true, emitDeclarationOnly: true })`, inline the imported `CreateTaskOptions` / `AgentTask` / `RequestInfo` declarations (or re-export them from the existing `swarm-sdk.d.ts`), and write a single `declare module "swarm-extension" { ... }` file. `ctx.swarm` is typed as the `SwarmSdk` interface from `swarm-sdk.d.ts`. Follow `scripts/bundle-script-types.ts:34-47` for the write + `bunx biome format` step. Add the Dockerfile `bun build` staging only if the `.d.ts` must exist on disk for the compiled binary (mirror how `swarm-sdk.d.ts` reaches `SCRIPT_TYPES_DIR`, Dockerfile lines 47-58 and 118-123).
 
 #### 3. Migration
-**File**: `src/be/migrations/147_extensions.sql` (new; confirm ordinal per root.md pre-flight)
+**File**: `src/be/migrations/150_extensions.sql` (new; confirm ordinal per root.md pre-flight)
 **Changes**: Four tables, styled after `064_scripts.sql` with the audit columns from `082_user_audit_fields.sql:79` included up front:
 - `extensions`: `id TEXT PK, name TEXT NOT NULL UNIQUE, description TEXT NOT NULL DEFAULT '', runtime TEXT NOT NULL DEFAULT 'api' CHECK(runtime IN ('api','worker')), manifestJson TEXT NOT NULL, contentHash TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1, activeVersion INTEGER NOT NULL DEFAULT 1, enabled INTEGER NOT NULL DEFAULT 0, priority INTEGER NOT NULL DEFAULT 100, configJson TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'disabled' CHECK(status IN ('disabled','enabled','error','auto-disabled')), consecutiveFailures INTEGER NOT NULL DEFAULT 0, lastError TEXT, agentId TEXT, createdByAgentId TEXT, created_by TEXT, updated_by TEXT, createdAt, updatedAt`.
 - `extension_files`: `id, extensionId FK ON DELETE CASCADE, path TEXT NOT NULL, content TEXT NOT NULL, contentHash TEXT NOT NULL, created_by, updated_by, UNIQUE(extensionId, path)`. Holds the active version's files; v1 always has one row, `hooks.ts`.
@@ -62,21 +65,36 @@ Verbs: `extension.write` (lead agents and operators) and `extension.activate` (o
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun run test:root -- src/tests/extensions-db.test.ts src/tests/extensions-validate.test.ts src/tests/extensions-http.test.ts`
-- [ ] `bun run tsc:check`
-- [ ] `bun run lint`
-- [ ] `bun run check:rbac-coverage && bun run check:openapi-response-coverage`
-- [ ] `bash scripts/check-audit-columns.sh && bash scripts/check-migration-conflicts.sh && bash scripts/check-db-boundary.sh`
-- [ ] `bun run build:extension-types && bun run check:script-types` (generated file committed and fresh)
-- [ ] `bun run docs:openapi` and commit `openapi.json` + `docs-site/content/docs/api-reference/**`
-- [ ] `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts`
+- [x] `bun run test:root -- src/tests/extensions-db.test.ts src/tests/extensions-validate.test.ts src/tests/extensions-http.test.ts`
+- [x] `bun run tsc:check`
+- [x] `bun run lint`
+- [x] `bun run check:rbac-coverage && bun run check:openapi-response-coverage`
+- [x] `bash scripts/check-audit-columns.sh && bash scripts/check-migration-conflicts.sh && bash scripts/check-db-boundary.sh`
+- [x] `bun run build:extension-types && bun run check:script-types` (generated file committed and fresh)
+- [x] `bun run docs:openapi` and commit `openapi.json` + `docs-site/content/docs/api-reference/**`
+- [x] `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts`
 
 #### Automated QA:
-- [ ] Boot the API against a fresh scratch DB (`DATABASE_PATH=/tmp/ext-step1.sqlite bun run start:http`), install the `minimal` bundle via curl, list it, GET it and confirm `manifest` + `files["hooks.ts"]` come back, fetch versions, install a changed hooks file, confirm `version: 2` and two version rows, PATCH priority to 10, GET `/api/extensions/type-defs` returns text containing `declare module "swarm-extension"`.
-- [ ] Install `bad-import`, `worker-runtime`, and `reserved-assets` and confirm 400 with a readable diagnostic for each.
-- [ ] Boot against a copy of an existing pre-migration DB and confirm only migration 147 applies.
+- [x] Boot the API against a fresh scratch DB (`DATABASE_PATH=/tmp/ext-step1.sqlite bun run start:http`), install the `minimal` bundle via curl, list it, GET it and confirm `manifest` + `files["hooks.ts"]` come back, fetch versions, install a changed hooks file, confirm `version: 2` and two version rows, PATCH priority to 10, GET `/api/extensions/type-defs` returns text containing `declare module "swarm-extension"`.
+- [x] Install `bad-import`, `worker-runtime`, and `reserved-assets` and confirm 400 with a readable diagnostic for each.
+- [x] Boot against a copy of an existing pre-migration DB and confirm only migration 150 applies.
 
 #### Manual Verification:
-- [ ] Taras reads the generated `swarm-extension.d.ts` once and confirms the event names and modify shapes match the brainstorm table.
+- [x] Taras reads the generated `swarm-extension.d.ts` once and confirms the event names and modify shapes match the brainstorm table.
 
 **Implementation Note**: This step is a vertical slice — QA-able on its own. After completing this step, pause for manual confirmation. Taras handles commits.
+
+## Execution notes (2026-09-14)
+
+- Executor: Codex gpt-5.6-sol (high), one fix round via `codex exec resume` after a two-axis Opus review.
+- Migration ordinal is **150** (`origin/main` tail 149 at pre-flight; #1417 merged with 149, #1235 closed).
+- `swarm-extension.d.ts` text is embedded in the binary via the generated `src/extensions/contract-types.generated.ts` constant (no Dockerfile COPY, no runtime file read). Both artifacts are covered by `check:script-types`.
+- `checkImportAllowlist` gained `strictDynamic` (extensions only): rejects computed `import()` / `require()` because extensions run in-process. Scripts keep prior behavior.
+- `typecheckWithAmbient({ source, modules, ambient?, checkFile })` replaced `typecheckScript`'s inline host; scripts pass `swarm-sdk` + `stdlib` as modules, exactly as before.
+- `ExtensionManifestSchema` (Zod) and `contract.ts`'s `ExtensionManifest` are guarded in both directions by compile-time assignability checks in `src/types.ts`.
+- RBAC (decided by Taras 2026-09-14): `extension.write` = lead agent, operator, or dashboard user (`lead-or-operator-or-user`); `extension.activate` = operator or dashboard user (`operator-or-user`). Users have no admin flag, so they are treated like the operator, matching the config routes.
+- `configJson` is scrubbed with `scrubSecrets` on every read path (install, list, get, patch responses) per Taras's decision; the stored value stays raw.
+- `src/tests/docs-index-footprint.test.js` operation pin bumped 359 to 370 (11 new routes).
+- `extensionPrincipal` resolves `X-Agent-ID` before the shared API key (same precedent as `src/http/mcp-servers.ts`).
+- Live QA ran from the orchestrator (Codex's sandbox denies listeners): fresh DB applies 150; install / dedupe / version 2 / PATCH / type-defs / 501 stubs / 400 diagnostics all verified; a pre-migration DB copy applied only 150.
+- For step-2: `block()` / `modify()` are value exports in the d.ts; the bare-import shim for `swarm-extension` must provide them at runtime. `post.*` payloads carry `{ task }` while the bus emits `taskId`, so the dispatcher needs a task read per post event. `extension_files` holds the newest install; load `extension_versions.filesJson` for `activeVersion` when it differs. `extensions.agentId` is set on enable.

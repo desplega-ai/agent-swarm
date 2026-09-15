@@ -3,12 +3,15 @@ import type { WebClient } from "@slack/web-api";
 import {
   getAgentById,
   getAgentWorkingOnThread,
+  getAllAgents,
   getLeadAgent,
   getMostRecentTaskInThread,
   getTasksByAgentId,
 } from "../be/db";
+import { dispatchPre } from "../extensions/dispatcher";
 import { resolveTemplate } from "../prompts/resolver";
 import { slackContextKey } from "../tasks/context-key";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import { workflowEventBus } from "../workflows/event-bus";
 import { ackSlackMessage, reactionName } from "./ack";
 import { buildTreeBlocks, type TreeNode } from "./blocks";
@@ -23,7 +26,13 @@ import {
   notifySlackFileFailures,
   type SlackFileFailure,
 } from "./inbound-files";
-import { extractTaskFromMessage, hasOtherUserMention, routeMessage } from "./router";
+import {
+  broadcastMatches,
+  extractTaskFromMessage,
+  hasOtherUserMention,
+  routeMessage,
+} from "./router";
+import type { AgentMatch } from "./types";
 // Side-effect import: registers all Slack event templates in the in-memory registry
 import "./templates";
 import { isEnvFlagEnabled } from "../utils/env-flag";
@@ -445,11 +454,13 @@ export function registerMessageHandler(app: App): void {
       sampleContext: msg.text ?? "",
     });
 
-    // Emit workflow trigger event for Slack messages
+    // Keep channel/user for legacy consumers and channelId/userId for the extension contract.
     workflowEventBus.emit("slack.message", {
       channel: msg.channel,
+      channelId: msg.channel,
       text: msg.text,
       user: msg.user,
+      userId: msg.user,
       ts: msg.ts,
       threadTs: msg.thread_ts,
     });
@@ -565,7 +576,48 @@ export function registerMessageHandler(app: App): void {
     const routingThreadContext = msg.thread_ts
       ? { channelId: msg.channel, threadTs: msg.thread_ts }
       : undefined;
-    const matches = await routeMessage(
+    const routeResult = await dispatchPre("pre.slack.route", {
+      channelId: msg.channel,
+      userId: msg.user,
+      text: routingText,
+      ...(msg.thread_ts ? { threadTs: msg.thread_ts } : {}),
+      botMentioned: botMentioned || isImplicitMention,
+      ...(routingThreadContext ? { threadContext: routingThreadContext } : {}),
+    });
+    if (routeResult.action === "block") {
+      console.info("[Slack] Extension blocked message routing:", scrubSecrets(routeResult.reason));
+      return;
+    }
+
+    let matches: AgentMatch[] | undefined;
+    if (routeResult.action === "modify") {
+      const { target } = routeResult.data;
+      if (target.kind === "agent") {
+        const agent = await getAgentById(target.agentId);
+        if (agent) {
+          matches = [{ agent, matchedText: "extension" }];
+        } else {
+          console.warn(
+            "[Slack] Extension selected an unknown agent. Using the built-in router:",
+            scrubSecrets(target.agentId),
+          );
+        }
+      } else if (target.kind === "lead") {
+        const leadAgent = await getLeadAgent();
+        if (leadAgent) {
+          matches = [{ agent: leadAgent, matchedText: "extension" }];
+        } else {
+          console.warn(
+            scrubSecrets(
+              "[Slack] Extension selected the lead, but no lead exists. Using the built-in router.",
+            ),
+          );
+        }
+      } else {
+        matches = broadcastMatches(await getAllAgents());
+      }
+    }
+    matches ??= await routeMessage(
       routingText,
       botUserId,
       botMentioned || isImplicitMention,

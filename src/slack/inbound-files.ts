@@ -288,11 +288,15 @@ export async function createSlackTaskWithFiles(
   inbound: InboundSlackFiles,
 ): Promise<{ task: AgentTask; unattached: SlackFileFailure[] }> {
   if (inbound.fetched.length === 0) {
-    const task = await createTaskWithSiblingAwareness(description, options);
+    const task = await createTaskWithSiblingAwareness(description, options, { origin: "slack" });
     return { task, unattached: inbound.failed };
   }
 
-  const task = await createTaskWithSiblingAwareness(description, { ...options, status: "draft" });
+  const task = await createTaskWithSiblingAwareness(
+    description,
+    { ...options, status: "draft" },
+    { origin: "slack" },
+  );
   const unattached = [...inbound.failed];
   // Uploads run one after another and can outlast the abandoned-draft sweep's
   // window; renewing the lease keeps the sweep from promoting a live batch.

@@ -64,6 +64,10 @@ const UNGATED_TOOL_FILES: Record<string, string> = {
   "src/tools/create-metric.ts": PIN_REASON,
   "src/tools/create-page.ts": PIN_REASON,
   "src/tools/db-query.ts": PIN_REASON,
+  "src/tools/extension-install.ts":
+    "proxies to /api/extensions which enforces extension.write / GET is ungated",
+  "src/tools/extension-list.ts":
+    "proxies to /api/extensions which enforces extension.write / GET is ungated",
   "src/tools/get-metrics.ts": PIN_REASON,
   "src/tools/get-swarm.ts": PIN_REASON,
   "src/tools/join-swarm.ts": PIN_REASON,

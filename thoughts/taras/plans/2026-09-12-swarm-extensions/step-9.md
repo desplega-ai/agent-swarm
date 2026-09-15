@@ -2,7 +2,7 @@
 id: step-9
 name: "Integration: e2e scenario, docs, drift checks"
 depends_on: [step-3, step-4, step-5, step-6, step-7]
-status: ready
+status: done
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -34,21 +34,45 @@ After this step the whole feature is exercised end to end by the black-box runne
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun run e2e --only extensions`
-- [ ] `bun run e2e` (full, no regressions)
-- [ ] `bun run test:root -- --parallel=4`
-- [ ] `bun run tsc:check && bun run lint`
-- [ ] `bun run check:rbac-coverage && bun run check:openapi-response-coverage && bun run check:script-types && bun run check:dep-graph`
-- [ ] `bash scripts/check-db-boundary.sh && bash scripts/check-api-key-boundary.sh && bash scripts/check-audit-columns.sh && bash scripts/check-migration-conflicts.sh && bash scripts/check-test-spawn-sync.sh`
-- [ ] `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts && bun scripts/check-sdk-tool-registration.ts`
-- [ ] `bun run docs:openapi && git diff --exit-code openapi.json docs-site/content/docs/api-reference`
-- [ ] `bun run check:bun-version`
+- [x] `bun run e2e --only extensions`
+- [x] `bun run e2e` (full, no regressions)
+- [x] `bun run test:root -- --parallel=4`
+- [x] `bun run tsc:check && bun run lint`
+- [x] `bun run check:rbac-coverage && bun run check:openapi-response-coverage && bun run check:script-types && bun run check:dep-graph`
+- [x] `bash scripts/check-db-boundary.sh && bash scripts/check-api-key-boundary.sh && bash scripts/check-audit-columns.sh && bash scripts/check-migration-conflicts.sh && bash scripts/check-test-spawn-sync.sh`
+- [x] `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts && bun scripts/check-sdk-tool-registration.ts`
+- [x] `bun run docs:openapi && git diff --exit-code openapi.json docs-site/content/docs/api-reference`
+- [x] `bun run check:bun-version`
 
 #### Automated QA:
-- [ ] Run the root.md Manual E2E block end to end against a scratch DB and paste the outputs into the step notes.
-- [ ] `cd docs-site && bun run build` (or the docs-site build command in its package.json) succeeds with the new guide in the nav.
+- [x] Run the root.md Manual E2E block end to end against a scratch DB and paste the outputs into the step notes.
+- [x] `cd docs-site && bun run build` (or the docs-site build command in its package.json) succeeds with the new guide in the nav.
 
 #### Manual Verification:
 - [ ] Taras reads the operator guide once for accuracy against the brainstorm.
 
 **Implementation Note**: This step is a vertical slice — QA-able on its own. After completing this step, pause for manual confirmation. Taras handles commits.
+
+## Execution notes (2026-09-14)
+
+- Executor: Codex gpt-5.6-sol (high), sequential in the main worktree. Report: /tmp/ext-impl/step-9-report.md. Two-axis Opus review: no Critical findings; one Important (MCP.md is generated, `bun run docs:mcp` now owns the two tool entries under Scripts Tools) and five Minor items fixed by the orchestrator (runbook `signal` and modify-validation wording, runbook link to the guide, CLAUDE.md runbooks index, no-op handler dropped from the docs example, e2e asserts the MCP draft lands `enabled: false` / `status: "disabled"`).
+- Orchestrator fix: the e2e v2 install bumped only `manifest.version`, but the fixture hooks pin the manifest as a const literal, so the install typecheck rejected it. Version 2 is now produced by a changed hooks file (same as the step-2 live QA).
+- Live runs (Codex sandbox denies listeners): `bun run e2e --only extensions` PASS (1.6 s); full `bun run e2e` PASS 17/17; `bun run test:root -- --parallel=4` 8781 pass / 0 fail with `ANTHROPIC_API_KEY=` unset (3 workflow-LLM credential tests fail only when the key is set; known env sensitivity).
+- Docs site: `bun install --frozen-lockfile` fails in `docs-site/` (bun.lock drift vs pnpm-lock.yaml; pre-existing, CI does not build docs-site). `pnpm install --frozen-lockfile && bun run build` succeeds with the guide in the nav.
+- `bun run check:operator-skill` fails only on remote `docs.agent-swarm.dev` link checks in the sandbox (no DNS); not related to this step.
+- Deferred (out of diff): `EXTENSION_HANDLER_TIMEOUT_MS` and `EXTENSION_MAX_CONSECUTIVE_FAILURES` are validated in `swarm-config-guard.ts` but not registered in the dashboard configuration catalog; `scripts/e2e/scenarios/extensions.ts` duplicates the fixture loader from `src/tests/fixtures/extensions/load.ts` (the e2e tsconfig does not include `src/tests`).
+- Manual E2E block (root.md steps 1-6) on a scratch DB, route-channel-to-agent installed with `config: { channelId, agentId }` (enable returns 400 without it, as designed):
+
+```
+1 install route-channel-to-agent: 200 id=1e3a5434-e96d-4a11-9e2c-c6e373e92880 version=1
+2 enable: 200 status=enabled
+3 ext agent: found status=offline; extension: {"status":"enabled","activeVersion":1,"consecutiveFailures":0}
+4 create task: 201 id=9aaa843d-e384-4220-9bab-b0fc0290824e
+4 post-logger runs[0]: {"id":"e291e980-8e6e-42a2-a8bf-be8e33631cfe","extensionId":"d7638f0b-5838-4f47-983c-7c1bcddfceea","version":1,"event":"post.task.created","action":"continue","durationMs":41,"message":null,"createdAt":"2026-09-14T17:37:59.869Z"}
+5 install throws: 200 enable: 200
+5 after 5 tasks: status=auto-disabled consecutiveFailures=5 autoDisabled=true
+6 v2 install: 200 version=2 activeVersion=2
+6 activate-version 1: 200 activeVersion=1 status=enabled
+```
+
+- Step 7 (dashboard) screenshots are the step-8 captures in agent-fs `qa/agent-swarm/2026-09-14-extensions-dashboard/`.

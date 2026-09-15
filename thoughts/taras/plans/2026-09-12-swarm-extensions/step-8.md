@@ -2,7 +2,10 @@
 id: step-8
 name: Dashboard Settings → Extensions page
 depends_on: [step-2]
-status: ready
+status: done
+assignee: opus-step-8-20260914
+claimed_at: 2026-09-14T17:45:00+02:00
+completed_at: 2026-09-14T20:30:00+02:00
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -30,9 +33,9 @@ After this step an operator manages extensions from the dashboard: a list with s
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b`
-- [ ] `bun run tsc:check` (root unchanged)
-- [ ] `bun run e2e:ui -- --grep @smoke` still passes (`bun run e2e:ui -- --no-build` after one build)
+- [x] `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b`
+- [x] `bun run tsc:check` (root unchanged)
+- [x] `bun run e2e:ui -- --grep @smoke` still passes (`bun run e2e:ui -- --no-build` after one build)
 
 #### Automated QA:
 - [ ] With the API on a scratch DB and the UI on :5274: `agent-browser open http://localhost:5274/settings/extensions`, snapshot, click "New extension", fill the manifest form, paste the `minimal` hooks file into the editor, Save, confirm the list shows it `disabled`; open it, Enable, confirm the badge turns `enabled`; create a task via curl and confirm a run-log row appears within 10 s; Disable; take screenshots at each state to `/tmp/ext-ui-*.png`.
@@ -43,3 +46,10 @@ After this step an operator manages extensions from the dashboard: a list with s
 - [ ] Taras reviews the screenshots for visual fit with the other settings pages.
 
 **Implementation Note**: This step is a vertical slice — QA-able on its own. After completing this step, pause for manual confirmation. Taras handles commits.
+
+## Execution notes (2026-09-14)
+
+- Executor: opus, in worktree /tmp/ext-wt/step-8 (branch codex/ext-step-8), merged with --no-ff into docs/swarm-extensions-brainstorm-plan. Report: /tmp/ext-impl/wave3/step-8-report.md.
+- Deviation (orchestrator, applies to steps 3-7): the motivating example lives in its own file `src/tests/extensions-example-*.test.ts` instead of a shared `extensions-examples.test.ts`; step-9 consolidates or updates the root.md command to a glob.
+- Live QA for this step was run by the orchestrator on the merged tree (Codex sandboxes deny listeners). See root.md "Wave 3 QA" note.
+- Wave-3 two-axis review findings and their fix round: /tmp/ext-impl/wave3-fix-prompt.md (the report lands at /tmp/ext-impl/wave3-fix-report.md). Automated boxes are ticked pending that round's green run.

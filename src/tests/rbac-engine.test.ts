@@ -81,6 +81,9 @@ const LEAD_ONLY_VERBS: PermissionVerb[] = [
   "script.api.delete",
 ];
 
+const OPERATOR_ONLY_VERBS: PermissionVerb[] = ["extension.activate"];
+const LEAD_OR_OPERATOR_VERBS: PermissionVerb[] = ["extension.write"];
+
 const LEAD_OR_RESOURCE_OWNER_VERBS: PermissionVerb[] = [
   "memory.edit.any",
   "skill.update.any",
@@ -171,6 +174,8 @@ describe("verb-group partition", () => {
       ...ANY_AUTHENTICATED_VERBS,
       ...REQUESTER_OWNS_TASK_VERBS,
       ...COMPOSITE_VERBS,
+      ...OPERATOR_ONLY_VERBS,
+      ...LEAD_OR_OPERATOR_VERBS,
     ];
     expect(new Set(grouped).size).toBe(grouped.length);
     expect(grouped.sort()).toEqual([...PERMISSION_VERBS].sort());
@@ -214,6 +219,40 @@ describe("lead-only verbs", () => {
     expect(decision.allow).toBe(false);
     if (!decision.allow) expect(decision.reason).toBe("requires lead agent");
   });
+});
+
+describe("operator-or-user verbs", () => {
+  const expected: Expected = {
+    lead: false,
+    worker: false,
+    ownerWorker: false,
+    creatorWorker: false,
+    userRequester: true,
+    foreignUser: true,
+    operator: true,
+  };
+  for (const verb of OPERATOR_ONLY_VERBS) {
+    test(`${verb}: operator or user allowed`, () => {
+      expectDecisions(verb, { kind: "none" }, expected);
+    });
+  }
+});
+
+describe("lead-or-operator-or-user verbs", () => {
+  const expected: Expected = {
+    lead: true,
+    worker: false,
+    ownerWorker: false,
+    creatorWorker: false,
+    userRequester: true,
+    foreignUser: true,
+    operator: true,
+  };
+  for (const verb of LEAD_OR_OPERATOR_VERBS) {
+    test(`${verb}: lead, operator, or user allowed`, () => {
+      expectDecisions(verb, { kind: "none" }, expected);
+    });
+  }
 });
 
 describe("lead-or-resource-owner verbs", () => {

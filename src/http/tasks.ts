@@ -41,6 +41,7 @@ import {
 } from "../be/steering";
 import { findUserById } from "../be/users";
 import { can, type RbacPrincipal, type RbacResource } from "../rbac";
+import { TaskCreationBlockedError } from "../tasks/errors";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { guardTerminalTaskResultWrite } from "../tasks/terminal-result-guard";
 import { createResumeFollowUp, createWorkerTaskFollowUp } from "../tasks/worker-follow-up";
@@ -259,6 +260,13 @@ const createTask = route({
   responses: {
     201: { description: "Task created", schema: AgentTaskSchema },
     400: { description: "Validation error" },
+    422: {
+      description: "Task creation blocked by an extension",
+      schema: z.object({
+        error: z.string(),
+        extension: z.object({ id: z.string(), name: z.string() }),
+      }),
+    },
   },
 });
 
@@ -836,36 +844,40 @@ export async function handleTasks(
     }
 
     try {
-      const task = await createTaskWithSiblingAwareness(parsed.body.task, {
-        key: assetKey,
-        agentId: defaultAgentId,
-        routingReason:
-          parsed.body.routingReason ??
-          (defaultAgentId
-            ? parentTask?.agentId === defaultAgentId
-              ? "continuity"
-              : "skill"
-            : undefined),
-        routingNote: parsed.body.routingNote,
-        creatorAgentId: myAgentId || undefined,
-        taskType: parsed.body.taskType || undefined,
-        tags: parsed.body.tags || undefined,
-        priority: parsed.body.priority,
-        dependsOn: parsed.body.dependsOn || undefined,
-        offeredTo: parsed.body.offeredTo || undefined,
-        dir: parsed.body.dir || undefined,
-        parentTaskId: parsed.body.parentTaskId || undefined,
-        source: parsed.body.source || "api",
-        outputSchema: parsed.body.outputSchema || undefined,
-        contextKey: parsed.body.contextKey || undefined,
-        requestedByUserId,
-        status: parsed.body.draft ? "draft" : undefined,
-        ...splitLegacyModelAlias({
-          model: parsed.body.model,
-          modelTier: parsed.body.modelTier,
-        }),
-        effort: parsed.body.effort,
-      });
+      const task = await createTaskWithSiblingAwareness(
+        parsed.body.task,
+        {
+          key: assetKey,
+          agentId: defaultAgentId,
+          routingReason:
+            parsed.body.routingReason ??
+            (defaultAgentId
+              ? parentTask?.agentId === defaultAgentId
+                ? "continuity"
+                : "skill"
+              : undefined),
+          routingNote: parsed.body.routingNote,
+          creatorAgentId: myAgentId || undefined,
+          taskType: parsed.body.taskType || undefined,
+          tags: parsed.body.tags || undefined,
+          priority: parsed.body.priority,
+          dependsOn: parsed.body.dependsOn || undefined,
+          offeredTo: parsed.body.offeredTo || undefined,
+          dir: parsed.body.dir || undefined,
+          parentTaskId: parsed.body.parentTaskId || undefined,
+          source: parsed.body.source || "api",
+          outputSchema: parsed.body.outputSchema || undefined,
+          contextKey: parsed.body.contextKey || undefined,
+          requestedByUserId,
+          status: parsed.body.draft ? "draft" : undefined,
+          ...splitLegacyModelAlias({
+            model: parsed.body.model,
+            modelTier: parsed.body.modelTier,
+          }),
+          effort: parsed.body.effort,
+        },
+        { origin: "rest" },
+      );
 
       ensure({
         id: "created",
@@ -885,6 +897,10 @@ export async function handleTasks(
 
       createTask.respond(res, 201, task);
     } catch (error) {
+      if (error instanceof TaskCreationBlockedError) {
+        createTask.respond(res, 422, { error: error.reason, extension: error.extension });
+        return true;
+      }
       console.error("[HTTP] Failed to create task:", error);
       jsonError(res, "Failed to create task", 500);
     }
