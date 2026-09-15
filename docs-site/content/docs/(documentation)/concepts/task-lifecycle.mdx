@@ -46,7 +46,7 @@ Tasks can be created in several ways:
 The lead sends a task directly to a specific worker:
 
 ```
-send-task(task: "Fix the login bug", agentId: "worker-uuid")
+send-task(task: "Fix the login bug", agentId: "worker-uuid", routingReason: "skill")
 ```
 
 ### Task Pool
@@ -68,7 +68,7 @@ task-action(action: "claim", taskId: "task-uuid")
 Tasks can be offered to a worker who must accept or reject:
 
 ```
-send-task(task: "Refactor auth module", agentId: "worker-uuid", offerMode: true)
+send-task(task: "Refactor auth module", agentId: "worker-uuid", routingReason: "skill", offerMode: true)
 ```
 
 ### External Sources
@@ -109,6 +109,12 @@ A task with dependencies won't be offered or claimable until all dependencies ar
 | `contextKey` | Uniform ingress-scoped key populated automatically at every ingress site. See [Context Keys](#context-keys) below |
 | `requiredCapabilities` | Optional (`send-task`/`task-action create`) — capabilities a candidate agent must have for task routing. See [Routing Affinity](#routing-affinity) below |
 | `leadOnly` | Optional (`send-task`/`task-action create`) — explicit authorization boundary for privileged work. Only Lead agents may be assigned, offered, claim, or recover the task; this is never inferred from prompt text. |
+
+## Routing reasons
+
+An explicit `send-task.agentId` requires `routingReason`. REST callers must also supply it when `POST /api/tasks` specifies either `agentId` or `offeredTo`. Choose `skill`, `continuity`, `overflow`, `human_pinned`, or `reroute_fault`; optionally add `routingNote` with up to 200 characters. Pool submissions omit the reason. If `send-task` inherits its assignee from `parentTaskId`, it records `continuity` automatically.
+
+Task responses include the recorded reason and note. At task creation, the server also attempts to persist a decision-time snapshot of worker status and load, plus the most recent continuity candidates from the same PR, thread, and repository. Snapshot failures are logged without blocking task creation.
 
 ## Context Keys
 
@@ -151,6 +157,8 @@ store-progress(taskId: "...", status: "failed", failureReason: "Tests still fail
 ```
 
 For automatic or recurring tasks (schedules, heartbeat, monitors, digests), completion memories are skipped unless the task explicitly opts in with `persistMemory: true` on its final `store-progress` call.
+
+For longer waits, use [defer-task](/docs/concepts/scheduling#deferring-until-another-task-finishes) to complete the current task and book a continuation. Delegated tasks create a lead follow-up on completion or failure by default. The default lead prompt reserves inline polling for essential results expected within about a minute; that path sets `followUpConfig.disabled: true` to avoid an extra follow-up and defers if the wait runs longer.
 
 ### Terminal result consistency
 

@@ -6,6 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.149.0] - 2026-09-15
+
+### Added
+- **Task assignments record routing reasons and decision-time snapshots**, including worker load and continuity candidates. Explicit MCP agent assignments and REST assignments/offers now require `routingReason` (#1482).
+- **Deferred tasks can wake when a watched task completes or fails**, with a required deadline and durable deduplication across restarts (#1474).
+- **Blocked-waiting progress updates nudge agents toward deferral** after three minutes since the previous update, without changing task state (#1472).
+- **A bundled comms skill supports clarity rewrites**, with concise default response guidance (#1470).
+
+### Changed
+- **Lead delegation defaults to automatic follow-ups**, reserving inline polling for essential results expected within about a minute (#1476).
+
+### Fixed
+- **Schema-validated tasks can defer with structured output**, preserving the JSON result while logging deferral details separately (#1469).
+- **Automation setup refusals send deduplicated Slack alerts** with missing requirements and a setup link when an alerts channel is configured (#1475).
+- **Legacy schedules no longer block on unused setup requirements** after a targeted migration repairs their metadata (#1478).
+- **ACP session credentials enforce configuration permissions**, and failed token revocation is logged with bounded cleanup requests (#1481).
+- **The docs site requires Next.js ^16.3.3** to address GHSA-p293-qw3h-jr36 (#1479).
+
+## [1.148.0] - 2026-09-14
+
+### Added
+- **Helm supports cert-manager HTTPS shortcuts and local agent-fs storage**, with an all-worker example; Compose offers automatic HTTPS through Caddy (#1468).
+- **Harness plugin descriptors share release versions** through `prepare-release` (#1468).
+
+### Fixed
+- **ALB ingress defaults to the API health endpoint**, and worker pool probes tolerate startup load (#1468).
+- **Valid MCP inputs are accepted consistently across harnesses** (#1465).
+- **Session transcripts show turn-prompt text and distinguish skill invocations** (#1460).
+
 ## [1.147.0] - 2026-09-14
 
 ### Added

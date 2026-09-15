@@ -111,6 +111,8 @@ Send a task to a specific agent, create an unassigned task, or offer a task for 
 |-----------|------|----------|-------------|
 | `task` | string | Yes | Task description |
 | `agentId` | string | No | Target agent (omit for pool) |
+| `routingReason` | string | With `agentId` | Why this agent was selected: `skill`, `continuity`, `overflow`, `human_pinned`, or `reroute_fault`. Omit for pool routing |
+| `routingNote` | string | No | Optional routing context, up to 200 characters |
 | `offerMode` | boolean | No | Offer instead of direct assign |
 | `priority` | number | No | Priority 0-100 (default: 50) |
 | `tags` | array | No | Tags for filtering |
@@ -158,6 +160,8 @@ Store task progress, or mark a task as completed or failed.
 | `force` | boolean | No | On an already-terminal task, replace only the explicitly supplied `output` and/or `failureReason`. Status, `finishedAt`, completion events, memories, follow-ups, and capacity updates are preserved rather than replayed. |
 
 Terminal results are first-call-wins. Repeating the same result succeeds as an idempotent no-op; a different result is rejected and reported as discarded unless `force: true` is explicit. Forced corrections still validate `outputSchema` and return `wasForcedOverwrite: true` on success.
+
+For a nonterminal task, progress text such as "waiting for" or "blocked on" can return `blockedWaitingElapsedMs` and a nudge to use `defer-task` when at least three minutes have elapsed since the previous update. This is advice only; it does not create a wake-up or change the task's status.
 
 ### cancel-task
 
@@ -565,7 +569,12 @@ See [Scheduled Tasks](/docs/concepts/scheduling) for details.
 
 Complete the current task now and wake up later to continue it. Use it when the result needs time: a build, a deploy, a reply.
 
-Pass `taskId`, one of `delayMs` or `runAt`, a `summary` of what you did and where things stand, a `note` that says what is pending, and optional `checks` to verify on wake-up. The task reaches its final state (`completed`) on this call. The tool stores the `summary` followed by the deferral note as the task output, and creates a one-off schedule that targets you. The task that schedule creates carries the deferred task as its `parentTaskId`, so the wake-up run receives the deferred task's context. There is no new task status: the schedule row is the state. Do not hand-roll this with `create-schedule`.
+Pass `taskId`, one of `delayMs` or `runAt`, a `summary` of what you did and where things stand, a `note` that says what is pending, and optional `checks` to verify on wake-up. The task reaches its final state (`completed`) on this call. A one-off schedule targets you, and its child task carries the deferred task as `parentTaskId` so the wake-up run receives the prior context. Use this tool instead of creating a continuation schedule by hand.
+
+- **Early wake-up:** optionally pass `wakeOn: { event: "settled", taskId: "<watched-task-id>" }`. Events are `task.completed`, `task.failed`, or `settled` (completed or failed). The watched task must exist, be nonterminal, and differ from the task being deferred. A `delayMs` or `runAt` deadline is still required; the event and deadline share a single wake-up so racing triggers do not create duplicate children. Pending waits survive API restarts.
+- **Structured output:** if the task has an `outputSchema`, pass `output` as a JSON string matching it. The tool stores that string verbatim as terminal output and puts the summary and deferral details in the task log. Missing or invalid output is rejected before creating a schedule. Without a schema, the summary and deferral details become terminal output, and `output` is ignored.
+
+See [deferring until another task finishes](/docs/concepts/scheduling#deferring-until-another-task-finishes) for an example.
 
 ## Workflow Tools
 

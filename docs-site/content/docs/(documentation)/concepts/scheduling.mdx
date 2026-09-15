@@ -51,6 +51,24 @@ create-schedule(
 )
 ```
 
+## Deferring until another task finishes
+
+Use `defer-task` when your current task needs to resume after other work finishes:
+
+```json
+{
+  "taskId": "<current-task-id>",
+  "delayMs": 1800000,
+  "wakeOn": { "event": "settled", "taskId": "<build-task-id>" },
+  "summary": "Submitted the build; validation is pending.",
+  "note": "Read the build result, then verify the deployment."
+}
+```
+
+The call completes the current task and schedules one continuation for the same agent. `settled` wakes on completion or failure; use `task.completed` or `task.failed` to watch only that outcome. The required delay or `runAt` is the latest scheduled wake-up time if the event does not arrive. Cancellation is not a `settled` event. An already-terminal watched task is rejected so you can read its result immediately.
+
+The event and deadline compete for the same durable wait. Only one creates the continuation, including after an API restart. Tasks with an `outputSchema` must also supply schema-valid JSON in `output`; summary and deferral details are stored separately in the task log.
+
 ## Schedule Properties
 
 | Property | Description |
@@ -80,6 +98,8 @@ create-schedule(
 Bundled schedules can declare `requiredParams` and `requires` metadata. `requiredParams` names values that must be present in the schedule's `params` object. `requires` names integrations, such as Slack or GitHub, that must be configured before the automation can run.
 
 The scheduler checks these requirements immediately before dispatch. An incomplete automation reports `needs_setup` with its missing parameters, missing integrations, and a dashboard fix URL; it does not create a task, start a workflow, or run a script. The schedules dashboard exposes the same status and lets operators supply the missing values, so the UI and dispatcher use one preflight result.
+
+When Slack is available and `SLACK_ALERTS_CHANNEL` is configured, a newly recorded setup refusal sends an alert naming the automation, missing values, and dashboard fix URL. Repeated identical schedule refusals are suppressed within a UTC day; a changed failure can alert again. Workflow refusals alert at most once per workflow per UTC day. The blocked fire is skipped without being retried or queued; fixing setup allows later fires to proceed. Without Slack alerts, the refusal remains visible in the dashboard and logs.
 
 ## Choosing `targetType`
 
