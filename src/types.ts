@@ -2899,6 +2899,8 @@ export const ExtensionRunSchema = z
     action: z.enum(["continue", "modify", "block", "error", "timeout", "load-error"]),
     durationMs: z.number().int().nullable(),
     message: z.string().nullable(),
+    agentId: z.string().nullable(),
+    subject: z.string().nullable(),
     createdAt: z.string(),
   })
   .openapi("ExtensionRun");

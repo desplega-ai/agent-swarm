@@ -105,12 +105,61 @@ function handlersFor(event: keyof SwarmEventMap, opts?: DispatchOptions) {
     );
 }
 
+type RunContext = { agentId: string | null; subject: string | null };
+
+function snippet(text: unknown, max = 80): string {
+  const flat = String(text ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
+/**
+ * Who and what a run row refers to, so the run log can say which agent was
+ * blocked and on what. Never stores the full payload: subjects are short and
+ * secret-scrubbed.
+ */
+export function runContext(event: keyof SwarmEventMap, payload: unknown): RunContext {
+  const p = (payload ?? {}) as Record<string, any>;
+  const requestAgent = typeof p.requestInfo?.agentId === "string" ? p.requestInfo.agentId : null;
+  let agentId: string | null = null;
+  let subject: string | null = null;
+  switch (event) {
+    case "pre.tool.call":
+    case "post.tool.call":
+      agentId = requestAgent;
+      subject = `tool ${p.tool}`;
+      break;
+    case "pre.task.create":
+      agentId = requestAgent ?? (typeof p.options?.agentId === "string" ? p.options.agentId : null);
+      subject = `${p.origin}: ${snippet(p.description)}`;
+      break;
+    case "pre.task.followUp":
+      agentId = typeof p.workerAgentId === "string" ? p.workerAgentId : null;
+      subject = `task ${p.completedTask?.id} ${p.status}`;
+      break;
+    case "pre.slack.route":
+    case "post.slack.message":
+      subject = `channel ${p.channelId}: ${snippet(p.text, 60)}`;
+      break;
+    case "pre.heartbeat.remediate":
+      agentId = typeof p.task?.agentId === "string" ? p.task.agentId : null;
+      subject = `task ${p.task?.id} ${p.classification} -> ${p.proposedAction}`;
+      break;
+    default:
+      agentId = typeof p.task?.agentId === "string" ? p.task.agentId : null;
+      subject = p.task?.id ? `task ${p.task.id}: ${snippet(p.task.task)}` : null;
+  }
+  return { agentId, subject: subject ? scrubSecrets(subject) : null };
+}
+
 async function writeRun(
   loaded: LoadedExtension,
   event: keyof SwarmEventMap,
   action: "continue" | "modify" | "block" | "error" | "timeout",
   durationMs: number,
   message?: string,
+  context?: RunContext,
 ): Promise<void> {
   try {
     await insertExtensionRun({
@@ -120,6 +169,8 @@ async function writeRun(
       action,
       durationMs,
       message: message ?? null,
+      agentId: context?.agentId ?? null,
+      subject: context?.subject ?? null,
     });
   } catch (error) {
     console.error(
@@ -150,10 +201,18 @@ async function markFailure(
   event: keyof SwarmEventMap,
   error: unknown,
   durationMs: number,
+  payload?: unknown,
 ): Promise<void> {
   const timedOut = error instanceof ExtensionTimeoutError;
   const message = scrubSecrets(error instanceof Error ? error.message : String(error));
-  await writeRun(loaded, event, timedOut ? "timeout" : "error", durationMs, message);
+  await writeRun(
+    loaded,
+    event,
+    timedOut ? "timeout" : "error",
+    durationMs,
+    message,
+    runContext(event, payload),
+  );
   try {
     const next = await recordExtensionFailure(
       loaded.record.id,
@@ -203,7 +262,7 @@ async function runHandler(
     const durationMs = Date.now() - startedAt;
     return { ok: true, result, durationMs };
   } catch (error) {
-    await markFailure(loaded, event, error, Date.now() - startedAt);
+    await markFailure(loaded, event, error, Date.now() - startedAt, payload);
     return { ok: false };
   } finally {
     if (timeout) clearTimeout(timeout);
@@ -292,7 +351,14 @@ export async function dispatchPre<E extends PreEventName>(
         (result as { action?: unknown }).action === "continue")
     ) {
       await markSuccess(loaded);
-      await writeRun(loaded, event, "continue", run.durationMs);
+      await writeRun(
+        loaded,
+        event,
+        "continue",
+        run.durationMs,
+        undefined,
+        runContext(event, currentPayload),
+      );
       continue;
     }
     if (typeof result !== "object" || result === null) {
@@ -308,7 +374,14 @@ export async function dispatchPre<E extends PreEventName>(
     if (preResult.action === "block" && typeof preResult.reason === "string") {
       const reason = scrubSecrets(preResult.reason);
       await markSuccess(loaded);
-      await writeRun(loaded, event, "block", run.durationMs, reason);
+      await writeRun(
+        loaded,
+        event,
+        "block",
+        run.durationMs,
+        reason,
+        runContext(event, currentPayload),
+      );
       return {
         action: "block",
         reason,
@@ -338,9 +411,16 @@ export async function dispatchPre<E extends PreEventName>(
         currentPayload = mergePayload(event, currentPayload, data);
         modified = true;
         await markSuccess(loaded);
-        await writeRun(loaded, event, "modify", run.durationMs);
+        await writeRun(
+          loaded,
+          event,
+          "modify",
+          run.durationMs,
+          undefined,
+          runContext(event, currentPayload),
+        );
       } catch (error) {
-        await markFailure(loaded, event, error, run.durationMs);
+        await markFailure(loaded, event, error, run.durationMs, currentPayload);
       }
       continue;
     }
@@ -349,6 +429,7 @@ export async function dispatchPre<E extends PreEventName>(
       event,
       new Error("Extension pre handler returned an invalid result"),
       run.durationMs,
+      currentPayload,
     );
   }
 
@@ -369,7 +450,14 @@ export async function dispatchPost<E extends PostEventName>(
     const run = await runHandler(loaded, handler, event, payload);
     if (run.ok) {
       await markSuccess(loaded);
-      await writeRun(loaded, event, "continue", run.durationMs);
+      await writeRun(
+        loaded,
+        event,
+        "continue",
+        run.durationMs,
+        undefined,
+        runContext(event, payload),
+      );
     }
   }
 }

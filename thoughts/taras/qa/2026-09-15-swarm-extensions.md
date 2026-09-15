@@ -19,7 +19,7 @@ PR #1441 adds trusted TypeScript hook bundles that run inside the API server. Un
 
 Deployment: `docker-compose.local.yml` plus a QA override on the desplega-labs VPS (API, Claude lead, Claude worker, pi worker with deepseek-v4-flash, agent-fs). Slack runs through `@desplega.ai/slack-mock` on the host, so the Slack handler code path is real and every channel can be screenshotted. The dashboard ran locally (Vite) against an SSH tunnel to the box.
 
-Four fixes landed in the PR as a result of this QA (see Issues Found). Each was re-verified on the box after an API image rebuild.
+Five fixes landed in the PR as a result of this QA (see Issues Found). Each was re-verified on the box after an API image rebuild.
 
 ## Scope
 
@@ -33,7 +33,7 @@ Four fixes landed in the PR as a result of this QA (see Issues Found). Each was 
 - Example extensions shipped as templates plus a seeded skill.
 
 ### Out of Scope
-- Worker runtime hooks (not in v1).
+- Worker runtime hooks (not in v1). The manifest already allows `runtime: "worker"` and the contract defines `WorkerCtx` (`worker.agentId`, `worker.taskId`, `worker.harness`), but install rejects it. A v2 would ship a loader inside the worker process so hooks can run around harness events (session start, tool use inside the harness, file writes) with the worker's own credentials. That is the next thing to build if extensions should shape what happens inside a session rather than only at the API boundary.
 - Multi-replica coordination.
 - Production deployment and the real Slack workspace (the handler ignores bot-authored messages, so an automated run cannot post as a human through the real dev bot).
 
@@ -159,15 +159,15 @@ status: auto-disabled, consecutiveFailures: 5, lastError: fixture failure
 ## Issues Found
 - [x] 1. Agents had no path to the hook contract: no seeded skill mentioned extensions and the tool descriptions did not point at `GET /api/extensions/type-defs`. severity: major. Fixed: seeded `swarm-extensions` skill (`templates/skills/swarm-extensions`), tool descriptions reference the route.
 - [x] 2. A Slack-origin block reported "Could not assign to: lead — error" and swallowed the reason. severity: major. Fixed in `src/slack/handlers.ts` (catch surfaces `TaskCreationBlockedError.reason`), covered by a new e2e assertion.
-- [ ] 3. MCP `extension-install` denies workers while REST with the bare shared API key accepts (operator principal). Same identity, two answers. severity: major, by design of the repo identity model (DES-717). Not fixed here. The seeded skill tells workers not to bypass and to hand off to a lead.
+- [ ] 3. MCP `extension-install` denies workers while REST with the bare shared API key accepts (operator principal). Same identity, two answers. severity: major, by design of the repo identity model (DES-717). Not fixed here, tracked in [#1505](https://github.com/desplega-ai/agent-swarm/issues/1505). The seeded skill tells workers not to bypass and to hand off to a lead.
 - [x] 4. `ext:<name>` identities were denied lead-only tools (`slack-post` and friends), so the flagship notification use case failed silently. severity: critical. Fixed: `src/rbac/elevated-agents.ts` registry, `actsAsLead()` in the legacy policy, dispatcher grants on load and revokes on dispose, unit test `extensions-lead-equivalence.test.ts`. Design call for Taras: an operator-enabled extension now acts with lead privileges for tool calls while enabled. `isLead` on the agent row stays false so lead selection never picks it.
 - [x] 5. `swarm-sdk` types (the `ctx.swarm` surface) are not part of the extension type-defs, and SDK calls resolve with `{ success, status, data }` instead of throwing. severity: minor. Documented in the skill, the guide, and the `notify-on-complete` template now checks `success`.
 - [ ] 6. Slack wording for a policy block reuses the assignment-failure line. severity: minor. Not fixed.
-- [ ] 7. Extension run rows for `pre.tool.call` carry no agent id. severity: minor. Not fixed.
+- [x] 7. Extension run rows carried no agent id or subject, so the run log could not say who was blocked on what. severity: minor. Fixed: `extension_runs` gained `agentId` and `subject` (migration 153, unreleased), the dispatcher fills them per event (tool name, task origin plus description snippet, channel, task id), and the dashboard run log shows Agent and Subject columns. Full payloads are still not stored (secrets, size); the Message column carries the block or error text.
 
 ## Verdict
 **Status**: PASS
-**Summary**: With the four fixes in this PR, real agents discover, author, hand off, and install extensions through the intended roles, and the policy, routing, notification, tool-guard, versioning, and auto-disable flows all behave as designed on a real deployment. Issues 3, 6, and 7 remain as follow-ups.
+**Summary**: With the five fixes in this PR, real agents discover, author, hand off, and install extensions through the intended roles, and the policy, routing, notification, tool-guard, versioning, and auto-disable flows all behave as designed on a real deployment. Issues 3 (#1505) and 6 remain as follow-ups.
 
 ## Appendix
 

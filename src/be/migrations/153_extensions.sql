@@ -57,6 +57,8 @@ CREATE TABLE extension_runs (
     CHECK(action IN ('continue', 'modify', 'block', 'error', 'timeout', 'load-error')),
   durationMs INTEGER,
   message TEXT,
+  agentId TEXT,
+  subject TEXT,
   createdAt TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

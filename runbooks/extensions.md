@@ -73,6 +73,7 @@ flowchart TD
 
 `src/extensions/contract.ts` defines every event payload and modification shape.
 `src/extensions/dispatcher.ts` owns ordering, handler limits, result handling, and run records.
+Each run record stores the event, action, duration, message, the acting agent id when the event carries one, and a short secret-scrubbed subject (tool name, task origin and description snippet, Slack channel, or task id). Full payloads are never stored.
 Boundary code calls `dispatchPre` or `dispatchPost`.
 Boundary code never reads the registry.
 

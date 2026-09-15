@@ -1521,6 +1521,8 @@ export interface ExtensionRun {
   action: ExtensionRunAction;
   durationMs: number | null;
   message: string | null;
+  agentId: string | null;
+  subject: string | null;
   createdAt: string;
 }
 

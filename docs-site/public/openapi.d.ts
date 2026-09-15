@@ -21123,6 +21123,8 @@ export interface components {
             action: "continue" | "modify" | "block" | "error" | "timeout" | "load-error";
             durationMs: number | null;
             message: string | null;
+            agentId: string | null;
+            subject: string | null;
             createdAt: string;
         };
         UserFavorite: {

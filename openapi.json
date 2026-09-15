@@ -1826,6 +1826,18 @@
               "null"
             ]
           },
+          "agentId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "subject": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "createdAt": {
             "type": "string"
           }
@@ -1838,6 +1850,8 @@
           "action",
           "durationMs",
           "message",
+          "agentId",
+          "subject",
           "createdAt"
         ]
       },

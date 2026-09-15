@@ -413,11 +413,13 @@ export async function insertExtensionRun(args: {
   action: ExtensionRun["action"];
   durationMs?: number | null;
   message?: string | null;
+  agentId?: string | null;
+  subject?: string | null;
 }): Promise<ExtensionRun> {
   const row = await getDbClient().get<ExtensionRunRow>(
     `INSERT INTO extension_runs (
-      id, extensionId, version, event, action, durationMs, message, createdAt
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      id, extensionId, version, event, action, durationMs, message, agentId, subject, createdAt
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     [
       crypto.randomUUID(),
       args.extensionId,
@@ -426,6 +428,8 @@ export async function insertExtensionRun(args: {
       args.action,
       args.durationMs ?? null,
       args.message ?? null,
+      args.agentId ?? null,
+      args.subject ?? null,
       new Date().toISOString(),
     ],
   );

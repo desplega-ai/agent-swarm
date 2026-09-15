@@ -190,6 +190,26 @@ function RunLogGrid({ runs }: { runs: ExtensionRun[] }) {
         valueFormatter: (p) => (p.value == null ? "—" : `${p.value} ms`),
       },
       {
+        headerName: "Agent",
+        field: "agentId",
+        width: 120,
+        suppressSizeToFit: true,
+        cellRenderer: (p: ICellRendererParams<ExtensionRun>) => (
+          <span className="font-mono text-xs text-muted-foreground" title={p.data?.agentId ?? ""}>
+            {p.data?.agentId ? p.data.agentId.slice(0, 8) : "—"}
+          </span>
+        ),
+      },
+      {
+        headerName: "Subject",
+        field: "subject",
+        flex: 1,
+        minWidth: 180,
+        cellRenderer: (p: ICellRendererParams<ExtensionRun>) => (
+          <span className="text-xs text-muted-foreground break-all">{p.data?.subject || "—"}</span>
+        ),
+      },
+      {
         headerName: "Message",
         field: "message",
         flex: 1,
