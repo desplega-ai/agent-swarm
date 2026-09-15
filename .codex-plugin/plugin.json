@@ -39,7 +39,12 @@
       "Set up agent-swarm with Docker Compose on this VPS."
     ],
     "websiteURL": "https://agent-swarm.dev",
+    "privacyPolicyURL": "https://www.agent-swarm.dev/privacy",
+    "termsOfServiceURL": "https://www.agent-swarm.dev/terms",
     "logo": "./assets/agent-swarm-logo.png",
-    "screenshots": []
+    "composerIcon": "./assets/agent-swarm-logo.png",
+    "screenshots": [
+      "./assets/operator-skill.png"
+    ]
   }
 }
