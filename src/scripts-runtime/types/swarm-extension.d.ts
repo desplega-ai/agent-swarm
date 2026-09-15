@@ -25,6 +25,7 @@ declare module "swarm-extension" {
       | "human_pinned"
       | "reroute_fault"
       | undefined;
+    routingSource?: "declared" | "engine_default" | undefined;
     routingNote?: string | undefined;
     taskType?: string | undefined;
     tags?: string[] | undefined;
@@ -139,6 +140,7 @@ declare module "swarm-extension" {
       | "human_pinned"
       | "reroute_fault"
       | undefined;
+    routingSource?: "declared" | "engine_default" | undefined;
     routingNote?: string | undefined;
     taskType?: string | undefined;
     offeredTo?: string | undefined;
