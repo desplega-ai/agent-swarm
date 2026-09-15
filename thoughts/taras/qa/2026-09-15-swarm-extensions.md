@@ -91,7 +91,7 @@ Four fixes landed in the PR as a result of this QA (see Issues Found). Each was 
 2. Let the in-flight lead and worker tasks complete, and pin `DES-780` to the Claude worker.
 
 **Expected Result:** The first completion call is blocked with the reason, the agent adds the line, the second call succeeds, and the run log shows block then continue.
-**Actual Result:** The lead's follow-up task was blocked twice (18:07:40 and 18:07:43) and completed at 18:07:54 with a `Verified:` line in its output. Run log: 2 block, 11 continue. See Appendix for the pinned worker task.
+**Actual Result:** The lead's follow-up task was blocked twice (18:07:40 and 18:07:43) and completed at 18:07:54 with a `Verified:` line in its output. The pinned worker task `DES-780` was blocked at 18:16:42 and 18:17:00, then completed with the output "Created /workspace/personal/qa-tc6.txt ... Verified: `cat /workspace/personal/qa-tc6.txt` returned `hello-qa`." Both agents corrected themselves from the block reason alone.
 **Status:** pass
 
 ### TC-7: Dashboard
@@ -174,4 +174,4 @@ status: auto-disabled, consecutiveFailures: 5, lastError: fixture failure
 - **Plan**: `thoughts/taras/plans/2026-09-12-swarm-extensions/root.md`
 - **Templates shipped**: `templates/extensions/require-ticket-ref`, `notify-on-complete`, `require-verification-note` (validated offline with `bun scripts/extensions/install-template.ts <name> --validate-only`).
 - **Box teardown**: `docker compose -f docker-compose.local.yml -f docker-compose.qa.yml down -v` in `/root/agent-swarm-qa`, kill the `slack-mock serve` process, and remove the two `inet sandboxd forward` accept rules for `br-79446c73d448` (`nft -a list chain inet sandboxd forward`, then `nft delete rule inet sandboxd forward handle <n>`).
-- **Notes**: The pinned worker task `DES-780` for TC-6 was still queued behind the worker's follow-up tasks when this report was written; the lead's blocked-then-verified completion already proves the guard on a real session.
+- **Notes**: The QA stack on the box was left running with `require-verification-note` disabled again; the other three extensions stay enabled for a look at the dashboard through an SSH tunnel (`ssh -L 3013:localhost:3013 -L 4040:172.17.0.1:4040 desplega-labs`, then `cd apps/ui && bunx vite --port 5175` and connect the dashboard to `http://localhost:5175`).
