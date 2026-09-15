@@ -1,5 +1,6 @@
 import type { App } from "@slack/bolt";
 import type { WebClient } from "@slack/web-api";
+import { z } from "zod";
 import {
   getAgentById,
   getAgentWorkingOnThread,
@@ -41,6 +42,17 @@ import { ensureSlackThreadTree, isSlackRenderV2Enabled } from "./render-v2";
 import { formatSlackSteeringAck, requestSlackThreadSteering } from "./steering";
 import { bufferThreadMessage, getBufferMessageCount, instantFlush } from "./thread-buffer";
 import { registerTreeMessage } from "./watcher";
+
+/** Runtime check for `pre.slack.route` modifications (mirrors `SlackRouteModify`). */
+const SlackRouteModifySchema = z
+  .object({
+    target: z.discriminatedUnion("kind", [
+      z.object({ kind: z.literal("agent"), agentId: z.string().min(1) }).strict(),
+      z.object({ kind: z.literal("lead") }).strict(),
+      z.object({ kind: z.literal("broadcast") }).strict(),
+    ]),
+  })
+  .strict();
 
 // User filtering configuration from environment variables
 const allowedEmailDomains = (process.env.SLACK_ALLOWED_EMAIL_DOMAINS || "")
@@ -576,14 +588,27 @@ export function registerMessageHandler(app: App): void {
     const routingThreadContext = msg.thread_ts
       ? { channelId: msg.channel, threadTs: msg.thread_ts }
       : undefined;
-    const routeResult = await dispatchPre("pre.slack.route", {
-      channelId: msg.channel,
-      userId: msg.user,
-      text: routingText,
-      ...(msg.thread_ts ? { threadTs: msg.thread_ts } : {}),
-      botMentioned: botMentioned || isImplicitMention,
-      ...(routingThreadContext ? { threadContext: routingThreadContext } : {}),
-    });
+    const routeResult = await dispatchPre(
+      "pre.slack.route",
+      {
+        channelId: msg.channel,
+        userId: msg.user,
+        text: routingText,
+        ...(msg.thread_ts ? { threadTs: msg.thread_ts } : {}),
+        botMentioned: botMentioned || isImplicitMention,
+        ...(routingThreadContext ? { threadContext: routingThreadContext } : {}),
+      },
+      {
+        // A runtime-invalid target (missing, null, unknown kind) is an extension
+        // failure, not a routing input; the built-in router keeps handling the message.
+        validateModify: (data) => {
+          const parsed = SlackRouteModifySchema.safeParse(data);
+          return parsed.success
+            ? { success: true, data: parsed.data }
+            : { success: false, error: new Error(parsed.error.message) };
+        },
+      },
+    );
     if (routeResult.action === "block") {
       console.info("[Slack] Extension blocked message routing:", scrubSecrets(routeResult.reason));
       return;

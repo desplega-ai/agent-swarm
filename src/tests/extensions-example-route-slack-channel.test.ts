@@ -169,6 +169,31 @@ describe("extension Slack channel routing", () => {
     }
   });
 
+  test("treats a runtime-invalid route target as an extension failure and keeps routing", async () => {
+    const bundle = await loadBundleFixture("minimal");
+    const extension = (
+      await installExtension({
+        manifest: { ...bundle.manifest, name: "bad-route-target", description: "bad target" },
+        files: {
+          "hooks.ts": `import { modify, type SwarmExtension } from "swarm-extension";
+const extension: SwarmExtension = (api) => {
+  api.on("pre.slack.route", () => modify({ target: null } as never));
+};
+export default extension;
+`,
+        },
+      })
+    ).extension;
+    await enableExtension(extension.id);
+
+    const ts = await sendMessage("C5", `<@${BOT_USER_ID}> survive the bad target`);
+    expect(await getMostRecentTaskInThread("C5", ts)).toMatchObject({ agentId: leadAgent.id });
+    const runs = await listExtensionRuns(extension.id);
+    expect(runs.some((run) => run.event === "pre.slack.route" && run.action === "error")).toBe(
+      true,
+    );
+  });
+
   test("dispatches post.slack.message with the canonical channel and user fields", async () => {
     const bundle = await loadBundleFixture("route-channel-to-agent");
     const extension = (

@@ -1,21 +1,16 @@
+import type { ColDef, ICellRendererParams } from "ag-grid-community";
 import { Blocks, Plus } from "lucide-react";
+import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useExtensions } from "@/api/hooks/use-extensions";
-import type { ExtensionStatus } from "@/api/types";
+import type { Extension, ExtensionStatus } from "@/api/types";
+import { DataGrid } from "@/components/shared/data-grid";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageSkeleton } from "@/components/shared/page-skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { formatSmartTime } from "@/lib/utils";
 
 /** Status to badge variant. `error` and `auto-disabled` both need attention. */
@@ -35,6 +30,81 @@ export function statusBadgeVariant(
 export default function ExtensionsPage() {
   const navigate = useNavigate();
   const { data: extensions, isLoading, error } = useExtensions();
+
+  const columnDefs = useMemo<ColDef<Extension>[]>(
+    () => [
+      {
+        headerName: "Name",
+        field: "name",
+        flex: 1,
+        minWidth: 240,
+        cellRenderer: (p: ICellRendererParams<Extension>) =>
+          p.data ? (
+            <div className="leading-tight py-1">
+              <div className="font-medium">{p.data.name}</div>
+              <div className="text-xs text-muted-foreground truncate">
+                {p.data.description || "—"}
+              </div>
+            </div>
+          ) : null,
+      },
+      {
+        headerName: "Status",
+        field: "status",
+        width: 130,
+        suppressSizeToFit: true,
+        cellRenderer: (p: ICellRendererParams<Extension>) =>
+          p.data ? (
+            <Badge variant={statusBadgeVariant(p.data.status)} size="tag">
+              {p.data.status}
+            </Badge>
+          ) : null,
+      },
+      {
+        headerName: "Version",
+        field: "activeVersion",
+        width: 170,
+        suppressSizeToFit: true,
+        cellRenderer: (p: ICellRendererParams<Extension>) =>
+          p.data ? (
+            <span className="font-mono text-xs">
+              v{p.data.activeVersion}
+              {p.data.version !== p.data.activeVersion && (
+                <span className="text-muted-foreground"> (latest v{p.data.version})</span>
+              )}
+            </span>
+          ) : null,
+      },
+      {
+        headerName: "Priority",
+        field: "priority",
+        width: 110,
+        suppressSizeToFit: true,
+        cellClass: "ag-right-aligned-cell font-mono text-xs",
+        headerClass: "ag-right-aligned-header",
+      },
+      {
+        headerName: "Failures",
+        field: "consecutiveFailures",
+        width: 110,
+        suppressSizeToFit: true,
+        cellClass: "ag-right-aligned-cell font-mono text-xs",
+        headerClass: "ag-right-aligned-header",
+      },
+      {
+        headerName: "Updated",
+        field: "updatedAt",
+        width: 150,
+        suppressSizeToFit: true,
+        cellRenderer: (p: ICellRendererParams<Extension>) => (
+          <span className="text-xs text-muted-foreground">
+            {p.data ? formatSmartTime(p.data.updatedAt) : null}
+          </span>
+        ),
+      },
+    ],
+    [],
+  );
 
   if (isLoading) return <PageSkeleton />;
 
@@ -72,56 +142,17 @@ export default function ExtensionsPage() {
           }
         />
       ) : (
-        <div className="rounded-md border overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Version</TableHead>
-                <TableHead className="text-right">Priority</TableHead>
-                <TableHead className="text-right">Failures</TableHead>
-                <TableHead>Updated</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(extensions ?? []).map((extension) => (
-                <TableRow
-                  key={extension.id}
-                  className="cursor-pointer"
-                  onClick={() => navigate(`/settings/extensions/${extension.id}`)}
-                >
-                  <TableCell>
-                    <div className="font-medium">{extension.name}</div>
-                    <div className="text-xs text-muted-foreground truncate max-w-md">
-                      {extension.description || "—"}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={statusBadgeVariant(extension.status)} size="tag">
-                      {extension.status}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="font-mono text-xs">
-                    v{extension.activeVersion}
-                    {extension.version !== extension.activeVersion && (
-                      <span className="text-muted-foreground"> (latest v{extension.version})</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-right font-mono text-xs">
-                    {extension.priority}
-                  </TableCell>
-                  <TableCell className="text-right font-mono text-xs">
-                    {extension.consecutiveFailures}
-                  </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    {formatSmartTime(extension.updatedAt)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+        <DataGrid
+          rowData={extensions ?? []}
+          columnDefs={columnDefs}
+          domLayout="autoHeight"
+          pagination={false}
+          rowHeight={56}
+          emptyMessage="No extensions installed."
+          onRowClicked={(event) => {
+            if (event.data) void navigate(`/settings/extensions/${event.data.id}`);
+          }}
+        />
       )}
     </div>
   );

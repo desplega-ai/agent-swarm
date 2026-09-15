@@ -21,7 +21,7 @@ import * as dbClient from "../be/db-client";
 import { installExtension, listExtensionRuns } from "../be/extensions/db";
 import { disableExtension, enableExtension, stopExtensionRuntime } from "../extensions/lifecycle";
 import { handleTasks } from "../http/tasks";
-import { createStandaloneScheduleTask } from "../scheduler/scheduler";
+import { dispatchScheduleTarget } from "../scheduler/scheduler";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { createWorkerTaskFollowUp } from "../tasks/worker-follow-up";
 import { registerSendTaskTool } from "../tools/send-task";
@@ -185,8 +185,9 @@ export default extension;
       taskTemplate: "scheduled-origin-task",
       intervalMs: 60_000,
     });
-    const scheduledTask = await createStandaloneScheduleTask(schedule);
-    expect(scheduledTask.scheduleId).toBe(schedule.id);
+    // The production path creates the task inside a transaction; hooks must still fire.
+    const dispatched = await dispatchScheduleTarget(schedule);
+    expect(dispatched.task?.scheduleId).toBe(schedule.id);
     expect(
       (
         await getKv(
@@ -442,5 +443,45 @@ export default extension;
       priority: 7,
       followUpConfig: { disabled: true },
     });
+  });
+
+  test("follow-up hooks that violate the task schema are ignored and the follow-up still lands", async () => {
+    const lead = await createAgent({
+      name: "invalid-follow-up-lead",
+      isLead: true,
+      status: "idle",
+    });
+    const worker = await createAgent({
+      name: "invalid-follow-up-worker",
+      isLead: false,
+      status: "idle",
+    });
+    const extension = await installSource(
+      "invalid-follow-up",
+      `import { modify, type SwarmExtension } from "swarm-extension";
+const extension: SwarmExtension = (api) => {
+  api.on("pre.task.followUp", () => modify({ priority: -1 }));
+};
+export default extension;
+`,
+    );
+
+    const task = await createTaskExtended("Invalid follow-up source", {
+      agentId: worker.id,
+      source: "api",
+    });
+    await startTask(task.id);
+    const completed = await completeTask(task.id, "done");
+    const followUp = await createWorkerTaskFollowUp({
+      task: completed!,
+      status: "completed",
+      output: "done",
+    });
+
+    expect(followUp).toMatchObject({ agentId: lead.id, parentTaskId: task.id, priority: 50 });
+    const runs = await listExtensionRuns(extension.id);
+    expect(runs.some((run) => run.event === "pre.task.followUp" && run.action === "error")).toBe(
+      true,
+    );
   });
 });

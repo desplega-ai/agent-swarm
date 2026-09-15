@@ -250,25 +250,50 @@ function redactExtension<T extends { configJson: string }>(extension: T): T {
   return { ...extension, configJson: scrubSecrets(extension.configJson) };
 }
 
-const REDACTED_CONFIG_VALUE = /^\[REDACTED:[A-Z0-9_]+\]$/;
+// Matches every marker shape `scrubSecrets` emits: env-key names (`EXT_TOKEN`) and
+// structural pattern names (`github_token`, `sk-ant`).
+const REDACTED_CONFIG_VALUE = /^\[REDACTED:[A-Za-z0-9_.:-]+\]$/;
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Walk `incoming` alongside `stored`; wherever the operator submitted an unchanged
+ * redaction placeholder, restore the stored value at that path (objects and arrays
+ * are recursed so nested secrets survive a dashboard round trip).
+ */
+function restoreRedacted(incoming: unknown, stored: unknown): unknown {
+  if (typeof incoming === "string") {
+    return REDACTED_CONFIG_VALUE.test(incoming) && stored !== undefined ? stored : incoming;
+  }
+  if (Array.isArray(incoming)) {
+    const storedArray = Array.isArray(stored) ? stored : [];
+    return incoming.map((item, index) => restoreRedacted(item, storedArray[index]));
+  }
+  if (isPlainObject(incoming)) {
+    const storedObject = isPlainObject(stored) ? stored : {};
+    return Object.fromEntries(
+      Object.entries(incoming).map(([key, value]) => [
+        key,
+        restoreRedacted(value, storedObject[key]),
+      ]),
+    );
+  }
+  return incoming;
+}
 
 function preserveRedactedConfigValues(
   incoming: Record<string, unknown>,
   storedJson: string,
 ): Record<string, unknown> {
-  const parsed = JSON.parse(storedJson) as unknown;
-  const stored =
-    typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : {};
-  return Object.fromEntries(
-    Object.entries(incoming).map(([key, value]) => [
-      key,
-      typeof value === "string" && REDACTED_CONFIG_VALUE.test(value) && Object.hasOwn(stored, key)
-        ? stored[key]
-        : value,
-    ]),
-  );
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(storedJson);
+  } catch {
+    parsed = {};
+  }
+  return restoreRedacted(incoming, parsed) as Record<string, unknown>;
 }
 
 /**

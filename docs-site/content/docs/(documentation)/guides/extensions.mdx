@@ -54,7 +54,7 @@ The server validates stored configuration against that schema during activation.
 
 Read responses scrub secrets from `configJson`.
 The API stores the original values.
-A PATCH request can submit unchanged `[REDACTED:...]` placeholders.
+A PATCH request can submit unchanged `[REDACTED:...]` placeholders, including nested ones.
 The server replaces those placeholders with the stored values before validation.
 
 ## Contract

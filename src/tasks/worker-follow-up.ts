@@ -1,3 +1,4 @@
+import { z } from "zod";
 import {
   buildRoutingAffinityFromAgent,
   createLogEntry,
@@ -14,12 +15,29 @@ import {
 import { repointTrackerSyncBySwarmId } from "../be/db-queries/tracker";
 import { dispatchPre } from "../extensions/dispatcher";
 import { resolveTemplate } from "../prompts/resolver";
-import type { Agent, AgentTask, ResumeReason, RoutingAffinity, TaskAttachment } from "../types";
+import {
+  type Agent,
+  type AgentTask,
+  CreateTaskOptionsSchema,
+  type ResumeReason,
+  type RoutingAffinity,
+  type TaskAttachment,
+} from "../types";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
 import { createTaskWithSiblingAwareness } from "./sibling-awareness";
 // Side-effect import: registers task lifecycle templates in the in-memory registry.
 import "../tools/templates";
+
+/** Runtime check for `pre.task.followUp` modifications (mirrors `TaskFollowUpModify`). */
+const TaskFollowUpModifySchema = CreateTaskOptionsSchema.pick({
+  agentId: true,
+  priority: true,
+  followUpConfig: true,
+})
+  .partial()
+  .extend({ description: z.string().trim().min(1).optional() })
+  .strict();
 
 /**
  * Liveness window (seconds) for considering a worker "online" enough to
@@ -219,15 +237,28 @@ export async function createWorkerTaskFollowUp(args: {
     }
   }
 
-  const preFollowUp = await dispatchPre("pre.task.followUp", {
-    completedTask: task,
-    status,
-    output,
-    failureReason,
-    workerAgentId: taskAgent.id,
-    leadAgentId: leadAgent.id,
-    summary: followUpDescription,
-  });
+  const preFollowUp = await dispatchPre(
+    "pre.task.followUp",
+    {
+      completedTask: task,
+      status,
+      output,
+      failureReason,
+      workerAgentId: taskAgent.id,
+      leadAgentId: leadAgent.id,
+      summary: followUpDescription,
+    },
+    {
+      // A modification that violates the task schema (for example `priority: -1`)
+      // is attributed to the extension and ignored, so the follow-up is still created.
+      validateModify: (data) => {
+        const parsed = TaskFollowUpModifySchema.safeParse(data);
+        return parsed.success
+          ? { success: true, data: parsed.data }
+          : { success: false, error: new Error(parsed.error.message) };
+      },
+    },
+  );
   if (preFollowUp.action === "block") return null;
 
   const changes = preFollowUp.action === "modify" ? preFollowUp.data : {};

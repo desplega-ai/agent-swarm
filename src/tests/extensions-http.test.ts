@@ -377,6 +377,39 @@ export default extension;
         token: "extqaTOKENvalue_1234567890abcdef",
         other: "b",
       });
+
+      // Nested objects, arrays, and structural (lowercase) markers survive a round trip.
+      const ghToken = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+      const nested = await dispatch(`/api/extensions/${extension!.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          config: {
+            token: "extqaTOKENvalue_1234567890abcdef",
+            github: { token: ghToken, list: [ghToken, "plain"] },
+          },
+        }),
+      });
+      expect(nested.status).toBe(200);
+      const nestedBody = JSON.stringify(await nested.json());
+      expect(nestedBody).not.toContain(ghToken);
+      expect(nestedBody).toContain("[REDACTED:github_token]");
+      const roundTrip = await dispatch(`/api/extensions/${extension!.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          config: {
+            token: "[REDACTED:EXT_QA_TOKEN]",
+            github: {
+              token: "[REDACTED:github_token]",
+              list: ["[REDACTED:github_token]", "changed"],
+            },
+          },
+        }),
+      });
+      expect(roundTrip.status).toBe(200);
+      expect(JSON.parse((await getExtensionByName("minimal"))!.configJson)).toEqual({
+        token: "extqaTOKENvalue_1234567890abcdef",
+        github: { token: ghToken, list: [ghToken, "changed"] },
+      });
     } finally {
       delete process.env.EXT_QA_TOKEN;
       refreshSecretScrubberCache();

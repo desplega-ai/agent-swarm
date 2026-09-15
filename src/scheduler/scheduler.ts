@@ -38,7 +38,7 @@ import {
   reconcileDeferredTaskWaits,
   stopDeferredTaskWaits,
 } from "./deferred-task-waits";
-import { createStandaloneScheduleTask } from "./schedule-task";
+import { createStandaloneScheduleTask, prepareStandaloneScheduleTask } from "./schedule-task";
 
 export { createStandaloneScheduleTask } from "./schedule-task";
 
@@ -201,8 +201,10 @@ export async function dispatchScheduleTarget(
         }
       }
       if (!triggeredWorkflows) {
+        // Extension hooks must run before the transaction opens (see schedule-task.ts).
+        const prepared = await prepareStandaloneScheduleTask(schedule, extraTags);
         const task = await getDbClient().transaction(async () =>
-          createStandaloneScheduleTask(schedule, extraTags),
+          createStandaloneScheduleTask(schedule, extraTags, prepared),
         );
         return { triggeredWorkflows, task };
       }

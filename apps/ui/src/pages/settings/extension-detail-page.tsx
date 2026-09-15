@@ -1,3 +1,4 @@
+import type { ColDef, ICellRendererParams } from "ag-grid-community";
 import { ArrowLeft, Save } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -13,8 +14,9 @@ import {
   useInstallExtension,
   usePatchExtension,
 } from "@/api/hooks/use-extensions";
-import type { ExtensionManifest } from "@/api/types";
+import type { ExtensionManifest, ExtensionRun, ExtensionVersion } from "@/api/types";
 import { ScriptSourceEditor } from "@/components/scripts/script-source-editor";
+import { DataGrid } from "@/components/shared/data-grid";
 import { PageSkeleton } from "@/components/shared/page-skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -23,14 +25,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { formatSmartTime } from "@/lib/utils";
 import { statusBadgeVariant } from "./extensions-page";
@@ -52,6 +46,172 @@ const TEMPLATE_FORM = {
   hooksPath: "hooks.ts",
   source: TEMPLATE_HOOKS,
 };
+
+/** Version history for one bundle, with the activate action on each row. */
+function VersionsGrid({
+  versions,
+  activeVersion,
+  busy,
+  onActivate,
+}: {
+  versions: ExtensionVersion[];
+  activeVersion: number;
+  busy: boolean;
+  onActivate: (version: number) => void;
+}) {
+  const columnDefs = useMemo<ColDef<ExtensionVersion>[]>(
+    () => [
+      {
+        headerName: "Version",
+        field: "version",
+        width: 150,
+        suppressSizeToFit: true,
+        cellRenderer: (p: ICellRendererParams<ExtensionVersion>) =>
+          p.data ? (
+            <span className="font-mono text-xs">
+              v{p.data.version}
+              {p.data.version === activeVersion && (
+                <Badge variant="outline" size="tag" className="ml-2">
+                  active
+                </Badge>
+              )}
+            </span>
+          ) : null,
+      },
+      {
+        headerName: "Changed",
+        field: "changedAt",
+        width: 160,
+        suppressSizeToFit: true,
+        cellRenderer: (p: ICellRendererParams<ExtensionVersion>) => (
+          <span className="text-xs text-muted-foreground">
+            {p.data ? formatSmartTime(p.data.changedAt) : null}
+          </span>
+        ),
+      },
+      {
+        headerName: "Reason",
+        field: "changeReason",
+        flex: 1,
+        minWidth: 200,
+        cellRenderer: (p: ICellRendererParams<ExtensionVersion>) => (
+          <span className="text-xs text-muted-foreground">{p.data?.changeReason || "—"}</span>
+        ),
+      },
+      {
+        headerName: "Action",
+        colId: "action",
+        width: 120,
+        suppressSizeToFit: true,
+        sortable: false,
+        cellClass: "ag-right-aligned-cell",
+        headerClass: "ag-right-aligned-header",
+        cellRenderer: (p: ICellRendererParams<ExtensionVersion>) =>
+          p.data ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={busy || p.data.version === activeVersion}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (p.data) onActivate(p.data.version);
+              }}
+            >
+              Activate
+            </Button>
+          ) : null,
+      },
+    ],
+    [activeVersion, busy, onActivate],
+  );
+
+  return (
+    <DataGrid
+      rowData={versions}
+      columnDefs={columnDefs}
+      domLayout="autoHeight"
+      pagination={false}
+      emptyMessage="No versions yet."
+    />
+  );
+}
+
+/** Tail of the extension run log. */
+function RunLogGrid({ runs }: { runs: ExtensionRun[] }) {
+  const columnDefs = useMemo<ColDef<ExtensionRun>[]>(
+    () => [
+      {
+        headerName: "When",
+        field: "createdAt",
+        width: 150,
+        suppressSizeToFit: true,
+        cellRenderer: (p: ICellRendererParams<ExtensionRun>) => (
+          <span className="text-xs text-muted-foreground whitespace-nowrap">
+            {p.data ? formatSmartTime(p.data.createdAt) : null}
+          </span>
+        ),
+      },
+      {
+        headerName: "Event",
+        field: "event",
+        width: 200,
+        suppressSizeToFit: true,
+        cellClass: "font-mono text-xs",
+      },
+      {
+        headerName: "Action",
+        field: "action",
+        width: 140,
+        suppressSizeToFit: true,
+        cellRenderer: (p: ICellRendererParams<ExtensionRun>) =>
+          p.data ? (
+            <Badge
+              variant={
+                p.data.action === "error" ||
+                p.data.action === "timeout" ||
+                p.data.action === "load-error"
+                  ? "destructive"
+                  : "outline"
+              }
+              size="tag"
+            >
+              {p.data.action}
+            </Badge>
+          ) : null,
+      },
+      {
+        headerName: "Duration",
+        field: "durationMs",
+        width: 120,
+        suppressSizeToFit: true,
+        cellClass: "ag-right-aligned-cell font-mono text-xs",
+        headerClass: "ag-right-aligned-header",
+        valueFormatter: (p) => (p.value == null ? "—" : `${p.value} ms`),
+      },
+      {
+        headerName: "Message",
+        field: "message",
+        flex: 1,
+        minWidth: 200,
+        cellRenderer: (p: ICellRendererParams<ExtensionRun>) => (
+          <span className="text-xs text-muted-foreground break-all">{p.data?.message || "—"}</span>
+        ),
+      },
+    ],
+    [],
+  );
+
+  return (
+    <DataGrid
+      rowData={runs}
+      columnDefs={columnDefs}
+      domLayout="autoHeight"
+      pagination={false}
+      emptyMessage="No runs yet."
+    />
+  );
+}
 
 /**
  * One extension bundle: manifest fields, the `hooks.ts` editor typed against
@@ -366,52 +526,17 @@ export default function ExtensionDetailPage() {
             <CardTitle>Versions</CardTitle>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Version</TableHead>
-                  <TableHead>Changed</TableHead>
-                  <TableHead>Reason</TableHead>
-                  <TableHead className="text-right">Action</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(versions ?? []).map((version) => (
-                  <TableRow key={version.id}>
-                    <TableCell className="font-mono text-xs">
-                      v{version.version}
-                      {version.version === extension.activeVersion && (
-                        <Badge variant="outline" size="tag" className="ml-2">
-                          active
-                        </Badge>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {formatSmartTime(version.changedAt)}
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {version.changeReason || "—"}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        disabled={busy || version.version === extension.activeVersion}
-                        onClick={() => {
-                          loadedKey.current = null;
-                          activate.mutate(version.version, {
-                            onError: (error) => setSaveError(error.message),
-                          });
-                        }}
-                      >
-                        Activate
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+            <VersionsGrid
+              versions={versions ?? []}
+              activeVersion={extension.activeVersion}
+              busy={busy}
+              onActivate={(version) => {
+                loadedKey.current = null;
+                activate.mutate(version, {
+                  onError: (error) => setSaveError(error.message),
+                });
+              }}
+            />
           </CardContent>
         </Card>
       )}
@@ -427,47 +552,7 @@ export default function ExtensionDetailPage() {
                 No runs yet. Entries appear once an enabled extension handles an event.
               </p>
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>When</TableHead>
-                    <TableHead>Event</TableHead>
-                    <TableHead>Action</TableHead>
-                    <TableHead className="text-right">Duration</TableHead>
-                    <TableHead>Message</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {(runs ?? []).map((run) => (
-                    <TableRow key={run.id}>
-                      <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                        {formatSmartTime(run.createdAt)}
-                      </TableCell>
-                      <TableCell className="font-mono text-xs">{run.event}</TableCell>
-                      <TableCell>
-                        <Badge
-                          variant={
-                            run.action === "error" ||
-                            run.action === "timeout" ||
-                            run.action === "load-error"
-                              ? "destructive"
-                              : "outline"
-                          }
-                          size="tag"
-                        >
-                          {run.action}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right font-mono text-xs">
-                        {run.durationMs == null ? "—" : `${run.durationMs} ms`}
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground break-all">
-                        {run.message || "—"}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+              <RunLogGrid runs={runs ?? []} />
             )}
           </CardContent>
         </Card>

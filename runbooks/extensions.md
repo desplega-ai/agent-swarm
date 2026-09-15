@@ -74,7 +74,7 @@ flowchart TD
 Boundary code calls `dispatchPre` or `dispatchPost`.
 Boundary code never reads the registry.
 
-Call `dispatchPre` only at an entry point before a transaction starts.
+Call `dispatchPre` only at an entry point before a transaction starts. When the task must be created inside a transaction (schedule firing, deferred waits), call `prepareTaskWithSiblingAwareness` outside it and pass the result in.
 The dispatcher calls `isInTransaction()` as a defensive guard.
 If the guard detects a transaction, the dispatcher logs the event and returns `continue`.
 
@@ -82,7 +82,7 @@ Handlers run in ascending priority order.
 The extension name resolves equal priorities.
 Each valid modification becomes the next handler's input.
 The first block result stops the chain.
-Each boundary checks a modification before it applies the change. Task and tool boundaries validate against a schema. The Slack boundary checks the target kind and resolves the agent.
+Each boundary validates a modification against a schema before it applies the change (`validateModify`). An invalid modification is recorded as an extension error and ignored, and the core operation continues.
 
 Task event bus handlers run after commit.
 The post bridge reads the current task and then calls `dispatchPost`.
@@ -130,8 +130,8 @@ The boundary skips that extension during its own task creation.
 
 The database stores the raw `configJson` value.
 REST and MCP read paths call `scrubSecrets` before they return it.
-PATCH accepts a previously returned `[REDACTED:NAME]` value.
-The route restores the matching stored field before it validates the configuration.
+PATCH accepts previously returned `[REDACTED:name]` placeholders at any depth (objects and arrays).
+The route restores each matching stored value before it validates the configuration.
 
 Handlers never receive a database client.
 They use `ctx.state` and `ctx.swarm` for state and swarm operations.

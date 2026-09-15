@@ -1,7 +1,8 @@
 import { getDbClient, getScheduledTaskById, getUserById, updateScheduledTask } from "@/be/db";
-import type { AgentTask } from "@/types";
+import type { PreparedTaskCreate } from "@/tasks/sibling-awareness";
+import type { AgentTask, ScheduledTask } from "@/types";
 import { workflowEventBus } from "@/workflows/event-bus";
-import { createStandaloneScheduleTask } from "./schedule-task";
+import { createStandaloneScheduleTask, prepareStandaloneScheduleTask } from "./schedule-task";
 
 export type TaskWakeEvent = "task.completed" | "task.failed" | "settled";
 
@@ -11,6 +12,37 @@ type TaskWait = {
   eventName: TaskWakeEvent;
   status: "pending" | "fired";
 };
+
+function wakeSchedule(
+  schedule: ScheduledTask,
+  wait: TaskWait,
+  reason: "ceiling" | "task.completed" | "task.failed",
+): ScheduledTask {
+  const cause = reason === "ceiling" ? "ceiling expired" : `${reason} for task ${wait.taskId}`;
+  return { ...schedule, taskTemplate: `${schedule.taskTemplate}\n\nWake-up cause: ${cause}.` };
+}
+
+async function prepareDeferredWakeTask(
+  scheduleId: string,
+  reason: "ceiling" | "task.completed" | "task.failed",
+  extraTags: string[],
+): Promise<PreparedTaskCreate | undefined> {
+  const client = getDbClient();
+  const wait = await client.get<TaskWait>(
+    "SELECT * FROM deferred_task_waits WHERE scheduleId = ?",
+    [scheduleId],
+  );
+  if (!wait || wait.status !== "pending") return undefined;
+  if (reason !== "ceiling" && wait.eventName !== "settled" && wait.eventName !== reason)
+    return undefined;
+  let schedule = await getScheduledTaskById(scheduleId);
+  if (!schedule?.enabled) return undefined;
+  if (schedule.createdBy && !(await getUserById(schedule.createdBy))) {
+    schedule = { ...schedule, createdBy: undefined };
+  }
+  if (!schedule.taskTemplate) throw new Error(`Schedule "${schedule.name}" has no taskTemplate`);
+  return await prepareStandaloneScheduleTask(wakeSchedule(schedule, wait, reason), extraTags);
+}
 
 /** Undefined means a normal schedule; an empty result means another caller won. */
 export async function dispatchDeferredTaskWait(
@@ -26,6 +58,10 @@ export async function dispatchDeferredTaskWait(
     ]))
   )
     return undefined;
+  // Extension pre-hooks must run outside the transaction, so build the wake-up task
+  // first; the transaction below re-checks the wait and schedule before claiming.
+  const preparedForWait = await prepareDeferredWakeTask(scheduleId, reason, extraTags);
+  if (!preparedForWait) return {};
   return client.transaction(async () => {
     const wait = await client.get<TaskWait>(
       "SELECT * FROM deferred_task_waits WHERE scheduleId = ?",
@@ -46,13 +82,10 @@ export async function dispatchDeferredTaskWait(
       schedule = { ...schedule, createdBy: undefined };
     }
     if (!schedule.taskTemplate) throw new Error(`Schedule "${schedule.name}" has no taskTemplate`);
-    const cause = reason === "ceiling" ? "ceiling expired" : `${reason} for task ${wait.taskId}`;
     const task = await createStandaloneScheduleTask(
-      {
-        ...schedule,
-        taskTemplate: `${schedule.taskTemplate}\n\nWake-up cause: ${cause}.`,
-      },
+      wakeSchedule(schedule, wait, reason),
       extraTags,
+      preparedForWait,
     );
     await client.run("UPDATE deferred_task_waits SET childTaskId = ? WHERE scheduleId = ?", [
       task.id,

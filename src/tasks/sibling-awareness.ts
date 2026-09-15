@@ -139,11 +139,20 @@ export async function withSiblingAwareness(
  * first. Use this from every ingress that has a `contextKey` so cross-ingress
  * sibling coordination is uniform without duplicating the wrapper boilerplate.
  */
-export async function createTaskWithSiblingAwareness(
+/** Final description and options after extension pre-hooks and sibling wiring. */
+export type PreparedTaskCreate = { description: string; options: CreateTaskOptions };
+
+/**
+ * Run the `pre.task.create` extension hooks and sibling-awareness wiring without
+ * inserting the task. Callers that must create the task inside a transaction call
+ * this first, outside the transaction, so extension hooks are not skipped by the
+ * dispatcher's `isInTransaction()` guard.
+ */
+export async function prepareTaskWithSiblingAwareness(
   description: string,
   options: CreateTaskOptions,
   args: { origin?: TaskCreateOrigin } = {},
-): Promise<AgentTask> {
+): Promise<PreparedTaskCreate> {
   const preCreate = await applyPreTaskCreate({
     description,
     options,
@@ -153,9 +162,18 @@ export async function createTaskWithSiblingAwareness(
   if (preCreate.kind === "blocked") {
     throw new TaskCreationBlockedError(preCreate.reason, preCreate.extension);
   }
-  const { description: d, options: o } = await withSiblingAwareness(
-    preCreate.description,
-    preCreate.options,
+  return await withSiblingAwareness(preCreate.description, preCreate.options);
+}
+
+export async function createTaskWithSiblingAwareness(
+  description: string,
+  options: CreateTaskOptions,
+  args: { origin?: TaskCreateOrigin } = {},
+): Promise<AgentTask> {
+  const { description: d, options: o } = await prepareTaskWithSiblingAwareness(
+    description,
+    options,
+    args,
   );
   return await createTaskExtended(d, o);
 }
