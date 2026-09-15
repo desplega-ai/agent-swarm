@@ -17,7 +17,7 @@
     "templates/skills/comms/files/references/visual-shapes.md": "5e07e9250ad4cdc877af2281525185f0de89c01f90a077463a2c77c8a7b998e8",
     "templates/skills/delegate-work/config.json": "5b1542eb0be359bb8a17117fcf87917e0607d1b939ae3266ddffacdc14efb281",
     "templates/skills/delegate-work/content.md": "c9562bd17846d3595d40172ecfdc6f85bb99eaf23597eb9d5aa9635d5c14d079",
-    "templates/skills/delegate-work/files/scripts/codex-exec.sh": "c2222986c46ac608403f28f201230cb34c7d7ac41a2262dc2c8dbd99c8645dbb",
+    "templates/skills/delegate-work/files/scripts/codex-exec.sh": "be9b33ba111afc8b38c20a4190eae19099025474d4ed3278d944ee0e6b6621af",
     "templates/skills/design-docs/config.json": "b78141763541486d67a105e8fa23873c9ffee6a682832c4b7266b8320d55ead7",
     "templates/skills/design-docs/content.md": "fc860031defbd192c1b8e1c024b46509d78dcf10dbf1b8c93cc4d62396153a52",
     "templates/skills/design-docs/files/template.md": "72d2cdcf8713c08d525d69892c5fed536107594522e3e799ae44f51df7015a36",
@@ -103,6 +103,12 @@
   ],
   "source": "https://github.com/desplega-ai/ai-toolbox.git",
   "transforms": {
+    "bundledCommentRewrites": [
+      {
+        "path": "scripts/codex-exec.sh",
+        "skill": "delegate-work"
+      }
+    ],
     "executableBitsDowngraded": [
       {
         "path": "scripts/codex-exec.sh",

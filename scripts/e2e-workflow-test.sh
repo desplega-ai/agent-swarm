@@ -8,8 +8,8 @@ set -euo pipefail
 # Mocks Slack/GitHub/AgentMail by firing events through the REST API.
 #
 # Usage:
-#   ./scripts/e2e-workflow-test.sh                    # Uses defaults from .env
-#   PORT=3014 API_KEY=123123 ./scripts/e2e-workflow-test.sh  # Explicit config
+#   export AGENT_SWARM_API_KEY  # Set to the running server's key first
+#   PORT=3014 ./scripts/e2e-workflow-test.sh
 #
 # Prerequisites:
 #   - API server running: bun run start:http
@@ -17,7 +17,8 @@ set -euo pipefail
 # ===========================================================================
 
 PORT="${PORT:-3014}"
-API_KEY="${API_KEY:-123123}"
+API_KEY="${AGENT_SWARM_API_KEY:-${API_KEY:-}}"
+: "${API_KEY:?Set AGENT_SWARM_API_KEY or API_KEY to the running server key}"
 BASE_URL="http://localhost:${PORT}"
 AGENT_ID="e2e-test-$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || echo test-agent)"
 

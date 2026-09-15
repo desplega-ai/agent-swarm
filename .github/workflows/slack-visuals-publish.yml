@@ -76,10 +76,10 @@ jobs:
       - name: Read PR context
         id: pr
         if: steps.download.outcome == 'success'
-        env:
-          TRUSTED_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
+          # Read trusted run metadata from GitHub's event file, separate from the artifact.
+          TRUSTED_HEAD_SHA=$(jq -r '.workflow_run.head_sha' "$GITHUB_EVENT_PATH")
           if [ ! -f visuals/pr-context.json ]; then
             echo "No visuals/pr-context.json in the artifact (non-pull_request run, or the" >&2
             echo "producing workflow failed before writing it). Nothing to publish." >&2

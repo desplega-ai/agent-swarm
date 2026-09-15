@@ -10,6 +10,7 @@ import {
   type Manifest,
   type PathRewrite,
   parseSkillMd,
+  rewriteBundledFileComments,
   rewriteSkillReferences,
   sanitizeSyncedVia,
   stableJson,
@@ -213,6 +214,24 @@ describe("ai-toolbox skill sync pure transforms", () => {
         10 * 1024 * 1024,
       ),
     ).toThrow("exceed 10485760 bytes total");
+  });
+
+  test("clarifies only the Codex helper comment and preserves executable sandbox settings", () => {
+    const comment =
+      "#   CODEX_SANDBOX default: workspace-write      read-only | workspace-write | danger-full-access";
+    const executable = `SANDBOX="\${CODEX_SANDBOX:-workspace-write}"\nargs+=( --dangerously-bypass-approvals-and-sandbox )\n`;
+    const source = `${comment}\n${executable}`;
+    expect(rewriteBundledFileComments("delegate-work", "scripts/codex-exec.sh", source)).toBe(
+      `#   CODEX_SANDBOX default: workspace-write (passed to codex's -s option)\n${executable}`,
+    );
+    expect(rewriteBundledFileComments("other", "scripts/codex-exec.sh", source)).toBe(source);
+    expect(rewriteBundledFileComments("delegate-work", "scripts/other.sh", source)).toBe(source);
+    expect(() =>
+      rewriteBundledFileComments("delegate-work", "scripts/codex-exec.sh", executable),
+    ).toThrow("expected one upstream sandbox default comment");
+    expect(() =>
+      rewriteBundledFileComments("delegate-work", "scripts/codex-exec.sh", `${comment}\n${source}`),
+    ).toThrow("expected one upstream sandbox default comment");
   });
 
   test("reports executable text downgrades and rejects binary files", () => {
