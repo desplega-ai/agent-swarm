@@ -16,6 +16,7 @@ import {
   MessageSquare,
   Plug,
   Route,
+  Search,
   Sparkles,
   SquareCheckBig,
 } from "lucide-react";
@@ -45,6 +46,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   sparkles: Sparkles,
   bot: Bot,
   route: Route,
+  search: Search,
   "key-round": KeyRound,
   "chart-line": ChartLine,
   cloud: Cloud,

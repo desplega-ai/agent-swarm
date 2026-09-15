@@ -1,0 +1,13 @@
+{
+  "kind": "skill",
+  "name": "serply-search",
+  "displayName": "Serply Search",
+  "slug": "serply-search",
+  "title": "Serply Search",
+  "description": "Query real Google results through Serply, with separate endpoints for news (dated coverage) and scholar (citation counts). Use when the ranking itself, the publication date, or the citation count is the answer.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": ["SERPLY_API_KEY"],
+  "runAllSeedersCandidate": false,
+  "tags": ["research", "search", "web"]
+}
