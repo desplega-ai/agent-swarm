@@ -264,14 +264,45 @@ describe("Session templates: composite resolution", () => {
       expect(result.text).not.toContain("{{@template[");
       expect(result.text).toContain("You are Ada,");
       expect(result.text).toContain("composite-agent-001");
-      // Every provider receives the same reply limits, skill routing, and exceptions.
+      // Bind the budget to task output in the shared writing block itself,
+      // so a budget elsewhere in the composite cannot mask a reply-only rule.
+      const writingBlock = result.text.split("## How you write\n")[1]?.split("\n## ")[0];
+      expect(writingBlock).toContain("task output (`output` or a remote final message)");
+      expect(writingBlock).toContain(
+        "Routine replies and free-text task output: under 120 words by default",
+      );
+      expect(writingBlock).toContain("requested depth, enumerated results, essential evidence");
+      expect(writingBlock).toContain("longer output required by the task's `outputSchema`");
+      expect(writingBlock).toContain("Preserve investigation and required artifacts");
+      expect(writingBlock).toContain(
+        "Schema exemptions apply to `outputSchema`-constrained completions",
+      );
+      expect(writingBlock).toContain("free-text `output` follows the target");
+      expect(writingBlock).toContain("link documents instead of inlining them");
+      expect(writingBlock).not.toContain("schema-defined output");
       expect(result.text).toContain("Simple replies: one to three sentences");
-      expect(result.text).toContain("Routine replies: under 120 words");
-      expect(result.text).toContain("Use more detail for requested depth or essential evidence");
       expect(result.text).toContain("Use the `comms` skill when available");
       expect(result.text).toContain("Follow the current request and Requester Profile");
-      expect(result.text).toContain("Do not shorten investigation, required artifacts");
       expect(result.text).toContain("Output schemas and channel delivery rules");
+    });
+  }
+
+  for (const eventType of ["system.agent.worker", "system.agent.worker.remote"]) {
+    test(`${eventType} pairs completion requirements with the output budget`, () => {
+      const { text } = resolveTemplate(eventType, {});
+      expect(text).toContain("under 120 words by default");
+      expect(text).toContain("Link documents instead of inlining them; omit process narration");
+      expect(text).toContain("under 120 words by default, with the exceptions in How you write");
+    });
+  }
+
+  for (const eventType of ["system.agent.slack", "system.agent.scripts_only_mode.slack"]) {
+    test(`${eventType} applies the output budget to the engine-owned card`, () => {
+      const { text } = resolveTemplate(eventType, { slackChannelId: "C123", slackThreadTs: "1.2" });
+      expect(text).toContain("The outcome card publishes your `output` verbatim");
+      expect(text).toContain(
+        "Keep free-text `output` under 120 words by default, with the exceptions in How you write",
+      );
     });
   }
 

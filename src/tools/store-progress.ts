@@ -102,7 +102,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
           .string()
           .optional()
           .describe(
-            "The task result (used when completing). For Slack-originated tasks, this is published verbatim in the thread's outcome card: provide a concrete summary scaled to what was asked, including only the outcome and any links or IDs the human needs—not process narration, a transcript, or a restatement of the brief.",
+            "The task result (used when completing). For Slack-originated tasks, this is published verbatim in the thread's outcome card. Keep free-text output under 120 words by default. Name the result and every artifact link, plus any IDs the human needs. Link documents instead of inlining them; omit process narration, transcripts, and restatements of the brief. Exceed the target only when requested depth, enumerated results, essential evidence, caveats, or instructions require it, or when the task's outputSchema requires longer output. When the task carries an outputSchema, output must be JSON matching it.",
           ),
         failureReason: z
           .string()

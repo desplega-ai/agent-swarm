@@ -960,21 +960,21 @@ describe("truncateRepoClaudeMd", () => {
 // ---------------------------------------------------------------------------
 
 describe("getBasePrompt: size budget", () => {
-  // The v2 rewrite cut the static prompt from ~25k characters to ~4.2k. These
-  // ceilings are generous, so they only fire on a regression back to v1 size.
-  test("a fresh claude worker stays under 5,000 characters", async () => {
+  // Include the explicit task-output budget and exceptions in the static prompt.
+  // Keep tight role-specific ceilings to catch unrelated prompt growth.
+  test("a fresh claude worker stays under 5,400 characters", async () => {
     const result = await getBasePrompt({ ...minimalArgs, name: "Ada", traits: localTraits });
-    expect(result.length).toBeLessThan(5_000);
+    expect(result.length).toBeLessThan(5_400);
   });
 
-  test("a fresh claude lead stays under 5,200 characters", async () => {
+  test("a fresh claude lead stays under 5,500 characters", async () => {
     const result = await getBasePrompt({
       ...minimalArgs,
       role: "lead",
       name: "Cora",
       traits: localTraits,
     });
-    expect(result.length).toBeLessThan(5_200);
+    expect(result.length).toBeLessThan(5_500);
   });
 
   test("Picateclas spawn-OOM hardening: the kitchen sink stays below MAX_ARG_STRLEN", async () => {
