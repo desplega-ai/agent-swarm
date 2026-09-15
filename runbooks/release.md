@@ -53,13 +53,34 @@ The Helm chart is published separately by `helm-publish.yml` when `charts/agent-
 
 If you push to `main` **without** a version change, none of the publish jobs run — Docker images still build/deploy but aren't tagged with a release version. So a release is opt-in: it's defined by the `package.json` version bump.
 
+### Moving Docker tags and deployment
+
+The three manifest jobs publish SHA and optional version tags, then expose the
+exact manifest digests from Buildx's metadata file. Only the `deploy` job promotes
+API/worker `:latest` and worker `:slim`. It waits for all three manifests and holds
+the `agent-swarm-deploy` concurrency lock through the completed Dokploy deploy.
+`queue: max` preserves pending deployments (up to GitHub's 100-job limit), so a
+late stale build cannot evict a queued main-tip run.
+After acquiring that lock, it checks that the run is still the main tip; stale
+runs keep their SHA/version images but skip both promotion and deployment.
+Non-main manual dispatches cannot promote moving tags or deploy.
+
+Promotion uses the run's digest outputs, since even a SHA tag can change on a
+rerun. Builds remain parallel. The three registry writes are sequential, so a
+failed promotion can leave partially updated tags; it fails the job before
+deployment. Rerunning the current main workflow retries promotion. A newer main
+commit arriving after the guard waits for the lock before its own promotion.
+
+When first rolling out this workflow, let runs using the old workflow finish
+before relying on the lock: their manifest jobs still write moving tags outside it.
+
 ### Swarm Cloud image-release callback
 
 After the server and worker Docker manifest lists are published, the workflow posts the same release payload to each configured Swarm Cloud image-release intake. The callbacks are limited to the protected publish context: `desplega-ai/agent-swarm`, non-PR events, and `refs/heads/main`.
 
 The callback reports the detected release version when `package.json` changed, matching the tag created by `create-git-tag`; ordinary `main` pushes report `main`.
 
-The callbacks send the manifest-list digest refs for the API and worker images, for example `ghcr.io/desplega-ai/agent-swarm:latest@sha256:...` and `ghcr.io/desplega-ai/agent-swarm-worker:latest@sha256:...`. The workflow builds `payload.json` once with `jq`, signs its exact bytes separately for each deployment's secret, and sends those same bytes with `curl --data-binary` so every signature matches raw-body verification.
+The callbacks send the manifest-list digest refs for the API and worker images, from that run's merge-job outputs, for example `ghcr.io/desplega-ai/agent-swarm@sha256:...` and `ghcr.io/desplega-ai/agent-swarm-worker@sha256:...`. They never resolve `:latest`, so overlapping builds or reruns cannot mislabel another run's images with this run's commit. The workflow builds `payload.json` once with `jq`, signs its exact bytes separately for each deployment's secret, and sends those same bytes with `curl --data-binary` so every signature matches raw-body verification.
 
 The production target uses `SWARM_CLOUD_BASE_URL` with `IMAGE_RELEASE_INTAKE_SECRET`; it is authoritative, so a transport or non-200/201 response fails the release job. The development target uses `SWARM_CLOUD_DEV_BASE_URL` with `IMAGE_RELEASE_DEV_INTAKE_SECRET`; it is best-effort so development metadata stays fresh without making a development outage block publishing. An incomplete target pair is skipped with a warning. Even when production fails, the workflow still attempts development delivery before returning the production failure.
 
