@@ -44,9 +44,7 @@
   "oauth_config": {
     "redirect_urls": [
       "https://cloud.agent-swarm.dev/api/integrations/slack/callback",
-      "https://web.localhost/api/integrations/slack/callback",
-      "https://backend.composio.dev/api/v1/auth-apps/add",
-      "https://api.desplega.agent-swarm.dev/api/oauth/callback"
+      "https://web.localhost/api/integrations/slack/callback"
     ],
     "scopes": {
       "user": [

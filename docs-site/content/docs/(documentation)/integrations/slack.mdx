@@ -28,6 +28,10 @@ Enable Slack for task creation, agent communication, and interactive workflows v
 
 A ready-to-use `slack-manifest.json` is included in the repository root — import it directly in the Slack App configuration page to set up all scopes, events, and features automatically. After adding channel-management scopes to an existing app, reinstall the app to the workspace so Slack grants them to the bot token.
 
+The manifest's `oauth_config.redirect_urls` lists two generic placeholders (a hosted-cloud callback and a `web.localhost` dev callback). Replace or extend these with your own deployment's HTTPS callback URL(s) before installing — do not reuse another deployment's callback host.
+
+Token rotation is off (`settings.token_rotation_enabled: false`) because the app runs under Socket Mode with a static `SLACK_BOT_TOKEN`; there is no refresh-token exchange in this codebase. Rotate or revoke compromised tokens from the Slack App configuration page (OAuth & Permissions → reinstall, or Manage Distribution → revoke).
+
 ## Configuration
 
 ```bash
