@@ -569,6 +569,7 @@ export const AgentTaskSchema = z
     agentmailInboxId: z.string().optional(),
     agentmailMessageId: z.string().optional(),
     agentmailThreadId: z.string().optional(),
+    agentmailReplySent: z.boolean().default(false),
 
     // Mention-to-task metadata (optional). Plain strings, not z.uuid():
     // Slack channel/message IDs (e.g. "C0AR967K0KZ") are not UUIDs — a uuid
@@ -941,6 +942,9 @@ export type IdentityEventType = z.infer<typeof IdentityEventTypeSchema>;
 //   - broken_task        — tasks in failed/cancelled status
 //   - to_read            — sessions/tasks marked unread for the user
 //   - to_start_template  — task-templates the user hasn't dismissed
+//   - notification       — dashboard notification-center items (see
+//                           apps/ui/src/lib/notifications/definitions.ts);
+//                           itemId is the notification definition's key
 //
 // Statuses:
 //   - open      — visible in inbox
@@ -953,6 +957,7 @@ export const InboxItemTypeSchema = z.enum([
   "broken_task",
   "to_read",
   "to_start_template",
+  "notification",
 ]);
 export type InboxItemType = z.infer<typeof InboxItemTypeSchema>;
 

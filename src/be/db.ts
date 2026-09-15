@@ -758,6 +758,20 @@ export async function markTaskSlackReplySent(taskId: string): Promise<void> {
   await getDbClient().run(`UPDATE agent_tasks SET slackReplySent = 1 WHERE id = ?`, [taskId]);
 }
 
+/**
+ * Marks an agentmail task's terminal-state reply as sent. Conditional on the
+ * flag not already being set — the read-then-send-then-write sequence in
+ * agentmail outbound sync is not atomic, so this UPDATE is the last line of
+ * defense against a double-send on a racing retry.
+ */
+export async function markTaskAgentmailReplySent(taskId: string): Promise<boolean> {
+  const result = await getDbClient().run(
+    `UPDATE agent_tasks SET agentmailReplySent = 1 WHERE id = ? AND agentmailReplySent = 0`,
+    [taskId],
+  );
+  return result.changes > 0;
+}
+
 export async function setSlackMessageTracking(
   taskId: string,
   fields: {
