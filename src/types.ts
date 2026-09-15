@@ -941,6 +941,9 @@ export type IdentityEventType = z.infer<typeof IdentityEventTypeSchema>;
 //   - broken_task        — tasks in failed/cancelled status
 //   - to_read            — sessions/tasks marked unread for the user
 //   - to_start_template  — task-templates the user hasn't dismissed
+//   - notification       — dashboard notification-center items (see
+//                           apps/ui/src/lib/notifications/definitions.ts);
+//                           itemId is the notification definition's key
 //
 // Statuses:
 //   - open      — visible in inbox
@@ -953,6 +956,7 @@ export const InboxItemTypeSchema = z.enum([
   "broken_task",
   "to_read",
   "to_start_template",
+  "notification",
 ]);
 export type InboxItemType = z.infer<typeof InboxItemTypeSchema>;
 

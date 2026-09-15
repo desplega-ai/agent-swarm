@@ -597,7 +597,8 @@ export type InboxItemType =
   | "credential_missing"
   | "broken_task"
   | "to_read"
-  | "to_start_template";
+  | "to_start_template"
+  | "notification";
 
 export type InboxItemStatus = "open" | "snoozed" | "dismissed" | "done";
 
