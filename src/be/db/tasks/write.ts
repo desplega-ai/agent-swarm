@@ -323,7 +323,11 @@ export async function updateTaskTitle(
   return row ? rowToAgentTask(row) : null;
 }
 
-export async function completeTask(id: string, output?: string): Promise<AgentTask | null> {
+export async function completeTask(
+  id: string,
+  output?: string,
+  options?: { addTags?: string[] },
+): Promise<AgentTask | null> {
   const oldTask = await getTaskById(id);
   if (!oldTask) return null;
 
@@ -350,6 +354,14 @@ export async function completeTask(id: string, output?: string): Promise<AgentTa
       completed = await getDbClient().get<AgentTaskRow>(
         "UPDATE agent_tasks SET output = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *",
         [scrubSecrets(output), id],
+      );
+    }
+    if (completed && options?.addTags?.length) {
+      const existingTags: string[] = completed.tags ? JSON.parse(completed.tags) : [];
+      const nextTags = Array.from(new Set([...existingTags, ...options.addTags]));
+      completed = await getDbClient().get<AgentTaskRow>(
+        "UPDATE agent_tasks SET tags = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *",
+        [JSON.stringify(nextTags), id],
       );
     }
     if (completed) {

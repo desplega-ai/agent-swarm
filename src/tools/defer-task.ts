@@ -327,7 +327,9 @@ export const registerDeferTaskTool = (server: McpServer) => {
           const terminalOutput = task.outputSchema
             ? output!
             : renderHumanFacingDeferral(note, nextRunAt, schedule.id, requesterTz, isFallbackTz);
-          const completed = await completeTask(taskId, terminalOutput);
+          const completed = await completeTask(taskId, terminalOutput, {
+            addTags: ["deferred"],
+          });
           if (!completed) {
             // Another writer terminally completed/failed/cancelled this task
             // between our early check and this transaction's write. Abort:

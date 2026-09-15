@@ -1626,6 +1626,35 @@ describe("Slack renderer v2", () => {
     expect(outcome?.finalizedAt).toBeDefined();
   });
 
+  test("keeps a deferral's human-facing line even when the agent already sent a slack-reply", async () => {
+    const lead = await createAgent({ name: "Deferring Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_RENDER_DEFER_AFTER_REPLY");
+    const ask = await createTaskExtended("defer after replying by hand", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    await startTask(ask.id);
+    await ensureSlackThreadTree([ask.id]);
+    // Agent posts a hand-written slack-reply first (e.g. a transcription),
+    // then defer-task completes the task with the engine-authored deferral
+    // line and tags it "deferred" (mirrors defer-task.ts's completeTask call).
+    await markTaskSlackReplySent(ask.id);
+    const deferralLine =
+      "Deferred until today 17:30:19 UTC ([715bf847](https://app.agent-swarm.dev/schedules/715bf847-fe3e-40e9-9fef-3297a62d9afd)) -> checking the new defer card";
+    await completeTask(ask.id, deferralLine, { addTags: ["deferred"] });
+    calls.length = 0;
+    _resetSlackRenderV2ForTests();
+
+    await processSlackRenderV2();
+
+    const started = calls.find((call) => call.method === "chat.startStream");
+    expect(started?.payload.markdown_text).toBe(`✅\n\n${deferralLine}`);
+    expect(started?.payload.markdown_text).not.toBe(`✅ ${lead.name} completed`);
+  });
+
   test("refreshes a stream started with stale content before finalizing it", async () => {
     const lead = await createAgent({ name: "Refresh Lead", isLead: true, status: "idle" });
     const { channelId, threadTs } = uniqueSlackAddress("C_RENDER_REFRESH_STALE");
