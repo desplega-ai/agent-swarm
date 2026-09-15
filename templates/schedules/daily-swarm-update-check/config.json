@@ -1,0 +1,14 @@
+{
+  "kind": "schedule",
+  "name": "daily-swarm-update-check",
+  "displayName": "Daily Agent-Swarm Update Check",
+  "slug": "daily-swarm-update-check",
+  "title": "Daily Agent-Swarm Update Check",
+  "description": "Compare the running agent-swarm version against the latest published GitHub release and flag the operator when an upgrade is available. Zero-config: no repo clone, no integration required.",
+  "version": "1.0.0",
+  "category": "schedules",
+  "placeholders": [],
+  "requires": [],
+  "runAllSeedersCandidate": true,
+  "tags": ["operations", "release", "upgrade"]
+}

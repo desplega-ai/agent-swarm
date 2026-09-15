@@ -35,9 +35,30 @@ function workflowSource(template = "Do the work.", description = "Seeded workflo
   } satisfies WorkflowTemplateSource;
 }
 
+/** A zero-config candidate: no requires, no placeholders — eligible for auto-enable. */
+function zeroConfigWorkflowSource(opts?: { name?: string; templateEnabled?: boolean }) {
+  const name = opts?.name ?? "test-zero-config-workflow";
+  const payloadEnabled = opts?.templateEnabled === false ? { enabled: false } : {};
+  return {
+    config: JSON.stringify({
+      name,
+      description: "Zero-config seeded workflow.",
+      placeholders: [],
+      requires: [],
+      runAllSeedersCandidate: true,
+    }),
+    content: `# Test\n\n\`\`\`json\n${JSON.stringify({
+      nodes: [{ id: "work", type: "agent-task", config: { template: "Do the work." } }],
+      ...payloadEnabled,
+    })}\n\`\`\``,
+  } satisfies WorkflowTemplateSource;
+}
+
 async function getWorkflow(name = "test-seeded-workflow") {
   return (await listWorkflows()).find((workflow) => workflow.name === name) ?? null;
 }
+
+const ORIGINAL_SEED_AUTOMATIONS_ENABLED = process.env.SEED_AUTOMATIONS_ENABLED;
 
 beforeEach(async () => {
   await removeDbFiles();
@@ -47,6 +68,11 @@ beforeEach(async () => {
 afterEach(async () => {
   closeDb();
   await removeDbFiles();
+  if (ORIGINAL_SEED_AUTOMATIONS_ENABLED === undefined) {
+    delete process.env.SEED_AUTOMATIONS_ENABLED;
+  } else {
+    process.env.SEED_AUTOMATIONS_ENABLED = ORIGINAL_SEED_AUTOMATIONS_ENABLED;
+  }
 });
 
 describe("workflows seeder", () => {
@@ -63,6 +89,40 @@ describe("workflows seeder", () => {
       false,
     );
     expect(workflows.some((workflow) => workflow.name === "gsc-topic-miner")).toBe(false);
+  });
+
+  test("SEED_AUTOMATIONS_ENABLED=false keeps every candidate disabled, including zero-config ones", () => {
+    process.env.SEED_AUTOMATIONS_ENABLED = "false";
+    const workflows = loadSeedWorkflows();
+    expect(workflows.every((workflow) => workflow.enabled === false)).toBe(true);
+  });
+
+  test("switch on: a zero-config candidate auto-enables via createWorkflowsSeeder/apply", async () => {
+    delete process.env.SEED_AUTOMATIONS_ENABLED;
+    const seeder = createWorkflowsSeeder([zeroConfigWorkflowSource()]);
+    await runSeeder(seeder, { quiet: true });
+    expect(await getWorkflow("test-zero-config-workflow")).toMatchObject({ enabled: true });
+  });
+
+  test("switch on: an item with unmet requires stays disabled", async () => {
+    delete process.env.SEED_AUTOMATIONS_ENABLED;
+    const seeder = createWorkflowsSeeder([workflowSource()]);
+    await runSeeder(seeder, { quiet: true });
+    expect(await getWorkflow()).toMatchObject({ enabled: false });
+  });
+
+  test("switch off: a zero-config candidate stays disabled", async () => {
+    process.env.SEED_AUTOMATIONS_ENABLED = "false";
+    const seeder = createWorkflowsSeeder([zeroConfigWorkflowSource()]);
+    await runSeeder(seeder, { quiet: true });
+    expect(await getWorkflow("test-zero-config-workflow")).toMatchObject({ enabled: false });
+  });
+
+  test("switch on: a zero-config candidate whose template recommends staying off stays disabled", async () => {
+    delete process.env.SEED_AUTOMATIONS_ENABLED;
+    const seeder = createWorkflowsSeeder([zeroConfigWorkflowSource({ templateEnabled: false })]);
+    await runSeeder(seeder, { quiet: true });
+    expect(await getWorkflow("test-zero-config-workflow")).toMatchObject({ enabled: false });
   });
 
   test("seeds a workflow and re-runs as a no-op", async () => {

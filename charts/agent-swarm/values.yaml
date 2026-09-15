@@ -107,6 +107,17 @@ config:
   # -- Free-form additional env vars layered on top of the chart defaults.
   # Useful for less-common knobs (TEMPLATE_REGISTRY_URL, SCHEDULER_INTERVAL_MS, etc.).
   extraEnv: {}
+  # -- Let a freshly-seeded workflow/schedule template arrive ENABLED instead
+  # of merely inventoried. This is not a blanket switch: an individual
+  # template still only auto-enables when it needs no integration and no
+  # required param/placeholder (so it can't fail on a stranger's cluster for
+  # lack of a credential), and when the template itself doesn't recommend
+  # staying off. Everything else still seeds disabled, same as before this
+  # flag existed. Default true so a fresh install has its zero-config
+  # automations (e.g. the daily status report, the update-check schedule)
+  # running out of the box, not just present. Set false to restore the old
+  # "inventory everything, enable nothing automatically" behavior.
+  seedAutomationsEnabled: true
 
 # API — single-replica StatefulSet running the SQLite-backed control plane.
 # replicas is fixed at 1 (SQLite single-writer); the chart fails to render

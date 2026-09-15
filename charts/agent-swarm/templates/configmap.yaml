@@ -34,3 +34,4 @@ data:
   {{- range $k, $v := .Values.config.extraEnv }}
   {{ $k }}: {{ $v | quote }}
   {{- end }}
+  SEED_AUTOMATIONS_ENABLED: {{ .Values.config.seedAutomationsEnabled | quote }}

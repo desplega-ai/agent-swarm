@@ -39,6 +39,30 @@ function scheduleSource(cron = "0 9 * * *", description = "Seeded schedule.") {
   } satisfies ScheduleTemplateSource;
 }
 
+/** A zero-config candidate: no requires, no placeholders — eligible for auto-enable. */
+function zeroConfigScheduleSource(opts?: { name?: string; templateEnabled?: boolean }) {
+  const name = opts?.name ?? "test-zero-config-schedule";
+  const templateEnabled = opts?.templateEnabled ?? true;
+  return {
+    config: JSON.stringify({
+      name,
+      title: "Test zero-config schedule",
+      description: "Zero-config seeded schedule.",
+      placeholders: [],
+      requires: [],
+      runAllSeedersCandidate: true,
+      tags: ["fixture"],
+    }),
+    content: `# Test\n\n## Schedule\n\n\`\`\`json\n${JSON.stringify({
+      cron: "0 9 * * *",
+      timezone: "UTC",
+      enabled: templateEnabled,
+    })}\n\`\`\`\n\n## Scheduled Task\n\nRun work.`,
+  } satisfies ScheduleTemplateSource;
+}
+
+const ORIGINAL_SEED_AUTOMATIONS_ENABLED = process.env.SEED_AUTOMATIONS_ENABLED;
+
 beforeEach(async () => {
   await removeDbFiles();
   initDb(TEST_DB_PATH);
@@ -47,15 +71,29 @@ beforeEach(async () => {
 afterEach(async () => {
   closeDb();
   await removeDbFiles();
+  if (ORIGINAL_SEED_AUTOMATIONS_ENABLED === undefined) {
+    delete process.env.SEED_AUTOMATIONS_ENABLED;
+  } else {
+    process.env.SEED_AUTOMATIONS_ENABLED = ORIGINAL_SEED_AUTOMATIONS_ENABLED;
+  }
 });
 
 describe("schedules seeder", () => {
-  test("loads only the four starter candidates, including the unfenced schedule block", () => {
+  test("loads only the five starter candidates, including the unfenced schedule block", () => {
     const schedules = loadSeedSchedules();
-    expect(schedules).toHaveLength(4);
+    expect(schedules).toHaveLength(5);
+    // Zero-config, requires:[], placeholders:[], template enabled:true -> auto-enabled
+    // under the default (unset -> on) SEED_AUTOMATIONS_ENABLED switch.
     expect(schedules.find((schedule) => schedule.name === "daily-status-report")).toMatchObject({
       cronExpression: "15 2 * * *",
-      enabled: false,
+      enabled: true,
+      requiredParams: [],
+      requires: [],
+    });
+    expect(
+      schedules.find((schedule) => schedule.name === "daily-swarm-update-check"),
+    ).toMatchObject({
+      enabled: true,
       requiredParams: [],
       requires: [],
     });
@@ -63,6 +101,48 @@ describe("schedules seeder", () => {
     expect(schedules.some((schedule) => schedule.name === "weekly-harness-upgrade-check")).toBe(
       false,
     );
+  });
+
+  test("SEED_AUTOMATIONS_ENABLED=false keeps every candidate disabled, including zero-config ones", () => {
+    process.env.SEED_AUTOMATIONS_ENABLED = "false";
+    const schedules = loadSeedSchedules();
+    expect(schedules.every((schedule) => schedule.enabled === false)).toBe(true);
+  });
+
+  test("switch on: a zero-config candidate auto-enables via createSchedulesSeeder/apply", async () => {
+    delete process.env.SEED_AUTOMATIONS_ENABLED;
+    const seeder = createSchedulesSeeder([zeroConfigScheduleSource()]);
+    await runSeeder(seeder, { quiet: true });
+    expect(await getScheduledTaskByName("test-zero-config-schedule")).toMatchObject({
+      enabled: true,
+    });
+  });
+
+  test("switch on: an item with unmet requires stays disabled", async () => {
+    delete process.env.SEED_AUTOMATIONS_ENABLED;
+    const seeder = createSchedulesSeeder([scheduleSource()]);
+    await runSeeder(seeder, { quiet: true });
+    expect(await getScheduledTaskByName("test-seeded-schedule")).toMatchObject({
+      enabled: false,
+    });
+  });
+
+  test("switch off: a zero-config candidate stays disabled", async () => {
+    process.env.SEED_AUTOMATIONS_ENABLED = "false";
+    const seeder = createSchedulesSeeder([zeroConfigScheduleSource()]);
+    await runSeeder(seeder, { quiet: true });
+    expect(await getScheduledTaskByName("test-zero-config-schedule")).toMatchObject({
+      enabled: false,
+    });
+  });
+
+  test("switch on: a zero-config candidate whose template recommends staying off stays disabled", async () => {
+    delete process.env.SEED_AUTOMATIONS_ENABLED;
+    const seeder = createSchedulesSeeder([zeroConfigScheduleSource({ templateEnabled: false })]);
+    await runSeeder(seeder, { quiet: true });
+    expect(await getScheduledTaskByName("test-zero-config-schedule")).toMatchObject({
+      enabled: false,
+    });
   });
 
   test("seeds a schedule with setup metadata and re-runs as a no-op", async () => {
