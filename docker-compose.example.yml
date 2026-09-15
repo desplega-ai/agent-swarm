@@ -5,7 +5,7 @@
 #
 # What it does:
 #  - Sets up an API service and multiple worker/lead agents
-#  - Deploys 2 worker agents and 1 lead agent by default
+#  - Deploys 1 lead and 11 workers covering all 11 official templates
 #  - Uses volumes for persistent storage of logs, db and agent workspaces
 #
 # Port mapping:
@@ -26,6 +26,25 @@
 # Provider mapping: claude -> claude, openai -> codex, openrouter -> pi,
 # bedrock -> pi (AWS Bedrock (alpha)).
 # Alpha: session summaries, memory rating, spend tracking and model tiers may be missing on Bedrock.
+
+# Each agent keeps its identity on its own personal volume. Explicit IDs remain
+# supported for existing installs; removing an override reuses the persisted ID.
+x-agent-entrypoint: &agent-entrypoint
+  - /bin/sh
+  - -ec
+  - |
+    ID_FILE="/workspace/personal/.agent-id"
+    if [ -n "$${AGENT_ID:-}" ]; then
+      printf '%s\n' "$$AGENT_ID" > "$$ID_FILE"
+    elif [ -s "$$ID_FILE" ]; then
+      AGENT_ID=$$(cat "$$ID_FILE")
+    else
+      AGENT_ID=$$(cat /proc/sys/kernel/random/uuid)
+      printf '%s\n' "$$AGENT_ID" > "$$ID_FILE"
+    fi
+    export AGENT_ID
+    exec /docker-entrypoint.sh "$$@"
+  - --
 
 services:
   minio:
@@ -215,6 +234,7 @@ services:
 
   lead:
     image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
+    entrypoint: *agent-entrypoint
     platform: linux/amd64
     pull_policy: always
     stop_grace_period: 60s
@@ -238,8 +258,7 @@ services:
       - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
       - AWS_PROFILE=${AWS_PROFILE:-}
       - API_KEY=${API_KEY}
-      # Generate once with `uuidgen`, set LEAD_AGENT_ID in .env, and keep it stable across restarts.
-      - "AGENT_ID=${LEAD_AGENT_ID:?Set LEAD_AGENT_ID in .env (generate one with uuidgen)}"
+      - "AGENT_ID=${LEAD_AGENT_ID:-}"
 
       # Important: Lead agent role
       - AGENT_ROLE=lead
@@ -274,6 +293,7 @@ services:
 
   worker-1:
     image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
+    entrypoint: *agent-entrypoint
     platform: linux/amd64
     pull_policy: always
     stop_grace_period: 60s
@@ -297,8 +317,7 @@ services:
       - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
       - AWS_PROFILE=${AWS_PROFILE:-}
       - API_KEY=${API_KEY}
-      # Generate once with `uuidgen`, set WORKER_1_AGENT_ID in .env, and keep it stable across restarts.
-      - "AGENT_ID=${WORKER_1_AGENT_ID:?Set WORKER_1_AGENT_ID in .env (generate one with uuidgen)}"
+      - "AGENT_ID=${WORKER_1_AGENT_ID:-}"
       - AGENT_ROLE=worker
       # Template for initial profile (fetched on first boot)
       - TEMPLATE_ID=official/coder
@@ -331,6 +350,7 @@ services:
 
   worker-2:
     image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
+    entrypoint: *agent-entrypoint
     platform: linux/amd64
     pull_policy: always
     stop_grace_period: 60s
@@ -354,8 +374,7 @@ services:
       - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
       - AWS_PROFILE=${AWS_PROFILE:-}
       - API_KEY=${API_KEY}
-      # Generate once with `uuidgen`, set WORKER_2_AGENT_ID in .env, and keep it stable across restarts.
-      - "AGENT_ID=${WORKER_2_AGENT_ID:?Set WORKER_2_AGENT_ID in .env (generate one with uuidgen)}"
+      - "AGENT_ID=${WORKER_2_AGENT_ID:-}"
       - AGENT_ROLE=worker
       # Template for initial profile (fetched on first boot)
       - TEMPLATE_ID=official/coder
@@ -386,8 +405,9 @@ services:
 
     restart: unless-stopped
 
-  worker-content-writer:
+  worker-researcher:
     image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
+    entrypoint: *agent-entrypoint
     platform: linux/amd64
     pull_policy: always
     stop_grace_period: 60s
@@ -411,8 +431,235 @@ services:
       - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
       - AWS_PROFILE=${AWS_PROFILE:-}
       - API_KEY=${API_KEY}
-      # Generate once with `uuidgen`, set CONTENT_WRITER_AGENT_ID in .env, and keep it stable across restarts.
-      - "AGENT_ID=${CONTENT_WRITER_AGENT_ID:?Set CONTENT_WRITER_AGENT_ID in .env (generate one with uuidgen)}"
+      - "AGENT_ID=${RESEARCHER_AGENT_ID:-}"
+      - AGENT_ROLE=worker
+      # Template for initial profile (fetched on first boot)
+      - TEMPLATE_ID=official/researcher
+
+      # - MCP_BASE_URL=${MCP_BASE_URL:-http://api:3013}
+      # If in the same Docker network, use the service name
+      - MCP_BASE_URL=http://api:3013
+      - AGENT_FS_API_URL=http://agent-fs:7433
+
+      - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
+      - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
+
+      - YOLO=true
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - GITHUB_EMAIL=${GITHUB_EMAIL:-}
+      - GITHUB_NAME=${GITHUB_NAME:-}
+      - SWARM_URL=${SWARM_URL:-localhost}
+
+    ports:
+      - "${RESEARCHER_PORT:-3031}:3000"
+
+    volumes:
+      - swarm_logs:/logs
+      - swarm_shared:/workspace/shared
+      - swarm_researcher:/workspace/personal
+      # AWS profile auth only: uncomment this mount. Do not expose host AWS credentials otherwise.
+      # - ${HOME}/.aws:/home/worker/.aws:ro
+
+    restart: unless-stopped
+
+  worker-reviewer:
+    image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
+    entrypoint: *agent-entrypoint
+    platform: linux/amd64
+    pull_policy: always
+    stop_grace_period: 60s
+
+    depends_on:
+      api:
+        condition: service_healthy
+
+    environment:
+      - HARNESS_PROVIDER=${HARNESS_PROVIDER:-claude}
+      - MODEL_OVERRIDE=${MODEL_OVERRIDE:-}
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-}
+      - BEDROCK_AUTH_MODE=${BEDROCK_AUTH_MODE:-}
+      - AWS_REGION=${AWS_REGION:-}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
+      - AWS_PROFILE=${AWS_PROFILE:-}
+      - API_KEY=${API_KEY}
+      - "AGENT_ID=${REVIEWER_AGENT_ID:-}"
+      - AGENT_ROLE=worker
+      # Template for initial profile (fetched on first boot)
+      - TEMPLATE_ID=official/reviewer
+
+      # - MCP_BASE_URL=${MCP_BASE_URL:-http://api:3013}
+      # If in the same Docker network, use the service name
+      - MCP_BASE_URL=http://api:3013
+      - AGENT_FS_API_URL=http://agent-fs:7433
+
+      - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
+      - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
+
+      - YOLO=true
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - GITHUB_EMAIL=${GITHUB_EMAIL:-}
+      - GITHUB_NAME=${GITHUB_NAME:-}
+      - SWARM_URL=${SWARM_URL:-localhost}
+
+    ports:
+      - "${REVIEWER_PORT:-3032}:3000"
+
+    volumes:
+      - swarm_logs:/logs
+      - swarm_shared:/workspace/shared
+      - swarm_reviewer:/workspace/personal
+      # AWS profile auth only: uncomment this mount. Do not expose host AWS credentials otherwise.
+      # - ${HOME}/.aws:/home/worker/.aws:ro
+
+    restart: unless-stopped
+
+  worker-tester:
+    image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
+    entrypoint: *agent-entrypoint
+    platform: linux/amd64
+    pull_policy: always
+    stop_grace_period: 60s
+
+    depends_on:
+      api:
+        condition: service_healthy
+
+    environment:
+      - HARNESS_PROVIDER=${HARNESS_PROVIDER:-claude}
+      - MODEL_OVERRIDE=${MODEL_OVERRIDE:-}
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-}
+      - BEDROCK_AUTH_MODE=${BEDROCK_AUTH_MODE:-}
+      - AWS_REGION=${AWS_REGION:-}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
+      - AWS_PROFILE=${AWS_PROFILE:-}
+      - API_KEY=${API_KEY}
+      - "AGENT_ID=${TESTER_AGENT_ID:-}"
+      - AGENT_ROLE=worker
+      # Template for initial profile (fetched on first boot)
+      - TEMPLATE_ID=official/tester
+
+      # - MCP_BASE_URL=${MCP_BASE_URL:-http://api:3013}
+      # If in the same Docker network, use the service name
+      - MCP_BASE_URL=http://api:3013
+      - AGENT_FS_API_URL=http://agent-fs:7433
+
+      - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
+      - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
+
+      - YOLO=true
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - GITHUB_EMAIL=${GITHUB_EMAIL:-}
+      - GITHUB_NAME=${GITHUB_NAME:-}
+      - SWARM_URL=${SWARM_URL:-localhost}
+
+    ports:
+      - "${TESTER_PORT:-3033}:3000"
+
+    volumes:
+      - swarm_logs:/logs
+      - swarm_shared:/workspace/shared
+      - swarm_tester:/workspace/personal
+      # AWS profile auth only: uncomment this mount. Do not expose host AWS credentials otherwise.
+      # - ${HOME}/.aws:/home/worker/.aws:ro
+
+    restart: unless-stopped
+
+  worker-forward-deployed-engineer:
+    image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
+    entrypoint: *agent-entrypoint
+    platform: linux/amd64
+    pull_policy: always
+    stop_grace_period: 60s
+
+    depends_on:
+      api:
+        condition: service_healthy
+
+    environment:
+      - HARNESS_PROVIDER=${HARNESS_PROVIDER:-claude}
+      - MODEL_OVERRIDE=${MODEL_OVERRIDE:-}
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-}
+      - BEDROCK_AUTH_MODE=${BEDROCK_AUTH_MODE:-}
+      - AWS_REGION=${AWS_REGION:-}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
+      - AWS_PROFILE=${AWS_PROFILE:-}
+      - API_KEY=${API_KEY}
+      - "AGENT_ID=${FORWARD_DEPLOYED_ENGINEER_AGENT_ID:-}"
+      - AGENT_ROLE=worker
+      # Template for initial profile (fetched on first boot)
+      - TEMPLATE_ID=official/forward-deployed-engineer
+
+      # - MCP_BASE_URL=${MCP_BASE_URL:-http://api:3013}
+      # If in the same Docker network, use the service name
+      - MCP_BASE_URL=http://api:3013
+      - AGENT_FS_API_URL=http://agent-fs:7433
+
+      - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
+      - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
+
+      - YOLO=true
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - GITHUB_EMAIL=${GITHUB_EMAIL:-}
+      - GITHUB_NAME=${GITHUB_NAME:-}
+      - SWARM_URL=${SWARM_URL:-localhost}
+
+    ports:
+      - "${FORWARD_DEPLOYED_ENGINEER_PORT:-3034}:3000"
+
+    volumes:
+      - swarm_logs:/logs
+      - swarm_shared:/workspace/shared
+      - swarm_forward_deployed_engineer:/workspace/personal
+      # AWS profile auth only: uncomment this mount. Do not expose host AWS credentials otherwise.
+      # - ${HOME}/.aws:/home/worker/.aws:ro
+
+    restart: unless-stopped
+
+  worker-content-writer:
+    image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
+    entrypoint: *agent-entrypoint
+    platform: linux/amd64
+    pull_policy: always
+    stop_grace_period: 60s
+
+    depends_on:
+      api:
+        condition: service_healthy
+
+    environment:
+      - HARNESS_PROVIDER=${HARNESS_PROVIDER:-claude}
+      - MODEL_OVERRIDE=${MODEL_OVERRIDE:-}
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-}
+      - BEDROCK_AUTH_MODE=${BEDROCK_AUTH_MODE:-}
+      - AWS_REGION=${AWS_REGION:-}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
+      - AWS_PROFILE=${AWS_PROFILE:-}
+      - API_KEY=${API_KEY}
+      - "AGENT_ID=${CONTENT_WRITER_AGENT_ID:-}"
       - AGENT_ROLE=worker
       # Template for initial profile (fetched on first boot)
       - TEMPLATE_ID=official/content-writer
@@ -449,6 +696,7 @@ services:
 
   worker-content-reviewer:
     image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
+    entrypoint: *agent-entrypoint
     platform: linux/amd64
     pull_policy: always
     stop_grace_period: 60s
@@ -472,8 +720,7 @@ services:
       - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
       - AWS_PROFILE=${AWS_PROFILE:-}
       - API_KEY=${API_KEY}
-      # Generate once with `uuidgen`, set CONTENT_REVIEWER_AGENT_ID in .env, and keep it stable across restarts.
-      - "AGENT_ID=${CONTENT_REVIEWER_AGENT_ID:?Set CONTENT_REVIEWER_AGENT_ID in .env (generate one with uuidgen)}"
+      - "AGENT_ID=${CONTENT_REVIEWER_AGENT_ID:-}"
       - AGENT_ROLE=worker
       # Template for initial profile (fetched on first boot)
       - TEMPLATE_ID=official/content-reviewer
@@ -506,6 +753,7 @@ services:
 
   worker-content-strategist:
     image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
+    entrypoint: *agent-entrypoint
     platform: linux/amd64
     pull_policy: always
     stop_grace_period: 60s
@@ -529,8 +777,7 @@ services:
       - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
       - AWS_PROFILE=${AWS_PROFILE:-}
       - API_KEY=${API_KEY}
-      # Generate once with `uuidgen`, set CONTENT_STRATEGIST_AGENT_ID in .env, and keep it stable across restarts.
-      - "AGENT_ID=${CONTENT_STRATEGIST_AGENT_ID:?Set CONTENT_STRATEGIST_AGENT_ID in .env (generate one with uuidgen)}"
+      - "AGENT_ID=${CONTENT_STRATEGIST_AGENT_ID:-}"
       - AGENT_ROLE=worker
       # Template for initial profile (fetched on first boot)
       - TEMPLATE_ID=official/content-strategist
@@ -563,6 +810,7 @@ services:
 
   worker-ux-principles:
     image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
+    entrypoint: *agent-entrypoint
     platform: linux/amd64
     pull_policy: always
     stop_grace_period: 60s
@@ -586,8 +834,7 @@ services:
       - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
       - AWS_PROFILE=${AWS_PROFILE:-}
       - API_KEY=${API_KEY}
-      # Generate once with `uuidgen`, set UX_PRINCIPLES_AGENT_ID in .env, and keep it stable across restarts.
-      - "AGENT_ID=${UX_PRINCIPLES_AGENT_ID:?Set UX_PRINCIPLES_AGENT_ID in .env (generate one with uuidgen)}"
+      - "AGENT_ID=${UX_PRINCIPLES_AGENT_ID:-}"
       - AGENT_ROLE=worker
       # Template for initial profile (fetched on first boot)
       - TEMPLATE_ID=official/ux-principles
@@ -620,6 +867,7 @@ services:
 
   worker-discoverability-optimizer:
     image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
+    entrypoint: *agent-entrypoint
     platform: linux/amd64
     pull_policy: always
     stop_grace_period: 60s
@@ -643,8 +891,7 @@ services:
       - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
       - AWS_PROFILE=${AWS_PROFILE:-}
       - API_KEY=${API_KEY}
-      # Generate once with `uuidgen`, set DISCOVERABILITY_AGENT_ID in .env, and keep it stable across restarts.
-      - "AGENT_ID=${DISCOVERABILITY_AGENT_ID:?Set DISCOVERABILITY_AGENT_ID in .env (generate one with uuidgen)}"
+      - "AGENT_ID=${DISCOVERABILITY_AGENT_ID:-}"
       - AGENT_ROLE=worker
       # Template for initial profile (fetched on first boot)
       - TEMPLATE_ID=official/discoverability-optimizer
@@ -735,6 +982,10 @@ volumes:
   swarm_lead:
   swarm_worker_1:
   swarm_worker_2:
+  swarm_forward_deployed_engineer:
+  swarm_tester:
+  swarm_reviewer:
+  swarm_researcher:
   swarm_content_writer:
   swarm_content_reviewer:
   swarm_content_strategist:
