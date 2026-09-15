@@ -37,6 +37,21 @@ Dashboard:
   Check controller-specific CORS behavior if browser requests fail.
   Guide: https://docs.agent-swarm.dev/docs/guides/kubernetes
 
+NEXT STEPS:
+  1. Connect the dashboard using the URL and API connection details above.
+  2. Seeded workflows and schedules arrive DISABLED. Review them and enable
+     the ones you want in the dashboard.
+  3. The default values leave integration credentials unset. Configure the
+     credentials you need through auth.* or your auth.existingSecret:
+     - Slack: slackBotToken, slackAppToken, slackSigningSecret
+       (SLACK_BOT_TOKEN, SLACK_APP_TOKEN, SLACK_SIGNING_SECRET).
+     - GitHub: githubToken, githubWebhookSecret
+       (GITHUB_TOKEN, GITHUB_WEBHOOK_SECRET).
+     - Provider credentials: claudeCodeOauthToken, anthropicApiKey, openaiApiKey,
+       openrouterApiKey (CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY,
+       OPENAI_API_KEY, OPENROUTER_API_KEY). Supply the credential required by
+       your selected harness provider before running tasks.
+
 {{- if not .Values.agentFs.enabled }}
 
 Note: agent-fs is disabled. Agents will operate with local-only filesystem

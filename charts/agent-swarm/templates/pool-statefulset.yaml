@@ -127,7 +127,7 @@ spec:
             {{- end }}
             {{- include "agent-swarm.poolEnv" $ | nindent 12 }}
           resources:
-            {{- toYaml $pool.resources | nindent 12 }}
+            {{- toYaml (default $.Values.poolDefaults.resources $pool.resources) | nindent 12 }}
           volumeMounts:
             {{- include "agent-swarm.poolVolumeMounts" $ | nindent 12 }}
             {{- if $pool.systemPromptConfigMap }}

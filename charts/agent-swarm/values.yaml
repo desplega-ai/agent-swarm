@@ -157,6 +157,14 @@ service:
 # Defaults shared by every pool. A pool may override `resources`, `storage`,
 # `harnessProvider`, `modelOverride`, etc.
 poolDefaults:
+  # -- Baseline for outbound-polling workers. Increase requests for sustained
+  # builds/browser workloads; pools.<name>.resources replaces this entire map.
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 4Gi
   storage:
     # -- Default size for each pool pod's personal PVC. Override per pool
     # via `pools.<name>.storage.personalSize` if you need different sizing.
@@ -193,9 +201,10 @@ poolDefaults:
 # one pool may have `role: lead`, and it must have `replicas: 1`. The chart
 # enforces both at render time.
 #
-# The default values include a single lead and a single coder pool — enough
-# to run a minimal swarm. Override entirely in your own values.yaml for real
-# deployments.
+# Defaults match the CLI's Full Swarm preset in src/commands/onboard/presets.ts:
+# one lead and ten specialist workers, requesting 3 CPU / 6Gi in total.
+# For only lead + coder, use examples/values-minimal.yaml. Helm merges pool
+# maps, so set unwanted entries to null to remove them.
 pools:
   lead:
     replicas: 1
@@ -210,14 +219,45 @@ pools:
         memory: 4Gi
   coder:
     replicas: 1
+    role: coder
     templateId: official/coder
     maxConcurrentTasks: 3
-    resources:
-      requests:
-        cpu: 500m
-        memory: 1Gi
-      limits:
-        memory: 4Gi
+  content-reviewer:
+    replicas: 1
+    role: content-reviewer
+    templateId: official/content-reviewer
+  content-strategist:
+    replicas: 1
+    role: content-strategist
+    templateId: official/content-strategist
+  content-writer:
+    replicas: 1
+    role: content-writer
+    templateId: official/content-writer
+  discoverability-optimizer:
+    replicas: 1
+    role: discoverability-optimizer
+    templateId: official/discoverability-optimizer
+  forward-deployed-engineer:
+    replicas: 1
+    role: forward-deployed-engineer
+    templateId: official/forward-deployed-engineer
+  researcher:
+    replicas: 1
+    role: researcher
+    templateId: official/researcher
+  reviewer:
+    replicas: 1
+    role: reviewer
+    templateId: official/reviewer
+  tester:
+    replicas: 1
+    role: tester
+    templateId: official/tester
+  ux-principles:
+    replicas: 1
+    role: ux-principles
+    templateId: official/ux-principles
 
 # Ingress for the API. Disabled by default — most consumers run the swarm
 # cluster-internal and don't expose the API publicly.

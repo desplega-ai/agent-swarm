@@ -1,0 +1,26 @@
+# API + one lead + one coder, using the chart's default resource requests.
+# Create agent-swarm-secrets with API_KEY and your provider credential first.
+# From the repository root:
+#   helm install swarm ./charts/agent-swarm \
+#     -f charts/agent-swarm/examples/values-minimal.yaml \
+#     --set auth.existingSecret=agent-swarm-secrets
+#
+# Helm merges maps: null removes a default pool instead of leaving it deployed.
+pools:
+  lead:
+    replicas: 1
+    role: lead
+    templateId: official/lead
+  coder:
+    replicas: 1
+    role: coder
+    templateId: official/coder
+  content-reviewer: null
+  content-strategist: null
+  content-writer: null
+  discoverability-optimizer: null
+  forward-deployed-engineer: null
+  researcher: null
+  reviewer: null
+  tester: null
+  ux-principles: null

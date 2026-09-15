@@ -17,7 +17,29 @@ helm install swarm oci://ghcr.io/desplega-ai/charts/agent-swarm \
 
 Omit `--version` for latest, or pin the release you want.
 
-That's a minimal install: API + lead + 1 coder pool, no agent-fs, no litestream. Override `pools` in your own values to size the swarm.
+This installs the API and the CLI's **Full Swarm**: one lead plus one each of coder, content-reviewer, content-strategist, content-writer, discoverability-optimizer, forward-deployed-engineer, researcher, reviewer, tester, and ux-principles. agent-fs and litestream are opt-in.
+
+For a smaller install, use [examples/values-minimal.yaml](examples/values-minimal.yaml) with the Secret created above. From the repository root:
+
+```bash
+helm install swarm ./charts/agent-swarm \
+  -f charts/agent-swarm/examples/values-minimal.yaml \
+  --set auth.existingSecret=agent-swarm-secrets
+```
+
+The minimal example deploys only lead + coder. Helm merges `pools` maps, so it explicitly sets the other default pools to `null` to remove them.
+
+### Resource sizing
+
+| Pool | CPU request | Memory request | Memory limit |
+|---|---|---|---|
+| Lead (one) | 500m | 1Gi | 4Gi |
+| Each worker (ten) | 250m | 512Mi | 4Gi |
+| All default pools | **3 CPU** | **6Gi** | **44Gi** |
+
+These requests reserve a baseline for agents polling for tasks; harness processes start when work arrives. For example, three nodes with 4 CPU each can place lead + two workers on one node and four workers on each remaining node, requesting **1 CPU / 2Gi per node**. Leave additional allocatable capacity for the API, system pods, and active tasks. The API has no resource requests by default. The default persistent storage requirement is **230Gi** (eleven 20Gi personal PVCs plus the API's 10Gi PVC), using the cluster's default StorageClass.
+
+Workers inherit `poolDefaults.resources`; a nonempty `pools.<name>.resources` replaces the entire resource map. The lead has its own larger allocation. CPU has no limit so tasks can use spare capacity; memory may grow to the per-pod limit. These are starting requests, not a benchmark or a capacity guarantee for simultaneous builds or browsers. Increase requests and cluster capacity for sustained workloads. The minimal example requests **750m CPU / 1.5Gi** across its two pools, with **50Gi** of PVC storage.
 
 ## Connect the dashboard
 
@@ -58,7 +80,7 @@ pools:
     templateId: official/lead
   coder:
     replicas: 4
-    # role omitted → defaults to "worker"
+    role: coder
     templateId: official/coder
 ```
 
