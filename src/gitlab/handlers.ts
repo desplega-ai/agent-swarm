@@ -173,25 +173,29 @@ export async function handleMergeRequest(
         return { created: false };
       }
 
-      const task = await createTaskWithSiblingAwareness(result.text, {
-        agentId: lead?.id ?? null,
-        routingReason: lead ? "skill" : undefined,
-        routingSource: lead ? "engine_default" : undefined,
-        source: "gitlab",
-        vcsProvider: "gitlab",
-        taskType: "gitlab-mr",
-        vcsRepo: repo,
-        vcsEventType: "merge_request",
-        vcsNumber: mr.iid,
-        vcsAuthor: user.username,
-        requestedByUserId,
-        vcsUrl: mr.url,
-        contextKey: gitlabContextKey({
-          projectId: String(project.id),
-          kind: "mr",
-          iid: mr.iid,
-        }),
-      });
+      const task = await createTaskWithSiblingAwareness(
+        result.text,
+        {
+          agentId: lead?.id ?? null,
+          routingReason: lead ? "skill" : undefined,
+          routingSource: lead ? "engine_default" : undefined,
+          source: "gitlab",
+          vcsProvider: "gitlab",
+          taskType: "gitlab-mr",
+          vcsRepo: repo,
+          vcsEventType: "merge_request",
+          vcsNumber: mr.iid,
+          vcsAuthor: user.username,
+          requestedByUserId,
+          vcsUrl: mr.url,
+          contextKey: gitlabContextKey({
+            projectId: String(project.id),
+            kind: "mr",
+            iid: mr.iid,
+          }),
+        },
+        { origin: "webhook" },
+      );
 
       try {
         await addGitLabReaction(repo, "mr", mr.iid, "eyes");
@@ -282,25 +286,29 @@ export async function handleIssue(
         return { created: false };
       }
 
-      const task = await createTaskWithSiblingAwareness(result.text, {
-        agentId: lead?.id ?? null,
-        routingReason: lead ? "skill" : undefined,
-        routingSource: lead ? "engine_default" : undefined,
-        source: "gitlab",
-        vcsProvider: "gitlab",
-        taskType: "gitlab-issue",
-        vcsRepo: repo,
-        vcsEventType: "issue",
-        vcsNumber: issue.iid,
-        vcsAuthor: user.username,
-        requestedByUserId,
-        vcsUrl: issue.url,
-        contextKey: gitlabContextKey({
-          projectId: String(project.id),
-          kind: "issue",
-          iid: issue.iid,
-        }),
-      });
+      const task = await createTaskWithSiblingAwareness(
+        result.text,
+        {
+          agentId: lead?.id ?? null,
+          routingReason: lead ? "skill" : undefined,
+          routingSource: lead ? "engine_default" : undefined,
+          source: "gitlab",
+          vcsProvider: "gitlab",
+          taskType: "gitlab-issue",
+          vcsRepo: repo,
+          vcsEventType: "issue",
+          vcsNumber: issue.iid,
+          vcsAuthor: user.username,
+          requestedByUserId,
+          vcsUrl: issue.url,
+          contextKey: gitlabContextKey({
+            projectId: String(project.id),
+            kind: "issue",
+            iid: issue.iid,
+          }),
+        },
+        { origin: "webhook" },
+      );
 
       try {
         await addGitLabReaction(repo, "issue", issue.iid, "eyes");
@@ -387,29 +395,33 @@ export async function handleNote(event: NoteEvent): Promise<{ created: boolean; 
     return { created: false };
   }
 
-  const task = await createTaskWithSiblingAwareness(noteResult.text, {
-    agentId: lead?.id ?? null,
-    routingReason: lead ? "skill" : undefined,
-    routingSource: lead ? "engine_default" : undefined,
-    source: "gitlab",
-    vcsProvider: "gitlab",
-    taskType: "gitlab-comment",
-    vcsRepo: repo,
-    vcsEventType: eventType,
-    vcsNumber: targetNumber,
-    vcsCommentId: note.id,
-    vcsAuthor: user.username,
-    requestedByUserId,
-    vcsUrl: targetUrl,
-    parentTaskId: existingTask?.id,
-    contextKey: targetNumber
-      ? gitlabContextKey({
-          projectId: String(project.id),
-          kind: note.noteable_type === "MergeRequest" ? "mr" : "issue",
-          iid: targetNumber,
-        })
-      : undefined,
-  });
+  const task = await createTaskWithSiblingAwareness(
+    noteResult.text,
+    {
+      agentId: lead?.id ?? null,
+      routingReason: lead ? "skill" : undefined,
+      routingSource: lead ? "engine_default" : undefined,
+      source: "gitlab",
+      vcsProvider: "gitlab",
+      taskType: "gitlab-comment",
+      vcsRepo: repo,
+      vcsEventType: eventType,
+      vcsNumber: targetNumber,
+      vcsCommentId: note.id,
+      vcsAuthor: user.username,
+      requestedByUserId,
+      vcsUrl: targetUrl,
+      parentTaskId: existingTask?.id,
+      contextKey: targetNumber
+        ? gitlabContextKey({
+            projectId: String(project.id),
+            kind: note.noteable_type === "MergeRequest" ? "mr" : "issue",
+            iid: targetNumber,
+          })
+        : undefined,
+    },
+    { origin: "webhook" },
+  );
 
   try {
     await addGitLabNoteReaction(
@@ -469,26 +481,30 @@ export async function handlePipeline(
     return { created: false };
   }
 
-  const task = await createTaskWithSiblingAwareness(pipelineResult.text, {
-    agentId: lead?.id ?? null,
-    routingReason: lead ? "skill" : undefined,
-    routingSource: lead ? "engine_default" : undefined,
-    source: "gitlab",
-    vcsProvider: "gitlab",
-    taskType: "gitlab-ci",
-    vcsRepo: repo,
-    vcsEventType: "pipeline",
-    vcsNumber: mrIid,
-    vcsAuthor: "",
-    requestedByUserId,
-    vcsUrl: event.merge_request.url,
-    parentTaskId: existingTask.id,
-    contextKey: gitlabContextKey({
-      projectId: String(project.id),
-      kind: "mr",
-      iid: mrIid,
-    }),
-  });
+  const task = await createTaskWithSiblingAwareness(
+    pipelineResult.text,
+    {
+      agentId: lead?.id ?? null,
+      routingReason: lead ? "skill" : undefined,
+      routingSource: lead ? "engine_default" : undefined,
+      source: "gitlab",
+      vcsProvider: "gitlab",
+      taskType: "gitlab-ci",
+      vcsRepo: repo,
+      vcsEventType: "pipeline",
+      vcsNumber: mrIid,
+      vcsAuthor: "",
+      requestedByUserId,
+      vcsUrl: event.merge_request.url,
+      parentTaskId: existingTask.id,
+      contextKey: gitlabContextKey({
+        projectId: String(project.id),
+        kind: "mr",
+        iid: mrIid,
+      }),
+    },
+    { origin: "webhook" },
+  );
 
   return { created: true, taskId: task.id };
 }

@@ -1,4 +1,5 @@
 import { getAgentById, getAgentWorkingOnThread, getAllAgents } from "../be/db";
+import type { Agent } from "../types";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import type { AgentMatch } from "./types";
 
@@ -14,6 +15,15 @@ export interface ThreadContext {
 export function hasOtherUserMention(text: string, botUserId: string): boolean {
   const mentions = text.match(/<@([A-Z0-9]+)>/g) ?? [];
   return mentions.some((m) => m !== `<@${botUserId}>`);
+}
+
+/**
+ * Build the matches for an explicit swarm#all broadcast.
+ */
+export function broadcastMatches(agents: Agent[]): AgentMatch[] {
+  return agents
+    .filter((agent) => !agent.isLead)
+    .map((agent) => ({ agent, matchedText: "swarm#all" }));
 }
 
 /**
@@ -50,10 +60,10 @@ export async function routeMessage(
 
   // Check for swarm#all broadcast
   if (/swarm#all/i.test(text)) {
-    const nonLeadAgents = agents.filter((a) => !a.isLead);
-    for (const agent of nonLeadAgents) {
+    for (const broadcastMatch of broadcastMatches(agents)) {
+      const agent = broadcastMatch.agent;
       if (!matches.some((m) => m.agent.id === agent.id)) {
-        matches.push({ agent, matchedText: "swarm#all" });
+        matches.push(broadcastMatch);
       }
     }
   }

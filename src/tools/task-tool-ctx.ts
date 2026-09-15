@@ -9,6 +9,7 @@ export type ToolCtx =
       runtimeInstanceId?: string;
       sourceTaskId?: string;
       sessionId?: string;
+      requestInfo?: RequestInfo;
     }
   | { kind: "user"; userId: string; user: User; sessionId?: string };
 
@@ -19,6 +20,7 @@ export function ownerCtx(info: RequestInfo): ToolCtx {
     runtimeInstanceId: info.runtimeInstanceId,
     sourceTaskId: info.sourceTaskId,
     sessionId: info.sessionId,
+    requestInfo: info,
   };
 }
 

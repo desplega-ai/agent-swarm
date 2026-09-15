@@ -138,6 +138,11 @@ type TxContext = {
 
 const txContext = new AsyncLocalStorage<TxContext>();
 
+export function isInTransaction(): boolean {
+  const store = txContext.getStore();
+  return store !== undefined && !store.closed;
+}
+
 /**
  * Cross-process SQLITE_BUSY retry posture (litestream checkpoints, CLI access
  * on the same file). Retries happen only where a repeat is exact: top-level

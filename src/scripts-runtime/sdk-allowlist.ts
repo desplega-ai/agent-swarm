@@ -56,6 +56,10 @@ export const SDK_TOOL_NAME_MAP = {
   script_getRun: "get-script-run",
   script_listRuns: "list-script-runs",
 
+  // ── extensions ──
+  extension_install: "extension-install",
+  extension_list: "extension-list",
+
   // ── swarm / agent ──
   swarm_get: "get-swarm",
   agent_info: "my-agent-info",

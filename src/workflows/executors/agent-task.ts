@@ -1,5 +1,7 @@
 import { z } from "zod";
+import { applyPreTaskCreate } from "../../extensions/apply-task-create";
 import { workflowContextKey } from "../../tasks/context-key";
+import { TaskCreationBlockedError } from "../../tasks/errors";
 import { withSiblingAwareness } from "../../tasks/sibling-awareness";
 import type { ExecutorMeta } from "../../types";
 import {
@@ -96,9 +98,9 @@ export class AgentTaskExecutor extends BaseExecutor<
     }
 
     // 3. Create the task (config is already deep-interpolated by the engine)
-    const { description: taskDescription, options: taskOptions } = await withSiblingAwareness(
-      config.template,
-      {
+    const preCreate = await applyPreTaskCreate({
+      description: config.template,
+      options: {
         key: effectiveKey,
         agentId: config.agentId ?? null,
         // A configured workflow target is an author pin, including existing definitions.
@@ -125,6 +127,14 @@ export class AgentTaskExecutor extends BaseExecutor<
         followUpConfig: config.followUpConfig,
         contextKey: workflowContextKey({ workflowRunId: meta.runId }),
       },
+      origin: "workflow",
+    });
+    if (preCreate.kind === "blocked") {
+      throw new TaskCreationBlockedError(preCreate.reason, preCreate.extension);
+    }
+    const { description: taskDescription, options: taskOptions } = await withSiblingAwareness(
+      preCreate.description,
+      preCreate.options,
     );
     const task = await db.createTaskExtended(taskDescription, taskOptions);
 

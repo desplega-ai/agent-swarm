@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { validateScriptImports } from "../scripts-runtime/import-allowlist";
+import { checkImportAllowlist, validateScriptImports } from "../scripts-runtime/import-allowlist";
 
 describe("script import allowlist", () => {
   test("allows relative imports and runtime barrels", () => {
@@ -59,6 +59,49 @@ describe("script import allowlist", () => {
     const result = validateScriptImports("export default async () => import('fs')");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.diagnostic).toContain("fs");
+  });
+
+  test("allows literal dynamic imports from the existing script allowlist", () => {
+    expect(validateScriptImports("export default async () => import('zod')")).toEqual({
+      ok: true,
+    });
+  });
+
+  test("allows computed dynamic imports by default", () => {
+    expect(validateScriptImports("const x = 'zod'; export default async () => import(x)")).toEqual({
+      ok: true,
+    });
+  });
+
+  test("strictDynamic rejects computed dynamic imports and requires", () => {
+    for (const source of [
+      "const name = 'zod'; export default async () => import(name)",
+      "const name = 'zod'; export default () => require(name)",
+    ]) {
+      const result = checkImportAllowlist(source, {
+        allowedBare: ["swarm-extension", "stdlib", "zod"],
+        allowRelative: false,
+        strictDynamic: true,
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.diagnostic).toContain("Computed");
+    }
+  });
+
+  test("strictDynamic checks require and import-equals specifiers", () => {
+    for (const source of [
+      "export default () => require('node:fs')",
+      "import fs = require('node:fs'); export default () => fs",
+    ]) {
+      expect(validateScriptImports(source)).toEqual({ ok: true });
+      const result = checkImportAllowlist(source, {
+        allowedBare: ["swarm-extension", "stdlib", "zod"],
+        allowRelative: false,
+        strictDynamic: true,
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.diagnostic).toContain("node:fs");
+    }
   });
 
   test("rejects Function constructor dynamic import bypasses", () => {

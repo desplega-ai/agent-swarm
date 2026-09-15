@@ -1,0 +1,9 @@
+{
+  "name": "priority-a",
+  "description": "Appends A to task descriptions",
+  "version": "1.0.0",
+  "runtime": "api",
+  "assets": {
+    "hooks": "hooks.ts"
+  }
+}

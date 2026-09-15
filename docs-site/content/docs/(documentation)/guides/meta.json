@@ -18,6 +18,7 @@
     "observability-opentelemetry",
     "performance-resource-sizing",
     "cost-and-context-computation",
+    "extensions",
     "scripts-runtime",
     "scripts-only-mode",
     "script-connections",

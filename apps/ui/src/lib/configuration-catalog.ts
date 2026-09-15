@@ -791,7 +791,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
   {
     id: "workflows",
     title: "Workflows & scheduler",
-    description: "Execution limits for workflow runs and the cadence of the scheduler loop.",
+    description: "Execution limits for workflows, extensions, and the scheduler loop.",
     icon: Workflow,
     entries: [
       {
@@ -838,6 +838,22 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         defaultValue: "true",
         restartRequired: true,
         docsUrl: `${DOCS}ui/configuration`,
+      },
+      {
+        key: "EXTENSION_HANDLER_TIMEOUT_MS",
+        label: "Extension handler timeout (ms)",
+        description: "Maximum time for one extension handler before execution continues.",
+        kind: "number",
+        defaultValue: "5000",
+        placeholder: "5000",
+      },
+      {
+        key: "EXTENSION_MAX_CONSECUTIVE_FAILURES",
+        label: "Extension failure limit",
+        description: "Consecutive handler failures that automatically disable an extension.",
+        kind: "number",
+        defaultValue: "5",
+        placeholder: "5",
       },
     ],
   },

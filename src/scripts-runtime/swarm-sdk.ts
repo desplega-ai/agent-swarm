@@ -20,6 +20,9 @@ function headers(config: SwarmConfig): Record<string, string> {
     ...(config.runtimeInstanceId
       ? { "X-Runtime-Instance-ID": Redacted.value(config.runtimeInstanceId) }
       : {}),
+    ...(config.extensionToken
+      ? { "X-Extension-Token": Redacted.value(config.extensionToken) }
+      : {}),
     "Content-Type": "application/json",
   };
 }

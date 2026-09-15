@@ -33,6 +33,10 @@ Build one with `toolOk(message, extras?)` / `toolErr(message, extras?)` (`src/to
 
 ## 2. The registrar finalize pipeline
 
+For agent-facing MCP calls, the registrar dispatches `pre.tool.call` before the tool callback. An extension can reject the call or replace its arguments. The registrar validates replaced arguments against the tool input schema. Invalid replacements fail open and create an extension error run. Calls from the script SDK or another extension bypass both tool-call hooks.
+
+After finalization, the registrar starts `post.tool.call` without blocking the response. The event contains the effective arguments, raw tool outcome, request information, and callback duration.
+
 `finalizeSwarmToolResult` runs an ordered middleware pipeline over the `SwarmToolResult` before building the wire result:
 
 1. **scrub** (`scrubMiddleware` → `scrubObject`) — runs first so every later stage only ever sees already-scrubbed data. Escape hatch: a result may set `allowSecretEgress: true` to skip scrubbing — ONLY for deliberate credential-reveal branches whose entire purpose is handing the agent a secret (`oauth-access-token`, `script-apis` create/rotate/list-includeSecrets, `get-config`/`list-config` with unmasked secrets). These tools register the revealed value via `registerVolatileSecret` so every *other* egress (logs, other tool results) still redacts it; without the flag the central scrubber would redact the reveal itself.
