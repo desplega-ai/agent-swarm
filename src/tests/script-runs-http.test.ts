@@ -401,7 +401,10 @@ describe("/api/script-runs HTTP", () => {
     expect(stepCount.c).toBe(1);
   });
 
-  test("agent-task dispatch preserves existing author pins and records human_pinned", async () => {
+  test.each([
+    undefined,
+    "skill",
+  ] as const)("agent-task dispatch preserves author pins and routing provenance for %s", async (routingReason) => {
     const created = await dispatch("/api/script-runs", {
       method: "POST",
       agentId,
@@ -412,7 +415,7 @@ describe("/api/script-runs HTTP", () => {
     const responsePromise = dispatch(`/api/internal/script-runs/${runId}/agent-task`, {
       method: "POST",
       agentId,
-      body: JSON.stringify({ stepKey: "pinned", task: "do pinned work", agentId }),
+      body: JSON.stringify({ stepKey: "pinned", task: "do pinned work", agentId, routingReason }),
     });
 
     let dispatched = await getLatestScriptRunStepTaskByContextKey(`script-run:${runId}:pinned`);
@@ -426,10 +429,15 @@ describe("/api/script-runs HTTP", () => {
     expect(response.status).toBe(200);
     const { taskId } = (await response.json()) as { taskId: string };
     expect(
-      await getDbClient().get("SELECT agentId, routing_reason FROM agent_tasks WHERE id = ?", [
-        taskId,
-      ]),
-    ).toEqual({ agentId, routing_reason: "human_pinned" });
+      await getDbClient().get(
+        "SELECT agentId, routing_reason, routing_source FROM agent_tasks WHERE id = ?",
+        [taskId],
+      ),
+    ).toEqual({
+      agentId,
+      routing_reason: routingReason ?? "human_pinned",
+      routing_source: routingReason ? "declared" : "engine_default",
+    });
   });
 
   test("agent-task polling returns the step output when a newer completed follow-up shares its context key", async () => {

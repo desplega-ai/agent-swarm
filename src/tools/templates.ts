@@ -198,6 +198,7 @@ Use the crashed agent's identity above as context for who was on it and what kin
 Dispatch via \`send-task\` with ALL of:
 - an explicit \`agentId\` (the chosen worker) — REQUIRED. If you omit it, \`send-task\` auto-routes to the original task's agent, which is the dead worker, and the work re-strands.
 - \`routingReason: "reroute_fault"\`
+- \`routingNote\`: explain why this worker is the right recovery target (at least 10 characters after trim, maximum 200)
 - \`taskType: "resume"\`
 - the tag \`resume-generation:{{generation_next}}\`
 - \`parentTaskId: {{original_task_id}}\`
@@ -252,7 +253,7 @@ Required capabilities: {{required_capabilities}}{{artifacts_block}}
 
 This task has been sitting unassigned because no currently-registered agent matches its required role/capabilities. Pick an agent to take this work over and RE-DELEGATE it — do NOT execute it yourself.
 
-Dispatch via \`send-task\` with an explicit \`agentId\` (REQUIRED — omitting it re-pools the work under the same affinity tag and it will starve again), \`routingReason: "overflow"\`, and \`parentTaskId: {{original_task_id}}\`.
+Dispatch via \`send-task\` with an explicit \`agentId\` (REQUIRED — omitting it re-pools the work under the same affinity tag and it will starve again), \`routingReason: "overflow"\`, a \`routingNote\` explaining the worker choice (at least 10 characters after trim, maximum 200), and \`parentTaskId: {{original_task_id}}\`.
 
 This work will NOT fall back to the unassigned pool — you are the only re-delegation path.`,
   variables: [

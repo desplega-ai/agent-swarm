@@ -112,6 +112,8 @@ flowchart TD
 - An **active_session** = one worker-*run* process for a task (`active_sessions`, `UNIQUE(taskId)`), created lazily *after* the provider process spawns, heartbeated by **tool activity** (throttled ~5s; no wall-clock ping between tool calls). "No active session" is AND-gated with `lastUpdatedAt > 5m`, so it means *"no live run **and** no task progress in 5 min."* It can false-positive on a long-but-quiet live worker; the resume-generation budget (`MAX_RESUME_GENERATIONS`) bounds the blast radius.
 - Thresholds (env-overridable): `STALL_THRESHOLD_NO_SESSION_MIN=5` (`HEARTBEAT_STALL_NO_SESSION_MIN`), `STALL_THRESHOLD_STALE_HEARTBEAT_MIN=15`, `STALL_THRESHOLD_MINUTES=30`, `STEERING_STALL_GRACE_MIN=5` (`HEARTBEAT_STEERING_GRACE_MIN`), `STALE_CLEANUP_THRESHOLD_MINUTES=30`.
 
+Task creation records the origin of each routing reason as `routingSource`: `declared` for a caller-supplied reason, `engine_default` for reasons chosen by recovery, scheduling, integration, or other engine paths. Historical rows remain unknown (SQL NULL, omitted from task responses). MCP `send-task` calls with an explicit `agentId` require a `routingNote` of at least 10 characters after trim and at most 200 characters; REST creation keeps notes optional.
+
 ## 3. Protected resume routing heuristic (`remediateCrashedWorkerTask` / shutdown → `createResumeFollowUp` → reaper)
 
 ```mermaid

@@ -535,6 +535,7 @@ describe("Tasks", () => {
     expect(status).toBe(201);
     expect(body.id).toBeDefined();
     expect(body.task).toBe("Integration test task 1");
+    expect(body.routingSource).toBe("engine_default");
     ids.task = body.id;
   });
 
@@ -550,6 +551,8 @@ describe("Tasks", () => {
     expect(status).toBe(201);
     expect(body.agentId).toBe(ids.workerAgent);
     expect(body.routingReason).toBe("human_pinned");
+    expect(body.routingSource).toBe("declared");
+    expect(body.routingNote).toBeUndefined(); // REST deliberately keeps notes optional.
     ids.task2 = body.id;
   });
 

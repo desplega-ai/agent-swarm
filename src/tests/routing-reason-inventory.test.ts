@@ -1,11 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import ts from "typescript";
 
-const TASK_CREATORS = new Set(["createTaskExtended", "createTaskWithSiblingAwareness"]);
+const TASK_CREATORS = new Set([
+  "createTaskExtended",
+  "createTaskWithSiblingAwareness",
+  "createSlackTaskWithFiles",
+]);
 
 type Violation = { file: string; line: number; creator: string };
 
-async function assignedCreatorsWithoutReason(): Promise<Violation[]> {
+async function creatorsWithoutRoutingMetadata(): Promise<Violation[]> {
   const violations: Violation[] = [];
   const glob = new Bun.Glob("src/**/*.ts");
 
@@ -32,8 +36,9 @@ async function assignedCreatorsWithoutReason(): Promise<Violation[]> {
             ),
           );
           if (
-            (propertyNames.has("agentId") || propertyNames.has("offeredTo")) &&
-            !propertyNames.has("routingReason")
+            ((propertyNames.has("agentId") || propertyNames.has("offeredTo")) &&
+              !propertyNames.has("routingReason")) ||
+            (propertyNames.has("routingReason") && !propertyNames.has("routingSource"))
           ) {
             const { line } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
             violations.push({ file, line: line + 1, creator });
@@ -49,7 +54,7 @@ async function assignedCreatorsWithoutReason(): Promise<Violation[]> {
 }
 
 describe("routing reason production inventory", () => {
-  test("every direct assigned/offer creator declares its reason at the call site", async () => {
-    expect(await assignedCreatorsWithoutReason()).toEqual([]);
+  test("every assigned/offer creator records its reason and provenance at the call site", async () => {
+    expect(await creatorsWithoutRoutingMetadata()).toEqual([]);
   });
 });

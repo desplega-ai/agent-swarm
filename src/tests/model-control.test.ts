@@ -560,6 +560,7 @@ describe("Model Control - Zod Validation Schema", () => {
       sendTaskInputSchema.parse({
         agentId: crypto.randomUUID(),
         routingReason: "human_pinned",
+        routingNote: "This test explicitly selects the target worker",
         task: "x",
         model: "gpt-5.5",
       }).model,
@@ -583,6 +584,7 @@ describe("Model Control - Zod Validation Schema", () => {
       sendTaskInputSchema.parse({
         agentId: crypto.randomUUID(),
         routingReason: "human_pinned",
+        routingNote: "This test explicitly selects the target worker",
         task: "x",
         effort: "xhigh",
       }).effort,
@@ -591,6 +593,7 @@ describe("Model Control - Zod Validation Schema", () => {
       sendTaskInputSchema.parse({
         agentId: crypto.randomUUID(),
         routingReason: "human_pinned",
+        routingNote: "This test explicitly selects the target worker",
         task: "x",
         effort: "max",
       }).effort,

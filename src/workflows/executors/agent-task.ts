@@ -104,6 +104,11 @@ export class AgentTaskExecutor extends BaseExecutor<
         // A configured workflow target is an author pin, including existing definitions.
         routingReason: config.routingReason ?? (config.agentId ? "human_pinned" : undefined),
         routingNote: config.routingNote,
+        routingSource: config.routingReason
+          ? "declared"
+          : config.agentId
+            ? "engine_default"
+            : undefined,
         source: "workflow",
         tags: config.tags,
         priority: config.priority,

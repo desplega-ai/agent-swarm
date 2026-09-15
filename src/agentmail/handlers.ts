@@ -50,6 +50,7 @@ const agentmailBuffer = createIngressBuffer<BufferedAgentMailMessage>({
     const task = await createTaskWithSiblingAwareness(followupResult.text, {
       agentId: first.agentId,
       routingReason: "continuity",
+      routingSource: "engine_default",
       source: "agentmail",
       taskType: "agentmail-reply",
       agentmailInboxId: first.inboxId,
@@ -251,6 +252,7 @@ export async function handleMessageReceived(
     const task = await createTaskWithSiblingAwareness(followupResult.text, {
       agentId: existingTask.agentId,
       routingReason: existingTask.agentId ? "continuity" : undefined,
+      routingSource: existingTask.agentId ? "engine_default" : undefined,
       source: "agentmail",
       taskType: "agentmail-reply",
       agentmailInboxId: inbox_id,
@@ -291,6 +293,7 @@ export async function handleMessageReceived(
         const task = await createTaskWithSiblingAwareness(leadResult.text, {
           agentId: agent.id,
           routingReason: "human_pinned",
+          routingSource: "engine_default",
           source: "agentmail",
           taskType: "agentmail-message",
           agentmailInboxId: inbox_id,
@@ -322,6 +325,7 @@ export async function handleMessageReceived(
       const task = await createTaskWithSiblingAwareness(workerResult.text, {
         agentId: agent.id,
         routingReason: "human_pinned",
+        routingSource: "engine_default",
         source: "agentmail",
         taskType: "agentmail-message",
         agentmailInboxId: inbox_id,
@@ -357,6 +361,7 @@ export async function handleMessageReceived(
     const task = await createTaskWithSiblingAwareness(unmappedResult.text, {
       agentId: lead.id,
       routingReason: "skill",
+      routingSource: "engine_default",
       source: "agentmail",
       taskType: "agentmail-message",
       agentmailInboxId: inbox_id,

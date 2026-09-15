@@ -40,7 +40,7 @@ function callSendTask(
 function structuredOf(result: CallToolResult) {
   return result.structuredContent as {
     success: boolean;
-    task?: { id: string; outputSchema?: Record<string, unknown> };
+    task?: { id: string; outputSchema?: Record<string, unknown>; routingSource?: string };
     message: string;
   };
 }
@@ -168,6 +168,7 @@ describe("send-task: outputSchema propagation", () => {
     const created = await getTaskById(s.task!.id);
     expect(created?.outputSchema).toEqual(schema);
     expect(created?.routingReason).toBeUndefined();
+    expect(created?.routingSource).toBeUndefined();
   });
 
   test("a provided outputSchema is persisted when the task is offered to an agent", async () => {
@@ -184,6 +185,7 @@ describe("send-task: outputSchema propagation", () => {
         task: "offered task with a schema",
         agentId: worker.id,
         routingReason: "human_pinned",
+        routingNote: "This test explicitly selects the target worker",
         offerMode: true,
         outputSchema: schema,
         allowDuplicate: true,
@@ -214,6 +216,7 @@ describe("send-task: outputSchema propagation", () => {
         task: "directly assigned task with a schema",
         agentId: worker.id,
         routingReason: "human_pinned",
+        routingNote: "This test explicitly selects the target worker",
         outputSchema: schema,
         allowDuplicate: true,
       },
@@ -224,6 +227,8 @@ describe("send-task: outputSchema propagation", () => {
     const created = await getTaskById(s.task!.id);
     expect(created?.outputSchema).toEqual(schema);
     expect(created?.routingReason).toBe("human_pinned");
+    expect(created?.routingSource).toBe("declared");
+    expect(s.task?.routingSource).toBe("declared");
   });
 
   test("implicit parent routing stamps continuity while pool creation omits a reason", async () => {
@@ -249,6 +254,8 @@ describe("send-task: outputSchema propagation", () => {
     const continuedTask = await getTaskById(structuredOf(continued).task!.id);
     expect(continuedTask?.agentId).toBe(worker.id);
     expect(continuedTask?.routingReason).toBe("continuity");
+    expect(continuedTask?.routingSource).toBe("engine_default");
+    expect(structuredOf(continued).task?.routingSource).toBe("engine_default");
 
     const pooled = await callSendTask(
       server,
@@ -278,6 +285,7 @@ describe("send-task: outputSchema propagation", () => {
     );
     const created = await getTaskById(structuredOf(result).task!.id);
     expect(created?.routingNote).toBe("matches the required runtime specialization");
+    expect(created?.routingSource).toBe("declared");
   });
 });
 

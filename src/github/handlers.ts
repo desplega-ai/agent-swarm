@@ -258,6 +258,7 @@ export async function handlePullRequest(
     const task = await createTaskWithSiblingAwareness(result.text, {
       agentId: lead?.id ?? "",
       routingReason: lead ? "skill" : undefined,
+      routingSource: lead ? "engine_default" : undefined,
       source: "github",
       vcsProvider: "github",
       taskType: "github-pr",
@@ -372,6 +373,7 @@ export async function handlePullRequest(
     const task = await createTaskWithSiblingAwareness(result.text, {
       agentId: lead?.id ?? "",
       routingReason: lead ? "skill" : undefined,
+      routingSource: lead ? "engine_default" : undefined,
       source: "github",
       vcsProvider: "github",
       taskType: "github-pr",
@@ -481,6 +483,7 @@ export async function handlePullRequest(
     const task = await createTaskWithSiblingAwareness(result.text, {
       agentId: lead?.id ?? "",
       routingReason: lead ? "skill" : undefined,
+      routingSource: lead ? "engine_default" : undefined,
       source: "github",
       vcsProvider: "github",
       taskType: "github-pr",
@@ -577,6 +580,7 @@ export async function handlePullRequest(
   const task = await createTaskWithSiblingAwareness(result.text, {
     agentId: lead?.id ?? "",
     routingReason: lead ? "skill" : undefined,
+    routingSource: lead ? "engine_default" : undefined,
     source: "github",
     vcsProvider: "github",
     taskType: "github-pr",
@@ -662,6 +666,7 @@ export async function handleIssue(
     const task = await createTaskWithSiblingAwareness(result.text, {
       agentId: lead?.id ?? "",
       routingReason: lead ? "skill" : undefined,
+      routingSource: lead ? "engine_default" : undefined,
       source: "github",
       vcsProvider: "github",
       taskType: "github-issue",
@@ -764,6 +769,7 @@ export async function handleIssue(
     const task = await createTaskWithSiblingAwareness(result.text, {
       agentId: lead?.id ?? "",
       routingReason: lead ? "skill" : undefined,
+      routingSource: lead ? "engine_default" : undefined,
       source: "github",
       vcsProvider: "github",
       taskType: "github-issue",
@@ -842,6 +848,7 @@ export async function handleIssue(
   const task = await createTaskWithSiblingAwareness(result.text, {
     agentId: lead?.id ?? "",
     routingReason: lead ? "skill" : undefined,
+    routingSource: lead ? "engine_default" : undefined,
     source: "github",
     vcsProvider: "github",
     taskType: "github-issue",
@@ -954,6 +961,7 @@ export async function handleComment(
   const task = await createTaskWithSiblingAwareness(result.text, {
     agentId: lead?.id ?? "",
     routingReason: lead ? "skill" : undefined,
+    routingSource: lead ? "engine_default" : undefined,
     source: "github",
     vcsProvider: "github",
     taskType: "github-comment",
@@ -1269,6 +1277,7 @@ export async function handlePullRequestReview(
   const task = await createTaskWithSiblingAwareness(result.text, {
     agentId: lead?.id ?? "",
     routingReason: lead ? "skill" : undefined,
+    routingSource: lead ? "engine_default" : undefined,
     source: "github",
     vcsProvider: "github",
     taskType: "github-review",

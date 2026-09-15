@@ -625,6 +625,11 @@ export async function handleScriptRuns(
           routingReason:
             parsed.body.routingReason ?? (parsed.body.agentId ? "human_pinned" : undefined),
           routingNote: parsed.body.routingNote,
+          routingSource: parsed.body.routingReason
+            ? "declared"
+            : parsed.body.agentId
+              ? "engine_default"
+              : undefined,
           tags: parsed.body.tags,
           priority: parsed.body.priority,
           offeredTo: parsed.body.offerMode ? parsed.body.agentId : undefined,

@@ -13,7 +13,12 @@ const ROUTING_REASONS = [
 describe("send-task routing decision input", () => {
   test.each(ROUTING_REASONS)("accepts routingReason %s", (routingReason) => {
     expect(
-      sendTaskInputSchema.safeParse({ task: "delegate", agentId: "worker", routingReason }).success,
+      sendTaskInputSchema.safeParse({
+        task: "delegate",
+        agentId: "worker",
+        routingReason,
+        routingNote: "Owns this code path",
+      }).success,
     ).toBe(true);
   });
 
@@ -23,6 +28,7 @@ describe("send-task routing decision input", () => {
         task: "delegate",
         agentId: "worker",
         routingReason: "round_robin",
+        routingNote: "Owns this code path",
       }).success,
     ).toBe(false);
   });
@@ -53,6 +59,52 @@ describe("send-task routing decision input", () => {
     ).toBe(false);
   });
 
+  test.each([
+    undefined,
+    "",
+    "         ",
+    "123456789",
+    " 123456789 ",
+  ])("rejects direct assignment and offers with a missing or short note: %s", (routingNote) => {
+    for (const offerMode of [false, true]) {
+      const result = sendTaskInputSchema.safeParse({
+        task: "delegate",
+        agentId: "worker",
+        routingReason: "skill",
+        routingNote,
+        offerMode,
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) expect(result.error.issues[0]?.path).toEqual(["routingNote"]);
+    }
+  });
+
+  test("accepts exactly 10 trimmed characters and does not require a note for implicit routing", () => {
+    expect(
+      sendTaskInputSchema.safeParse({
+        task: "delegate",
+        agentId: "worker",
+        routingReason: "skill",
+        routingNote: " 1234567890 ",
+      }).success,
+    ).toBe(true);
+    expect(sendTaskInputSchema.safeParse({ task: "pool" }).success).toBe(true);
+    expect(
+      sendTaskInputSchema.safeParse({ task: "continue", parentTaskId: crypto.randomUUID() })
+        .success,
+    ).toBe(true);
+  });
+
+  test("handler rejects a missing note before any direct-call write", async () => {
+    const result = await sendTaskHandler({ kind: "owner", agentId: "sender" }, {
+      task: "delegate",
+      agentId: "worker",
+      routingReason: "skill",
+    } as never);
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("routingNote is required");
+  });
+
   test("handler rejects direct callers that bypass schema parsing", async () => {
     const result = await sendTaskHandler({ kind: "owner", agentId: "sender" }, {
       task: "delegate",
@@ -77,13 +129,34 @@ test("the delegate script requires the caller's reason and forwards it without r
     },
   };
   expect((await delegate({ agentName: "Worker", task: "work" }, ctx)).ok).toBe(false);
+  expect(
+    (await delegate({ agentName: "Worker", task: "work", routingReason: "skill" }, ctx)).ok,
+  ).toBe(false);
+  expect(
+    (
+      await delegate(
+        { agentName: "Worker", task: "work", routingReason: "skill", routingNote: " 123456789 " },
+        ctx,
+      )
+    ).ok,
+  ).toBe(false);
   expect(sent).toHaveLength(0);
   const result = await delegate(
-    { agentName: "Worker", task: "work", routingReason: "continuity", routingNote: "same PR" },
+    {
+      agentName: "Worker",
+      task: "work",
+      routingReason: "continuity",
+      routingNote: "same PR and worker",
+    },
     ctx,
   );
   expect(result.ok).toBe(true);
   expect(sent).toEqual([
-    { agentId: "worker", task: "work", routingReason: "continuity", routingNote: "same PR" },
+    {
+      agentId: "worker",
+      task: "work",
+      routingReason: "continuity",
+      routingNote: "same PR and worker",
+    },
   ]);
 });

@@ -86,6 +86,7 @@ describe("task tool ctx", () => {
       task: "ordinary direct assignment",
       agentId: lead.id,
       routingReason: "skill",
+      routingNote: "This test explicitly selects the target worker",
       offerMode: false,
       allowDuplicate: false,
     });
@@ -108,6 +109,7 @@ describe("task tool ctx", () => {
       task: "ordinary offer",
       agentId: lead.id,
       routingReason: "skill",
+      routingNote: "This test explicitly selects the target worker",
       offerMode: true,
       allowDuplicate: false,
     });

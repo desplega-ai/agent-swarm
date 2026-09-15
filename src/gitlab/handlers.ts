@@ -176,6 +176,7 @@ export async function handleMergeRequest(
       const task = await createTaskWithSiblingAwareness(result.text, {
         agentId: lead?.id ?? null,
         routingReason: lead ? "skill" : undefined,
+        routingSource: lead ? "engine_default" : undefined,
         source: "gitlab",
         vcsProvider: "gitlab",
         taskType: "gitlab-mr",
@@ -284,6 +285,7 @@ export async function handleIssue(
       const task = await createTaskWithSiblingAwareness(result.text, {
         agentId: lead?.id ?? null,
         routingReason: lead ? "skill" : undefined,
+        routingSource: lead ? "engine_default" : undefined,
         source: "gitlab",
         vcsProvider: "gitlab",
         taskType: "gitlab-issue",
@@ -388,6 +390,7 @@ export async function handleNote(event: NoteEvent): Promise<{ created: boolean; 
   const task = await createTaskWithSiblingAwareness(noteResult.text, {
     agentId: lead?.id ?? null,
     routingReason: lead ? "skill" : undefined,
+    routingSource: lead ? "engine_default" : undefined,
     source: "gitlab",
     vcsProvider: "gitlab",
     taskType: "gitlab-comment",
@@ -469,6 +472,7 @@ export async function handlePipeline(
   const task = await createTaskWithSiblingAwareness(pipelineResult.text, {
     agentId: lead?.id ?? null,
     routingReason: lead ? "skill" : undefined,
+    routingSource: lead ? "engine_default" : undefined,
     source: "gitlab",
     vcsProvider: "gitlab",
     taskType: "gitlab-ci",

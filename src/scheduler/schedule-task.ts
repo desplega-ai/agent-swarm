@@ -18,6 +18,7 @@ export async function createStandaloneScheduleTask(
     priority: schedule.priority,
     agentId: schedule.targetAgentId,
     routingReason: schedule.targetAgentId ? "human_pinned" : undefined,
+    routingSource: schedule.targetAgentId ? "engine_default" : undefined,
     model: schedule.model,
     modelTier: schedule.modelTier,
     scheduleId: schedule.id,

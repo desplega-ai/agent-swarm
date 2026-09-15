@@ -224,6 +224,7 @@ export interface AgentTask {
   status: AgentTaskStatus;
   source: AgentTaskSource;
   routingReason?: RoutingReason;
+  routingSource?: "declared" | "engine_default";
   routingNote?: string;
   taskType?: string;
   tags: string[];

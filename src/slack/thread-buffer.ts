@@ -250,6 +250,7 @@ async function slackFlush(
       agentId: lead?.id,
       routingReason:
         lead && mostRecentTask?.agentId === lead.id ? "continuity" : lead ? "skill" : undefined,
+      routingSource: lead ? "engine_default" : undefined,
       source: "slack",
       slackChannelId: channelId,
       slackThreadTs: threadTs,

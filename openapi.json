@@ -184,6 +184,14 @@
               "reroute_fault"
             ]
           },
+          "routingSource": {
+            "type": "string",
+            "enum": [
+              "declared",
+              "engine_default"
+            ],
+            "description": "Origin of the routing reason: declared by the caller or chosen by the engine. Absent for unknown historical provenance or no reason."
+          },
           "routingNote": {
             "type": "string",
             "maxLength": 200
