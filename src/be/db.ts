@@ -759,14 +759,28 @@ export async function markTaskSlackReplySent(taskId: string): Promise<void> {
 }
 
 /**
- * Marks an agentmail task's terminal-state reply as sent. Conditional on the
- * flag not already being set — the read-then-send-then-write sequence in
- * agentmail outbound sync is not atomic, so this UPDATE is the last line of
- * defense against a double-send on a racing retry.
+ * Atomically claims an agentmail task's terminal-state reply. Agentmail
+ * outbound sync calls this BEFORE sending, not after: the atomic
+ * `WHERE agentmailReplySent = 0` compare-and-swap means only one caller can
+ * ever win the claim, so only one caller ever performs the external send.
  */
 export async function markTaskAgentmailReplySent(taskId: string): Promise<boolean> {
   const result = await getDbClient().run(
     `UPDATE agent_tasks SET agentmailReplySent = 1 WHERE id = ? AND agentmailReplySent = 0`,
+    [taskId],
+  );
+  return result.changes > 0;
+}
+
+/**
+ * Releases a claim taken by `markTaskAgentmailReplySent` when the external
+ * send it was guarding failed, so a later retry can claim and send again.
+ * Conditional on the flag currently being set — a no-op once the reply has
+ * genuinely gone out (nothing left to release) or if never claimed.
+ */
+export async function releaseTaskAgentmailReplySent(taskId: string): Promise<boolean> {
+  const result = await getDbClient().run(
+    `UPDATE agent_tasks SET agentmailReplySent = 0 WHERE id = ? AND agentmailReplySent = 1`,
     [taskId],
   );
   return result.changes > 0;

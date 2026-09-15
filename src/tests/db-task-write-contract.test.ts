@@ -485,6 +485,7 @@ value:releaseStaleOfferedTasksForOfflineAgents
 value:releaseStaleProcessingInbox
 value:releaseStaleReviewingTasks
 value:releaseTask
+value:releaseTaskAgentmailReplySent
 value:replaceTaskAttachment
 value:reserveSlackMessage
 value:resetEmptyPollCount

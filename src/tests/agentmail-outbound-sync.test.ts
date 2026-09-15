@@ -1,7 +1,16 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { initAgentMailOutboundSync, teardownAgentMailOutboundSync } from "../agentmail/outbound";
-import { closeDb, completeTask, createTaskExtended, failTask, getTaskById, initDb } from "../be/db";
+import {
+  closeDb,
+  completeTask,
+  createTaskExtended,
+  failTask,
+  getTaskById,
+  initDb,
+  markTaskAgentmailReplySent,
+  releaseTaskAgentmailReplySent,
+} from "../be/db";
 
 const TEST_DB_PATH = "./test-agentmail-outbound-sync.sqlite";
 
@@ -171,6 +180,45 @@ describe("AgentMail Outbound Reply Sync", () => {
     expect(mockReply).toHaveBeenCalledTimes(1);
     const updated = await getTaskById(task.id);
     expect(updated?.agentmailReplySent).toBe(false);
+  });
+
+  test("concurrent claims: exactly one of two simultaneous claims wins", async () => {
+    const task = await makeAgentmailTask("concurrent-claim");
+    const [a, b] = await Promise.all([
+      markTaskAgentmailReplySent(task.id),
+      markTaskAgentmailReplySent(task.id),
+    ]);
+    expect([a, b].filter(Boolean)).toHaveLength(1);
+  });
+
+  test("a released claim can be re-claimed for a later send", async () => {
+    const task = await makeAgentmailTask("release-and-reclaim");
+    expect(await markTaskAgentmailReplySent(task.id)).toBe(true);
+    expect(await releaseTaskAgentmailReplySent(task.id)).toBe(true);
+    expect(await markTaskAgentmailReplySent(task.id)).toBe(true);
+  });
+
+  test("release is a no-op when the claim was never taken", async () => {
+    const task = await makeAgentmailTask("release-noop");
+    expect(await releaseTaskAgentmailReplySent(task.id)).toBe(false);
+  });
+
+  test("a failed send releases the claim, permitting a later successful send attempt", async () => {
+    mockReply.mockImplementationOnce(
+      () => Promise.resolve(new Response("forbidden", { status: 403 })) as Promise<Response>,
+    );
+
+    const task = await makeAgentmailTask("release-after-failed-send");
+    await completeTask(task.id, "should attempt but fail");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(mockReply).toHaveBeenCalledTimes(1);
+    const afterFailure = await getTaskById(task.id);
+    expect(afterFailure?.agentmailReplySent).toBe(false);
+
+    // The claim was released, so a fresh claim attempt (simulating a manual
+    // retry path) succeeds — the flag is not stuck claimed forever.
+    expect(await markTaskAgentmailReplySent(task.id)).toBe(true);
   });
 
   test("teardown removes listeners — events fire no sends after teardown", async () => {

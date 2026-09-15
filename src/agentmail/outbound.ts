@@ -1,4 +1,4 @@
-import { getTaskById, markTaskAgentmailReplySent } from "../be/db";
+import { getTaskById, markTaskAgentmailReplySent, releaseTaskAgentmailReplySent } from "../be/db";
 import { getTaskUrl } from "../slack/blocks";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { workflowEventBus } from "../workflows/event-bus";
@@ -96,6 +96,13 @@ async function sendReply(taskId: string, bodyText: string): Promise<void> {
   if (task.agentmailReplySent) return;
   if (!task.agentmailInboxId || !task.agentmailMessageId) return;
 
+  // Claim before sending: the atomic CAS in markTaskAgentmailReplySent means
+  // only one caller can ever win this claim, so only one caller ever performs
+  // the external send below. A lost claim means another caller already owns
+  // (or has already completed) the send.
+  const claimed = await markTaskAgentmailReplySent(taskId);
+  if (!claimed) return;
+
   const text = `${bodyText}\n\n—\nView task: ${getTaskUrl(taskId)}`;
 
   try {
@@ -108,18 +115,10 @@ async function sendReply(taskId: string, bodyText: string): Promise<void> {
       console.error(
         `[AgentMail Outbound] Failed to send reply for task ${taskId} → message ${task.agentmailMessageId}: HTTP ${response.status} ${scrubSecrets(body)}`,
       );
+      await releaseTaskAgentmailReplySent(taskId);
       return;
     }
 
-    const marked = await markTaskAgentmailReplySent(taskId);
-    if (!marked) {
-      // Lost the race to a concurrent send — the other caller already flipped
-      // the flag. Nothing further to do; log for observability only.
-      console.log(
-        `[AgentMail Outbound] Reply sent for task ${taskId} but flag was already set (concurrent send)`,
-      );
-      return;
-    }
     console.log(
       `[AgentMail Outbound] Sent reply for task ${taskId} → message ${task.agentmailMessageId}`,
     );
@@ -128,5 +127,6 @@ async function sendReply(taskId: string, bodyText: string): Promise<void> {
       `[AgentMail Outbound] Error sending reply for task ${taskId}:`,
       scrubSecrets(error instanceof Error ? error.message : String(error)),
     );
+    await releaseTaskAgentmailReplySent(taskId);
   }
 }
