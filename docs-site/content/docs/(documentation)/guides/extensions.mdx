@@ -133,7 +133,7 @@ Each handler receives a context with these fields:
 - `ctx.event` identifies the event, extension, version, and dispatch time.
 
 The extension runs as the system agent `ext:<name>`.
-Its `ctx.swarm` calls use `callOrigin: "extension"`.
+Its `ctx.swarm` calls use `callOrigin: "extension"`, authenticated by a per-process token that only the in-process SDK holds.
 These calls bypass `pre.tool.call` to prevent recursion.
 Tasks created by an extension also skip that extension's own handlers.
 

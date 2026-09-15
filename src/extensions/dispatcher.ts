@@ -54,6 +54,25 @@ export function isExtensionAgentId(agentId: string | null | undefined): boolean 
   return !!agentId && extensionAgentIds.has(agentId);
 }
 
+/**
+ * Per-process secret that authenticates extension-originated loopback calls. Only the
+ * in-process `ctx.swarm` SDK holds it; the bridge grants `callOrigin: "extension"` solely
+ * when the request presents it, so an agent header alone can never claim that origin.
+ */
+const extensionBridgeToken = crypto.randomUUID();
+
+export function getExtensionBridgeToken(): string {
+  return extensionBridgeToken;
+}
+
+/** Resolve the bridge call origin from the agent identity plus the per-process token. */
+export function resolveBridgeCallOrigin(
+  agentId: string | undefined,
+  token: string | undefined,
+): "extension" | "script-sdk" {
+  return isExtensionAgentId(agentId) && token === extensionBridgeToken ? "extension" : "script-sdk";
+}
+
 export function extensionIdForAgent(agentId: string | null | undefined): string | undefined {
   return agentId && isExtensionAgentId(agentId) ? extensionByAgent.get(agentId) : undefined;
 }

@@ -13,6 +13,7 @@ import {
   startTask,
 } from "../be/db";
 import { installExtension, listExtensionRuns } from "../be/extensions/db";
+import { getExtensionBridgeToken, resolveBridgeCallOrigin } from "../extensions/dispatcher";
 import { enableExtension, stopExtensionRuntime } from "../extensions/lifecycle";
 import { registerStoreProgressTool } from "../tools/store-progress";
 import {
@@ -232,6 +233,18 @@ describe("extension tool-call hooks", () => {
     expect(extensionResult.isError).toBe(false);
     await Bun.sleep(20);
     expect(await listExtensionRuns(extension.id)).toEqual([]);
+  });
+
+  test("the bridge grants the extension origin only with the per-process token", async () => {
+    const extension = await enableFixture("no-exclamation-marks");
+    const agentId = extension.agentId!;
+    // A caller-controlled agent header alone must not claim the extension origin.
+    expect(resolveBridgeCallOrigin(agentId, undefined)).toBe("script-sdk");
+    expect(resolveBridgeCallOrigin(agentId, "forged")).toBe("script-sdk");
+    expect(resolveBridgeCallOrigin(crypto.randomUUID(), getExtensionBridgeToken())).toBe(
+      "script-sdk",
+    );
+    expect(resolveBridgeCallOrigin(agentId, getExtensionBridgeToken())).toBe("extension");
   });
 
   test("the no-input branch ignores modified arguments and still runs post hooks", async () => {

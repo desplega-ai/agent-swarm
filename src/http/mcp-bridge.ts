@@ -8,7 +8,7 @@ import {
 } from "@modelcontextprotocol/sdk/server/zod-compat.js";
 import { z } from "zod";
 import { createServer } from "@/server";
-import { isExtensionAgentId } from "../extensions/dispatcher";
+import { resolveBridgeCallOrigin } from "../extensions/dispatcher";
 import { isMcpToolAllowedForScripts } from "../scripts-runtime/sdk-allowlist";
 import {
   markExtensionRequestOrigin,
@@ -135,6 +135,11 @@ const mcpBridgeRoute = route({
   },
 });
 
+function headerValue(req: IncomingMessage, name: string): string | undefined {
+  const value = req.headers[name];
+  return Array.isArray(value) ? value[0] : value;
+}
+
 export async function handleMcpBridge(
   req: IncomingMessage,
   res: ServerResponse,
@@ -149,14 +154,10 @@ export async function handleMcpBridge(
 
   const { tool: toolName, args } = parsed.body;
 
-  const sourceTaskId = Array.isArray(req.headers["x-source-task-id"])
-    ? req.headers["x-source-task-id"][0]
-    : (req.headers["x-source-task-id"] as string | undefined);
+  const sourceTaskId = headerValue(req, "x-source-task-id");
   // Runtime identity rides the bridge like the agent identity so the
   // work-acquisition gates in bridged tools see the invoking worker process.
-  const runtimeInstanceId = Array.isArray(req.headers["x-runtime-instance-id"])
-    ? req.headers["x-runtime-instance-id"][0]
-    : (req.headers["x-runtime-instance-id"] as string | undefined);
+  const runtimeInstanceId = headerValue(req, "x-runtime-instance-id");
 
   try {
     const result = await invokeToolInProcess({
@@ -165,7 +166,9 @@ export async function handleMcpBridge(
       agentId: myAgentId,
       sourceTaskId,
       runtimeInstanceId,
-      callOrigin: isExtensionAgentId(myAgentId) ? "extension" : "script-sdk",
+      // The agent header is caller-controlled; the extension origin also needs the
+      // per-process token that only the in-process extension SDK holds.
+      callOrigin: resolveBridgeCallOrigin(myAgentId, headerValue(req, "x-extension-token")),
     });
 
     if (result && typeof result === "object" && "structuredContent" in result) {

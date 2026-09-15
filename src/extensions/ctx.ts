@@ -7,7 +7,7 @@ import { createSwarmSdk } from "../scripts-runtime/swarm-sdk";
 import { getApiKey } from "../utils/api-key";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import type { ApiCtx, ExtensionLogger, ExtensionState, SwarmEventMap } from "./contract";
-import { ExtensionAbortedError, isRegistered } from "./dispatcher";
+import { ExtensionAbortedError, getExtensionBridgeToken, isRegistered } from "./dispatcher";
 import { getExtensionLoopbackBaseUrl } from "./lifecycle";
 import type { LoadedExtension } from "./loader";
 
@@ -149,6 +149,7 @@ export function buildCtx(
           apiKey: { value: getApiKey(), isSecret: true },
           agentId: { value: loaded.record.agentId, isSecret: false },
           mcpBaseUrl: { value: getExtensionLoopbackBaseUrl(), isSecret: false },
+          extensionToken: { value: getExtensionBridgeToken(), isSecret: true },
         },
         user: {},
       }),

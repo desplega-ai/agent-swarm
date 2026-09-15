@@ -119,7 +119,7 @@ All emitted error text passes through `scrubSecrets`.
 
 The extension identity is the system agent `ext:<name>`.
 Every `ctx.swarm` call uses that agent ID.
-The server assigns `callOrigin: "extension"` from the registered identity.
+The server assigns `callOrigin: "extension"` only when the request carries both the registered `ext:<name>` agent ID and the per-process bridge token (`X-Extension-Token`, held only by the in-process SDK). An agent header alone yields the ordinary `script-sdk` origin.
 Extension-originated calls bypass `pre.tool.call` and `post.tool.call`.
 This rule prevents tool-hook recursion.
 
