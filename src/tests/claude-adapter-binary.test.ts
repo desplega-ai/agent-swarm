@@ -17,8 +17,8 @@
  *      `projects[cwd].hasTrustDialogAccepted: true` to `$HOME/.claude.json`
  *      before spawning. Idempotent. No-op for "claude".
  *
- * `Bun.spawn` and the synchronous binary-version probe are stubbed so the
- * tests don't actually exec anything; we read the argv off the call args.
+ * `Bun.spawn` is stubbed so the tests don't actually exec anything; we read
+ * the session argv off the call args and ignore the binary-version probe.
  * `Bun.which` is stubbed for the tmux gate so the tests don't depend on the
  * host having tmux installed. `$HOME` is redirected to a tmp dir so the
  * trust-preseed never touches the real `~/.claude.json`.
@@ -74,17 +74,6 @@ function makeFakeProc(): ReturnType<typeof Bun.spawn> {
     ref: () => {},
     unref: () => {},
   } as unknown as ReturnType<typeof Bun.spawn>;
-}
-
-/**
- * The adapter probes `<binary> --version` synchronously before it spawns the
- * session. Keep integration tests hermetic: a `bunx <package>` probe can do
- * package resolution and outlive Bun's per-test timeout under CI load.
- */
-function mockClaudeVersionProbe(): ReturnType<typeof spyOn> {
-  return spyOn(Bun, "spawnSync").mockImplementation((() => ({
-    success: false,
-  })) as typeof Bun.spawnSync);
 }
 
 async function createCompletedSession(adapter: ClaudeAdapter, config: ProviderSessionConfig) {
@@ -384,7 +373,6 @@ describe("CLAUDE_BINARY env override", () => {
   let originalHome: string | undefined;
   let homeDir: string;
   let spawnSpy: ReturnType<typeof spyOn>;
-  let spawnSyncSpy: ReturnType<typeof spyOn>;
   let whichSpy: ReturnType<typeof spyOn>;
   let spawnedArgs: Array<readonly string[]>;
   let spawnedEnvs: Array<Record<string, string> | undefined>;
@@ -405,11 +393,12 @@ describe("CLAUDE_BINARY env override", () => {
     spawnedArgs = [];
     spawnedEnvs = [];
     spawnSpy = spyOn(Bun, "spawn").mockImplementation(((cmd: readonly string[], opts?: unknown) => {
-      spawnedArgs.push(cmd);
-      spawnedEnvs.push((opts as { env?: Record<string, string> } | undefined)?.env);
+      if (cmd.at(-1) !== "--version") {
+        spawnedArgs.push(cmd);
+        spawnedEnvs.push((opts as { env?: Record<string, string> } | undefined)?.env);
+      }
       return makeFakeProc();
     }) as typeof Bun.spawn);
-    spawnSyncSpy = mockClaudeVersionProbe();
 
     // Default: pretend tmux IS on PATH so non-tmux-gate tests don't trip.
     whichSpy = spyOn(Bun, "which").mockImplementation((name: string) => {
@@ -420,7 +409,6 @@ describe("CLAUDE_BINARY env override", () => {
 
   afterEach(async () => {
     spawnSpy.mockRestore();
-    spawnSyncSpy.mockRestore();
     whichSpy.mockRestore();
     await rm(homeDir, { recursive: true, force: true });
     if (originalHome === undefined) {
@@ -695,7 +683,6 @@ describe("Claude Bridge tmux fail-fast gate", () => {
   let originalHome: string | undefined;
   let homeDir: string;
   let spawnSpy: ReturnType<typeof spyOn>;
-  let spawnSyncSpy: ReturnType<typeof spyOn>;
   let whichSpy: ReturnType<typeof spyOn>;
 
   beforeEach(async () => {
@@ -709,13 +696,11 @@ describe("Claude Bridge tmux fail-fast gate", () => {
     delete process.env.SWARM_USE_CLAUDE_BRIDGE;
     process.env.CLAUDE_CODE_OAUTH_TOKEN = "test-token";
     spawnSpy = spyOn(Bun, "spawn").mockImplementation((() => makeFakeProc()) as typeof Bun.spawn);
-    spawnSyncSpy = mockClaudeVersionProbe();
     whichSpy = spyOn(Bun, "which");
   });
 
   afterEach(async () => {
     spawnSpy.mockRestore();
-    spawnSyncSpy.mockRestore();
     whichSpy.mockRestore();
     await rm(homeDir, { recursive: true, force: true });
     if (originalHome === undefined) {
@@ -815,7 +800,6 @@ describe("Trust pre-seed via ClaudeAdapter.createSession", () => {
   let originalHome: string | undefined;
   let homeDir: string;
   let spawnSpy: ReturnType<typeof spyOn>;
-  let spawnSyncSpy: ReturnType<typeof spyOn>;
   let whichSpy: ReturnType<typeof spyOn>;
 
   beforeEach(async () => {
@@ -829,7 +813,6 @@ describe("Trust pre-seed via ClaudeAdapter.createSession", () => {
     delete process.env.SWARM_USE_CLAUDE_BRIDGE;
     process.env.CLAUDE_CODE_OAUTH_TOKEN = "test-token";
     spawnSpy = spyOn(Bun, "spawn").mockImplementation((() => makeFakeProc()) as typeof Bun.spawn);
-    spawnSyncSpy = mockClaudeVersionProbe();
     whichSpy = spyOn(Bun, "which").mockImplementation((name: string) => {
       if (name === "tmux") return "/usr/bin/tmux";
       return null;
@@ -838,7 +821,6 @@ describe("Trust pre-seed via ClaudeAdapter.createSession", () => {
 
   afterEach(async () => {
     spawnSpy.mockRestore();
-    spawnSyncSpy.mockRestore();
     whichSpy.mockRestore();
     await rm(homeDir, { recursive: true, force: true });
     if (originalHome === undefined) {

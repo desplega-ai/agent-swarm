@@ -228,10 +228,12 @@ describe("ClaudeSession spawn env — SWARM_ENABLE_CLAUDE_CODE_OTEL", () => {
   beforeEach(() => {
     spawnedEnvs = [];
     spawnSpy = spyOn(Bun, "spawn").mockImplementation(((
-      _cmd: readonly string[],
+      cmd: readonly string[],
       opts?: { env?: Record<string, string> },
     ) => {
-      spawnedEnvs.push(opts?.env);
+      if (cmd.at(-1) !== "--version") {
+        spawnedEnvs.push(opts?.env);
+      }
       return makeFakeProc();
     }) as typeof Bun.spawn);
     getActiveSpanSpy = spyOn(trace, "getActiveSpan").mockReturnValue(makeSpan());

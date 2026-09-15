@@ -96,6 +96,8 @@ export function parseClaudeBinary(raw: string | undefined): string[] {
 }
 
 const MIN_CLAUDE_QUEUE_STEERING_VERSION = [2, 1, 205] as const;
+const CLAUDE_VERSION_PROBE_TIMEOUT_MS = 1_000;
+const CLAUDE_VERSION_PROBE_MAX_BUFFER_BYTES = 64 * 1024;
 
 /**
  * Operator kill-switch for the stream-json invocation path.
@@ -1157,14 +1159,25 @@ export class ClaudeAdapter implements ProviderAdapter {
     const queueSteeringOverride = resolveClaudeQueueSteeringOverride(sourceEnv);
     let harnessVersion: string | undefined;
     try {
-      const result = Bun.spawnSync([...effectiveClaudeBinaryArgv, "--version"], {
-        env: sourceEnv,
-        stdout: "pipe",
-        stderr: "pipe",
-      });
-      if (result.success) {
-        const trimmed =
-          `${result.stdout?.toString() ?? ""}\n${result.stderr?.toString() ?? ""}`.trim();
+      const probe = registerProcessGroup(
+        Bun.spawn([...effectiveClaudeBinaryArgv, "--version"], {
+          detached: detachedProcessGroup,
+          env: sourceEnv,
+          stdin: "ignore",
+          stdout: "pipe",
+          stderr: "pipe",
+          timeout: CLAUDE_VERSION_PROBE_TIMEOUT_MS,
+          killSignal: "SIGKILL",
+          maxBuffer: CLAUDE_VERSION_PROBE_MAX_BUFFER_BYTES,
+        }),
+      );
+      const exitCode = await probe.exited.finally(() => terminateProcessGroup(probe.pid));
+      const [stdout, stderr] = await Promise.all([
+        new Response(probe.stdout).text(),
+        new Response(probe.stderr).text(),
+      ]);
+      if (exitCode === 0) {
+        const trimmed = `${stdout}\n${stderr}`.trim();
         if (trimmed) {
           harnessVersion = trimmed;
           harnessVariantMeta = { version: trimmed };

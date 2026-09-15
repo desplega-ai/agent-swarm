@@ -100,10 +100,12 @@ describe("ClaudeSession spawn env — reasoning_effort", () => {
   beforeEach(() => {
     spawnedEnvs = [];
     spawnSpy = spyOn(Bun, "spawn").mockImplementation(((
-      _cmd: readonly string[],
+      cmd: readonly string[],
       opts?: { env?: Record<string, string> },
     ) => {
-      spawnedEnvs.push(opts?.env);
+      if (cmd.at(-1) !== "--version") {
+        spawnedEnvs.push(opts?.env);
+      }
       return makeFakeProc();
     }) as typeof Bun.spawn);
   });
