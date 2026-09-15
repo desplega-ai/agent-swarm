@@ -7,7 +7,6 @@ import { resolveSlackUserId, rewriteSlackMentions } from "./enrich";
 import { wasEventSeen } from "./event-dedup";
 import type { SlackFile } from "./files";
 import {
-  bufferedFileFailures,
   buildEffectiveText,
   createSlackTaskWithFiles,
   fetchSlackFiles,
@@ -128,21 +127,12 @@ export function createAssistant(): Assistant {
         // 1. Check if an agent is already working in this thread
         const workingAgent = await getAgentWorkingOnThread(channelId, threadTs);
 
-        // Follow-up message → route to the same agent. Buffered follow-ups
-        // carry the `[File: …]` lines only; their files are not attached.
+        // Follow-up message → buffer text and file metadata until the flush.
         if (workingAgent && workingAgent.status !== "offline" && isAdditiveSlack()) {
-          const unattached = bufferedFileFailures(files);
-          bufferThreadMessage(
-            channelId,
-            threadTs,
-            buildEffectiveText(messageText, files, unattached),
-            userId,
-            message.ts,
-          );
+          bufferThreadMessage(channelId, threadTs, messageText, userId, message.ts, files);
           const count = getBufferMessageCount(`${channelId}:${threadTs}`);
           const event = count === 1 ? "accepted" : "buffered";
           await ackSlackMessage(client, channelId, message.ts, reactionName(event), event);
-          await notifySlackFileFailures(client, channelId, threadTs, unattached);
           await safeSetStatus("Queuing follow-up...");
           return;
         }

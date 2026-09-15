@@ -16,7 +16,6 @@ import { enrichSlackUserEmail, resolveSlackUserId, rewriteSlackMentions } from "
 import { wasEventSeen } from "./event-dedup";
 import type { SlackFile } from "./files";
 import {
-  bufferedFileFailures,
   buildEffectiveText,
   createSlackTaskWithFiles,
   fetchSlackFiles,
@@ -487,11 +486,7 @@ export function registerMessageHandler(app: App): void {
       false,
     );
     if (additiveSlack && msg.thread_ts) {
-      // A !now follow-up is buffered too: its files ride along as marked `[File: …]` lines only.
-      const unattached = bufferedFileFailures(msg.files);
-      const stripped = buildEffectiveText(msg.text, msg.files, unattached)
-        .replace(/<@[A-Z0-9]+>/g, "")
-        .trim();
+      const stripped = (msg.text ?? "").replace(/<@[A-Z0-9]+>/g, "").trim();
       if (
         stripped.startsWith("!now") &&
         (await hasSwarmThreadActivity(client, msg.channel, msg.thread_ts))
@@ -503,15 +498,14 @@ export function registerMessageHandler(app: App): void {
           `[Slack] !now command detected in thread ${threadKey}${nowMessage ? ` with message: "${nowMessage}"` : ""}`,
         );
 
-        if (nowMessage) {
-          bufferThreadMessage(msg.channel, msg.thread_ts, nowMessage, msg.user, msg.ts);
+        if (nowMessage || msg.files?.length) {
+          bufferThreadMessage(msg.channel, msg.thread_ts, nowMessage, msg.user, msg.ts, msg.files);
         }
 
         // Instant flush — no dependency
         await instantFlush(threadKey);
 
         await ackSlackMessage(client, msg.channel, msg.ts, reactionName("now"), "now");
-        await notifySlackFileFailures(client, msg.channel, msg.thread_ts, unattached);
 
         return;
       }
@@ -538,14 +532,13 @@ export function registerMessageHandler(app: App): void {
 
       if (hasSwarmActivity) {
         const threadKey = `${msg.channel}:${msg.thread_ts}`;
-        // Buffered follow-ups carry the `[File: …]` lines only; their files are not attached.
-        const unattached = bufferedFileFailures(msg.files);
         bufferThreadMessage(
           msg.channel,
           msg.thread_ts,
-          buildEffectiveText(msg.text, msg.files, unattached),
+          msg.text ?? "",
           msg.user,
           msg.ts,
+          msg.files,
         );
 
         // Slack feedback: react with the accepted reaction on first buffer, buffered on appends
@@ -554,7 +547,6 @@ export function registerMessageHandler(app: App): void {
         const name = reactionName(event);
         console.log(`[Slack] Additive buffer: ${threadKey} (message #${count}, reaction: ${name})`);
         await ackSlackMessage(client, msg.channel, msg.ts, name, event);
-        await notifySlackFileFailures(client, msg.channel, msg.thread_ts, unattached);
 
         return; // Don't process further — buffer will flush
       }
