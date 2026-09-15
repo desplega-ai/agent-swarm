@@ -18,6 +18,14 @@ declare module "swarm-extension" {
       | "linear"
       | "jira"
       | undefined;
+    routingReason?:
+      | "skill"
+      | "continuity"
+      | "overflow"
+      | "human_pinned"
+      | "reroute_fault"
+      | undefined;
+    routingNote?: string | undefined;
     taskType?: string | undefined;
     tags?: string[] | undefined;
     priority?: number | undefined;
@@ -124,6 +132,14 @@ declare module "swarm-extension" {
     wasPaused: boolean;
     creatorAgentId?: string | undefined;
     title?: string | undefined;
+    routingReason?:
+      | "skill"
+      | "continuity"
+      | "overflow"
+      | "human_pinned"
+      | "reroute_fault"
+      | undefined;
+    routingNote?: string | undefined;
     taskType?: string | undefined;
     offeredTo?: string | undefined;
     offeredAt?: string | undefined;
