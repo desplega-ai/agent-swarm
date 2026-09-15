@@ -520,7 +520,7 @@ describe("LlmRater.rate(ctx) — per-memory path with MockLlmRaterClient", () =>
 let TEST_PORT = 0;
 const TEST_DB_PATH = `/tmp/test-memory-rater-llm-${Date.now()}.sqlite`;
 let BASE = "";
-const API_KEY = "test-key";
+const API_KEY = "example-test-key";
 
 let serverProc: Subprocess;
 const agentA = randomUUID();

@@ -45,12 +45,12 @@ describe("runComposioCommand", () => {
     const fetchMock = mock(async (url: string | URL | Request, init?: RequestInit) => {
       expect(String(url)).toBe("https://backend.composio.dev/api/v3.1/tools?limit=10");
       expect(init?.method).toBe("GET");
-      expect((init?.headers as Record<string, string>)["x-api-key"]).toBe("ck_test_secret");
-      return jsonResponse({ ok: true, token: "ck_test_secret" });
+      expect((init?.headers as Record<string, string>)["x-api-key"]).toBe("example-ck_test_secret");
+      return jsonResponse({ ok: true, token: "example-ck_test_secret" });
     });
 
     await runComposioCommand(["GET", "/tools", "--query", "limit=10"], {
-      env: { COMPOSIO_API_KEY: "ck_test_secret" },
+      env: { COMPOSIO_API_KEY: "example-ck_test_secret" },
       fetch: fetchMock,
       log: (message) => out.push(message),
       error: (message) => out.push(message),
@@ -62,18 +62,20 @@ describe("runComposioCommand", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(out.join("\n")).toContain('"ok": true');
     expect(out.join("\n")).toContain("[REDACTED:COMPOSIO_API_KEY]");
-    expect(out.join("\n")).not.toContain("ck_test_secret");
+    expect(out.join("\n")).not.toContain("example-ck_test_secret");
   });
 
   test("uses org key header when --org is passed", async () => {
     const fetchMock = mock(async (_url: string | URL | Request, init?: RequestInit) => {
-      expect((init?.headers as Record<string, string>)["x-org-api-key"]).toBe("org_secret_value");
+      expect((init?.headers as Record<string, string>)["x-org-api-key"]).toBe(
+        "example-org_secret_value",
+      );
       expect((init?.headers as Record<string, string>)["x-api-key"]).toBeUndefined();
       return jsonResponse({ ok: true });
     });
 
     await runComposioCommand(["GET", "/org/projects", "--org"], {
-      env: { COMPOSIO_ORG_API_KEY: "org_secret_value" },
+      env: { COMPOSIO_ORG_API_KEY: "example-org_secret_value" },
       fetch: fetchMock,
       log: () => {},
       error: () => {},
@@ -108,7 +110,7 @@ describe("runXCommand", () => {
   test("dispatches to composio target", async () => {
     const fetchMock = mock(async () => jsonResponse({ ok: true }));
     await runXCommand(["composio", "GET", "/tools"], {
-      env: { COMPOSIO_API_KEY: "ck_test_secret" },
+      env: { COMPOSIO_API_KEY: "example-ck_test_secret" },
       fetch: fetchMock,
       log: () => {},
       error: () => {},

@@ -27,7 +27,7 @@ import { summarizeSessionForPi } from "../providers/pi-mono-extension";
 function makeConfig(): SwarmHooksConfig {
   return {
     apiUrl: "http://localhost:3013",
-    apiKey: "test-key",
+    apiKey: "example-test-key",
     agentId: "agent-pi-1",
     taskId: "task-pi-1",
     isLead: false,
@@ -135,7 +135,7 @@ describe("summarizeSessionForPi", () => {
     expect(lastRunSummarizeArgs!.taskContext.sourceTaskId).toBe("task-pi-1");
     expect(lastRunSummarizeArgs!.taskContext.agentId).toBe("agent-pi-1");
     expect(lastRunSummarizeArgs!.apiUrl).toBe("http://localhost:3013");
-    expect(lastRunSummarizeArgs!.apiKey).toBe("test-key");
+    expect(lastRunSummarizeArgs!.apiKey).toBe("example-test-key");
 
     const indexCalls = fetchCalls.filter((c) => c.url.endsWith("/api/memory/index"));
     expect(indexCalls.length).toBe(1);

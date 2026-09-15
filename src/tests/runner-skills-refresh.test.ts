@@ -126,7 +126,7 @@ describe("refreshSkillsIfChanged", () => {
     return {
       apiUrl: baseUrl,
       swarmUrl: "app.agent-swarm.dev",
-      apiKey: "test-key",
+      apiKey: "example-test-key",
       agentId: "agent-1",
       role: "worker",
     };

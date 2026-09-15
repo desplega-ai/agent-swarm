@@ -55,7 +55,7 @@ const savedEnv = { ...process.env };
 
 beforeEach(() => {
   clearVolatileSecretsForTesting();
-  process.env.AGENT_SWARM_API_KEY = "embedded-auth-test-key";
+  process.env.AGENT_SWARM_API_KEY = "example-embedded-auth-test-key";
   delete process.env.API_KEY;
   process.env.MCP_BASE_URL = "http://localhost:3013";
 });
@@ -101,7 +101,7 @@ describe("embedded connection auth", () => {
       kind: "graphql",
       baseUrl: "https://api.vendor.test/graphql",
       allowedHosts: ["api.vendor.test"],
-      auth: { type: "bearer", secret: "test-tok-123" },
+      auth: { type: "bearer", secret: "example-test-tok-123" },
     });
     createdConnectionIds.push(connection.id);
 
@@ -124,16 +124,16 @@ describe("embedded connection auth", () => {
     );
     expect(raw?.isSecret).toBe(1);
     expect(raw?.encrypted).toBe(1);
-    expect(raw?.value).not.toBe("test-tok-123");
+    expect(raw?.value).not.toBe("example-test-tok-123");
     // Decrypts back to plaintext on read.
     expect((await getSwarmConfigs({ key: "connection.bearerVendor.secret" }))[0]?.value).toBe(
-      "test-tok-123",
+      "example-test-tok-123",
     );
 
     // The broker registers the resolved secret with the scrubber so logs/output
     // only ever show the placeholder — never the raw value.
     await buildScriptCredentialBindings({});
-    expect(scrubSecrets("token=test-tok-123")).toContain(
+    expect(scrubSecrets("token=example-test-tok-123")).toContain(
       "[REDACTED:connection.bearerVendor.secret]",
     );
   });
@@ -202,7 +202,7 @@ describe("embedded connection auth", () => {
     if (!app) throw new Error("app not created");
     const authorization = await upsertAuthorization({
       appId: app.id,
-      accessToken: "oauth-access-token",
+      accessToken: "example-oauth-access-token",
       status: "active",
     });
 
@@ -313,7 +313,7 @@ describe("embedded connection auth", () => {
       kind: "graphql",
       baseUrl: "https://api.vendor.test/graphql",
       allowedHosts: ["api.vendor.test"],
-      auth: { type: "bearer", secret: "slug-secret-1" },
+      auth: { type: "bearer", secret: "example-slug-secret-1" },
     });
     createdConnectionIds.push(connection.id);
     expect(await getSwarmConfigs({ key: "connection.slugOne.secret" })).toHaveLength(1);
@@ -324,17 +324,19 @@ describe("embedded connection auth", () => {
       kind: "graphql",
       baseUrl: "https://api.vendor.test/graphql",
       allowedHosts: ["api.vendor.test"],
-      auth: { type: "bearer", secret: "slug-secret-2" },
+      auth: { type: "bearer", secret: "example-slug-secret-2" },
     });
     expect(renamed.authConfigKey).toBe("connection.slugTwo.secret");
     // Old derived secret is gone; the new one holds the new value.
     expect(await getSwarmConfigs({ key: "connection.slugOne.secret" })).toHaveLength(0);
     expect((await getSwarmConfigs({ key: "connection.slugTwo.secret" }))[0]?.value).toBe(
-      "slug-secret-2",
+      "example-slug-secret-2",
     );
     // Stale key no longer scrubbed; new key is.
     await buildScriptCredentialBindings({});
-    expect(scrubSecrets("v=slug-secret-2")).toContain("[REDACTED:connection.slugTwo.secret]");
+    expect(scrubSecrets("v=example-slug-secret-2")).toContain(
+      "[REDACTED:connection.slugTwo.secret]",
+    );
   });
 
   test("switching an inline-secret connection to oauth deletes the derived inline secret", async () => {
@@ -351,7 +353,7 @@ describe("embedded connection auth", () => {
     if (!app) throw new Error("app not created");
     const authorization = await upsertAuthorization({
       appId: app.id,
-      accessToken: "oauth-access-token",
+      accessToken: "example-oauth-access-token",
       status: "active",
     });
 
@@ -360,7 +362,7 @@ describe("embedded connection auth", () => {
       kind: "graphql",
       baseUrl: "https://api.vendor.test/graphql",
       allowedHosts: ["api.vendor.test"],
-      auth: { type: "bearer", secret: "switch-secret" },
+      auth: { type: "bearer", secret: "example-switch-secret" },
     });
     createdConnectionIds.push(connection.id);
     expect(await getSwarmConfigs({ key: "connection.switchVendor.secret" })).toHaveLength(1);
@@ -387,7 +389,7 @@ describe("embedded connection auth", () => {
       kind: "graphql",
       baseUrl: "https://api.vendor.test/graphql",
       allowedHosts: ["api.vendor.test"],
-      auth: { type: "bearer", secret: "keep-secret" },
+      auth: { type: "bearer", secret: "example-keep-secret" },
     });
     createdConnectionIds.push(connection.id);
 
@@ -402,7 +404,7 @@ describe("embedded connection auth", () => {
     });
     expect(updated.authConfigKey).toBe("connection.keepVendor.secret");
     expect((await getSwarmConfigs({ key: "connection.keepVendor.secret" }))[0]?.value).toBe(
-      "keep-secret",
+      "example-keep-secret",
     );
   });
 
@@ -413,7 +415,7 @@ describe("embedded connection auth", () => {
       kind: "graphql",
       baseUrl: "https://api.vendor.test/graphql",
       allowedHosts: ["api.vendor.test"],
-      auth: { type: "bearer", secret: "rename-secret" },
+      auth: { type: "bearer", secret: "example-rename-secret" },
     });
     createdConnectionIds.push(connection.id);
     expect(await getSwarmConfigs({ key: "connection.renameOne.secret" })).toHaveLength(1);
@@ -689,7 +691,7 @@ describe("embedded connection auth", () => {
         kind: "openapi",
         baseUrl: `http://127.0.0.1:${server.port}`,
         openapiSpecJson: openapiSpec(server.port),
-        auth: { type: "bearer", secret: "e2e-secret-xyz" },
+        auth: { type: "bearer", secret: "example-e2e-secret-xyz" },
       });
       createdConnectionIds.push(connection.id);
       expect(connection.generationError).toBeNull();
@@ -708,9 +710,9 @@ describe("embedded connection auth", () => {
 
       expect(output.error).toBeUndefined();
       expect(output.result).toEqual({ ok: true });
-      expect(observedAuth).toBe("Bearer e2e-secret-xyz");
+      expect(observedAuth).toBe("Bearer example-e2e-secret-xyz");
       // The raw secret never appears in script output/logs — only the placeholder.
-      expect(JSON.stringify(output)).not.toContain("e2e-secret-xyz");
+      expect(JSON.stringify(output)).not.toContain("example-e2e-secret-xyz");
     } finally {
       server.stop(true);
     }

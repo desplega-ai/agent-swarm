@@ -49,6 +49,8 @@ flag; without it, the existing follow-up task behavior is unchanged.
 ### Buffer flush behavior
 
 - All buffered messages are concatenated with `---` separators
+- File metadata stays in the buffer; files are downloaded and attached at flush time, including `!now`. Batches with files skip steering and create a follow-up task whose uploads finish before it can be claimed. Text-only batches retain the configured steering behavior.
+- Files that cannot be downloaded or stored keep an explicit failure notice. If the Slack app is unavailable at flush, the task keeps the file names marked as unattached.
 - The task is created as `pending` status
 - If there is an active task in the thread, the new task gets `dependsOn` set to it (dependency chaining)
 - If there is no active task, the new task has no dependency and is immediately pickable

@@ -588,7 +588,7 @@ describe("Workflow Integration — I/O Schemas, Convergence, TriggerSchema (Phas
       };
 
       // Set env var for input resolution
-      process.env.TEST_INTEG_API_KEY = "secret123";
+      process.env.TEST_INTEG_API_KEY = "example-secret123";
       const workflow = await makeWorkflow(def, {
         // biome-ignore lint/suspicious/noTemplateCurlyInString: testing env var syntax
         input: { API_KEY: "${TEST_INTEG_API_KEY}" },
@@ -600,7 +600,7 @@ describe("Workflow Integration — I/O Schemas, Convergence, TriggerSchema (Phas
       expect(run!.status).toBe("completed");
 
       const ctx = run!.context as Record<string, unknown>;
-      expect(ctx.step1).toEqual({ echo: "env=secret123" });
+      expect(ctx.step1).toEqual({ echo: "env=example-secret123" });
     });
   });
 

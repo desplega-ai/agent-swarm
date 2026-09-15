@@ -24,7 +24,7 @@ import { getPathSegments, parseQueryParams } from "../http/utils";
 import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-whoami-route.sqlite";
-const API_KEY = "test-api-key";
+const API_KEY = "example-test-api-key";
 const ACTOR: IdentityActor = { kind: "operator", id: "op:test" };
 
 interface WhoamiBody {

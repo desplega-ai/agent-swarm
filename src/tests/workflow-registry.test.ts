@@ -500,7 +500,7 @@ describe("Workflow Registry & Definition (Phase 1)", () => {
             { id: "b", type: "notify", config: { channel: "swarm", template: "done" } },
           ],
         },
-        triggers: [{ type: "webhook", hmacSecret: "test-secret" }],
+        triggers: [{ type: "webhook", hmacSecret: "example-test-secret" }],
         cooldown: { hours: 1 },
         input: { apiKey: envVarRef },
       });

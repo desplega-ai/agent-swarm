@@ -23,7 +23,7 @@ import { handleMcpUser } from "../http/mcp-user";
 import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-mcp-user-route.sqlite";
-const API_KEY = "test-mcp-user-key";
+const API_KEY = "example-test-mcp-user-key";
 const ACTOR: IdentityActor = { kind: "operator", id: "test" };
 
 async function removeDbFiles(path: string): Promise<void> {

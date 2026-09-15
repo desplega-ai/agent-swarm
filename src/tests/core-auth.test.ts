@@ -15,7 +15,7 @@ import "../http/trackers/linear";
 import "../http/workflows";
 import { listenOnFreePort } from "./test-net";
 
-const API_KEY = "test-secret-key";
+const API_KEY = "example-test-secret-key";
 
 function createTestServer(apiKey: string): Server {
   return createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {

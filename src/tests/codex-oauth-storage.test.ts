@@ -12,7 +12,7 @@ import {
 import type { CodexOAuthCredentials } from "../providers/codex-oauth/types.js";
 
 const MOCK_API_URL = "http://localhost:3013";
-const MOCK_API_KEY = "test-api-key";
+const MOCK_API_KEY = "example-test-api-key";
 
 const mockCreds: CodexOAuthCredentials = {
   access: "at_test123",
@@ -500,8 +500,8 @@ describe("getValidCodexOAuth", () => {
       async () =>
         new Response(
           JSON.stringify({
-            access_token: "at_refreshed",
-            refresh_token: "rt_refreshed",
+            access_token: "example-at_refreshed",
+            refresh_token: "example-rt_refreshed",
             expires_in: 3600,
           }),
           { status: 200 },
@@ -509,7 +509,7 @@ describe("getValidCodexOAuth", () => {
     );
 
     const result = await getValidCodexOAuth(MOCK_API_URL, MOCK_API_KEY, 0);
-    expect(result?.access).toBe("at_refreshed");
+    expect(result?.access).toBe("example-at_refreshed");
     expect(putCapturedKey).toBe("codex_oauth_0");
   });
 
@@ -601,8 +601,8 @@ describe("getValidCodexOAuth", () => {
       async () =>
         new Response(
           JSON.stringify({
-            access_token: "at_keepwarm_refreshed",
-            refresh_token: "rt_keepwarm_refreshed",
+            access_token: "example-at_keepwarm_refreshed",
+            refresh_token: "example-rt_keepwarm_refreshed",
             expires_in: 3600,
           }),
           { status: 200 },
@@ -612,7 +612,7 @@ describe("getValidCodexOAuth", () => {
     const result = await getValidCodexOAuth(MOCK_API_URL, MOCK_API_KEY, 0, {
       maxAgeMs: 7 * 24 * 60 * 60 * 1000,
     });
-    expect(result?.access).toBe("at_keepwarm_refreshed");
+    expect(result?.access).toBe("example-at_keepwarm_refreshed");
     expect(putCapturedKey).toBe("codex_oauth_0");
   });
 

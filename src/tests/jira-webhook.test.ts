@@ -20,7 +20,7 @@ import {
 import * as syncModule from "../jira/sync";
 
 const TEST_DB_PATH = "./test-jira-webhook.sqlite";
-const TEST_TOKEN = "test-jira-webhook-token-deadbeefcafe1234";
+const TEST_TOKEN = "example-test-jira-webhook-token-deadbeefcafe1234";
 
 // Spy on the sync handlers — using mock.module here would leak globally
 // because bun's mock.module has no documented restore. spyOn is restored by
@@ -39,7 +39,7 @@ beforeAll(async () => {
   // Seed an oauth app so any nested calls don't blow up.
   await upsertOAuthApp("jira", {
     clientId: "client-id",
-    clientSecret: "client-secret",
+    clientSecret: "example-client-secret",
     authorizeUrl: "https://auth.atlassian.com/authorize",
     tokenUrl: "https://auth.atlassian.com/oauth/token",
     redirectUri: "http://localhost:3013/api/trackers/jira/callback",

@@ -64,7 +64,7 @@ const memoryId = "22222222-2222-4222-8222-222222222222";
 describe("memory_rate MCP tool", () => {
   beforeEach(() => {
     process.env.MCP_BASE_URL = "http://test-host:9999";
-    process.env.API_KEY = "test-key";
+    process.env.API_KEY = "example-test-key";
   });
 
   afterEach(() => {
@@ -89,7 +89,7 @@ describe("memory_rate MCP tool", () => {
     expect(calls[0]!.init?.method).toBe("POST");
     const headers = calls[0]!.init?.headers as Record<string, string>;
     expect(headers["X-Agent-ID"]).toBe("agent-abc");
-    expect(headers.Authorization).toBe("Bearer test-key");
+    expect(headers.Authorization).toBe("Bearer example-test-key");
     const body = JSON.parse(calls[0]!.init?.body as string);
     expect(body).toEqual({
       events: [

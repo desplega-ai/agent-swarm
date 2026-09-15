@@ -594,8 +594,8 @@ describe("ScriptExecutor", () => {
 
   skip("child process never inherits the server's secrets — env is scrubbed, not passed through", async () => {
     const savedKey = process.env.AGENT_SWARM_API_KEY;
-    process.env.AGENT_SWARM_API_KEY = "super-secret-operator-bearer";
-    process.env.SOME_OTHER_SERVER_SECRET = "also-should-not-leak";
+    process.env.AGENT_SWARM_API_KEY = "example-super-secret-operator-bearer";
+    process.env.SOME_OTHER_SERVER_SECRET = "example-also-should-not-leak";
     try {
       const result = await executor.run(
         input(

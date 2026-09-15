@@ -9,6 +9,6 @@
   "category": "workflows",
   "placeholders": [],
   "requires": [],
-  "runAllSeedersCandidate": false,
+  "runAllSeedersCandidate": true,
   "tags": ["release-notes", "harness"]
 }

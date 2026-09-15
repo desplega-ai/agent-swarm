@@ -73,7 +73,7 @@ describe("Automation preflight alerts", () => {
   });
 
   test("scrubs alert text and logs Slack failures without throwing", async () => {
-    const secret = "preflight-alert-sensitive-fixture";
+    const secret = "example-preflight-alert-sensitive-fixture";
     registerVolatileSecret(secret, "PREFLIGHT_TEST_SECRET");
     postMessage.mockRejectedValueOnce(new Error(`Slack failed: ${secret}`));
     const error = spyOn(console, "error").mockImplementation(() => {});

@@ -26,7 +26,7 @@ import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
 const spawnDescribe = describe.skipIf(SKIP_SANDBOX_SPAWN_TESTS);
 
 const TEST_DB_PATH = "./test-workflow-e2e.sqlite";
-const API_KEY = "test-workflow-e2e-key-1234567890";
+const API_KEY = "example-test-workflow-e2e-key-1234567890";
 
 const noOpEmbeddingProvider = {
   name: "test/noop-workflow-e2e-embedding",

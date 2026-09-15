@@ -19,6 +19,7 @@ import {
   completeTask,
   createAgent,
   createTaskExtended,
+  createUser,
   createWorkflow,
   createWorkflowRun,
   createWorkflowRunStep,
@@ -183,14 +184,30 @@ describe("defer-task handler", () => {
 
     const stored = await getTaskById(task.id);
     expect(stored?.status).toBe("completed");
-    // Summary first, then the deferral status line, then the checks.
-    expect(stored?.output).toBe(
+    // Human-facing output: one line, `Deferred until {date} {time} ({link}) -> {desc}`.
+    // No requestedByUserId is set on this task, so it falls back to UTC and
+    // labels it explicitly.
+    const shortId = schedule.id.slice(0, 8);
+    expect(stored?.output).toMatch(
+      /^Deferred until (today|tomorrow|\d{2}-\d{2}) \d{2}:\d{2}:\d{2} UTC \(/,
+    );
+    expect(stored?.output).toContain(
+      `([${shortId}](https://app.agent-swarm.dev/schedules/${schedule.id})) -> deploy 42 is still running`,
+    );
+    expect(stored?.output).not.toContain(schedule.nextRunAt!);
+    expect(stored?.output).not.toContain("Checks:");
+    expect(stored?.output).not.toContain("- smoke tests pass");
+    expect(stored?.output).not.toContain("Pending:");
+    expect(stored?.output).not.toContain(SUMMARY);
+
+    // Full detail (ISO timestamp, schedule id, checks) lands in the task log.
+    const logs = (await getLogsByTaskId(task.id)).filter(
+      (log) => log.eventType === "task_progress",
+    );
+    expect(logs).toHaveLength(1);
+    expect(logs[0]!.newValue).toBe(
       `${SUMMARY}\n\nDeferred until ${schedule.nextRunAt} (schedule ${schedule.id}). Pending: deploy 42 is still running\n\nChecks:\n- deploy 42 status is green\n- smoke tests pass`,
     );
-    expect(stored?.output).toContain("Pending: deploy 42 is still running");
-    expect(stored?.output).toContain(schedule.nextRunAt!);
-    expect(stored?.output).toContain(schedule.id);
-    expect(stored?.output).toContain("- smoke tests pass");
   });
 
   test("runAt path is honoured verbatim", async () => {
@@ -423,8 +440,56 @@ describe("defer-task handler", () => {
       meta(),
     )) as DeferTaskResult;
     expect(result.structuredContent.success).toBe(true);
-    expect((await getTaskById(task.id))?.output).toBe(
-      `${SUMMARY}\n\nDeferred until ${result.structuredContent.nextRunAt} (schedule ${result.structuredContent.scheduleId}). Pending: pending`,
+    const stored = await getTaskById(task.id);
+    const shortId = result.structuredContent.scheduleId!.slice(0, 8);
+    expect(stored?.output).toMatch(
+      /^Deferred until (today|tomorrow|\d{2}-\d{2}) \d{2}:\d{2}:\d{2} UTC \(/,
+    );
+    expect(stored?.output).toContain(`([${shortId}](`);
+    expect(stored?.output).toContain(") -> pending");
+    expect(stored?.output).not.toContain(SUMMARY);
+  });
+
+  test("human-facing output strips a repeated Pending: prefix and caps a long note", async () => {
+    const task = await startedTask("verbose note");
+    const longNote = `Pending: ${"x".repeat(300)}\nsecond line is dropped`;
+    const result = (await buildTool().handler(
+      { taskId: task.id, delayMs: 60_000, summary: SUMMARY, note: longNote },
+      meta(),
+    )) as DeferTaskResult;
+
+    expect(result.structuredContent.success).toBe(true);
+    const stored = await getTaskById(task.id);
+    // No doubled "Pending: Pending:", no second line, capped with an ellipsis.
+    expect(stored?.output).not.toContain("Pending: Pending:");
+    expect(stored?.output).not.toContain("second line is dropped");
+    expect(stored?.output).toContain(`-> ${"x".repeat(99)}…`);
+
+    // The full untrimmed note still reaches the task log and the wake-up task.
+    const logs = (await getLogsByTaskId(task.id)).filter(
+      (log) => log.eventType === "task_progress",
+    );
+    expect(logs[0]!.newValue).toContain(`Pending: ${longNote}`);
+    const schedules = await schedulesForTask(task.id);
+    expect(schedules[0]!.taskTemplate).toContain(longNote);
+  });
+
+  test("human-facing time renders in the requester's timezone, unlabelled, when one is on file", async () => {
+    const user = await createUser({ name: "Requester", timezone: "America/New_York" });
+    const task = await startedTask("waiting on requester", agentId, {
+      requestedByUserId: user.id,
+    });
+
+    const result = (await buildTool().handler(
+      { taskId: task.id, delayMs: 60_000, summary: SUMMARY, note: "pending" },
+      meta(),
+    )) as DeferTaskResult;
+
+    expect(result.structuredContent.success).toBe(true);
+    const stored = await getTaskById(task.id);
+    // A real timezone is on file: no explicit "UTC" label on the time.
+    expect(stored?.output).toMatch(
+      /^Deferred until (today|tomorrow|\d{2}-\d{2}) \d{2}:\d{2}:\d{2} \(/,
     );
   });
 

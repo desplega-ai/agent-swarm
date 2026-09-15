@@ -113,7 +113,7 @@ describe("runMemoryRater — request shape", () => {
 
     const result = await runMemoryRater({
       prompt: "test prompt",
-      apiKey: "test-api-key-123",
+      apiKey: "example-test-api-key-123",
       fetchImpl: fakeFetch,
     });
 
@@ -125,7 +125,7 @@ describe("runMemoryRater — request shape", () => {
 
     const headers = capturedInit?.headers as Record<string, string>;
     expect(headers["Content-Type"]).toBe("application/json");
-    expect(headers.Authorization).toBe("Bearer test-api-key-123");
+    expect(headers.Authorization).toBe("Bearer example-test-api-key-123");
 
     const body = JSON.parse(String(capturedInit?.body));
     expect(body.model).toBe(DEFAULT_MEMORY_RATER_MODEL);
@@ -151,7 +151,7 @@ describe("runMemoryRater — request shape", () => {
 
       const result = await runMemoryRater({
         prompt: "test prompt",
-        apiKey: "test-api-key-123",
+        apiKey: "example-test-api-key-123",
         fetchImpl: fakeFetch,
       });
 

@@ -155,7 +155,7 @@ mock.module("../otel", () => ({
 const { handleSessionData } = await import("../http/session-data");
 
 const TEST_DB_PATH = "./test-otel-session-cost-metrics.sqlite";
-const API_KEY = "test-otel-metrics";
+const API_KEY = "example-test-otel-metrics";
 
 async function removeDbFiles(path: string): Promise<void> {
   for (const suffix of ["", "-wal", "-shm"]) {

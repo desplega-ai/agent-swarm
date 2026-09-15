@@ -41,6 +41,8 @@ import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-workflow-http-v2.sqlite";
 
+const secretRef = (name: string): string => `secret.${name}`;
+
 // ─── Test Server ─────────────────────────────────────────────
 
 function createTestServer(): Server {
@@ -201,10 +203,10 @@ describe("Workflow HTTP API v2", () => {
           name: "full-schema-workflow",
           description: "test",
           definition: simpleDefinition(),
-          triggers: [{ type: "webhook", hmacSecret: "secret-123" }],
+          triggers: [{ type: "webhook", hmacSecret: "example-secret-123" }],
           cooldown: { minutes: 30 },
           // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional — this is the input resolution syntax
-          input: { apiKey: "${API_KEY}", secret: "secret.MY_SECRET", literal: "hello" },
+          input: { apiKey: "${API_KEY}", secret: secretRef("MY_SECRET"), literal: "hello" },
         }),
       });
 
@@ -480,7 +482,7 @@ describe("Workflow HTTP API v2", () => {
         method: "PUT",
         headers,
         body: JSON.stringify({
-          triggers: [{ type: "webhook", hmacSecret: "new-secret" }],
+          triggers: [{ type: "webhook", hmacSecret: "example-new-secret" }],
           cooldown: { seconds: 30 },
           input: { key: "value" },
           params: { REPO_URL: "acme/widgets" },
@@ -921,11 +923,11 @@ describe("Workflow HTTP API v2", () => {
   describe("POST /api/webhooks/:workflowId", () => {
     test("valid HMAC returns 201", async () => {
       const workflow = await createTestWorkflow({
-        triggers: [{ type: "webhook", hmacSecret: "test-secret" }],
+        triggers: [{ type: "webhook", hmacSecret: "example-test-secret" }],
       });
 
       const body = '{"event":"test"}';
-      const hmac = crypto.createHmac("sha256", "test-secret");
+      const hmac = crypto.createHmac("sha256", "example-test-secret");
       hmac.update(body);
       const sig = `sha256=${hmac.digest("hex")}`;
 
@@ -944,7 +946,7 @@ describe("Workflow HTTP API v2", () => {
 
     test("invalid HMAC returns 401", async () => {
       const workflow = await createTestWorkflow({
-        triggers: [{ type: "webhook", hmacSecret: "test-secret" }],
+        triggers: [{ type: "webhook", hmacSecret: "example-test-secret" }],
       });
 
       const res = await fetch(`${baseUrl}/api/webhooks/${workflow.id}`, {

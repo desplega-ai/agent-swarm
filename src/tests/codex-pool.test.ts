@@ -30,7 +30,7 @@ import type { CodexOAuthCredentials } from "../providers/codex-oauth/types.js";
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
 const MOCK_API_URL = "http://localhost:3013";
-const MOCK_API_KEY = "test-api-key";
+const MOCK_API_KEY = "example-test-api-key";
 const FUTURE = Date.now() + 3_600_000;
 
 function makeJwt(userId: string, accountId: string): string {

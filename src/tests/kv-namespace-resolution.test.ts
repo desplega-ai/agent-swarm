@@ -17,7 +17,7 @@ import { githubContextKey, linearContextKey, slackContextKey } from "../tasks/co
 import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-kv-ns-resolution.sqlite";
-const API_KEY = "test-kv-ns-key";
+const API_KEY = "example-test-kv-ns-key";
 
 async function removeDbFiles(path: string): Promise<void> {
   for (const suffix of ["", "-wal", "-shm"]) {

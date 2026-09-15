@@ -349,7 +349,7 @@ describe("completeStructured", () => {
   test("claude-cli exhaustion logs one scrubbed line", async () => {
     const original = console.error;
     const errors: unknown[][] = [];
-    const secret = "sk-proj-abcdefghijklmnopqrstuvwxyz012345";
+    const secret = "example-sk-proj-abcdefghijklmnopqrstuvwxyz012345";
     console.error = (...args: unknown[]) => {
       errors.push(args);
     };
@@ -374,7 +374,7 @@ describe("completeStructured", () => {
       expect(errors[0]).toHaveLength(1);
       expect(errors[0]?.[0]).toBeString();
       expect(errors[0]?.[0]).toContain("callerTag=session-summary:test kind=claude-cli");
-      expect(errors[0]?.[0]).toContain("provider failed with [REDACTED:");
+      expect(errors[0]?.[0]).toContain("provider failed with example-[REDACTED:");
       expect(errors[0]?.[0]).not.toContain(secret);
     } finally {
       console.error = original;

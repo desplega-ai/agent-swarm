@@ -2,14 +2,22 @@
  * Sessions surface — shared floating composer dock.
  *
  * A rounded card-shaped input area inset from the panel edges with a slim
- * action row at the bottom: routing hint on the left, ⌘↵ hint + circular
+ * action row at the bottom: routing hint on the left, keyboard hints + circular
  * primary send button on the right. Used by both the new-session view and
  * the in-session composer so the bottom of the right pane is identical
  * regardless of state.
+ * Enter sends, Shift+Enter inserts a new line, and Cmd/Ctrl+Enter also sends.
  */
 
 import { ArrowUp, FileText, Paperclip, X } from "lucide-react";
-import { type ChangeEvent, type DragEvent, useEffect, useRef, useState } from "react";
+import {
+  type ChangeEvent,
+  type ClipboardEvent,
+  type DragEvent,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -51,7 +59,7 @@ function fileExtension(name: string): string {
   return dot === -1 ? "" : name.slice(dot).toLowerCase();
 }
 
-/** Splits a dropped/selected file batch into what's safe to attach and a
+/** Splits a dropped/selected/pasted file batch into what's safe to attach and a
  * human-readable reason for anything rejected. Returns at most one message —
  * multiple bad files still name only the first, to keep the row short. */
 function partitionAttachmentFiles(files: File[]): { valid: File[]; error: string | null } {
@@ -145,7 +153,8 @@ export function ComposerDock({
   const canAttach = !disabled && !isPending && !!onAttachmentsChange;
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+    if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
+    if (e.key === "Enter" && (!e.shiftKey || e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       if (canSubmit) onSubmit();
     }
@@ -161,6 +170,12 @@ export function ComposerDock({
   const onFilesSelected = (event: ChangeEvent<HTMLInputElement>) => {
     handleIncomingFiles(Array.from(event.target.files ?? []));
     event.target.value = "";
+  };
+
+  const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    if (!canAttach || e.clipboardData.files.length === 0) return;
+    e.preventDefault();
+    handleIncomingFiles(Array.from(e.clipboardData.files));
   };
 
   const removeAttachment = (index: number) => {
@@ -231,6 +246,7 @@ export function ComposerDock({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={onKeyDown}
+          onPaste={onPaste}
           placeholder={placeholder}
           disabled={disabled || isPending}
           rows={1}
@@ -324,7 +340,7 @@ export function ComposerDock({
               </Tooltip>
             ) : null}
             <span className="text-[10px] font-mono text-muted-foreground tracking-wider hidden sm:inline">
-              ⌘↵
+              ↵ send · ⇧↵ newline
             </span>
             <Tooltip>
               <TooltipTrigger asChild>

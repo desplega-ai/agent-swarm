@@ -13,7 +13,7 @@ import { listenOnFreePort } from "./test-net";
 
 let TEST_BASE_URL = "";
 const ORG_ID = "org-test-123";
-const API_KEY = "cog_test_key";
+const API_KEY = "example-cog_test_key";
 
 // Canned responses -----------------------------------------------------------
 const SESSION_RESPONSE = {

@@ -25,7 +25,7 @@ import type { RbacCheck } from "../rbac/types";
 import { setRequestAuth } from "../utils/request-auth-context";
 
 const TEST_DB_PATH = `/private/tmp/test-apps-user-config-${process.pid}.sqlite`;
-const API_KEY = "apps-user-config-test-key";
+const API_KEY = "example-apps-user-config-test-key";
 const AGENT_ID = crypto.randomUUID();
 const OPERATOR_ACTOR: IdentityActor = { kind: "operator", id: "apps-user-config-test" };
 const mutableLegacyPolicy = LEGACY_POLICY as unknown as Record<"app.use", LegacyRule>;

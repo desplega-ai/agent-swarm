@@ -142,7 +142,7 @@ describe("createArtifactServer", () => {
 
   beforeAll(() => {
     process.env.AGENT_ID = "test-agent-id";
-    process.env.API_KEY = "test-api-key";
+    process.env.API_KEY = "example-test-api-key";
     process.env.MCP_BASE_URL = "http://localhost:19999"; // Intentionally unreachable
   });
 
@@ -342,7 +342,7 @@ describe("createArtifactServer", () => {
         const path = c.req.path.replace("/@swarm/api", "/api");
         const targetUrl = `http://localhost:${mockMcpPort}${path}`;
         const headers: Record<string, string> = {
-          Authorization: "Bearer test-api-key",
+          Authorization: "Bearer example-test-api-key",
           "X-Agent-ID": "test-agent-id",
         };
         if (c.req.method !== "GET") {
@@ -368,7 +368,7 @@ describe("createArtifactServer", () => {
       try {
         // Test GET request headers
         await fetch(`http://localhost:${proxyPort}/@swarm/api/agents`);
-        expect(capturedHeaders.authorization).toBe("Bearer test-api-key");
+        expect(capturedHeaders.authorization).toBe("Bearer example-test-api-key");
         expect(capturedHeaders["x-agent-id"]).toBe("test-agent-id");
 
         // GET should NOT have Content-Type
@@ -379,7 +379,7 @@ describe("createArtifactServer", () => {
           method: "POST",
           body: JSON.stringify({ task: "test" }),
         });
-        expect(capturedHeaders.authorization).toBe("Bearer test-api-key");
+        expect(capturedHeaders.authorization).toBe("Bearer example-test-api-key");
         expect(capturedHeaders["x-agent-id"]).toBe("test-agent-id");
         expect(capturedHeaders["content-type"]).toBe("application/json");
       } finally {
@@ -594,7 +594,7 @@ describe("artifact CLI command", () => {
 
       const origEnv = { ...process.env };
       process.env.MCP_BASE_URL = `http://localhost:${mockPort}`;
-      process.env.API_KEY = "test-key";
+      process.env.API_KEY = "example-test-key";
       process.env.AGENT_ID = "test-agent";
 
       const consoleSpy = mock(() => {});
@@ -627,7 +627,7 @@ describe("artifact CLI command", () => {
 
       const origEnv = { ...process.env };
       process.env.MCP_BASE_URL = `http://localhost:${mockPort}`;
-      process.env.API_KEY = "test-key";
+      process.env.API_KEY = "example-test-key";
       process.env.AGENT_ID = "test-agent";
 
       const consoleSpy = mock(() => {});
@@ -678,7 +678,7 @@ describe("artifact CLI command", () => {
 
       const origEnv = { ...process.env };
       process.env.MCP_BASE_URL = `http://localhost:${mockPort}`;
-      process.env.API_KEY = "test-key";
+      process.env.API_KEY = "example-test-key";
       process.env.AGENT_ID = "test-agent";
 
       const consoleSpy = mock(() => {});
@@ -734,7 +734,7 @@ describe("artifact CLI command", () => {
 
       const origEnv = { ...process.env };
       process.env.MCP_BASE_URL = `http://localhost:${mockPort}`;
-      process.env.API_KEY = "test-key";
+      process.env.API_KEY = "example-test-key";
       process.env.AGENT_ID = "test-agent";
 
       const consoleSpy = mock(() => {});

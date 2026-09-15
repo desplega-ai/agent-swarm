@@ -39,7 +39,7 @@ async function addScript(name: string, isScratch: boolean) {
 
 describe("scratch script retention", () => {
   beforeAll(async () => {
-    process.env.AGENT_SWARM_API_KEY = "scripts-retention-test-key";
+    process.env.AGENT_SWARM_API_KEY = "example-scripts-retention-test-key";
     await clearDb();
     initDb(TEST_DB_PATH);
   });

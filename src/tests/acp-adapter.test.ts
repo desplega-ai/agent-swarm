@@ -264,7 +264,7 @@ class FakeAgent {
               },
             },
           },
-          diagnosticToken: "ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+          diagnosticToken: "example-ghp_abcdefghijklmnopqrstuvwxyz0123456789",
           chunks: Array.from({ length: 20 }, () => "y".repeat(2_000)),
         },
       },
@@ -283,7 +283,7 @@ class FakeAgent {
       stopReason: "end_turn",
       usage,
       _meta: {
-        debug: "ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+        debug: "example-ghp_abcdefghijklmnopqrstuvwxyz0123456789",
         authorization: "opaque-response-credential",
         note: "response metadata",
       },
@@ -475,7 +475,7 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
         }
         expect(persistedJson).toContain("X-Debug");
         expect(persistedJson).toContain("X-Debug-Map");
-        expect(persistedJson).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz0123456789");
+        expect(persistedJson).not.toContain("example-ghp_abcdefghijklmnopqrstuvwxyz0123456789");
         expect(persistedJson).toContain("[REDACTED:github_token]");
         expect(persistedJson).toContain("… [truncated]");
         expect(persistedJson).not.toContain("x".repeat(30_001));
@@ -510,7 +510,7 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
           PATH: "/bin",
           HOME: "/home/test",
           ACP_TARGET: "opencode",
-          OPENAI_API_KEY: "test-key",
+          OPENAI_API_KEY: "example-test-key",
           OPENCODE_CONFIG_CONTENT: JSON.stringify({ theme: "dark" }),
         },
       }),
@@ -525,13 +525,13 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
             PATH: "/bin",
             HOME: "/home/test",
             ACP_TARGET: "opencode",
-            OPENAI_API_KEY: "test-key",
+            OPENAI_API_KEY: "example-test-key",
             OPENCODE_CONFIG_CONTENT: JSON.stringify({ theme: "dark" }),
           },
         }),
       ),
     ).toMatchObject({
-      OPENAI_API_KEY: "test-key",
+      OPENAI_API_KEY: "example-test-key",
       OPENCODE_CONFIG_CONTENT: JSON.stringify({ theme: "dark", model: "opencode/model" }),
     });
   });
@@ -596,8 +596,8 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
       ]),
     ).toEqual([{ type: "boolean", id: "flag", name: "Flag", currentValue: true }]);
 
-    const secret = "ghp_abcdefghijklmnopqrstuvwxyz1234567890";
-    const redacted = "[REDACTED:github_token]";
+    const secret = "example-ghp_abcdefghijklmnopqrstuvwxyz1234567890";
+    const redacted = "example-[REDACTED:github_token]";
     const sanitized = sanitizeAcpConfigOptions([
       {
         type: "select",
@@ -729,7 +729,7 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
     );
 
     // Minimal swarm API stub: tracks calls to the session token endpoints.
-    const FAKE_TOKEN = "aseph_ephemtesttoken12345678901234";
+    const FAKE_TOKEN = "example-aseph_ephemtesttoken12345678901234";
     const FAKE_TOKEN_ID = "fake-ephem-token-id";
     let mintCalled = false;
     let revokeCalled = false;
@@ -781,7 +781,7 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
         baseConfig({
           cwd,
           apiUrl: `http://127.0.0.1:${swarmPort}`,
-          apiKey: "real-operator-key",
+          apiKey: "example-real-operator-key",
           env: {
             PATH: process.env.PATH ?? "",
             HOME: process.env.HOME ?? "",

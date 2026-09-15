@@ -40,8 +40,8 @@ async function makeToken(
   });
   return {
     mcpServerId: server.id,
-    accessToken: "fresh-access",
-    refreshToken: "refresh-ok",
+    accessToken: "example-fresh-access",
+    refreshToken: "example-refresh-ok",
     tokenType: "Bearer",
     expiresAt: new Date(Date.now() + 3600_000).toISOString(), // not expiring
     scope: "read",
@@ -50,7 +50,7 @@ async function makeToken(
     authorizeUrl: "https://as.example.com/authorize",
     tokenUrl: "https://as.example.com/token",
     dcrClientId: "client-abc",
-    dcrClientSecret: "secret-xyz",
+    dcrClientSecret: "example-secret-xyz",
     clientSource: "dcr",
     status: "connected",
     ...overrides,
@@ -81,7 +81,7 @@ describe("ensureMcpToken", () => {
 
     const token = await ensureMcpToken(input.mcpServerId);
     expect(token).not.toBeNull();
-    expect(token!.accessToken).toBe("fresh-access");
+    expect(token!.accessToken).toBe("example-fresh-access");
     expect(fetchCalled).toBe(false);
   });
 
@@ -128,12 +128,12 @@ describe("ensureMcpToken", () => {
       calls += 1;
       const params = new URLSearchParams((init?.body as string) ?? "");
       expect(params.get("grant_type")).toBe("refresh_token");
-      expect(params.get("refresh_token")).toBe("refresh-ok");
+      expect(params.get("refresh_token")).toBe("example-refresh-ok");
       return new Response(
         JSON.stringify({
-          access_token: "refreshed-access",
+          access_token: "example-refreshed-access",
           expires_in: 3600,
-          refresh_token: "refresh-next",
+          refresh_token: "example-refresh-next",
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       );
@@ -141,8 +141,8 @@ describe("ensureMcpToken", () => {
 
     const token = await ensureMcpToken(input.mcpServerId);
     expect(token).not.toBeNull();
-    expect(token!.accessToken).toBe("refreshed-access");
-    expect(token!.refreshToken).toBe("refresh-next");
+    expect(token!.accessToken).toBe("example-refreshed-access");
+    expect(token!.refreshToken).toBe("example-refresh-next");
     expect(token!.status).toBe("connected");
     expect(calls).toBe(1);
   });
@@ -159,15 +159,18 @@ describe("ensureMcpToken", () => {
       const params = new URLSearchParams((init?.body as string) ?? "");
       expect(headers.Authorization).toBeUndefined();
       expect(params.get("client_id")).toBe("client-abc");
-      expect(params.get("client_secret")).toBe("secret-xyz");
-      return new Response(JSON.stringify({ access_token: "refreshed-access", expires_in: 3600 }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
+      expect(params.get("client_secret")).toBe("example-secret-xyz");
+      return new Response(
+        JSON.stringify({ access_token: "example-refreshed-access", expires_in: 3600 }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
     };
 
     const token = await ensureMcpToken(input.mcpServerId);
-    expect(token!.accessToken).toBe("refreshed-access");
+    expect(token!.accessToken).toBe("example-refreshed-access");
   });
 
   test("flips status to 'error' on refresh failure", async () => {
@@ -218,10 +221,13 @@ describe("ensureMcpToken", () => {
       calls += 1;
       // small delay so second caller piggy-backs on inflight
       await new Promise((r) => setTimeout(r, 25));
-      return new Response(JSON.stringify({ access_token: "shared-refreshed", expires_in: 3600 }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
+      return new Response(
+        JSON.stringify({ access_token: "example-shared-refreshed", expires_in: 3600 }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
     };
 
     const [a, b, c] = await Promise.all([
@@ -230,8 +236,8 @@ describe("ensureMcpToken", () => {
       ensureMcpToken(input.mcpServerId),
     ]);
     expect(calls).toBe(1);
-    expect(a!.accessToken).toBe("shared-refreshed");
-    expect(b!.accessToken).toBe("shared-refreshed");
-    expect(c!.accessToken).toBe("shared-refreshed");
+    expect(a!.accessToken).toBe("example-shared-refreshed");
+    expect(b!.accessToken).toBe("example-shared-refreshed");
+    expect(c!.accessToken).toBe("example-shared-refreshed");
   });
 });

@@ -19,7 +19,7 @@ describe("workflow-ctx: ctx.swarm proxy tool name resolution", () => {
       const { ctx } = buildWorkflowCtx({
         runId: "test-run",
         agentId: "test-agent",
-        apiKey: "test-key",
+        apiKey: "example-test-key",
         baseUrl: "http://localhost:9999",
         args: {},
       });

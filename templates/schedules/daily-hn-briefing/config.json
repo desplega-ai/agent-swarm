@@ -9,6 +9,6 @@
   "category": "schedules",
   "placeholders": ["REPORT_EMAIL"],
   "requires": ["agentmail"],
-  "runAllSeedersCandidate": false,
+  "runAllSeedersCandidate": true,
   "tags": ["research", "briefing", "browser"]
 }

@@ -15,7 +15,7 @@ const resources = { memoryMb: 2048, cpuTimeSec: 20, maxStdoutBytes: 1_048_576 };
 const spawnTest = test.skipIf(SKIP_SANDBOX_SPAWN_TESTS);
 
 beforeEach(() => {
-  process.env.AGENT_SWARM_API_KEY = "runtime-test-secret-1234567890";
+  process.env.AGENT_SWARM_API_KEY = "example-runtime-test-secret-1234567890";
   delete process.env.API_KEY;
   process.env.MCP_BASE_URL = "http://localhost:3013";
   refreshSecretScrubberCache();
@@ -99,7 +99,9 @@ describe("runScript", () => {
     const server = Bun.serve({
       port: 0,
       async fetch(req) {
-        expect(req.headers.get("authorization")).toBe("Bearer runtime-test-secret-1234567890");
+        expect(req.headers.get("authorization")).toBe(
+          "Bearer example-runtime-test-secret-1234567890",
+        );
         expect(req.headers.get("x-agent-id")).toBe("agent-1");
 
         const url = new URL(req.url);
@@ -280,8 +282,8 @@ describe("runScript", () => {
   });
 
   spawnTest("subprocess env is stripped to the explicit allowlist", async () => {
-    process.env.API_KEY = "legacy-secret-that-must-not-leak";
-    process.env.AGENT_SWARM_API_KEY = "preferred-secret-that-must-not-leak";
+    process.env.API_KEY = "example-legacy-secret-that-must-not-leak";
+    process.env.AGENT_SWARM_API_KEY = "example-preferred-secret-that-must-not-leak";
     refreshSecretScrubberCache();
 
     const output = await runScript({

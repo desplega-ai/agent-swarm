@@ -29,7 +29,7 @@ describe("selectCredential", () => {
   });
 
   test("comma-separated picks one randomly", () => {
-    const value = "key-aaa11,key-bbb22,key-ccc33";
+    const value = "example-key-aaa11,example-key-bbb22,example-key-ccc33";
     const results = new Set<string>();
     for (let i = 0; i < 100; i++) {
       const result = selectCredential(value);
@@ -44,47 +44,47 @@ describe("selectCredential", () => {
   });
 
   test("respects availableIndices for rate-limit-aware selection", () => {
-    const value = "key-aaa11,key-bbb22,key-ccc33";
+    const value = "example-key-aaa11,example-key-bbb22,example-key-ccc33";
     for (let i = 0; i < 50; i++) {
       const result = selectCredential(value, [1]); // Only index 1 is available
-      expect(result.selected).toBe("key-bbb22");
+      expect(result.selected).toBe("example-key-bbb22");
       expect(result.index).toBe(1);
     }
   });
 
   test("falls back to random when all keys are rate-limited (empty availableIndices)", () => {
-    const value = "key-aaa11,key-bbb22";
+    const value = "example-key-aaa11,example-key-bbb22";
     const result = selectCredential(value, []);
-    expect(["key-aaa11", "key-bbb22"]).toContain(result.selected);
+    expect(["example-key-aaa11", "example-key-bbb22"]).toContain(result.selected);
     expect(result.isRateLimitFallback).toBe(true);
   });
 
   test("filters out-of-range availableIndices", () => {
-    const value = "key-aaa11,key-bbb22";
+    const value = "example-key-aaa11,example-key-bbb22";
     const result = selectCredential(value, [99]); // Out of range
     // Falls back to random
-    expect(["key-aaa11", "key-bbb22"]).toContain(result.selected);
+    expect(["example-key-aaa11", "example-key-bbb22"]).toContain(result.selected);
     expect(result.isRateLimitFallback).toBe(true);
   });
 
   test("isRateLimitFallback is false when indices are available", () => {
-    const result = selectCredential("key-aaa11,key-bbb22", [0, 1]);
+    const result = selectCredential("example-key-aaa11,example-key-bbb22", [0, 1]);
     expect(result.isRateLimitFallback).toBe(false);
   });
 
   test("isRateLimitFallback is false when no availability info", () => {
-    const result = selectCredential("key-aaa11,key-bbb22");
+    const result = selectCredential("example-key-aaa11,example-key-bbb22");
     expect(result.isRateLimitFallback).toBe(false);
   });
 
   test("single key with empty availableIndices sets isRateLimitFallback", () => {
-    const result = selectCredential("single-key", []);
+    const result = selectCredential("example-single-key", []);
     expect(result.isRateLimitFallback).toBe(true);
-    expect(result.selected).toBe("single-key");
+    expect(result.selected).toBe("example-single-key");
   });
 
   test("keySuffix is last 5 chars of selected key", () => {
-    const result = selectCredential("sk-ant-api03-abcde12345");
+    const result = selectCredential("example-sk-ant-api03-abcde12345");
     expect(result.keySuffix).toBe("12345");
   });
 
@@ -102,31 +102,31 @@ describe("selectCredential", () => {
 describe("resolveCredentialPools", () => {
   test("returns selections for pool vars", async () => {
     const env: Record<string, string | undefined> = {
-      ANTHROPIC_API_KEY: "key-aaa11,key-bbb22",
+      ANTHROPIC_API_KEY: "example-key-aaa11,example-key-bbb22",
     };
     const selections = await resolveCredentialPools(env);
     expect(selections.length).toBe(1);
     expect(selections[0]!.total).toBe(2);
     expect(selections[0]!.keyType).toBe("ANTHROPIC_API_KEY");
     // Env should be mutated to the selected key
-    expect(["key-aaa11", "key-bbb22"]).toContain(env.ANTHROPIC_API_KEY);
+    expect(["example-key-aaa11", "example-key-bbb22"]).toContain(env.ANTHROPIC_API_KEY);
   });
 
   test("passes availableIndicesMap through", async () => {
     const env: Record<string, string | undefined> = {
-      ANTHROPIC_API_KEY: "key-aaa11,key-bbb22,key-ccc33",
+      ANTHROPIC_API_KEY: "example-key-aaa11,example-key-bbb22,example-key-ccc33",
     };
     const selections = await resolveCredentialPools(env, {
       availableIndicesMap: { ANTHROPIC_API_KEY: [2] },
     });
     expect(selections.length).toBe(1);
     expect(selections[0]!.index).toBe(2);
-    expect(env.ANTHROPIC_API_KEY).toBe("key-ccc33");
+    expect(env.ANTHROPIC_API_KEY).toBe("example-key-ccc33");
   });
 
   test("single keys are tracked with index 0", async () => {
     const env: Record<string, string | undefined> = {
-      ANTHROPIC_API_KEY: "single-key",
+      ANTHROPIC_API_KEY: "example-single-key",
     };
     const selections = await resolveCredentialPools(env);
     expect(selections.length).toBe(1);
@@ -134,7 +134,7 @@ describe("resolveCredentialPools", () => {
     expect(selections[0]!.total).toBe(1);
     expect(selections[0]!.keySuffix).toBe("e-key");
     expect(selections[0]!.keyType).toBe("ANTHROPIC_API_KEY");
-    expect(env.ANTHROPIC_API_KEY).toBe("single-key");
+    expect(env.ANTHROPIC_API_KEY).toBe("example-single-key");
   });
 });
 

@@ -29,7 +29,7 @@ beforeAll(async () => {
   // Seed an oauth_apps row + cloudId/siteUrl so URL helpers don't blow up
   await upsertOAuthApp("jira", {
     clientId: "client-id",
-    clientSecret: "client-secret",
+    clientSecret: "example-client-secret",
     authorizeUrl: "https://auth.atlassian.com/authorize",
     tokenUrl: "https://auth.atlassian.com/oauth/token",
     redirectUri: "http://localhost:3013/api/trackers/jira/callback",

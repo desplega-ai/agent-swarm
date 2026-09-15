@@ -66,6 +66,7 @@ async function getWorkflow(name = "test-seeded-workflow") {
 const ORIGINAL_SEED_AUTOMATIONS_ENABLED = process.env.SEED_AUTOMATIONS_ENABLED;
 
 beforeEach(async () => {
+  delete process.env.SEED_AUTOMATIONS_ENABLED;
   await removeDbFiles();
   initDb(TEST_DB_PATH);
 });
@@ -81,24 +82,35 @@ afterEach(async () => {
 });
 
 describe("workflows seeder", () => {
-  test("loads only the five starter candidates with their setup metadata", () => {
+  test("loads all ten workflow templates with their setup metadata", () => {
     const workflows = loadSeedWorkflows();
-    expect(workflows).toHaveLength(5);
+    expect(workflows).toHaveLength(10);
     expect(workflows.find((workflow) => workflow.name === "autopilot")).toMatchObject({
       enabled: false,
       requiredParams: ["REPO_URL"],
       requires: ["github"],
     });
-    expect(workflows.some((workflow) => workflow.name === "ralph-loop")).toBe(false);
-    expect(workflows.some((workflow) => workflow.name === "claude-code-changelog-watch")).toBe(
-      false,
-    );
-    expect(workflows.some((workflow) => workflow.name === "gsc-topic-miner")).toBe(false);
+    expect(
+      workflows.find((workflow) => workflow.name === "claude-code-changelog-watch"),
+    ).toMatchObject({
+      enabled: false,
+      requiredParams: [],
+      requires: [],
+    });
+    expect(workflows.find((workflow) => workflow.name === "gsc-topic-miner")).toMatchObject({
+      enabled: false,
+      requiredParams: ["GSC_PROPERTY"],
+      requires: ["gsc", "agentfs"],
+    });
+    expect(workflows.every((workflow) => !workflow.enabled)).toBe(true);
   });
 
-  test("SEED_AUTOMATIONS_ENABLED=false keeps every candidate disabled, including zero-config ones", () => {
+  test("SEED_AUTOMATIONS_ENABLED=false still seeds all workflows disabled", async () => {
     process.env.SEED_AUTOMATIONS_ENABLED = "false";
-    const workflows = loadSeedWorkflows();
+    const result = await runSeeder(createWorkflowsSeeder(), { quiet: true });
+    expect(result).toMatchObject({ created: 10, failed: [] });
+    const workflows = await listWorkflows();
+    expect(workflows).toHaveLength(10);
     expect(workflows.every((workflow) => workflow.enabled === false)).toBe(true);
   });
 

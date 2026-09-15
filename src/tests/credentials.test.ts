@@ -12,7 +12,7 @@ describe("validateClaudeCredentials", () => {
   });
 
   test("returns 'api_key' when only ANTHROPIC_API_KEY is set", () => {
-    expect(validateClaudeCredentials({ ANTHROPIC_API_KEY: "sk-ant-123" })).toBe("api_key");
+    expect(validateClaudeCredentials({ ANTHROPIC_API_KEY: "example-sk-ant-123" })).toBe("api_key");
   });
 
   test("prefers oauth over api_key when both are set", () => {
@@ -52,19 +52,21 @@ describe("validateOpencodeCredentials", () => {
   });
 
   test("returns 'openrouter_api_key' when OPENROUTER_API_KEY is set", () => {
-    expect(validateOpencodeCredentials({ OPENROUTER_API_KEY: "sk-or-123" })).toBe(
+    expect(validateOpencodeCredentials({ OPENROUTER_API_KEY: "example-sk-or-123" })).toBe(
       "openrouter_api_key",
     );
   });
 
   test("returns 'anthropic_api_key' when only ANTHROPIC_API_KEY is set", () => {
-    expect(validateOpencodeCredentials({ ANTHROPIC_API_KEY: "sk-ant-123" })).toBe(
+    expect(validateOpencodeCredentials({ ANTHROPIC_API_KEY: "example-sk-ant-123" })).toBe(
       "anthropic_api_key",
     );
   });
 
   test("returns 'openai_api_key' when only OPENAI_API_KEY is set", () => {
-    expect(validateOpencodeCredentials({ OPENAI_API_KEY: "sk-openai-123" })).toBe("openai_api_key");
+    expect(validateOpencodeCredentials({ OPENAI_API_KEY: "example-sk-openai-123" })).toBe(
+      "openai_api_key",
+    );
   });
 
   test("returns 'auth_file' when auth.json exists and no env vars are set", () => {

@@ -389,7 +389,7 @@ describe("registerClient (RFC 7591 DCR)", () => {
       return new Response(
         JSON.stringify({
           client_id: "issued-id",
-          client_secret: "issued-secret",
+          client_secret: "example-issued-secret",
           client_id_issued_at: 1700000000,
         }),
         { status: 201, headers: { "Content-Type": "application/json" } },
@@ -404,7 +404,7 @@ describe("registerClient (RFC 7591 DCR)", () => {
     });
 
     expect(res.client_id).toBe("issued-id");
-    expect(res.client_secret).toBe("issued-secret");
+    expect(res.client_secret).toBe("example-issued-secret");
     expect(capturedBody).toBeTruthy();
     expect(JSON.parse(capturedBody!).client_name).toBe("agent-swarm");
   });
@@ -471,7 +471,7 @@ describe("exchangeCodeForTokens", () => {
     const res = await exchangeCodeForTokens({
       tokenUrl: "https://as.example.com/token",
       clientId: "client-xyz",
-      clientSecret: "secret-xyz",
+      clientSecret: "example-secret-xyz",
       tokenEndpointAuthMethod: "client_secret_post",
       redirectUri: "https://swarm.example.com/callback",
       code: "authcode-1",
@@ -485,7 +485,7 @@ describe("exchangeCodeForTokens", () => {
     expect(params.get("code")).toBe("authcode-1");
     expect(params.get("code_verifier")).toBe("verifier-1");
     expect(params.get("resource")).toBe("https://mcp.example.com/");
-    expect(params.get("client_secret")).toBe("secret-xyz");
+    expect(params.get("client_secret")).toBe("example-secret-xyz");
     expect(res.access_token).toBe("at-1");
   });
 
@@ -551,8 +551,8 @@ describe("refreshMcpToken", () => {
   });
 
   test("scrubs an echoed client_secret/refresh_token from the thrown error body", async () => {
-    const clientSecret = "super-secret-client-value-123456";
-    const refreshToken = "super-secret-refresh-value-654321";
+    const clientSecret = "example-super-secret-client-value-123456";
+    const refreshToken = "example-super-secret-refresh-value-654321";
     globalThis.fetch = async () =>
       new Response(
         JSON.stringify({
@@ -706,7 +706,7 @@ describe("token-endpoint client authentication is applied per the registered met
     await exchangeCodeForTokens({
       tokenUrl: "https://as.example.com/token",
       clientId: creds.clientId ?? "client-xyz",
-      clientSecret: creds.clientSecret ?? "secret-xyz",
+      clientSecret: creds.clientSecret ?? "example-secret-xyz",
       tokenEndpointAuthMethod,
       redirectUri: "https://swarm.example.com/callback",
       code: "authcode-1",
@@ -719,7 +719,7 @@ describe("token-endpoint client authentication is applied per the registered met
   test("client_secret_basic → Authorization: Basic header, no creds in the body", async () => {
     const { params, headers } = await captureExchange("client_secret_basic");
     expect(headers.Authorization).toBe(
-      `Basic ${Buffer.from("client-xyz:secret-xyz").toString("base64")}`,
+      `Basic ${Buffer.from("client-xyz:example-secret-xyz").toString("base64")}`,
     );
     expect(params.get("client_id")).toBeNull();
     expect(params.get("client_secret")).toBeNull();
@@ -729,7 +729,7 @@ describe("token-endpoint client authentication is applied per the registered met
     const { params, headers } = await captureExchange("client_secret_post");
     expect(headers.Authorization).toBeUndefined();
     expect(params.get("client_id")).toBe("client-xyz");
-    expect(params.get("client_secret")).toBe("secret-xyz");
+    expect(params.get("client_secret")).toBe("example-secret-xyz");
   });
 
   test("none → client_id only in the body, no secret anywhere", async () => {
@@ -821,7 +821,7 @@ describe("token-endpoint client authentication is applied per the registered met
     await exchangeCodeForTokens({
       tokenUrl: "https://as.example.com/token",
       clientId: "client-xyz",
-      clientSecret: "secret-xyz",
+      clientSecret: "example-secret-xyz",
       tokenEndpointAuthMethod: "client_secret_post",
       redirectUri: "https://swarm.example.com/callback",
       code,
@@ -836,7 +836,7 @@ describe("token-endpoint client authentication is applied per the registered met
   });
 
   test("a form-encoded refresh token is redacted on a failed refresh", async () => {
-    const refreshToken = "rt+slash/eq=";
+    const refreshToken = "example-rt+slash/eq=";
     const encoded = new URLSearchParams({ v: refreshToken }).toString().slice(2);
     globalThis.fetch = async () =>
       new Response(`{"detail":"refresh_token=${encoded}"}`, { status: 400 });
@@ -844,7 +844,7 @@ describe("token-endpoint client authentication is applied per the registered met
     await refreshMcpToken({
       tokenUrl: "https://as.example.com/token",
       clientId: "client-xyz",
-      clientSecret: "secret-xyz",
+      clientSecret: "example-secret-xyz",
       tokenEndpointAuthMethod: "client_secret_post",
       refreshToken,
       resource: "https://mcp.example.com/",
@@ -856,7 +856,7 @@ describe("token-endpoint client authentication is applied per the registered met
   });
 
   test("a form-encoded revoked token is redacted on a failed revocation", async () => {
-    const token = "tok+slash/eq=";
+    const token = "example-tok+slash/eq=";
     const encoded = new URLSearchParams({ v: token }).toString().slice(2);
     globalThis.fetch = async () => new Response(`{"detail":"token=${encoded}"}`, { status: 400 });
 
@@ -864,7 +864,7 @@ describe("token-endpoint client authentication is applied per the registered met
       revocationUrl: "https://as.example.com/revoke",
       token,
       clientId: "client-xyz",
-      clientSecret: "secret-xyz",
+      clientSecret: "example-secret-xyz",
       tokenEndpointAuthMethod: "client_secret_post",
     }).catch((err: Error) => {
       expect(err.message).toContain("Token revocation failed (400)");
@@ -876,7 +876,7 @@ describe("token-endpoint client authentication is applied per the registered met
   test("an upstream error body echoing the client secret is scrubbed before it is thrown", async () => {
     // The callback logs this message AND reflects it into the dashboard
     // redirect as error_description, so an echoed credential would escape.
-    const secret = "sk-echoed-secret-value-1234567890";
+    const secret = "example-echoed-client-secret-value";
     globalThis.fetch = async () =>
       new Response(`{"error":"invalid_client","detail":"bad client_secret: ${secret}"}`, {
         status: 401,
@@ -910,14 +910,14 @@ describe("token-endpoint client authentication is applied per the registered met
   });
 
   test("a revocation error body echoing the token is scrubbed before it is thrown", async () => {
-    const token = "rt-echoed-refresh-token-0987654321";
+    const token = "example-rt-echoed-refresh-token-0987654321";
     globalThis.fetch = async () => new Response(`{"error":"bad token: ${token}"}`, { status: 400 });
 
     await revokeMcpToken({
       revocationUrl: "https://as.example.com/revoke",
       token,
       clientId: "client-xyz",
-      clientSecret: "secret-xyz",
+      clientSecret: "example-secret-xyz",
       tokenEndpointAuthMethod: "client_secret_post",
     }).catch((err: Error) => {
       expect(err.message).toContain("Token revocation failed (400)");
@@ -929,7 +929,7 @@ describe("token-endpoint client authentication is applied per the registered met
     for (const missing of [undefined, null, "some-unknown-method"]) {
       const { params, headers } = await captureExchange(missing);
       expect(headers.Authorization).toBe(
-        `Basic ${Buffer.from("client-xyz:secret-xyz").toString("base64")}`,
+        `Basic ${Buffer.from("client-xyz:example-secret-xyz").toString("base64")}`,
       );
       expect(params.get("client_id")).toBeNull();
       expect(params.get("client_secret")).toBeNull();
@@ -980,7 +980,7 @@ describe("token-endpoint client authentication is applied per the registered met
     await refreshMcpToken({
       tokenUrl: "https://as.example.com/token",
       clientId: "client-xyz",
-      clientSecret: "secret-xyz",
+      clientSecret: "example-secret-xyz",
       tokenEndpointAuthMethod: "client_secret_basic",
       refreshToken: "rt-abc",
       resource: "https://mcp.example.com/",
@@ -988,7 +988,7 @@ describe("token-endpoint client authentication is applied per the registered met
 
     const params = new URLSearchParams(capturedBody);
     expect(capturedHeaders.Authorization).toBe(
-      `Basic ${Buffer.from("client-xyz:secret-xyz").toString("base64")}`,
+      `Basic ${Buffer.from("client-xyz:example-secret-xyz").toString("base64")}`,
     );
     expect(params.get("client_id")).toBeNull();
     expect(params.get("client_secret")).toBeNull();

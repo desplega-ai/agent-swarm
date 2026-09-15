@@ -22,7 +22,7 @@ beforeEach(async () => {
   await getDbClient().run("DELETE FROM oauth_apps WHERE provider = 'jira'");
   await upsertOAuthApp("jira", {
     clientId: "client-id",
-    clientSecret: "client-secret",
+    clientSecret: "example-client-secret",
     authorizeUrl: "https://auth.atlassian.com/authorize",
     tokenUrl: "https://auth.atlassian.com/oauth/token",
     redirectUri: "http://localhost:3013/api/trackers/jira/callback",

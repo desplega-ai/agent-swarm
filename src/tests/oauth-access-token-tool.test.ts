@@ -23,7 +23,7 @@ const originalFetch = globalThis.fetch;
 
 const testApp = {
   clientId: "client-id",
-  clientSecret: "client-secret",
+  clientSecret: "example-client-secret",
   authorizeUrl: "https://example.com/oauth/authorize",
   tokenUrl: "https://example.com/oauth/token",
   redirectUri: "http://localhost:3013/callback",
@@ -69,8 +69,8 @@ afterAll(async () => {
 describe("resolveOAuthAccessToken", () => {
   test("registered MCP tool returns a seeded provider token", async () => {
     await storeOAuthTokens("custom-provider", {
-      accessToken: "mcp-tool-access-token-plain-value",
-      refreshToken: "mcp-tool-refresh-token",
+      accessToken: "example-mcp-tool-access-token-plain-value",
+      refreshToken: "example-mcp-tool-refresh-token",
       expiresAt: new Date(Date.now() + 3600_000).toISOString(),
     });
     const server = new McpServer({ name: "oauth-access-token-test", version: "1.0.0" });
@@ -112,7 +112,7 @@ describe("resolveOAuthAccessToken", () => {
     expect(result.structuredContent).toMatchObject({
       success: true,
       provider: "custom-provider",
-      accessToken: "mcp-tool-access-token-plain-value",
+      accessToken: "example-mcp-tool-access-token-plain-value",
       expiresAt: expect.any(String),
       tokenType: "Bearer",
     });
@@ -123,7 +123,7 @@ describe("resolveOAuthAccessToken", () => {
     // details carries the actual token payload (allowSecretEgress: true means
     // the central scrubber does not redact it, since the tool's whole purpose
     // is handing over the plaintext token).
-    expect(result.structuredContent.details).toBe("mcp-tool-access-token-plain-value");
+    expect(result.structuredContent.details).toBe("example-mcp-tool-access-token-plain-value");
 
     // content[0].text is composed as message + "\n\n" + details, so both
     // channels (text for pi/opencode/claude-managed, structuredContent for
@@ -132,7 +132,7 @@ describe("resolveOAuthAccessToken", () => {
     expect(result.content).toHaveLength(1);
     expect(result.content[0].type).toBe("text");
     expect(result.content[0].text).toBe(
-      `custom-provider OAuth access token resolved; expires at ${expiresAt}.\n\nmcp-tool-access-token-plain-value`,
+      `custom-provider OAuth access token resolved; expires at ${expiresAt}.\n\nexample-mcp-tool-access-token-plain-value`,
     );
   });
 
@@ -170,10 +170,10 @@ describe("resolveOAuthAccessToken", () => {
   });
 
   test("returns a fresh access token and registers it for scrubber redaction", async () => {
-    const accessToken = "linear-access-token-plain-value-1234567890";
+    const accessToken = "example-linear-access-token-plain-value-1234567890";
     await storeOAuthTokens("linear", {
       accessToken,
-      refreshToken: "linear-refresh-token",
+      refreshToken: "example-linear-refresh-token",
       expiresAt: new Date(Date.now() + 3600_000).toISOString(),
     });
 
@@ -192,21 +192,21 @@ describe("resolveOAuthAccessToken", () => {
 
   test("supports any configured OAuth provider slug", async () => {
     await storeOAuthTokens("custom-provider", {
-      accessToken: "custom-provider-access-token-plain-value",
-      refreshToken: "custom-provider-refresh-token",
+      accessToken: "example-custom-provider-access-token-plain-value",
+      refreshToken: "example-custom-provider-refresh-token",
       expiresAt: new Date(Date.now() + 3600_000).toISOString(),
     });
 
     const result = await resolveOAuthAccessToken("custom-provider");
 
     expect(result.provider).toBe("custom-provider");
-    expect(result.accessToken).toBe("custom-provider-access-token-plain-value");
+    expect(result.accessToken).toBe("example-custom-provider-access-token-plain-value");
   });
 
   test("refreshes Jira before returning a near-expiry token", async () => {
     await storeOAuthTokens("jira", {
-      accessToken: "old-jira-access-token",
-      refreshToken: "old-jira-refresh-token",
+      accessToken: "example-old-jira-access-token",
+      refreshToken: "example-old-jira-refresh-token",
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
     });
 
@@ -214,10 +214,10 @@ describe("resolveOAuthAccessToken", () => {
       Promise.resolve(
         new Response(
           JSON.stringify({
-            access_token: "new-jira-access-token-plain-value",
+            access_token: "example-new-jira-access-token-plain-value",
             token_type: "Bearer",
             expires_in: 3600,
-            refresh_token: "new-jira-refresh-token",
+            refresh_token: "example-new-jira-refresh-token",
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
@@ -228,13 +228,13 @@ describe("resolveOAuthAccessToken", () => {
     const result = await resolveOAuthAccessToken("jira");
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
-    expect(result.accessToken).toBe("new-jira-access-token-plain-value");
-    expect((await getOAuthTokens("jira"))?.refreshToken).toBe("new-jira-refresh-token");
+    expect(result.accessToken).toBe("example-new-jira-access-token-plain-value");
+    expect((await getOAuthTokens("jira"))?.refreshToken).toBe("example-new-jira-refresh-token");
   });
 
   test("rejects a near-expiry token when no refresh token is available", async () => {
     await storeOAuthTokens("jira", {
-      accessToken: "stale-jira-access-token",
+      accessToken: "example-stale-jira-access-token",
       refreshToken: null,
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
     });

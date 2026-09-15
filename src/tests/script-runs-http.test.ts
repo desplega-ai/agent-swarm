@@ -20,7 +20,7 @@ import { getPathSegments, parseQueryParams } from "../http/utils";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
 
 const TEST_DB_PATH = "./test-script-runs-http.sqlite";
-const API_KEY = "test-script-runs-http-key-1234567890";
+const API_KEY = "example-test-script-runs-http-key-1234567890";
 
 let agentId: string;
 let savedEnv: NodeJS.ProcessEnv;

@@ -245,13 +245,13 @@ describe("setup milestones", () => {
       hint: "Memory search is off. Set OPENAI_API_KEY (or EMBEDDING_API_KEY) on the API server to enable it; it is cheap.",
     });
 
-    process.env.OPENAI_API_KEY = "openai-embedding-key";
+    process.env.OPENAI_API_KEY = "example-openai-embedding-key";
     expect(getMilestone(await buildStatusPayload(), "embeddings").state).toBe("configured");
 
     process.env.EMBEDDING_API_KEY = "";
     expect(getMilestone(await buildStatusPayload(), "embeddings").state).toBe("unverified");
 
-    process.env.EMBEDDING_API_KEY = "dedicated-embedding-key";
+    process.env.EMBEDDING_API_KEY = "example-dedicated-embedding-key";
     delete process.env.OPENAI_API_KEY;
     expect(getMilestone(await buildStatusPayload(), "embeddings").state).toBe("configured");
   });
@@ -417,7 +417,7 @@ describe("setup milestones", () => {
     const a = await buildStatusPayload();
     expect(getMilestone(a, "github").state).toBe("unverified");
 
-    process.env.GITHUB_APP_PRIVATE_KEY = "-----BEGIN PRIVATE KEY-----\n...";
+    process.env.GITHUB_APP_PRIVATE_KEY = "[REDACTED:github_app_private_key]";
     const b = await buildStatusPayload();
     expect(getMilestone(b, "github").state).toBe("verified");
   });
@@ -456,7 +456,7 @@ describe("setup milestones", () => {
       scopes: "read",
     });
     await storeOAuthTokens("linear", {
-      accessToken: "lin-tok-xyz",
+      accessToken: "example-lin-tok-xyz",
       refreshToken: "ref",
       expiresAt: new Date(Date.now() + 3600_000).toISOString(),
       scope: "read",
@@ -475,7 +475,7 @@ describe("setup milestones", () => {
       // metadata intentionally omitted on first upsert
     });
     await storeOAuthTokens("jira", {
-      accessToken: "jira-tok",
+      accessToken: "example-jira-tok",
       refreshToken: null,
       expiresAt: new Date(Date.now() + 3600_000).toISOString(),
       scope: null,
@@ -831,7 +831,7 @@ describe("validateProviderCredentials — error scrubbing", () => {
   });
 
   test("devin hits v3/self (not the deprecated v1 endpoint) and passes on 2xx", async () => {
-    process.env.DEVIN_API_KEY = "cog_fake-devin-key-1234";
+    process.env.DEVIN_API_KEY = "example-cog_fake-devin-key-1234";
     let capturedUrl = "";
     globalThis.fetch = (async (url) => {
       capturedUrl = String(url);
@@ -851,7 +851,7 @@ describe("validateProviderCredentials — error scrubbing", () => {
   });
 
   test("scrubs api key from error message on 401 response", async () => {
-    const fakeKey = "sk-ant-fakekey-DO-NOT-LEAK-1234567890abcdef";
+    const fakeKey = "example-anthropic-key-do-not-leak";
     process.env.ANTHROPIC_API_KEY = fakeKey;
     globalThis.fetch = (async () =>
       new Response(`Unauthorized: invalid key ${fakeKey}`, {

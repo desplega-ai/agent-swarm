@@ -49,7 +49,7 @@ import { getFreePort, SERVER_BOOT_HOOK_TIMEOUT_MS, waitForServer } from "./test-
 let TEST_PORT = 0;
 const TEST_DB_PATH = `/tmp/test-memory-rater-e2e-${Date.now()}.sqlite`;
 let BASE = "";
-const API_KEY = "test-key";
+const API_KEY = "example-test-key";
 
 let serverProc: Subprocess;
 let store: SqliteMemoryStore;

@@ -7,12 +7,12 @@
   },
   "features": {
     "app_home": {
-      "home_tab_enabled": false,
+      "home_tab_enabled": true,
       "messages_tab_enabled": true,
       "messages_tab_read_only_enabled": false
     },
     "bot_user": {
-      "display_name": "agent-swarm",
+      "display_name": "Agent Swarm",
       "always_online": true
     },
     "slash_commands": [
@@ -27,9 +27,18 @@
         "should_escape": false
       }
     ],
-    "assistant_view": {
-      "assistant_description": "Manage an agent-swarm",
+    "agent_view": {
+      "agent_description": "Manage an agent-swarm",
       "suggested_prompts": []
+    },
+    "rich_previews": {
+      "is_active": true,
+      "entity_types": [
+        "slack#/entities/file",
+        "slack#/entities/task",
+        "slack#/entities/item",
+        "slack#/entities/content_item"
+      ]
     }
   },
   "oauth_config": {
@@ -57,23 +66,23 @@
         "app_mentions:read",
         "assistant:write",
         "channels:history",
-        "channels:join",
-        "channels:manage",
         "channels:read",
         "chat:write",
         "chat:write.customize",
+        "chat:write.public",
         "commands",
         "files:read",
         "files:write",
         "groups:history",
         "groups:read",
-        "groups:write",
         "im:history",
         "im:read",
         "im:write",
+        "mpim:history",
+        "mpim:read",
+        "mpim:write",
         "reactions:write",
-        "users:read",
-        "users:read.email"
+        "users:read"
       ]
     },
     "pkce_enabled": false
@@ -82,9 +91,11 @@
     "event_subscriptions": {
       "bot_events": [
         "app_mention",
+        "entity_details_requested",
         "message.channels",
         "message.groups",
         "message.im",
+        "message.mpim",
         "assistant_thread_started"
       ]
     },
@@ -93,7 +104,7 @@
     },
     "org_deploy_enabled": false,
     "socket_mode_enabled": true,
-    "token_rotation_enabled": true,
+    "token_rotation_enabled": false,
     "is_mcp_enabled": true
   }
 }

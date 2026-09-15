@@ -9,6 +9,6 @@
   "category": "schedules",
   "placeholders": ["REPO_URL", "SLACK_CHANNEL_ID", "TIMEZONE"],
   "requires": ["github", "slack"],
-  "runAllSeedersCandidate": false,
+  "runAllSeedersCandidate": true,
   "tags": ["github", "dependencies", "maintenance"]
 }

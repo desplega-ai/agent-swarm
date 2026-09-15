@@ -19,7 +19,7 @@ const ROTATION_AGENT_ID = "1a444444-4444-4444-8444-444444444444";
 const FIXTURE_SUMMARY =
   "The worker fixture completed a transport parity task with durable evidence.";
 const FIXTURE_OAUTH = "synthetic-fixture-oauth-token";
-const FIXTURE_API_KEY = "synthetic-fixture-anthropic-api-key";
+const FIXTURE_API_KEY = "example-synthetic-fixture-anthropic-api-key";
 const ROTATION_OAUTH_POOL = ["synthetic-rotation-oauth-oa001", "synthetic-rotation-oauth-oa002"];
 const ROTATION_API_POOL = ["synthetic-rotation-api-ap001", "synthetic-rotation-api-ap002"];
 
@@ -260,7 +260,7 @@ async function runTransport(transport: "cli" | "sdk", agentId: string): Promise<
     CLAUDE_BINARY: fixturePath,
     CLAUDE_CODE_OAUTH_TOKEN: FIXTURE_OAUTH,
     ANTHROPIC_API_KEY: FIXTURE_API_KEY,
-    OPENROUTER_API_KEY: "synthetic-fixture-openrouter-key",
+    OPENROUTER_API_KEY: "example-synthetic-fixture-openrouter-key",
     OPENROUTER_BASE_URL: `http://127.0.0.1:${openRouterMock.port}`,
     CRED_CHECK_DISABLE: "1",
     CLAUDE_QUEUE_STEERING: "0",
@@ -401,7 +401,7 @@ async function runCredentialRotation(): Promise<void> {
     CLAUDE_FIXTURE_OBSERVATION_FILE: observationFile,
     CLAUDE_CODE_OAUTH_TOKEN: ROTATION_OAUTH_POOL.join(","),
     ANTHROPIC_API_KEY: ROTATION_API_POOL.join(","),
-    OPENROUTER_API_KEY: "synthetic-fixture-openrouter-key",
+    OPENROUTER_API_KEY: "example-synthetic-fixture-openrouter-key",
     OPENROUTER_BASE_URL: `http://127.0.0.1:${openRouterMock.port}`,
     CRED_CHECK_DISABLE: "1",
     CLAUDE_QUEUE_STEERING: "0",

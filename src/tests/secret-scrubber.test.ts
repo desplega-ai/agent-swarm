@@ -67,23 +67,23 @@ describe("scrubSecrets — env-based replacement", () => {
   });
 
   test("redacts any key with _API_KEY suffix", () => {
-    process.env.FOO_SERVICE_API_KEY = "supersecretFooApiKey_longerthan12chars";
+    process.env.FOO_SERVICE_API_KEY = "example-supersecretFooApiKey_longerthan12chars";
     refreshSecretScrubberCache();
-    const out = scrubSecrets("key=supersecretFooApiKey_longerthan12chars tail");
+    const out = scrubSecrets("key=example-supersecretFooApiKey_longerthan12chars tail");
     expect(out).toBe("key=[REDACTED:FOO_SERVICE_API_KEY] tail");
   });
 
   test("redacts any key with _TOKEN suffix", () => {
-    process.env.WEIRD_SERVICE_TOKEN = "weirdserviceTOKENvalue_1234567890";
+    process.env.WEIRD_SERVICE_TOKEN = "example-weirdserviceTOKENvalue_1234567890";
     refreshSecretScrubberCache();
-    const out = scrubSecrets("t=weirdserviceTOKENvalue_1234567890");
+    const out = scrubSecrets("t=example-weirdserviceTOKENvalue_1234567890");
     expect(out).toBe("t=[REDACTED:WEIRD_SERVICE_TOKEN]");
   });
 
   test("redacts any key with _SECRET suffix", () => {
-    process.env.MY_OAUTH_CLIENT_SECRET = "oauthsecret_verylong_1234567890abcdef";
+    process.env.MY_OAUTH_CLIENT_SECRET = "example-oauthsecret_verylong_1234567890abcdef";
     refreshSecretScrubberCache();
-    const out = scrubSecrets("secret=oauthsecret_verylong_1234567890abcdef");
+    const out = scrubSecrets("secret=example-oauthsecret_verylong_1234567890abcdef");
     expect(out).toBe("secret=[REDACTED:MY_OAUTH_CLIENT_SECRET]");
   });
 
@@ -111,10 +111,11 @@ describe("scrubSecrets — env-based replacement", () => {
 
   test("handles comma-separated pool values (scrubs both the full pool and each component)", () => {
     process.env.POOL_TOKEN =
-      "ghp_poolfirst1234567890abcdefABCDEF1234567890,ghp_poolsecond1234567890abcdef1234567890AB";
+      "example-ghp_poolfirst1234567890abcdefABCDEF1234567890," +
+      "example-ghp_poolsecond1234567890abcdef1234567890AB";
     refreshSecretScrubberCache();
-    const out = scrubSecrets("using ghp_poolfirst1234567890abcdefABCDEF1234567890");
-    expect(out).not.toContain("ghp_poolfirst1234567890abcdefABCDEF1234567890");
+    const out = scrubSecrets("using example-ghp_poolfirst1234567890abcdefABCDEF1234567890");
+    expect(out).not.toContain("example-ghp_poolfirst1234567890abcdefABCDEF1234567890");
     expect(out).toContain("[REDACTED:");
   });
 
@@ -123,7 +124,8 @@ describe("scrubSecrets — env-based replacement", () => {
     process.env.OPENAI_API_KEY = "sk-proj-abcd1234567890EFGHefgh1234567890";
     refreshSecretScrubberCache();
     const input =
-      "gh=ghp_abcdefghijklmnopqrstuvwxyz0123456789 and openai=sk-proj-abcd1234567890EFGHefgh1234567890";
+      "gh=example-ghp_abcdefghijklmnopqrstuvwxyz0123456789 " +
+      "and openai=example-sk-proj-abcd1234567890EFGHefgh1234567890";
     const out = scrubSecrets(input);
     expect(out).toContain("[REDACTED:GITHUB_TOKEN]");
     expect(out).toContain("[REDACTED:OPENAI_API_KEY]");
@@ -146,63 +148,65 @@ describe("scrubSecrets — env-based replacement", () => {
     const out1 = scrubSecrets("no secret yet here_abcdefghij");
     expect(out1).toBe("no secret yet here_abcdefghij");
 
-    process.env.NEW_SERVICE_API_KEY = "here_abcdefghij_andmore1234567890";
+    process.env.NEW_SERVICE_API_KEY = "example-here_abcdefghij_andmore1234567890";
     refreshSecretScrubberCache();
-    const out2 = scrubSecrets("value=here_abcdefghij_andmore1234567890");
+    const out2 = scrubSecrets("value=example-here_abcdefghij_andmore1234567890");
     expect(out2).toBe("value=[REDACTED:NEW_SERVICE_API_KEY]");
   });
 });
 
 describe("scrubSecrets — regex patterns", () => {
   test("redacts github_pat_ fine-grained PATs", () => {
-    const out = scrubSecrets("PAT: github_pat_11B4WKYAA0Qe95fajGmt3o_ABCDEF1234567890abcdef");
+    const token = `github_pat_${"a".repeat(32)}`;
+    const out = scrubSecrets(`PAT: ${token}`);
     expect(out).toContain("[REDACTED:github_pat]");
-    expect(out).not.toContain("github_pat_11B4WKYAA");
+    expect(out).not.toContain(token);
   });
 
   test("redacts ghp_ classic tokens", () => {
-    const out = scrubSecrets("PAT: ghp_1234567890abcdefABCDEF1234567890ABCD end");
+    const out = scrubSecrets("PAT: example-ghp_1234567890abcdefABCDEF1234567890ABCD end");
     expect(out).toContain("[REDACTED:github_token]");
     expect(out).not.toContain("ghp_1234567890abcdef");
   });
 
   test("redacts gho_ OAuth tokens", () => {
-    const out = scrubSecrets("OAuth: gho_abcdef1234567890ABCDEF1234567890abcd");
+    const out = scrubSecrets("OAuth: example-gho_abcdef1234567890ABCDEF1234567890abcd");
     expect(out).toContain("[REDACTED:github_token]");
   });
 
   test("redacts ghs_ installation tokens", () => {
-    const out = scrubSecrets("Installation: ghs_abcdef1234567890ABCDEF1234567890abcd");
+    const out = scrubSecrets("Installation: example-ghs_abcdef1234567890ABCDEF1234567890abcd");
     expect(out).toContain("[REDACTED:github_token]");
   });
 
   test("redacts glpat- GitLab PATs", () => {
-    const out = scrubSecrets("GL: glpat-abcdef1234567890ABCDEFgh");
+    const out = scrubSecrets("GL: example-glpat-abcdef1234567890ABCDEFgh");
     expect(out).toContain("[REDACTED:gitlab_pat]");
     expect(out).not.toContain("glpat-abcdef");
   });
 
   test("redacts sk-ant- Anthropic keys", () => {
-    const out = scrubSecrets("Anthropic: sk-ant-api03-abc123def456ghi789jkl012mno345");
+    const token = `sk-ant-${"a".repeat(32)}`;
+    const out = scrubSecrets(`Anthropic: ${token}`);
     expect(out).toContain("[REDACTED:anthropic_key]");
-    expect(out).not.toContain("sk-ant-api03");
+    expect(out).not.toContain(token);
   });
 
   test("redacts sk-proj- OpenAI project keys (preferred over legacy sk-)", () => {
-    const out = scrubSecrets("OpenAI: sk-proj-abcdefghijklmnopqrstuvwxyz012345");
+    const out = scrubSecrets("OpenAI: example-sk-proj-abcdefghijklmnopqrstuvwxyz012345");
     expect(out).toContain("[REDACTED:openai_proj_key]");
     expect(out).not.toContain("sk-proj-abcdefghijkl");
   });
 
   test("redacts legacy sk- keys (catch-all)", () => {
-    const out = scrubSecrets("Legacy: sk-abcdefghijklmnopqrstuvwxyz0123");
+    const out = scrubSecrets("Legacy: example-sk-abcdefghijklmnopqrstuvwxyz0123");
     expect(out).toContain("[REDACTED:sk_key]");
   });
 
   test("redacts Slack xoxb tokens", () => {
-    const out = scrubSecrets("slack=xoxb-1234567890-0987654321-abcdefghij");
+    const out = scrubSecrets("slack=example-xoxb-1234567890-0987654321-abcdefghij");
     expect(out).toContain("[REDACTED:slack_token]");
-    expect(out).not.toContain("xoxb-1234567890");
+    expect(out).not.toContain("example-xoxb-1234567890");
   });
 
   test("redacts AWS access key IDs", () => {
@@ -228,7 +232,7 @@ describe("scrubSecrets — regex patterns", () => {
 
   test("regex patterns catch tokens even when env is empty", () => {
     // Fresh env — no secrets registered — regex should still catch well-known shapes.
-    const out = scrubSecrets("token=ghp_1234567890abcdefABCDEF1234567890ABCD");
+    const out = scrubSecrets("token=example-ghp_1234567890abcdefABCDEF1234567890ABCD");
     expect(out).toContain("[REDACTED:github_token]");
   });
 
@@ -241,7 +245,7 @@ describe("scrubSecrets — regex patterns", () => {
   });
 
   test("redacts Linear OAuth tokens", () => {
-    const out = scrubSecrets("Authorization: Bearer lin_oauth_test123abcdef end");
+    const out = scrubSecrets("Authorization: Bearer example-lin_oauth_test123abcdef end");
     expect(out).toContain("[REDACTED:linear_oauth]");
     expect(out).not.toContain("lin_oauth_test123");
   });
@@ -279,7 +283,10 @@ describe("scrubSecrets — regex patterns", () => {
   });
 
   test("redacts tokens in double-encoded JSON with escape sequences", () => {
-    const inner = JSON.stringify({ access_token: "lin_oauth_test123abcdef", scope: "read" });
+    const inner = JSON.stringify({
+      access_token: "example-lin_oauth_test123abcdef",
+      scope: "read",
+    });
     const content = `{"output":${JSON.stringify(inner)}}`;
     const out = scrubSecrets(content);
     expect(out).toContain("[REDACTED:linear_oauth]");
@@ -333,14 +340,14 @@ describe("scrubSecrets — does not over-scrub", () => {
 
 describe("scrubObject", () => {
   test("scrubs nested object and array string leaves", () => {
-    process.env.NESTED_TOKEN = "nested-secret-value-1234567890";
+    process.env.NESTED_TOKEN = "example-nested-secret-value-1234567890";
     refreshSecretScrubberCache();
 
     const out = scrubObject({
       keep: 1,
       nested: {
-        secret: "nested-secret-value-1234567890",
-        list: ["safe", "nested-secret-value-1234567890"],
+        secret: "example-nested-secret-value-1234567890",
+        list: ["safe", "example-nested-secret-value-1234567890"],
       },
       nullish: null,
       bool: true,
@@ -371,7 +378,7 @@ describe("registerVolatileSecret", () => {
   });
 
   test("scrubs a runtime-registered volatile secret", () => {
-    const secret = "volatile_runtime_token_1234567890abcdef";
+    const secret = "example-volatile_runtime_token_1234567890abcdef";
     registerVolatileSecret(secret, "RUNTIME_TOKEN");
     const out = scrubSecrets(`key=${secret}`);
     expect(out).toBe("key=[REDACTED:RUNTIME_TOKEN]");

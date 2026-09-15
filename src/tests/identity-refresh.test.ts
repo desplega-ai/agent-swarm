@@ -16,7 +16,7 @@ const cached: IdentityProfileFields = {
 };
 const context: IdentityRefreshContext = {
   apiUrl: "http://identity.invalid",
-  apiKey: "test-key",
+  apiKey: "example-test-key",
   agentId: "38d36438-58a0-45b5-8602-a5d52b07c2f1",
   role: "worker",
   timeoutMs: 20,
@@ -133,7 +133,7 @@ describe("refreshIdentityIfChanged", () => {
       expect(url).toBe(`${context.apiUrl}/me`);
       expect(init?.headers).toEqual({
         "X-Agent-ID": context.agentId,
-        Authorization: "Bearer test-key",
+        Authorization: "Bearer example-test-key",
       });
       signal = init?.signal ?? undefined;
       return Response.json({ soulMd: "new" });

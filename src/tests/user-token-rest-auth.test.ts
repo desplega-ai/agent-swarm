@@ -21,7 +21,7 @@ import { getPathSegments, parseQueryParams } from "../http/utils";
 import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-user-token-rest-auth.sqlite";
-const API_KEY = "test-api-key";
+const API_KEY = "example-test-api-key";
 const ACTOR: IdentityActor = { kind: "operator", id: "op:test" };
 
 function createTestServer(): Server {

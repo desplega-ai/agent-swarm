@@ -13,7 +13,7 @@ const TEST_DB_PATH = "./test-ensure-token.sqlite";
 
 const testApp = {
   clientId: "test-client-id",
-  clientSecret: "test-client-secret",
+  clientSecret: "example-test-client-secret",
   authorizeUrl: "https://example.com/oauth/authorize",
   tokenUrl: "https://example.com/oauth/token",
   redirectUri: "http://localhost:3013/callback",
@@ -48,8 +48,8 @@ afterAll(async () => {
 describe("ensureToken", () => {
   test("does nothing when token is not expiring", async () => {
     await storeOAuthTokens("test-provider", {
-      accessToken: "valid-token",
-      refreshToken: "refresh-token",
+      accessToken: "example-valid-token",
+      refreshToken: "example-refresh-token",
       expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(), // 1 hour from now
     });
 
@@ -63,13 +63,13 @@ describe("ensureToken", () => {
 
     // Token should be unchanged
     const tokens = await getOAuthTokens("test-provider");
-    expect(tokens?.accessToken).toBe("valid-token");
+    expect(tokens?.accessToken).toBe("example-valid-token");
   });
 
   test("refreshes token when expiring soon", async () => {
     await storeOAuthTokens("test-provider", {
-      accessToken: "old-token",
-      refreshToken: "refresh-token",
+      accessToken: "example-old-token",
+      refreshToken: "example-refresh-token",
       expiresAt: new Date(Date.now() + 2 * 60 * 1000).toISOString(), // 2 minutes (within 5-min buffer)
     });
 
@@ -77,10 +77,10 @@ describe("ensureToken", () => {
       Promise.resolve(
         new Response(
           JSON.stringify({
-            access_token: "new-access-token",
+            access_token: "example-new-access-token",
             token_type: "Bearer",
             expires_in: 3600,
-            refresh_token: "new-refresh-token",
+            refresh_token: "example-new-refresh-token",
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
@@ -96,12 +96,12 @@ describe("ensureToken", () => {
     expect(url).toBe("https://example.com/oauth/token");
     expect(init.method).toBe("POST");
     expect(init.body).toContain("grant_type=refresh_token");
-    expect(init.body).toContain("refresh_token=refresh-token");
+    expect(init.body).toContain("refresh_token=example-refresh-token");
 
     // Token should be updated in DB
     const tokens = await getOAuthTokens("test-provider");
-    expect(tokens?.accessToken).toBe("new-access-token");
-    expect(tokens?.refreshToken).toBe("new-refresh-token");
+    expect(tokens?.accessToken).toBe("example-new-access-token");
+    expect(tokens?.refreshToken).toBe("example-new-refresh-token");
   });
 
   test("handles gracefully when no tokens exist", async () => {
@@ -131,8 +131,8 @@ describe("ensureToken", () => {
 
   test("handles refresh failure gracefully", async () => {
     await storeOAuthTokens("test-provider", {
-      accessToken: "old-token",
-      refreshToken: "refresh-token",
+      accessToken: "example-old-token",
+      refreshToken: "example-refresh-token",
       expiresAt: new Date(Date.now() + 60 * 1000).toISOString(), // 1 minute from now
     });
 
@@ -153,13 +153,13 @@ describe("ensureToken", () => {
 
     // Original token should still be in DB (refresh failed)
     const tokens = await getOAuthTokens("test-provider");
-    expect(tokens?.accessToken).toBe("old-token");
+    expect(tokens?.accessToken).toBe("example-old-token");
   });
 
   test("refreshes token when custom bufferMs makes it 'expiring soon'", async () => {
     await storeOAuthTokens("test-provider", {
-      accessToken: "old-token",
-      refreshToken: "refresh-token",
+      accessToken: "example-old-token",
+      refreshToken: "example-refresh-token",
       expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString(), // 12h from now
     });
 
@@ -167,10 +167,10 @@ describe("ensureToken", () => {
       Promise.resolve(
         new Response(
           JSON.stringify({
-            access_token: "refreshed-token",
+            access_token: "example-refreshed-token",
             token_type: "Bearer",
             expires_in: 3600,
-            refresh_token: "new-refresh-token",
+            refresh_token: "example-new-refresh-token",
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
@@ -187,12 +187,12 @@ describe("ensureToken", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
 
     const tokens = await getOAuthTokens("test-provider");
-    expect(tokens?.accessToken).toBe("refreshed-token");
+    expect(tokens?.accessToken).toBe("example-refreshed-token");
   });
 
   test("handles token with no refresh token", async () => {
     await storeOAuthTokens("test-provider", {
-      accessToken: "old-token",
+      accessToken: "example-old-token",
       refreshToken: null,
       expiresAt: new Date(Date.now() + 60 * 1000).toISOString(), // 1 minute from now
     });
@@ -211,8 +211,8 @@ describe("ensureToken", () => {
 describe("ensureTokenOrThrow", () => {
   test("throws when refresh fails for a configured provider (so keepalive can alert)", async () => {
     await storeOAuthTokens("test-provider", {
-      accessToken: "old-token",
-      refreshToken: "refresh-token",
+      accessToken: "example-old-token",
+      refreshToken: "example-refresh-token",
       expiresAt: new Date(Date.now() + 60 * 1000).toISOString(),
     });
 
@@ -244,8 +244,8 @@ describe("ensureTokenOrThrow", () => {
     // guarantee a rotation regardless of how far the current token is from
     // expiry.
     await storeOAuthTokens("test-provider", {
-      accessToken: "old-token",
-      refreshToken: "refresh-token",
+      accessToken: "example-old-token",
+      refreshToken: "example-refresh-token",
       expiresAt: new Date(Date.now() + 50 * 60 * 1000).toISOString(), // 50 min ahead
     });
 
@@ -253,10 +253,10 @@ describe("ensureTokenOrThrow", () => {
       Promise.resolve(
         new Response(
           JSON.stringify({
-            access_token: "rotated-token",
+            access_token: "example-rotated-token",
             token_type: "Bearer",
             expires_in: 3600,
-            refresh_token: "rotated-refresh",
+            refresh_token: "example-rotated-refresh",
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
@@ -268,14 +268,14 @@ describe("ensureTokenOrThrow", () => {
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     const tokens = await getOAuthTokens("test-provider");
-    expect(tokens?.accessToken).toBe("rotated-token");
-    expect(tokens?.refreshToken).toBe("rotated-refresh");
+    expect(tokens?.accessToken).toBe("example-rotated-token");
+    expect(tokens?.refreshToken).toBe("example-rotated-refresh");
   });
 
   test("persists Jira's rotated refresh token before reporting refresh success", async () => {
     await storeOAuthTokens("jira", {
-      accessToken: "old-jira-access",
-      refreshToken: "old-jira-refresh",
+      accessToken: "example-old-jira-access",
+      refreshToken: "example-old-jira-refresh",
       expiresAt: new Date(Date.now() + 50 * 60 * 1000).toISOString(),
     });
 
@@ -283,10 +283,10 @@ describe("ensureTokenOrThrow", () => {
       Promise.resolve(
         new Response(
           JSON.stringify({
-            access_token: "new-jira-access",
+            access_token: "example-new-jira-access",
             token_type: "Bearer",
             expires_in: 3600,
-            refresh_token: "new-jira-refresh",
+            refresh_token: "example-new-jira-refresh",
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
@@ -296,14 +296,14 @@ describe("ensureTokenOrThrow", () => {
     await ensureTokenOrThrow("jira", Number.MAX_SAFE_INTEGER);
 
     const tokens = await getOAuthTokens("jira");
-    expect(tokens?.accessToken).toBe("new-jira-access");
-    expect(tokens?.refreshToken).toBe("new-jira-refresh");
+    expect(tokens?.accessToken).toBe("example-new-jira-access");
+    expect(tokens?.refreshToken).toBe("example-new-jira-refresh");
   });
 
   test("serializes concurrent Jira refresh callers before the token endpoint", async () => {
     await storeOAuthTokens("jira", {
-      accessToken: "old-jira-access",
-      refreshToken: "old-jira-refresh",
+      accessToken: "example-old-jira-access",
+      refreshToken: "example-old-jira-refresh",
       expiresAt: new Date(Date.now() + 60 * 1000).toISOString(),
     });
 
@@ -311,10 +311,10 @@ describe("ensureTokenOrThrow", () => {
       Promise.resolve(
         new Response(
           JSON.stringify({
-            access_token: "new-jira-access",
+            access_token: "example-new-jira-access",
             token_type: "Bearer",
             expires_in: 3600,
-            refresh_token: "new-jira-refresh",
+            refresh_token: "example-new-jira-refresh",
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
@@ -330,17 +330,17 @@ describe("ensureTokenOrThrow", () => {
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     const [_url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
-    expect(init.body).toContain("refresh_token=old-jira-refresh");
+    expect(init.body).toContain("refresh_token=example-old-jira-refresh");
 
     const tokens = await getOAuthTokens("jira");
-    expect(tokens?.accessToken).toBe("new-jira-access");
-    expect(tokens?.refreshToken).toBe("new-jira-refresh");
+    expect(tokens?.accessToken).toBe("example-new-jira-access");
+    expect(tokens?.refreshToken).toBe("example-new-jira-refresh");
   });
 
   test("does not rotate again when a concurrent caller already changed the token row", async () => {
     await storeOAuthTokens("jira", {
-      accessToken: "old-jira-access",
-      refreshToken: "old-jira-refresh",
+      accessToken: "example-old-jira-access",
+      refreshToken: "example-old-jira-refresh",
       expiresAt: new Date(Date.now() + 60 * 1000).toISOString(),
     });
 
@@ -348,10 +348,10 @@ describe("ensureTokenOrThrow", () => {
       Promise.resolve(
         new Response(
           JSON.stringify({
-            access_token: "new-jira-access",
+            access_token: "example-new-jira-access",
             token_type: "Bearer",
             expires_in: 3600,
-            refresh_token: "new-jira-refresh",
+            refresh_token: "example-new-jira-refresh",
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
@@ -367,14 +367,14 @@ describe("ensureTokenOrThrow", () => {
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     const tokens = await getOAuthTokens("jira");
-    expect(tokens?.accessToken).toBe("new-jira-access");
-    expect(tokens?.refreshToken).toBe("new-jira-refresh");
+    expect(tokens?.accessToken).toBe("example-new-jira-access");
+    expect(tokens?.refreshToken).toBe("example-new-jira-refresh");
   });
 
   test("rejects a Jira refresh response that omits the rotated refresh token", async () => {
     await storeOAuthTokens("jira", {
-      accessToken: "old-jira-access",
-      refreshToken: "old-jira-refresh",
+      accessToken: "example-old-jira-access",
+      refreshToken: "example-old-jira-refresh",
       expiresAt: new Date(Date.now() + 60 * 1000).toISOString(),
     });
 
@@ -382,7 +382,7 @@ describe("ensureTokenOrThrow", () => {
       Promise.resolve(
         new Response(
           JSON.stringify({
-            access_token: "new-jira-access",
+            access_token: "example-new-jira-access",
             token_type: "Bearer",
             expires_in: 3600,
           }),
@@ -394,30 +394,30 @@ describe("ensureTokenOrThrow", () => {
     await expect(ensureTokenOrThrow("jira")).rejects.toThrow(/rotated refresh_token/);
 
     const tokens = await getOAuthTokens("jira");
-    expect(tokens?.accessToken).toBe("old-jira-access");
-    expect(tokens?.refreshToken).toBe("old-jira-refresh");
+    expect(tokens?.accessToken).toBe("example-old-jira-access");
+    expect(tokens?.refreshToken).toBe("example-old-jira-refresh");
   });
 
   test("does not use a refreshed Jira access token when persistence loses the CAS race", async () => {
     await storeOAuthTokens("jira", {
-      accessToken: "old-jira-access",
-      refreshToken: "old-jira-refresh",
+      accessToken: "example-old-jira-access",
+      refreshToken: "example-old-jira-refresh",
       expiresAt: new Date(Date.now() + 60 * 1000).toISOString(),
     });
 
     const fetchSpy = mock(async () => {
       await storeOAuthTokens("jira", {
-        accessToken: "concurrent-jira-access",
-        refreshToken: "concurrent-jira-refresh",
+        accessToken: "example-concurrent-jira-access",
+        refreshToken: "example-concurrent-jira-refresh",
         expiresAt: new Date(Date.now() + 3600_000).toISOString(),
       });
       return Promise.resolve(
         new Response(
           JSON.stringify({
-            access_token: "stale-result-access",
+            access_token: "example-stale-result-access",
             token_type: "Bearer",
             expires_in: 3600,
-            refresh_token: "stale-result-refresh",
+            refresh_token: "example-stale-result-refresh",
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
@@ -431,30 +431,30 @@ describe("ensureTokenOrThrow", () => {
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     const tokens = await getOAuthTokens("jira");
-    expect(tokens?.accessToken).toBe("concurrent-jira-access");
-    expect(tokens?.refreshToken).toBe("concurrent-jira-refresh");
+    expect(tokens?.accessToken).toBe("example-concurrent-jira-access");
+    expect(tokens?.refreshToken).toBe("example-concurrent-jira-refresh");
   });
 
   test("carries the loaded tokenVersion through refresh when the refresh token is unchanged", async () => {
     await storeOAuthTokens("jira", {
-      accessToken: "old-jira-access",
-      refreshToken: "stable-jira-refresh",
+      accessToken: "example-old-jira-access",
+      refreshToken: "example-stable-jira-refresh",
       expiresAt: new Date(Date.now() + 60 * 1000).toISOString(),
     });
 
     const fetchSpy = mock(async () => {
       await storeOAuthTokens("jira", {
-        accessToken: "same-refresh-concurrent-winner",
-        refreshToken: "stable-jira-refresh",
+        accessToken: "example-same-refresh-concurrent-winner",
+        refreshToken: "example-stable-jira-refresh",
         expiresAt: new Date(Date.now() + 3600_000).toISOString(),
       });
       return Promise.resolve(
         new Response(
           JSON.stringify({
-            access_token: "same-refresh-stale-result",
+            access_token: "example-same-refresh-stale-result",
             token_type: "Bearer",
             expires_in: 3600,
-            refresh_token: "stable-jira-refresh",
+            refresh_token: "example-stable-jira-refresh",
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
@@ -469,7 +469,7 @@ describe("ensureTokenOrThrow", () => {
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     const tokens = await getOAuthTokens("jira");
-    expect(tokens?.accessToken).toBe("same-refresh-concurrent-winner");
-    expect(tokens?.refreshToken).toBe("stable-jira-refresh");
+    expect(tokens?.accessToken).toBe("example-same-refresh-concurrent-winner");
+    expect(tokens?.refreshToken).toBe("example-stable-jira-refresh");
   });
 });

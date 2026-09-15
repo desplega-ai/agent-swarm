@@ -134,9 +134,9 @@ export function buildEffectiveText(
 }
 
 /**
- * The files of a follow-up that `ADDITIVE_SLACK` queues instead of turning into
- * a task right away: the queued text keeps their `[File: …]` lines, but they
- * are not attached, so they're reported like any other unattached file.
+ * Fallback when a buffered follow-up cannot fetch its files (for example,
+ * the Slack app is unavailable at flush). Keep their names in the task and
+ * mark them unattached. Normal flushes report specific download/storage failures.
  */
 export function bufferedFileFailures(files: SlackFile[] | undefined): SlackFileFailure[] {
   return (files ?? []).map((file) => ({ file, reason: BUFFERED_REASON }));

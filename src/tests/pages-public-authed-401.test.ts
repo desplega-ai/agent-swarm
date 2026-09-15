@@ -90,7 +90,7 @@ describe("GET /p/:id — authed mode returns 401 in step-3", () => {
         title: "Password",
         contentType: "text/html",
         authMode: "password",
-        password: "swordfish",
+        password: "example-swordfish",
         body: "<h1>secret</h1>",
       }),
     });

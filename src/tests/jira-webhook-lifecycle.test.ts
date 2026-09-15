@@ -31,13 +31,13 @@ mock.module("../jira/client", () => ({
 
 beforeAll(async () => {
   initDb(TEST_DB_PATH);
-  process.env.JIRA_WEBHOOK_TOKEN = "test-token-32-chars-deadbeef-cafe-99";
+  process.env.JIRA_WEBHOOK_TOKEN = "example-test-token-32-chars-deadbeef-cafe-99";
   delete process.env.PUBLIC_MCP_BASE_URL;
   process.env.MCP_BASE_URL = "https://test.example.com";
 
   await upsertOAuthApp("jira", {
     clientId: "client-id",
-    clientSecret: "client-secret",
+    clientSecret: "example-client-secret",
     authorizeUrl: "https://auth.atlassian.com/authorize",
     tokenUrl: "https://auth.atlassian.com/oauth/token",
     redirectUri: "http://localhost:3013/api/trackers/jira/callback",
@@ -118,7 +118,7 @@ describe("registerJiraWebhook", () => {
       webhooks: { events: string[]; jqlFilter: string; fieldIdsFilter: string[] }[];
     };
     expect(parsed.url).toBe(
-      "https://test.example.com/api/trackers/jira/webhook/test-token-32-chars-deadbeef-cafe-99",
+      "https://test.example.com/api/trackers/jira/webhook/example-test-token-32-chars-deadbeef-cafe-99",
     );
     expect(parsed.webhooks[0]?.jqlFilter).toBe("project = KAN");
     expect(parsed.webhooks[0]?.events).toEqual([

@@ -31,7 +31,7 @@ import { join } from "node:path";
 import { resolveCodexOAuthCredentialInfo } from "../commands/runner";
 
 const MOCK_API_URL = "http://localhost:3013";
-const MOCK_API_KEY = "test-api-key";
+const MOCK_API_KEY = "example-test-api-key";
 
 const originalFetch = globalThis.fetch;
 const originalHome = process.env.HOME;
@@ -65,9 +65,9 @@ async function writeStandaloneAuthJson(): Promise<void> {
       auth_mode: "chatgpt",
       OPENAI_API_KEY: null,
       tokens: {
-        id_token: "id-standalone",
-        access_token: "access-standalone",
-        refresh_token: "refresh-standalone",
+        id_token: "example-id-standalone",
+        access_token: "example-access-standalone",
+        refresh_token: "example-refresh-standalone",
         account_id: "acct-standalone",
       },
       last_refresh: new Date().toISOString(),

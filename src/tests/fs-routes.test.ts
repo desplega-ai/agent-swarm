@@ -25,7 +25,7 @@ import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-fs-routes.sqlite";
 const TEST_FS_DIR = "./test-fs-routes-data";
-const API_KEY = "test-fs-key";
+const API_KEY = "example-test-fs-key";
 
 async function removeDbFiles(path: string): Promise<void> {
   for (const suffix of ["", "-wal", "-shm"]) {

@@ -44,7 +44,7 @@ async function pre117Database(path = ":memory:"): Promise<Database> {
       id: "app-linear",
       provider: "linear",
       clientId: "linear-client",
-      clientSecret: "linear-client-secret",
+      clientSecret: "example-linear-client-secret",
       authorizeUrl: "https://linear.test/authorize",
       tokenUrl: "https://linear.test/token",
       redirectUri: "https://swarm.test/api/oauth/linear/callback",
@@ -60,7 +60,7 @@ async function pre117Database(path = ":memory:"): Promise<Database> {
       id: "app-jira",
       provider: "jira",
       clientId: "jira-client",
-      clientSecret: "jira-client-secret",
+      clientSecret: "example-jira-client-secret",
       authorizeUrl: "https://jira.test/authorize",
       tokenUrl: "https://jira.test/token",
       redirectUri: "https://swarm.test/api/oauth/jira/callback",
@@ -77,7 +77,7 @@ async function pre117Database(path = ":memory:"): Promise<Database> {
       id: "app-vendor",
       provider: "vendor",
       clientId: "vendor-client",
-      clientSecret: "vendor-client-secret",
+      clientSecret: "example-vendor-client-secret",
       authorizeUrl: "https://vendor.test/authorize",
       tokenUrl: "https://vendor.test/token",
       redirectUri: "https://swarm.test/api/oauth/vendor/callback",
@@ -422,9 +422,9 @@ describe("migration 117 unified OAuth storage", () => {
         )
         .get();
       expect(encryptedLinear?.clientSecretEncrypted).toBe(1);
-      expect(encryptedLinear?.clientSecret).not.toBe("linear-client-secret");
+      expect(encryptedLinear?.clientSecret).not.toBe("example-linear-client-secret");
       expect(decryptSecret(encryptedLinear!.clientSecret, getEncryptionKey())).toBe(
-        "linear-client-secret",
+        "example-linear-client-secret",
       );
       const encryptedAuthorization = database
         .query<{ accessToken: string; refreshToken: string | null; tokensEncrypted: number }, []>(

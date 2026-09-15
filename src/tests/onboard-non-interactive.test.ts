@@ -18,7 +18,7 @@ describe("non-interactive onboarding CLI", () => {
       try {
         const result = await runChild(["bun", CLI_PATH, "onboard", "--yes"], {
           cwd: outputDir,
-          env: { ...process.env, CLAUDE_CODE_OAUTH_TOKEN: "test-oauth" },
+          env: { ...process.env, CLAUDE_CODE_OAUTH_TOKEN: "example-test-oauth" },
         });
 
         expect(result.exitCode).not.toBe(0);
@@ -42,7 +42,7 @@ describe("non-interactive onboarding CLI", () => {
           ["bun", CLI_PATH, "onboard", "--yes", "--preset=solo", "--max-concurrent-tasks=0"],
           {
             cwd: outputDir,
-            env: { ...process.env, CLAUDE_CODE_OAUTH_TOKEN: "test-oauth" },
+            env: { ...process.env, CLAUDE_CODE_OAUTH_TOKEN: "example-test-oauth" },
           },
         );
 
@@ -110,10 +110,10 @@ describe("resolveNonInteractiveProvider", () => {
   });
 
   test("detects OpenAI and maps it to codex", () => {
-    const result = resolveNonInteractiveProvider({ OPENAI_API_KEY: "sk-openai" });
+    const result = resolveNonInteractiveProvider({ OPENAI_API_KEY: "example-sk-openai" });
     expect(result).toMatchObject({
       ok: true,
-      state: { provider: "openai", harness: "codex", openaiApiKey: "sk-openai" },
+      state: { provider: "openai", harness: "codex", openaiApiKey: "example-sk-openai" },
     });
   });
 

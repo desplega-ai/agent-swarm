@@ -19,7 +19,7 @@ import { slackContextKey as buildSlackContextKey } from "../tasks/context-key";
 import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-kv-http.sqlite";
-const API_KEY = "test-kv-key";
+const API_KEY = "example-test-kv-key";
 
 async function removeDbFiles(path: string): Promise<void> {
   for (const suffix of ["", "-wal", "-shm"]) {

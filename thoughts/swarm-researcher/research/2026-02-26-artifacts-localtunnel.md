@@ -520,8 +520,8 @@ lt --port 3000 --subdomain my-agent --auth
 # Username: "hi", Password: auto-generated
 
 # Mode 2: Custom password
-lt --port 3000 --subdomain my-agent --auth "my-secret-password"
-# Username: "hi", Password: "my-secret-password"
+lt --port 3000 --subdomain my-agent --auth "example-my-secret-password"
+# Username: "hi", Password: "example-my-secret-password"
 ```
 
 **Programmatic API:**

@@ -1,0 +1,61 @@
+name: HOL Plugin Scanner
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: plugin-scanner-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    name: Repository plugin findings (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Scan repository
+        id: scanner
+        uses: hashgraph-online/ai-plugin-scanner-action@46ad86451b45941cd853a03ee6ccdb55f3dbee28 # v1.2.683
+        with:
+          mode: scan
+          plugin_dir: .
+          format: json
+          output: ${{ runner.temp }}/plugin-scanner.json
+          profile: default
+          # Collect comparable, unsuppressed findings while remediation is reviewed.
+          # HOL catalog review still requires >=80; a green job is not eligibility.
+          min_score: "0"
+          trust_repository_policy: "false"
+          online: "false"
+          upload_sarif: "false"
+          pr_comment: "off"
+
+      - name: Explain catalog threshold
+        env:
+          SCORE: ${{ steps.scanner.outputs.score }}
+        run: |
+          {
+            echo '### HOL catalog review'
+            echo
+            echo "Repository score: ${SCORE}/100. The catalog maintainer requires at least 80/100."
+            echo 'This job collects findings for review. Its success does not establish catalog eligibility.'
+            echo 'Download the plugin-scanner-report artifact for every rule, severity, and path.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload rule-level report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: plugin-scanner-report
+          path: ${{ runner.temp }}/plugin-scanner.json
+          if-no-files-found: error
+          retention-days: 30

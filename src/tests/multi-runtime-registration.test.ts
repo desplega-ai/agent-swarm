@@ -49,7 +49,7 @@ import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-multi-runtime-registration.sqlite";
 let baseUrl = "";
-const API_KEY = "test-multi-runtime-key";
+const API_KEY = "example-test-multi-runtime-key";
 
 const LEAD_ID = "44444444-4444-4444-4444-444444444444";
 

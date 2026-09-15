@@ -6,7 +6,17 @@
  * task unclaimable until its attachments exist, and both Slack ingress
  * handlers end to end against a real DB and the local file provider.
  */
-import { afterAll, beforeAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  spyOn,
+  test,
+} from "bun:test";
 import { mkdtemp, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,13 +26,17 @@ import {
   createTaskExtended,
   getDbClient,
   getLogsByTaskId,
+  getSlackTasksInThread,
+  getSteeringMessagesForTask,
   getTaskAttachments,
   getTaskById,
   initDb,
   promoteAbandonedDraftTasks,
+  startTask,
 } from "../be/db";
 import { MAX_TASK_ATTACHMENT_BYTES } from "../be/task-attachment-store";
 import { getFileStorageProvider, resetFileStorageProviderForTests } from "../fs/registry";
+import * as slackAppModule from "../slack/app";
 import { createAssistant } from "../slack/assistant";
 import * as slackEnrichModule from "../slack/enrich";
 import type { SlackFile } from "../slack/files";
@@ -34,10 +48,10 @@ import {
   notifySlackFileFailures,
   setDraftLeaseRefreshMsForTests,
 } from "../slack/inbound-files";
-import { instantFlush } from "../slack/thread-buffer";
+import { getBufferMessageCount, instantFlush } from "../slack/thread-buffer";
 
 const TEST_DB_PATH = "./test-slack-inbound-files.sqlite";
-const BOT_TOKEN = "xoxb-inbound-files-test";
+const BOT_TOKEN = "example-slack-inbound-files-token";
 const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
 
 let slackFiles: ReturnType<typeof Bun.serve>;
@@ -51,6 +65,7 @@ const previousEnv = {
   SLACK_RENDER_V2: process.env.SLACK_RENDER_V2,
   STEERING_ENABLED: process.env.STEERING_ENABLED,
   SLACK_THREAD_STEERING: process.env.SLACK_THREAD_STEERING,
+  SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION: process.env.SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION,
 };
 
 const HTML_FILE = new TextEncoder().encode("<html><body>quarterly report</body></html>");
@@ -708,30 +723,95 @@ describe("Slack ingress with files", () => {
     expect(await getTaskAttachments(followUp!.id)).toHaveLength(1);
   });
 
-  test("a follow-up queued by ADDITIVE_SLACK says its file was not attached", async () => {
-    await createAgent({ name: "lead", isLead: true, status: "busy" });
-    const { task: first } = await sendAssistantDm({ subtype: undefined, text: "start" });
-    await getDbClient().run("UPDATE agent_tasks SET status = 'in_progress' WHERE id = ?", [
-      first!.id,
-    ]);
-    process.env.ADDITIVE_SLACK = "true";
-    // instantFlush steers into the running session when steering is on; this
-    // asserts the task-creating path, so keep steering off whatever the env says.
-    process.env.STEERING_ENABLED = "false";
-    delete process.env.SLACK_THREAD_STEERING;
-    const client = slackClient();
+  describe("buffered follow-ups with files", () => {
+    let earlier: Awaited<ReturnType<typeof createTaskExtended>>;
+    let client: ReturnType<typeof slackClient>;
+    const getApp = spyOn(slackAppModule, "getSlackApp");
+    const channelId = "C0BUFFERFILES";
+    const threadTs = "1950000000.000001";
+    const key = `${channelId}:${threadTs}`;
 
-    try {
+    beforeEach(async () => {
+      const lead = await createAgent({
+        name: "lead",
+        isLead: true,
+        status: "busy",
+        harnessProvider: "pi",
+      });
+      earlier = await createTaskExtended("earlier work", {
+        agentId: lead.id,
+        source: "slack",
+        slackChannelId: channelId,
+        slackThreadTs: threadTs,
+      });
+      await startTask(earlier.id);
+      process.env.ADDITIVE_SLACK = "true";
+      process.env.STEERING_ENABLED = "true";
+      process.env.SLACK_THREAD_STEERING = "lead";
+      process.env.SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION = "false";
+      client = slackClient();
+      getApp.mockReturnValue({ client } as never);
+    });
+
+    afterEach(async () => {
+      await instantFlush(key);
+      process.env.ADDITIVE_SLACK = "false";
+      restoreSteeringEnv();
+      const requireMention = previousEnv.SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION;
+      if (requireMention === undefined) delete process.env.SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION;
+      else process.env.SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION = requireMention;
+      getApp.mockReturnValue(null);
+    });
+
+    afterAll(() => getApp.mockRestore());
+
+    async function sendBuffered(text: string, files: SlackFile[] = []) {
+      seq += 1;
+      const ts = `1950000001.${String(seq).padStart(6, "0")}`;
+      await channelMessage({
+        event: {
+          type: "message",
+          subtype: files.length ? "file_share" : undefined,
+          channel: channelId,
+          thread_ts: threadTs,
+          ts,
+          user: "U_HUMAN",
+          text,
+          files,
+        },
+        body: { event_id: `evt_inbound_files_${seq}` },
+        client,
+        say: mock(async () => ({})),
+      });
+      return ts;
+    }
+
+    async function followUp() {
+      const tasks = (await getSlackTasksInThread(channelId, threadTs)).filter(
+        (task) => task.id !== earlier.id,
+      );
+      expect(tasks).toHaveLength(1);
+      return tasks[0]!;
+    }
+
+    function failureNotices() {
+      return (client.chat.postMessage.mock.calls as unknown as [{ text: string }][])
+        .map(([args]) => args.text)
+        .filter((text) => text.includes("Couldn't attach"));
+    }
+
+    test("assistant follow-ups retain files until flush and resolve id-only metadata", async () => {
+      client.files.info.mockResolvedValue({ ok: true, file: slackFile() } as never);
       seq += 1;
       await assistantMessage({
         message: {
-          channel: first!.slackChannelId,
-          thread_ts: first!.slackThreadTs,
-          ts: `1800000000.${String(seq).padStart(6, "0")}`,
+          channel: channelId,
+          thread_ts: threadTs,
+          ts: `1950000001.${String(seq).padStart(6, "0")}`,
           user: "U_HUMAN",
           subtype: "file_share",
           text: "",
-          files: [slackFile()],
+          files: [{ id: "F0SHOT0001" }],
         },
         body: { event_id: `evt_inbound_files_${seq}` },
         client,
@@ -740,81 +820,137 @@ describe("Slack ingress with files", () => {
         setTitle: mock(async () => {}),
         getThreadContext: mock(async () => ({})),
       });
-    } finally {
-      process.env.ADDITIVE_SLACK = "false";
-    }
-
-    try {
-      await assertQueuedFollowUp();
-    } finally {
-      restoreSteeringEnv();
-    }
-
-    async function assertQueuedFollowUp() {
       expect(fileRequests).toEqual([]);
-      expect(client.chat.postMessage).toHaveBeenCalledTimes(1);
-      const [args] = client.chat.postMessage.mock.calls[0] as unknown as [{ text: string }];
-      expect(args.text).toContain("`screenshot.png` (follow-ups queued by ADDITIVE_SLACK");
+      expect(client.files.info).not.toHaveBeenCalled();
+      expect(failureNotices()).toEqual([]);
 
-      // Drain the debounce buffer now, while the DB is still open.
-      await instantFlush(`${first!.slackChannelId}:${first!.slackThreadTs}`);
-      const queued = await getDbClient().get<{ task: string }>(
-        "SELECT task FROM agent_tasks WHERE slackThreadTs = ? AND id != ? ORDER BY createdAt DESC",
-        [first!.slackThreadTs, first!.id],
-      );
-      expect(queued?.task).toContain("(not attached: follow-ups queued by ADDITIVE_SLACK");
-    }
-  });
-
-  test("a !now follow-up with a file says the file was not attached", async () => {
-    const lead = await createAgent({ name: "lead", isLead: true, status: "busy" });
-    const threadTs = "1950000000.000001";
-    const earlier = await createTaskExtended("earlier work", {
-      agentId: lead.id,
-      source: "slack",
-      slackChannelId: "C0NOWTEST1",
-      slackThreadTs: threadTs,
+      await instantFlush(key);
+      const task = await followUp();
+      expect(await readStoredBytes(task.id)).toEqual([PNG_BYTES]);
+      expect(task.task).toContain("[File: screenshot.png");
+      expect(task.task).not.toContain("not attached");
+      expect(await wasDraft(task.id)).toBe(true);
+      expect(await getSteeringMessagesForTask(earlier.id)).toEqual([]);
+      expect(failureNotices()).toEqual([]);
     });
-    await getDbClient().run("UPDATE agent_tasks SET status = 'in_progress' WHERE id = ?", [
-      earlier.id,
-    ]);
-    process.env.ADDITIVE_SLACK = "true";
-    process.env.STEERING_ENABLED = "false";
-    delete process.env.SLACK_THREAD_STEERING;
-    const client = slackClient();
-    seq += 1;
 
-    try {
-      await channelMessage({
-        event: {
-          type: "message",
-          subtype: "file_share",
-          channel: "C0NOWTEST1",
-          thread_ts: threadTs,
-          ts: `1950000001.${String(seq).padStart(6, "0")}`,
-          user: "U_HUMAN",
-          text: "!now here it is",
-          files: [slackFile()],
-        },
-        body: { event_id: `evt_inbound_files_${seq}` },
-        client,
-        say: mock(async () => ({})),
+    for (const steering of ["off", "lead"]) {
+      test(`timed flush attaches every message's files with steering ${steering}`, async () => {
+        process.env.SLACK_THREAD_STEERING = steering;
+        const nativeSetTimeout = globalThis.setTimeout;
+        const bufferMs = Number(process.env.ADDITIVE_SLACK_BUFFER_MS) || 10_000;
+        const timer = spyOn(globalThis, "setTimeout").mockImplementation((fn, ms, ...args) =>
+          nativeSetTimeout(fn, ms === bufferMs ? 250 : ms, ...args),
+        );
+        const otherBytes = new Uint8Array([...PNG_BYTES, 4]);
+        bytesById.set("F0OTHER0001", otherBytes);
+        let lastTs: string;
+        try {
+          await sendBuffered("", [slackFile()]);
+          lastTs = await sendBuffered("compare these", [
+            slackFile({ id: "F0OTHER0001", name: "other.png", size: otherBytes.length }),
+          ]);
+          expect(getBufferMessageCount(key)).toBe(2);
+          expect(fileRequests).toEqual([]);
+          expect(failureNotices()).toEqual([]);
+        } finally {
+          timer.mockRestore();
+        }
+        // Wait for the real timer callback and draft promotion, not instantFlush.
+        for (let i = 0; i < 200; i++) {
+          const tasks = await getSlackTasksInThread(channelId, threadTs);
+          if (tasks.some((task) => task.id !== earlier.id && task.status === "pending")) break;
+          await Bun.sleep(10);
+        }
+        const task = await followUp();
+        expect(task.status).toBe("pending");
+        expect(task.dependsOn).toEqual([earlier.id]);
+        expect(task.slackTriggerMessageTs).toBe(lastTs!);
+        expect(task.task).toContain("2 message(s) buffered");
+        expect(task.task).toContain("compare these");
+        expect(task.task).not.toContain("not attached");
+        expect(await readStoredBytes(task.id)).toEqual([PNG_BYTES, otherBytes]);
+        expect(await wasDraft(task.id)).toBe(true);
+        expect(await getSteeringMessagesForTask(earlier.id)).toEqual([]);
+        expect(failureNotices()).toEqual([]);
       });
-    } finally {
-      process.env.ADDITIVE_SLACK = "false";
-      restoreSteeringEnv();
+
+      test(`!now with files flushes existing files without dependency with steering ${steering}`, async () => {
+        process.env.SLACK_THREAD_STEERING = steering;
+        await sendBuffered("earlier screenshot", [slackFile()]);
+        expect(fileRequests).toEqual([]);
+        const otherBytes = new Uint8Array([...PNG_BYTES, 4]);
+        bytesById.set("F0OTHER0001", otherBytes);
+        await sendBuffered("!now", [
+          slackFile({ id: "F0OTHER0001", name: "other.png", size: otherBytes.length }),
+        ]);
+        const task = await followUp();
+        expect(task.task).toContain("earlier screenshot");
+        expect(task.task).not.toContain("!now");
+        expect(task.dependsOn).toEqual([]);
+        expect(await getTaskAttachments(task.id)).toHaveLength(2);
+        expect(await readStoredBytes(task.id)).toEqual([PNG_BYTES, otherBytes]);
+        expect(await getSteeringMessagesForTask(earlier.id)).toEqual([]);
+        expect(failureNotices()).toEqual([]);
+      });
     }
 
-    expect(fileRequests).toEqual([]);
-    expect(client.chat.postMessage).toHaveBeenCalledTimes(1);
-    const [args] = client.chat.postMessage.mock.calls[0] as unknown as [{ text: string }];
-    expect(args.text).toContain("`screenshot.png`");
-    const flushed = await getDbClient().get<{ task: string }>(
-      "SELECT task FROM agent_tasks WHERE slackThreadTs = ? AND task != 'earlier work'",
-      [threadTs],
-    );
-    expect(flushed?.task).toContain("here it is");
-    expect(flushed?.task).toContain("(not attached: follow-ups queued by ADDITIVE_SLACK");
+    test("text-only follow-ups still steer the running task", async () => {
+      await sendBuffered("!now use the safer approach");
+      const steering = await getSteeringMessagesForTask(earlier.id);
+      expect(steering).toHaveLength(1);
+      expect(steering[0]!.body).toContain("use the safer approach");
+      expect(await getSlackTasksInThread(channelId, threadTs)).toHaveLength(1);
+      expect(fileRequests).toEqual([]);
+    });
+
+    test("download failures and oversize files are reported at flush while good files attach", async () => {
+      await sendBuffered("inspect these", [
+        slackFile(),
+        slackFile({
+          id: "F0DENIED001",
+          name: "denied.png",
+          url_private_download: `${slackFiles.url}forbidden`,
+        }),
+        slackFile({ id: "F0HUGE0001", name: "huge.png", size: HUGE_BYTES }),
+      ]);
+      expect(failureNotices()).toEqual([]);
+      await instantFlush(key);
+      const task = await followUp();
+      expect(await readStoredBytes(task.id)).toEqual([PNG_BYTES]);
+      expect(task.task).toContain("not attached: download failed (HTTP 403)");
+      expect(task.task).not.toContain("follow-ups queued by ADDITIVE_SLACK");
+      expect(failureNotices()).toHaveLength(1);
+      expect(failureNotices()[0]).toContain("`denied.png` (download failed (HTTP 403))");
+      expect(failureNotices()[0]).toContain("`huge.png`");
+      expect(failureNotices()[0]).not.toContain("`screenshot.png`");
+    });
+
+    test("storage failures are reported after flush", async () => {
+      const upload = spyOn(getFileStorageProvider(), "upload").mockRejectedValue(
+        new Error("storage unavailable"),
+      );
+      try {
+        await sendBuffered("!now inspect this", [slackFile()]);
+        const task = await followUp();
+        expect(task.status).toBe("pending");
+        expect(await getTaskAttachments(task.id)).toEqual([]);
+        expect(failureNotices()).toHaveLength(1);
+        expect(failureNotices()[0]).toContain("storage unavailable");
+      } finally {
+        upload.mockRestore();
+      }
+    });
+
+    test("an unavailable Slack app retains the buffered file failure fallback", async () => {
+      getApp.mockReturnValue(null);
+      await sendBuffered("!now inspect this", [slackFile()]);
+      const task = await followUp();
+      expect(await getTaskAttachments(task.id)).toEqual([]);
+      expect(task.task).toContain("[File: screenshot.png");
+      expect(task.task).toContain("not attached: follow-ups queued by ADDITIVE_SLACK");
+      expect(await getSteeringMessagesForTask(earlier.id)).toEqual([]);
+    });
   });
 
   test("a channel message that mentions the bot with a file attaches it", async () => {

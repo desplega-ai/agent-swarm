@@ -9,6 +9,6 @@
   "category": "schedules",
   "placeholders": ["REPO_URL", "BRANCH", "SCOPE_PATH", "REPORT_NAME", "PAGE_ID"],
   "requires": ["github"],
-  "runAllSeedersCandidate": false,
+  "runAllSeedersCandidate": true,
   "tags": ["code-quality", "maintenance", "reporting", "community-template"]
 }

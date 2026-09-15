@@ -448,7 +448,7 @@ describe("Codex app-server session", () => {
             item: {
               type: "agentMessage",
               id: "secret-message",
-              text: "Authorization: Bearer sk-proj-abcdefghijklmnopqrstuvwxyz012345",
+              text: "Authorization: Bearer example-sk-proj-abcdefghijklmnopqrstuvwxyz012345",
             },
           });
         });
@@ -478,7 +478,9 @@ describe("Codex app-server session", () => {
 
     expect(requests).toContain("turn/interrupt");
     expect(result).toMatchObject({ exitCode: 130, failureReason: "operator cancelled" });
-    expect(JSON.stringify(emitted)).not.toContain("sk-proj-abcdefghijklmnopqrstuvwxyz012345");
+    expect(JSON.stringify(emitted)).not.toContain(
+      "example-sk-proj-abcdefghijklmnopqrstuvwxyz012345",
+    );
   });
 
   test("closes queue delivery before the final result event", async () => {
@@ -1434,7 +1436,7 @@ describe("buildCodexConfig", () => {
       agentId: "agent-mcp-test",
       taskId: "task-mcp-test",
       apiUrl: "http://test.invalid",
-      apiKey: "test-key",
+      apiKey: "example-test-key",
       cwd: "",
       logFile: `/tmp/codex-mcp-test-${Date.now()}-${Math.random().toString(36).slice(2)}.log`,
       ...overrides,
@@ -1463,7 +1465,7 @@ describe("buildCodexConfig", () => {
     expect(Object.keys(mcp)).toEqual(["agent-swarm"]);
     expect(mcp["agent-swarm"]?.url).toBe("http://test.invalid/mcp");
     const headers = mcp["agent-swarm"]?.http_headers as Record<string, string>;
-    expect(headers.Authorization).toBe("Bearer test-key");
+    expect(headers.Authorization).toBe("Bearer example-test-key");
     expect(headers["X-Agent-ID"]).toBe("agent-mcp-test");
     expect(headers["X-Source-Task-Id"]).toBe("task-mcp-test");
     expect(mcp["agent-swarm"]?.enabled).toBe(true);
@@ -1748,7 +1750,7 @@ describe("buildCodexConfig — context-mode + features", () => {
       agentId: "agent-mcp-test",
       taskId: "task-mcp-test",
       apiUrl: "http://test.invalid",
-      apiKey: "test-key",
+      apiKey: "example-test-key",
       cwd: "",
       logFile: `/tmp/codex-ctx-test-${Date.now()}-${Math.random().toString(36).slice(2)}.log`,
       ...overrides,

@@ -9,7 +9,7 @@
   "category": "workflows",
   "placeholders": ["LINEAR_PROJECT_ID"],
   "requires": ["linear"],
-  "runAllSeedersCandidate": false,
+  "runAllSeedersCandidate": true,
   "tags": [
     "workflow",
     "linear",

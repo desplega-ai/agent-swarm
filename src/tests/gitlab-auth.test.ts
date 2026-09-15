@@ -24,12 +24,12 @@ describe("GitLab auth", () => {
     });
 
     test("returns true when GITLAB_WEBHOOK_SECRET is set", () => {
-      process.env.GITLAB_WEBHOOK_SECRET = "test-secret";
+      process.env.GITLAB_WEBHOOK_SECRET = "example-test-secret";
       expect(isGitLabEnabled()).toBe(true);
     });
 
     test("returns false when GITLAB_DISABLE is true", () => {
-      process.env.GITLAB_WEBHOOK_SECRET = "test-secret";
+      process.env.GITLAB_WEBHOOK_SECRET = "example-test-secret";
       process.env.GITLAB_DISABLE = "true";
       expect(isGitLabEnabled()).toBe(false);
     });
@@ -37,7 +37,7 @@ describe("GitLab auth", () => {
 
   describe("initGitLab", () => {
     test("initializes with custom URL", () => {
-      process.env.GITLAB_WEBHOOK_SECRET = "test-secret";
+      process.env.GITLAB_WEBHOOK_SECRET = "example-test-secret";
       process.env.GITLAB_TOKEN = "glpat-abc123";
       process.env.GITLAB_URL = "https://gitlab.mycompany.com";
       initGitLab();
@@ -47,7 +47,7 @@ describe("GitLab auth", () => {
     });
 
     test("defaults to gitlab.com URL", () => {
-      process.env.GITLAB_WEBHOOK_SECRET = "test-secret";
+      process.env.GITLAB_WEBHOOK_SECRET = "example-test-secret";
       initGitLab();
 
       expect(getGitLabUrl()).toBe("https://gitlab.com");
@@ -59,7 +59,7 @@ describe("GitLab auth", () => {
     });
 
     test("is idempotent", () => {
-      process.env.GITLAB_WEBHOOK_SECRET = "test-secret";
+      process.env.GITLAB_WEBHOOK_SECRET = "example-test-secret";
       process.env.GITLAB_TOKEN = "token-1";
       initGitLab();
 
@@ -76,27 +76,27 @@ describe("GitLab auth", () => {
     });
 
     test("returns false when no token provided", () => {
-      process.env.GITLAB_WEBHOOK_SECRET = "test-secret";
+      process.env.GITLAB_WEBHOOK_SECRET = "example-test-secret";
       initGitLab();
       expect(verifyGitLabWebhook(undefined)).toBe(false);
     });
 
     test("returns false for mismatched token", () => {
-      process.env.GITLAB_WEBHOOK_SECRET = "test-secret";
+      process.env.GITLAB_WEBHOOK_SECRET = "example-test-secret";
       initGitLab();
       expect(verifyGitLabWebhook("wrong-secret")).toBe(false);
     });
 
     test("returns false for different length token", () => {
-      process.env.GITLAB_WEBHOOK_SECRET = "test-secret";
+      process.env.GITLAB_WEBHOOK_SECRET = "example-test-secret";
       initGitLab();
       expect(verifyGitLabWebhook("short")).toBe(false);
     });
 
     test("returns true for matching token", () => {
-      process.env.GITLAB_WEBHOOK_SECRET = "test-secret";
+      process.env.GITLAB_WEBHOOK_SECRET = "example-test-secret";
       initGitLab();
-      expect(verifyGitLabWebhook("test-secret")).toBe(true);
+      expect(verifyGitLabWebhook("example-test-secret")).toBe(true);
     });
   });
 

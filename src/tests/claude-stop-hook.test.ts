@@ -104,7 +104,7 @@ function makeEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   // selectively via `extra`.
   return {
     MCP_BASE_URL: "http://localhost:3013",
-    API_KEY: "test-key",
+    API_KEY: "example-test-key",
     AGENT_SWARM_TASK_ID: "task-stop-1",
     ...extra,
   };
@@ -129,8 +129,8 @@ describe("runStopHookSessionSummary", () => {
       } as unknown as ReturnType<typeof Bun.spawn>;
     }) as typeof Bun.spawn;
     const env = makeEnv({
-      CLAUDE_CODE_OAUTH_TOKEN: "test-oauth-token",
-      AGENT_SWARM_CLAUDE_OAUTH_TOKEN: "test-oauth-token",
+      CLAUDE_CODE_OAUTH_TOKEN: "example-test-oauth-token",
+      AGENT_SWARM_CLAUDE_OAUTH_TOKEN: "example-test-oauth-token",
     });
 
     await runStopHookSessionSummarySubprocess(
@@ -152,10 +152,10 @@ describe("runStopHookSessionSummary", () => {
       "session-summary-stdin",
     ]);
     expect((spawnOptions as { env?: NodeJS.ProcessEnv }).env?.CLAUDE_CODE_OAUTH_TOKEN).toBe(
-      "test-oauth-token",
+      "example-test-oauth-token",
     );
     expect((spawnOptions as { env?: NodeJS.ProcessEnv }).env?.AGENT_SWARM_CLAUDE_OAUTH_TOKEN).toBe(
-      "test-oauth-token",
+      "example-test-oauth-token",
     );
     expect(JSON.parse(stdinPayload)).toEqual({
       agentId: "agent-claude-memory",
@@ -232,7 +232,7 @@ describe("runStopHookSessionSummary", () => {
     expect(lastRunSummarizeArgs!.taskContext.sourceTaskId).toBe("task-stop-1");
     expect(lastRunSummarizeArgs!.taskContext.agentId).toBe("agent-claude-1");
     expect(lastRunSummarizeArgs!.apiUrl).toBe("http://localhost:3013");
-    expect(lastRunSummarizeArgs!.apiKey).toBe("test-key");
+    expect(lastRunSummarizeArgs!.apiKey).toBe("example-test-key");
 
     const indexCalls = fetchCalls.filter((c) => c.url.endsWith("/api/memory/index"));
     expect(indexCalls.length).toBe(1);
@@ -248,7 +248,7 @@ describe("runStopHookSessionSummary", () => {
     // Headers match the old runMemoryRater POST: Bearer + X-Agent-ID.
     const headers = indexCalls[0]!.init?.headers as Record<string, string>;
     expect(headers["Content-Type"]).toBe("application/json");
-    expect(headers.Authorization).toBe("Bearer test-key");
+    expect(headers.Authorization).toBe("Bearer example-test-key");
     expect(headers["X-Agent-ID"]).toBe("agent-claude-1");
 
     expect(consoleErrors.length).toBe(0);
@@ -320,7 +320,7 @@ describe("runStopHookSessionSummary", () => {
           transcriptPath,
           env: makeEnv({
             // Mirror the process env into the SUT-scoped env for SKIP / MCP_BASE_URL plumbing.
-            CLAUDE_CODE_OAUTH_TOKEN: "sk-test-oauth-stop-hook",
+            CLAUDE_CODE_OAUTH_TOKEN: "example-sk-test-oauth-stop-hook",
           }),
         },
         deps,

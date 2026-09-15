@@ -85,7 +85,7 @@ function makeConfig(logFile: string): ProviderSessionConfig {
     agentId: "agent-1",
     taskId: "task-1",
     apiUrl: "http://localhost:0",
-    apiKey: "test-key",
+    apiKey: "example-test-key",
     cwd: "/tmp",
     logFile,
   };

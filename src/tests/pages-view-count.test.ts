@@ -72,7 +72,7 @@ describe("Pages — view_count counter", () => {
 
   beforeAll(async () => {
     originalPageSessionSecret = process.env.PAGE_SESSION_SECRET;
-    process.env.PAGE_SESSION_SECRET = "test-view-count-secret";
+    process.env.PAGE_SESSION_SECRET = "example-test-view-count-secret";
     for (const suffix of ["", "-wal", "-shm"]) {
       try {
         await unlink(`${TEST_DB_PATH}${suffix}`);

@@ -21,7 +21,7 @@ import { listenOnFreePort } from "./test-net";
  */
 
 const AGENT_ID = "9b2c4a1e-6d3f-4a55-8f27-1c0e7b5a4d90";
-const API_KEY = "test-swarm-key";
+const API_KEY = "example-test-swarm-key";
 const AGENT_FS_KEY = "af_live_key";
 
 type FakeApiState = {

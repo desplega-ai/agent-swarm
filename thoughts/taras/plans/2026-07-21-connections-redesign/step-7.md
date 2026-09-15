@@ -43,7 +43,7 @@ Collapse the connection↔binding↔credential triad: connection upsert accepts 
 - [ ] `bun run tsc:check` && `bun run lint` && `bash scripts/check-db-boundary.sh` && `bun run docs:openapi` (commit artifacts)
 
 #### Automated QA:
-- [ ] Boot server; single curl creates an openapi connection with `auth:{type:'bearer', secret:'test-tok-123'}` → swarm_config has encrypted `connection.<slug>.secret`; run an inline script hitting the connection against a local mock API → mock receives `Authorization: Bearer test-tok-123`, while `script_run` output/logs show only `[REDACTED:...]`
+- [ ] Boot server; single curl creates an openapi connection with `auth:{type:'bearer', secret:'example-test-tok-123'}` → swarm_config has encrypted `connection.<slug>.secret`; run an inline script hitting the connection against a local mock API → mock receives `Authorization: Bearer example-test-tok-123`, while `script_run` output/logs show only `[REDACTED:...]`
 - [ ] Same flow with `auth:{type:'query', paramName:'api_key', ...}` → mock receives the query param, **no** Authorization header
 - [ ] Standalone binding created for a raw-fetch host still substitutes in a plain `fetch()` script (the surviving advanced path)
 

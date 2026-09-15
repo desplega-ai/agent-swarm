@@ -764,11 +764,11 @@ describe("initTelemetry", () => {
 
   describe("_hasEmbeddingKey", () => {
     test("true when EMBEDDING_API_KEY is set", () => {
-      expect(_hasEmbeddingKey({ EMBEDDING_API_KEY: "sk-embed" })).toBe(true);
+      expect(_hasEmbeddingKey({ EMBEDDING_API_KEY: "example-sk-embed" })).toBe(true);
     });
 
     test("true when OPENAI_API_KEY is set", () => {
-      expect(_hasEmbeddingKey({ OPENAI_API_KEY: "sk-openai" })).toBe(true);
+      expect(_hasEmbeddingKey({ OPENAI_API_KEY: "example-sk-openai" })).toBe(true);
     });
 
     test("false when neither is set (onboard wizard only writes ANTHROPIC_API_KEY)", () => {
@@ -949,7 +949,7 @@ describe("initTelemetry", () => {
     });
 
     test("channels + embedding key all present", async () => {
-      process.env.EMBEDDING_API_KEY = "sk-embed";
+      process.env.EMBEDDING_API_KEY = "example-sk-embed";
       process.env.SLACK_BOT_TOKEN = "xoxb-1";
       process.env.SLACK_APP_TOKEN = "xapp-1";
       process.env.AGENTMAIL_WEBHOOK_SECRET = "whsec_1";

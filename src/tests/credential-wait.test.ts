@@ -221,7 +221,7 @@ describe("awaitCredentials", () => {
     const status = await awaitCredentials({
       provider: "claude",
       initialEnv: {},
-      refreshEnv: async () => ({ CLAUDE_CODE_OAUTH_TOKEN: "fresh-tok" }),
+      refreshEnv: async () => ({ CLAUDE_CODE_OAUTH_TOKEN: "example-fresh-tok" }),
       sleep: async () => {},
       log: log.fn,
       backoff: { initialMs: 1, maxMs: 1, maxWaitSeconds: 0 },
@@ -229,7 +229,7 @@ describe("awaitCredentials", () => {
 
     expect(status.ready).toBe(true);
     // After the loop returns ready, process.env reflects the fresh value.
-    expect(process.env.CLAUDE_CODE_OAUTH_TOKEN).toBe("fresh-tok");
+    expect(process.env.CLAUDE_CODE_OAUTH_TOKEN).toBe("example-fresh-tok");
   });
 
   test("backoff config falls back to env-var defaults when override absent", async () => {

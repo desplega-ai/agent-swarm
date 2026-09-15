@@ -43,7 +43,7 @@ import type { ProviderEvent, ProviderSessionConfig } from "../providers/types.js
 
 const TEST_DB_PATH = "./test-codex-adapter-pool-auth-revalidate.sqlite";
 const MOCK_API_URL = "http://localhost:3013";
-const MOCK_API_KEY = "test-api-key";
+const MOCK_API_KEY = "example-test-api-key";
 const FAKE_HOME = "/home/fake-pool-worker";
 
 process.env.SECRETS_ENCRYPTION_KEY = Buffer.alloc(32, 4).toString("base64");
@@ -385,9 +385,9 @@ describe("resolveCodexAuthMode — pool path revalidates through the lock", () =
       auth_mode: "chatgpt",
       OPENAI_API_KEY: null,
       tokens: {
-        id_token: "at_local",
-        access_token: "at_local",
-        refresh_token: "rt_local",
+        id_token: "example-at_local",
+        access_token: "example-at_local",
+        refresh_token: "example-rt_local",
         account_id: "acc-local",
       },
       last_refresh: new Date().toISOString(),
@@ -487,7 +487,7 @@ describe("resolveCodexAuthMode — pool path revalidates through the lock", () =
 
     const existingAuthJson = JSON.stringify({
       auth_mode: "api-key",
-      OPENAI_API_KEY: "sk-local",
+      OPENAI_API_KEY: "example-sk-local",
     });
     const { fs, homedir, readCurrent } = fakeAuthJsonFs(existingAuthJson);
     const events: ProviderEvent[] = [];

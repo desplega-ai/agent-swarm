@@ -97,7 +97,7 @@ describe("profile divergence audit", () => {
       {
         agentId: "agent-1",
         apiUrl: "https://api.example.test",
-        apiKey: "secret-key",
+        apiKey: "example-secret-key",
         claudeMdPath: WORKSPACE_CLAUDE_MD_PATH,
       },
       { fetchImpl, readFile },
@@ -131,7 +131,7 @@ describe("profile divergence audit", () => {
       {
         agentId: "agent-codex",
         apiUrl: "https://api.example.test",
-        apiKey: "secret-key",
+        apiKey: "example-secret-key",
       },
       { fetchImpl, readFile },
     );
@@ -153,7 +153,7 @@ describe("profile divergence audit", () => {
         {
           agentId: "agent-unregistered",
           apiUrl: "https://api.example.test",
-          apiKey: "secret-key",
+          apiKey: "example-secret-key",
         },
         { fetchImpl, readFile: async () => undefined },
       ),
@@ -172,7 +172,7 @@ describe("profile divergence audit", () => {
       {
         agentId: "agent-unset",
         apiUrl: "https://api.example.test",
-        apiKey: "secret-key",
+        apiKey: "example-secret-key",
         claudeMdPath: WORKSPACE_CLAUDE_MD_PATH,
       },
       { fetchImpl, readFile },
@@ -415,7 +415,7 @@ describe("postProfileUpdate (non-2xx is surfaced, not swallowed)", () => {
   const opts = {
     agentId: "agent-1",
     apiUrl: "https://api.example.test",
-    apiKey: "secret-key",
+    apiKey: "example-secret-key",
   };
   const payload = {
     label: "setup",
@@ -477,7 +477,7 @@ describe("postProfileUpdate (non-2xx is surfaced, not swallowed)", () => {
     expect(capturedUrl).toBe("https://api.example.test/api/agents/agent-1/profile");
     expect(capturedInit?.method).toBe("PUT");
     const headers = capturedInit?.headers as Record<string, string>;
-    expect(headers.Authorization).toBe("Bearer secret-key");
+    expect(headers.Authorization).toBe("Bearer example-secret-key");
     expect(headers["X-Agent-ID"]).toBe("agent-1");
     expect(JSON.parse(String(capturedInit?.body))).toEqual(payload.body);
   });
@@ -498,7 +498,7 @@ describe("syncProfileFilesToServer (orchestration is non-fatal)", () => {
       await syncProfileFilesToServer({
         agentId: "agent-1",
         apiUrl: "https://api.example.test",
-        apiKey: "secret-key",
+        apiKey: "example-secret-key",
         changeSource: "session_sync",
         fields: ["claude"],
         claudeMdLock: { path: lockPath, waitMs: 100 },
@@ -522,7 +522,7 @@ describe("syncProfileFilesToServer (orchestration is non-fatal)", () => {
         syncProfileFilesToServer({
           agentId: "agent-1",
           apiUrl: "https://api.example.test",
-          apiKey: "secret-key",
+          apiKey: "example-secret-key",
           changeSource: "session_sync",
           // No files on a CI box → typically no payloads; still must never throw.
           claudeMdLock: { path: join(tmpdir(), `claude-md-${crypto.randomUUID()}.lock`) },

@@ -220,7 +220,7 @@ describe("script SDK allowlist", () => {
 
 describe("mcp-bridge allowlist gate", () => {
   const TEST_DB_PATH = "./test-sdk-allowlist-bridge.sqlite";
-  const API_KEY = "test-mcp-bridge-key-1234567890";
+  const API_KEY = "example-test-mcp-bridge-key-1234567890";
   let prevApiKey: string | undefined;
   let oversizedTaskId: string;
 

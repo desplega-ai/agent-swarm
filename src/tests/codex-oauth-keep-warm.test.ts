@@ -24,7 +24,7 @@ const originalApiKey = process.env.AGENT_SWARM_API_KEY;
 
 beforeAll(async () => {
   initDb(TEST_DB_PATH);
-  process.env.AGENT_SWARM_API_KEY = "test-api-key";
+  process.env.AGENT_SWARM_API_KEY = "example-test-api-key";
 
   lockServer = createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://internal");
@@ -159,8 +159,8 @@ describe("POST /api/oauth/keep-warm/codex", () => {
     setFetchForTesting(async () => {
       return new Response(
         JSON.stringify({
-          access_token: "at_keepwarm",
-          refresh_token: "rt_keepwarm",
+          access_token: "example-at_keepwarm",
+          refresh_token: "example-rt_keepwarm",
           expires_in: 864000,
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
@@ -173,7 +173,7 @@ describe("POST /api/oauth/keep-warm/codex", () => {
     const body = JSON.parse(captured.body) as { results: Array<Record<string, unknown>> };
     expect(body.results).toHaveLength(1);
     expect(body.results[0]).toMatchObject({ slot: 1, outcome: "refreshed" });
-    expect(slots.get(1)?.access).toBe("at_keepwarm");
+    expect(slots.get(1)?.access).toBe("example-at_keepwarm");
   });
 
   it("skips a slot with an active codex-auth-watch bench marker", async () => {

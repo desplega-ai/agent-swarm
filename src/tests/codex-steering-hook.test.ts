@@ -9,7 +9,7 @@ import { CHILD_PROCESS_TEST_BUDGET_MS, expectChildOk, runChild } from "./test-pr
 
 const config: CodexHookConfig = {
   apiUrl: "http://steering.test",
-  apiKey: "test-key",
+  apiKey: "example-test-key",
   agentId: "11111111-1111-4111-8111-111111111111",
 };
 

@@ -60,7 +60,7 @@ describe("GET /p/:id — authed mode cookie gate (step-4)", () => {
   // Set the page-session secret BEFORE the server boots so signPageSession()
   // in the launch handler picks it up. The test re-uses API_KEY fallback too.
   beforeAll(async () => {
-    process.env.PAGE_SESSION_SECRET = "test-authed-mode-secret-xyz";
+    process.env.PAGE_SESSION_SECRET = "example-test-authed-mode-secret-xyz";
     for (const suffix of ["", "-wal", "-shm"]) {
       try {
         await unlink(`${TEST_DB_PATH}${suffix}`);
