@@ -379,6 +379,57 @@ function AttachmentRow({
             ? "Text"
             : attachment.mimeType?.split("/")[1]?.toUpperCase() || attachment.kind;
 
+    if (href) {
+      const metadata = [
+        attachment.kind === "agent-fs" ? "Agent FS" : null,
+        label !== attachment.kind ? label : null,
+        attachment.sizeBytes != null ? formatSize(attachment.sizeBytes) : null,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      const filename = attachment.path?.split("/").filter(Boolean).at(-1);
+
+      return (
+        <div className="inline-flex w-[24rem] max-w-full items-center rounded-xl border border-border bg-background shadow-sm">
+          <a
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="group flex min-w-0 flex-1 items-center gap-3 rounded-l-xl px-3 py-2.5 text-left hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+            aria-label={`Open ${attachment.name} in a new tab`}
+            title={attachment.path || attachment.name}
+          >
+            <span className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted sm:flex">
+              <PreviewIcon kind={previewKind} />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="line-clamp-2 break-words text-sm font-medium text-foreground group-hover:text-primary">
+                {attachment.name}
+              </span>
+              {metadata && <span className="block text-xs text-muted-foreground">{metadata}</span>}
+              {!attachment.mimeType && filename && filename !== attachment.name && (
+                <span className="hidden truncate font-mono text-xs text-muted-foreground sm:block">
+                  {filename}
+                </span>
+              )}
+            </span>
+            <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground group-hover:text-primary" />
+          </a>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="mr-1 shrink-0 border-l border-border-subtle rounded-l-none text-muted-foreground"
+            onClick={() => onDownload(attachment)}
+            aria-label={`Download ${attachment.name}`}
+            title={`Download ${attachment.name}`}
+          >
+            <Download className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      );
+    }
+
     return (
       <>
         <button
