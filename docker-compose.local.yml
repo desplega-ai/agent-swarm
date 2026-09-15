@@ -13,9 +13,10 @@
 #   docker compose -f docker-compose.local.yml down
 
 services:
+  # Use quay.io because MinIO's Docker Hub repositories were removed.
   minio:
     container_name: swarm-agent-fs-minio
-    image: minio/minio:latest
+    image: quay.io/minio/minio:latest
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -33,7 +34,7 @@ services:
     restart: unless-stopped
 
   minio-init:
-    image: minio/mc:latest
+    image: quay.io/minio/mc:latest
     depends_on:
       minio:
         condition: service_healthy
