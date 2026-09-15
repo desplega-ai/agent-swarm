@@ -880,6 +880,18 @@ export function registerMessageHandler(app: App): void {
       );
       if (isSlackRenderV2Enabled()) {
         if (successfulTaskIds.length > 0) await ensureSlackThreadTree(successfulTaskIds);
+        // The tree only renders tasks that exist. A blocked or failed assignment must
+        // still be answered, or the user gets silence for a policy block.
+        if (results.failed.length > 0) {
+          const failedLines = results.failed
+            .map((f) => `⚠️ Could not assign to: *${f.agentName}* — ${f.reason}`)
+            .join("\n");
+          await say({
+            text: `Could not assign to: ${results.failed.map((f) => f.agentName).join(", ")}`,
+            blocks: [{ type: "context", elements: [{ type: "mrkdwn", text: failedLines }] }],
+            thread_ts: msg.thread_ts || msg.ts,
+          });
+        }
       } else {
         // Build initial tree nodes from assignment results
         const initialNodes: TreeNode[] = results.assigned.map(({ agentName, taskId }) => ({
