@@ -47,6 +47,27 @@ afterAll(async () => {
 });
 
 describe("typecheckScript", () => {
+  test("task_send requires a routing note for explicit assignments at typecheck", async () => {
+    const missing = await typecheckScript(`
+      import type { ScriptContext } from "swarm-sdk";
+      export default async function(args: unknown, ctx: ScriptContext) {
+        return ctx.swarm.task_send({ task: "work", agentId: "worker", routingReason: "skill" });
+      }
+    `);
+    expect(missing.ok).toBe(false);
+    if (!missing.ok) expect(missing.diagnostics.join("\n")).toContain("routingNote");
+
+    const valid = await typecheckScript(`
+      import type { ScriptContext } from "swarm-sdk";
+      export default async function(args: unknown, ctx: ScriptContext) {
+        await ctx.swarm.task_send({ task: "work", agentId: "worker", routingReason: "skill", routingNote: "Owns this code path" });
+        await ctx.swarm.task_send({ task: "pool work" });
+        await ctx.swarm.task_send({ task: "continue", parentTaskId: "parent" });
+      }
+    `);
+    expect(valid).toEqual({ ok: true });
+  });
+
   test("task_defer accepts task wakeOn with a required caller-supplied ceiling", async () => {
     const result = await typecheckScript(`
       import type { ScriptContext } from "swarm-sdk";

@@ -10,6 +10,7 @@ import type {
   ReasoningEffort,
   RoutingAffinity,
   RoutingReason,
+  RoutingSource,
 } from "../../../types";
 import {
   FollowUpConfigSchema,
@@ -47,6 +48,7 @@ export type AgentTaskRow = {
   status: AgentTaskStatus;
   source: AgentTaskSource;
   routing_reason: RoutingReason | null;
+  routing_source: RoutingSource | null;
   routing_note: string | null;
   taskType: string | null;
   tags: string | null;
@@ -169,6 +171,7 @@ export function rowToAgentTask(row: AgentTaskRow): AgentTask {
     status: row.status,
     source: row.source,
     routingReason: row.routing_reason ?? undefined,
+    routingSource: row.routing_source ?? undefined,
     routingNote: row.routing_note ?? undefined,
     taskType: row.taskType ?? undefined,
     tags: row.tags ? JSON.parse(row.tags) : [],

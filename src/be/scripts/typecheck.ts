@@ -38,10 +38,14 @@ export type ScriptApiDefaultOptions = { raw?: false };
 export type RoutingReason = "skill" | "continuity" | "overflow" | "human_pinned" | "reroute_fault";
 export type TaskSendArgs = Record<string, unknown> & {
   task: string;
-  routingNote?: string;
 } & (
-  | { agentId: string; routingReason: RoutingReason }
-  | { agentId?: never; routingReason?: never }
+  | {
+      agentId: string;
+      routingReason: RoutingReason;
+      /** At least 10 characters after trim; maximum 200. */
+      routingNote: string;
+    }
+  | { agentId?: never; routingReason?: never; routingNote?: string }
 );
 export type AgentTaskStepConfig = {
   template?: string;

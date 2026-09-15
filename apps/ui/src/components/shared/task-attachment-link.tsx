@@ -17,7 +17,14 @@ export function buildAgentFsLiveUrl(opts: {
   const orgId = opts.orgId?.trim();
   const driveId = opts.driveId?.trim();
   if (!orgId || !driveId) return null;
-  return `${getAgentFsLiveUrl()}/file/~/${orgId}/${driveId}/${path.replace(/^\/+/, "")}`;
+  const normalizedPath = path.replace(/^\/+/, "");
+  // Never double-encode an already-encoded segment: preserve existing %HH
+  // escapes byte-for-byte, including in segments that also contain raw text.
+  const encodedPath = normalizedPath
+    .split("/")
+    .map((segment) => encodeURIComponent(segment).replace(/%25([0-9a-f]{2})/gi, "%$1"))
+    .join("/");
+  return `${getAgentFsLiveUrl()}/file/~/${orgId}/${driveId}/${encodedPath}`;
 }
 
 export function AttachmentName({ href, name }: { href: string | null; name: string }) {

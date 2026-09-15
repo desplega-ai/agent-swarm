@@ -87,6 +87,7 @@ export function registerActionHandlers(app: App): void {
       {
         agentId: lead?.id,
         routingReason: lead ? "skill" : undefined,
+        routingSource: lead ? "engine_default" : undefined,
         source: "slack",
         parentTaskId: taskId,
         slackChannelId: originalTask.slackChannelId,

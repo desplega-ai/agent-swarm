@@ -184,6 +184,14 @@
               "reroute_fault"
             ]
           },
+          "routingSource": {
+            "type": "string",
+            "enum": [
+              "declared",
+              "engine_default"
+            ],
+            "description": "Origin of the routing reason: declared by the caller or chosen by the engine. Absent for unknown historical provenance or no reason."
+          },
           "routingNote": {
             "type": "string",
             "maxLength": 200
@@ -2006,7 +2014,8 @@
               "credential_missing",
               "broken_task",
               "to_read",
-              "to_start_template"
+              "to_start_template",
+              "notification"
             ]
           },
           "itemId": {
@@ -17658,7 +17667,8 @@
                 "credential_missing",
                 "broken_task",
                 "to_read",
-                "to_start_template"
+                "to_start_template",
+                "notification"
               ]
             },
             "required": false,
@@ -17736,7 +17746,8 @@
                       "credential_missing",
                       "broken_task",
                       "to_read",
-                      "to_start_template"
+                      "to_start_template",
+                      "notification"
                     ]
                   },
                   "itemId": {

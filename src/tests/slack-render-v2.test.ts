@@ -19,6 +19,7 @@ import {
   getSlackTreeMessages,
   getTaskById,
   initDb,
+  insertTaskAttachment,
   isPendingSlackMessage,
   markTaskSlackReplySent,
   startTask,
@@ -39,7 +40,7 @@ import {
 } from "../slack/render-v2";
 import { getAgentDisplayName, getAgentEmoji } from "../slack/responses";
 import { slackContextKey } from "../tasks/context-key";
-import type { AgentTask } from "../types";
+import type { AgentTask, TaskAttachment } from "../types";
 import { clearVolatileSecretsForTesting } from "../utils/secret-scrubber";
 
 const TEST_DB_PATH = "./test-slack-render-v2.sqlite";
@@ -1183,6 +1184,95 @@ describe("Slack renderer v2", () => {
     expect(calls.some((call) => call.method === "chat.appendStream")).toBe(false);
   });
 
+  test.each<{
+    label: string;
+    attachment: Partial<TaskAttachment> & Pick<TaskAttachment, "kind" | "name">;
+    expected: string;
+  }>([
+    {
+      label: "plain ASCII positive control",
+      attachment: { kind: "agent-fs", name: "report.txt", path: "/reports/report.txt" },
+      expected:
+        "📎 [report.txt](https://files.example.test/file/~/org-1/drive-1/reports/report.txt)",
+    },
+    {
+      label: "raw path spaces and parentheses",
+      attachment: { kind: "agent-fs", name: "final report", path: "/shared reports/final (v1).md" },
+      expected:
+        "📎 [final report](https://files.example.test/file/~/org-1/drive-1/shared%20reports/final%20%28v1%29.md)",
+    },
+    {
+      label: "already encoded positive control",
+      attachment: { kind: "agent-fs", name: "report", path: "/reports/final%20%28v1%29.md" },
+      expected:
+        "📎 [report](https://files.example.test/file/~/org-1/drive-1/reports/final%20%28v1%29.md)",
+    },
+    {
+      label: "label delimiters, backslashes, and whitespace",
+      attachment: {
+        kind: "url",
+        name: " \t[report] (final)\\\r\n\t copy  ",
+        url: "https://example.test/report",
+      },
+      expected: "📎 [\\[report\\] \\(final\\)\\\\ copy](https://example.test/report)",
+    },
+    {
+      label: "URL positive control with an IPv6 host",
+      attachment: { kind: "url", name: "report", url: "http://[::1]/report.txt?q=a%20b&x=1#part" },
+      expected: "📎 [report](http://[::1]/report.txt?q=a%20b&x=1#part)",
+    },
+    {
+      label: "URL delimiters with existing escapes and query parameters",
+      attachment: {
+        kind: "url",
+        name: "report",
+        url: "https://example.test/a%20b) [c]<(d)>\\file?q=one two&x=1#part",
+      },
+      expected:
+        "📎 [report](https://example.test/a%20b%29%20[c]%3C%28d%29%3E%5Cfile?q=one%20two&x=1#part)",
+    },
+    {
+      label: "non-HTTP fallback stays omitted",
+      attachment: { kind: "url", name: "report", url: "agent-fs:/reports/report.md" },
+      expected: "",
+    },
+  ])("streams safe attachment Markdown: $label", async ({ attachment, expected }) => {
+    const originalHost = process.env.AGENT_FS_LIVE_URL;
+    process.env.AGENT_FS_LIVE_URL = "https://files.example.test";
+    try {
+      const lead = await createAgent({ name: "Attachment Lead", isLead: true, status: "idle" });
+      const { channelId, threadTs } = uniqueSlackAddress("C_OUTCOME_ATTACHMENT");
+      const ask = await createTaskExtended("render attachment link", {
+        agentId: lead.id,
+        source: "slack",
+        slackChannelId: channelId,
+        slackThreadTs: threadTs,
+        contextKey: slackContextKey({ channelId, threadTs }),
+      });
+      await insertTaskAttachment({
+        ...attachment,
+        taskId: ask.id,
+        agentId: lead.id,
+        orgId: "org-1",
+        driveId: "drive-1",
+        isPrimary: true,
+      });
+      await startTask(ask.id);
+      await ensureSlackThreadTree([ask.id]);
+      await completeTask(ask.id, "Done");
+      calls.length = 0;
+      _resetSlackRenderV2ForTests();
+
+      await processSlackRenderV2();
+
+      const started = calls.find((call) => call.method === "chat.startStream");
+      expect(started?.payload.markdown_text).toBe(`✅\n\nDone${expected ? `\n\n${expected}` : ""}`);
+    } finally {
+      if (originalHost === undefined) delete process.env.AGENT_FS_LIVE_URL;
+      else process.env.AGENT_FS_LIVE_URL = originalHost;
+    }
+  });
+
   test("truncates oversized Markdown before a code fence and links the full task", async () => {
     const lead = await createAgent({ name: "Overflow Lead", isLead: true, status: "idle" });
     const { channelId, threadTs } = uniqueSlackAddress("C_OUTCOME_OVERFLOW");
@@ -1624,6 +1714,35 @@ describe("Slack renderer v2", () => {
     expect(started?.payload.markdown_text).toBe(`✅ ${lead.name} completed`);
     expect(started?.payload.markdown_text).not.toContain("PRIVATE OUTPUT");
     expect(outcome?.finalizedAt).toBeDefined();
+  });
+
+  test("keeps a deferral's human-facing line even when the agent already sent a slack-reply", async () => {
+    const lead = await createAgent({ name: "Deferring Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_RENDER_DEFER_AFTER_REPLY");
+    const ask = await createTaskExtended("defer after replying by hand", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    await startTask(ask.id);
+    await ensureSlackThreadTree([ask.id]);
+    // Agent posts a hand-written slack-reply first (e.g. a transcription),
+    // then defer-task completes the task with the engine-authored deferral
+    // line and tags it "deferred" (mirrors defer-task.ts's completeTask call).
+    await markTaskSlackReplySent(ask.id);
+    const deferralLine =
+      "Deferred until today 17:30:19 UTC ([715bf847](https://app.agent-swarm.dev/schedules/715bf847-fe3e-40e9-9fef-3297a62d9afd)) -> checking the new defer card";
+    await completeTask(ask.id, deferralLine, { addTags: ["deferred"] });
+    calls.length = 0;
+    _resetSlackRenderV2ForTests();
+
+    await processSlackRenderV2();
+
+    const started = calls.find((call) => call.method === "chat.startStream");
+    expect(started?.payload.markdown_text).toBe(`✅\n\n${deferralLine}`);
+    expect(started?.payload.markdown_text).not.toBe(`✅ ${lead.name} completed`);
   });
 
   test("refreshes a stream started with stale content before finalizing it", async () => {

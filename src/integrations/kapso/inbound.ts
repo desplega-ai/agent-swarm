@@ -157,6 +157,7 @@ export async function routeKapsoInbound(payload: KapsoWebhookPayload): Promise<K
     {
       agentId: mapping.agentId ?? null,
       routingReason: mapping.agentId ? "human_pinned" : undefined,
+      routingSource: mapping.agentId ? "engine_default" : undefined,
       source: "system",
       taskType: "kapso-inbound",
       tags: ["kapso-whatsapp", "inbound"],

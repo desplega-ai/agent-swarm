@@ -6406,7 +6406,7 @@ export interface paths {
                 query: {
                     userId: string;
                     status?: "open" | "snoozed" | "dismissed" | "done";
-                    itemType?: "approval" | "credential_missing" | "broken_task" | "to_read" | "to_start_template";
+                    itemType?: "approval" | "credential_missing" | "broken_task" | "to_read" | "to_start_template" | "notification";
                 };
                 header?: never;
                 path?: never;
@@ -6463,7 +6463,7 @@ export interface paths {
                     "application/json": {
                         userId: string;
                         /** @enum {string} */
-                        itemType: "approval" | "credential_missing" | "broken_task" | "to_read" | "to_start_template";
+                        itemType: "approval" | "credential_missing" | "broken_task" | "to_read" | "to_start_template" | "notification";
                         itemId: string;
                         /** @enum {string} */
                         status: "open" | "snoozed" | "dismissed" | "done";
@@ -20701,6 +20701,11 @@ export interface components {
             source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira";
             /** @enum {string} */
             routingReason?: "skill" | "continuity" | "overflow" | "human_pinned" | "reroute_fault";
+            /**
+             * @description Origin of the routing reason: declared by the caller or chosen by the engine. Absent for unknown historical provenance or no reason.
+             * @enum {string}
+             */
+            routingSource?: "declared" | "engine_default";
             routingNote?: string;
             taskType?: string;
             /** @default [] */
@@ -21173,7 +21178,7 @@ export interface components {
             id: string;
             userId: string;
             /** @enum {string} */
-            itemType: "approval" | "credential_missing" | "broken_task" | "to_read" | "to_start_template";
+            itemType: "approval" | "credential_missing" | "broken_task" | "to_read" | "to_start_template" | "notification";
             itemId: string;
             /** @enum {string} */
             status: "open" | "snoozed" | "dismissed" | "done";

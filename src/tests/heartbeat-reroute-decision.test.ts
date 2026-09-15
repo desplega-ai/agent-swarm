@@ -454,6 +454,7 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
         task: "Resume the crashed work on B",
         agentId: agentB.id,
         routingReason: "reroute_fault",
+        routingNote: "This test explicitly selects the target worker",
         taskType: "resume",
         parentTaskId: original.id,
         allowDuplicate: true,

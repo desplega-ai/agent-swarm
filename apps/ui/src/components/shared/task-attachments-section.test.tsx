@@ -3,6 +3,33 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { AttachmentName, buildAgentFsLiveUrl } from "./task-attachment-link";
 
 describe("task attachment links", () => {
+  test.each([
+    ["plain ASCII positive control", "/reports/report-2026_v1.txt", "reports/report-2026_v1.txt"],
+    [
+      "spaces in every segment",
+      "/shared reports/final report.md",
+      "shared%20reports/final%20report.md",
+    ],
+    ["Unicode and URL syntax", "/reports/café #1?.md", "reports/caf%C3%A9%20%231%3F.md"],
+    [
+      "already encoded positive control",
+      "/reports/final%20report%2f%2520.md",
+      "reports/final%20report%2f%2520.md",
+    ],
+    [
+      "mixed raw and encoded text",
+      "/shared%20reports/final%20report 100%.md",
+      "shared%20reports/final%20report%20100%25.md",
+    ],
+    ["malformed percent escapes", "/reports/100% %2 %GG.md", "reports/100%25%20%252%20%25GG.md"],
+  ])("encodes attachment paths: %s", (_label, path, expectedPath) => {
+    const href = buildAgentFsLiveUrl({ path, orgId: "org-1", driveId: "drive-1" });
+    const html = renderToStaticMarkup(<AttachmentName href={href} name="Report" />);
+
+    expect(href).toBe(`https://live.agent-fs.dev/file/~/org-1/drive-1/${expectedPath}`);
+    expect(html).toContain(`href="${href}"`);
+  });
+
   test("renders an agent-fs attachment name as an inline live-host link", () => {
     const href = buildAgentFsLiveUrl({
       path: "thoughts/report.md",

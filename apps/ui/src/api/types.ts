@@ -224,6 +224,7 @@ export interface AgentTask {
   status: AgentTaskStatus;
   source: AgentTaskSource;
   routingReason?: RoutingReason;
+  routingSource?: "declared" | "engine_default";
   routingNote?: string;
   taskType?: string;
   tags: string[];
@@ -597,7 +598,8 @@ export type InboxItemType =
   | "credential_missing"
   | "broken_task"
   | "to_read"
-  | "to_start_template";
+  | "to_start_template"
+  | "notification";
 
 export type InboxItemStatus = "open" | "snoozed" | "dismissed" | "done";
 

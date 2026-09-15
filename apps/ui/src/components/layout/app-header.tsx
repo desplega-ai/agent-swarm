@@ -5,6 +5,7 @@ import type { StatusHealth } from "@/api/types";
 import { useStatusContext } from "@/app/status-context";
 import { MoonIcon } from "@/components/icons/moon";
 import { SunIcon } from "@/components/icons/sun";
+import { NotificationBell } from "@/components/notifications/notification-bell";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
@@ -116,6 +117,8 @@ export function AppHeader() {
             </TooltipContent>
           </Tooltip>
         )}
+
+        <NotificationBell />
 
         {/* GitHub repo link */}
         <Tooltip>

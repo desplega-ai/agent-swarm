@@ -399,13 +399,14 @@ describe("Scheduled Tasks Integration", () => {
 
       // Find the created task
       const createdTask = (await getDbClient().get(
-        "SELECT *, routing_reason AS routingReason FROM agent_tasks WHERE task = ? ORDER BY createdAt DESC LIMIT 1",
+        "SELECT *, routing_reason AS routingReason, routing_source AS routingSource FROM agent_tasks WHERE task = ? ORDER BY createdAt DESC LIMIT 1",
         [schedule.taskTemplate!],
-      )) as { agentId: string; routingReason: string; status: string };
+      )) as { agentId: string; routingReason: string; routingSource: string; status: string };
 
       expect(createdTask).toBeDefined();
       expect(createdTask.agentId).toBe(targetAgent.id);
       expect(createdTask.routingReason).toBe("human_pinned");
+      expect(createdTask.routingSource).toBe("engine_default");
       expect(createdTask.status).toBe("pending"); // Should be pending when assigned to agent
     });
 
@@ -421,13 +422,19 @@ describe("Scheduled Tasks Integration", () => {
 
       // Find the created task
       const createdTask = (await getDbClient().get(
-        "SELECT *, routing_reason AS routingReason FROM agent_tasks WHERE task = ? ORDER BY createdAt DESC LIMIT 1",
+        "SELECT *, routing_reason AS routingReason, routing_source AS routingSource FROM agent_tasks WHERE task = ? ORDER BY createdAt DESC LIMIT 1",
         [schedule.taskTemplate!],
-      )) as { agentId: string | null; routingReason: string | null; status: string };
+      )) as {
+        agentId: string | null;
+        routingReason: string | null;
+        routingSource: string | null;
+        status: string;
+      };
 
       expect(createdTask).toBeDefined();
       expect(createdTask.agentId).toBeNull();
       expect(createdTask.routingReason).toBeNull();
+      expect(createdTask.routingSource).toBeNull();
       expect(createdTask.status).toBe("unassigned");
     });
 
@@ -531,7 +538,7 @@ describe("Scheduled Tasks Integration", () => {
 
       // Find the created task
       const createdTask = (await getDbClient().get(
-        "SELECT *, routing_reason AS routingReason FROM agent_tasks WHERE task = ? ORDER BY createdAt DESC LIMIT 1",
+        "SELECT *, routing_reason AS routingReason, routing_source AS routingSource FROM agent_tasks WHERE task = ? ORDER BY createdAt DESC LIMIT 1",
         [schedule.taskTemplate!],
       )) as {
         task: string;
@@ -540,6 +547,7 @@ describe("Scheduled Tasks Integration", () => {
         priority: number;
         agentId: string;
         routingReason: string;
+        routingSource: string;
         creatorAgentId: string;
       };
 
@@ -548,6 +556,7 @@ describe("Scheduled Tasks Integration", () => {
       expect(createdTask.priority).toBe(90);
       expect(createdTask.agentId).toBe(testAgent.id);
       expect(createdTask.routingReason).toBe("human_pinned");
+      expect(createdTask.routingSource).toBe("engine_default");
       expect(createdTask.creatorAgentId).toBe(testAgent.id);
 
       const tags = JSON.parse(createdTask.tags);

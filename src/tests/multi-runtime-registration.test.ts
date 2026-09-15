@@ -3,7 +3,7 @@
  * handlers on both sides of MULTI_RUNTIME_ENABLED.
  */
 
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { createServer as createHttpServer, type Server } from "node:http";
 import {
@@ -15,6 +15,7 @@ import {
   getActiveTaskCount,
   getAgentById,
   getDbClient,
+  getIdleWorkersWithCapacity,
   getSwarmConfigs,
   getTaskById,
   hasCapacity,
@@ -22,6 +23,7 @@ import {
   releaseStaleOfferedTasksForOfflineAgents,
   startTask,
   updateAgentStatus,
+  updateAgentStatusFromCapacity,
   upsertSwarmConfig,
 } from "../be/db";
 import {
@@ -32,8 +34,16 @@ import {
   getRuntimeInstanceById,
   hasReadyLiveRuntime,
 } from "../be/multi-runtime";
+import {
+  CREDENTIAL_RETRY_INTERVAL_MS,
+  type CredentialRefreshState,
+  refreshCredentialStatus,
+} from "../commands/credential-refresh";
 import { retryBootStep } from "../commands/credential-wait";
-import { sendCredStatusReport } from "../commands/provider-credentials";
+import {
+  CREDENTIAL_PROVIDER_CHECKERS,
+  sendCredStatusReport,
+} from "../commands/provider-credentials";
 import { runHeartbeatSweep } from "../heartbeat/heartbeat";
 import { handleActiveSessions } from "../http/active-sessions";
 import { handleAgentRegister, handleAgentsRest } from "../http/agents";
@@ -2839,4 +2849,88 @@ describe("MCP task-action accept requires a live runtime", () => {
     expect((await getTaskById(task.id))?.status).toBe("pending");
     expect((await getTaskById(task.id))?.agentId).toBe(id);
   });
+});
+
+describe("post-task credential recovery without a restart", () => {
+  for (const multiRuntime of [false, true]) {
+    test(`parked worker recovers with multi-runtime ${multiRuntime ? "on" : "off"}`, async () => {
+      process.env.MULTI_RUNTIME_ENABLED = String(multiRuntime);
+      const id = await makeAgent(1);
+      const runtimeInstanceId = crypto.randomUUID();
+      await register(id, { maxTasks: 1, runtimeInstanceId });
+      const api = { apiUrl: baseUrl, apiKey: API_KEY, agentId: id, runtimeInstanceId };
+      const refresh: CredentialRefreshState = {
+        harnessProvider: "acp",
+        ready: true,
+        lastRefreshAt: 0,
+        inFlight: false,
+      };
+      const check = spyOn(CREDENTIAL_PROVIDER_CHECKERS, "claude");
+      const originalOAuth = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+      // The real Claude checker and live-test use OAuth presence, no upstream I/O.
+      process.env.CLAUDE_CODE_OAUTH_TOKEN = "test-credential-recovery";
+      try {
+        // A live provider swap produces a real not-ready post-task snapshot.
+        await refreshCredentialStatus(api, refresh, "claude", {}, 1);
+        expect((await getAgentById(id))?.status).toBe("waiting_for_credentials");
+        expect((await getAgentById(id))?.credStatus?.reportKind).toBe("post_task");
+        expect((await getIdleWorkersWithCapacity()).some((agent) => agent.id === id)).toBe(false);
+        if (multiRuntime) {
+          expect((await getRuntimeInstanceById(runtimeInstanceId))?.credentialReady).toBe(false);
+        }
+
+        // Ping and completion/capacity reconciliation cannot recover it.
+        await pingAgent(id, runtimeInstanceId);
+        await updateAgentStatusFromCapacity(id);
+        expect((await getAgentById(id))?.status).toBe("waiting_for_credentials");
+        await refreshCredentialStatus(api, refresh, "claude", {}, CREDENTIAL_RETRY_INTERVAL_MS);
+        expect(check).toHaveBeenCalledTimes(1);
+
+        // A still-missing snapshot stays parked, and starts a new throttle window.
+        await refreshCredentialStatus(api, refresh, "claude", {}, CREDENTIAL_RETRY_INTERVAL_MS + 1);
+        expect(check).toHaveBeenCalledTimes(2);
+        expect((await getAgentById(id))?.status).toBe("waiting_for_credentials");
+        const env = { CLAUDE_CODE_OAUTH_TOKEN: "test-credential-recovery" };
+        await refreshCredentialStatus(
+          api,
+          refresh,
+          "claude",
+          env,
+          2 * CREDENTIAL_RETRY_INTERVAL_MS,
+        );
+        expect(check).toHaveBeenCalledTimes(2);
+        expect((await getAgentById(id))?.status).toBe("waiting_for_credentials");
+
+        // Credentials resolve. Same runner state, provider, and runtime identity.
+        await refreshCredentialStatus(
+          api,
+          refresh,
+          "claude",
+          env,
+          2 * CREDENTIAL_RETRY_INTERVAL_MS + 1,
+        );
+        expect(check).toHaveBeenCalledTimes(3);
+        expect((await getAgentById(id))?.status).toBe("idle");
+        expect((await getAgentById(id))?.credStatus?.ready).toBe(true);
+        expect((await getAgentById(id))?.credentialMissing).toBeNull();
+        expect((await getIdleWorkersWithCapacity()).some((agent) => agent.id === id)).toBe(true);
+        if (multiRuntime) {
+          expect((await getRuntimeInstanceById(runtimeInstanceId))?.credentialReady).toBe(true);
+          expect(await countActiveRuntimeInstancesForAgent(id)).toBe(1);
+        }
+        await refreshCredentialStatus(
+          api,
+          refresh,
+          "claude",
+          env,
+          10 * CREDENTIAL_RETRY_INTERVAL_MS,
+        );
+        expect(check).toHaveBeenCalledTimes(3);
+      } finally {
+        check.mockRestore();
+        if (originalOAuth === undefined) delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+        else process.env.CLAUDE_CODE_OAUTH_TOKEN = originalOAuth;
+      }
+    });
+  }
 });

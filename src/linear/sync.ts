@@ -617,6 +617,7 @@ export async function handleAgentSessionEvent(event: Record<string, unknown>): P
     {
       agentId: lead?.id ?? "",
       routingReason: lead ? "skill" : undefined,
+      routingSource: lead ? "engine_default" : undefined,
       source: "linear",
       taskType: "linear-issue",
       requestedByUserId,
@@ -905,6 +906,7 @@ export async function handleAgentSessionPrompted(event: Record<string, unknown>)
     {
       agentId: lead?.id ?? "",
       routingReason: lead ? "skill" : undefined,
+      routingSource: lead ? "engine_default" : undefined,
       source: "linear",
       taskType: "linear-issue",
       requestedByUserId: promptedRequestedByUserId,

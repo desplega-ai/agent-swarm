@@ -2524,7 +2524,7 @@ export async function createTaskExtended(
 
     const inserted = await getDbClient().get<AgentTaskRow>(
       `INSERT INTO agent_tasks (
-        id, "key", agentId, creatorAgentId, task, status, source, routing_reason, routing_note,
+        id, "key", agentId, creatorAgentId, task, status, source, routing_reason, routing_source, routing_note,
         taskType, tags, priority, dependsOn, offeredTo, offeredAt,
         slackChannelId, slackThreadTs, slackTriggerMessageTs, slackUserId,
         vcsProvider, vcsRepo, vcsEventType, vcsNumber, vcsCommentId, vcsAuthor, vcsUrl,
@@ -2532,7 +2532,7 @@ export async function createTaskExtended(
         agentmailInboxId, agentmailMessageId, agentmailThreadId,
         mentionMessageId, mentionChannelId, dir, parentTaskId, model, modelTier, effort, scheduleId,
         workflowRunId, workflowRunStepId, outputSchema, followUpConfig, requestedByUserId, requestedByUserIdInherited, contextKey, routingAffinity, swarmVersion, createdAt, lastUpdatedAt, created_by, updated_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
       [
         id,
         assetKey,
@@ -2542,6 +2542,7 @@ export async function createTaskExtended(
         status,
         options?.source ?? "mcp",
         options?.routingReason ?? null,
+        options?.routingSource ?? null,
         options?.routingNote ?? null,
         options?.taskType ?? null,
         JSON.stringify(options?.tags ?? []),
@@ -3650,6 +3651,7 @@ export async function postMessage(
       const task = await createTaskExtended(taskDescription, {
         agentId: mentionedAgentId, // Direct assignment
         routingReason: "human_pinned",
+        routingSource: "engine_default",
         creatorAgentId: agentId ?? undefined,
         source: "mcp",
         taskType: "task",

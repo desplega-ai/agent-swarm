@@ -720,6 +720,40 @@ export const INTEGRATIONS: IntegrationDef[] = [
     ],
   },
 
+  // --------------------------------------------------------------- Serply
+  {
+    id: "serply",
+    name: "Serply",
+    description:
+      "Google search, news and scholar results for agent research, over the Serply REST API.",
+    category: "other",
+    iconKey: "search",
+    docsUrl: "https://serply.io/docs",
+    recommendedSkills: [
+      {
+        name: "serply-search",
+        source: "template",
+        templateRepo: "desplega-ai/agent-swarm",
+        templatePath: "templates/skills/serply-search",
+        roles: ["lead", "worker"],
+        reason:
+          "Endpoints, response field names, and the Cloudflare User-Agent requirement. The key on its own does not tell an agent that scholar rows live under `articles` while `results` comes back empty.",
+        installOnSetup: true,
+      },
+    ],
+    fields: [
+      {
+        key: "SERPLY_API_KEY",
+        label: "API key",
+        type: "password",
+        required: true,
+        isSecret: true,
+        helpText:
+          "Serply API key, read by the serply-search skill and sent as the `X-Api-Key` header. Get one at https://serply.io",
+      },
+    ],
+  },
+
   // -------------------------------------------------------------- Anthropic
   {
     id: "anthropic",

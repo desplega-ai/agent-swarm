@@ -585,6 +585,7 @@ async function createInitialJiraTask(input: {
     {
       agentId: lead?.id ?? "",
       routingReason: lead ? "skill" : undefined,
+      routingSource: lead ? "engine_default" : undefined,
       source: "jira",
       taskType: "jira-issue",
       requestedByUserId: input.requestedByUserId,
@@ -635,6 +636,7 @@ async function createCommentMentionTask(input: {
     {
       agentId: lead?.id ?? "",
       routingReason: lead ? "skill" : undefined,
+      routingSource: lead ? "engine_default" : undefined,
       source: "jira",
       taskType: "jira-issue",
       requestedByUserId: input.requestedByUserId,

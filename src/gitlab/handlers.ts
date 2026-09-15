@@ -178,6 +178,7 @@ export async function handleMergeRequest(
         {
           agentId: lead?.id ?? null,
           routingReason: lead ? "skill" : undefined,
+          routingSource: lead ? "engine_default" : undefined,
           source: "gitlab",
           vcsProvider: "gitlab",
           taskType: "gitlab-mr",
@@ -290,6 +291,7 @@ export async function handleIssue(
         {
           agentId: lead?.id ?? null,
           routingReason: lead ? "skill" : undefined,
+          routingSource: lead ? "engine_default" : undefined,
           source: "gitlab",
           vcsProvider: "gitlab",
           taskType: "gitlab-issue",
@@ -398,6 +400,7 @@ export async function handleNote(event: NoteEvent): Promise<{ created: boolean; 
     {
       agentId: lead?.id ?? null,
       routingReason: lead ? "skill" : undefined,
+      routingSource: lead ? "engine_default" : undefined,
       source: "gitlab",
       vcsProvider: "gitlab",
       taskType: "gitlab-comment",
@@ -483,6 +486,7 @@ export async function handlePipeline(
     {
       agentId: lead?.id ?? null,
       routingReason: lead ? "skill" : undefined,
+      routingSource: lead ? "engine_default" : undefined,
       source: "gitlab",
       vcsProvider: "gitlab",
       taskType: "gitlab-ci",

@@ -52,6 +52,7 @@ const agentmailBuffer = createIngressBuffer<BufferedAgentMailMessage>({
       {
         agentId: first.agentId,
         routingReason: "continuity",
+        routingSource: "engine_default",
         source: "agentmail",
         taskType: "agentmail-reply",
         agentmailInboxId: first.inboxId,
@@ -257,6 +258,7 @@ export async function handleMessageReceived(
       {
         agentId: existingTask.agentId,
         routingReason: existingTask.agentId ? "continuity" : undefined,
+        routingSource: existingTask.agentId ? "engine_default" : undefined,
         source: "agentmail",
         taskType: "agentmail-reply",
         agentmailInboxId: inbox_id,
@@ -301,6 +303,7 @@ export async function handleMessageReceived(
           {
             agentId: agent.id,
             routingReason: "human_pinned",
+            routingSource: "engine_default",
             source: "agentmail",
             taskType: "agentmail-message",
             agentmailInboxId: inbox_id,
@@ -336,6 +339,7 @@ export async function handleMessageReceived(
         {
           agentId: agent.id,
           routingReason: "human_pinned",
+          routingSource: "engine_default",
           source: "agentmail",
           taskType: "agentmail-message",
           agentmailInboxId: inbox_id,
@@ -375,6 +379,7 @@ export async function handleMessageReceived(
       {
         agentId: lead.id,
         routingReason: "skill",
+        routingSource: "engine_default",
         source: "agentmail",
         taskType: "agentmail-message",
         agentmailInboxId: inbox_id,

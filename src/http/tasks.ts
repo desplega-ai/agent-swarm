@@ -856,6 +856,11 @@ export async function handleTasks(
                 ? "continuity"
                 : "skill"
               : undefined),
+          routingSource: parsed.body.routingReason
+            ? "declared"
+            : defaultAgentId
+              ? "engine_default"
+              : undefined,
           routingNote: parsed.body.routingNote,
           creatorAgentId: myAgentId || undefined,
           taskType: parsed.body.taskType || undefined,

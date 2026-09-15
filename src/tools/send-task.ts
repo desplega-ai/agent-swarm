@@ -71,7 +71,9 @@ export const sendTaskInputSchema = z
       .string()
       .max(200)
       .optional()
-      .describe("Optional routing context (maximum 200 characters)."),
+      .describe(
+        "Why this worker fits the task. Required when agentId is supplied: at least 10 characters after trimming whitespace, maximum 200 characters. Optional for implicit parent or pool routing.",
+      ),
     task: z.string().min(1).describe("The task description to send."),
     key: AssetKeySchema.optional().describe(
       "Logical namespace key. Child tasks inherit their parent namespace when provided.",
@@ -192,6 +194,14 @@ export const sendTaskInputSchema = z
         path: ["routingReason"],
       });
     }
+    if (data.agentId !== undefined && (data.routingNote?.trim().length ?? 0) < 10) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "routingNote is required when agentId is supplied (at least 10 characters after trim).",
+        path: ["routingNote"],
+      });
+    }
     checkOutputSchemaShape(data.outputSchema, ctx);
   });
 
@@ -270,6 +280,11 @@ export async function sendTaskHandler(
   // Defense in depth for direct TypeScript callers that bypass MCP schema parsing.
   if (agentId !== undefined && routingReason === undefined) {
     return toolErr("routingReason is required when agentId is supplied.");
+  }
+  if (agentId !== undefined && (routingNote?.trim().length ?? 0) < 10) {
+    return toolErr(
+      "routingNote is required when agentId is supplied (at least 10 characters after trim).",
+    );
   }
   if (ctx.kind === "owner" && !ctx.agentId) {
     return toolErr('Agent ID not found. The MCP client should define the "X-Agent-ID" header.', {
@@ -366,6 +381,8 @@ export async function sendTaskHandler(
   const effectiveRoutingReason =
     agentId !== undefined ? routingReason : effectiveAgentId ? "continuity" : undefined;
   const effectiveRoutingNote = effectiveRoutingReason ? routingNote : undefined;
+  const effectiveRoutingSource =
+    agentId !== undefined ? "declared" : effectiveAgentId ? "engine_default" : undefined;
 
   const requestedTaskOptions: CreateTaskOptions = {
     key: assetKey,
@@ -392,6 +409,7 @@ export async function sendTaskHandler(
     followUpConfig,
     outputSchema,
     routingReason: effectiveRoutingReason,
+    routingSource: effectiveRoutingSource,
     routingNote: effectiveRoutingNote,
     routingAffinity:
       effectiveLeadOnly || requiredCapabilities?.length

@@ -157,6 +157,7 @@ export function createAssistant(): Assistant {
             {
               agentId: workingAgent.id,
               routingReason: "continuity",
+              routingSource: "engine_default",
               source: "slack",
               slackChannelId: channelId,
               slackThreadTs: threadTs,
@@ -239,6 +240,7 @@ export function createAssistant(): Assistant {
           {
             agentId: lead.id,
             routingReason: "skill",
+            routingSource: "engine_default",
             source: "slack",
             slackChannelId: channelId,
             slackThreadTs: threadTs,

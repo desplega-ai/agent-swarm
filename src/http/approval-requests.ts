@@ -386,6 +386,7 @@ export async function handleApprovalRequests(
         await createTaskExtended(taskText, {
           agentId: sourceTask.agentId,
           routingReason: sourceTask.agentId ? "continuity" : undefined,
+          routingSource: sourceTask.agentId ? "engine_default" : undefined,
           parentTaskId: updated.sourceTaskId,
           source: "system",
           taskType: "hitl-follow-up",

@@ -665,7 +665,11 @@ async function outcomeContent(task: AgentTask, slackReplySent: boolean): Promise
   if (task.status === "cancelled") {
     return `🚫 **Cancelled**\n\n${outcomeText(task.failureReason, "Task was cancelled.")}`;
   }
-  if (slackReplySent && task.status === "completed") {
+  // A deferral's output is engine-authored, never posted by hand via
+  // slack-reply, so it must not collapse into the "agent completed" summary
+  // even when the agent also sent a slack-reply earlier in the same task.
+  const isDeferred = task.tags?.includes("deferred");
+  if (slackReplySent && task.status === "completed" && !isDeferred) {
     const agentName = task.agentId
       ? ((await getAgentById(task.agentId))?.name ?? "Agent")
       : "Agent";
@@ -697,7 +701,7 @@ export async function childOutcomeContent(
   if (task.status === "failed") {
     return `↳ ❌ ${agentName} — failed\n\n${outcomeText(task.failureReason, "Task failed.")}`;
   }
-  if (slackReplySent) {
+  if (slackReplySent && !task.tags?.includes("deferred")) {
     return `↳ ✅ ${agentName} completed`;
   }
   return `↳ ✅ ${agentName} — result\n\n${outcomeText(task.output, "Task completed.")}`;
@@ -847,7 +851,17 @@ function attachmentLine(attachments: TaskAttachment[]): string | undefined {
   const attachment = attachments.find((item) => item.isPrimary) ?? attachments[0];
   if (!attachment) return undefined;
   const url = taskAttachmentDisplayUrl(attachment);
-  return /^https?:\/\//.test(url) ? `📎 [${attachment.name}](${url})` : undefined;
+  if (!/^https?:\/\//.test(url)) return undefined;
+  const label = attachment.name
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[\\[\]()]/g, "\\$&");
+  // Keep the Markdown destination intact without changing existing URL escapes.
+  const destination = url
+    .replace(/[\s\\<>]/g, encodeURIComponent)
+    .replace(/\(/g, "%28")
+    .replace(/\)/g, "%29");
+  return `📎 [${label}](${destination})`;
 }
 
 type MarkdownFence = { character: "`" | "~"; length: number };

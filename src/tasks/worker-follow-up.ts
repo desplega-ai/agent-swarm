@@ -268,6 +268,7 @@ export async function createWorkerTaskFollowUp(args: {
     {
       agentId: followUpAgentId,
       routingReason: followUpAgentId ? "skill" : undefined,
+      routingSource: followUpAgentId ? "engine_default" : undefined,
       source: "system",
       taskType: "follow-up",
       priority: changes.priority,
@@ -483,6 +484,7 @@ export async function createResumeFollowUp(args: {
         : preferredAgentId === parent.agentId
           ? "continuity"
           : "reroute_fault",
+    routingSource: preferredAgentId === undefined ? undefined : "engine_default",
     creatorAgentId: parent.creatorAgentId,
     source: "system",
     taskType: "resume",
@@ -602,6 +604,7 @@ export async function createRerouteDecisionTask(args: {
   const created = await createTaskExtended(decision.text, {
     agentId: leadAgent.id,
     routingReason: "reroute_fault",
+    routingSource: "engine_default",
     creatorAgentId: original.creatorAgentId,
     source: "system",
     taskType: "reroute-decision",
@@ -682,6 +685,7 @@ export async function createPoolStarvationDecisionTask(args: {
   const created = await createTaskExtended(decision.text, {
     agentId: leadAgent.id,
     routingReason: "overflow",
+    routingSource: "engine_default",
     creatorAgentId: original.creatorAgentId,
     source: "system",
     taskType: "reroute-decision",

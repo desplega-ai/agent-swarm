@@ -350,6 +350,9 @@ export const RoutingReasonSchema = z.enum([
 ]);
 export type RoutingReason = z.infer<typeof RoutingReasonSchema>;
 
+export const RoutingSourceSchema = z.enum(["declared", "engine_default"]);
+export type RoutingSource = z.infer<typeof RoutingSourceSchema>;
+
 // ---------------------------------------------------------------------------
 // Harness Provider
 // ---------------------------------------------------------------------------
@@ -515,6 +518,9 @@ export const AgentTaskSchema = z
     status: AgentTaskStatusSchema,
     source: AgentTaskSourceSchema.default("mcp"),
     routingReason: RoutingReasonSchema.optional(),
+    routingSource: RoutingSourceSchema.optional().describe(
+      "Origin of the routing reason: declared by the caller or chosen by the engine. Absent for unknown historical provenance or no reason.",
+    ),
     routingNote: z.string().max(200).optional(),
 
     // Task metadata
@@ -677,6 +683,7 @@ export const CreateTaskOptionsSchema = z.object({
   creatorAgentId: z.string().optional(),
   source: AgentTaskSourceSchema.optional(),
   routingReason: RoutingReasonSchema.optional(),
+  routingSource: RoutingSourceSchema.optional(),
   routingNote: z.string().max(200).optional(),
   taskType: z.string().max(50).optional(),
   tags: z.array(z.string()).optional(),
@@ -942,6 +949,9 @@ export type IdentityEventType = z.infer<typeof IdentityEventTypeSchema>;
 //   - broken_task        — tasks in failed/cancelled status
 //   - to_read            — sessions/tasks marked unread for the user
 //   - to_start_template  — task-templates the user hasn't dismissed
+//   - notification       — dashboard notification-center items (see
+//                           apps/ui/src/lib/notifications/definitions.ts);
+//                           itemId is the notification definition's key
 //
 // Statuses:
 //   - open      — visible in inbox
@@ -954,6 +964,7 @@ export const InboxItemTypeSchema = z.enum([
   "broken_task",
   "to_read",
   "to_start_template",
+  "notification",
 ]);
 export type InboxItemType = z.infer<typeof InboxItemTypeSchema>;
 

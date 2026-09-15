@@ -169,6 +169,7 @@ describe("session-UI follow-up → Lead → onward delegation", () => {
         task: "please pick this up",
         agentId: differentWorkerId,
         routingReason: "human_pinned",
+        routingNote: "This test explicitly selects the target worker",
         allowDuplicate: true,
       },
       leadAgentId,

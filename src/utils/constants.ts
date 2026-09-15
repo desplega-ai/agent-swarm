@@ -130,5 +130,11 @@ export function buildAgentFsLiveUrl(opts: {
   if (!orgId || !driveId) return null;
   const host = getAgentFsLiveUrl();
   const normalizedPath = path.replace(/^\/+/, "");
-  return `${host}/file/~/${orgId}/${driveId}/${normalizedPath}`;
+  // Never double-encode an already-encoded segment: preserve existing %HH
+  // escapes byte-for-byte, including in segments that also contain raw text.
+  const encodedPath = normalizedPath
+    .split("/")
+    .map((segment) => encodeURIComponent(segment).replace(/%25([0-9a-f]{2})/gi, "%$1"))
+    .join("/");
+  return `${host}/file/~/${orgId}/${driveId}/${encodedPath}`;
 }

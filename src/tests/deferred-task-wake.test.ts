@@ -133,10 +133,199 @@ async function waitState(scheduleId: string) {
     childTaskId: string | null;
     resolvedAt: string | null;
     updated_at: string;
-  }>("SELECT * FROM deferred_task_waits WHERE scheduleId = ?", [scheduleId]);
+  }>(
+    `SELECT w.*, m.taskId FROM deferred_task_waits w
+     JOIN deferred_task_wait_members m ON m.scheduleId = w.scheduleId
+     WHERE w.scheduleId = ?`,
+    [scheduleId],
+  );
+}
+
+async function multiFixture(mode?: "all" | "any", event: TaskWakeEvent = "settled") {
+  const parent = await activeTask();
+  const producers = [await activeTask(), await activeTask()];
+  const result = await defer(parent.id, producers[0]!.id, event, {
+    wakeOn: { taskIds: producers.map((producer) => producer.id), event, mode },
+  });
+  expect(result.structuredContent.success).toBe(true);
+  const schedule = (await getScheduledTaskById(result.structuredContent.scheduleId!))!;
+  return { parent, producers, schedule };
 }
 
 describe("defer-task wakeOn", () => {
+  test.each([
+    "completed",
+    "failed",
+  ])("all is the default and waits for the final member to be %s", async (status) => {
+    const { producers, schedule } = await multiFixture();
+    await completeTask(producers[0]!.id, "first result");
+    await reconcileDeferredTaskWaits(producers[0]!.id);
+    expect(await children(schedule.id)).toHaveLength(0);
+    // The dispatch entry point must also enforce the whole set.
+    expect(await dispatchDeferredTaskWait(schedule.id, "task.completed")).toEqual({});
+    if (status === "completed") await completeTask(producers[1]!.id, "second result");
+    else await failTask(producers[1]!.id, "second result failed");
+    await reconcileDeferredTaskWaits(producers[1]!.id);
+    const found = await children(schedule.id);
+    expect(found).toHaveLength(1);
+    expect(found[0]!.task).toContain("all tasks matched settled");
+    expect(found[0]!.task).toContain(`${producers[1]!.id} (${status})`);
+    expect((await getScheduledTaskById(schedule.id))?.enabled).toBe(false);
+  });
+
+  test.each([
+    "completed",
+    "failed",
+  ])("explicit any wakes on the first %s member", async (status) => {
+    const { producers, schedule } = await multiFixture("any");
+    if (status === "completed") await completeTask(producers[1]!.id, "ready");
+    else await failTask(producers[1]!.id, "failed");
+    await reconcileDeferredTaskWaits(producers[1]!.id);
+    expect(await children(schedule.id)).toHaveLength(1);
+    expect((await children(schedule.id))[0]!.task).toContain("any tasks matched settled");
+    expect((await getTaskById(producers[0]!.id))?.status).toBe("in_progress");
+    await completeTask(producers[0]!.id, "later");
+    await reconcileDeferredTaskWaits();
+    await executeSchedule(schedule);
+    expect(await children(schedule.id)).toHaveLength(1);
+  });
+
+  test("all follows one member through repeated deferrals and restart without extending the ceiling", async () => {
+    const { producers, schedule } = await multiFixture("all");
+    await completeTask(producers[0]!.id, "ready");
+    let current = producers[1]!;
+    for (let step = 0; step < 2; step++) {
+      const deferred = await defer(current.id, current.id, "settled", { wakeOn: undefined });
+      expect(deferred.structuredContent.success).toBe(true);
+      await reconcileDeferredTaskWaits(current.id);
+      expect(await children(schedule.id)).toHaveLength(0);
+      expect(await dispatchDeferredTaskWait(schedule.id, "task.completed")).toEqual({});
+      const successor = (await getScheduledTaskById(deferred.structuredContent.scheduleId!))!;
+      await executeSchedule(successor);
+      current = (await children(successor.id))[0]!;
+      closeDb();
+      initDb(path);
+      await initDeferredTaskWaits();
+      expect(await children(schedule.id)).toHaveLength(0);
+      expect((await getScheduledTaskById(schedule.id))?.nextRunAt).toBe(schedule.nextRunAt);
+    }
+    await completeTask(current.id, "final result");
+    const child = await awaitChild(schedule.id);
+    expect(child.task).toContain(`${current.id} (completed)`);
+    expect(child.task).toContain(`${producers[0]!.id} (completed)`);
+    expect(await children(schedule.id)).toHaveLength(1);
+  });
+
+  test("any ignores a deferred completion until another member really settles", async () => {
+    const { producers, schedule } = await multiFixture("any");
+    await defer(producers[0]!.id, producers[0]!.id, "settled", { wakeOn: undefined });
+    await reconcileDeferredTaskWaits();
+    expect(await children(schedule.id)).toHaveLength(0);
+    await failTask(producers[1]!.id, "real failure");
+    await reconcileDeferredTaskWaits(producers[1]!.id);
+    expect(await children(schedule.id)).toHaveLength(1);
+  });
+
+  test("the set's ceiling fires before all settle and later events cannot duplicate it", async () => {
+    const { producers, schedule } = await multiFixture();
+    await completeTask(producers[0]!.id, "ready");
+    await reconcileDeferredTaskWaits();
+    expect(await children(schedule.id)).toHaveLength(0);
+    await executeSchedule(schedule);
+    expect((await children(schedule.id))[0]!.task).toContain("ceiling expired");
+    await completeTask(producers[1]!.id, "late");
+    await reconcileDeferredTaskWaits();
+    expect(await children(schedule.id)).toHaveLength(1);
+    expect((await waitState(schedule.id))?.firedBy).toBe("ceiling");
+  });
+
+  test.each([
+    "all",
+    "any",
+  ] as const)("%s concurrent terminal events and the ceiling create exactly one child", async (mode) => {
+    const { producers, schedule } = await multiFixture(mode);
+    await initDeferredTaskWaits();
+    await Promise.all([
+      completeTask(producers[0]!.id, "ready"),
+      failTask(producers[1]!.id, "failed"),
+      executeSchedule(schedule),
+    ]);
+    await reconcileDeferredTaskWaits();
+    const found = await children(schedule.id);
+    expect(found).toHaveLength(1);
+    expect((await waitState(schedule.id))?.childTaskId).toBe(found[0]!.id);
+  });
+
+  test.each([
+    "all",
+    "any",
+  ] as const)("%s respects event filters when a member fails", async (mode) => {
+    const { producers, schedule } = await multiFixture(mode, "task.completed");
+    await failTask(producers[0]!.id, "wrong event");
+    await reconcileDeferredTaskWaits();
+    expect(await children(schedule.id)).toHaveLength(0);
+    await completeTask(producers[1]!.id, "right event");
+    await reconcileDeferredTaskWaits();
+    expect(await children(schedule.id)).toHaveLength(mode === "all" ? 0 : 1);
+    await executeSchedule(schedule);
+    expect(await children(schedule.id)).toHaveLength(1);
+  });
+
+  test("one invalid member rejects the entire set before any schedule or completion is committed", async () => {
+    const parent = await activeTask();
+    const valid = await activeTask();
+    const terminal = await activeTask();
+    await completeTask(terminal.id, "done");
+    for (const mode of ["all", "any"]) {
+      for (const [id, message] of [
+        [terminal.id, "already completed"],
+        [crypto.randomUUID(), "not found"],
+        [parent.id, "Cannot wake on"],
+      ]) {
+        const result = await defer(parent.id, valid.id, "settled", {
+          wakeOn: { taskIds: [valid.id, id], event: "settled", mode },
+        });
+        expect(result.structuredContent.success).toBe(false);
+        expect(result.structuredContent.message).toContain(message!);
+      }
+    }
+    expect((await getTaskById(parent.id))?.status).toBe("in_progress");
+    expect(
+      await getDbClient().query("SELECT id FROM scheduled_tasks WHERE parentTaskId = ?", [
+        parent.id,
+      ]),
+    ).toHaveLength(0);
+  });
+
+  test("multi-ID schema rejects empty, duplicate, ambiguous, or missing IDs and invalid modes", async () => {
+    const parent = await activeTask();
+    const producer = await activeTask();
+    const base = { taskId: parent.id, summary: "done", note: "wait", delayMs: 60000 };
+    for (const fields of [
+      {},
+      { taskIds: [] },
+      { taskIds: [""] },
+      { taskIds: [producer.id, producer.id] },
+      { taskId: producer.id, taskIds: [producer.id] },
+      { taskIds: [producer.id], mode: "some" },
+    ]) {
+      expect(
+        tool.inputSchema.safeParse({ ...base, wakeOn: { event: "settled", ...fields } }).success,
+      ).toBe(false);
+    }
+    const wakeOn = { taskIds: [producer.id], event: "settled" };
+    expect(tool.inputSchema.safeParse({ ...base, wakeOn }).success).toBe(true);
+    for (const extra of [
+      { delayMs: undefined },
+      { runAt: new Date(Date.now() + 60000).toISOString() },
+    ]) {
+      expect(
+        (await defer(parent.id, producer.id, "settled", { wakeOn, ...extra })).structuredContent
+          .success,
+      ).toBe(false);
+    }
+  });
+
   test("ordinary schedules neither suppress a completion nor retarget its waiters", async () => {
     const { producer, schedule } = await fixture();
     const ordinary = await createScheduledTask({

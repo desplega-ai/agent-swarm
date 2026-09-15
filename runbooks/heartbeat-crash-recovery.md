@@ -125,6 +125,8 @@ flowchart TD
 - `pre.heartbeat.remediate` receives the task, optional session, classification, proposed action, reason, and age values before any remediation write. An extension can select `supersede-resume`, `fail`, or `record`. A block records the stalled task and an `extensionSkipped` finding, then performs no remediation during that sweep. An invalid action logs a scrubbed warning and keeps the original proposal.
 - Thresholds (env-overridable): `STALL_THRESHOLD_NO_SESSION_MIN=5` (`HEARTBEAT_STALL_NO_SESSION_MIN`), `STALL_THRESHOLD_STALE_HEARTBEAT_MIN=15`, `STALL_THRESHOLD_MINUTES=30`, `STEERING_STALL_GRACE_MIN=5` (`HEARTBEAT_STEERING_GRACE_MIN`), `STALE_CLEANUP_THRESHOLD_MINUTES=30`.
 
+Task creation records the origin of each routing reason as `routingSource`: `declared` for a caller-supplied reason, `engine_default` for reasons chosen by recovery, scheduling, integration, or other engine paths. Historical rows remain unknown (SQL NULL, omitted from task responses). MCP `send-task` calls with an explicit `agentId` require a `routingNote` of at least 10 characters after trim and at most 200 characters; REST creation keeps notes optional.
+
 ## 3. Protected resume routing heuristic (`remediateCrashedWorkerTask` / shutdown → `createResumeFollowUp` → reaper)
 
 ```mermaid

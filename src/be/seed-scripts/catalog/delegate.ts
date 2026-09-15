@@ -3,7 +3,9 @@ import { z } from "zod";
 export const argsSchema = z.object({
   agentName: z.string().describe("Target agent's name (case-insensitive) — resolved to its id"),
   routingReason: z.enum(["skill", "continuity", "overflow", "human_pinned", "reroute_fault"]),
-  routingNote: z.string().max(200).optional(),
+  routingNote: z.string().max(200).refine((note) => note.trim().length >= 10, {
+    message: "routingNote must contain at least 10 characters after trim",
+  }),
   task: z.string().describe("Full task prompt for the target agent"),
   parentTaskId: z
     .string()

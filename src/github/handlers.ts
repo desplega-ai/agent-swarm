@@ -260,6 +260,7 @@ export async function handlePullRequest(
       {
         agentId: lead?.id ?? "",
         routingReason: lead ? "skill" : undefined,
+        routingSource: lead ? "engine_default" : undefined,
         source: "github",
         vcsProvider: "github",
         taskType: "github-pr",
@@ -378,6 +379,7 @@ export async function handlePullRequest(
       {
         agentId: lead?.id ?? "",
         routingReason: lead ? "skill" : undefined,
+        routingSource: lead ? "engine_default" : undefined,
         source: "github",
         vcsProvider: "github",
         taskType: "github-pr",
@@ -491,6 +493,7 @@ export async function handlePullRequest(
       {
         agentId: lead?.id ?? "",
         routingReason: lead ? "skill" : undefined,
+        routingSource: lead ? "engine_default" : undefined,
         source: "github",
         vcsProvider: "github",
         taskType: "github-pr",
@@ -591,6 +594,7 @@ export async function handlePullRequest(
     {
       agentId: lead?.id ?? "",
       routingReason: lead ? "skill" : undefined,
+      routingSource: lead ? "engine_default" : undefined,
       source: "github",
       vcsProvider: "github",
       taskType: "github-pr",
@@ -680,6 +684,7 @@ export async function handleIssue(
       {
         agentId: lead?.id ?? "",
         routingReason: lead ? "skill" : undefined,
+        routingSource: lead ? "engine_default" : undefined,
         source: "github",
         vcsProvider: "github",
         taskType: "github-issue",
@@ -786,6 +791,7 @@ export async function handleIssue(
       {
         agentId: lead?.id ?? "",
         routingReason: lead ? "skill" : undefined,
+        routingSource: lead ? "engine_default" : undefined,
         source: "github",
         vcsProvider: "github",
         taskType: "github-issue",
@@ -868,6 +874,7 @@ export async function handleIssue(
     {
       agentId: lead?.id ?? "",
       routingReason: lead ? "skill" : undefined,
+      routingSource: lead ? "engine_default" : undefined,
       source: "github",
       vcsProvider: "github",
       taskType: "github-issue",
@@ -984,6 +991,7 @@ export async function handleComment(
     {
       agentId: lead?.id ?? "",
       routingReason: lead ? "skill" : undefined,
+      routingSource: lead ? "engine_default" : undefined,
       source: "github",
       vcsProvider: "github",
       taskType: "github-comment",
@@ -1303,6 +1311,7 @@ export async function handlePullRequestReview(
     {
       agentId: lead?.id ?? "",
       routingReason: lead ? "skill" : undefined,
+      routingSource: lead ? "engine_default" : undefined,
       source: "github",
       vcsProvider: "github",
       taskType: "github-review",

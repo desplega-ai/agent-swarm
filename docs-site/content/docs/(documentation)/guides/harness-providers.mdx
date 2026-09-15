@@ -20,6 +20,12 @@ For an operator-facing comparison of the install choices, see the [Provider Capa
 
 ---
 
+## Credential readiness recovery
+
+After boot, a live provider change triggers a fresh credential report. A not-ready report parks the worker in `waiting_for_credentials`; the runner continues polling and rechecks credentials at most once every 30 seconds after reconciling its environment. Once a ready report succeeds, the API restores dispatch eligibility without a restart, using the same runtime identity in multi-runtime mode. Failed checks or report deliveries also retry on that interval, and only one check/report runs at a time.
+
+Ready workers retain the five-minute Bedrock enumeration refresh. `CRED_CHECK_DISABLE=1` disables both boot checks and steady-state refreshes.
+
 ## 1. The `ProviderAdapter` contract
 
 ### Claude execution transports

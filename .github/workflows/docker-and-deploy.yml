@@ -156,6 +156,8 @@ jobs:
       - detect-version-change
       - build-and-push-server-amd64
       - build-and-push-server-arm64
+    outputs:
+      digest: ${{ steps.manifest.outputs.digest }}
     permissions:
       contents: read
       packages: write
@@ -173,8 +175,8 @@ jobs:
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          flavor: latest=false
           tags: |
-            type=raw,value=latest
             type=raw,value=${{ needs.detect-version-change.outputs.version }},enable=${{ needs.detect-version-change.outputs.version_changed == 'true' }}
             type=sha
 
@@ -182,15 +184,21 @@ jobs:
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
       - name: Create manifest list and push
+        id: manifest
         run: |
-          docker buildx imagetools create \
+          set -euo pipefail
+
+          docker buildx imagetools create --metadata-file manifest.json \
             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build-and-push-server-amd64.outputs.digest }} \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build-and-push-server-arm64.outputs.digest }}
 
+          digest="$(jq -er '."containerimage.descriptor".digest | select(test("^sha256:[0-9a-f]{64}$"))' manifest.json)"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
       - name: Inspect image
         run: |
-          docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.manifest.outputs.digest }}
 
   build-and-push-worker-amd64:
     runs-on: ubuntu-latest
@@ -282,6 +290,8 @@ jobs:
       - detect-version-change
       - build-and-push-worker-amd64
       - build-and-push-worker-arm64
+    outputs:
+      digest: ${{ steps.manifest.outputs.digest }}
     permissions:
       contents: read
       packages: write
@@ -299,8 +309,8 @@ jobs:
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker
+          flavor: latest=false
           tags: |
-            type=raw,value=latest
             type=raw,value=${{ needs.detect-version-change.outputs.version }},enable=${{ needs.detect-version-change.outputs.version_changed == 'true' }}
             type=sha
 
@@ -308,15 +318,21 @@ jobs:
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
       - name: Create manifest list and push
+        id: manifest
         run: |
-          docker buildx imagetools create \
+          set -euo pipefail
+
+          docker buildx imagetools create --metadata-file manifest.json \
             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker@${{ needs.build-and-push-worker-amd64.outputs.digest }} \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker@${{ needs.build-and-push-worker-arm64.outputs.digest }}
 
+          digest="$(jq -er '."containerimage.descriptor".digest | select(test("^sha256:[0-9a-f]{64}$"))' manifest.json)"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
       - name: Inspect image
         run: |
-          docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker:latest
+          docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker@${{ steps.manifest.outputs.digest }}
 
   # Slim worker variant (--target worker-slim): all four harness CLIs but no
   # Playwright/agent-browser browsers, postgres/redis servers, glab, or build toolchain.
@@ -416,6 +432,8 @@ jobs:
       - detect-version-change
       - build-and-push-worker-slim-amd64
       - build-and-push-worker-slim-arm64
+    outputs:
+      digest: ${{ steps.manifest.outputs.digest }}
     permissions:
       contents: read
       packages: write
@@ -433,8 +451,8 @@ jobs:
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker
+          flavor: latest=false
           tags: |
-            type=raw,value=slim
             type=raw,value=${{ needs.detect-version-change.outputs.version }}-slim,enable=${{ needs.detect-version-change.outputs.version_changed == 'true' }}
             type=sha,suffix=-slim
 
@@ -442,15 +460,21 @@ jobs:
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
       - name: Create manifest list and push
+        id: manifest
         run: |
-          docker buildx imagetools create \
+          set -euo pipefail
+
+          docker buildx imagetools create --metadata-file manifest.json \
             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker@${{ needs.build-and-push-worker-slim-amd64.outputs.digest }} \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker@${{ needs.build-and-push-worker-slim-arm64.outputs.digest }}
 
+          digest="$(jq -er '."containerimage.descriptor".digest | select(test("^sha256:[0-9a-f]{64}$"))' manifest.json)"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
       - name: Inspect image
         run: |
-          docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker:slim
+          docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker@${{ steps.manifest.outputs.digest }}
 
   # Keep the ci-metrics `branch/main` baseline fresh so merge-gate PR runs have
   # something to diff against (see agent-fs docs/ci-metrics.md). Measures the
@@ -509,24 +533,39 @@ jobs:
             -d "$BODY" | jq -r '.result.markdown // empty' >> "$GITHUB_STEP_SUMMARY"
 
   deploy:
-    name: Deploy
+    name: Promote images and deploy
     runs-on: ubuntu-latest
-    # Checkout + git fetch of origin/main only; the deploy step authenticates to
-    # Dokploy with its own secret, not GITHUB_TOKEN.
+    # All moving-tag writes and the complete deploy share this lock. Builds and
+    # SHA/version publication stay parallel; stale runs cannot roll these tags back.
+    if: github.ref == 'refs/heads/main'
     permissions:
       contents: read
+      packages: write
     concurrency:
       group: agent-swarm-deploy
+      # A late stale build must not evict a queued main-tip deployment.
+      queue: max
       cancel-in-progress: false
 
     needs:
       - merge-server
       - merge-worker
+      - merge-worker-slim
 
     steps:
       - name: Checkout
         id: checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
       - name: Check running commit is main tip
         id: guard
@@ -542,11 +581,27 @@ jobs:
 
           if [ "${GITHUB_SHA}" = "${main_tip}" ]; then
             echo "is_tip=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::Running commit is still the main tip; proceeding with deploy"
+            echo "::notice::Running commit is still the main tip; proceeding with tag promotion and deploy"
           else
             echo "is_tip=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Skipping deploy because a newer main commit is available: ${main_tip}"
+            echo "::notice::Skipping tag promotion and deploy because a newer main commit is available: ${main_tip}"
           fi
+
+      - name: Promote moving tags
+        if: steps.guard.outputs.is_tip == 'true'
+        env:
+          API_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          WORKER_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker
+          API_DIGEST: ${{ needs.merge-server.outputs.digest }}
+          WORKER_DIGEST: ${{ needs.merge-worker.outputs.digest }}
+          SLIM_DIGEST: ${{ needs.merge-worker-slim.outputs.digest }}
+        run: |
+          set -euo pipefail
+
+          # Use this run's manifest outputs, never a SHA tag that a rerun can move.
+          docker buildx imagetools create -t "${API_IMAGE}:latest" "${API_IMAGE}@${API_DIGEST}"
+          docker buildx imagetools create -t "${WORKER_IMAGE}:latest" "${WORKER_IMAGE}@${WORKER_DIGEST}"
+          docker buildx imagetools create -t "${WORKER_IMAGE}:slim" "${WORKER_IMAGE}@${SLIM_DIGEST}"
 
       - name: Deploy Agent Swarm
         if: steps.guard.outputs.is_tip == 'true'
@@ -567,25 +622,13 @@ jobs:
       - merge-server
       - merge-worker
     if: github.repository == 'desplega-ai/agent-swarm' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-    permissions:
-      contents: read
-      packages: read
+    permissions: {}
     env:
       SWARM_CLOUD_BASE_URL: ${{ secrets.SWARM_CLOUD_BASE_URL }}
       IMAGE_RELEASE_INTAKE_SECRET: ${{ secrets.IMAGE_RELEASE_INTAKE_SECRET }}
       SWARM_CLOUD_DEV_BASE_URL: ${{ secrets.SWARM_CLOUD_DEV_BASE_URL }}
       IMAGE_RELEASE_DEV_INTAKE_SECRET: ${{ secrets.IMAGE_RELEASE_DEV_INTAKE_SECRET }}
     steps:
-      - name: Log in to Container Registry
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
-
       # Posts the SAME payload to every configured Swarm Cloud intake:
       #   - prod (SWARM_CLOUD_BASE_URL)     : authoritative, a failure fails the release job
       #   - dev  (SWARM_CLOUD_DEV_BASE_URL) : best-effort, can NEVER fail the release job
@@ -596,6 +639,8 @@ jobs:
         env:
           API_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           WORKER_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker
+          API_DIGEST: ${{ needs.merge-server.outputs.digest }}
+          WORKER_DIGEST: ${{ needs.merge-worker.outputs.digest }}
           GIT_SHA: ${{ github.sha }}
           REPOSITORY: ${{ github.repository }}
           VERSION: ${{ needs.detect-version-change.outputs.version_changed == 'true' && needs.detect-version-change.outputs.version || github.ref_name }}
@@ -676,8 +721,8 @@ jobs:
             exit 0
           fi
 
-          api_digest="$(docker buildx imagetools inspect "${API_IMAGE}:latest" --format '{{json .Manifest.Digest}}' | jq -r .)"
-          worker_digest="$(docker buildx imagetools inspect "${WORKER_IMAGE}:latest" --format '{{json .Manifest.Digest}}' | jq -r .)"
+          api_digest="$API_DIGEST"
+          worker_digest="$WORKER_DIGEST"
 
           if ! [[ "$api_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
             echo "::error::Unexpected API manifest digest: $api_digest"
@@ -689,8 +734,8 @@ jobs:
             exit 1
           fi
 
-          api_ref="${API_IMAGE}:latest@${api_digest}"
-          worker_ref="${WORKER_IMAGE}:latest@${worker_digest}"
+          api_ref="${API_IMAGE}@${api_digest}"
+          worker_ref="${WORKER_IMAGE}@${worker_digest}"
           published_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
           jq -n \
