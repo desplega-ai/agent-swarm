@@ -119,36 +119,52 @@ function snippet(text: unknown, max = 80): string {
  * blocked and on what. Never stores the full payload: subjects are short and
  * secret-scrubbed.
  */
+function field(source: unknown, ...path: string[]): unknown {
+  let current: unknown = source;
+  for (const key of path) {
+    if (typeof current !== "object" || current === null) return undefined;
+    current = (current as Record<string, unknown>)[key];
+  }
+  return current;
+}
+
+function stringField(source: unknown, ...path: string[]): string | null {
+  const value = field(source, ...path);
+  return typeof value === "string" ? value : null;
+}
+
 export function runContext(event: keyof SwarmEventMap, payload: unknown): RunContext {
-  const p = (payload ?? {}) as Record<string, any>;
-  const requestAgent = typeof p.requestInfo?.agentId === "string" ? p.requestInfo.agentId : null;
+  const requestAgent = stringField(payload, "requestInfo", "agentId");
   let agentId: string | null = null;
   let subject: string | null = null;
   switch (event) {
     case "pre.tool.call":
     case "post.tool.call":
       agentId = requestAgent;
-      subject = `tool ${p.tool}`;
+      subject = `tool ${stringField(payload, "tool") ?? "?"}`;
       break;
     case "pre.task.create":
-      agentId = requestAgent ?? (typeof p.options?.agentId === "string" ? p.options.agentId : null);
-      subject = `${p.origin}: ${snippet(p.description)}`;
+      agentId = requestAgent ?? stringField(payload, "options", "agentId");
+      subject = `${stringField(payload, "origin") ?? "?"}: ${snippet(field(payload, "description"))}`;
       break;
     case "pre.task.followUp":
-      agentId = typeof p.workerAgentId === "string" ? p.workerAgentId : null;
-      subject = `task ${p.completedTask?.id} ${p.status}`;
+      agentId = stringField(payload, "workerAgentId");
+      subject =
+        `task ${stringField(payload, "completedTask", "id") ?? "?"} ${stringField(payload, "status") ?? ""}`.trim();
       break;
     case "pre.slack.route":
     case "post.slack.message":
-      subject = `channel ${p.channelId}: ${snippet(p.text, 60)}`;
+      subject = `channel ${stringField(payload, "channelId") ?? "?"}: ${snippet(field(payload, "text"), 60)}`;
       break;
     case "pre.heartbeat.remediate":
-      agentId = typeof p.task?.agentId === "string" ? p.task.agentId : null;
-      subject = `task ${p.task?.id} ${p.classification} -> ${p.proposedAction}`;
+      agentId = stringField(payload, "task", "agentId");
+      subject = `task ${stringField(payload, "task", "id") ?? "?"} ${stringField(payload, "classification") ?? ""} -> ${stringField(payload, "proposedAction") ?? ""}`;
       break;
-    default:
-      agentId = typeof p.task?.agentId === "string" ? p.task.agentId : null;
-      subject = p.task?.id ? `task ${p.task.id}: ${snippet(p.task.task)}` : null;
+    default: {
+      agentId = stringField(payload, "task", "agentId");
+      const taskId = stringField(payload, "task", "id");
+      subject = taskId ? `task ${taskId}: ${snippet(field(payload, "task", "task"))}` : null;
+    }
   }
   return { agentId, subject: subject ? scrubSecrets(subject) : null };
 }
