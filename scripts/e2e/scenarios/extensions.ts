@@ -162,6 +162,7 @@ export const extensions: Scenario = {
       const toolTask = await ctx.api("POST", "/api/tasks", {
         body: {
           task: `extension tool task ${ctx.nonce}`,
+          routingReason: "human_pinned",
           agentId: toolWorkerId,
           source: "api",
         },
