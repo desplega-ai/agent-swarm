@@ -16,8 +16,9 @@ openssl rand -hex 32
 Use the last command's output as `API_KEY` in `.env`. Replace the example credential with your selected harness credential.
 For Claude OAuth, obtain it with `claude setup-token`. Remove the placeholder token when using `ANTHROPIC_API_KEY`.
 
-Generate a different UUID for every active agent with `uuidgen`. Save each UUID once in `.env`.
-The unmodified example requires these eight values, even when you start only selected services:
+All twelve Compose agent ID variables are optional overrides in `.env`. Leave them blank to generate a UUID on first boot and reuse it across restarts. Each service stores its ID in `/workspace/personal/.agent-id` on its own personal volume. An explicit `.env` value takes precedence and is persisted; keep existing overrides to retain identity. Removing personal volumes also removes generated IDs.
+
+To set explicit overrides, generate a different UUID for each agent with `uuidgen` and save it in the corresponding variable:
 
 ```text
 LEAD_AGENT_ID
@@ -28,6 +29,10 @@ CONTENT_REVIEWER_AGENT_ID
 CONTENT_STRATEGIST_AGENT_ID
 UX_PRINCIPLES_AGENT_ID
 DISCOVERABILITY_AGENT_ID
+RESEARCHER_AGENT_ID
+REVIEWER_AGENT_ID
+TESTER_AGENT_ID
+FORWARD_DEPLOYED_ENGINEER_AGENT_ID
 ```
 
 Set `MCP_BASE_URL=http://localhost:3013` in `.env`. The API container uses this address for internal calls.
@@ -51,7 +56,7 @@ docker compose -f docker-compose.example.yml --env-file .env ps
 curl -fsS http://localhost:3013/health
 ```
 
-The example starts a lead, coder workers, content workers, and other specialist workers. Remove unwanted services and their identity requirements before starting.
+The example starts a lead, coder workers, content workers, and other specialist workers. Remove unwanted services before starting.
 Do not share personal volumes between agents. Preserve the API, worker, and agent-fs volumes described in [component minimums](https://github.com/desplega-ai/agent-swarm/blob/main/skills/agent-swarm/references/components.md).
 
 Continue with the authenticated agent check and first task in [API usage](https://github.com/desplega-ai/agent-swarm/blob/main/skills/agent-swarm/references/usage.md).

@@ -40,8 +40,11 @@ API_KEY=your-secret-api-key
 CLAUDE_CODE_OAUTH_TOKEN=your-oauth-token   # Run `claude setup-token` to get this
 SECRETS_ENCRYPTION_KEY=                     # Run `openssl rand -base64 32` and paste here. See "Encryption Key" below.
 
-# Stable agent IDs — run `uuidgen` once for each value and paste it here.
-# Keep every value unique and stable across restarts.
+# Docker Compose agent IDs (optional overrides)
+# Leave blank to generate a UUID on first boot and reuse it across restarts.
+# Each service stores its ID in /workspace/personal/.agent-id on its own volume.
+# Explicit IDs take precedence and are persisted; keep them to retain identity.
+# Removing personal volumes also removes generated IDs.
 LEAD_AGENT_ID=
 WORKER_1_AGENT_ID=
 WORKER_2_AGENT_ID=
@@ -50,6 +53,10 @@ CONTENT_REVIEWER_AGENT_ID=
 CONTENT_STRATEGIST_AGENT_ID=
 UX_PRINCIPLES_AGENT_ID=
 DISCOVERABILITY_AGENT_ID=
+RESEARCHER_AGENT_ID=
+REVIEWER_AGENT_ID=
+TESTER_AGENT_ID=
+FORWARD_DEPLOYED_ENGINEER_AGENT_ID=
 
 # ---- Optional ----
 GITHUB_TOKEN=ghp_xxxx                      # For git operations inside agents
@@ -66,15 +73,17 @@ You can pass multiple OAuth tokens for load balancing: `CLAUDE_CODE_OAUTH_TOKEN=
 If you leave `SECRETS_ENCRYPTION_KEY` blank on a brand-new deploy, the API will auto-generate one and write it to the `swarm_api` volume at `.encryption-key`. For production, set it explicitly so you control where it lives and can back it up alongside your other secrets. See [Encryption Key](#encryption-key).
 </Callout>
 
-### Step 3: Generate Stable Agent IDs
+### Step 3: Choose Optional Agent ID Overrides
 
 Each agent needs a stable UUID that persists across restarts. This is critical for task resume — if an agent restarts, it uses its `AGENT_ID` to pick up paused tasks.
 
-The example compose file reads the named values from `.env` and stops with a clear error if one is missing. Generate one unique UUID per agent and paste the output into the corresponding variable above:
+All twelve Compose agent ID variables are optional. Leave them blank to generate a UUID on first boot. Each service saves its ID to `/workspace/personal/.agent-id` on its own personal volume and reuses it across restarts. An explicit `.env` value takes precedence and is persisted to that file; keep existing overrides to retain identity. Removing personal volumes discards generated IDs.
+
+If you want explicit overrides, generate one unique UUID per agent and paste the output into the corresponding variables above:
 
 ```bash
-# Generate all required `*_AGENT_ID=value` lines, then paste them into .env.
-for name in LEAD_AGENT_ID WORKER_1_AGENT_ID WORKER_2_AGENT_ID CONTENT_WRITER_AGENT_ID CONTENT_REVIEWER_AGENT_ID CONTENT_STRATEGIST_AGENT_ID UX_PRINCIPLES_AGENT_ID DISCOVERABILITY_AGENT_ID; do
+# Optional: generate `*_AGENT_ID=value` overrides, then paste them into .env.
+for name in LEAD_AGENT_ID WORKER_1_AGENT_ID WORKER_2_AGENT_ID CONTENT_WRITER_AGENT_ID CONTENT_REVIEWER_AGENT_ID CONTENT_STRATEGIST_AGENT_ID UX_PRINCIPLES_AGENT_ID DISCOVERABILITY_AGENT_ID RESEARCHER_AGENT_ID REVIEWER_AGENT_ID TESTER_AGENT_ID FORWARD_DEPLOYED_ENGINEER_AGENT_ID; do
   printf '%s=%s\n' "$name" "$(uuidgen)"
 done
 ```
@@ -355,13 +364,14 @@ The compose file mounts this as a Docker secret at `/run/secrets/encryption_key`
 To scale the swarm, copy an existing worker block in `docker-compose.yml`:
 
 1. Give it a new service name (e.g., `worker-3`)
-2. Generate a new `AGENT_ID` UUID: `uuidgen`
+2. Reuse `entrypoint: *agent-entrypoint` from the example compose file. Leave `WORKER_3_AGENT_ID` blank for a generated, persisted ID, or set it in `.env` to a unique UUID from `uuidgen` as an optional override
 3. Pick a new host port (e.g., `3023:3000`)
 4. Add a new personal volume (e.g., `swarm_worker_3:/workspace/personal`)
 5. Declare the new volume at the bottom of the file under `volumes:`
 
 ```yaml title="docker-compose.yml (add a new worker)"
   worker-3:
+    entrypoint: *agent-entrypoint
     image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
     platform: linux/amd64
     pull_policy: always
@@ -372,7 +382,7 @@ To scale the swarm, copy an existing worker block in `docker-compose.yml`:
     environment:
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - API_KEY=${API_KEY}
-      - AGENT_ID=YOUR-NEW-UUID-HERE
+      - AGENT_ID=${WORKER_3_AGENT_ID:-}
       - AGENT_ROLE=worker
       - TEMPLATE_ID=official/coder
       - MCP_BASE_URL=http://api:3013
