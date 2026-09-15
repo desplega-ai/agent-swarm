@@ -456,6 +456,7 @@ value:markSlackTreeRendered
 value:markSteeringDelivered
 value:markSteeringHandled
 value:markSteeringPromoted
+value:markTaskAgentmailReplySent
 value:markTaskSlackReplySent
 value:markTasksNotified
 value:maskSecrets

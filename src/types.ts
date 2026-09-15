@@ -957,7 +957,6 @@ export const InboxItemTypeSchema = z.enum([
   "broken_task",
   "to_read",
   "to_start_template",
-  "notification",
 ]);
 export type InboxItemType = z.infer<typeof InboxItemTypeSchema>;
 
