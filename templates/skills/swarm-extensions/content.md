@@ -100,7 +100,7 @@ export default extension;
 
 - `ctx.config`: the validated configuration.
 - `ctx.state`: per-extension key-value store (`get`, `set`, `incr`, `del`).
-- `ctx.swarm`: the swarm SDK. Call any script-exposed tool by name with underscores, for example `await ctx.swarm.slack_post({ channelId, message })` or `await ctx.swarm.task_send({ ... })`. Calls made from a hook carry the `ext:<name>` identity. The type definitions import `SwarmSdk` from `swarm-sdk`. Call the `script-query-types` tool (or `GET /api/scripts/type-defs`) to get `swarm-sdk.d.ts` with every method name and argument type before you use `ctx.swarm`.
+- `ctx.swarm`: the swarm SDK. Call any script-exposed tool by name with underscores, for example `await ctx.swarm.slack_post({ channelId, message })` or `await ctx.swarm.task_send({ ... })`. Calls made from a hook carry the `ext:<name>` identity, which has lead privileges while the extension is enabled. Calls resolve with `{ success, status, data }` and do not throw on a tool error. Check `success` and throw when the hook must fail. The type definitions import `SwarmSdk` from `swarm-sdk`. Call the `script-query-types` tool (or `GET /api/scripts/type-defs`) to get `swarm-sdk.d.ts` with every method name and argument type before you use `ctx.swarm`.
 - `ctx.log`: structured logger. Entries appear in the extension run log on the dashboard.
 - `ctx.signal`: abort signal for the 5-second cap.
 

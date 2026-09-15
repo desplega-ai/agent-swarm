@@ -125,7 +125,7 @@ Heartbeat actions are `supersede-resume`, `fail`, and `record`.
 
 Each handler receives a context with these fields:
 
-- `ctx.swarm` exposes the script SDK through loopback HTTP. Method names follow the SDK (`slack_post`, `task_send`, ...). The `script-query-types` tool or `GET /api/scripts/type-defs` returns `swarm-sdk.d.ts` with the full surface.
+- `ctx.swarm` exposes the script SDK through loopback HTTP. Calls resolve with `{ success, status, data }` and do not throw on a tool error. The `ext:<name>` identity acts with lead privileges while the extension is enabled, so hooks can post to Slack and use other lead-only tools. Method names follow the SDK (`slack_post`, `task_send`, ...). The `script-query-types` tool or `GET /api/scripts/type-defs` returns `swarm-sdk.d.ts` with the full surface.
 - `ctx.state` exposes extension-scoped `get`, `set`, `incr`, and `del` operations.
 - `ctx.config` contains the validated operator configuration.
 - `ctx.log` writes scrubbed log messages.

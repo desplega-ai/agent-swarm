@@ -22,6 +22,8 @@ It always stores a disabled draft.
 An operator or dashboard user can enable the draft.
 
 Enable creates or updates the `ext:<name>` system agent.
+The agent row keeps `isLead: false`, so lead selection never picks it.
+On load the dispatcher registers the agent in `src/rbac/elevated-agents.ts`, and the legacy policy treats it as a lead for tool calls (Slack posting, task creation, and other lead-only verbs). Dispose revokes it.
 The system agent stays offline and has a zero task limit.
 The loader writes the active snapshot to a process-specific temporary directory.
 It creates runtime shims and imports the TypeScript module in process.

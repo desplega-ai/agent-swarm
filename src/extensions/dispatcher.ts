@@ -1,5 +1,6 @@
 import { isInTransaction } from "../be/db-client";
 import { insertExtensionRun, recordExtensionFailure, setExtensionState } from "../be/extensions/db";
+import { grantLeadEquivalence, revokeLeadEquivalence } from "../rbac/elevated-agents";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import type { SwarmEventMap } from "./contract";
 import { buildCtx } from "./ctx";
@@ -247,6 +248,7 @@ export function registerLoaded(loaded: LoadedExtension): void {
   if (loaded.record.agentId) {
     extensionAgentIds.add(loaded.record.agentId);
     extensionByAgent.set(loaded.record.agentId, loaded.record.id);
+    grantLeadEquivalence(loaded.record.agentId);
   }
 }
 
@@ -256,6 +258,7 @@ export function unregister(extensionId: string): LoadedExtension | undefined {
   if (loaded?.record.agentId) {
     extensionAgentIds.delete(loaded.record.agentId);
     extensionByAgent.delete(loaded.record.agentId);
+    revokeLeadEquivalence(loaded.record.agentId);
   }
   return loaded;
 }
