@@ -8,7 +8,9 @@ import {
   closeDb,
   completeTask,
   createAgent,
+  createScheduledTask,
   createTaskExtended,
+  deleteScheduledTask,
   failTask,
   getDbClient,
   getLogsByTaskId,
@@ -123,8 +125,143 @@ async function awaitChild(scheduleId: string) {
   }
   throw new Error("Event bus did not create a wake-up child");
 }
+async function waitState(scheduleId: string) {
+  return getDbClient().get<{
+    taskId: string;
+    status: string;
+    firedBy: string | null;
+    childTaskId: string | null;
+    resolvedAt: string | null;
+    updated_at: string;
+  }>("SELECT * FROM deferred_task_waits WHERE scheduleId = ?", [scheduleId]);
+}
 
 describe("defer-task wakeOn", () => {
+  test("ordinary schedules neither suppress a completion nor retarget its waiters", async () => {
+    const { producer, schedule } = await fixture();
+    const ordinary = await createScheduledTask({
+      name: `ordinary-${crypto.randomUUID()}`,
+      taskTemplate: "Related scheduled work",
+      taskType: "maintenance",
+      intervalMs: 60000,
+      parentTaskId: producer.id,
+    });
+    await dispatchScheduleTarget(ordinary);
+    expect(await waitState(schedule.id)).toMatchObject({ taskId: producer.id, status: "pending" });
+    await completeTask(producer.id, "done");
+    await reconcileDeferredTaskWaits(producer.id);
+    expect(await children(schedule.id)).toHaveLength(1);
+  });
+
+  test("two waiters follow a time-based deferral and fire once on the resume task's completion", async () => {
+    await initDeferredTaskWaits();
+    const { producer, schedule } = await fixture();
+    const second = await defer((await activeTask()).id, producer.id, "task.completed");
+    const secondSchedule = (await getScheduledTaskById(second.structuredContent.scheduleId!))!;
+    const deferred = await defer(producer.id, producer.id, "settled", { wakeOn: undefined });
+    expect(deferred.structuredContent.success).toBe(true);
+    const successor = (await getScheduledTaskById(deferred.structuredContent.scheduleId!))!;
+
+    await reconcileDeferredTaskWaits(producer.id);
+    for (const waiter of [schedule, secondSchedule]) {
+      expect(await children(waiter.id)).toHaveLength(0);
+      expect(await waitState(waiter.id)).toMatchObject({
+        taskId: producer.id,
+        status: "pending",
+        firedBy: null,
+      });
+    }
+
+    await executeSchedule(successor);
+    const resumed = (await children(successor.id))[0]!;
+    for (const waiter of [schedule, secondSchedule]) {
+      expect(await waitState(waiter.id)).toMatchObject({ taskId: resumed.id, status: "pending" });
+      expect((await getScheduledTaskById(waiter.id))?.nextRunAt).toBe(waiter.nextRunAt);
+    }
+    await reconcileDeferredTaskWaits();
+    expect(await children(schedule.id)).toHaveLength(0);
+    await completeTask(resumed.id, "real result");
+    for (const waiter of [schedule, secondSchedule]) {
+      const child = await awaitChild(waiter.id);
+      expect(child.task).toContain(`Wake-up cause: task.completed for task ${resumed.id}`);
+      const fired = await waitState(waiter.id);
+      expect(fired).toMatchObject({
+        status: "fired",
+        firedBy: "task.completed",
+        childTaskId: child.id,
+      });
+      expect(fired?.updated_at).toBe(fired?.resolvedAt);
+      await Promise.all([executeSchedule(waiter), reconcileDeferredTaskWaits(resumed.id)]);
+      expect(await children(waiter.id)).toHaveLength(1);
+      expect(await waitState(waiter.id)).toEqual(fired);
+    }
+  });
+
+  test("event-driven deferrals retarget through a chain without refreshing the waiter's ceiling", async () => {
+    const { producer, schedule } = await fixture("task.failed");
+    let current = producer;
+    for (let step = 0; step < 2; step++) {
+      const dependency = await activeTask();
+      const deferred = await defer(current.id, dependency.id);
+      expect(deferred.structuredContent.success).toBe(true);
+      await reconcileDeferredTaskWaits(current.id);
+      expect(await waitState(schedule.id)).toMatchObject({ taskId: current.id, status: "pending" });
+      await completeTask(dependency.id, "dependency ready");
+      await reconcileDeferredTaskWaits(dependency.id);
+      current = (await children(deferred.structuredContent.scheduleId!))[0]!;
+      expect(await waitState(schedule.id)).toMatchObject({ taskId: current.id, status: "pending" });
+      expect((await getScheduledTaskById(schedule.id))?.nextRunAt).toBe(schedule.nextRunAt);
+    }
+
+    await failTask(current.id, "real failure");
+    // Reopen to verify the new watched task is durable across restarts.
+    closeDb();
+    initDb(path);
+    await initDeferredTaskWaits();
+    const child = await awaitChild(schedule.id);
+    expect(child.task).toContain(`Wake-up cause: task.failed for task ${current.id}`);
+    expect(await children(schedule.id)).toHaveLength(1);
+  });
+
+  test("the original ceiling still fires during the defer gap and fired waits never retarget", async () => {
+    const { producer, schedule } = await fixture();
+    const deferred = await defer(producer.id, producer.id, "settled", { wakeOn: undefined });
+    const successor = (await getScheduledTaskById(deferred.structuredContent.scheduleId!))!;
+    await reconcileDeferredTaskWaits(producer.id);
+    expect(await children(schedule.id)).toHaveLength(0);
+    expect((await getScheduledTaskById(schedule.id))?.nextRunAt).toBe(schedule.nextRunAt);
+    await executeSchedule(schedule);
+    const fired = await waitState(schedule.id);
+    expect(fired).toMatchObject({ taskId: producer.id, firedBy: "ceiling", status: "fired" });
+    expect(fired?.updated_at).toBe(fired?.resolvedAt);
+    await executeSchedule(successor);
+    const resumed = (await children(successor.id))[0]!;
+    await completeTask(resumed.id, "late result");
+    await reconcileDeferredTaskWaits();
+    expect(await waitState(schedule.id)).toEqual(fired);
+    expect(await children(schedule.id)).toHaveLength(1);
+  });
+
+  test.each([
+    "disabled",
+    "deleted",
+  ])("a successor schedule that is %s during the gap releases the parent's completion", async (action) => {
+    const { producer, schedule } = await fixture();
+    const deferred = await defer(producer.id, producer.id, "settled", { wakeOn: undefined });
+    const successorId = deferred.structuredContent.scheduleId!;
+    await reconcileDeferredTaskWaits(producer.id);
+    expect(await children(schedule.id)).toHaveLength(0);
+    if (action === "disabled") await updateScheduledTask(successorId, { enabled: false });
+    else await deleteScheduledTask(successorId);
+    await reconcileDeferredTaskWaits();
+    expect(await children(schedule.id)).toHaveLength(1);
+    expect(await waitState(schedule.id)).toMatchObject({
+      taskId: producer.id,
+      status: "fired",
+      firedBy: "task.completed",
+    });
+  });
+
   test("schema output stays verbatim while a task event wakes the continuation", async () => {
     const parent = await createTaskExtended("structured deferral", {
       agentId,

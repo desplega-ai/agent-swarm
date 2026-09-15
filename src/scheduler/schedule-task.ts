@@ -1,3 +1,4 @@
+import { getDbClient } from "@/be/db";
 import { scheduleContextKey } from "@/tasks/context-key";
 import { createTaskWithSiblingAwareness } from "@/tasks/sibling-awareness";
 import type { AgentTask, ScheduledTask } from "@/types";
@@ -9,7 +10,7 @@ export async function createStandaloneScheduleTask(
   if (!schedule.taskTemplate) {
     throw new Error(`Schedule "${schedule.name}" has no taskTemplate (targetType=agent-task)`);
   }
-  return await createTaskWithSiblingAwareness(schedule.taskTemplate, {
+  const task = await createTaskWithSiblingAwareness(schedule.taskTemplate, {
     key: schedule.key,
     creatorAgentId: schedule.createdByAgentId,
     taskType: schedule.taskType,
@@ -28,4 +29,14 @@ export async function createStandaloneScheduleTask(
     // the wake-up run continues the deferred task rather than a random sibling.
     parentTaskId: schedule.parentTaskId,
   });
+  // Both timer and event dispatch wrap this helper in a transaction. Transfer
+  // pending watchers before the resume task becomes visible or its schedule is
+  // disabled; their own schedules retain the original ceilings.
+  if (schedule.taskType === "deferred" && schedule.parentTaskId) {
+    await getDbClient().run(
+      "UPDATE deferred_task_waits SET taskId = ?, updated_at = ? WHERE status = 'pending' AND taskId = ?",
+      [task.id, new Date().toISOString(), schedule.parentTaskId],
+    );
+  }
+  return task;
 }

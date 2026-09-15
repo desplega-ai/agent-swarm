@@ -78,6 +78,10 @@ export async function reconcileDeferredTaskWaits(taskId?: string): Promise<void>
      JOIN agent_tasks t ON t.id = w.taskId
      JOIN scheduled_tasks s ON s.id = w.scheduleId
      WHERE w.status = 'pending' AND s.enabled = 1 AND t.status IN ('completed', 'failed')
+       AND NOT EXISTS (
+         SELECT 1 FROM scheduled_tasks d
+         WHERE d.parentTaskId = t.id AND d.taskType = 'deferred' AND d.enabled = 1
+       )
        AND (w.eventName = 'settled' OR w.eventName = 'task.' || t.status)
        ${taskId ? "AND w.taskId = ?" : ""}`,
     taskId ? [taskId] : [],

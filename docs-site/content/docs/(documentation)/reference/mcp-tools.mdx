@@ -567,6 +567,8 @@ Complete the current task now and wake up later to continue it. Use it when the 
 
 Pass `taskId`, one of `delayMs` or `runAt`, a `summary` of what you did and where things stand, a `note` that says what is pending, and optional `checks` to verify on wake-up. The task reaches its final state (`completed`) on this call. The tool stores the `summary` followed by the deferral note as the task output, and creates a one-off schedule that targets you. The task that schedule creates carries the deferred task as its `parentTaskId`, so the wake-up run receives the deferred task's context. There is no new task status: the schedule row is the state. Do not hand-roll this with `create-schedule`.
 
+Optional `wakeOn: { taskId, event }` wakes the continuation early on `task.completed`, `task.failed`, or `settled` (completed or failed). A `delayMs` or `runAt` ceiling is still required. If the watched task defers, the wait follows its resume task across further deferrals without changing that ceiling. Disabling or deleting a successor schedule before it runs makes the parent's completion eligible on the next reconciliation; a wait for `task.failed` still falls back to its ceiling.
+
 ## Workflow Tools
 
 ### create-workflow
