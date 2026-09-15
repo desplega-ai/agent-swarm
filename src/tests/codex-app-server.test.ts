@@ -152,7 +152,7 @@ describe("CodexAppServer", () => {
   test(
     "scrubs stderr before callbacks and process-exit errors",
     async () => {
-      const secret = "s" + "k-abcdefghijklmnopqrstuvwx";
+      const secret = "example-sk-abcdefghijklmnopqrstuvwx";
       const stderr: string[] = [];
       const server = new CodexAppServer({
         codexPath: FIXTURE,
@@ -163,7 +163,7 @@ describe("CodexAppServer", () => {
       const error = await server.request("exit").catch((caught) => caught as Error);
       expect(error.message).toContain("exited with code 7");
       expect(error.message).not.toContain(secret);
-      expect(stderr).toEqual(["[REDACTED:sk_key]"]);
+      expect(stderr).toEqual(["example-[REDACTED:sk_key]"]);
       await server.close();
     },
     CHILD_PROCESS_TEST_BUDGET_MS,

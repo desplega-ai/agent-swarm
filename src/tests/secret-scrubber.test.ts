@@ -111,12 +111,11 @@ describe("scrubSecrets — env-based replacement", () => {
 
   test("handles comma-separated pool values (scrubs both the full pool and each component)", () => {
     process.env.POOL_TOKEN =
-      "gh" +
-      "p_poolfirst1234567890abcdefABCDEF1234567890,gh" +
-      "p_poolsecond1234567890abcdef1234567890AB";
+      "example-ghp_poolfirst1234567890abcdefABCDEF1234567890," +
+      "example-ghp_poolsecond1234567890abcdef1234567890AB";
     refreshSecretScrubberCache();
-    const out = scrubSecrets("using gh" + "p_poolfirst1234567890abcdefABCDEF1234567890");
-    expect(out).not.toContain("gh" + "p_poolfirst1234567890abcdefABCDEF1234567890");
+    const out = scrubSecrets("using example-ghp_poolfirst1234567890abcdefABCDEF1234567890");
+    expect(out).not.toContain("example-ghp_poolfirst1234567890abcdefABCDEF1234567890");
     expect(out).toContain("[REDACTED:");
   });
 
@@ -125,9 +124,8 @@ describe("scrubSecrets — env-based replacement", () => {
     process.env.OPENAI_API_KEY = "sk-proj-abcd1234567890EFGHefgh1234567890";
     refreshSecretScrubberCache();
     const input =
-      "gh=gh" +
-      "p_abcdefghijklmnopqrstuvwxyz0123456789 and openai=s" +
-      "k-proj-abcd1234567890EFGHefgh1234567890";
+      "gh=example-ghp_abcdefghijklmnopqrstuvwxyz0123456789 " +
+      "and openai=example-sk-proj-abcd1234567890EFGHefgh1234567890";
     const out = scrubSecrets(input);
     expect(out).toContain("[REDACTED:GITHUB_TOKEN]");
     expect(out).toContain("[REDACTED:OPENAI_API_KEY]");
@@ -159,54 +157,56 @@ describe("scrubSecrets — env-based replacement", () => {
 
 describe("scrubSecrets — regex patterns", () => {
   test("redacts github_pat_ fine-grained PATs", () => {
-    const out = scrubSecrets("PAT: github_" + "pat_11B4WKYAA0Qe95fajGmt3o_ABCDEF1234567890abcdef");
+    const token = `github_pat_${"a".repeat(32)}`;
+    const out = scrubSecrets(`PAT: ${token}`);
     expect(out).toContain("[REDACTED:github_pat]");
-    expect(out).not.toContain("github_pat_11B4WKYAA");
+    expect(out).not.toContain(token);
   });
 
   test("redacts ghp_ classic tokens", () => {
-    const out = scrubSecrets("PAT: gh" + "p_1234567890abcdefABCDEF1234567890ABCD end");
+    const out = scrubSecrets("PAT: example-ghp_1234567890abcdefABCDEF1234567890ABCD end");
     expect(out).toContain("[REDACTED:github_token]");
     expect(out).not.toContain("ghp_1234567890abcdef");
   });
 
   test("redacts gho_ OAuth tokens", () => {
-    const out = scrubSecrets("OAuth: gh" + "o_abcdef1234567890ABCDEF1234567890abcd");
+    const out = scrubSecrets("OAuth: example-gho_abcdef1234567890ABCDEF1234567890abcd");
     expect(out).toContain("[REDACTED:github_token]");
   });
 
   test("redacts ghs_ installation tokens", () => {
-    const out = scrubSecrets("Installation: gh" + "s_abcdef1234567890ABCDEF1234567890abcd");
+    const out = scrubSecrets("Installation: example-ghs_abcdef1234567890ABCDEF1234567890abcd");
     expect(out).toContain("[REDACTED:github_token]");
   });
 
   test("redacts glpat- GitLab PATs", () => {
-    const out = scrubSecrets("GL: gl" + "pat-abcdef1234567890ABCDEFgh");
+    const out = scrubSecrets("GL: example-glpat-abcdef1234567890ABCDEFgh");
     expect(out).toContain("[REDACTED:gitlab_pat]");
     expect(out).not.toContain("glpat-abcdef");
   });
 
   test("redacts sk-ant- Anthropic keys", () => {
-    const out = scrubSecrets("Anthropic: s" + "k-ant-api03-abc123def456ghi789jkl012mno345");
+    const token = `sk-ant-${"a".repeat(32)}`;
+    const out = scrubSecrets(`Anthropic: ${token}`);
     expect(out).toContain("[REDACTED:anthropic_key]");
-    expect(out).not.toContain("sk-ant-api03");
+    expect(out).not.toContain(token);
   });
 
   test("redacts sk-proj- OpenAI project keys (preferred over legacy sk-)", () => {
-    const out = scrubSecrets("OpenAI: s" + "k-proj-abcdefghijklmnopqrstuvwxyz012345");
+    const out = scrubSecrets("OpenAI: example-sk-proj-abcdefghijklmnopqrstuvwxyz012345");
     expect(out).toContain("[REDACTED:openai_proj_key]");
     expect(out).not.toContain("sk-proj-abcdefghijkl");
   });
 
   test("redacts legacy sk- keys (catch-all)", () => {
-    const out = scrubSecrets("Legacy: s" + "k-abcdefghijklmnopqrstuvwxyz0123");
+    const out = scrubSecrets("Legacy: example-sk-abcdefghijklmnopqrstuvwxyz0123");
     expect(out).toContain("[REDACTED:sk_key]");
   });
 
   test("redacts Slack xoxb tokens", () => {
-    const out = scrubSecrets("slack=xo" + "xb-1234567890-0987654321-abcdefghij");
+    const out = scrubSecrets("slack=example-xoxb-1234567890-0987654321-abcdefghij");
     expect(out).toContain("[REDACTED:slack_token]");
-    expect(out).not.toContain("xo" + "xb-1234567890");
+    expect(out).not.toContain("example-xoxb-1234567890");
   });
 
   test("redacts AWS access key IDs", () => {
@@ -232,7 +232,7 @@ describe("scrubSecrets — regex patterns", () => {
 
   test("regex patterns catch tokens even when env is empty", () => {
     // Fresh env — no secrets registered — regex should still catch well-known shapes.
-    const out = scrubSecrets("token=gh" + "p_1234567890abcdefABCDEF1234567890ABCD");
+    const out = scrubSecrets("token=example-ghp_1234567890abcdefABCDEF1234567890ABCD");
     expect(out).toContain("[REDACTED:github_token]");
   });
 

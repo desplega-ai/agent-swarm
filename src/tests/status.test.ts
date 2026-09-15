@@ -851,7 +851,7 @@ describe("validateProviderCredentials — error scrubbing", () => {
   });
 
   test("scrubs api key from error message on 401 response", async () => {
-    const fakeKey = "s" + "k-ant-fakekey-DO-NOT-LEAK-1234567890abcdef";
+    const fakeKey = "example-anthropic-key-do-not-leak";
     process.env.ANTHROPIC_API_KEY = fakeKey;
     globalThis.fetch = (async () =>
       new Response(`Unauthorized: invalid key ${fakeKey}`, {

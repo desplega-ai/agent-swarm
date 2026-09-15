@@ -233,7 +233,7 @@ describe("steering worker transport", () => {
 
   test("scrubs provider errors before reporting an undeliverable reason", async () => {
     const pending = pendingMessage();
-    const secret = "s" + "k-proj-steering-transport-secret-1234567890";
+    const secret = `sk-proj-${"steering".repeat(4)}`;
     let reportedBody = "";
     const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
       if (String(input).includes("/api/steering-messages?")) {

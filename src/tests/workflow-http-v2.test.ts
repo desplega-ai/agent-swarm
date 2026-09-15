@@ -41,6 +41,8 @@ import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-workflow-http-v2.sqlite";
 
+const secretRef = (name: string): string => `secret.${name}`;
+
 // ─── Test Server ─────────────────────────────────────────────
 
 function createTestServer(): Server {
@@ -204,7 +206,7 @@ describe("Workflow HTTP API v2", () => {
           triggers: [{ type: "webhook", hmacSecret: "example-secret-123" }],
           cooldown: { minutes: 30 },
           // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional — this is the input resolution syntax
-          input: { apiKey: "${API_KEY}", secret: "secret." + "MY_SECRET", literal: "hello" },
+          input: { apiKey: "${API_KEY}", secret: secretRef("MY_SECRET"), literal: "hello" },
         }),
       });
 

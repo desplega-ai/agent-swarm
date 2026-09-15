@@ -1984,7 +1984,7 @@ describe("AgentMail Webhooks (with filters)", () => {
   let AGENTMAIL_PORT = 0;
   const AGENTMAIL_DB = `/tmp/test-agentmail-${Date.now()}.sqlite`;
   let AGENTMAIL_BASE = "";
-  const WEBHOOK_SECRET = "wh" + "sec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw"; // test-only secret
+  const WEBHOOK_SECRET = `whsec_${Buffer.alloc(32, 1).toString("base64")}`;
   let agentmailProc: Subprocess;
 
   function signPayload(payload: unknown): { body: string; headers: Record<string, string> } {

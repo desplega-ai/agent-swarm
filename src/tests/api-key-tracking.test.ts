@@ -84,7 +84,7 @@ describe("selectCredential", () => {
   });
 
   test("keySuffix is last 5 chars of selected key", () => {
-    const result = selectCredential("s" + "k-ant-api03-abcde12345");
+    const result = selectCredential("example-sk-ant-api03-abcde12345");
     expect(result.keySuffix).toBe("12345");
   });
 

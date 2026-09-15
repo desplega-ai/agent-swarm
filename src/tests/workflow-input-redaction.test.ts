@@ -26,6 +26,8 @@ import {
 
 const TEST_DB_PATH = "./test-workflow-input-redaction.sqlite";
 
+const secretRef = (name: string): string => `secret.${name}`;
+
 // Captures the input it was invoked with so we can assert what the executor
 // actually receives (real value, not redacted).
 class CaptureExecutor extends BaseExecutor<
@@ -52,7 +54,7 @@ class CaptureExecutor extends BaseExecutor<
 
 describe("getSecretInputKeys", () => {
   test("flags secret.* references", () => {
-    const keys = getSecretInputKeys({ GITHUB_TOKEN: "secret." + "GITHUB_TOKEN" });
+    const keys = getSecretInputKeys({ GITHUB_TOKEN: secretRef("GITHUB_TOKEN") });
     expect(keys.has("GITHUB_TOKEN")).toBe(true);
     expect(keys.size).toBe(1);
   });
@@ -187,7 +189,7 @@ describe("end-to-end — workflow step persistence redacts secrets", () => {
       definition: def,
       triggers: [],
       input: {
-        GITHUB_TOKEN: "secret." + "TEST_REDACTION_GITHUB_TOKEN",
+        GITHUB_TOKEN: secretRef("TEST_REDACTION_GITHUB_TOKEN"),
         plain: "not-a-secret",
       },
     });

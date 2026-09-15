@@ -876,7 +876,7 @@ describe("token-endpoint client authentication is applied per the registered met
   test("an upstream error body echoing the client secret is scrubbed before it is thrown", async () => {
     // The callback logs this message AND reflects it into the dashboard
     // redirect as error_description, so an echoed credential would escape.
-    const secret = "s" + "k-echoed-secret-value-1234567890";
+    const secret = "example-echoed-client-secret-value";
     globalThis.fetch = async () =>
       new Response(`{"error":"invalid_client","detail":"bad client_secret: ${secret}"}`, {
         status: 401,

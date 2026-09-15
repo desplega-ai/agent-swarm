@@ -448,7 +448,7 @@ describe("Codex app-server session", () => {
             item: {
               type: "agentMessage",
               id: "secret-message",
-              text: "Authorization: Bearer s" + "k-proj-abcdefghijklmnopqrstuvwxyz012345",
+              text: "Authorization: Bearer example-sk-proj-abcdefghijklmnopqrstuvwxyz012345",
             },
           });
         });
@@ -478,7 +478,9 @@ describe("Codex app-server session", () => {
 
     expect(requests).toContain("turn/interrupt");
     expect(result).toMatchObject({ exitCode: 130, failureReason: "operator cancelled" });
-    expect(JSON.stringify(emitted)).not.toContain("s" + "k-proj-abcdefghijklmnopqrstuvwxyz012345");
+    expect(JSON.stringify(emitted)).not.toContain(
+      "example-sk-proj-abcdefghijklmnopqrstuvwxyz012345",
+    );
   });
 
   test("closes queue delivery before the final result event", async () => {

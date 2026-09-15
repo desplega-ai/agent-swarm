@@ -111,16 +111,16 @@ describe("finalizeSwarmToolResult", () => {
   });
 
   test("secrets are scrubbed from message, details, and data at the egress point", async () => {
-    registerVolatileSecret("s" + "k-super-secret-token-123", "TEST_TOKEN");
+    registerVolatileSecret("example-sk-super-secret-token-123", "TEST_TOKEN");
     try {
       const result = await finalizeSwarmToolResult("some-tool", {
         ok: false,
-        message: "Auth failed with s" + "k-super-secret-token-123",
-        details: "header was s" + "k-super-secret-token-123",
-        data: { token: "s" + "k-super-secret-token-123" },
+        message: "Auth failed with example-sk-super-secret-token-123",
+        details: "header was example-sk-super-secret-token-123",
+        data: { token: "example-sk-super-secret-token-123" },
       });
       const serialized = JSON.stringify(result);
-      expect(serialized).not.toContain("s" + "k-super-secret-token-123");
+      expect(serialized).not.toContain("example-sk-super-secret-token-123");
     } finally {
       clearVolatileSecretsForTesting();
     }

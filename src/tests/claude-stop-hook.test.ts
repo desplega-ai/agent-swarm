@@ -320,7 +320,7 @@ describe("runStopHookSessionSummary", () => {
           transcriptPath,
           env: makeEnv({
             // Mirror the process env into the SUT-scoped env for SKIP / MCP_BASE_URL plumbing.
-            CLAUDE_CODE_OAUTH_TOKEN: "s" + "k-test-oauth-stop-hook",
+            CLAUDE_CODE_OAUTH_TOKEN: "example-sk-test-oauth-stop-hook",
           }),
         },
         deps,

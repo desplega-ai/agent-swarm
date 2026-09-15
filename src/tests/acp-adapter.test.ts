@@ -264,7 +264,7 @@ class FakeAgent {
               },
             },
           },
-          diagnosticToken: "gh" + "p_abcdefghijklmnopqrstuvwxyz0123456789",
+          diagnosticToken: "example-ghp_abcdefghijklmnopqrstuvwxyz0123456789",
           chunks: Array.from({ length: 20 }, () => "y".repeat(2_000)),
         },
       },
@@ -283,7 +283,7 @@ class FakeAgent {
       stopReason: "end_turn",
       usage,
       _meta: {
-        debug: "gh" + "p_abcdefghijklmnopqrstuvwxyz0123456789",
+        debug: "example-ghp_abcdefghijklmnopqrstuvwxyz0123456789",
         authorization: "opaque-response-credential",
         note: "response metadata",
       },
@@ -475,7 +475,7 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
         }
         expect(persistedJson).toContain("X-Debug");
         expect(persistedJson).toContain("X-Debug-Map");
-        expect(persistedJson).not.toContain("gh" + "p_abcdefghijklmnopqrstuvwxyz0123456789");
+        expect(persistedJson).not.toContain("example-ghp_abcdefghijklmnopqrstuvwxyz0123456789");
         expect(persistedJson).toContain("[REDACTED:github_token]");
         expect(persistedJson).toContain("… [truncated]");
         expect(persistedJson).not.toContain("x".repeat(30_001));
@@ -596,8 +596,8 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
       ]),
     ).toEqual([{ type: "boolean", id: "flag", name: "Flag", currentValue: true }]);
 
-    const secret = "gh" + "p_abcdefghijklmnopqrstuvwxyz1234567890";
-    const redacted = "[REDACTED:github_token]";
+    const secret = "example-ghp_abcdefghijklmnopqrstuvwxyz1234567890";
+    const redacted = "example-[REDACTED:github_token]";
     const sanitized = sanitizeAcpConfigOptions([
       {
         type: "select",

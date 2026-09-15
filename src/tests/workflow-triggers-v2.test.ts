@@ -27,6 +27,8 @@ import {
 
 const TEST_DB_PATH = "./test-workflow-triggers-v2.sqlite";
 
+const secretRef = (name: string): string => `secret.${name}`;
+
 // ─── Test Executor ──────────────────────────────────────────
 
 class NoopExecutor extends BaseExecutor<typeof NoopExecutor.schema, typeof NoopExecutor.outSchema> {
@@ -658,7 +660,7 @@ describe("handleWebhookTrigger — hmacSecret references", () => {
       triggers: [
         {
           type: "webhook",
-          hmacSecret: "secret." + "TEST_KAPSO_WEBHOOK_HMAC_SECRET",
+          hmacSecret: secretRef("TEST_KAPSO_WEBHOOK_HMAC_SECRET"),
           hmacHeader: "X-Webhook-Signature",
         },
       ],
@@ -678,7 +680,7 @@ describe("handleWebhookTrigger — hmacSecret references", () => {
 
   test("unresolvable secret.NAME ref fails cleanly with a WebhookError", async () => {
     const workflow = await makeWorkflow({
-      triggers: [{ type: "webhook", hmacSecret: "secret." + "NONEXISTENT_HMAC_SECRET_12345" }],
+      triggers: [{ type: "webhook", hmacSecret: secretRef("NONEXISTENT_HMAC_SECRET_12345") }],
     });
 
     const body = '{"event":"missing-secret"}';
@@ -697,7 +699,7 @@ describe("handleWebhookTrigger — hmacSecret references", () => {
   });
 
   test("a literal hmacSecret is not treated as a reference", async () => {
-    const secret = "plain." + "literal-not-a-ref";
+    const secret = `plain.${"literal-not-a-ref"}`;
     const workflow = await makeWorkflow({
       triggers: [{ type: "webhook", hmacSecret: secret }],
     });

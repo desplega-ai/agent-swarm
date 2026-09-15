@@ -18,7 +18,7 @@ import {
  * rather than executed.
  */
 
-const SECRET = "xo" + "xb-9911-shutdown-token-value";
+const SECRET = "example-shutdown-token-value";
 
 const shutdownSourcePath = `${import.meta.dir}/../http/index.ts`;
 const shutdownSource = await Bun.file(shutdownSourcePath).text();

@@ -43,6 +43,8 @@ const skip = test.skipIf(SKIP_SANDBOX_SPAWN_TESTS);
 
 const TEST_DB_PATH = "./test-workflow-engine-v2.sqlite";
 
+const inputRef = (name: string): string => `input.${name}`;
+
 // ─── Test Executors ──────────────────────────────────────────
 
 class EchoExecutor extends BaseExecutor<typeof EchoExecutor.schema, typeof EchoExecutor.outSchema> {
@@ -1158,7 +1160,7 @@ describe("interpolateNodeConfig — script node", () => {
   test("an inputs alias pointing at workflow input is still interpolated into the script", () => {
     const node = {
       type: "script",
-      inputs: { token: "input." + "API_TOKEN" },
+      inputs: { token: inputRef("API_TOKEN") },
       config: { runtime: "bash", script: "curl -H 'Authorization: {{token}}' https://x" },
     };
     const ctx = { input: { API_TOKEN: "tok-123" }, token: "tok-123" };

@@ -413,7 +413,7 @@ describe("task steering core", () => {
 
   test("scrubs secrets before persisting the steering body", async () => {
     const previous = process.env.OPENAI_API_KEY;
-    const secret = "s" + "k-proj-steering-secret-value-1234567890";
+    const secret = "example-steering-secret-value";
     process.env.OPENAI_API_KEY = secret;
     try {
       const task = await runningTask("pi", "secret scrubbing");
