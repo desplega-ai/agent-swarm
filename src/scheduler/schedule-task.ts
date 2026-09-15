@@ -34,7 +34,10 @@ export async function createStandaloneScheduleTask(
   // disabled; their own schedules retain the original ceilings.
   if (schedule.taskType === "deferred" && schedule.parentTaskId) {
     await getDbClient().run(
-      "UPDATE deferred_task_waits SET taskId = ?, updated_at = ? WHERE status = 'pending' AND taskId = ?",
+      `UPDATE deferred_task_wait_members SET taskId = ?, updated_at = ?
+       WHERE taskId = ? AND scheduleId IN (
+         SELECT scheduleId FROM deferred_task_waits WHERE status = 'pending'
+       )`,
       [task.id, new Date().toISOString(), schedule.parentTaskId],
     );
   }

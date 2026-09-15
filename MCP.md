@@ -924,14 +924,14 @@ Create a new scheduled task. For recurring: provide cronExpression or intervalMs
 
 **Defer Task**
 
-Completes this task now with status `completed` and books a wake-up for you. Use when the result needs time: a build, a deploy, a reply. The task reaches its final state on this call; the lead sees your summary as its output unless the task has an outputSchema. For a task with an outputSchema, provide output as a JSON string matching that schema; it is stored verbatim as terminal output, while deferral details remain visible in the task log. A one-off schedule wakes you up later with a child task that carries this task as its parent. Optionally provide wakeOn to wake early when another task completes or fails; delayMs or runAt remains required as the ceiling. Provide delayMs or runAt, a summary of what you did, and a note that says what is pending and what to check.
+Completes this task now with status `completed` and books a wake-up for you. Use when the result needs time: a build, a deploy, a reply. The task reaches its final state on this call; the lead sees your summary as its output unless the task has an outputSchema. For a task with an outputSchema, provide output as a JSON string matching that schema; it is stored verbatim as terminal output, while deferral details remain visible in the task log. A one-off schedule wakes you up later with a child task that carries this task as its parent. Optionally provide wakeOn with taskId or taskIds to wake early on task outcomes; mode defaults to all, or use any for the first match. delayMs or runAt remains required as the ceiling for the whole set. Provide delayMs or runAt, a summary of what you did, and a note that says what is pending and what to check.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `taskId` | `string` | Yes | - | The ID of the task you are working on. |
 | `delayMs` | `number` | No | - | Wake up after this many milliseconds (e.g. 1800000 for 30 min). |
 | `runAt` | `string` | No | - | Wake up at this ISO datetime (e.g. '2026-03-06T15:00:00Z'). Must be future. |
-| `wakeOn` | `object` | No | - | Wake early on this task event. settled covers completed or failed. Already-terminal tasks are rejected; a delayMs/runAt ceiling is still required. |
+| `wakeOn` | `object` | No | - | Wake early on a task event. Provide taskId or nonempty, unique taskIds. mode defaults to all (every member must match); any wakes on the first match. settled covers completed or failed. Deferred members follow their continuations. Any already-terminal member rejects the request; one delayMs/runAt ceiling is still required for the whole set. |
 | `summary` | `string` | Yes | - | What you did so far and where things stand. Stored in the task log for tasks with an outputSchema; otherwise becomes the task's output. |
 | `output` | `string` | No | - | Required when the task has an outputSchema: a JSON string matching that schema, stored verbatim as terminal output. Ignored for tasks without an outputSchema. |
 | `note` | `string` | Yes | - | What is pending, and what to check on wake-up. |

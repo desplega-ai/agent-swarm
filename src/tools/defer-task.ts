@@ -139,7 +139,7 @@ export const registerDeferTaskTool = (server: McpServer) => {
       title: "Defer Task",
       annotations: { destructiveHint: false, idempotentHint: false },
       description:
-        "Completes this task now with status `completed` and books a wake-up for you. Use when the result needs time: a build, a deploy, a reply. The task reaches its final state on this call; the lead sees your summary as its output unless the task has an outputSchema. For a task with an outputSchema, provide output as a JSON string matching that schema; it is stored verbatim as terminal output, while deferral details remain visible in the task log. A one-off schedule wakes you up later with a child task that carries this task as its parent. Optionally provide wakeOn to wake early when another task completes or fails; delayMs or runAt remains required as the ceiling. Provide delayMs or runAt, a summary of what you did, and a note that says what is pending and what to check.",
+        "Completes this task now with status `completed` and books a wake-up for you. Use when the result needs time: a build, a deploy, a reply. The task reaches its final state on this call; the lead sees your summary as its output unless the task has an outputSchema. For a task with an outputSchema, provide output as a JSON string matching that schema; it is stored verbatim as terminal output, while deferral details remain visible in the task log. A one-off schedule wakes you up later with a child task that carries this task as its parent. Optionally provide wakeOn with taskId or taskIds to wake early on task outcomes; mode defaults to all, or use any for the first match. delayMs or runAt remains required as the ceiling for the whole set. Provide delayMs or runAt, a summary of what you did, and a note that says what is pending and what to check.",
       inputSchema: z.object({
         taskId: z.string().describe("The ID of the task you are working on."),
         delayMs: z
@@ -156,12 +156,20 @@ export const registerDeferTaskTool = (server: McpServer) => {
         wakeOn: z
           .object({
             event: z.enum(["task.completed", "task.failed", "settled"]),
-            taskId: z.string().min(1),
+            taskId: z.string().min(1).optional(),
+            taskIds: z.array(z.string().min(1)).min(1).optional(),
+            mode: z.enum(["all", "any"]).optional(),
           })
           .strict()
+          .refine((wake) => (wake.taskId !== undefined) !== (wake.taskIds !== undefined), {
+            message: "Provide exactly one of wakeOn.taskId or wakeOn.taskIds.",
+          })
+          .refine((wake) => !wake.taskIds || new Set(wake.taskIds).size === wake.taskIds.length, {
+            message: "wakeOn.taskIds must not contain duplicates.",
+          })
           .optional()
           .describe(
-            "Wake early on this task event. settled covers completed or failed. Already-terminal tasks are rejected; a delayMs/runAt ceiling is still required.",
+            "Wake early on a task event. Provide taskId or nonempty, unique taskIds. mode defaults to all (every member must match); any wakes on the first match. settled covers completed or failed. Deferred members follow their continuations. Any already-terminal member rejects the request; one delayMs/runAt ceiling is still required for the whole set.",
           ),
         summary: z
           .string()
@@ -249,8 +257,10 @@ export const registerDeferTaskTool = (server: McpServer) => {
       }
       const nextRunAt = delayMs ? new Date(Date.now() + delayMs).toISOString() : runAt!;
 
+      const watchedTaskIds = wakeOn?.taskIds ?? (wakeOn?.taskId ? [wakeOn.taskId] : []);
+      const wakeMode = wakeOn?.mode ?? "all";
       const wakeDescription = wakeOn
-        ? `on ${wakeOn.event} for task ${wakeOn.taskId}, or by ${nextRunAt}`
+        ? `on ${wakeOn.event} for ${wakeMode} of tasks ${watchedTaskIds.join(", ")}, or by ${nextRunAt}`
         : `at ${nextRunAt}`;
       const checksBlock = renderChecks(checks);
       const taskTemplate = `Resume task ${taskId}: ${note}${checksBlock}`;
@@ -274,14 +284,14 @@ export const registerDeferTaskTool = (server: McpServer) => {
 
       try {
         const committed = await getDbClient().transaction(async () => {
-          if (wakeOn) {
-            if (wakeOn.taskId === taskId)
+          for (const watchedId of watchedTaskIds) {
+            if (watchedId === taskId)
               throw new DeferAbortedError("Cannot wake on the task being deferred.");
-            const watched = await getTaskById(wakeOn.taskId);
-            if (!watched) throw new DeferAbortedError(`Watched task ${wakeOn.taskId} not found.`);
+            const watched = await getTaskById(watchedId);
+            if (!watched) throw new DeferAbortedError(`Watched task ${watchedId} not found.`);
             if (isTerminalTaskStatus(watched.status))
               throw new DeferAbortedError(
-                `Watched task ${wakeOn.taskId} is already ${watched.status}; read its result instead of deferring.`,
+                `Watched task ${watchedId} is already ${watched.status}; read its result instead of deferring.`,
               );
           }
           const schedule = await createScheduledTask({
@@ -309,13 +319,21 @@ export const registerDeferTaskTool = (server: McpServer) => {
 
           if (wakeOn) {
             await getDbClient().run(
-              "INSERT INTO deferred_task_waits (scheduleId, taskId, eventName, created_by, updated_by) VALUES (?, ?, ?, ?, ?)",
-              [schedule.id, wakeOn.taskId, wakeOn.event, createdBy ?? null, createdBy ?? null],
+              "INSERT INTO deferred_task_waits (scheduleId, eventName, mode, created_by, updated_by) VALUES (?, ?, ?, ?, ?)",
+              [schedule.id, wakeOn.event, wakeMode, createdBy ?? null, createdBy ?? null],
             );
+            for (const watchedId of watchedTaskIds) {
+              await getDbClient().run(
+                "INSERT INTO deferred_task_wait_members (scheduleId, taskId, created_by, updated_by) VALUES (?, ?, ?, ?)",
+                [schedule.id, watchedId, createdBy ?? null, createdBy ?? null],
+              );
+            }
             getDbClient().afterCommit(() => {
-              void reconcileDeferredTaskWaits(wakeOn.taskId).catch((err) => {
-                console.error("[defer-task] Event wake reconciliation failed:", err);
-              });
+              void Promise.all(watchedTaskIds.map((id) => reconcileDeferredTaskWaits(id))).catch(
+                (err) => {
+                  console.error("[defer-task] Event wake reconciliation failed:", err);
+                },
+              );
             });
           }
 
