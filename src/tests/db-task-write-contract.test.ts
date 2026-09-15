@@ -456,6 +456,7 @@ value:markSlackTreeRendered
 value:markSteeringDelivered
 value:markSteeringHandled
 value:markSteeringPromoted
+value:markTaskAgentmailReplySent
 value:markTaskSlackReplySent
 value:markTasksNotified
 value:maskSecrets
@@ -484,6 +485,7 @@ value:releaseStaleOfferedTasksForOfflineAgents
 value:releaseStaleProcessingInbox
 value:releaseStaleReviewingTasks
 value:releaseTask
+value:releaseTaskAgentmailReplySent
 value:replaceTaskAttachment
 value:reserveSlackMessage
 value:resetEmptyPollCount

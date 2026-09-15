@@ -85,6 +85,7 @@ export const looseAgentTaskOutputSchema = z.looseObject({
   agentmailInboxId: z.string().optional(),
   agentmailMessageId: z.string().optional(),
   agentmailThreadId: z.string().optional(),
+  agentmailReplySent: z.boolean().optional(),
   mentionMessageId: z.string().optional(),
   mentionChannelId: z.string().optional(),
   dir: z.string().optional(),

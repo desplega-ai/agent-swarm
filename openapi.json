@@ -313,6 +313,10 @@
           "agentmailThreadId": {
             "type": "string"
           },
+          "agentmailReplySent": {
+            "type": "boolean",
+            "default": false
+          },
           "mentionMessageId": {
             "type": "string"
           },
