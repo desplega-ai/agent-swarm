@@ -82,6 +82,7 @@
     "event_subscriptions": {
       "bot_events": [
         "app_mention",
+        "entity_details_requested",
         "message.channels",
         "message.groups",
         "message.im",

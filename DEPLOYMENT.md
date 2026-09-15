@@ -578,8 +578,8 @@ Files shared with the bot, and files fetched by task-scoped `slack-read` or `sla
 2. Enable Socket Mode (for real-time events without public webhooks)
 3. Enable Interactivity and Assistant View
 4. Add required scopes: `app_mentions:read`, `assistant:write`, `channels:history`, `channels:manage`, `channels:read`, `chat:write`, `chat:write.customize`, `chat:write.public`, `commands`, `files:read`, `files:write`, `groups:history`, `groups:read`, `groups:write`, `im:history`, `im:read`, `im:write`, `mpim:history`, `mpim:read`, `mpim:write`, `reactions:write`, `users:read`
-   After changing scopes in `slack-manifest.json`, apply the updated manifest to the Slack app and reinstall the app to the workspace for the changes to take effect.
-5. Subscribe to bot events: `app_mention`, `assistant_thread_started`, `assistant_thread_context_changed`, `message.channels`, `message.groups`, `message.im`, `message.mpim`
+   After changing scopes or event subscriptions in `slack-manifest.json`, apply the updated manifest to the Slack app and reinstall the app to the workspace for the changes to take effect.
+5. Subscribe to bot events: `app_mention`, `assistant_thread_started`, `assistant_thread_context_changed`, `entity_details_requested`, `message.channels`, `message.groups`, `message.im`, `message.mpim`
 6. Install to workspace and copy tokens
 
 ### Configuration
@@ -595,6 +595,9 @@ SLACK_DISABLE=true
 
 # Optional: one persistent task tree plus streamed outcome cards (default: false)
 # SLACK_RENDER_V2=true
+
+# Optional: Populate Work Object flexpanes (default: false)
+# SLACK_WORK_OBJECTS_ENABLED=true
 
 # Optional: Filter allowed users
 SLACK_ALLOWED_EMAIL_DOMAINS=company.com,partner.com  # Comma-separated email domains
@@ -622,6 +625,31 @@ SLACK_ALLOWED_USER_IDS=U12345678,U87654321           # Comma-separated user IDs 
 # worker callbacks, and terminal promotion work regardless.
 # STEERING_ENABLED=true
 ```
+
+### Work Object flexpanes (opt-in)
+
+Set `SLACK_WORK_OBJECTS_ENABLED=true` on the API to handle `entity_details_requested` with `entity.presentDetails`. The default is off. Apply the updated `slack-manifest.json` and reinstall the Slack app as described above, and enable Work Object Previews in the Slack app settings.
+
+The supported reference is `external_ref: { "type": "task", "id": "<full task UUID>" }` with `entity_type: "slack#/entities/task"` and `url: "<APP_URL>/tasks/<full task UUID>"`. The pane reads the task's current title, description, status, assignee, timestamps, and result/failure/progress. It respects the Slack user filters below and only serves tasks whose `slackChannelId` matches the requesting event's channel. Forwarded cards in other channels and tasks without Slack context receive a restricted view. Unknown references (including file, item, and content_item references), missing tasks, and lookup failures receive explicit error views.
+
+This flag enables the details handler; task notifications continue to use their existing rendering. To test manually after applying the manifest, reinstalling, and enabling the flag:
+
+1. Choose an existing Slack task and its original channel. Using the app's bot token, post a test card with `chat.postMessage` in that channel, with `text` and this `metadata` (replace the placeholders):
+
+   ```json
+   {
+     "entities": [{
+       "entity_type": "slack#/entities/task",
+       "external_ref": { "type": "task", "id": "<task UUID>" },
+       "url": "<APP_URL>/tasks/<task UUID>",
+       "entity_payload": { "attributes": { "title": { "text": "Task flexpane test" } } }
+     }]
+   }
+   ```
+
+2. Click the card and confirm the pane shows the task's current data. Refresh after the task changes and confirm it updates. If no `entity_details_requested` event arrives, record that outcome: Slack's [implementation guide](https://docs.slack.dev/messaging/work-objects-implementation/#flexpane-implementation) documents the flexpane through unfurls and does not explicitly guarantee event delivery for postMessage-only cards. Adding link unfurls requires a separate decision and implementation.
+3. Post a card with an unknown reference, then click it and confirm an error view replaces the spinner. A task from another channel must show a restricted view.
+4. Unset the flag (and reload the API configuration or restart) to disable details handling.
 
 ### User Filtering
 

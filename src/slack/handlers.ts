@@ -103,7 +103,7 @@ export function checkUserAccess(
  * Check if a user is allowed to interact with the swarm.
  * Returns true if filtering is disabled, user is in whitelist, or user's email domain is allowed.
  */
-async function isUserAllowed(client: WebClient, userId: string): Promise<boolean> {
+export async function isUserAllowed(client: WebClient, userId: string): Promise<boolean> {
   // If no filtering configured, allow all users (backwards compatible)
   if (!filteringEnabled) {
     return true;
