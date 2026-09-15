@@ -4,7 +4,7 @@ Slack uses Socket Mode, so it does not need a public webhook URL.
 Re-fetch the [manifest](https://github.com/desplega-ai/agent-swarm/blob/main/slack-manifest.json) and [Slack guide](https://docs.agent-swarm.dev/docs/integrations/slack).
 
 1. Create a Slack app from a manifest at `https://api.slack.com/apps`.
-2. Import the current `slack-manifest.json`. It supplies scopes, bot events, Socket Mode, Interactivity, and Assistant View.
+2. Import the current `slack-manifest.json`. It supplies scopes, bot events, Socket Mode, Interactivity, and Agent View.
 3. Generate an app-level token with `connections:write`. Save it as `SLACK_APP_TOKEN` (`xapp-`).
 4. Install the app to your workspace. Save the Bot User OAuth Token as `SLACK_BOT_TOKEN` (`xoxb-`).
 5. Save both tokens as global secrets through Settings → Secrets, or execute the commands below.
