@@ -67,7 +67,7 @@ describe("generateCompose", () => {
       "AWS_SESSION_TOKEN",
       "AWS_PROFILE",
     ]) {
-      expect(agentServices.match(new RegExp(`^ {6}- ${variable}=`, "gm"))).toHaveLength(8);
+      expect(agentServices.match(new RegExp(`^ {6}- ${variable}=`, "gm"))).toHaveLength(12);
     }
   });
 
