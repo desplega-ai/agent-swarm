@@ -9,6 +9,6 @@
   "category": "workflows",
   "placeholders": ["ORG_ID", "REPO_URL"],
   "requires": ["github"],
-  "runAllSeedersCandidate": false,
+  "runAllSeedersCandidate": true,
   "tags": ["workflow", "release-notes", "context"]
 }

@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, getScheduledTaskByName, initDb, updateScheduledTask } from "../be/db";
+import {
+  closeDb,
+  getScheduledTaskByName,
+  getScheduledTasks,
+  initDb,
+  updateScheduledTask,
+} from "../be/db";
 import { runSeeder } from "../be/seed";
 import {
   createSchedulesSeeder,
@@ -69,6 +75,7 @@ function zeroConfigScheduleSource(opts?: {
 const ORIGINAL_SEED_AUTOMATIONS_ENABLED = process.env.SEED_AUTOMATIONS_ENABLED;
 
 beforeEach(async () => {
+  delete process.env.SEED_AUTOMATIONS_ENABLED;
   await removeDbFiles();
   initDb(TEST_DB_PATH);
 });
@@ -84,9 +91,9 @@ afterEach(async () => {
 });
 
 describe("schedules seeder", () => {
-  test("loads only the five starter candidates, including the unfenced schedule block", () => {
+  test("loads all eleven schedule templates, including the unfenced schedule block", () => {
     const schedules = loadSeedSchedules();
-    expect(schedules).toHaveLength(5);
+    expect(schedules).toHaveLength(11);
     // Zero-config, requires:[], placeholders:[], template enabled:true -> auto-enabled
     // under the default (unset -> on) SEED_AUTOMATIONS_ENABLED switch.
     expect(schedules.find((schedule) => schedule.name === "daily-status-report")).toMatchObject({
@@ -102,16 +109,44 @@ describe("schedules seeder", () => {
       requiredParams: [],
       requires: [],
     });
-    expect(schedules.some((schedule) => schedule.name === "weekly-dependabot-triage")).toBe(false);
-    expect(schedules.some((schedule) => schedule.name === "weekly-harness-upgrade-check")).toBe(
-      false,
-    );
+    expect(
+      schedules.find((schedule) => schedule.name === "weekly-harness-upgrade-check"),
+    ).toMatchObject({
+      enabled: false,
+      requiredParams: ["REPO_URL", "PR_REVIEWER"],
+      requires: ["github"],
+    });
+    expect(
+      schedules.filter((schedule) => schedule.enabled).map((schedule) => schedule.name),
+    ).toEqual([
+      "daily-blocker-digest",
+      "daily-compounding-reflection",
+      "daily-status-report",
+      "daily-swarm-update-check",
+      "daily-workflow-health-audit",
+    ]);
   });
 
-  test("SEED_AUTOMATIONS_ENABLED=false keeps every candidate disabled, including zero-config ones", () => {
+  test("SEED_AUTOMATIONS_ENABLED=false still seeds all schedules disabled", async () => {
     process.env.SEED_AUTOMATIONS_ENABLED = "false";
-    const schedules = loadSeedSchedules();
+    const result = await runSeeder(createSchedulesSeeder(), { quiet: true });
+    expect(result).toMatchObject({ created: 11, failed: [] });
+    const schedules = await getScheduledTasks();
+    expect(schedules).toHaveLength(11);
     expect(schedules.every((schedule) => schedule.enabled === false)).toBe(true);
+  });
+
+  test("seeds a disabled schedule whose timezone still needs setup", async () => {
+    const result = await runSeeder(createSchedulesSeeder(), { quiet: true });
+    expect(result).toMatchObject({ created: 11, failed: [] });
+    expect(await getScheduledTaskByName("weekly-dependabot-triage")).toMatchObject({
+      cronExpression: "40 3 * * 0",
+      timezone: "{{TIMEZONE}}",
+      enabled: false,
+      nextRunAt: undefined,
+      requiredParams: ["REPO_URL", "SLACK_CHANNEL_ID", "TIMEZONE"],
+      requires: ["github", "slack"],
+    });
   });
 
   test("switch on: a zero-config candidate auto-enables via createSchedulesSeeder/apply", async () => {

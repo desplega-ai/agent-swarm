@@ -9,6 +9,6 @@
   "category": "workflows",
   "placeholders": ["REPO_URL"],
   "requires": ["github"],
-  "runAllSeedersCandidate": false,
+  "runAllSeedersCandidate": true,
   "tags": ["workflow", "review", "iteration"]
 }

@@ -11,6 +11,12 @@ import dailyCompoundingReflectionConfig from "../../../templates/schedules/daily
 import dailyCompoundingReflectionContent from "../../../templates/schedules/daily-compounding-reflection/content.md" with {
   type: "text",
 };
+import dailyHnBriefingConfig from "../../../templates/schedules/daily-hn-briefing/config.json" with {
+  type: "text",
+};
+import dailyHnBriefingContent from "../../../templates/schedules/daily-hn-briefing/content.md" with {
+  type: "text",
+};
 import dailyStatusReportConfig from "../../../templates/schedules/daily-status-report/config.json" with {
   type: "text",
 };
@@ -51,6 +57,12 @@ import weeklyDoraMetricsConfig from "../../../templates/schedules/weekly-dora-me
   type: "text",
 };
 import weeklyDoraMetricsContent from "../../../templates/schedules/weekly-dora-metrics/content.md" with {
+  type: "text",
+};
+import weeklyHarnessUpgradeCheckConfig from "../../../templates/schedules/weekly-harness-upgrade-check/config.json" with {
+  type: "text",
+};
+import weeklyHarnessUpgradeCheckContent from "../../../templates/schedules/weekly-harness-upgrade-check/content.md" with {
   type: "text",
 };
 import type { AutomationIntegrationId, ScheduledTask } from "../../types";
@@ -107,6 +119,7 @@ const BUILT_IN_SCHEDULE_SOURCES: readonly ScheduleTemplateSource[] = [
     config: asText(dailyCompoundingReflectionConfig),
     content: asText(dailyCompoundingReflectionContent),
   },
+  { config: asText(dailyHnBriefingConfig), content: asText(dailyHnBriefingContent) },
   { config: asText(dailyStatusReportConfig), content: asText(dailyStatusReportContent) },
   {
     config: asText(dailySwarmUpdateCheckConfig),
@@ -126,6 +139,10 @@ const BUILT_IN_SCHEDULE_SOURCES: readonly ScheduleTemplateSource[] = [
     content: asText(weeklyDependabotTriageContent),
   },
   { config: asText(weeklyDoraMetricsConfig), content: asText(weeklyDoraMetricsContent) },
+  {
+    config: asText(weeklyHarnessUpgradeCheckConfig),
+    content: asText(weeklyHarnessUpgradeCheckContent),
+  },
 ];
 
 function parseScheduleSource(source: ScheduleTemplateSource): SeedSchedule | null {
@@ -137,7 +154,8 @@ function parseScheduleSource(source: ScheduleTemplateSource): SeedSchedule | nul
     ? scheduleHeading.index! + scheduleHeading[0].length
     : source.content.indexOf("```json");
   const scheduleText = source.content.slice(scheduleStart);
-  const blockMatch = scheduleText.match(/(?:```json\s*\n)?(\{[\s\S]*?\})(?:\n```)?/);
+  const blockMatch =
+    scheduleText.match(/^\s*```json\s*\n([\s\S]*?)\n```/) ?? scheduleText.match(/(\{[\s\S]*?\})/);
   if (!blockMatch?.[1]) throw new Error(`Schedule template ${config.name} has no schedule JSON`);
   const block = JSON.parse(blockMatch[1]) as ScheduleBlock;
   const afterBlock = scheduleStart + blockMatch.index! + blockMatch[0].length;
@@ -205,9 +223,14 @@ function scheduleFromRow(schedule: ScheduledTask): SeedSchedule {
 
 function nextRunAt(schedule: SeedSchedule): string | null {
   try {
+    // Disabled templates can await a required timezone parameter. Validate the
+    // cron in UTC until setup supplies it, retaining the placeholder in the row.
+    const timezonePending =
+      !schedule.enabled &&
+      schedule.requiredParams.some((param) => schedule.timezone.includes(`{{${param}}}`));
     const interval = CronExpressionParser.parse(schedule.cronExpression, {
       currentDate: new Date(),
-      tz: schedule.timezone,
+      tz: timezonePending ? "UTC" : schedule.timezone,
     });
     return schedule.enabled ? interval.next().toISOString() : null;
   } catch (error) {

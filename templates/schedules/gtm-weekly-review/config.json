@@ -9,6 +9,6 @@
   "category": "schedules",
   "placeholders": ["REPO_URL", "GSC_PROPERTY"],
   "requires": ["github", "gsc"],
-  "runAllSeedersCandidate": false,
+  "runAllSeedersCandidate": true,
   "tags": ["gtm", "metrics", "reporting"]
 }

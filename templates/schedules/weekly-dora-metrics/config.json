@@ -9,6 +9,6 @@
   "category": "schedules",
   "placeholders": ["REPO_URL", "BRANCH", "TAG_PATTERN", "REPORT_NAME", "PAGE_ID"],
   "requires": ["github"],
-  "runAllSeedersCandidate": false,
+  "runAllSeedersCandidate": true,
   "tags": ["dora", "metrics", "engineering-productivity", "reporting", "community-template"]
 }
