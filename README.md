@@ -78,6 +78,10 @@ Or install it as a plugin in your harness:
 | Antigravity / Factory Droid | `droid plugin marketplace add https://github.com/desplega-ai/agent-swarm` then `droid plugin install agent-swarm@agent-swarm` |
 | OpenCode, pi, Devin, Kimi, others | `npx skills add desplega-ai/agent-swarm` |
 
+The plugin's [privacy](https://www.agent-swarm.dev/privacy) and
+[terms](https://www.agent-swarm.dev/terms) links describe the Agent Swarm website and
+Cloud service. The self-hosted software remains covered by the [MIT License](./LICENSE).
+
 Or use the examples directly:
 
 ```bash

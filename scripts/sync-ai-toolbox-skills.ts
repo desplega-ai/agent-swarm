@@ -93,6 +93,7 @@ export type Manifest = {
     userInvocableFalse: string[];
     pathRewrites: PathRewrite[];
     executableBitsDowngraded: ExecutableBitDowngrade[];
+    bundledCommentRewrites?: { skill: string; path: string }[];
   };
 };
 
@@ -621,6 +622,21 @@ function assertNoRepoAbsoluteReferences(skill: string, body: string): void {
   }
 }
 
+export function rewriteBundledFileComments(skill: string, path: string, content: string): string {
+  if (skill !== "delegate-work" || path !== "scripts/codex-exec.sh") return content;
+
+  // Clarify the actual default without changing the helper's executable lines.
+  // Guard the exact upstream comment so a future re-pin requires review if it drifts.
+  const before =
+    "#   CODEX_SANDBOX default: workspace-write      read-only | workspace-write | danger-full-access";
+  const after = "#   CODEX_SANDBOX default: workspace-write (passed to codex's -s option)";
+  const lines = content.split("\n");
+  if (lines.filter((line) => line === before).length !== 1) {
+    fail(`${skill}/${path}: expected one upstream sandbox default comment.`);
+  }
+  return lines.map((line) => (line === before ? after : line)).join("\n");
+}
+
 function decodeText(skill: string, path: string, bytes: Uint8Array): string {
   if (bytes.includes(0)) fail(`${skill}: ${path} is binary (contains a NUL byte).`);
   try {
@@ -857,6 +873,7 @@ function buildOutputs(
   const userInvocableFalse: string[] = [];
   const pathRewrites: PathRewrite[] = [];
   const executableBitsDowngraded: ExecutableBitDowngrade[] = [];
+  const bundledCommentRewrites: { skill: string; path: string }[] = [];
 
   for (const skill of skills) {
     const sourceRoot =
@@ -918,9 +935,13 @@ function buildOutputs(
       if (validated.executableBitDowngraded) {
         executableBitsDowngraded.push({ skill, path: bundledPath });
       }
+      const bundledContent = rewriteBundledFileComments(skill, bundledPath, validated.content);
+      if (bundledContent !== validated.content) {
+        bundledCommentRewrites.push({ skill, path: bundledPath });
+      }
       outputs.push({
         path: `templates/skills/${skill}/files/${bundledPath}`,
-        content: validated.content,
+        content: bundledContent,
       });
     }
   }
@@ -946,6 +967,7 @@ function buildOutputs(
       userInvocableFalse: userInvocableFalse.sort(),
       pathRewrites,
       executableBitsDowngraded,
+      bundledCommentRewrites,
     },
   };
 }

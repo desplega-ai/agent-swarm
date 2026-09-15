@@ -1,0 +1,11 @@
+# Local artifacts only. Keep all tracked source, manifests, skills, and docs visible.
+/.env.local
+/.env.development.local
+/.env.test.local
+/.env.production.local
+/.encryption-key
+/.page-session-secret
+/test-*.sqlite
+/test-*.sqlite-wal
+/test-*.sqlite-shm
+/.bun-test-timings/

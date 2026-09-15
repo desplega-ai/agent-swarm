@@ -8,6 +8,16 @@ commit_per_phase: true
 
 # Context-Mode MCP Wiring for Swarm Workers — Implementation Plan
 
+## Historical configuration note
+
+This completed plan records the May 2026 wiring. The [archived plan](https://github.com/desplega-ai/agent-swarm/blob/038a41446186f9f5ab7d6d83a711600dcd3435df/thoughts/taras/plans/2026-05-28-context-mode-worker-wiring.md)
+preserves the original configuration example. Current worker settings live in the
+[Codex adapter](../../../src/providers/codex-adapter.ts) and [provider runbook](../../../runbooks/harness-providers.md).
+The adapter still runs unattended sessions with unrestricted worker access.
+The [delegated worktree helper](../../../templates/skills/delegate-work/files/scripts/codex-exec.sh)
+instead uses `workspace-write`, with `CODEX_BYPASS=1` as an explicit opt-out of
+sandboxing and approvals. These runtime behaviors are unchanged by this documentation update.
+
 ## Overview
 
 Wire context-mode's `ctx_*` tools into agent-swarm workers across all four harnesses (Claude, Codex, pi, OpenCode) so they actually load at runtime. Today, context-mode is installed and advertised in the worker image but never loaded — Claude's `--strict-mcp-config` filters it out, and the other three providers have no wiring at all.
@@ -233,15 +243,9 @@ Add a `context-mode` entry to the `mcp_servers` object built by `buildCodexConfi
 **Changes**:
 - In the return object of `buildCodexConfig()` (`:356-363`), add the `features` block:
   ```ts
-  return {
-    model,
-    approval_policy: "never",
-    sandbox_mode: "danger-full-access",
-    skip_git_repo_check: true,
-    show_raw_agent_reasoning: false,
-    features: { hooks: true, plugin_hooks: true },
-    mcp_servers: mcpServers,
-  } as CodexConfig;
+  // Add these feature flags to the existing configuration.
+  // Obtain worker approval/sandbox settings from the current adapter.
+  features: { hooks: true, plugin_hooks: true },
   ```
 - The SDK will flatten `features.hooks` → `--config features.hooks=true` and `features.plugin_hooks` → `--config features.plugin_hooks=true`. This enables the hook system + plugin-provided hooks.
 

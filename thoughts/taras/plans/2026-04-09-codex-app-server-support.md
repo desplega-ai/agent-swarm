@@ -9,6 +9,17 @@ last_updated_by: claude (verify-plan)
 
 # Codex Provider Support (App-Server Approach) Implementation Plan
 
+## Historical configuration note
+
+This completed plan records the April 2026 design. The original executable
+configuration examples are preserved in the [archived plan](https://github.com/desplega-ai/agent-swarm/blob/038a41446186f9f5ab7d6d83a711600dcd3435df/thoughts/taras/plans/2026-04-09-codex-app-server-support.md).
+For current worker configuration, use the [provider runbook](../../../runbooks/harness-providers.md)
+and [Codex adapter](../../../src/providers/codex-adapter.ts), which still starts
+unattended sessions with unrestricted worker access. That behavior has not changed.
+For delegated worktree execution, the [helper](../../../templates/skills/delegate-work/files/scripts/codex-exec.sh)
+uses `workspace-write`; `CODEX_BYPASS=1` explicitly opts out of both sandboxing and
+approvals. Do not copy historical worker configuration into a local worktree session.
+
 ## Overview
 
 Add OpenAI Codex as a third harness provider alongside Claude Code and pi-mono, using the **`@openai/codex-sdk`** package (which drives Codex via the `codex app-server` JSON-RPC protocol internally). Selected at runtime via `HARNESS_PROVIDER=codex`. The existing `ProviderAdapter` abstraction (src/providers/types.ts) was built exactly for this — we implement a new `CodexAdapter` + `CodexSession` class and wire it through the factory. **All types come from the SDK — no hand-rolled duplicates of `Thread`, `Turn`, events, or items.**
@@ -44,7 +55,7 @@ The provider abstraction was introduced in plan 2026-03-08-pi-mono-provider-impl
   2. **Codex CLI native OAuth** (`codex login`) — stores credentials in `~/.codex/auth.json`, picked up automatically by the SDK. Good for local dev where the user runs the CLI login once.
   3. **Agent-swarm-native ChatGPT OAuth flow** (Phase 8) — port pi-mono's implementation so our onboarding CLI / dashboard can trigger the OAuth handshake directly without requiring the user to run `codex login`. Uses the published Codex client ID `app_EMoamEEZ73f0CkXaXp7hrann`, PKCE S256, loopback redirect on port 1455, persists to the API config store as an OAuth credential (not a file), and auto-refreshes. This gives users "ChatGPT Plus/Pro subscription" billing parity with the Codex CLI without forcing an interactive CLI login on their box. ⚠️ Upstream pi-mono source URL is tracked in Phase 8 — needs verification before porting.
 - **Model catalogue** — Codex CLI API-addressable models as of 2026-04-09 (from https://developers.openai.com/codex/models): `gpt-5.4` (recommended default), `gpt-5.4-mini` (faster/cheaper), `gpt-5.3-codex`, `gpt-5.2-codex` (legacy, scheduled retirement — check [developers.openai.com/api/docs/deprecations](https://developers.openai.com/api/docs/deprecations) for exact date). **Excluded**: `gpt-5.3-codex-spark` — it's a ChatGPT Pro research preview and is NOT API-addressable via the Codex SDK at launch, so including it would cause runtime errors if selected via `MODEL_OVERRIDE`. We (a) pick `gpt-5.4` as the default and (b) store the supported-models list in a typed `src/providers/codex-models.ts` with shortname mapping (mirrors `pi-mono-adapter.ts:71-75` `shortnames` map). This can be promoted to DB-backed storage later if we need per-agent overrides.
-- **Approvals + sandbox** — inside a worker container we want `approvalPolicy: "never"` + `sandbox: "danger-full-access"` + `skipGitRepoCheck: true`. These map to `ThreadStartParams`.
+- **Approvals + sandbox** — the original design used unattended, unrestricted worker sessions. See the historical configuration note above and the current adapter for the active settings.
 - **Experimental protocol** — `codex app-server` is marked `[experimental]` in CLI help, and several JSON-RPC methods live under `v2/`. The SDK abstracts most of this, but we should **pin the CLI version** in Docker and regenerate bindings on upgrade. Our adapter consumes the SDK's public surface, not the raw protocol, so this risk is contained.
 - **Hook-equivalent behaviors** — we rely on the **two-layer architecture**: (a) runner-side provider-agnostic cancellation polling at `runner.ts:2812-2841` already calls `session.abort()` on any `ProviderSession` — codex inherits this for free once Phase 2 wires the AbortController properly; (b) an adapter-internal event-stream observer (new in Phase 5) adds lower-latency cancellation checks on every `tool_start` event, plus tool-loop detection, auto-progress updates, and session lifecycle pings — mirroring `createSwarmHooksExtension` in `src/providers/pi-mono-extension.ts:384`. Codex's SDK has no preToolUse blocking hook, so layer (b) can only *accelerate* the abort signal, not *block* tool execution like pi-mono can.
 
@@ -172,7 +183,7 @@ Create the bare-bones adapter class that implements `ProviderAdapter` and can co
   - `readonly name = "codex"`
   - `formatCommand(name: string): string` → returns `/${name}` (identical to Claude; the skill resolver in Phase 4 handles inlining).
   - `canResume(sessionId: string): Promise<boolean>` → `return Promise.resolve(typeof sessionId === "string" && sessionId.length > 0)` for now; Phase 2 will check `~/.codex/sessions/` or attempt a cheap `resumeThread` handshake.
-  - `createSession(config: ProviderSessionConfig): Promise<ProviderSession>` → instantiate `Codex` with env + baseline config (populated in Phase 3); call `codex.startThread({ workingDirectory: config.cwd, skipGitRepoCheck: true, sandboxMode: "danger-full-access", approvalPolicy: "never", baseInstructions: config.systemPrompt })` (or `codex.resumeThread(config.resumeSessionId)` if present); construct and return a new `CodexSession`.
+  - `createSession(config: ProviderSessionConfig): Promise<ProviderSession>` → instantiate `Codex` with env + baseline config (populated in Phase 3); start or resume a thread using the provider configuration (see the historical configuration note above for the archived SDK invocation); construct and return a new `CodexSession`.
 - Export `class CodexSession implements ProviderSession` with empty stubs for `sessionId`, `onEvent`, `waitForCompletion`, `abort` — these get fleshed out in Phase 2.
 
 #### 3. Factory + error message
@@ -366,15 +377,8 @@ The adapter calls `resolveCodexModel(config.model)` before passing the model nam
 
 **File**: `Dockerfile.worker` (Phase 6 will do the deeper Docker changes — in this phase we only add the config baseline)
 **Changes**: (deferred to Phase 6; tracked here for visibility so we don't forget during E2E)
-- `RUN mkdir -p /home/worker/.codex && cat > /home/worker/.codex/config.toml <<'EOF'` with:
-  ```toml
-  model = "gpt-5.4"   # matches CODEX_DEFAULT_MODEL in src/providers/codex-models.ts
-  approval_policy = "never"
-  sandbox_mode = "danger-full-access"
-  skip_git_repo_check = true
-  show_raw_agent_reasoning = false
-  ```
-- `chown` to `worker`.
+- The original Docker baseline snippet is preserved in the archived plan linked above.
+- Consult the current `Dockerfile.worker` and Codex adapter for worker settings; use the worktree helper for delegated local execution.
 
 #### 2. Per-session MCP config builder
 
@@ -577,17 +581,7 @@ Install `@openai/codex` CLI (and the SDK as a runtime Node dependency) into the 
   RUN sudo npm install -g @openai/codex@${CODEX_VERSION}
   RUN which codex && codex --version
   ```
-- After the claude plugin install block, add the baseline codex config (model value comes from `CODEX_DEFAULT_MODEL` in `src/providers/codex-models.ts` — keep them in sync; CI lint check suggested below):
-  ```dockerfile
-  RUN mkdir -p /home/worker/.codex && \
-      printf '%s\n' \
-        'model = "gpt-5.4"' \
-        'approval_policy = "never"' \
-        'sandbox_mode = "danger-full-access"' \
-        'skip_git_repo_check = true' \
-        > /home/worker/.codex/config.toml && \
-      chown -R worker:worker /home/worker/.codex
-  ```
+- The original Docker baseline creation command is preserved in the archived plan linked above. Current worker configuration lives in `Dockerfile.worker` and the Codex adapter.
   Also add a simple check to `scripts/check-codex-default-model.sh` (new, ~10 lines) that greps the Dockerfile for `model = "<value>"` and asserts it matches `CODEX_DEFAULT_MODEL` in `src/providers/codex-models.ts`. Wire it into the merge gate next to `scripts/check-db-boundary.sh`.
 - After the `COPY plugin/pi-skills/` line (line 154), add:
   ```dockerfile
@@ -672,7 +666,7 @@ cp "$HOME/.claude/skills/$SKILL_NAME/SKILL.md" "$HOME/.codex/skills/$SKILL_NAME/
 #### Automated Verification:
 - [x] Docker image builds: `bun run docker:build:worker` — verified in verify-plan pass, sha256:92a0588c4454 (5.67 GB)
 - [x] Codex CLI present in image: `docker run --rm --entrypoint /bin/sh agent-swarm-worker:latest -c 'codex --version'` → `codex-cli 0.118.0`
-- [x] Baseline config present: `cat ~/.codex/config.toml` → `model = "gpt-5.4"`, `approval_policy = "never"`, `sandbox_mode = "danger-full-access"`, `skip_git_repo_check = true`, `show_raw_agent_reasoning = false`
+- [x] Baseline config was present at the April verification. The exact historical values are preserved in the archived plan linked above; this is not a verification of current defaults.
 - [x] Skills copied: 13 skills in `~/.codex/skills/` (close-issue, create-pr, implement-issue, investigate-sentry-issue, respond-github, review-offered-task, review-pr, start-leader, start-worker, swarm-chat, todos, user-management, work-on-task). `work-on-task/SKILL.md` readable.
 - [x] Existing claude/pi binaries still present in the image: `claude --version` → `2.1.87 (Claude Code)`, `pi --version` → `0.64.0`. (Full `scripts/e2e-docker-provider.ts` regression run still deferred — the script doesn't yet support a `codex` test case; it's a follow-up.)
 - [x] Shell syntax check: `bash -n docker-entrypoint.sh`

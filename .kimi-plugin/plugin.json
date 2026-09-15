@@ -25,11 +25,6 @@
     "displayName": "Agent Swarm",
     "shortDescription": "Deploy and operate an agent-swarm from your coding agent",
     "developerName": "desplega.sh",
-    "capabilities": [
-      "Interactive",
-      "Read",
-      "Write"
-    ],
     "websiteURL": "https://agent-swarm.dev"
   }
 }
