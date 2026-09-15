@@ -847,7 +847,17 @@ function attachmentLine(attachments: TaskAttachment[]): string | undefined {
   const attachment = attachments.find((item) => item.isPrimary) ?? attachments[0];
   if (!attachment) return undefined;
   const url = taskAttachmentDisplayUrl(attachment);
-  return /^https?:\/\//.test(url) ? `📎 [${attachment.name}](${url})` : undefined;
+  if (!/^https?:\/\//.test(url)) return undefined;
+  const label = attachment.name
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[\\[\]()]/g, "\\$&");
+  // Keep the Markdown destination intact without changing existing URL escapes.
+  const destination = url
+    .replace(/[\s\\<>]/g, encodeURIComponent)
+    .replace(/\(/g, "%28")
+    .replace(/\)/g, "%29");
+  return `📎 [${label}](${destination})`;
 }
 
 type MarkdownFence = { character: "`" | "~"; length: number };
