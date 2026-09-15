@@ -147,6 +147,30 @@ curl -H "Authorization: Bearer 123123" http://localhost:3013/api/agents
 curl -H "Authorization: Bearer 123123" -H "X-Agent-ID: <uuid>" http://localhost:3013/mcp
 ```
 
+## Helper credentials
+
+`scripts/e2e-workflow-test.sh` and `scripts/seed-api-keys.sh` require the running
+server's key through exported `AGENT_SWARM_API_KEY` (preferred) or `API_KEY`.
+The seed helper also accepts the key as its second argument, which takes precedence.
+These Bash helpers do not load `.env` themselves. Missing or empty credentials fail
+before any API request.
+
+`scripts/scripts-api-smoke.sh` requires the same explicit key when `SWARM_BASE_URL`
+points to an existing server. Without `SWARM_BASE_URL`, it starts its own server
+and generates a random per-run key when none is supplied, passing that key to both
+the server and every authenticated client request.
+
+The optional worker PostgreSQL helper requires a non-empty exported
+`LOCAL_POSTGRES_PASSWORD` whenever `SWARM_DEP_POSTGRES_ENABLED=true`, or when
+running `scripts/init-local-postgres.sh` manually as root. Set it in the worker's
+environment before startup, for example `export LOCAL_POSTGRES_PASSWORD="$(openssl rand -hex 24)"`.
+Configure password-using clients with that same value. Each invocation applies it
+to the configured role, including existing clusters, so a previous default is
+replaced and a changed value rotates the password. Missing credentials fail before
+initialization or startup. The helper still binds to `127.0.0.1` (port `5433` by
+default) and retains local socket and loopback trust authentication; local clients
+can continue connecting without a password.
+
 ## Docker Compose
 
 Requires `.env` with `API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY` (or `OPENROUTER_API_KEY`). See `docker-compose.example.yml`.

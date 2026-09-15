@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Seed API key status data for dashboard demo/E2E testing.
 # Usage: ./scripts/seed-api-keys.sh [BASE_URL] [API_KEY]
+# Supply the key as argument 2 or export AGENT_SWARM_API_KEY / API_KEY.
 
 BASE_URL="${1:-http://localhost:3013}"
-API_KEY="${2:-123123}"
+API_KEY="${2:-${AGENT_SWARM_API_KEY:-${API_KEY:-}}}"
+: "${API_KEY:?Pass the server key as argument 2 or set AGENT_SWARM_API_KEY or API_KEY}"
 AUTH="Authorization: Bearer $API_KEY"
 
 echo "Seeding API key status data to $BASE_URL..."
