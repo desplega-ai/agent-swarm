@@ -7,7 +7,8 @@ import {
   proxyExtensionsApi,
 } from "./extension-common";
 
-export const EXTENSION_LIST_DESCRIPTION = "List installed extensions and their activation state.";
+export const EXTENSION_LIST_DESCRIPTION =
+  "List installed extensions and their activation state. To write a new one, fetch GET /api/extensions/type-defs for the hook contract and install it with extension-install.";
 
 type ExtensionListItem = ReturnType<typeof coerceExtensionSummary>;
 

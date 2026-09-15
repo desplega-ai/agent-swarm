@@ -108,6 +108,22 @@ export const extensions: Scenario = {
         body: { task: `blocked extension task ${ctx.nonce}` },
       });
       expectStatus(blockedTask, [422], "block REST task through extension");
+
+      // A blocked Slack-origin task must surface the extension's reason in the thread.
+      expectStatus(
+        await ctx.api("PATCH", `/api/extensions/${blockerId}`, {
+          body: { config: { source: "slack" } },
+        }),
+        [200],
+        "point blocker at the slack origin",
+      );
+      const blockedSlackMessage = await ask(ctx, `blocked slack task ${ctx.nonce}`);
+      await ctx.slack.waitForMessage(
+        (message) =>
+          message.thread_ts === blockedSlackMessage.ts &&
+          JSON.stringify(message).includes("Task source slack is blocked"),
+        { timeoutMs: 30_000 },
+      );
       await disable(ctx, blockerId);
 
       // The fixture hooks pin the manifest as a const literal, so a manifest-only version bump

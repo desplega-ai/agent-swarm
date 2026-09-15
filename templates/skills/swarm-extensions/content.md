@@ -1,0 +1,120 @@
+# Swarm Extensions
+
+An extension is a trusted TypeScript hook bundle that runs inside the swarm API server. Use one when a rule must apply to the whole swarm: block or rewrite new tasks, route Slack channels, suppress follow-ups, change stalled-task remediation, guard tool calls, or react after a task or tool call finishes.
+
+Do not use an extension for work that one task, one script, or one schedule can do.
+
+## Tools
+
+`extension-install` and `extension-list`. They are deferred. Load them with your harness tool search before the first call.
+
+`extension-install` validates the bundle (manifest, imports, typecheck against the hook contract) and stores it. Only a lead agent, an operator, or a dashboard user may install. A worker gets `Forbidden` from the tool. When you are a worker, write and validate the bundle, then hand it to your lead with `send-task` (include the manifest, the hooks file, and the config) and report that in your output. Do not call the REST install route with the shared API key to get around the role check. The stored extension stays disabled. An operator enables it from the dashboard (Settings, Extensions) or with `POST /api/extensions/{id}/enable`. Say this in your task report and give the extension name.
+
+Installing a bundle with the same name and changed files stores a new version. The active version does not change until an operator activates it.
+
+## Get the contract before you write hooks
+
+Fetch the generated type definitions and read them. Do not guess event names or field names.
+
+```bash
+curl -s "$MCP_BASE_URL/api/extensions/type-defs" \
+  -H "X-Agent-ID: $AGENT_ID" -H "Authorization: Bearer ${AGENT_SWARM_API_KEY:-$API_KEY}"
+```
+
+`$MCP_BASE_URL`, `$AGENT_ID`, and `$AGENT_SWARM_API_KEY` (or `$API_KEY`) are in every worker environment. The response is the `swarm-extension` module declaration: every event, its payload, and what a `modify` result may change.
+
+## Events
+
+| Event | When | Result |
+|---|---|---|
+| `pre.task.create` | before any task is stored (REST, MCP, Slack, schedule, workflow, webhook, follow-up) | `block(reason)`, `modify({ priority, agentId, tags, description, ... })`, or nothing |
+| `pre.task.followUp` | before the lead follow-up task for a finished worker task | `block`, `modify({ description, priority, agentId })`, or nothing |
+| `pre.slack.route` | before a Slack message becomes a task | `modify({ target: { kind: "agent", agentId } })`, `{ kind: "lead" }`, `{ kind: "broadcast" }` |
+| `pre.heartbeat.remediate` | after the heartbeat sweep finds a stalled task | `modify({ proposedAction: "record" | "fail" | "supersede-resume" })` |
+| `pre.tool.call` | before an agent MCP tool call runs | `block(reason)` or `modify({ args })` |
+| `post.task.created`, `post.task.completed`, `post.task.failed`, `post.task.cancelled`, `post.task.superseded`, `post.task.progress` | after the change is committed | none |
+| `post.slack.message`, `post.tool.call` | after the message or tool call finished | none |
+
+`event.origin` on `pre.task.create` tells where the task comes from: `rest`, `app`, `mcp`, `slack`, `schedule`, `workflow`, `webhook`, `followUp`, or `extension:<name>`.
+
+## Bundle shape
+
+The bundle is a manifest plus a files map. Version 1 accepts one file, the `assets.hooks` TypeScript file, and only `runtime: "api"`.
+
+```json
+{
+  "manifest": {
+    "name": "require-ticket-ref",
+    "description": "Blocks REST and MCP tasks that do not name a ticket",
+    "version": "1.0.0",
+    "runtime": "api",
+    "assets": { "hooks": "hooks.ts" }
+  },
+  "files": { "hooks.ts": "<file content>" },
+  "config": { "pattern": "DES-\\d+" }
+}
+```
+
+Rules for `hooks.ts`:
+
+- Import only from `swarm-extension`, `zod`, and `stdlib`. Relative imports, other packages, and dynamic imports are rejected.
+- Export the extension as `default`. Export `config` (a Zod schema) when the extension takes configuration. The install validates `config` against it.
+- Return `block(reason)` or `modify(data)` from pre hooks. Return nothing to continue.
+- Keep handlers fast. A handler is cancelled after 5 seconds. Five consecutive failures auto-disable the extension.
+- Handlers run outside database transactions and must not assume ordering with other extensions. Use `priority` in `api.on(event, handler, { priority })` when order matters (lower runs first).
+
+## Minimal hooks file
+
+```ts
+import { block, modify, type SwarmExtension } from "swarm-extension";
+import { z } from "zod";
+
+export const config = z.object({ pattern: z.string().default("DES-\\d+") });
+
+const manifest = {
+  name: "require-ticket-ref",
+  description: "Blocks REST and MCP tasks that do not name a ticket",
+  version: "1.0.0",
+  runtime: "api",
+  assets: { hooks: "hooks.ts" },
+  config,
+} as const;
+
+const extension: SwarmExtension<typeof manifest> = (api) => {
+  api.on("pre.task.create", (event, ctx) => {
+    if (event.origin !== "rest" && event.origin !== "mcp") return;
+    if (new RegExp(ctx.config.pattern).test(event.description)) return;
+    return block(`Task must reference a ticket matching ${ctx.config.pattern}`);
+  });
+
+  api.on("post.task.completed", async (event, ctx) => {
+    await ctx.state.incr("completed");
+    ctx.log.info("task completed", { id: event.task.id });
+  });
+};
+
+export default extension;
+```
+
+## Context (`ctx`)
+
+- `ctx.config`: the validated configuration.
+- `ctx.state`: per-extension key-value store (`get`, `set`, `incr`, `del`).
+- `ctx.swarm`: the swarm SDK. Call any script-exposed tool by name with underscores, for example `await ctx.swarm.slack_post({ channelId, message })` or `await ctx.swarm.task_send({ ... })`. Calls made from a hook carry the `ext:<name>` identity. The type definitions import `SwarmSdk` from `swarm-sdk`. Call the `script-query-types` tool (or `GET /api/scripts/type-defs`) to get `swarm-sdk.d.ts` with every method name and argument type before you use `ctx.swarm`.
+- `ctx.log`: structured logger. Entries appear in the extension run log on the dashboard.
+- `ctx.signal`: abort signal for the 5-second cap.
+
+## Verify
+
+1. Call `extension-list` and confirm the name, version, and `enabled: false`.
+2. Report the enable step. After an operator enables it, the dashboard run log shows every dispatch with its result (`continue`, `modify`, `block`, or `error`).
+3. Trigger the event once and confirm the effect (for example, a blocked REST task returns HTTP 422 with your reason).
+
+## Common mistakes
+
+- Guessing event names. Fetch the type definitions.
+- Using `import` from a package other than `swarm-extension`, `zod`, or `stdlib`.
+- Returning a plain object instead of `block(...)` or `modify(...)`.
+- Modifying fields the event does not allow. Read the `*Modify` type for that event.
+- Expecting the extension to run after install. It runs only after an operator enables it.
+- Blocking tasks from every origin. Check `event.origin` so schedules, workflows, and follow-ups keep working unless you mean to block them.

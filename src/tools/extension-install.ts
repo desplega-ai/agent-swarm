@@ -9,7 +9,7 @@ import {
 } from "./extension-common";
 
 export const EXTENSION_INSTALL_DESCRIPTION =
-  "Validate and store a TypeScript extension bundle. The extension remains disabled until an operator enables it.";
+  "Validate and store a TypeScript extension bundle (manifest plus a files map with one hooks.ts). Fetch the hook contract first: GET /api/extensions/type-defs returns swarm-extension.d.ts with every event and modify shape. The extension remains disabled until an operator enables it.";
 
 function extensionInstallResult(data: unknown, fallbackName: string) {
   const body = data as {

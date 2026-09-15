@@ -1,0 +1,7 @@
+{
+  "name": "require-ticket-ref",
+  "description": "Blocks new tasks from selected origins unless the description names a ticket",
+  "version": "1.0.0",
+  "runtime": "api",
+  "assets": { "hooks": "hooks.ts" }
+}

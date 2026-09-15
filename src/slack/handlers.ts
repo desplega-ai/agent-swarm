@@ -12,6 +12,7 @@ import {
 import { dispatchPre } from "../extensions/dispatcher";
 import { resolveTemplate } from "../prompts/resolver";
 import { slackContextKey } from "../tasks/context-key";
+import { TaskCreationBlockedError } from "../tasks/errors";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { workflowEventBus } from "../workflows/event-bus";
 import { ackSlackMessage, reactionName } from "./ack";
@@ -859,8 +860,11 @@ export function registerMessageHandler(app: App): void {
         } else {
           results.assigned.push({ agentName: agent.name, taskId: task.id });
         }
-      } catch {
-        results.failed.push({ agentName: agent.name, reason: "error" });
+      } catch (error) {
+        results.failed.push({
+          agentName: agent.name,
+          reason: error instanceof TaskCreationBlockedError ? error.reason : "error",
+        });
       }
     }
 
