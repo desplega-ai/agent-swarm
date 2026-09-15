@@ -10,5 +10,10 @@
   "placeholders": [],
   "requires": [],
   "runAllSeedersCandidate": true,
-  "tags": ["operations", "release", "upgrade"]
+  "autoEnableCandidate": true,
+  "tags": [
+    "operations",
+    "release",
+    "upgrade"
+  ]
 }

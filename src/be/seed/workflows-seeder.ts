@@ -65,6 +65,8 @@ type AutomationTemplateConfig = {
   placeholders?: string[];
   requires?: AutomationIntegrationId[];
   runAllSeedersCandidate?: boolean;
+  /** Explicit, reviewed opt-in into the auto-enable policy — see ./automation-toggle. */
+  autoEnableCandidate?: boolean;
 };
 
 type WorkflowTemplatePayload = {
@@ -138,11 +140,13 @@ function parseWorkflowSource(source: WorkflowTemplateSource): SeedWorkflow | nul
     description: config.description,
     // Boot seeding always inventories the automation. Whether it also arrives
     // enabled is gated by the operator switch (SEED_AUTOMATIONS_ENABLED), the
-    // item being zero-config (no requires/placeholders), and the template not
-    // explicitly recommending it stay off. See ./automation-toggle.
+    // item being zero-config (no requires/placeholders), the template's own
+    // explicit autoEnableCandidate opt-in, and the template not explicitly
+    // recommending it stay off. See ./automation-toggle.
     enabled: resolveSeededEnabled({
       requires,
       requiredParams,
+      autoEnableCandidate: config.autoEnableCandidate === true,
       templateRecommendsEnabled: payload.enabled !== false,
     }),
     definition: {

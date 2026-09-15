@@ -40,7 +40,11 @@ function scheduleSource(cron = "0 9 * * *", description = "Seeded schedule.") {
 }
 
 /** A zero-config candidate: no requires, no placeholders — eligible for auto-enable. */
-function zeroConfigScheduleSource(opts?: { name?: string; templateEnabled?: boolean }) {
+function zeroConfigScheduleSource(opts?: {
+  name?: string;
+  templateEnabled?: boolean;
+  autoEnableCandidate?: boolean;
+}) {
   const name = opts?.name ?? "test-zero-config-schedule";
   const templateEnabled = opts?.templateEnabled ?? true;
   return {
@@ -51,6 +55,7 @@ function zeroConfigScheduleSource(opts?: { name?: string; templateEnabled?: bool
       placeholders: [],
       requires: [],
       runAllSeedersCandidate: true,
+      autoEnableCandidate: opts?.autoEnableCandidate ?? true,
       tags: ["fixture"],
     }),
     content: `# Test\n\n## Schedule\n\n\`\`\`json\n${JSON.stringify({
@@ -139,6 +144,17 @@ describe("schedules seeder", () => {
   test("switch on: a zero-config candidate whose template recommends staying off stays disabled", async () => {
     delete process.env.SEED_AUTOMATIONS_ENABLED;
     const seeder = createSchedulesSeeder([zeroConfigScheduleSource({ templateEnabled: false })]);
+    await runSeeder(seeder, { quiet: true });
+    expect(await getScheduledTaskByName("test-zero-config-schedule")).toMatchObject({
+      enabled: false,
+    });
+  });
+
+  test("switch on: a zero-config candidate without an explicit autoEnableCandidate opt-in stays disabled", async () => {
+    delete process.env.SEED_AUTOMATIONS_ENABLED;
+    const seeder = createSchedulesSeeder([
+      zeroConfigScheduleSource({ autoEnableCandidate: false }),
+    ]);
     await runSeeder(seeder, { quiet: true });
     expect(await getScheduledTaskByName("test-zero-config-schedule")).toMatchObject({
       enabled: false,

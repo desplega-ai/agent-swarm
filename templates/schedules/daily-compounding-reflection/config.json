@@ -10,6 +10,7 @@
   "placeholders": [],
   "requires": [],
   "runAllSeedersCandidate": true,
+  "autoEnableCandidate": true,
   "tags": [
     "memory",
     "skills",

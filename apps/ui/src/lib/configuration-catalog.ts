@@ -829,6 +829,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         defaultValue: "10",
         placeholder: "10",
       },
+      {
+        key: "SEED_AUTOMATIONS_ENABLED",
+        label: "Auto-enable zero-config seeded automations",
+        description:
+          "Let seeded workflows and schedules that need no integration or param arrive already enabled at boot, instead of disabled-but-inventoried. A template that recommends staying off, or needs an integration or param this install doesn't have, is unaffected.",
+        kind: "boolean",
+        defaultValue: "true",
+        restartRequired: true,
+        docsUrl: `${DOCS}ui/configuration`,
+      },
     ],
   },
   {

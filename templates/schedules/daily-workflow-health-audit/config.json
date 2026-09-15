@@ -10,5 +10,10 @@
   "placeholders": [],
   "requires": [],
   "runAllSeedersCandidate": true,
-  "tags": ["workflows", "schedules", "reliability"]
+  "autoEnableCandidate": true,
+  "tags": [
+    "workflows",
+    "schedules",
+    "reliability"
+  ]
 }
