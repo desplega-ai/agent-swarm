@@ -763,6 +763,13 @@ type ToolConfig<
   _meta?: Record<string, unknown>;
 };
 
+const preloadedToolsByServer = new WeakMap<McpServer, ReadonlySet<string>>();
+
+/** Configure before registration. The set belongs to one MCP session, never the fleet. */
+export function setPreloadedTools(server: McpServer, names: readonly string[]): void {
+  preloadedToolsByServer.set(server, new Set(names));
+}
+
 /**
  * Creates a tool registration helper that automatically extracts request info
  * and passes it as the second parameter to the callback.
@@ -788,10 +795,13 @@ export const createToolRegistrar = (server: McpServer) => {
     config: ToolConfig<InputArgs, OutputArgs>,
     cb: ToolCallbackWithInfo<InputArgs>,
   ) => {
+    const toolConfig = preloadedToolsByServer.get(server)?.has(name)
+      ? { ...config, _meta: { ...config._meta, "anthropic/alwaysLoad": true } }
+      : config;
     // When inputSchema is undefined, the MCP SDK calls handler(extra) with a single arg.
     // When inputSchema is defined, it calls handler(args, extra) with two args.
     if (config.inputSchema === undefined) {
-      return server.registerTool(name, config, (async (meta: Meta) => {
+      return server.registerTool(name, toolConfig, (async (meta: Meta) => {
         const requestInfo = getRequestInfo(meta);
         return withSpan(
           "mcp.tool",
@@ -811,7 +821,10 @@ export const createToolRegistrar = (server: McpServer) => {
       }) as Parameters<typeof server.registerTool>[2]);
     }
 
-    return server.registerTool(name, config, (async (args: InferInput<InputArgs>, meta: Meta) => {
+    return server.registerTool(name, toolConfig, (async (
+      args: InferInput<InputArgs>,
+      meta: Meta,
+    ) => {
       const requestInfo = getRequestInfo(meta);
       return withSpan(
         // Span name carries the tool: a static `mcp.tool` is unreadable in a

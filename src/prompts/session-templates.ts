@@ -322,6 +322,15 @@ registerTemplate({
 // ============================================================================
 
 registerTemplate({
+  eventType: "system.agent.tool_preload",
+  header: "",
+  defaultBody:
+    "This session preloads selected swarm tools. If a tool definition is already available in context, call it directly. Use your harness tool search only for tools whose definitions are not yet available.",
+  variables: [],
+  category: "system",
+});
+
+registerTemplate({
   eventType: "system.agent.tools_skills",
   header: "",
   defaultBody: `

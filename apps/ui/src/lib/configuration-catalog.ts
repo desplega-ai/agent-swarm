@@ -293,6 +293,24 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}guides/harness-providers`,
       },
       {
+        key: "TASK_TOOL_PRELOAD_ENABLED",
+        label: "Preload task tools (proposal)",
+        description:
+          "Load selected swarm tools without a tool search in Claude sessions. Uses the task type or schedule in Task tool manifests. Takes effect on new MCP sessions.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}ui/configuration`,
+      },
+      {
+        key: "TASK_TOOL_MANIFESTS",
+        label: "Task tool manifests",
+        description:
+          "JSON maps named taskTypes and schedules to arrays of up to 16 swarm tool names. A schedule entry overrides its task type. Requires Preload task tools; other tools remain searchable.",
+        kind: "string",
+        defaultValue: "{}",
+        docsUrl: `${DOCS}ui/configuration`,
+      },
+      {
         key: "SCRIPTS_ONLY_MCP",
         label: "Scripts-only MCP",
         description:

@@ -33,6 +33,7 @@ const SYSTEM_TEMPLATES = [
   "system.agent.slack",
   "system.agent.steering",
   "system.agent.steering.delivery",
+  "system.agent.tool_preload",
   "system.agent.tools_skills",
   "system.agent.worker",
   "system.agent.worker.remote",
@@ -110,11 +111,11 @@ describe("Session templates: registration", () => {
     expect(sessionSystemEventTypes("session")).toEqual([...SESSION_TEMPLATES].sort());
   });
 
-  test("registers 24 system and session templates in total", () => {
+  test("registers 25 system and session templates in total", () => {
     const all = getAllTemplateDefinitions();
     const sessionSystem = all.filter((d) => d.category === "system" || d.category === "session");
-    // 19 system blocks + 5 session composites.
-    expect(sessionSystem.length).toBe(24);
+    // 20 system blocks + 5 session composites.
+    expect(sessionSystem.length).toBe(25);
   });
 
   test("drops the v1 blocks that prompt v2 deleted", () => {

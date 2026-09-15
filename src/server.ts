@@ -7,6 +7,7 @@ import { seedPricingFromModelsDev } from "./be/seed-pricing";
 import { isSteeringEnabled } from "./be/steering";
 import { registerGithubTaskReactions } from "./github/task-reactions";
 import { loadGlobalConfigsIntoEnv } from "./http/core";
+import { resolveTemplate } from "./prompts/resolver";
 import { isRbacEnabled } from "./rbac";
 import { registerAcceptSteerTool } from "./tools/accept-steer";
 import { registerAppDiffTool } from "./tools/app-diff";
@@ -163,6 +164,7 @@ import { registerUnregisterServiceTool } from "./tools/unregister-service";
 // Profiles capability
 import { registerUpdateProfileTool } from "./tools/update-profile";
 import { registerUpdateServiceStatusTool } from "./tools/update-service-status";
+import { setPreloadedTools } from "./tools/utils";
 import {
   registerReplyWhatsappMessageTool,
   registerSendWhatsappMessageTool,
@@ -274,7 +276,9 @@ export function isScriptsOnlyMcp(): boolean {
   return resolveScriptsOnlyMode({ env: process.env.SCRIPTS_ONLY_MCP });
 }
 
-export async function createServer(opts: { scriptsOnly?: boolean; fullSurface?: boolean } = {}) {
+export async function createServer(
+  opts: { scriptsOnly?: boolean; fullSurface?: boolean; preloadedTools?: readonly string[] } = {},
+) {
   // Reload env
   await loadGlobalConfigsIntoEnv(true);
 
@@ -316,11 +320,16 @@ export async function createServer(opts: { scriptsOnly?: boolean; fullSurface?: 
       description: pkg.description,
     },
     {
+      ...(opts.preloadedTools?.length
+        ? { instructions: resolveTemplate("system.agent.tool_preload", {}).text }
+        : {}),
       capabilities: {
         logging: {},
       },
     },
   );
+
+  if (opts.preloadedTools?.length) setPreloadedTools(server, opts.preloadedTools);
 
   // Scripts-only surface (experimental code-mode): register just the script
   // catalog tools and stop. script-connections / script-apis stay out — they

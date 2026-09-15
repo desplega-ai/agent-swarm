@@ -152,6 +152,14 @@ After a prompt completes, ACP persists a bounded, scrubbed `acp_prompt_response`
 
 Local CLI adapters start each harness in a dedicated POSIX process group. Normal completion, `abort()`, runner shutdown, and fatal runner errors terminate the whole group with SIGTERM, followed by SIGKILL after a short grace period. This also removes MCP servers and other descendants that outlive the harness CLI; Windows keeps direct-PID termination because it has no POSIX process groups.
 
+### Task tool preloading
+
+The default-off `TASK_TOOL_PRELOAD_ENABLED` proposal lets a new MCP session preload selected
+swarm tools by task type or schedule. The API adds Claude's per-tool `anthropic/alwaysLoad`
+metadata and a registered MCP instruction to call already-available tools directly. This does
+not change the provider adapter contract, tool permissions, or other harnesses' loading policy.
+See [configuration and limits](/docs/ui/configuration#task-tool-preloading-proposal).
+
 ### Live task steering
 
 Running tasks can receive more input through the optional `ProviderSession.deliverSteering()` method. `queue` adds context at the next turn boundary. `steer` requests an interrupt of the current turn; provider implementations must not advertise it unless they can deliver that semantic.

@@ -1,5 +1,6 @@
 import { normalizeSlackReactionShortcode } from "../slack/reaction-shortcode";
 import { ProviderNameSchema } from "../types";
+import { parseTaskToolManifest } from "../utils/task-tool-manifest";
 
 /**
  * Guards against storing reserved keys in the swarm_config table.
@@ -163,6 +164,15 @@ function validateFloatRange(
 }
 
 const VALIDATED_KEYS: Record<string, ConfigValidator> = {
+  TASK_TOOL_MANIFESTS: (value) => {
+    try {
+      if (typeof value !== "string") throw new Error("Expected JSON string");
+      parseTaskToolManifest(value);
+      return null;
+    } catch {
+      return "Invalid TASK_TOOL_MANIFESTS (expected JSON with taskTypes and/or schedules maps, each selecting at most 16 known swarm tools)";
+    }
+  },
   FEEDBACK_ENDPOINT: (value) => {
     if (typeof value !== "string") {
       return "Invalid FEEDBACK_ENDPOINT (must use HTTPS, or HTTP on a loopback host)";
@@ -252,6 +262,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     "HEARTBEAT_PIN_CRASH_RESUME",
     "POOL_AFFINITY_ENFORCEMENT",
     "SCRIPTS_ONLY_MCP",
+    "TASK_TOOL_PRELOAD_ENABLED",
     "SLACK_DISABLE",
     "SLACK_RENDER_V2",
     "SLACK_RENDER_V2_DELEGATION",
