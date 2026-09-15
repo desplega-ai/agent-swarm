@@ -6,6 +6,7 @@ import { CommandMenu } from "@/components/shared/command-menu";
 import { ErrorBoundary } from "@/components/shared/error-boundary";
 import { HiveLoadingScreen } from "@/components/shared/hive-loading-screen";
 import { NameConnectionModal } from "@/components/shared/name-connection-modal";
+import { OrganizationNameDialog } from "@/components/shared/organization-name-dialog";
 import { LeadCredentialDialog } from "@/components/support/lead-credential-dialog";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { useConfig } from "@/hooks/use-config";
@@ -62,6 +63,7 @@ export function RootLayout() {
         </SidebarProvider>
         <CommandMenu />
         <NameConnectionModal />
+        <OrganizationNameDialog key={`organization:${config.apiUrl}`} />
         <LeadCredentialDialog key={config.apiUrl} />
         <FeedbackDialog key={`feedback:${config.apiUrl}`} />
       </StatusProvider>

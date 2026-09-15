@@ -285,6 +285,10 @@ export async function seed(options: SeedOptions): Promise<SeedManifest> {
   await request(options, "PUT", "/api/config", {
     body: { scope: "global", key: "STEERING_ENABLED", value: "false", isSecret: false },
   });
+  await request(options, "PUT", "/api/config", {
+    body: { scope: "global", key: "SWARM_ORG_NAME", value: "e2e organization", isSecret: false },
+  });
+  await request(options, "POST", "/api/config/reload", { body: {} });
 
   const publicPage = await ensurePage(options, lead.id, "e2e public page", "public");
   const authedPage = await ensurePage(options, lead.id, "e2e authed page", "authed");

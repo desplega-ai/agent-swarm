@@ -310,7 +310,10 @@ export async function handleConfig(
     }
     const presence: Record<string, boolean> = {};
     for (const key of keys) {
-      presence[key] = process.env[key] !== undefined && process.env[key] !== "";
+      // Organization identity is trimmed by both /status and telemetry.
+      // Match that definition without changing presence semantics for secrets.
+      const value = key === "SWARM_ORG_NAME" ? process.env[key]?.trim() : process.env[key];
+      presence[key] = value !== undefined && value !== "";
     }
     envPresence.respond(res, 200, { presence });
     return true;

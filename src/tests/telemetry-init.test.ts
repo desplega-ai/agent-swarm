@@ -204,6 +204,14 @@ describe("initTelemetry", () => {
       const metadata = (captured as { metadata: Record<string, unknown> }).metadata;
       expect(metadata.organization_id).toBeUndefined();
       expect(metadata.organization_name).toBeUndefined();
+
+      // Dashboard config reloads update the env after telemetry initialized.
+      process.env.SWARM_ORG_NAME = "  Acme Engineering  ";
+      track({ event: "test.event", properties: {} });
+      await new Promise((r) => setTimeout(r, 0));
+      expect((captured as { metadata: Record<string, unknown> }).metadata.organization_name).toBe(
+        "Acme Engineering",
+      );
     });
 
     test("includes organization_id + organization_name when SWARM_ORG_* set", async () => {
