@@ -55,6 +55,69 @@ ui's dependency tree resolves from the **root** lockfile since the workspace mig
 | `UI_E2E_INGEST_BEARER` | secret | Taras | tracker ingest bearer | Ingest skipped |
 | `UI_E2E_TRACKER_URL` | repository variable | Taras | sticky comment tracker link | No tracker link in the comment |
 
+## HOL plugin scanner
+
+[`plugin-scanner.yml`](../.github/workflows/plugin-scanner.yml) runs on pushes and
+pull requests with read-only repository access. It pins HOL's Action to
+`46ad86451b45941cd853a03ee6ccdb55f3dbee28` (v1.2.683), which installs
+`plugin-scanner==3.0.181` with a verified wheel digest, PyPI provenance, and locked
+runtime dependencies. The job summary reports the score; its
+`plugin-scanner-report` artifact contains every finding as JSON for 30 days.
+
+The scan is advisory while findings are reviewed. `min_score: 0` allows report
+collection below the HOL catalog maintainer's **80/100** threshold; a green job
+does not mean the plugin qualifies for listing. Installation, scanning, and
+artifact failures still fail the job. PR comments, submissions, network-enabled
+analysis, SARIF upload, and repository-owned suppressions are disabled. The
+optional Cisco analyzer is not installed by the Action's default installation.
+
+### Scope and baseline
+
+The default profile at repository root reproduced the catalog's **52/100** on
+`c3da9506891abcd4d095626734118526e602109e`: 675 high, 20 medium, 5 low, and 5
+informational findings. Auto-detection found Claude, Codex, Gemini, and Kimi
+packages sharing that root. Claude, Codex, and Gemini each run the common checks
+over the monorepo, so most findings occur three times.
+
+After pinning the two actions, the same local scan scores **57/100** with 699
+findings: 675 high, 14 medium, 5 low, and 5 informational. Exactly six
+`GITHUB_ACTION_UNPINNED` findings disappear; no findings are added or suppressed.
+The catalog threshold remains unmet.
+
+| Rule | Findings before action pinning | Severity | Paths / interpretation |
+|---|---:|---|---|
+| `HARDCODED_SECRET` | 636 | high | 212 locations, each reported three times: 185 in tests/fixtures, 10 in docs/history, 17 elsewhere. These counts classify paths, not whether a credential is real. |
+| `DANGEROUS_DYNAMIC_EXECUTION` | 27 | high | Nine matches across seven files, including `src/workflows/wait-filter.ts`, `src/workflows/executors/code-match.ts`, and test/smoke fixtures. |
+| `SHELL_INJECTION_PATTERN` | 9 | high | `src/commands/codex-login.ts`, `src/utils/internal-ai/complete-structured.ts`, `src/tests/package-publish.test.ts`. Requires review of inputs and actual process APIs. |
+| `RISKY_APPROVAL_DEFAULT` | 9 | medium | `src/be/seed-skills/bundled-files.generated.json` and two historical plans under `thoughts/taras/plans/`. |
+| `GITHUB_ACTION_UNPINNED` | 6 | medium | Two refs in `merge-gate.yml`, each reported three times. Both are now pinned. |
+| `SECURITY_MD_MISSING` | 4 | low | Root `SECURITY.md`, reported once per ecosystem. |
+| `GITHUB_ACTIONS_UNTRUSTED_CHECKOUT` | 3 | high | `slack-visuals-publish.yml`: the scanner searches the whole file for a trigger, checkout, and head-ref expression without connecting the expression to a checkout step. This workflow deliberately checks out the base branch. |
+| `DEPENDENCY_LOCKFILE_MISSING` | 3 | medium | Root `pyproject.toml`, a deployment cache workaround with no declared Python dependencies. |
+| `MARKETPLACE_SOURCE_INVALID` | 1 | medium | `.agents/plugins/marketplace.json`. |
+| `MARKETPLACE_UNSAFE_SOURCE` | 1 | medium | `.agents/plugins/marketplace.json`. |
+| `KIMI_INTERFACE_INVALID` | 1 | low | Scanner reports `plugin.json`; the actual manifest is `.kimi-plugin/plugin.json`. |
+| `PLUGIN_JSON_INTERFACE_ASSET_PRIVACYPOLICYURL` | 1 | info | `.codex-plugin/plugin.json`. |
+| `PLUGIN_JSON_INTERFACE_ASSET_TERMSOFSERVICEURL` | 1 | info | `.codex-plugin/plugin.json`. |
+| `PLUGIN_JSON_INTERFACE_ASSET_COMPOSERICON` | 1 | info | `.codex-plugin/plugin.json`. |
+| `PLUGIN_JSON_INTERFACE_ASSET_SCREENSHOTS` | 1 | info | `.codex-plugin/plugin.json`. |
+| `CODEXIGNORE_MISSING` | 1 | info | Root `.codexignore`. |
+
+Keep `plugin_dir: .` for catalog comparability. Pointing only at `skills/` would
+omit manifests, referenced assets, and repository workflows. This scanner's
+baseline suppresses entire rule IDs; `ignore_paths` suppresses all findings in
+matching paths. Neither justifies hiding all server code or all secret findings
+before reviewing them. Any later scoped report must document the installable
+package boundary and retain the full repository report for comparison.
+
+To inspect a downloaded report without counting nested copies twice:
+
+```bash
+jq '.summary.findings, {score, raw_score, effective_score, ecosystems}' plugin-scanner.json
+jq '.findings | group_by(.ruleId) | map({rule: .[0].ruleId, count: length}) | sort_by(-.count)' plugin-scanner.json
+jq -r '.findings[] | [.ruleId, .severity, .filePath, (.lineNumber // "")] | @tsv' plugin-scanner.json
+```
+
 ## The full local pre-push command
 
 Run this from the repo root before every push. It mirrors merge-gate exactly for the most common path (root code changes, possibly `apps/ui/`):
