@@ -10,8 +10,8 @@
  * Used by:
  * - The worker boot loop (`src/commands/credential-wait.ts`) to decide
  *   whether the worker can claim tasks yet.
- * - The worker post-task hook (`src/commands/runner.ts`) to refresh on
- *   harness_provider changes.
+ * - The worker steady-state refresh (`src/commands/credential-refresh.ts`)
+ *   to check provider changes and recover blocked credentials.
  *
  * Reports flow worker → API as JSON via the existing PATCH /agents/:id
  * endpoint (see `AgentCredStatusSchema` in `src/types.ts`). The API never
@@ -534,29 +534,6 @@ export async function sendCredStatusReport(
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     throw new Error(`credential-status report failed: ${res.status} ${body}`.trim());
-  }
-}
-
-/**
- * Fire-and-forget wrapper around {@link sendCredStatusReport}. Used by the
- * post-task cache-miss path (`runner.ts`), where a stale dashboard is
- * acceptable and blocking the worker is not.
- */
-export async function reportCredStatus(
-  apiUrl: string,
-  apiKey: string,
-  agentId: string,
-  runtimeInstanceId: string | undefined,
-  credStatus: AgentCredStatus,
-): Promise<void> {
-  try {
-    await sendCredStatusReport(apiUrl, apiKey, agentId, runtimeInstanceId, {
-      ready: credStatus.ready,
-      missing: credStatus.missing,
-      credStatus,
-    });
-  } catch (err) {
-    console.warn(`[cred-status] POST failed (non-fatal): ${err}`);
   }
 }
 

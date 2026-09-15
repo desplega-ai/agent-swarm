@@ -71,6 +71,7 @@ import {
   buildResumeContextPreamble,
   prependContextPreamble,
 } from "./context-preamble.ts";
+import { type CredentialRefreshState, refreshCredentialStatus } from "./credential-refresh.ts";
 import {
   awaitCredentials,
   BootMaxWaitExceededError,
@@ -91,10 +92,8 @@ import {
   buildLatestModelReport,
   isCredCheckDisabled,
   reportAcpStatus,
-  reportCredStatus,
   reportLatestModel,
   sendCredStatusReport,
-  shouldRefreshBedrockStatus,
 } from "./provider-credentials.ts";
 import {
   type ResumeSessionCandidate,
@@ -4972,13 +4971,13 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   const cancelledSignaled = new Set<string>();
   const steeringDispatchState = isSteeringEnabled() ? createSteeringDispatchState() : null;
 
-  // Migration 055 — cache the harness_provider value used when we last
-  // built a `cred_status` snapshot. Re-runs the post-task check only when
-  // the resolved provider changes. Section 4 of the swarm_config-overrides-
-  // HARNESS_PROVIDER work makes this dynamic: state.harnessProvider is
-  // reconciled below from `swarm_config`, so an operator's change reaches
-  // here without a worker restart.
-  let cachedCredHarnessProvider: string | null = null;
+  // Readiness acknowledged by the API, shared by boot and steady-state checks.
+  const credentialRefreshState: CredentialRefreshState = {
+    harnessProvider: null,
+    ready: null,
+    lastRefreshAt: 0,
+    inFlight: false,
+  };
 
   // Throttle for live HARNESS_PROVIDER reconciliation. Each reconciliation
   // calls `fetchResolvedEnv` which also re-resolves credential pools — we
@@ -4993,16 +4992,6 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // changed. Any reregisterAgent() call resets the clock.
   let lastServerCapsRefreshAt = 0;
   const SERVER_CAPS_REFRESH_INTERVAL_MS = 300_000;
-
-  // Throttle for the periodic Bedrock model-enumeration refresh. The credential
-  // report below only re-runs on a harness_provider change (boot + provider
-  // swap), so enabling Bedrock access after boot would otherwise never reach the
-  // picker. This timer re-runs the enumeration on a fixed interval, decoupled
-  // from the harness-change gate, so the UI stays accurate. 5 minutes keeps it
-  // cheap (one bounded AWS enumeration per tick) while still surfacing newly
-  // granted access within a few minutes.
-  let lastBedrockRefreshAt = 0;
-  const BEDROCK_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 
   // Fresh per boot and shared by registration, ping, and close: a restarted
   // process is a new runtime, but one process presents one identity.
@@ -5055,7 +5044,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           ? `${basePrompt}\n\n${additionalSystemPrompt}`
           : basePrompt;
         promptRebuiltForProvider = true;
-        cachedCredHarnessProvider = null;
+        credentialRefreshState.harnessProvider = null;
         agentVisibleChanged = true;
         console.log(
           `[${role}] [harness] Swapped to ${resolvedProvider} (basePrompt rebuilt: ${basePrompt.length} chars)`,
@@ -5206,7 +5195,6 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // CRED_CHECK_DISABLE=1 opts out entirely: the worker trusts the operator
   // and starts polling immediately, with a NULL `cred_status` row that the
   // dashboard surfaces as "unreported."
-  cachedCredHarnessProvider = state.harnessProvider;
   if (isCredCheckDisabled(process.env)) {
     console.log(`[${role}] CRED_CHECK_DISABLE=1, skipping credential checks`);
   } else {
@@ -5331,6 +5319,9 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           log: (line) => console.warn(`[${role}] ${line}`),
         },
       );
+      credentialRefreshState.harnessProvider = state.harnessProvider;
+      credentialRefreshState.ready = bootCredSnapshot?.ready ?? true;
+      credentialRefreshState.lastRefreshAt = Date.now();
     } catch (error) {
       console.error(`[${role}] Failed to report credential readiness after recovery: ${error}`);
       process.exit(1);
@@ -5915,41 +5906,17 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       }
     }
 
-    // Migration 055 — post-task credential refresh, cache-keyed on the
-    // *resolved* harness_provider. Re-runs the snapshot when the provider
-    // changes (boot, or after a live swap above) so the dashboard shows
-    // up-to-date credential status for the active adapter.
-    if (!isCredCheckDisabled(process.env)) {
-      const currentHarness = state.harnessProvider;
-      if (currentHarness !== cachedCredHarnessProvider) {
-        cachedCredHarnessProvider = currentHarness;
-        buildCredStatusReport(currentHarness, process.env, {}, "post_task")
-          .then((snap) => reportCredStatus(apiUrl, apiKey, agentId, runtimeInstanceId, snap))
-          .catch((err) =>
-            console.warn(`[${role}] cred_status post_task report failed (non-fatal): ${err}`),
-          );
-      } else if (
-        shouldRefreshBedrockStatus({
-          harnessProvider: currentHarness,
-          env: process.env,
-          lastRefreshAt: lastBedrockRefreshAt,
-          now: Date.now(),
-          intervalMs: BEDROCK_REFRESH_INTERVAL_MS,
-        })
-      ) {
-        // Bedrock enumeration drifts independently of the harness_provider:
-        // access granted (or revoked) in the AWS console after boot won't flip
-        // the provider, so the harness-change gate above never fires. Re-run the
-        // enumeration on the throttled interval so the picker reflects the live
-        // account state. One bounded AWS round-trip per tick.
-        lastBedrockRefreshAt = Date.now();
-        buildCredStatusReport(currentHarness, process.env, {}, "post_task")
-          .then((snap) => reportCredStatus(apiUrl, apiKey, agentId, runtimeInstanceId, snap))
-          .catch((err) =>
-            console.warn(`[${role}] bedrock enumeration refresh failed (non-fatal): ${err}`),
-          );
-      }
-    }
+    // Recheck provider changes, blocked credentials, and Bedrock enumeration.
+    // The helper honors CRED_CHECK_DISABLE, throttles retries, and prevents
+    // overlapping reports while keeping polling responsive.
+    refreshCredentialStatus(
+      apiConfig,
+      credentialRefreshState,
+      state.harnessProvider,
+      process.env,
+    ).catch((err) =>
+      console.warn(`[${role}] cred_status post_task refresh failed (non-fatal): ${err}`),
+    );
 
     // Periodic VCS detection for running tasks (fire-and-forget, throttled per task)
     const now = Date.now();
