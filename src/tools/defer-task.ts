@@ -17,6 +17,7 @@ import { getTaskOutputValidationError } from "@/tasks/terminal-result-guard";
 import { assertOwnsTask, ownerCtx } from "@/tools/task-tool-ctx";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { isTerminalTaskStatus } from "@/types";
+import { getAppUrl } from "@/utils/constants";
 
 /** Thrown inside the transaction to abort and roll back the schedule INSERT. */
 class DeferAbortedError extends Error {}
@@ -25,6 +26,55 @@ class DeferAbortedError extends Error {}
 function renderChecks(checks?: string[]): string {
   if (!checks || checks.length === 0) return "";
   return `\n\nChecks:\n${checks.map((c) => `- ${c}`).join("\n")}`;
+}
+
+/** "about 25 minutes" / "about 2 hours" / "about 3 days", rounded to whole units. */
+function formatRelativeDuration(ms: number): string {
+  const minutes = Math.round(ms / 60_000);
+  if (minutes < 1) return "less than a minute";
+  if (minutes < 60) return `about ${minutes} minute${minutes === 1 ? "" : "s"}`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `about ${hours} hour${hours === 1 ? "" : "s"}`;
+  const days = Math.round(hours / 24);
+  return `about ${days} day${days === 1 ? "" : "s"}`;
+}
+
+/** "HH:MM UTC" today, "tomorrow HH:MM UTC", else "MMM D, HH:MM UTC". */
+function formatAbsoluteTime(target: Date, now: Date): string {
+  const hh = String(target.getUTCHours()).padStart(2, "0");
+  const mm = String(target.getUTCMinutes()).padStart(2, "0");
+  const time = `${hh}:${mm} UTC`;
+
+  const startOfUtcDay = (d: Date) => Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  const dayDiff = Math.round((startOfUtcDay(target) - startOfUtcDay(now)) / 86_400_000);
+
+  if (dayDiff === 0) return time;
+  if (dayDiff === 1) return `tomorrow ${time}`;
+  const month = target.toLocaleString("en-US", { month: "short", timeZone: "UTC" });
+  return `${month} ${target.getUTCDate()}, ${time}`;
+}
+
+/** First line of `note`, `Pending:` prefix stripped, capped to ~240 chars. */
+function renderNoteLine(note: string, max = 240): string {
+  const firstLine = (note.split("\n")[0] ?? "").trim().replace(/^pending:\s*/i, "");
+  if (firstLine.length <= max) return firstLine;
+  return `${firstLine.slice(0, max - 1).trimEnd()}…`;
+}
+
+/**
+ * Human-facing deferral text for tasks without an outputSchema — this is what
+ * lands verbatim in a human's Slack thread as the task's terminal output. No
+ * ISO timestamp, schedule UUID, or checks list: those stay in the task log.
+ */
+function renderHumanFacingDeferral(summary: string, note: string, nextRunAt: string): string {
+  const now = new Date();
+  const target = new Date(nextRunAt);
+  const relative = formatRelativeDuration(target.getTime() - now.getTime());
+  const absolute = formatAbsoluteTime(target, now);
+  const noteLine = renderNoteLine(note);
+  const appUrl = getAppUrl();
+  const scheduleLine = appUrl ? `\nWake-up schedule: ${appUrl}/schedules` : "";
+  return `${summary}\n\n⏳ Paused for ${relative} — back at ${absolute}. Waiting on: ${noteLine}${scheduleLine}`;
 }
 
 export const registerDeferTaskTool = (server: McpServer) => {
@@ -210,9 +260,14 @@ export const registerDeferTaskTool = (server: McpServer) => {
             });
           }
 
+          // Full detail for the task log — ISO timestamp, schedule id, checks.
+          // Never shown to a human directly; the wake-up task gets note+checks
+          // through taskTemplate instead.
           const deferralDetails = `${summary}\n\nDeferred until ${nextRunAt} (schedule ${schedule.id}). Pending: ${note}${checksBlock}`;
 
-          const terminalOutput = task.outputSchema ? output! : deferralDetails;
+          const terminalOutput = task.outputSchema
+            ? output!
+            : renderHumanFacingDeferral(summary, note, nextRunAt);
           const completed = await completeTask(taskId, terminalOutput);
           if (!completed) {
             // Another writer terminally completed/failed/cancelled this task
@@ -225,14 +280,12 @@ export const registerDeferTaskTool = (server: McpServer) => {
             );
           }
 
-          if (task.outputSchema) {
-            await createLogEntry({
-              eventType: "task_progress",
-              taskId,
-              agentId: requestInfo.agentId,
-              newValue: deferralDetails,
-            });
-          }
+          await createLogEntry({
+            eventType: "task_progress",
+            taskId,
+            agentId: requestInfo.agentId,
+            newValue: deferralDetails,
+          });
 
           // afterCommit: the transaction can still roll back; business-use must
           // not be told the task completed for a write that never landed.

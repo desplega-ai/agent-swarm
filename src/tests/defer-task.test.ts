@@ -183,14 +183,23 @@ describe("defer-task handler", () => {
 
     const stored = await getTaskById(task.id);
     expect(stored?.status).toBe("completed");
-    // Summary first, then the deferral status line, then the checks.
-    expect(stored?.output).toBe(
+    // Human-facing output: summary, plain-language pause line, no internals.
+    expect(stored?.output).toStartWith(`${SUMMARY}\n\n⏳ Paused for about 30 minutes — back at `);
+    expect(stored?.output).toContain("Waiting on: deploy 42 is still running");
+    expect(stored?.output).toContain("Wake-up schedule: ");
+    expect(stored?.output).not.toContain(schedule.nextRunAt!);
+    expect(stored?.output).not.toContain(schedule.id);
+    expect(stored?.output).not.toContain("Checks:");
+    expect(stored?.output).not.toContain("- smoke tests pass");
+
+    // Full detail (ISO timestamp, schedule id, checks) lands in the task log.
+    const logs = (await getLogsByTaskId(task.id)).filter(
+      (log) => log.eventType === "task_progress",
+    );
+    expect(logs).toHaveLength(1);
+    expect(logs[0]!.newValue).toBe(
       `${SUMMARY}\n\nDeferred until ${schedule.nextRunAt} (schedule ${schedule.id}). Pending: deploy 42 is still running\n\nChecks:\n- deploy 42 status is green\n- smoke tests pass`,
     );
-    expect(stored?.output).toContain("Pending: deploy 42 is still running");
-    expect(stored?.output).toContain(schedule.nextRunAt!);
-    expect(stored?.output).toContain(schedule.id);
-    expect(stored?.output).toContain("- smoke tests pass");
   });
 
   test("runAt path is honoured verbatim", async () => {
@@ -423,9 +432,34 @@ describe("defer-task handler", () => {
       meta(),
     )) as DeferTaskResult;
     expect(result.structuredContent.success).toBe(true);
-    expect((await getTaskById(task.id))?.output).toBe(
-      `${SUMMARY}\n\nDeferred until ${result.structuredContent.nextRunAt} (schedule ${result.structuredContent.scheduleId}). Pending: pending`,
+    const stored = await getTaskById(task.id);
+    expect(stored?.output).toStartWith(`${SUMMARY}\n\n⏳ Paused for about 1 minute — back at `);
+    expect(stored?.output).toContain("Waiting on: pending");
+    expect(stored?.output).not.toContain(result.structuredContent.scheduleId!);
+  });
+
+  test("human-facing output strips a repeated Pending: prefix and caps a long note", async () => {
+    const task = await startedTask("verbose note");
+    const longNote = `Pending: ${"x".repeat(300)}\nsecond line is dropped`;
+    const result = (await buildTool().handler(
+      { taskId: task.id, delayMs: 60_000, summary: SUMMARY, note: longNote },
+      meta(),
+    )) as DeferTaskResult;
+
+    expect(result.structuredContent.success).toBe(true);
+    const stored = await getTaskById(task.id);
+    // No doubled "Pending: Pending:", no second line, capped with an ellipsis.
+    expect(stored?.output).not.toContain("Pending: Pending:");
+    expect(stored?.output).not.toContain("second line is dropped");
+    expect(stored?.output).toContain(`Waiting on: ${"x".repeat(239)}…`);
+
+    // The full untrimmed note still reaches the task log and the wake-up task.
+    const logs = (await getLogsByTaskId(task.id)).filter(
+      (log) => log.eventType === "task_progress",
     );
+    expect(logs[0]!.newValue).toContain(`Pending: ${longNote}`);
+    const schedules = await schedulesForTask(task.id);
+    expect(schedules[0]!.taskTemplate).toContain(longNote);
   });
 
   test("the wake-up schedule carries modelTier but never the parent's concrete model", async () => {
