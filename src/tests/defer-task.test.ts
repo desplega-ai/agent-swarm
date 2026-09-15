@@ -19,6 +19,7 @@ import {
   completeTask,
   createAgent,
   createTaskExtended,
+  createUser,
   createWorkflow,
   createWorkflowRun,
   createWorkflowRunStep,
@@ -183,14 +184,21 @@ describe("defer-task handler", () => {
 
     const stored = await getTaskById(task.id);
     expect(stored?.status).toBe("completed");
-    // Human-facing output: summary, plain-language pause line, no internals.
-    expect(stored?.output).toStartWith(`${SUMMARY}\n\n⏳ Paused for about 30 minutes — back at `);
-    expect(stored?.output).toContain("Waiting on: deploy 42 is still running");
-    expect(stored?.output).toContain("Wake-up schedule: ");
+    // Human-facing output: one line, `Deferred until {date} {time} ({link}) -> {desc}`.
+    // No requestedByUserId is set on this task, so it falls back to UTC and
+    // labels it explicitly.
+    const shortId = schedule.id.slice(0, 8);
+    expect(stored?.output).toMatch(
+      /^Deferred until (today|tomorrow|\d{2}-\d{2}) \d{2}:\d{2}:\d{2} UTC \(/,
+    );
+    expect(stored?.output).toContain(
+      `([${shortId}](https://app.agent-swarm.dev/schedules/${schedule.id})) -> deploy 42 is still running`,
+    );
     expect(stored?.output).not.toContain(schedule.nextRunAt!);
-    expect(stored?.output).not.toContain(schedule.id);
     expect(stored?.output).not.toContain("Checks:");
     expect(stored?.output).not.toContain("- smoke tests pass");
+    expect(stored?.output).not.toContain("Pending:");
+    expect(stored?.output).not.toContain(SUMMARY);
 
     // Full detail (ISO timestamp, schedule id, checks) lands in the task log.
     const logs = (await getLogsByTaskId(task.id)).filter(
@@ -433,9 +441,13 @@ describe("defer-task handler", () => {
     )) as DeferTaskResult;
     expect(result.structuredContent.success).toBe(true);
     const stored = await getTaskById(task.id);
-    expect(stored?.output).toStartWith(`${SUMMARY}\n\n⏳ Paused for about 1 minute — back at `);
-    expect(stored?.output).toContain("Waiting on: pending");
-    expect(stored?.output).not.toContain(result.structuredContent.scheduleId!);
+    const shortId = result.structuredContent.scheduleId!.slice(0, 8);
+    expect(stored?.output).toMatch(
+      /^Deferred until (today|tomorrow|\d{2}-\d{2}) \d{2}:\d{2}:\d{2} UTC \(/,
+    );
+    expect(stored?.output).toContain(`([${shortId}](`);
+    expect(stored?.output).toContain(") -> pending");
+    expect(stored?.output).not.toContain(SUMMARY);
   });
 
   test("human-facing output strips a repeated Pending: prefix and caps a long note", async () => {
@@ -451,7 +463,7 @@ describe("defer-task handler", () => {
     // No doubled "Pending: Pending:", no second line, capped with an ellipsis.
     expect(stored?.output).not.toContain("Pending: Pending:");
     expect(stored?.output).not.toContain("second line is dropped");
-    expect(stored?.output).toContain(`Waiting on: ${"x".repeat(239)}…`);
+    expect(stored?.output).toContain(`-> ${"x".repeat(99)}…`);
 
     // The full untrimmed note still reaches the task log and the wake-up task.
     const logs = (await getLogsByTaskId(task.id)).filter(
@@ -460,6 +472,25 @@ describe("defer-task handler", () => {
     expect(logs[0]!.newValue).toContain(`Pending: ${longNote}`);
     const schedules = await schedulesForTask(task.id);
     expect(schedules[0]!.taskTemplate).toContain(longNote);
+  });
+
+  test("human-facing time renders in the requester's timezone, unlabelled, when one is on file", async () => {
+    const user = await createUser({ name: "Requester", timezone: "America/New_York" });
+    const task = await startedTask("waiting on requester", agentId, {
+      requestedByUserId: user.id,
+    });
+
+    const result = (await buildTool().handler(
+      { taskId: task.id, delayMs: 60_000, summary: SUMMARY, note: "pending" },
+      meta(),
+    )) as DeferTaskResult;
+
+    expect(result.structuredContent.success).toBe(true);
+    const stored = await getTaskById(task.id);
+    // A real timezone is on file: no explicit "UTC" label on the time.
+    expect(stored?.output).toMatch(
+      /^Deferred until (today|tomorrow|\d{2}-\d{2}) \d{2}:\d{2}:\d{2} \(/,
+    );
   });
 
   test("the wake-up schedule carries modelTier but never the parent's concrete model", async () => {

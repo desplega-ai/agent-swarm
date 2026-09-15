@@ -9,6 +9,7 @@ import {
   getAgentById,
   getDbClient,
   getTaskById,
+  getUserById,
   updateAgentStatusFromCapacity,
 } from "@/be/db";
 import { reconcileDeferredTaskWaits } from "@/scheduler/deferred-task-waits";
@@ -28,34 +29,77 @@ function renderChecks(checks?: string[]): string {
   return `\n\nChecks:\n${checks.map((c) => `- ${c}`).join("\n")}`;
 }
 
-/** "about 25 minutes" / "about 2 hours" / "about 3 days", rounded to whole units. */
-function formatRelativeDuration(ms: number): string {
-  const minutes = Math.round(ms / 60_000);
-  if (minutes < 1) return "less than a minute";
-  if (minutes < 60) return `about ${minutes} minute${minutes === 1 ? "" : "s"}`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `about ${hours} hour${hours === 1 ? "" : "s"}`;
-  const days = Math.round(hours / 24);
-  return `about ${days} day${days === 1 ? "" : "s"}`;
+/** Date/time parts of `date` as rendered in IANA zone `tz`. */
+function partsInTz(date: Date, tz: string) {
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+  const parts = Object.fromEntries(fmt.formatToParts(date).map((p) => [p.type, p.value]));
+  // Some locales render midnight as "24" under hour12: false.
+  const hour = parts.hour === "24" ? "00" : parts.hour;
+  return {
+    year: parts.year!,
+    month: parts.month!,
+    day: parts.day!,
+    hour: hour!,
+    minute: parts.minute!,
+    second: parts.second!,
+  };
 }
 
-/** "HH:MM UTC" today, "tomorrow HH:MM UTC", else "MMM D, HH:MM UTC". */
-function formatAbsoluteTime(target: Date, now: Date): string {
-  const hh = String(target.getUTCHours()).padStart(2, "0");
-  const mm = String(target.getUTCMinutes()).padStart(2, "0");
-  const time = `${hh}:${mm} UTC`;
-
-  const startOfUtcDay = (d: Date) => Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
-  const dayDiff = Math.round((startOfUtcDay(target) - startOfUtcDay(now)) / 86_400_000);
-
-  if (dayDiff === 0) return time;
-  if (dayDiff === 1) return `tomorrow ${time}`;
-  const month = target.toLocaleString("en-US", { month: "short", timeZone: "UTC" });
-  return `${month} ${target.getUTCDate()}, ${time}`;
+/**
+ * "today"/"tomorrow" or "MM-dd" plus "HH:MM:ss", both computed in `tz`.
+ * Falls back to UTC (parts still computed correctly) if `tz` is not a valid
+ * IANA zone — the caller decides whether to label the fallback.
+ */
+function formatDeferralDateTime(
+  target: Date,
+  now: Date,
+  tz: string,
+): { date: string; time: string } {
+  let zone = tz;
+  try {
+    Intl.DateTimeFormat("en-US", { timeZone: zone });
+  } catch {
+    zone = "UTC";
+  }
+  const t = partsInTz(target, zone);
+  const time = `${t.hour}:${t.minute}:${t.second}`;
+  const n = partsInTz(now, zone);
+  if (t.year === n.year && t.month === n.month && t.day === n.day) return { date: "today", time };
+  const tm = partsInTz(new Date(now.getTime() + 86_400_000), zone);
+  if (t.year === tm.year && t.month === tm.month && t.day === tm.day) {
+    return { date: "tomorrow", time };
+  }
+  return { date: `${t.month}-${t.day}`, time };
 }
 
-/** First line of `note`, `Pending:` prefix stripped, capped to ~240 chars. */
-function renderNoteLine(note: string, max = 240): string {
+/**
+ * Resolve the requesting human's IANA timezone from `users.timezone` via
+ * `task.requestedByUserId`. We do not currently capture a Slack profile `tz`
+ * anywhere in the ingest path (checked `src/slack/enrich.ts`, the only place
+ * that reads `users.info`) — a user only has a timezone here if someone set
+ * it explicitly via `manage-user`. Falls back to UTC, flagged as such.
+ */
+async function resolveRequesterTimezone(
+  requestedByUserId: string | undefined,
+): Promise<{ tz: string; isFallback: boolean }> {
+  if (requestedByUserId) {
+    const user = await getUserById(requestedByUserId);
+    if (user?.timezone) return { tz: user.timezone, isFallback: false };
+  }
+  return { tz: "UTC", isFallback: true };
+}
+
+/** First line of `note`, `Pending:` prefix stripped, capped to ~100 chars. */
+function renderShortDesc(note: string, max = 100): string {
   const firstLine = (note.split("\n")[0] ?? "").trim().replace(/^pending:\s*/i, "");
   if (firstLine.length <= max) return firstLine;
   return `${firstLine.slice(0, max - 1).trimEnd()}…`;
@@ -63,18 +107,29 @@ function renderNoteLine(note: string, max = 240): string {
 
 /**
  * Human-facing deferral text for tasks without an outputSchema — this is what
- * lands verbatim in a human's Slack thread as the task's terminal output. No
- * ISO timestamp, schedule UUID, or checks list: those stay in the task log.
+ * lands verbatim in a human's Slack thread as the task's terminal output.
+ * One line: `Deferred until {date} {time} ([shortId](url)) -> {short desc}`.
+ * No ISO timestamp, no bare UUID, no checks list, no `Pending:` prefix —
+ * those stay in the task log. The `[text](url)` link is plain GFM markdown:
+ * `markdownToSlack` (src/slack/blocks.ts) already down-converts it to a
+ * readable `text (url)` fallback for Slack, and it reads fine verbatim in
+ * the non-Slack task-output row / UI too.
  */
-function renderHumanFacingDeferral(summary: string, note: string, nextRunAt: string): string {
+function renderHumanFacingDeferral(
+  note: string,
+  nextRunAt: string,
+  scheduleId: string,
+  tz: string,
+  isFallbackTz: boolean,
+): string {
   const now = new Date();
   const target = new Date(nextRunAt);
-  const relative = formatRelativeDuration(target.getTime() - now.getTime());
-  const absolute = formatAbsoluteTime(target, now);
-  const noteLine = renderNoteLine(note);
-  const appUrl = getAppUrl();
-  const scheduleLine = appUrl ? `\nWake-up schedule: ${appUrl}/schedules` : "";
-  return `${summary}\n\n⏳ Paused for ${relative} — back at ${absolute}. Waiting on: ${noteLine}${scheduleLine}`;
+  const { date, time } = formatDeferralDateTime(target, now, tz);
+  const timeLabel = isFallbackTz ? `${time} UTC` : time;
+  const shortId = scheduleId.slice(0, 8);
+  const link = `[${shortId}](${getAppUrl()}/schedules/${scheduleId})`;
+  const shortDesc = renderShortDesc(note);
+  return `Deferred until ${date} ${timeLabel} (${link}) -> ${shortDesc}`;
 }
 
 export const registerDeferTaskTool = (server: McpServer) => {
@@ -213,6 +268,10 @@ export const registerDeferTaskTool = (server: McpServer) => {
         if (outputValidationError) return toolErr(outputValidationError);
       }
 
+      const { tz: requesterTz, isFallback: isFallbackTz } = await resolveRequesterTimezone(
+        task.requestedByUserId,
+      );
+
       try {
         const committed = await getDbClient().transaction(async () => {
           if (wakeOn) {
@@ -267,7 +326,7 @@ export const registerDeferTaskTool = (server: McpServer) => {
 
           const terminalOutput = task.outputSchema
             ? output!
-            : renderHumanFacingDeferral(summary, note, nextRunAt);
+            : renderHumanFacingDeferral(note, nextRunAt, schedule.id, requesterTz, isFallbackTz);
           const completed = await completeTask(taskId, terminalOutput);
           if (!completed) {
             // Another writer terminally completed/failed/cancelled this task
