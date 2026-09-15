@@ -76,16 +76,13 @@ Alpha: session summaries, memory rating, spend tracking and model tiers may be m
 
 > **Tip:** Claude users can pass multiple OAuth tokens for load balancing: `CLAUDE_CODE_OAUTH_TOKEN=token1,token2,token3`.
 
-**Step 3:** Generate stable UUIDs for each agent. The example compose file has placeholder UUIDs — replace them with your own so that agent identity persists across restarts.
+**Step 3:** Optionally set agent ID overrides in `.env`.
 
-```bash
-# Generate UUIDs (run once per agent)
-uuidgen  # lead
-uuidgen  # worker-1
-uuidgen  # worker-2
-```
+Leave the Docker Compose agent ID variables blank to generate a UUID on first boot and reuse it across restarts. Each service stores its ID in `/workspace/personal/.agent-id` on its own volume.
 
-Edit `docker-compose.yml` and replace the `AGENT_ID` values for each service with your generated UUIDs.
+To retain an existing identity, set the service's override in `.env` (for example, `LEAD_AGENT_ID` or `WORKER_1_AGENT_ID`). An explicit override takes precedence over the saved ID and is persisted to the same file. See `.env.docker.example` for all override variables.
+
+Removing personal volumes also removes generated IDs.
 
 **Step 4:** Start the swarm.
 
@@ -115,9 +112,10 @@ All services in the docker-compose files include `platform: linux/amd64` to avoi
 The example `docker-compose.yml` sets up:
 
 - **API service** (port 3013) — MCP HTTP server with SQLite database
-- **1 Lead agent** — Coordinator that delegates tasks to workers
-- **2 Worker agents** — Provider-powered agents that execute tasks
-- **3 Content agents** (optional) — Specialized workers for content writing, reviewing, and strategy, each bootstrapped from a template via `TEMPLATE_ID`
+- **12 agent services: 1 lead and 11 workers covering all 11 official templates**, each bootstrapped via `TEMPLATE_ID`:
+  - **1 lead** — Coordinator that delegates tasks to workers
+  - **2 coders** — Worker replicas that execute coding tasks
+  - **9 specialized workers** — `content-writer`, `content-reviewer`, `content-strategist`, `researcher`, `reviewer`, `tester`, `forward-deployed-engineer`, `ux-principles`, and `discoverability-optimizer`
 
 ### Volumes & Persistence
 
