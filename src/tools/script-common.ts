@@ -3,6 +3,7 @@ import { getApiKey } from "@/utils/api-key";
 import { getMcpBaseUrl } from "@/utils/constants";
 import {
   type RequestInfo,
+  type SwarmToolData,
   type SwarmToolResult,
   swarmToolOutputSchema,
   toolErr,
@@ -219,9 +220,13 @@ export async function proxySwarmApi<T extends Record<string, unknown>>(args: {
       data = JSON.parse(text);
     } catch {
       const contentType = res.headers.get("content-type") ?? "unknown";
-      return toolErr(
-        `Scripts API returned non-JSON response (HTTP ${res.status}, Content-Type: ${contentType}). Check API/proxy routing.`,
-        { details: capDetails(text), data: { status: res.status } },
+      // Transport-level failure: only `{ status }` is known here, and that shape
+      // is not statically related to the caller's `T`. Tool output schemas are
+      // loose with every data field optional, so the wire result stays valid.
+      const transportData: SwarmToolData = { status: res.status };
+      return toolErr<T>(
+        `Swarm API returned non-JSON response (HTTP ${res.status}, Content-Type: ${contentType}). Check API/proxy routing.`,
+        { details: capDetails(text), data: transportData as T },
       );
     }
   }
