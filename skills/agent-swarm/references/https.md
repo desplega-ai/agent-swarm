@@ -8,8 +8,10 @@ Read the [Kubernetes guide](https://docs.agent-swarm.dev/docs/guides/kubernetes)
 ## Compose: bundled Caddy
 
 The [Compose example](https://github.com/desplega-ai/agent-swarm/blob/main/docker-compose.example.yml) contains a `caddy` service under the `tls` profile.
-Caddy obtains Let's Encrypt certificates and proxies `SWARM_API_DOMAIN` to `api:3013` and `AGENT_FS_DOMAIN` to `agent-fs:7433`.
+Caddy obtains Let's Encrypt certificates and proxies `SWARM_API_DOMAIN` to `api:3013`. On `AGENT_FS_DOMAIN`, `/agentfs/*` goes to `minio:9000` for signed image/PDF/video previews and downloads; all other paths go to `agent-fs:7433` for the UI/API. The bucket path and `Host` header are preserved for S3 signature validation. This uses the existing file domain without another DNS record.
 Point DNS for both domains at the host. Open ports 80 and 443. Docker Compose v2.23.1 or newer is required.
+
+With `AGENT_FS_DOMAIN` set, the default S3 public endpoint is `https://${AGENT_FS_DOMAIN}`. Without it, the default remains `http://localhost:9000`. A non-empty `AGENT_FS_S3_PUBLIC_ENDPOINT` overrides either default and must be an origin browsers can reach over HTTPS for TLS deployments.
 
 ```bash
 cat >> .env <<'ENV'
@@ -22,7 +24,7 @@ curl -fsS https://swarm-api.example.com/health
 ```
 
 After Caddy runs, block public access to host ports 3013 and 7433.
-When another proxy already terminates TLS, skip the profile and set only `PUBLIC_MCP_BASE_URL`.
+When another proxy already terminates TLS, skip the profile and set `PUBLIC_MCP_BASE_URL` for the API. For file previews, set `AGENT_FS_DOMAIN` and configure the same `/agentfs/*` MinIO route without stripping the bucket prefix or rewriting `Host`, or set `AGENT_FS_S3_PUBLIC_ENDPOINT` to a separate browser-reachable HTTPS S3 origin.
 
 ## Kubernetes: cert-manager
 

@@ -136,9 +136,11 @@ docker compose --profile tls up -d
 curl -fsS https://swarm-api.example.com/health
 ```
 
-Caddy proxies the API domain to `api:3013` and the agent-fs domain to `agent-fs:7433`. Once it runs, stop exposing ports 3013 and 7433 on a public interface (firewall them or remove the `ports` entries). Certificates persist in the `caddy_data` volume. Requires Docker Compose v2.23.1 or newer for the inline Caddyfile.
+Caddy proxies the API domain to `api:3013`. On the agent-fs domain, `/agentfs/*` goes to `minio:9000` for signed image/PDF/video previews and downloads; all other paths go to `agent-fs:7433`. The bucket path and `Host` header are preserved for S3 signature validation, so previews use the existing file domain without another DNS record. Once it runs, stop exposing ports 3013 and 7433 on a public interface (firewall them or remove the `ports` entries). Certificates persist in the `caddy_data` volume. Requires Docker Compose v2.23.1 or newer for the inline Caddyfile.
 
-If you already run a reverse proxy (Caddy, nginx, Traefik, Cloudflare Tunnel), skip the profile and set only `PUBLIC_MCP_BASE_URL` to the HTTPS origin that proxy serves. When self-hosting the dashboard on your own domain, also set `CORS_ALLOWED_ORIGINS` to that origin.
+Signed URLs default to `https://${AGENT_FS_DOMAIN}` when `AGENT_FS_DOMAIN` is set, or `http://localhost:9000` otherwise. A non-empty `AGENT_FS_S3_PUBLIC_ENDPOINT` overrides either default and must be an origin browsers can reach over HTTPS for TLS deployments.
+
+If you already run a reverse proxy (Caddy, nginx, Traefik, Cloudflare Tunnel), skip the profile and set `PUBLIC_MCP_BASE_URL` to the HTTPS API origin that proxy serves. For file previews, set `AGENT_FS_DOMAIN` and configure the same `/agentfs/*` MinIO route without stripping the bucket prefix or rewriting `Host`, or set `AGENT_FS_S3_PUBLIC_ENDPOINT` to a separate browser-reachable HTTPS S3 origin. When self-hosting the dashboard on your own domain, also set `CORS_ALLOWED_ORIGINS` to that origin.
 
 ### Startup-script privilege boundary
 

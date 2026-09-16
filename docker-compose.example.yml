@@ -19,8 +19,9 @@
 # HTTPS (optional):
 #  Start with `--profile tls` to add a Caddy reverse proxy that obtains
 #  Let's Encrypt certificates automatically for SWARM_API_DOMAIN (-> api)
-#  and AGENT_FS_DOMAIN (-> agent-fs). Set both domains, point their DNS at
-#  this host, open ports 80/443, and set PUBLIC_MCP_BASE_URL=https://<api domain>.
+#  and AGENT_FS_DOMAIN (-> agent-fs UI/API and MinIO signed previews).
+#  Set both domains and point their DNS at this host. Open ports 80/443,
+#  and set PUBLIC_MCP_BASE_URL=https://<api domain>.
 #  Requires Docker Compose v2.23.1+ (inline `configs.content`).
 #
 # Provider mapping: claude -> claude, openai -> codex, openrouter -> pi,
@@ -91,7 +92,9 @@ services:
       - PORT=7433
       - SERVER_PORT=7433
       - S3_ENDPOINT=http://minio:9000
-      - S3_PUBLIC_ENDPOINT=${AGENT_FS_S3_PUBLIC_ENDPOINT:-http://localhost:9000}
+      # Browsers fetch signed previews directly: use the HTTPS file domain when
+      # configured, otherwise local MinIO. An explicit public endpoint wins.
+      - S3_PUBLIC_ENDPOINT=${AGENT_FS_S3_PUBLIC_ENDPOINT:-${AGENT_FS_DOMAIN:+https://}${AGENT_FS_DOMAIN:-http://localhost:9000}}
       - S3_BUCKET=agentfs
       - S3_ACCESS_KEY_ID=minioadmin
       - S3_SECRET_ACCESS_KEY=minioadmin
@@ -926,7 +929,7 @@ services:
   # ---------------------------------------------------------------------------
   # Optional HTTPS front door. Only starts with `docker compose --profile tls`.
   # Caddy terminates TLS with automatic Let's Encrypt certificates and proxies
-  # to the API and agent-fs over the compose network. When you use it, stop
+  # to the API, agent-fs, and MinIO over the compose network. When you use it, stop
   # publishing 3013/7433 on a public interface (firewall or remove the `ports`
   # entries above).
   # ---------------------------------------------------------------------------
@@ -961,7 +964,13 @@ configs:
         reverse_proxy api:3013
       }
       {$$AGENT_FS_DOMAIN:swarm-files.localhost} {
-        reverse_proxy agent-fs:7433
+        # Preserve the bucket path and Host for S3 signature validation.
+        handle /agentfs/* {
+          reverse_proxy minio:9000
+        }
+        handle {
+          reverse_proxy agent-fs:7433
+        }
       }
 
 secrets:
