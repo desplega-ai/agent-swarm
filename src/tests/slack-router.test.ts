@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlinkSync } from "node:fs";
-import { closeDb, createAgent, createTaskExtended, initDb } from "../be/db";
-import { routeMessage } from "../slack/router";
+import { closeDb, createAgent, createTaskExtended, getAllAgents, initDb } from "../be/db";
+import { broadcastMatches, routeMessage } from "../slack/router";
 import type { Agent } from "../types";
 
 const TEST_DB_PATH = "./test-slack-router.sqlite";
@@ -168,6 +168,21 @@ describe("Slack router — thread follow-up routing", () => {
       expect(matches.every((m) => m.matchedText === "swarm#all")).toBe(true);
       // Lead should not be in the matches
       expect(matches.every((m) => !m.agent.isLead)).toBe(true);
+    });
+
+    test("swarm#all includes offline non-lead agents", async () => {
+      const offlineWorker = await createAgent({
+        name: "offline-broadcast-worker",
+        isLead: false,
+        status: "offline",
+        capabilities: [],
+      });
+
+      const matches = broadcastMatches(await getAllAgents());
+
+      expect(matches.map((match) => match.agent.id)).toContain(offlineWorker.id);
+      expect(matches.every((match) => !match.agent.isLead)).toBe(true);
+      expect(matches.every((match) => match.matchedText === "swarm#all")).toBe(true);
     });
   });
 

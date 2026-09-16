@@ -15,6 +15,11 @@ export type SwarmConfigPayload = {
      * context like the agent identity — scripts never supply or override it.
      */
     runtimeInstanceId?: { value: string; isSecret: false };
+    /**
+     * Per-process secret set only by the in-process extension `ctx.swarm` SDK. The
+     * bridge requires it to grant the `extension` call origin. Never sent to scripts.
+     */
+    extensionToken?: { value: string; isSecret: true };
   };
   user: Record<string, { value: string; isSecret: boolean }>;
   egressSecrets?: EgressSecretEntry[];

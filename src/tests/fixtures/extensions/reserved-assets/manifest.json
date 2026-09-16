@@ -1,0 +1,10 @@
+{
+  "name": "reserved-assets",
+  "description": "Extension with a reserved asset",
+  "version": "1.0.0",
+  "runtime": "api",
+  "assets": {
+    "hooks": "hooks.ts",
+    "skills": ["skill.md"]
+  }
+}

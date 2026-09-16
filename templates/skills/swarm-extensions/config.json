@@ -1,0 +1,14 @@
+{
+  "kind": "skill",
+  "name": "swarm-extensions",
+  "displayName": "Swarm Extensions",
+  "slug": "swarm-extensions",
+  "title": "Swarm Extensions",
+  "description": "Write, install, and manage swarm extensions: TypeScript hook bundles that block, modify, or observe task creation, follow-ups, Slack routing, heartbeat remediation, and tool calls. Covers the hook contract, where to fetch swarm-extension.d.ts, the extension-install and extension-list tools, config schemas, and the operator enable step.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "systemDefault": true,
+  "tags": ["extensions", "hooks", "policy", "automation"]
+}

@@ -76,7 +76,8 @@ Complete with \`store-progress\`: status \`completed\`, and \`output\` naming th
 Free-text \`output\`: under 120 words by default, with the exceptions in How you write. Link documents instead of inlining them; omit process narration.
 For a task with \`outputSchema\`, return matching JSON in \`output\`.
 When you are blocked after real effort, store the blocker with \`store-progress\` and keep working on what you can.
-The task has four endings. When you are done: \`completed\`. When the answer needs time (a build, a deploy, a reply): \`defer-task\` with a summary of what you did, when to wake up, and what to check. It completes the task now; the wake-up task continues it. When a person must decide: \`request-human-input\`. When nothing else is possible: \`failed\` with the blocker.
+The task has four endings. When you are done: \`completed\`. When the answer needs time (a build, a deploy, a reply): \`defer-task\` with a summary, \`delayMs\` or \`runAt\`, and checks. It completes the task now; the wake-up task continues it. When a person must decide: \`request-human-input\`. When nothing else is possible: \`failed\` with the blocker.
+For task waits, add \`wakeOn:{event:"settled",taskIds:["<id>"],mode:"all"}\`; the displayed time is a ceiling, not a fixed wake-up.
 `,
   variables: [],
   category: "system",
@@ -97,9 +98,9 @@ Delegate by the shape of the work: a workflow for multi-step or fan-out work, a 
 Research or exploration: tell the worker to use the \`researching\` skill. A large feature: a task for the \`planning\` skill first, then a task for the \`implementing\` skill with \`parentTaskId\`. A small fix: direct implementation.
 A follow-up that continues earlier work carries \`parentTaskId\`. The worker receives the prior context.
 
-Worker completion/failure triggers a follow-up by default. For longer work, \`defer-task\` with a wake-up or complete this task. Review the worker's answer and complete the follow-up. Escalate only failures needing a person.
+Worker completion/failure triggers a follow-up by default; review the result and complete it. Escalate only failures needing a person. For longer task waits, complete this task or \`defer-task\` with \`wakeOn:{event:"settled",taskIds:["<id>"],mode:"all"}\` alongside \`delayMs\` or \`runAt\`. The displayed time is a ceiling, not a fixed wake-up.
 
-Wait inline via \`wait-for-task\` only for an essential result expected within ~1 minute. Set \`send-task.followUpConfig.disabled=true\`; cap all waits at ~1 minute total. If still running, \`defer-task\` with a wake-up.
+For an essential result expected within ~1 minute, set \`send-task.followUpConfig.disabled=true\` and use \`wait-for-task\` for at most ~1 minute total, then \`defer-task\` with \`wakeOn\` if still running.
 
 A task from an unknown user: register them with \`manage-user\`, then continue.
 Your heartbeat runbook is the \`heartbeatMd\` profile field. Edit it with \`update-profile\`. You MUST use the \`heartbeat-runbook\` skill when you handle a heartbeat checklist task.
@@ -404,7 +405,7 @@ The script authoring contract in the \`swarm-scripts\` skill (entry signature, \
 
 **Built-in coordination scripts, USE THESE FIRST (\`script-run\` with \`name\` + \`args\`):**
 - \`delegate\` {agentName, task, routingReason, routingNote, parentTaskId?} → subtask for an agent by name; returns {taskId}
-- \`wait-for-task\` {taskId} → waits up to ~25s for a terminal state; returns {done, status, output}; only for a child expected to finish within about a minute whose result the answer requires. Bound all calls to about a minute total; if still done=false, use \`defer-task\` with a wake-up to collect the result.
+- \`wait-for-task\` {taskId} → waits up to ~25s for a terminal state; returns {done, status, output}; only for a child expected to finish within about a minute whose result the answer requires. Bound all calls to about a minute total; if still done=false, use \`defer-task\` with \`wakeOn:{event:"settled",taskIds:["<id>"],mode:"all"}\` alongside \`delayMs\` or \`runAt\`. The displayed time is a ceiling; matching task outcomes wake you sooner.
 - \`get-child-outputs\` {parentTaskId} → all children with status+output
 - \`complete-task\` {taskId, output} → THE way to finish your assigned task
 - \`report-progress\` {taskId, note} → progress update

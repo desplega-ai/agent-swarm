@@ -17,6 +17,7 @@
     "debug",
     "ecosystem",
     "events",
+    "extensions",
     "external-apis",
     "fs",
     "favorites",

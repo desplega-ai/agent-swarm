@@ -23,6 +23,7 @@ import "./ecosystem";
 
 import "./api-keys";
 import "./events";
+import "./extensions";
 import "./favorites";
 import "./fs";
 import "./heartbeat";

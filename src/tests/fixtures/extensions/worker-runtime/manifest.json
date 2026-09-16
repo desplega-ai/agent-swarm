@@ -1,0 +1,9 @@
+{
+  "name": "worker-runtime",
+  "description": "Reserved worker extension",
+  "version": "1.0.0",
+  "runtime": "worker",
+  "assets": {
+    "hooks": "hooks.ts"
+  }
+}

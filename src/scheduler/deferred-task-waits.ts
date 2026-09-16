@@ -1,7 +1,8 @@
 import { getDbClient, getScheduledTaskById, getUserById, updateScheduledTask } from "@/be/db";
-import type { AgentTask } from "@/types";
+import type { PreparedTaskCreate } from "@/tasks/sibling-awareness";
+import type { AgentTask, ScheduledTask } from "@/types";
 import { workflowEventBus } from "@/workflows/event-bus";
-import { createStandaloneScheduleTask } from "./schedule-task";
+import { createStandaloneScheduleTask, prepareStandaloneScheduleTask } from "./schedule-task";
 
 export type TaskWakeEvent = "task.completed" | "task.failed" | "settled";
 
@@ -12,10 +13,80 @@ type TaskWait = {
   status: "pending" | "fired";
 };
 
+type WaitMember = { taskId: string; taskStatus: string | null; deferred: number };
+
+type WakeReason = "ceiling" | "task.completed" | "task.failed";
+
+/**
+ * Read the wait row and its member set and decide whether the wait is ready.
+ * Returns the wake-up cause text, or undefined when the wait is absent, already
+ * fired, not addressed by `reason`, or its member set has not matched yet.
+ * Pure reads: callers run it once outside the transaction (to build the task
+ * through the extension pre-hooks) and once more under the write lock, where
+ * the answer is authoritative. An event only identifies a candidate wait; it
+ * never proves the set is ready.
+ */
+async function resolveWaitCause(
+  scheduleId: string,
+  reason: WakeReason,
+): Promise<{ wait: TaskWait; cause: string } | undefined> {
+  const client = getDbClient();
+  const wait = await client.get<TaskWait>(
+    "SELECT * FROM deferred_task_waits WHERE scheduleId = ?",
+    [scheduleId],
+  );
+  if (!wait || wait.status !== "pending") return undefined;
+  if (reason !== "ceiling" && wait.eventName !== "settled" && wait.eventName !== reason)
+    return undefined;
+  if (reason === "ceiling") return { wait, cause: "ceiling expired" };
+  const members = await client.query<WaitMember>(
+    `SELECT m.taskId, t.status AS taskStatus, EXISTS (
+       SELECT 1 FROM scheduled_tasks d
+       WHERE d.parentTaskId = t.id AND d.taskType = 'deferred' AND d.enabled = 1
+     ) AS deferred
+     FROM deferred_task_wait_members m LEFT JOIN agent_tasks t ON t.id = m.taskId
+     WHERE m.scheduleId = ?`,
+    [scheduleId],
+  );
+  const matched = members.filter(
+    (member) =>
+      !member.deferred &&
+      (member.taskStatus === "completed" || member.taskStatus === "failed") &&
+      (wait.eventName === "settled" || wait.eventName === `task.${member.taskStatus}`),
+  );
+  if (!matched.length || (wait.mode === "all" && matched.length !== members.length))
+    return undefined;
+  const cause =
+    members.length === 1
+      ? `task.${matched[0]!.taskStatus} for task ${matched[0]!.taskId}`
+      : `${wait.mode} tasks matched ${wait.eventName}: ${matched.map((member) => `${member.taskId} (${member.taskStatus})`).join(", ")}`;
+  return { wait, cause };
+}
+
+function wakeSchedule(schedule: ScheduledTask, cause: string): ScheduledTask {
+  return { ...schedule, taskTemplate: `${schedule.taskTemplate}\n\nWake-up cause: ${cause}.` };
+}
+
+async function prepareDeferredWakeTask(
+  scheduleId: string,
+  reason: WakeReason,
+  extraTags: string[],
+): Promise<PreparedTaskCreate | undefined> {
+  const resolved = await resolveWaitCause(scheduleId, reason);
+  if (!resolved) return undefined;
+  let schedule = await getScheduledTaskById(scheduleId);
+  if (!schedule?.enabled) return undefined;
+  if (schedule.createdBy && !(await getUserById(schedule.createdBy))) {
+    schedule = { ...schedule, createdBy: undefined };
+  }
+  if (!schedule.taskTemplate) throw new Error(`Schedule "${schedule.name}" has no taskTemplate`);
+  return await prepareStandaloneScheduleTask(wakeSchedule(schedule, resolved.cause), extraTags);
+}
+
 /** Undefined means a normal schedule; an empty result means another caller won. */
 export async function dispatchDeferredTaskWait(
   scheduleId: string,
-  reason: "ceiling" | "task.completed" | "task.failed",
+  reason: WakeReason,
   extraTags: string[] = [],
 ): Promise<{ task?: AgentTask } | undefined> {
   const client = getDbClient();
@@ -26,45 +97,17 @@ export async function dispatchDeferredTaskWait(
     ]))
   )
     return undefined;
+  // Extension pre-hooks must run outside the transaction, so build the wake-up task
+  // first; the transaction below re-reads the wait and its member set before claiming.
+  // The prepared description carries the cause seen here; for an `any` wait a member
+  // that settles between this read and the claim is missing from that text only.
+  const preparedForWait = await prepareDeferredWakeTask(scheduleId, reason, extraTags);
+  if (!preparedForWait) return {};
   return client.transaction(async () => {
-    const wait = await client.get<TaskWait>(
-      "SELECT * FROM deferred_task_waits WHERE scheduleId = ?",
-      [scheduleId],
-    );
-    if (!wait || wait.status !== "pending") return {};
-    if (reason !== "ceiling" && wait.eventName !== "settled" && wait.eventName !== reason)
-      return {};
+    const resolved = await resolveWaitCause(scheduleId, reason);
+    if (!resolved) return {};
     let schedule = await getScheduledTaskById(scheduleId);
     if (!schedule?.enabled) return {};
-    // Re-read the entire set under the same write lock as the claim. An event
-    // only identifies a candidate wait; it never proves the set is ready.
-    let cause = "ceiling expired";
-    if (reason !== "ceiling") {
-      const members = await client.query<{
-        taskId: string;
-        taskStatus: string | null;
-        deferred: number;
-      }>(
-        `SELECT m.taskId, t.status AS taskStatus, EXISTS (
-           SELECT 1 FROM scheduled_tasks d
-           WHERE d.parentTaskId = t.id AND d.taskType = 'deferred' AND d.enabled = 1
-         ) AS deferred
-         FROM deferred_task_wait_members m LEFT JOIN agent_tasks t ON t.id = m.taskId
-         WHERE m.scheduleId = ?`,
-        [scheduleId],
-      );
-      const matched = members.filter(
-        (member) =>
-          !member.deferred &&
-          (member.taskStatus === "completed" || member.taskStatus === "failed") &&
-          (wait.eventName === "settled" || wait.eventName === `task.${member.taskStatus}`),
-      );
-      if (!matched.length || (wait.mode === "all" && matched.length !== members.length)) return {};
-      cause =
-        members.length === 1
-          ? `task.${matched[0]!.taskStatus} for task ${matched[0]!.taskId}`
-          : `${wait.mode} tasks matched ${wait.eventName}: ${matched.map((member) => `${member.taskId} (${member.taskStatus})`).join(", ")}`;
-    }
     const now = new Date().toISOString();
     const claimed = await client.run(
       "UPDATE deferred_task_waits SET status = 'fired', firedBy = ?, resolvedAt = ?, updated_at = ? WHERE scheduleId = ? AND status = 'pending'",
@@ -76,11 +119,9 @@ export async function dispatchDeferredTaskWait(
     }
     if (!schedule.taskTemplate) throw new Error(`Schedule "${schedule.name}" has no taskTemplate`);
     const task = await createStandaloneScheduleTask(
-      {
-        ...schedule,
-        taskTemplate: `${schedule.taskTemplate}\n\nWake-up cause: ${cause}.`,
-      },
+      wakeSchedule(schedule, resolved.cause),
       extraTags,
+      preparedForWait,
     );
     await client.run("UPDATE deferred_task_waits SET childTaskId = ? WHERE scheduleId = ?", [
       task.id,

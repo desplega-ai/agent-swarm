@@ -315,6 +315,10 @@ export interface SwarmSdk {
   script_getRun(args: { id: string }): Promise<unknown>;
   script_listRuns(args?: { status?: "running" | "paused" | "completed" | "failed" | "cancelled" | "aborted_limit"; agentId?: string; limit?: number; offset?: number }): Promise<unknown>;
 
+  // --- write: extensions ---
+  extension_install(args: { manifest: Record<string, unknown>; files: Record<string, string>; priority?: number; config?: Record<string, unknown> }): Promise<unknown>;
+  extension_list(args?: { enabledOnly?: boolean }): Promise<unknown>;
+
   // --- write: repos ---
   repo_update(args: Record<string, unknown>): Promise<unknown>;
 
@@ -461,7 +465,7 @@ export async function scriptSdkTypesWithGeneratedApis(
   return `${SCRIPT_SDK_TYPES}\n${apiTypes}\n${mcpTypes}\n${resolvedAppTypes}\n`;
 }
 
-const STDLIB_MODULE_TYPES = `
+export const SCRIPT_STDLIB_MODULE_TYPES = `
 declare module "stdlib" {
   export interface Redacted<T> {
     readonly __redactedBrand?: T;
@@ -482,7 +486,7 @@ declare module "stdlib" {
 `;
 
 function stdlibTypesFor(sdkModuleBody: string): string {
-  return `${STDLIB_MODULE_TYPES}
+  return `${SCRIPT_STDLIB_MODULE_TYPES}
 declare module "swarm-sdk" {
 ${sdkModuleBody.replace(/^/gm, "  ")}
 }
@@ -840,8 +844,6 @@ interface Window {
 
 const USER_FILE = "/virtual/user-script.ts";
 const CHECK_FILE = "/virtual/check.ts";
-const SDK_FILE = "/virtual/swarm-sdk.d.ts";
-const STDLIB_FILE = "/virtual/stdlib.d.ts";
 const RUNTIME_GLOBALS_FILE = "/virtual/runtime-globals.d.ts";
 
 /**
@@ -863,6 +865,7 @@ function scriptTypesBase(): string {
 function createCompilerHost(
   files: Map<string, string>,
   options: ts.CompilerOptions,
+  virtualModules: ReadonlyMap<string, string> = new Map(),
 ): ts.CompilerHost {
   const host = ts.createCompilerHost(options, true);
   const originalGetSourceFile = host.getSourceFile.bind(host);
@@ -895,11 +898,9 @@ function createCompilerHost(
       if (moduleName === "./user-script") {
         return { resolvedFileName: USER_FILE, extension: ts.Extension.Ts };
       }
-      if (moduleName === "swarm-sdk") {
-        return { resolvedFileName: SDK_FILE, extension: ts.Extension.Dts };
-      }
-      if (moduleName === "stdlib") {
-        return { resolvedFileName: STDLIB_FILE, extension: ts.Extension.Dts };
+      const virtualModule = virtualModules.get(moduleName);
+      if (virtualModule) {
+        return { resolvedFileName: virtualModule, extension: ts.Extension.Dts };
       }
       // For external packages, resolve from project root so node_modules is found
       const base = containingFile.startsWith("/virtual/") ? projectBase : containingFile;
@@ -984,10 +985,12 @@ function toStructured(diag: ts.Diagnostic): ScriptDiagnostic {
   };
 }
 
-export async function typecheckScript(
-  source: string,
-  context: ScriptTypeContext = {},
-): Promise<ScriptTypecheckResult> {
+export async function typecheckWithAmbient(args: {
+  source: string;
+  modules: Record<string, string>;
+  ambient?: Record<string, string>;
+  checkFile: string;
+}): Promise<ScriptTypecheckResult> {
   const options: ts.CompilerOptions = {
     allowImportingTsExtensions: true,
     lib: ["lib.es2022.d.ts"],
@@ -1000,35 +1003,23 @@ export async function typecheckScript(
     types: [],
   };
 
-  const apiTypes = getScriptApiTypes(context);
-  const mcpTypes = getScriptMcpTypes(context);
-  const appTypes = await getScriptAppTypes(context);
-  const sdkTypes = await scriptSdkTypesWithGeneratedApis(apiTypes, mcpTypes, appTypes);
-  const stdlibTypes = appTypes
-    ? await scriptStdlibTypesWithGeneratedApis(apiTypes, mcpTypes, appTypes)
-    : SCRIPT_STDLIB_TYPES;
   const files = new Map<string, string>([
-    [USER_FILE, source],
-    [SDK_FILE, sdkTypes],
-    [STDLIB_FILE, stdlibTypes],
+    [USER_FILE, args.source],
     [RUNTIME_GLOBALS_FILE, SCRIPT_RUNTIME_GLOBALS],
-    [
-      CHECK_FILE,
-      `/// <reference path="./runtime-globals.d.ts" />
-import run from "./user-script";
-import type { ScriptMain } from "swarm-sdk";
-const _scriptMain: ScriptMain = run;
-void _scriptMain;
-`,
-    ],
+    [CHECK_FILE, args.checkFile],
   ]);
+  const virtualModules = new Map<string, string>();
+  for (const [moduleName, source] of Object.entries(args.modules)) {
+    const fileName = `/virtual/${moduleName.replace(/[^A-Za-z0-9_.-]/g, "_")}.d.ts`;
+    files.set(fileName, source);
+    virtualModules.set(moduleName, fileName);
+  }
+  for (const [name, source] of Object.entries(args.ambient ?? {})) {
+    files.set(`/virtual/ambient-${name.replace(/[^A-Za-z0-9_.-]/g, "_")}.d.ts`, source);
+  }
 
-  const host = createCompilerHost(files, options);
-  const program = ts.createProgram(
-    [USER_FILE, CHECK_FILE, SDK_FILE, STDLIB_FILE, RUNTIME_GLOBALS_FILE],
-    options,
-    host,
-  );
+  const host = createCompilerHost(files, options, virtualModules);
+  const program = ts.createProgram([...files.keys()], options, host);
   const diagnostics = [
     ...program.getSyntacticDiagnostics(),
     ...program.getSemanticDiagnostics(),
@@ -1052,4 +1043,27 @@ void _scriptMain;
     ),
     structured: diagnostics.map(toStructured),
   };
+}
+
+export async function typecheckScript(
+  source: string,
+  context: ScriptTypeContext = {},
+): Promise<ScriptTypecheckResult> {
+  const apiTypes = getScriptApiTypes(context);
+  const mcpTypes = getScriptMcpTypes(context);
+  const appTypes = await getScriptAppTypes(context);
+  const sdkTypes = await scriptSdkTypesWithGeneratedApis(apiTypes, mcpTypes, appTypes);
+  const stdlibTypes = appTypes
+    ? await scriptStdlibTypesWithGeneratedApis(apiTypes, mcpTypes, appTypes)
+    : SCRIPT_STDLIB_TYPES;
+  return typecheckWithAmbient({
+    source,
+    modules: { "swarm-sdk": sdkTypes, stdlib: stdlibTypes },
+    checkFile: `/// <reference path="./runtime-globals.d.ts" />
+import run from "./user-script";
+import type { ScriptMain } from "swarm-sdk";
+const _scriptMain: ScriptMain = run;
+void _scriptMain;
+`,
+  });
 }

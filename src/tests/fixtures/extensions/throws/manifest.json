@@ -1,0 +1,9 @@
+{
+  "name": "throws",
+  "description": "Throws from task handlers",
+  "version": "1.0.0",
+  "runtime": "api",
+  "assets": {
+    "hooks": "hooks.ts"
+  }
+}

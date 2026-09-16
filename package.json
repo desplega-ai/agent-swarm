@@ -82,6 +82,7 @@
     "check:skill-sources": "bun scripts/check-skill-sources.ts",
     "check:operator-skill": "bun scripts/check-operator-skill.ts",
     "build:script-types": "bun scripts/bundle-script-types.ts",
+    "build:extension-types": "bun scripts/bundle-extension-types.ts",
     "build:cli": "bun run scripts/build-cli.ts",
     "mono:build": "turbo run build",
     "mono:test": "turbo run test",
