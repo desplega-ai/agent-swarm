@@ -121,6 +121,88 @@ export async function callSlackWithRetry(
   }
 }
 
+// Outcome delivery (chat.startStream, with its chat.postMessage fallback) can
+// fail for reasons callSlackWithRetry does not retry (e.g. user_not_found).
+// Without a bound, processSlackRenderV2's 3s tick re-attempts the same
+// failing task forever. This tracks per-task failures in memory and applies
+// capped exponential backoff plus a give-up ceiling so a persistently broken
+// recipient stops hammering Slack instead of retrying at tick cadence.
+const OUTCOME_DELIVERY_MAX_ATTEMPTS = 5;
+const OUTCOME_DELIVERY_BASE_DELAY_MS = 30_000;
+const OUTCOME_DELIVERY_MAX_DELAY_MS = 30 * 60_000;
+const outcomeDeliveryFailures = new Map<string, { count: number; nextAttemptAt: number }>();
+
+function outcomeDeliveryGate(taskId: string): boolean {
+  const state = outcomeDeliveryFailures.get(taskId);
+  if (!state) return true;
+  if (state.count >= OUTCOME_DELIVERY_MAX_ATTEMPTS) return false;
+  return Date.now() >= state.nextAttemptAt;
+}
+
+function noteOutcomeDeliverySuccess(taskId: string): void {
+  outcomeDeliveryFailures.delete(taskId);
+}
+
+async function noteOutcomeDeliveryFailure(task: AgentTask, error: unknown): Promise<void> {
+  const state = outcomeDeliveryFailures.get(task.id) ?? { count: 0, nextAttemptAt: 0 };
+  state.count += 1;
+  const delay = Math.min(
+    OUTCOME_DELIVERY_BASE_DELAY_MS * 2 ** (state.count - 1),
+    OUTCOME_DELIVERY_MAX_DELAY_MS,
+  );
+  state.nextAttemptAt = Date.now() + delay;
+  outcomeDeliveryFailures.set(task.id, state);
+  console.error(
+    `[Slack] Outcome delivery failed for task ${task.id} (attempt ${state.count}/${OUTCOME_DELIVERY_MAX_ATTEMPTS}):`,
+    error,
+  );
+  if (state.count >= OUTCOME_DELIVERY_MAX_ATTEMPTS) {
+    console.error(
+      `[Slack] Giving up on outcome delivery for task ${task.id} after ${state.count} attempts; surfacing failure and clearing the working indicator`,
+    );
+    await surfaceOutcomeDeliveryGiveUp(task, error);
+  }
+}
+
+/** Best-effort: post a visible failure notice and clear the "is working" status so a
+ * permanently broken delivery doesn't fail silently or leave the thread spinning. */
+async function surfaceOutcomeDeliveryGiveUp(task: AgentTask, error: unknown): Promise<void> {
+  const app = getSlackApp();
+  if (!app || !task.slackChannelId || !task.slackThreadTs) return;
+  try {
+    await app.client.apiCall("chat.postMessage", {
+      channel: task.slackChannelId,
+      thread_ts: task.slackThreadTs,
+      text: `⚠️ Couldn't deliver this task's reply after ${OUTCOME_DELIVERY_MAX_ATTEMPTS} attempts (${
+        error instanceof Error ? error.message : String(error)
+      }). See task ${getTaskLink(task.id)} for the result.`,
+    });
+  } catch (postError) {
+    console.error(`[Slack] Give-up notice failed to post for task ${task.id}:`, postError);
+  }
+  await clearAssistantStatus(app.client, task.slackChannelId, task.slackThreadTs);
+}
+
+/** Clears the assistant "is working" indicator in DM channels. Best-effort: the
+ * call throws when the thread isn't an assistant thread, which is expected
+ * for non-DM channels and safe to ignore. */
+async function clearAssistantStatus(
+  client: WebClient,
+  channelId: string,
+  threadTs: string,
+): Promise<void> {
+  if (!channelId.startsWith("D")) return;
+  try {
+    await client.apiCall("assistant.threads.setStatus", {
+      channel_id: channelId,
+      thread_ts: threadTs,
+      status: "",
+    });
+  } catch (error) {
+    console.warn(`[Slack] Failed to clear assistant status for ${channelId}/${threadTs}:`, error);
+  }
+}
+
 function slackTreeStallMinutes(): number {
   return Number(process.env.SLACK_TREE_STALL_MIN) || 15;
 }
@@ -1047,13 +1129,36 @@ export async function streamOutcomeCard(
     reservationWasCreated = reserved.created;
   }
   let streamedFreshContent = false;
+  let deliveredViaFallback = false;
   if (isPendingSlackMessage(outcome)) {
     const reconciled = reservationWasCreated
       ? undefined
       : await findReservedSlackMessage(app.client, outcome, presentation);
     streamedFreshContent = !reconciled;
-    const started =
-      reconciled ?? (await callSlackWithRetry(app.client, "chat.startStream", startPayload));
+    let started = reconciled;
+    if (!started) {
+      try {
+        started = await callSlackWithRetry(app.client, "chat.startStream", startPayload);
+      } catch (error) {
+        // chat.startStream can fail for reasons callSlackWithRetry does not
+        // retry (e.g. user_not_found). Without a fallback the agent's answer
+        // — already computed above — is dropped entirely. Fall back to a
+        // plain chat.postMessage so a streaming-API error never swallows a
+        // reply.
+        console.error(
+          `[Slack] chat.startStream failed for task ${task.id}; falling back to chat.postMessage:`,
+          error,
+        );
+        started = await callSlackWithRetry(app.client, "chat.postMessage", {
+          channel: task.slackChannelId,
+          thread_ts: task.slackThreadTs,
+          text: presentation,
+          ...(startPayload.username ? { username: startPayload.username } : {}),
+          ...(startPayload.icon_emoji ? { icon_emoji: startPayload.icon_emoji } : {}),
+        });
+        deliveredViaFallback = true;
+      }
+    }
     if (typeof started.ts !== "string" || !started.ts) {
       throw new Error("Slack did not return a timestamp for the outcome stream");
     }
@@ -1063,29 +1168,36 @@ export async function streamOutcomeCard(
     if (!persisted) throw new Error("Failed to persist the outcome stream timestamp");
     outcome = persisted;
   }
-  if (!streamedFreshContent) {
-    // The stream backing this message was started (or reconciled from) an earlier
-    // pass, whose slackReplySent snapshot may have since changed. Overwrite its
-    // content with the freshly computed presentation before finalizing, so a
-    // completed-then-collapsed reply doesn't finalize with stale full output.
-    await callSlackWithRetry(app.client, "chat.update", {
-      channel: task.slackChannelId,
-      ts: outcome.ts,
-      text: presentation,
-    });
+  if (!deliveredViaFallback) {
+    if (!streamedFreshContent) {
+      // The stream backing this message was started (or reconciled from) an earlier
+      // pass, whose slackReplySent snapshot may have since changed. Overwrite its
+      // content with the freshly computed presentation before finalizing, so a
+      // completed-then-collapsed reply doesn't finalize with stale full output.
+      await callSlackWithRetry(app.client, "chat.update", {
+        channel: task.slackChannelId,
+        ts: outcome.ts,
+        text: presentation,
+      });
+    }
+    try {
+      await callSlackWithRetry(app.client, "chat.stopStream", {
+        channel: task.slackChannelId,
+        ts: outcome.ts,
+        blocks: await outcomeFooter(task, tasks, duration),
+      });
+    } catch (error) {
+      // A process may have stopped the stream before it persisted the final
+      // permalink. In that one recovery case the message is already immutable,
+      // so continue by resolving and recording its permalink.
+      if (!isStreamAlreadyStopped(error)) throw error;
+    }
   }
-  try {
-    await callSlackWithRetry(app.client, "chat.stopStream", {
-      channel: task.slackChannelId,
-      ts: outcome.ts,
-      blocks: await outcomeFooter(task, tasks, duration),
-    });
-  } catch (error) {
-    // A process may have stopped the stream before it persisted the final
-    // permalink. In that one recovery case the message is already immutable,
-    // so continue by resolving and recording its permalink.
-    if (!isStreamAlreadyStopped(error)) throw error;
-  }
+  // chat.startStream/chat.postMessage posting a new message in the thread is
+  // what normally clears Slack's own "is working…" assistant indicator.
+  // Clear it explicitly too, so a delivery that only ever fails still
+  // doesn't leave the thread stuck spinning.
+  await clearAssistantStatus(app.client, task.slackChannelId, task.slackThreadTs);
   const permalink = await resolvePermalink(app.client, task.slackChannelId, outcome.ts);
   return await updateSlackMessageRecord(outcome.id, {
     permalink,
@@ -1228,16 +1340,18 @@ export async function processSlackRenderV2(): Promise<void> {
       if (!ownerAsk || ownerAsk.createdAt < delegationActivatedAt) continue;
       if (childCardsThisTick >= CHILD_CARDS_PER_TICK) continue;
       if (askId && (await childCardCountFor(askId)) >= CHILD_CARDS_PER_ASK) continue;
+      if (!outcomeDeliveryGate(task.id)) continue;
       try {
         const outcome = await streamOutcomeCard(task, tree, { buildContent: childOutcomeContent });
         if (outcome) {
+          noteOutcomeDeliverySuccess(task.id);
           childCardsThisTick++;
           if (askId) childCardCounts.set(askId, (childCardCounts.get(askId) ?? 0) + 1);
           await recordSlackDelivery(task, outcome, "child_outcome");
         }
         outcomeCreated ||= !!outcome;
       } catch (error) {
-        console.error(`[Slack] Failed to stream child outcome for task ${task.id}:`, error);
+        await noteOutcomeDeliveryFailure(task, error);
       }
     }
 
@@ -1252,12 +1366,16 @@ export async function processSlackRenderV2(): Promise<void> {
         task.createdAt >= delegationActivatedAt;
 
       if (!deferByClosure) {
+        if (!outcomeDeliveryGate(task.id)) continue;
         try {
           const outcome = await streamOutcomeCard(task, tree);
-          if (outcome) await finalizeTerminalSlackReactions([task]);
+          if (outcome) {
+            noteOutcomeDeliverySuccess(task.id);
+            await finalizeTerminalSlackReactions([task]);
+          }
           outcomeCreated ||= !!outcome;
         } catch (error) {
-          console.error(`[Slack] Failed to stream outcome for task ${task.id}:`, error);
+          await noteOutcomeDeliveryFailure(task, error);
         }
         continue;
       }
@@ -1282,6 +1400,7 @@ export async function processSlackRenderV2(): Promise<void> {
       if (childCardPending) continue;
       const state = closureState(task, closure, new Date(), settleSec, timeoutMin);
       if (state === "open") continue;
+      if (!outcomeDeliveryGate(task.id)) continue;
       try {
         const outcome = await streamOutcomeCard(task, tree, {
           buildContent: (_t, slackReplySent) =>
@@ -1289,6 +1408,7 @@ export async function processSlackRenderV2(): Promise<void> {
           conclusionKind: state === "timedOut" ? "timeout" : "complete",
         });
         if (outcome) {
+          noteOutcomeDeliverySuccess(task.id);
           const app = getSlackApp();
           if (app && task.slackChannelId && task.slackTriggerMessageTs) {
             const reaction = conclusionReactionChoice(state, task, closure);
@@ -1309,7 +1429,7 @@ export async function processSlackRenderV2(): Promise<void> {
         }
         outcomeCreated ||= !!outcome;
       } catch (error) {
-        console.error(`[Slack] Failed to stream ask conclusion for task ${task.id}:`, error);
+        await noteOutcomeDeliveryFailure(task, error);
       }
     }
     try {
@@ -1328,4 +1448,5 @@ export function _resetSlackRenderV2ForTests(): void {
   lastTreeUpdateAt.clear();
   treeUpdateTails.clear();
   cachedTeamId = undefined;
+  outcomeDeliveryFailures.clear();
 }
