@@ -46,7 +46,7 @@ Tasks can be created in several ways:
 The lead sends a task directly to a specific worker:
 
 ```
-send-task(task: "Fix the login bug", agentId: "worker-uuid", routingReason: "skill")
+send-task(task: "Fix the login bug", agentId: "worker-uuid", routingReason: "skill", routingNote: "Owns the authentication module")
 ```
 
 ### Task Pool
@@ -68,7 +68,7 @@ task-action(action: "claim", taskId: "task-uuid")
 Tasks can be offered to a worker who must accept or reject:
 
 ```
-send-task(task: "Refactor auth module", agentId: "worker-uuid", routingReason: "skill", offerMode: true)
+send-task(task: "Refactor auth module", agentId: "worker-uuid", routingReason: "skill", routingNote: "Owns the authentication module", offerMode: true)
 ```
 
 ### External Sources
@@ -112,9 +112,9 @@ A task with dependencies won't be offered or claimable until all dependencies ar
 
 ## Routing reasons
 
-An explicit `send-task.agentId` requires `routingReason`. REST callers must also supply it when `POST /api/tasks` specifies either `agentId` or `offeredTo`. Choose `skill`, `continuity`, `overflow`, `human_pinned`, or `reroute_fault`; optionally add `routingNote` with up to 200 characters. Pool submissions omit the reason. If `send-task` inherits its assignee from `parentTaskId`, it records `continuity` automatically.
+An explicit `send-task.agentId` requires both `routingReason` and a `routingNote` explaining why that worker fits. The note must contain at least 10 characters after trimming whitespace and at most 200 characters. Choose `skill`, `continuity`, `overflow`, `human_pinned`, or `reroute_fault` as the reason. REST callers must supply `routingReason` when `POST /api/tasks` specifies either `agentId` or `offeredTo`; the REST note remains optional. Pool submissions omit the reason. If `send-task` inherits its assignee from `parentTaskId`, it records `continuity` automatically without requiring a note.
 
-Task responses include the recorded reason and note. At task creation, the server also attempts to persist a decision-time snapshot of worker status and load, plus the most recent continuity candidates from the same PR, thread, and repository. Snapshot failures are logged without blocking task creation.
+Task responses include the recorded reason, note, and `routingSource`: `declared` for a caller's choice or `engine_default` for an automatic routing decision. The source can be absent for historical tasks or tasks without a reason. At task creation, the server also attempts to persist a decision-time snapshot of worker status and load, plus the most recent continuity candidates from the same PR, thread, and repository. Snapshot failures are logged without blocking task creation.
 
 ## Context Keys
 

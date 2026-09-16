@@ -1,6 +1,6 @@
 {
   "name": "agent-swarm",
-  "version": "1.149.1",
+  "version": "1.150.0",
   "description": "Install, deploy, and operate agent-swarm: Docker Compose, Kubernetes with Helm, HTTPS, agent-fs, integrations, and the API for coding agents",
   "author": {
     "name": "desplega.sh",
