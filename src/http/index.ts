@@ -661,8 +661,16 @@ httpServer
       await emitBuiltInIntegrationConnectedOnce("github");
     }
 
-    // Start Slack bot (if configured)
-    await startSlackApp();
+    // Start Slack bot (if configured). Never let a Slack failure abort the
+    // rest of this callback: on 2026-09-16 an invalid app token made
+    // app.start() reject here, and the scheduler, heartbeat, script-run
+    // supervisor, and OAuth sweeps below never started while /health stayed
+    // green for 7 hours. Slack is one integration, not the boot path.
+    try {
+      await startSlackApp();
+    } catch (err) {
+      console.error("[Slack] Failed to start, continuing boot without Slack:", err);
+    }
 
     // Independent of workers, scheduler targets, and heartbeat agent tasks.
     startQueueStallAlarm();
