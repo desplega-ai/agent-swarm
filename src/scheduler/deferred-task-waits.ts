@@ -15,7 +15,7 @@ type TaskWait = {
 /** Undefined means a normal schedule; an empty result means another caller won. */
 export async function dispatchDeferredTaskWait(
   scheduleId: string,
-  reason: "ceiling" | "task.completed" | "task.failed",
+  reason: "ceiling" | "task.completed" | "task.failed" | "task.cancelled",
   extraTags: string[] = [],
 ): Promise<{ task?: AgentTask } | undefined> {
   const client = getDbClient();
@@ -56,7 +56,9 @@ export async function dispatchDeferredTaskWait(
       const matched = members.filter(
         (member) =>
           !member.deferred &&
-          (member.taskStatus === "completed" || member.taskStatus === "failed") &&
+          (member.taskStatus === "completed" ||
+            member.taskStatus === "failed" ||
+            member.taskStatus === "cancelled") &&
           (wait.eventName === "settled" || wait.eventName === `task.${member.taskStatus}`),
       );
       if (!matched.length || (wait.mode === "all" && matched.length !== members.length)) return {};
@@ -101,12 +103,44 @@ export async function dispatchDeferredTaskWait(
 
 /** Reconcile durable producer state, including terminal transitions missed by this process. */
 export async function reconcileDeferredTaskWaits(taskId?: string): Promise<void> {
-  const rows = await getDbClient().query<TaskWait & { taskStatus: "completed" | "failed" }>(
+  const client = getDbClient();
+  const replacements = await client.query<{ taskId: string; resumeTaskId: string }>(
+    `SELECT DISTINCT m.taskId, (
+       SELECT r.id FROM agent_tasks r
+       WHERE r.parentTaskId = t.id AND r.taskType = 'resume'
+       ORDER BY r.createdAt, r.id LIMIT 1
+     ) AS resumeTaskId
+     FROM deferred_task_wait_members m
+     JOIN deferred_task_waits w ON w.scheduleId = m.scheduleId
+     JOIN agent_tasks t ON t.id = m.taskId
+     WHERE w.status = 'pending' AND t.status = 'superseded'
+       AND resumeTaskId IS NOT NULL`,
+  );
+  if (replacements.length) {
+    await client.transaction(async () => {
+      for (const replacement of replacements) {
+        // Collapse members that now watch the same child. Fired waits and their
+        // original ceilings stay untouched. No resume child (including skipped
+        // recovery) means hold to the ceiling, never wake on supersession.
+        await client.run(
+          `UPDATE OR REPLACE deferred_task_wait_members SET taskId = ?, updated_at = ?
+           WHERE taskId = ? AND scheduleId IN (
+             SELECT scheduleId FROM deferred_task_waits WHERE status = 'pending'
+           )`,
+          [replacement.resumeTaskId, new Date().toISOString(), replacement.taskId],
+        );
+      }
+    });
+    // Catch up through a chain missed while stopped, and check the replacements
+    // even when the triggering event named their superseded parent.
+    return reconcileDeferredTaskWaits();
+  }
+  const rows = await client.query<TaskWait & { taskStatus: "completed" | "failed" | "cancelled" }>(
     `SELECT DISTINCT w.*, t.status AS taskStatus FROM deferred_task_waits w
      JOIN deferred_task_wait_members m ON m.scheduleId = w.scheduleId
      JOIN agent_tasks t ON t.id = m.taskId
      JOIN scheduled_tasks s ON s.id = w.scheduleId
-     WHERE w.status = 'pending' AND s.enabled = 1 AND t.status IN ('completed', 'failed')
+     WHERE w.status = 'pending' AND s.enabled = 1 AND t.status IN ('completed', 'failed', 'cancelled')
        AND NOT EXISTS (
          SELECT 1 FROM scheduled_tasks d
          WHERE d.parentTaskId = t.id AND d.taskType = 'deferred' AND d.enabled = 1
@@ -125,7 +159,7 @@ export async function reconcileDeferredTaskWaits(taskId?: string): Promise<void>
   }
 }
 
-function onTaskTerminal(payload: unknown): void {
+function onTaskEvent(payload: unknown): void {
   if (
     !payload ||
     typeof payload !== "object" ||
@@ -138,15 +172,22 @@ function onTaskTerminal(payload: unknown): void {
   });
 }
 
-/** Two fixed listeners read durable waits, so boot needs no per-wait in-memory registry. */
+/** Fixed listeners read durable waits, so boot needs no per-wait in-memory registry. */
 export async function initDeferredTaskWaits(): Promise<void> {
   stopDeferredTaskWaits();
-  workflowEventBus.on("task.completed", onTaskTerminal);
-  workflowEventBus.on("task.failed", onTaskTerminal);
+  workflowEventBus.on("task.completed", onTaskEvent);
+  workflowEventBus.on("task.failed", onTaskEvent);
+  workflowEventBus.on("task.cancelled", onTaskEvent);
+  workflowEventBus.on("task.superseded", onTaskEvent);
+  // The resume may be committed after its parent's supersede event.
+  workflowEventBus.on("task.created", onTaskEvent);
   await reconcileDeferredTaskWaits();
 }
 
 export function stopDeferredTaskWaits(): void {
-  workflowEventBus.off("task.completed", onTaskTerminal);
-  workflowEventBus.off("task.failed", onTaskTerminal);
+  workflowEventBus.off("task.completed", onTaskEvent);
+  workflowEventBus.off("task.failed", onTaskEvent);
+  workflowEventBus.off("task.cancelled", onTaskEvent);
+  workflowEventBus.off("task.superseded", onTaskEvent);
+  workflowEventBus.off("task.created", onTaskEvent);
 }

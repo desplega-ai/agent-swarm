@@ -18,6 +18,7 @@ import {
   getTaskById,
   initDb,
   startTask,
+  supersedeTask,
   updateScheduledTask,
 } from "../be/db";
 import {
@@ -28,7 +29,9 @@ import {
   type TaskWakeEvent,
 } from "../scheduler/deferred-task-waits";
 import { dispatchScheduleTarget, executeSchedule } from "../scheduler/scheduler";
+import { createResumeFollowUp } from "../tasks/worker-follow-up";
 import { registerDeferTaskTool } from "../tools/defer-task";
+import type { AgentTask } from "../types";
 
 type Result = { structuredContent: { success: boolean; message: string; scheduleId?: string } };
 type Tool = {
@@ -141,6 +144,21 @@ async function waitState(scheduleId: string) {
   );
 }
 
+async function resumeTask(parentId: string) {
+  const result = await createResumeFollowUp({ parentId, reason: "manual_supersede" });
+  if (result.kind !== "created") throw new Error(`Resume creation failed: ${result.kind}`);
+  return result.task;
+}
+
+async function awaitWatchedTask(scheduleId: string, taskId: string) {
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline) {
+    if ((await waitState(scheduleId))?.taskId === taskId) return;
+    await Bun.sleep(5);
+  }
+  throw new Error("Event bus did not transfer the watched task");
+}
+
 async function multiFixture(mode?: "all" | "any", event: TaskWakeEvent = "settled") {
   const parent = await activeTask();
   const producers = [await activeTask(), await activeTask()];
@@ -156,6 +174,7 @@ describe("defer-task wakeOn", () => {
   test.each([
     "completed",
     "failed",
+    "cancelled",
   ])("all is the default and waits for the final member to be %s", async (status) => {
     const { producers, schedule } = await multiFixture();
     await completeTask(producers[0]!.id, "first result");
@@ -164,7 +183,8 @@ describe("defer-task wakeOn", () => {
     // The dispatch entry point must also enforce the whole set.
     expect(await dispatchDeferredTaskWait(schedule.id, "task.completed")).toEqual({});
     if (status === "completed") await completeTask(producers[1]!.id, "second result");
-    else await failTask(producers[1]!.id, "second result failed");
+    else if (status === "failed") await failTask(producers[1]!.id, "second result failed");
+    else await cancelTask(producers[1]!.id, "second result cancelled");
     await reconcileDeferredTaskWaits(producers[1]!.id);
     const found = await children(schedule.id);
     expect(found).toHaveLength(1);
@@ -176,10 +196,12 @@ describe("defer-task wakeOn", () => {
   test.each([
     "completed",
     "failed",
+    "cancelled",
   ])("explicit any wakes on the first %s member", async (status) => {
     const { producers, schedule } = await multiFixture("any");
     if (status === "completed") await completeTask(producers[1]!.id, "ready");
-    else await failTask(producers[1]!.id, "failed");
+    else if (status === "failed") await failTask(producers[1]!.id, "failed");
+    else await cancelTask(producers[1]!.id, "cancelled");
     await reconcileDeferredTaskWaits(producers[1]!.id);
     expect(await children(schedule.id)).toHaveLength(1);
     expect((await children(schedule.id))[0]!.task).toContain("any tasks matched settled");
@@ -581,7 +603,143 @@ describe("defer-task wakeOn", () => {
     expect(await children(schedule.id)).toHaveLength(1);
   });
 
-  test("unmatched task or event does not wake; cancelled producer still has a ceiling", async () => {
+  test("settled wakes on the cancellation bus and consumes the ceiling once", async () => {
+    await initDeferredTaskWaits();
+    const { producer, schedule } = await fixture();
+    await cancelTask(producer.id, "cancelled");
+    expect((await awaitChild(schedule.id)).task).toContain(
+      `Wake-up cause: task.cancelled for task ${producer.id}`,
+    );
+    expect(await waitState(schedule.id)).toMatchObject({ firedBy: "task.cancelled" });
+    await executeSchedule(schedule);
+    expect(await children(schedule.id)).toHaveLength(1);
+  });
+
+  test("restart reconciles cancellation missed while the listener was stopped", async () => {
+    const { producer, schedule } = await fixture();
+    await cancelTask(producer.id, "cancelled while stopped");
+    closeDb();
+    initDb(path);
+    await initDeferredTaskWaits();
+    expect(await waitState(schedule.id)).toMatchObject({
+      status: "fired",
+      firedBy: "task.cancelled",
+    });
+    expect(await children(schedule.id)).toHaveLength(1);
+  });
+
+  test.each([
+    "task.completed",
+    "task.failed",
+  ] as const)("%s does not wake on cancellation and retains the ceiling", async (event) => {
+    await initDeferredTaskWaits();
+    const { producer, schedule } = await fixture(event);
+    await cancelTask(producer.id, "cancelled");
+    await reconcileDeferredTaskWaits(producer.id);
+    expect(await dispatchDeferredTaskWait(schedule.id, "task.cancelled")).toEqual({});
+    expect(await children(schedule.id)).toHaveLength(0);
+    expect(await waitState(schedule.id)).toMatchObject({ status: "pending" });
+    await executeSchedule(schedule);
+    expect(await waitState(schedule.id)).toMatchObject({ firedBy: "ceiling" });
+  });
+
+  test.each([
+    "resume first",
+    "supersede first",
+  ])("superseded follows the resume without waking or extending the ceiling: %s", async (order) => {
+    await initDeferredTaskWaits();
+    for (const event of ["settled", "task.completed", "task.failed"] as const) {
+      const { producer, schedule } = await fixture(event);
+      let resume: AgentTask | undefined;
+      if (order === "resume first") {
+        resume = await resumeTask(producer.id);
+        await reconcileDeferredTaskWaits();
+        expect(await waitState(schedule.id)).toMatchObject({ taskId: producer.id });
+      }
+      await supersedeTask(producer.id, {
+        reason: "manual_supersede",
+        resumeTaskId: resume?.id ?? null,
+      });
+      if (!resume) {
+        await reconcileDeferredTaskWaits(producer.id);
+        expect(await waitState(schedule.id)).toMatchObject({
+          taskId: producer.id,
+          status: "pending",
+        });
+        resume = await resumeTask(producer.id);
+      }
+      await awaitWatchedTask(schedule.id, resume.id);
+      expect(await waitState(schedule.id)).toMatchObject({ status: "pending", firedBy: null });
+      expect(await children(schedule.id)).toHaveLength(0);
+      expect((await getScheduledTaskById(schedule.id))?.nextRunAt).toBe(schedule.nextRunAt);
+      if (event === "task.failed") await failTask(resume.id, "resume failed");
+      else await completeTask(resume.id, "resume completed");
+      expect((await awaitChild(schedule.id)).task).toContain(`for task ${resume.id}`);
+      await executeSchedule(schedule);
+      expect(await children(schedule.id)).toHaveLength(1);
+    }
+  });
+
+  test("superseded without a resume holds to its ceiling and a late resume cannot retarget a fired wait", async () => {
+    await initDeferredTaskWaits();
+    const { producer, schedule } = await fixture();
+    await supersedeTask(producer.id, { reason: "manual_supersede", resumeTaskId: null });
+    // An ordinary follow-up is not the replacement for superseded work.
+    await createTaskExtended("unrelated follow-up", {
+      parentTaskId: producer.id,
+      taskType: "follow-up",
+    });
+    await reconcileDeferredTaskWaits(producer.id);
+    expect(await waitState(schedule.id)).toMatchObject({ taskId: producer.id, status: "pending" });
+    expect(await children(schedule.id)).toHaveLength(0);
+    await executeSchedule(schedule);
+    const fired = await waitState(schedule.id);
+    expect(fired).toMatchObject({ firedBy: "ceiling" });
+    const resume = await resumeTask(producer.id);
+    await completeTask(resume.id, "too late");
+    await reconcileDeferredTaskWaits();
+    expect(await waitState(schedule.id)).toEqual(fired);
+    expect(await children(schedule.id)).toHaveLength(1);
+  });
+
+  test("restart follows a missed supersede chain to an already-terminal resume", async () => {
+    const { producer, schedule } = await fixture();
+    let current = producer;
+    for (let step = 0; step < 2; step++) {
+      await supersedeTask(current.id, { reason: "manual_supersede", resumeTaskId: null });
+      current = await resumeTask(current.id);
+    }
+    await completeTask(current.id, "final result");
+    closeDb();
+    initDb(path);
+    await initDeferredTaskWaits();
+    expect(await waitState(schedule.id)).toMatchObject({ taskId: current.id, status: "fired" });
+    expect((await awaitChild(schedule.id)).task).toContain(`for task ${current.id}`);
+    expect(await children(schedule.id)).toHaveLength(1);
+  });
+
+  test("a wait watching both the superseded parent and its resume collapses to one member", async () => {
+    const parent = await activeTask();
+    const producer = await activeTask();
+    const resume = await resumeTask(producer.id);
+    const deferred = await defer(parent.id, producer.id, "settled", {
+      wakeOn: { taskIds: [producer.id, resume.id], event: "settled" },
+    });
+    const scheduleId = deferred.structuredContent.scheduleId!;
+    await supersedeTask(producer.id, { reason: "manual_supersede", resumeTaskId: resume.id });
+    await reconcileDeferredTaskWaits();
+    expect(await waitState(scheduleId)).toMatchObject({ taskId: resume.id, status: "pending" });
+    expect(
+      await getDbClient().query("SELECT * FROM deferred_task_wait_members WHERE scheduleId = ?", [
+        scheduleId,
+      ]),
+    ).toHaveLength(1);
+    await completeTask(resume.id, "done");
+    await reconcileDeferredTaskWaits(resume.id);
+    expect(await children(scheduleId)).toHaveLength(1);
+  });
+
+  test("unmatched task or event does not wake", async () => {
     await initDeferredTaskWaits();
     const { producer, schedule } = await fixture("task.completed");
     const other = await activeTask();
@@ -589,12 +747,6 @@ describe("defer-task wakeOn", () => {
     await failTask(producer.id, "wrong event");
     await reconcileDeferredTaskWaits();
     expect(await children(schedule.id)).toHaveLength(0);
-    const cancelled = await fixture();
-    await cancelTask(cancelled.producer.id, "cancelled");
-    await reconcileDeferredTaskWaits();
-    expect(await children(cancelled.schedule.id)).toHaveLength(0);
-    await executeSchedule(cancelled.schedule);
-    expect(await children(cancelled.schedule.id)).toHaveLength(1);
     await executeSchedule(schedule);
   });
 
