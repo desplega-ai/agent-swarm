@@ -189,7 +189,11 @@ export async function proxyScriptsApi(args: {
     try {
       data = JSON.parse(text);
     } catch {
-      data = { error: text };
+      const contentType = res.headers.get("content-type") ?? "unknown";
+      return toolErr(
+        `Scripts API returned non-JSON response (HTTP ${res.status}, Content-Type: ${contentType}). Check API/proxy routing.`,
+        { details: capDetails(text), data: { status: res.status } },
+      );
     }
   }
 

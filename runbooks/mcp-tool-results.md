@@ -31,6 +31,8 @@ Build one with `toolOk(message, extras?)` / `toolErr(message, extras?)` (`src/to
 
 **Conversion rule** when adding or migrating a tool: `message` summarizes ("Script run failed: TypeError: ctx.api is undefined"); `details` carries the payload the model actually needs to act (diagnostics, stderr, a rendered table) — this is what fixes thin tools like `memory-search` or list-style tools that previously only echoed a count.
 
+The shared scripts API proxy rejects nonempty response bodies that cannot be parsed as JSON, including HTML returned with HTTP 200. Its error names the HTTP status and Content-Type and points to API/proxy routing. The body excerpt uses the 16,000-character details cap; the full invalid body is not retained in structured data. Valid JSON continues through the existing HTTP and script runtime failure checks.
+
 ## 2. The registrar finalize pipeline
 
 `finalizeSwarmToolResult` runs an ordered middleware pipeline over the `SwarmToolResult` before building the wire result:
