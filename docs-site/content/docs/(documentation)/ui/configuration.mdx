@@ -13,8 +13,8 @@ Every setting on this page corresponds to an environment variable the API server
 
 Precedence rules:
 
-- **At boot**, real environment variables win: a variable set in the server's environment takes precedence over a stored value until the next reload.
-- **After a save or reload**, stored values win: the server re-injects global config over the process environment.
+- **Stored values win**, at boot and after a save or reload: the server injects global config over the process environment, so a value saved here overrides the same variable set in the deployment environment. Reserved keys (`API_KEY`, `SECRETS_ENCRYPTION_KEY`) are never stored and always come from the environment.
+- To fall back to the environment value, delete the stored row; the server restores the original environment value on the next reload.
 - Settings marked with a **Restart required** badge are only read at server startup — saving them stores the value, but it takes effect on the next restart.
 
 Each row shows a source chip when the underlying environment variable is set on the server, so you can tell whether the effective value comes from the environment, the stored config, or both.

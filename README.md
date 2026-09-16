@@ -13,8 +13,8 @@ agent-swarm.dev is an open-source operating system for AI work. A lead agent del
 
 - A lead agent that receives work from Slack, repositories, issue trackers, email, or the API
 - [Schema-validated task results](./MCP.md#send-task) for callers that need structured JSON output
-- [Deferred tasks](./MCP.md#defer-task) that wake when another task finishes or a deadline arrives
-- [Dashboard file attachments](https://docs.agent-swarm.dev/docs/ui#file-attachments) by drag-and-drop or file picker
+- [Deferred tasks](./MCP.md#defer-task) that wake when all or any watched tasks reach an outcome, or a deadline arrives
+- [Dashboard file attachments](https://docs.agent-swarm.dev/docs/ui#file-attachments) by paste, drag-and-drop, or file picker
 - Workers in isolated Docker containers with development environments
 - Memory and identity that persist across sessions
 - Workflows, schedules, scripts, and apps for recurring work
@@ -78,6 +78,10 @@ Or install it as a plugin in your harness:
 | Antigravity / Factory Droid | `droid plugin marketplace add https://github.com/desplega-ai/agent-swarm` then `droid plugin install agent-swarm@agent-swarm` |
 | OpenCode, pi, Devin, Kimi, others | `npx skills add desplega-ai/agent-swarm` |
 
+The plugin's [privacy](https://www.agent-swarm.dev/privacy) and
+[terms](https://www.agent-swarm.dev/terms) links describe the Agent Swarm website and
+Cloud service. The self-hosted software remains covered by the [MIT License](./LICENSE).
+
 Or use the examples directly:
 
 ```bash
@@ -93,7 +97,7 @@ Kubernetes: [install the OCI Helm chart](./charts/agent-swarm/README.md).
 
 ## Integrations
 
-Slack · GitHub · GitLab · Linear · Jira · AgentMail · WhatsApp (Kapso) · Composio · Sentry · Devin. [Integration guides](https://docs.agent-swarm.dev/docs/integrations).
+Slack · GitHub · GitLab · Linear · Jira · AgentMail · WhatsApp (Kapso) · Composio · Sentry · Devin · [Serply search](https://docs.agent-swarm.dev/docs/integrations/serply). [Integration guides](https://docs.agent-swarm.dev/docs/integrations).
 
 ## Learn more
 

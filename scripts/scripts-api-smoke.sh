@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-API_KEY="${AGENT_SWARM_API_KEY:-${API_KEY:-123123}}"
+API_KEY="${AGENT_SWARM_API_KEY:-${API_KEY:-}}"
+if [[ -n "${SWARM_BASE_URL:-}" ]]; then
+  : "${API_KEY:?Set AGENT_SWARM_API_KEY or API_KEY to the running server key}"
+elif [[ -z "$API_KEY" ]]; then
+  API_KEY="$(bun -e 'process.stdout.write(crypto.randomUUID())')"
+  : "${API_KEY:?Failed to generate a per-run API key}"
+fi
 BASE_URL="${SWARM_BASE_URL:-http://127.0.0.1:${PORT:-3013}}"
 AGENT_ID="${SCRIPT_SMOKE_AGENT_ID:-scripts-smoke-agent}"
 STARTED_SERVER=0

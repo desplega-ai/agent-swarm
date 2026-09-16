@@ -14,7 +14,7 @@
 #   LOCAL_POSTGRES_DATA_DIR  — cluster data directory  (default: /tmp/postgres-data)
 #   LOCAL_POSTGRES_PORT      — port to listen on        (default: 5433)
 #   LOCAL_POSTGRES_USER      — superuser name            (default: postgres)
-#   LOCAL_POSTGRES_PASSWORD  — superuser password        (default: postgres)
+#   LOCAL_POSTGRES_PASSWORD  — superuser password        (required, non-empty)
 #   LOCAL_POSTGRES_DB        — database to create        (default: app)
 set -euo pipefail
 
@@ -31,7 +31,7 @@ PG_DATA_DIR="${PG_CLUSTER_DIR}/data"
 PG_LOG="${PG_CLUSTER_DIR}/postgres.log"
 PG_PORT="${LOCAL_POSTGRES_PORT:-5433}"
 PG_USER="${LOCAL_POSTGRES_USER:-postgres}"
-PG_PASSWORD="${LOCAL_POSTGRES_PASSWORD:-postgres}"
+: "${LOCAL_POSTGRES_PASSWORD:?Set LOCAL_POSTGRES_PASSWORD explicitly before enabling local PostgreSQL}"
 PG_DB="${LOCAL_POSTGRES_DB:-app}"
 
 log() { printf '[init-local-postgres] %s\n' "$1"; }
@@ -67,11 +67,7 @@ host    all   all   127.0.0.1/32   trust
 host    all   all   ::1/128        trust
 EOF
 
-  # Set password for the superuser role so password-based SCRAM clients can authenticate
   gosu worker "${PG_BINDIR}/pg_ctl" -D "$PG_DATA_DIR" -l "$PG_LOG" start -w -t 60 > /dev/null
-  gosu worker "${PG_BINDIR}/psql" \
-    -h 127.0.0.1 -p "$PG_PORT" -U "$PG_USER" -d postgres \
-    -c "ALTER USER ${PG_USER} PASSWORD '${PG_PASSWORD}';" > /dev/null
   log "Cluster initialized."
 else
   # --- 2. Start server if not already running ---
@@ -85,6 +81,15 @@ else
     log "PostgreSQL already running on port ${PG_PORT}."
   fi
 fi
+
+# Apply the explicit password to new and existing clusters, including old defaults.
+# psql quotes the identifier/literal and reads the password from the environment.
+gosu worker "${PG_BINDIR}/psql" \
+  -h 127.0.0.1 -p "$PG_PORT" -U "$PG_USER" -d postgres \
+  --set=ON_ERROR_STOP=1 --set=role_name="$PG_USER" > /dev/null <<'SQL'
+\getenv role_password LOCAL_POSTGRES_PASSWORD
+ALTER USER :"role_name" PASSWORD :'role_password';
+SQL
 
 # --- 3. Create database if absent ---
 DB_EXISTS=$(gosu worker "${PG_BINDIR}/psql" \

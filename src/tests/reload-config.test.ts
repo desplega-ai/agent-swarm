@@ -430,7 +430,7 @@ describe("auto-reload debouncer", () => {
     const testKey = `__TEST_OVERRIDE_LIVE_${Date.now()}`;
     process.env[testKey] = "shipped-by-deploy";
 
-    // Pre-existing env should win at startup, but reload uses override=true.
+    // Pre-existing env set manually here; reload (and boot) use override=true.
     await upsertSwarmConfig({ scope: "global", key: testKey, value: "from-config" });
     scheduleIntegrationsReload(20);
 

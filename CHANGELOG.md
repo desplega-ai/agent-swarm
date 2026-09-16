@@ -6,6 +6,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.150.0] - 2026-09-16
+
+### Added
+- **Deferred work can wait for all or any of several task outcomes**, with one deadline and continuity across further deferrals (#1510).
+- **Task routing records whether a reason came from the caller or the engine**. Explicit MCP worker assignments require a routing note explaining the choice (#1507).
+- **Slack task Work Objects can show current details in a flexpane**, behind the opt-in `SLACK_WORK_OBJECTS_ENABLED` flag and channel/user access checks (#1493).
+- **The dashboard adds a notifications bell and Slack Connect invitation request**, with per-user dismissal and completion state (#1508).
+- **Session messages send with Enter and accept pasted file attachments**, while Shift+Enter inserts a newline (#1500).
+- **Serply search is available through the integrations dashboard and a bundled skill**, covering web, news, and scholar results (#1515).
+
+### Changed
+- **Worker images and deployment examples use agent-fs 0.13.6** for reliable search (#1516).
+- **Task output follows concise writing guidance**, retaining exceptions for requested detail and structured output (#1489).
+
+### Fixed
+- **Compose includes all agent roles and persists generated identities**; MinIO images pull from Quay (#1490, #1499).
+- **Every automation template is available on installation**, including templates omitted from the default seeder subset (#1501).
+- **Credential reports retry so parked workers can recover**, and Claude version probes have a bounded startup timeout (#1504, #1496).
+- **Slack buffered follow-ups retain file attachments**, and rendered attachment links preserve paths and labels (#1492, #1506).
+- **Deferrals display a readable wake-up time and schedule link**, preserving that outcome in Slack task trees (#1494, #1509).
+- **Dashboard attachments open in their file viewer without double-encoding paths**, and users are prompted for missing organization names (#1503, #1514, #1488).
+- **Development helpers require explicit credentials instead of weak defaults** (#1512).
+- **Moving Docker image tags publish in deployment order**, preventing an older build from replacing newer tags (#1513).
+- **The Slack manifest matches the production app configuration**, and plugin packaging gains security/privacy documentation with a reproducible scanner workflow (#1498, #1495).
+
+## [1.149.1] - 2026-09-15
+
+### Added
+- **Seeded automations that need no configuration enable automatically**, including a swarm update check schedule (#1486).
+
+### Fixed
+- **Helm installs every Full Swarm profile by default** (#1487).
+
 ## [1.149.0] - 2026-09-15
 
 ### Added

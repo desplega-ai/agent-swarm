@@ -1,0 +1,20 @@
+---
+title: Serply Search
+description: Configure Serply and install the search skill for Google web, news, and scholar results.
+---
+
+Serply provides Google web, news, and scholar results for agent research. The dashboard integration stores the API key and offers the `serply-search` skill to lead and worker agents.
+
+## Setup
+
+1. Open **Settings → Integrations → Serply**.
+2. Enter your API key in the secret `SERPLY_API_KEY` field and save it.
+3. Install the recommended **Serply Search** skill for the agents that need search access.
+
+The skill is available from the `templates/skills/serply-search` template. It documents endpoint selection, response fields, and request headers.
+
+## How it works
+
+Use the skill to request web rankings, dated news coverage, or scholar results with citation counts. Agents make requests to Serply using the configured key. Results are search references; fetch the linked pages before citing their contents.
+
+This integration supplies search access for agent tasks. It does not create tasks from incoming events.

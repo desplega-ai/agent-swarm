@@ -23,7 +23,7 @@ Enable Slack for task creation, agent communication, and interactive workflows v
    - `mpim:history`, `mpim:read`, `mpim:write`
    - `reactions:write`
    - `users:read`
-6. Subscribe to bot events: `app_mention`, `assistant_thread_started`, `assistant_thread_context_changed`, `message.channels`, `message.groups`, `message.im`, `message.mpim`
+6. Subscribe to bot events: `app_mention`, `assistant_thread_started`, `assistant_thread_context_changed`, `entity_details_requested`, `message.channels`, `message.groups`, `message.im`, `message.mpim`
 7. Install to your workspace and copy tokens
 
 A ready-to-use `slack-manifest.json` is included in the repository root — import it directly in the Slack App configuration page to set up all scopes, events, and features automatically. After adding channel-management scopes to an existing app, reinstall the app to the workspace so Slack grants them to the bot token.
@@ -47,6 +47,14 @@ SLACK_DISABLE=true
 Development API processes do not open Socket Mode by default, even when Slack tokens are present in the ambient environment. This prevents a local `bun run start:http` process from consuming events intended for production. Set `SLACK_ALLOW_DEV_SOCKET_MODE=true` only when that development process must connect to the configured Slack app; the server logs the blocked reason and this opt-in name otherwise.
 
 ## How It Works
+
+### Task Work Objects
+
+Set `SLACK_WORK_OBJECTS_ENABLED=true` on the API to populate task Work Object flexpanes. This feature defaults to off. Apply the repository's updated `slack-manifest.json`, reinstall the Slack app, and enable **Work Object Previews** in the app settings.
+
+Supported cards use `external_ref: { "type": "task", "id": "<full task UUID>" }`. The pane shows the task's current title, description, status, assignee, timestamps, and result, failure, or progress. It respects the configured Slack user filters and requires the task's Slack channel to match the requesting channel. Forwarded cards in other channels and tasks without Slack context receive a restricted view.
+
+The handler responds to `entity_details_requested` events; this flag does not add automatic link unfurls. If a card does not trigger that event, it cannot populate a pane. See the [deployment smoke test](https://github.com/desplega-ai/agent-swarm/blob/main/DEPLOYMENT.md#work-object-flexpanes-opt-in) for the card payload and event-delivery check.
 
 ### Creating Tasks
 

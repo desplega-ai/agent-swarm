@@ -26,7 +26,7 @@
 # Env overrides (flags -m/-e take precedence):
 #   CODEX_MODEL   default: gpt-5.6-sol          gpt-5.6-sol | gpt-5.6-terra | gpt-5.6-luna
 #   CODEX_EFFORT  default: high                 reasoning effort (never "fast"/low)
-#   CODEX_SANDBOX default: workspace-write      read-only | workspace-write | danger-full-access
+#   CODEX_SANDBOX default: workspace-write (passed to codex's -s option)
 #   CODEX_BYPASS  set to 1 to use --dangerously-bypass-approvals-and-sandbox
 #                 (fully unsandboxed — opt in only when a phase must write
 #                 outside its worktree; overrides CODEX_SANDBOX)

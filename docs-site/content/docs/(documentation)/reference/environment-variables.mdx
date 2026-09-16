@@ -237,7 +237,7 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `LOCAL_POSTGRES_DATA_DIR` | No | `/tmp/postgres-data` | Data directory for the optional local Postgres cluster |
 | `LOCAL_POSTGRES_PORT` | No | `5433` | Port for the optional local Postgres cluster |
 | `LOCAL_POSTGRES_USER` | No | `postgres` | Superuser name for the optional local Postgres cluster |
-| `LOCAL_POSTGRES_PASSWORD` | No | `postgres` | Superuser password for the optional local Postgres cluster |
+| `LOCAL_POSTGRES_PASSWORD` | When local Postgres is enabled | None | Explicit non-empty superuser password; applied to new and existing clusters on each helper invocation |
 | `LOCAL_POSTGRES_DB` | No | `app` | Database created in the optional local Postgres cluster |
 
 ## Git Configuration
@@ -258,6 +258,7 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `SLACK_DISABLE` | Set to `true` to disable Slack |
 | `SLACK_ALLOW_DEV_SOCKET_MODE` | Set to `true` to explicitly allow a `NODE_ENV=development` API process to connect through Socket Mode (default: `false`) |
 | `SLACK_RENDER_V2` | Set to `true` to opt in to one persistent task tree per physical Slack thread plus streamed, immutable outcome cards (default: `false`) |
+| `SLACK_WORK_OBJECTS_ENABLED` | Set to `true` to populate task Work Object flexpanes (default: `false`). Apply the updated Slack manifest, reinstall the app, and enable Work Object Previews. See [Slack setup](/docs/integrations/slack#task-work-objects). |
 | `SLACK_RENDER_V2_DELEGATION` | Set to `true` to defer an ask's conclusion card until its whole closure (delegated tasks, children, follow-ups) settles, post child result cards, and gate the checkmark reaction on the closure instead of the ask alone. Requires `SLACK_RENDER_V2=true` (default: `false`) |
 | `SLACK_CONCLUSION_SETTLE_SEC` | Quiet seconds after a closure goes fully terminal before its conclusion card posts (default: `10`) |
 | `SLACK_CONCLUSION_TIMEOUT_MIN` | Idle minutes before a closure concludes with unfinished work and a `warning` reaction (default: `240`) |

@@ -555,7 +555,7 @@ describe("dispatchScheduleTarget — workflow target", () => {
     );
     expect(after?.count).toBe(before?.count);
     expect(updated?.enabled).toBe(true);
-    expect(updated?.lastRunAt).toBeUndefined();
+    expect(updated?.lastRunAt).toBeDefined();
     expect(updated?.consecutiveErrors).toBe(0);
     expect(updated?.lastErrorMessage).toBe("needs_setup: params=[REPO_URL] integrations=[]");
     expect(new Date(updated!.nextRunAt!).getTime()).toBeGreaterThan(Date.now());
@@ -654,7 +654,7 @@ describe("dispatchScheduleTarget — automation preflight", () => {
     expect(second.lastErrorMessage).toBe("needs_setup: params=[REPO_URL] integrations=[]");
     expect(second.consecutiveErrors).toBe(0);
     expect(second.enabled).toBe(true);
-    expect(second.lastRunAt).toBeUndefined();
+    expect(second.lastRunAt).toBeDefined();
     expect(new Date(second.nextRunAt!).getTime()).toBeGreaterThan(Date.now());
   });
 

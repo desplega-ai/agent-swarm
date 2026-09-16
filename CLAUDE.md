@@ -281,7 +281,7 @@ Quick reference:
 Operator-tunable env vars are surfaced on the dashboard **Settings → Configuration** page, driven by the catalog in `apps/ui/src/lib/configuration-catalog.ts`. When you add such a var:
 
 - Register it in the catalog: pick a group (Steering, Memory, Heartbeat, Harness, Integrations, Security, Workflows, Branding — or add a group), a `kind` (`boolean` / `enum` / `number` / `string`), `defaultValue`, description, and a `docsUrl` when a docs page covers it.
-- Values persist as **global-scope `swarm_config` rows** via PUT `/api/config`. Precedence: env wins at boot; stored values win after reload (global upserts trigger a debounced auto-reload server-side). If the var is only read at server startup, set `restartRequired: true`.
+- Values persist as **global-scope `swarm_config` rows** via PUT `/api/config`. Precedence: stored values win over the deployment env, both at boot and after reload (global upserts trigger a debounced auto-reload server-side); reserved keys stay env-only. If the var is only read at server startup, set `restartRequired: true`.
 - Constrained values should get a validator in `VALIDATED_KEYS` in `src/be/swarm-config-guard.ts`.
 - NEVER add secrets/credentials or reserved keys (`API_KEY`, `SECRETS_ENCRYPTION_KEY`) to the catalog — those belong on the Secrets/Integrations pages.
 - Update the docs page [docs-site/.../ui/configuration.mdx](./docs-site/content/docs/(documentation)/ui/configuration.mdx) in the same PR.

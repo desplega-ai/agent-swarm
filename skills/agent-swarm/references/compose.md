@@ -45,7 +45,7 @@ Apply the [component minimums](https://github.com/desplega-ai/agent-swarm/blob/m
 Remove unused example values from `.env`. Keep non-boot configuration in swarm config where supported.
 
 The example includes MinIO credentials for development. Replace them consistently in `minio`, `minio-init`, and `agent-fs` before external access.
-Set `AGENT_FS_S3_PUBLIC_ENDPOINT` to a URL reachable by clients when they use signed downloads.
+Signed image/PDF/video previews and downloads default to `https://${AGENT_FS_DOMAIN}` when `AGENT_FS_DOMAIN` is set, or `http://localhost:9000` otherwise. The bundled Caddy proxy routes `/agentfs/*` on the file domain to MinIO. Set `AGENT_FS_S3_PUBLIC_ENDPOINT` to override this origin, for example with an external S3 endpoint. It must be reachable by browsers and use HTTPS for TLS deployments.
 
 ## Start and verify
 

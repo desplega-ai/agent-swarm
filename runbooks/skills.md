@@ -143,6 +143,13 @@ unsupported frontmatter keys fail the sync. Never hand-edit vendored
 `config.json`, `content.md`, or `files/**`; update upstream, re-run the sync, and
 commit the manifest and output together.
 
+The sync also clarifies the Codex helper's sandbox-default comment while preserving
+every executable line. This exact, guarded comment transform is recorded under
+`transforms.bundledCommentRewrites`; the manifest retains the upstream commit and
+hashes the transformed output. If the upstream comment changes, review this
+transform before re-pinning. Rebuild the seeded bundle after syncing with
+`bun run build:seed-skill-files`.
+
 ## How versioning works
 
 The seeder never clobbers a user's edits. Per skill, per run:
