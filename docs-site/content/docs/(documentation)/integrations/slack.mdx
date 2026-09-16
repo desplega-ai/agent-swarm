@@ -110,10 +110,10 @@ Slack can send buffered thread feedback into a task that is still running:
 
 | Variable | Default | Behavior |
 |---|---|---|
-| `SLACK_THREAD_STEERING` | off | `lead` targets the latest in-progress lead task in the thread; `all` targets the latest active task regardless of role. Unset and other values preserve normal follow-up task routing. |
+| `SLACK_THREAD_STEERING` | `lead` | `lead` targets the latest in-progress lead task in the thread; `all` targets the latest active task regardless of role. Explicit `off` and invalid values preserve normal follow-up task routing. |
 | `SLACK_THREAD_STEERING_MODE` | `queue` | `queue` adds the message at a turn boundary. `steer` requests an interrupt and degrades when the harness cannot interrupt. |
 
-This is opt-in because it changes a thread reply from a durable follow-up task into input for an already-running task. Slack posts an acknowledgement that reflects the actual server outcome (`steered`, `queued`, or promoted to a follow-up).
+This changes a thread reply from a durable follow-up task into input for an already-running task. Slack posts an acknowledgement that reflects the actual server outcome (`steered`, `queued`, or promoted to a follow-up).
 
 **Follow-up re-delegation guard:** When the lead receives a `task.worker.completed` or `task.worker.failed` follow-up, it is explicitly instructed (via prompt template) not to re-delegate the same work back to a worker. A second guard in `send-task` blocks any re-delegation on a Slack thread that already has a completed task within the last 48 hours, preventing the duplicate-response cycle where repeated re-delegations caused the bot to answer the same thread multiple times.
 
@@ -143,7 +143,7 @@ When enabled via `ADDITIVE_SLACK=true`, thread replies that do NOT @mention the 
 
 ### Tree-Based Status Messages
 
-The legacy per-task renderer remains the default. Set `SLACK_RENDER_V2=true` to opt in to the v2 preview, where each Slack thread owns exactly one engine message: a task tree that is updated in place with `chat.update`. Later asks append to the same tree, delegated tasks stay nested under their parent, and task IDs remain clickable:
+The v2 renderer is enabled by default. Set `SLACK_RENDER_V2=false` to use the legacy renderer. With v2, each Slack thread owns exactly one engine message: a task tree that is updated in place with `chat.update`. Later asks append to the same tree, delegated tasks stay nested under their parent, and task IDs remain clickable:
 
 ```
 🧵 worked for 44m
@@ -176,9 +176,9 @@ Set `SLACK_RENDER_V2_DELEGATION=true` (requires `SLACK_RENDER_V2=true`) to opt i
 - **In-flight threads.** The first tick with the flag on stamps `delegation_activated_at`. An ask created before that stamp keeps the pre-delegation behavior: its own outcome card, no child cards, and the reaction gate keyed to its own completion. An ask created after the stamp gets the new lifecycle. One thread can carry both kinds of ask at once.
 - **Rollback.** Set `SLACK_RENDER_V2_DELEGATION=false`. The next tick reverts every closure to the pre-delegation gate; any ask that was deferred while the flag was on finalizes immediately under the old rule, so no thread is left stranded.
 
-### Opt In to the Renderer
+### Opt out of the renderer
 
-Leave `SLACK_RENDER_V2` unset or set it to `false` to use the default legacy per-task assignment/progress/completion renderer. Set `SLACK_RENDER_V2=true` to preview the new task tree and streamed outcome cards without changing the deployment.
+Set `SLACK_RENDER_V2=false` to use the legacy per-task assignment/progress/completion renderer. Leaving it unset enables the task tree and streamed outcome cards.
 
 ### Rich Block Kit Messages
 
@@ -190,7 +190,7 @@ The v2 tree uses `mrkdwn` inside footer-weight context blocks, which keeps every
 
 ### Interactive Actions
 
-The default legacy renderer's task messages include interactive buttons when `SLACK_RENDER_V2` is unset or `false`:
+The legacy renderer's task messages include interactive buttons when `SLACK_RENDER_V2=false`:
 
 - **Follow-up** — Opens a modal to send a follow-up message to the same agent, creating a new task with dependency on the completed one
 - **View Full Logs** — Links to the task detail page in the dashboard

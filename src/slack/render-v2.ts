@@ -77,7 +77,7 @@ type SlackThreadMessage = {
 };
 
 export function isSlackRenderV2Enabled(): boolean {
-  return isEnvFlagEnabled("SLACK_RENDER_V2", false);
+  return isEnvFlagEnabled("SLACK_RENDER_V2", true);
 }
 
 export function isSlackDelegationEnabled(): boolean {

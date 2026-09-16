@@ -44,7 +44,7 @@ describe("realtime room namespace guards", () => {
 
   test("allows page writes for user and operator contexts when RBAC is disabled", async () => {
     const previous = process.env.RBAC_ENABLED;
-    delete process.env.RBAC_ENABLED;
+    process.env.RBAC_ENABLED = "false";
     try {
       await expect(
         authorizeRoomNamespace(

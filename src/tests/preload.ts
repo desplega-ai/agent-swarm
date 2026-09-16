@@ -75,7 +75,7 @@ delete process.env.OPENROUTER_API_KEY;
 
 // Deployment flags must not change the test suite's default registration and
 // task-admission contracts. Multi-runtime suites opt in by setting this to "true"
-// and restore it (or delete it, which also defaults to disabled) themselves.
+// and restore it themselves. Tests of the code default explicitly delete it.
 process.env.MULTI_RUNTIME_ENABLED = "false";
 
 // Fixed fixture key for deterministic test runs (32 bytes of 0x00, base64-encoded).

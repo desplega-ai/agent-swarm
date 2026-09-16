@@ -373,12 +373,12 @@ describe("Slack renderer v2", () => {
     expect(calls).toHaveLength(0);
   });
 
-  test("defaults off and accepts an explicit opt-in", () => {
+  test("defaults on and accepts an explicit opt-out", () => {
     const previous = process.env.SLACK_RENDER_V2;
     delete process.env.SLACK_RENDER_V2;
-    expect(isSlackRenderV2Enabled()).toBe(false);
-    process.env.SLACK_RENDER_V2 = "true";
     expect(isSlackRenderV2Enabled()).toBe(true);
+    process.env.SLACK_RENDER_V2 = "false";
+    expect(isSlackRenderV2Enabled()).toBe(false);
     if (previous === undefined) delete process.env.SLACK_RENDER_V2;
     else process.env.SLACK_RENDER_V2 = previous;
   });

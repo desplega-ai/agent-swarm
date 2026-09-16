@@ -54,6 +54,7 @@ describe("swarm-config-guard: Configuration-page value validation", () => {
 
   test("steering enums are constrained", () => {
     expect(validateConfigValue("SLACK_THREAD_STEERING", "lead")).toBeNull();
+    expect(validateConfigValue("SLACK_THREAD_STEERING", "off")).toBeNull();
     expect(validateConfigValue("SLACK_THREAD_STEERING", "all")).toBeNull();
     expect(validateConfigValue("SLACK_THREAD_STEERING", "everyone")).toContain("must be one of");
     expect(validateConfigValue("SLACK_THREAD_STEERING_MODE", "queue")).toBeNull();

@@ -305,7 +305,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  delete process.env.MULTI_RUNTIME_ENABLED;
+  process.env.MULTI_RUNTIME_ENABLED = "false";
   await getDbClient().run("DELETE FROM runtime_instances");
   await getDbClient().run("DELETE FROM active_sessions");
   // Pool sweeps cap how many tasks they assign per tick, so leftovers from an
@@ -542,7 +542,7 @@ describe("disable / legacy restoration", () => {
     expect((await getAgentById(id))?.maxTasks).toBe(3);
     expect((await getAgentMaxTasksConfig(id))?.value).toBe("3");
 
-    delete process.env.MULTI_RUNTIME_ENABLED;
+    process.env.MULTI_RUNTIME_ENABLED = "false";
     const { status } = await register(id, { maxTasks: 8 });
     expect(status).toBe(200);
     expect((await getAgentById(id))?.maxTasks).toBe(8);
@@ -804,7 +804,7 @@ describe("GET /api/agents/{id}/runtime-instances", () => {
 
     await listRuntimes(id);
     // Rows written while the flag was on stay readable after a rollback.
-    delete process.env.MULTI_RUNTIME_ENABLED;
+    process.env.MULTI_RUNTIME_ENABLED = "false";
     const { status, body } = await listRuntimes(id);
     expect(status).toBe(200);
     expect(body.runtimeInstances).toHaveLength(1);
@@ -869,7 +869,7 @@ describe("runtime-aware close", () => {
     const rA = crypto.randomUUID();
     await register(id, { maxTasks: 1, runtimeInstanceId: rA });
 
-    delete process.env.MULTI_RUNTIME_ENABLED;
+    process.env.MULTI_RUNTIME_ENABLED = "false";
     expect(await closeRuntime(id, rA)).toBe(204);
     // Runtime rows stay inert while the flag is off.
     expect((await getAgentById(id))?.status).toBe("offline");
@@ -990,7 +990,7 @@ describe("runtime liveness via ping", () => {
     await register(id, { maxTasks: 1, runtimeInstanceId: rA });
     const before = await getRuntimeInstanceById(rA);
 
-    delete process.env.MULTI_RUNTIME_ENABLED;
+    process.env.MULTI_RUNTIME_ENABLED = "false";
     await Bun.sleep(10);
     expect(await pingAgent(id, rA)).toBe(204);
     expect((await getRuntimeInstanceById(rA))?.lastSeenAt).toBe(before?.lastSeenAt ?? "");
@@ -1191,7 +1191,7 @@ describe("stale runtime liveness", () => {
     await register(id, { maxTasks: 1, runtimeInstanceId: rA });
 
     // Flag off: close takes the legacy path and leaves the row active.
-    delete process.env.MULTI_RUNTIME_ENABLED;
+    process.env.MULTI_RUNTIME_ENABLED = "false";
     await closeRuntime(id, rA);
     expect((await getRuntimeInstanceById(rA))?.status).toBe("active");
     expect((await getAgentById(id))?.status).toBe("offline");
@@ -1386,7 +1386,7 @@ describe("rollback to legacy mode", () => {
     await register(id, { maxTasks: 1, runtimeInstanceId: rA });
 
     // Operator rolls back; workers stop refreshing their rows.
-    delete process.env.MULTI_RUNTIME_ENABLED;
+    process.env.MULTI_RUNTIME_ENABLED = "false";
     await makeRuntimeStale(rA);
 
     const result = await expireStaleRuntimeInstances();
@@ -1402,7 +1402,7 @@ describe("rollback to legacy mode", () => {
     const rA = crypto.randomUUID();
     await register(id, { maxTasks: 1, runtimeInstanceId: rA });
 
-    delete process.env.MULTI_RUNTIME_ENABLED;
+    process.env.MULTI_RUNTIME_ENABLED = "false";
     await makeRuntimeStale(rA);
     await expireStaleRuntimeInstances();
     expect((await getAgentById(id))?.status).toBe("idle");
@@ -1469,7 +1469,7 @@ describe("flag re-enable cycle preserves live sessions", () => {
 
     // Operator disables the flag: nothing refreshes runtime rows, but the
     // worker keeps executing and heartbeating its session.
-    delete process.env.MULTI_RUNTIME_ENABLED;
+    process.env.MULTI_RUNTIME_ENABLED = "false";
     await makeRuntimeStale(rt);
 
     // Re-enable past the stale window; the first sweep runs expiry.
@@ -1497,7 +1497,7 @@ describe("flag re-enable cycle preserves live sessions", () => {
     await startTask(task.id);
     await startSessionFor(id, task.id, rt);
 
-    delete process.env.MULTI_RUNTIME_ENABLED;
+    process.env.MULTI_RUNTIME_ENABLED = "false";
     await makeRuntimeStale(rt);
     // Sessions heartbeat on tool activity only: a long model call or shell
     // command can be quiet past the runtime cutoff while the worker is fine.
@@ -1526,7 +1526,7 @@ describe("flag re-enable cycle preserves live sessions", () => {
     await startTask(task.id);
     await startSessionFor(id, task.id, rt);
 
-    delete process.env.MULTI_RUNTIME_ENABLED;
+    process.env.MULTI_RUNTIME_ENABLED = "false";
     await makeRuntimeStale(rt);
     await makeSessionStale(task.id, 20);
     // The task itself progressed recently (store-progress traffic).
@@ -1551,7 +1551,7 @@ describe("flag re-enable cycle preserves live sessions", () => {
     await startTask(task.id);
     await startSessionFor(id, task.id, rt);
 
-    delete process.env.MULTI_RUNTIME_ENABLED;
+    process.env.MULTI_RUNTIME_ENABLED = "false";
     await makeRuntimeStale(rt);
     // The process died: session heartbeat AND task progress both went stale.
     await makeSessionStale(task.id, 30);
@@ -1578,7 +1578,7 @@ describe("flag re-enable cycle preserves live sessions", () => {
     await startTask(task.id);
     await startSessionFor(id, task.id, rt);
 
-    delete process.env.MULTI_RUNTIME_ENABLED;
+    process.env.MULTI_RUNTIME_ENABLED = "false";
     await makeRuntimeStale(rt);
 
     const result = await expireStaleRuntimeInstances();
@@ -1772,7 +1772,7 @@ describe("sweep coverage and rollback inertness", () => {
     await register(id, { maxTasks: 1, runtimeInstanceId: rt });
 
     // Rolled back; the legacy worker stops refreshing its retained row.
-    delete process.env.MULTI_RUNTIME_ENABLED;
+    process.env.MULTI_RUNTIME_ENABLED = "false";
     await makeRuntimeStale(rt);
     const task = await createTaskExtended("pool-work-legacy");
 

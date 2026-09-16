@@ -1,5 +1,6 @@
 import type { PermissionVerb } from "../rbac";
 import { PermissionVerbSchema } from "../rbac";
+import { isEnvFlagEnabled } from "../utils/env-flag";
 import { getDb, getDbClient } from "./db";
 
 export const DEFAULT_ROLE_ID = "rbac-role-admin";
@@ -358,8 +359,8 @@ export function ensureRbacSeedsSynced(opts?: { quiet?: boolean }): RbacSeedSyncS
 
 function describeRbacFlag(): string {
   const raw = process.env.RBAC_ENABLED;
-  if (raw === undefined) return "unset (off)";
-  return `${raw} (${raw === "true" ? "on" : "off"})`;
+  if (raw === undefined) return "unset (on)";
+  return `${raw} (${isEnvFlagEnabled("RBAC_ENABLED", true) ? "on" : "off"})`;
 }
 
 function printRolesTable(rows: RbacRoleSummaryRow[]): void {

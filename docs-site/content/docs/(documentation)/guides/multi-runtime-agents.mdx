@@ -20,7 +20,10 @@ agent its own `AGENT_ID`. Multi-runtime mode does not synchronize arbitrary
 files between containers and does not turn separate workers into isolated
 agents.
 
-## Enable it in this order
+## Upgrade existing deployments
+
+Multi-runtime is enabled by default for fresh deployments. Set
+`MULTI_RUNTIME_ENABLED=false` explicitly while upgrading older workers.
 
 Update every worker that will serve the agent before enabling the flag on the
 API server:

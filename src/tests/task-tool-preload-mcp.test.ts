@@ -73,11 +73,14 @@ async function pins(client: Client): Promise<string[]> {
     .sort();
 }
 
-test("wire response is default-off, per-task, additive, and fixed for one MCP session", async () => {
+test("wire response is default-on, per-task, additive, and fixed for one MCP session", async () => {
   const task = await createTaskExtended("review fixture", { agentId, taskType: "review" });
   const other = await createTaskExtended("other fixture", { agentId, taskType: "other" });
   const foreign = await createTaskExtended("unowned", { taskType: "review" });
   await configure("TASK_TOOL_MANIFESTS", '{"taskTypes":{"review":["script-run","get-tasks"]}}');
+  const defaultOn = await connect(task.id);
+  expect(await pins(defaultOn)).toEqual(["get-tasks", "script-run"]);
+  await configure("TASK_TOOL_PRELOAD_ENABLED", "false");
   const off = await connect(task.id);
   const baseline = (await off.listTools()).tools;
   expect(baseline.some((tool) => tool.name === "script-run")).toBe(true);

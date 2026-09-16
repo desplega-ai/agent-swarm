@@ -102,7 +102,7 @@ When the additive buffer flushes normally (not via `!now`), the created task use
 | `ADDITIVE_SLACK` | `false` | Enables non-mention thread message buffering and batching |
 | `ADDITIVE_SLACK_BUFFER_MS` | `10000` (10s) | Debounce window in milliseconds for the thread buffer |
 | `SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION` | `false` | Requires @mention for thread follow-up routing; non-mention thread messages are silently dropped |
-| `SLACK_THREAD_STEERING` | `off` | `off` preserves follow-up tasks; `lead` steers the latest in-progress lead task; `all` targets the latest active task |
+| `SLACK_THREAD_STEERING` | `lead` | `off` preserves follow-up tasks; `lead` steers the latest in-progress lead task; `all` targets the latest active task |
 | `SLACK_THREAD_STEERING_MODE` | `queue` | `queue` appends context; `steer` requests immediate steering and degrades to queue when unsupported |
 
 Both are read from environment variables. `ADDITIVE_SLACK` must be exactly `"true"` to enable. `ADDITIVE_SLACK_BUFFER_MS` is parsed as a number with fallback to 10000.
