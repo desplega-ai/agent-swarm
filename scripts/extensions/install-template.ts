@@ -21,6 +21,12 @@ if (!name) {
   console.error("usage: install-template.ts <name> [--config json] [--enable] [--validate-only]");
   process.exit(2);
 }
+// Template names are directory names under templates/extensions. Reject anything
+// else so the name can never escape that directory or hit a cryptic ENOENT.
+if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) {
+  console.error(`invalid template name "${name}": use lowercase letters, digits, and hyphens`);
+  process.exit(2);
+}
 
 const directory = new URL(`../../templates/extensions/${name}/`, import.meta.url);
 const manifest = await Bun.file(new URL("manifest.json", directory)).json();
