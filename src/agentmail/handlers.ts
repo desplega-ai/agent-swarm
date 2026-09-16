@@ -47,19 +47,23 @@ const agentmailBuffer = createIngressBuffer<BufferedAgentMailMessage>({
       preview: `[${items.length} buffered message(s)]\n\n${combinedPreview}`,
     });
     if (followupResult.skipped) return;
-    const task = await createTaskWithSiblingAwareness(followupResult.text, {
-      agentId: first.agentId,
-      routingReason: "continuity",
-      routingSource: "engine_default",
-      source: "agentmail",
-      taskType: "agentmail-reply",
-      agentmailInboxId: first.inboxId,
-      agentmailMessageId: first.messageId,
-      agentmailThreadId: first.threadId,
-      parentTaskId: first.parentTaskId,
-      requestedByUserId: first.requestedByUserId,
-      contextKey,
-    });
+    const task = await createTaskWithSiblingAwareness(
+      followupResult.text,
+      {
+        agentId: first.agentId,
+        routingReason: "continuity",
+        routingSource: "engine_default",
+        source: "agentmail",
+        taskType: "agentmail-reply",
+        agentmailInboxId: first.inboxId,
+        agentmailMessageId: first.messageId,
+        agentmailThreadId: first.threadId,
+        parentTaskId: first.parentTaskId,
+        requestedByUserId: first.requestedByUserId,
+        contextKey,
+      },
+      { origin: "webhook" },
+    );
     console.log(
       `[AgentMail] Buffered flush → task ${task.id} (${items.length} messages, thread ${first.threadId})`,
     );
@@ -249,19 +253,23 @@ export async function handleMessageReceived(
       return { created: false };
     }
 
-    const task = await createTaskWithSiblingAwareness(followupResult.text, {
-      agentId: existingTask.agentId,
-      routingReason: existingTask.agentId ? "continuity" : undefined,
-      routingSource: existingTask.agentId ? "engine_default" : undefined,
-      source: "agentmail",
-      taskType: "agentmail-reply",
-      agentmailInboxId: inbox_id,
-      agentmailMessageId: message_id,
-      agentmailThreadId: thread_id,
-      parentTaskId: existingTask.id,
-      requestedByUserId,
-      contextKey,
-    });
+    const task = await createTaskWithSiblingAwareness(
+      followupResult.text,
+      {
+        agentId: existingTask.agentId,
+        routingReason: existingTask.agentId ? "continuity" : undefined,
+        routingSource: existingTask.agentId ? "engine_default" : undefined,
+        source: "agentmail",
+        taskType: "agentmail-reply",
+        agentmailInboxId: inbox_id,
+        agentmailMessageId: message_id,
+        agentmailThreadId: thread_id,
+        parentTaskId: existingTask.id,
+        requestedByUserId,
+        contextKey,
+      },
+      { origin: "webhook" },
+    );
 
     console.log(
       `[AgentMail] Created follow-up task ${task.id} for thread ${thread_id} (parent: ${existingTask.id})`,
@@ -290,18 +298,22 @@ export async function handleMessageReceived(
           return { created: false };
         }
 
-        const task = await createTaskWithSiblingAwareness(leadResult.text, {
-          agentId: agent.id,
-          routingReason: "human_pinned",
-          routingSource: "engine_default",
-          source: "agentmail",
-          taskType: "agentmail-message",
-          agentmailInboxId: inbox_id,
-          agentmailMessageId: message_id,
-          agentmailThreadId: thread_id,
-          requestedByUserId,
-          contextKey: agentmailContextKey({ threadId: thread_id }),
-        });
+        const task = await createTaskWithSiblingAwareness(
+          leadResult.text,
+          {
+            agentId: agent.id,
+            routingReason: "human_pinned",
+            routingSource: "engine_default",
+            source: "agentmail",
+            taskType: "agentmail-message",
+            agentmailInboxId: inbox_id,
+            agentmailMessageId: message_id,
+            agentmailThreadId: thread_id,
+            requestedByUserId,
+            contextKey: agentmailContextKey({ threadId: thread_id }),
+          },
+          { origin: "webhook" },
+        );
 
         console.log(
           `[AgentMail] Created task ${task.id} for lead ${agent.name} (inbox: ${inbox_id})`,
@@ -322,18 +334,22 @@ export async function handleMessageReceived(
         return { created: false };
       }
 
-      const task = await createTaskWithSiblingAwareness(workerResult.text, {
-        agentId: agent.id,
-        routingReason: "human_pinned",
-        routingSource: "engine_default",
-        source: "agentmail",
-        taskType: "agentmail-message",
-        agentmailInboxId: inbox_id,
-        agentmailMessageId: message_id,
-        agentmailThreadId: thread_id,
-        requestedByUserId,
-        contextKey: agentmailContextKey({ threadId: thread_id }),
-      });
+      const task = await createTaskWithSiblingAwareness(
+        workerResult.text,
+        {
+          agentId: agent.id,
+          routingReason: "human_pinned",
+          routingSource: "engine_default",
+          source: "agentmail",
+          taskType: "agentmail-message",
+          agentmailInboxId: inbox_id,
+          agentmailMessageId: message_id,
+          agentmailThreadId: thread_id,
+          requestedByUserId,
+          contextKey: agentmailContextKey({ threadId: thread_id }),
+        },
+        { origin: "webhook" },
+      );
 
       console.log(
         `[AgentMail] Created task ${task.id} for worker ${agent.name} (inbox: ${inbox_id})`,
@@ -358,18 +374,22 @@ export async function handleMessageReceived(
       return { created: false };
     }
 
-    const task = await createTaskWithSiblingAwareness(unmappedResult.text, {
-      agentId: lead.id,
-      routingReason: "skill",
-      routingSource: "engine_default",
-      source: "agentmail",
-      taskType: "agentmail-message",
-      agentmailInboxId: inbox_id,
-      agentmailMessageId: message_id,
-      agentmailThreadId: thread_id,
-      requestedByUserId,
-      contextKey: agentmailContextKey({ threadId: thread_id }),
-    });
+    const task = await createTaskWithSiblingAwareness(
+      unmappedResult.text,
+      {
+        agentId: lead.id,
+        routingReason: "skill",
+        routingSource: "engine_default",
+        source: "agentmail",
+        taskType: "agentmail-message",
+        agentmailInboxId: inbox_id,
+        agentmailMessageId: message_id,
+        agentmailThreadId: thread_id,
+        requestedByUserId,
+        contextKey: agentmailContextKey({ threadId: thread_id }),
+      },
+      { origin: "webhook" },
+    );
 
     console.log(
       `[AgentMail] Created task ${task.id} for lead ${lead.name} (unmapped inbox: ${inbox_id})`,
@@ -390,15 +410,19 @@ export async function handleMessageReceived(
     return { created: false };
   }
 
-  const task = await createTaskWithSiblingAwareness(noAgentResult.text, {
-    source: "agentmail",
-    taskType: "agentmail-message",
-    agentmailInboxId: inbox_id,
-    agentmailMessageId: message_id,
-    agentmailThreadId: thread_id,
-    requestedByUserId,
-    contextKey: agentmailContextKey({ threadId: thread_id }),
-  });
+  const task = await createTaskWithSiblingAwareness(
+    noAgentResult.text,
+    {
+      source: "agentmail",
+      taskType: "agentmail-message",
+      agentmailInboxId: inbox_id,
+      agentmailMessageId: message_id,
+      agentmailThreadId: thread_id,
+      requestedByUserId,
+      contextKey: agentmailContextKey({ threadId: thread_id }),
+    },
+    { origin: "webhook" },
+  );
 
   console.log(`[AgentMail] Created unassigned task ${task.id} (no lead or mapping available)`);
   return { created: true, taskId: task.id };

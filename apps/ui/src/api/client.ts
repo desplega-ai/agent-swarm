@@ -36,6 +36,13 @@ import type {
   CredentialMissingAgentsResponse,
   DashboardCostResponse,
   EventDefinition,
+  Extension,
+  ExtensionBundle,
+  ExtensionInstallInput,
+  ExtensionInstallResult,
+  ExtensionPatchInput,
+  ExtensionRun,
+  ExtensionVersion,
   FavoriteItemType,
   FavoriteSetResponse,
   FavoritesResponse,
@@ -213,6 +220,30 @@ async function throwTriggerSchemaErrorIfMatch(res: Response, genericLabel: strin
     // fall through to the generic throw below
   }
   throw new Error(`${genericLabel}: ${res.status}`);
+}
+
+/**
+ * A rejected extension bundle. `POST /api/extensions/install` answers 400 with
+ * `{ error: "extension_validation_failed", diagnostics: string[] }`; the detail
+ * page renders `diagnostics` inline next to the editor, one line per finding.
+ */
+export class ExtensionInstallError extends Error {
+  readonly diagnostics: string[];
+  constructor(message: string, diagnostics: string[]) {
+    super(message);
+    this.name = "ExtensionInstallError";
+    this.diagnostics = diagnostics;
+  }
+}
+
+/** Unwrap the `{ extension }` envelope every extension lifecycle route answers with. */
+async function extractExtension(res: Response, label: string): Promise<Extension> {
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error || `${label} (${res.status})`);
+  }
+  const data = (await res.json()) as { extension: Extension };
+  return data.extension;
 }
 
 export interface ModelsCatalogResponse {
@@ -1300,6 +1331,100 @@ class ApiClient {
       throw new Error(`${error.error || `Failed to save script (${res.status})`}${detail}`);
     }
     return res.json();
+  }
+
+  // ── Extensions ──
+
+  async fetchExtensions(): Promise<Extension[]> {
+    const url = `${this.getBaseUrl()}/api/extensions`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch extensions: ${res.status}`);
+    const data = (await res.json()) as { extensions: Extension[] };
+    return data.extensions;
+  }
+
+  async fetchExtension(id: string): Promise<ExtensionBundle> {
+    const url = `${this.getBaseUrl()}/api/extensions/${encodeURIComponent(id)}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch extension: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchExtensionVersions(id: string): Promise<ExtensionVersion[]> {
+    const url = `${this.getBaseUrl()}/api/extensions/${encodeURIComponent(id)}/versions`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch extension versions: ${res.status}`);
+    const data = (await res.json()) as { versions: ExtensionVersion[] };
+    return data.versions;
+  }
+
+  async fetchExtensionRuns(id: string, limit = 50): Promise<ExtensionRun[]> {
+    const url = `${this.getBaseUrl()}/api/extensions/${encodeURIComponent(id)}/runs?limit=${limit}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch extension runs: ${res.status}`);
+    const data = (await res.json()) as { runs: ExtensionRun[] };
+    return data.runs;
+  }
+
+  /** `swarm-extension.d.ts` for the Monaco editor. Served as plain text, not JSON. */
+  async fetchExtensionTypeDefs(): Promise<string> {
+    const url = `${this.getBaseUrl()}/api/extensions/type-defs`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch extension type defs: ${res.status}`);
+    return res.text();
+  }
+
+  async installExtension(input: ExtensionInstallInput): Promise<ExtensionInstallResult> {
+    const url = `${this.getBaseUrl()}/api/extensions/install`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        diagnostics?: string[];
+      };
+      const message =
+        body.error === "extension_validation_failed"
+          ? "Bundle validation failed"
+          : body.error || `Failed to install extension (${res.status})`;
+      throw new ExtensionInstallError(message, body.diagnostics ?? []);
+    }
+    return res.json();
+  }
+
+  async patchExtension(id: string, input: ExtensionPatchInput): Promise<Extension> {
+    const url = `${this.getBaseUrl()}/api/extensions/${encodeURIComponent(id)}`;
+    const res = await fetch(url, {
+      method: "PATCH",
+      headers: this.getHeaders(),
+      body: JSON.stringify(input),
+    });
+    return extractExtension(res, "Failed to update extension");
+  }
+
+  async enableExtension(id: string): Promise<Extension> {
+    const url = `${this.getBaseUrl()}/api/extensions/${encodeURIComponent(id)}/enable`;
+    const res = await fetch(url, { method: "POST", headers: this.getHeaders() });
+    return extractExtension(res, "Failed to enable extension");
+  }
+
+  async disableExtension(id: string): Promise<Extension> {
+    const url = `${this.getBaseUrl()}/api/extensions/${encodeURIComponent(id)}/disable`;
+    const res = await fetch(url, { method: "POST", headers: this.getHeaders() });
+    return extractExtension(res, "Failed to disable extension");
+  }
+
+  async activateExtensionVersion(id: string, version: number): Promise<Extension> {
+    const url = `${this.getBaseUrl()}/api/extensions/${encodeURIComponent(id)}/activate-version`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify({ version }),
+    });
+    return extractExtension(res, "Failed to activate extension version");
   }
 
   // ── Script connections ──

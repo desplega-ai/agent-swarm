@@ -152,17 +152,21 @@ export async function routeKapsoInbound(payload: KapsoWebhookPayload): Promise<K
     return { kind: "workflow", workflowId: mapping.workflowId };
   }
 
-  const task = await createTaskWithSiblingAwareness(await buildTaskDescription(payload), {
-    agentId: mapping.agentId ?? null,
-    routingReason: mapping.agentId ? "human_pinned" : undefined,
-    routingSource: mapping.agentId ? "engine_default" : undefined,
-    source: "system",
-    taskType: "kapso-inbound",
-    tags: ["kapso-whatsapp", "inbound"],
-    priority: 70,
-    requestedByUserId: await resolveKapsoRequestedByUserId(payload),
-    contextKey: `kapso:conversation:${payload.conversation?.id ?? messageId}`,
-  });
+  const task = await createTaskWithSiblingAwareness(
+    await buildTaskDescription(payload),
+    {
+      agentId: mapping.agentId ?? null,
+      routingReason: mapping.agentId ? "human_pinned" : undefined,
+      routingSource: mapping.agentId ? "engine_default" : undefined,
+      source: "system",
+      taskType: "kapso-inbound",
+      tags: ["kapso-whatsapp", "inbound"],
+      priority: 70,
+      requestedByUserId: await resolveKapsoRequestedByUserId(payload),
+      contextKey: `kapso:conversation:${payload.conversation?.id ?? messageId}`,
+    },
+    { origin: "webhook" },
+  );
 
   return { kind: "task", taskId: task.id };
 }

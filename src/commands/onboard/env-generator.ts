@@ -16,6 +16,13 @@ export function generateEnv(state: OnboardState): string {
   lines.push(`MCP_BASE_URL=http://localhost:${port}`);
   lines.push("APP_URL=https://app.agent-swarm.dev");
 
+  // Image pin. Blank resolves to `latest`, which moves on every commit to main
+  // and is not a release. Left blank so a fresh install behaves as before;
+  // operators set a published release from
+  // https://github.com/desplega-ai/agent-swarm/releases before depending on it.
+  lines.push("# Pin a release, e.g. AGENT_SWARM_VERSION=1.150.0. Blank tracks `latest`.");
+  lines.push("AGENT_SWARM_VERSION=");
+
   // Install path — read by src/telemetry.ts at boot to attribute the
   // "which entry point produced this install" cohort. Boolean/enum only,
   // never an identifier. Installs that never ran the wizard (hand-written

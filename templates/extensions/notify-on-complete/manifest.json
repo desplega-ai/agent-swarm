@@ -1,0 +1,7 @@
+{
+  "name": "notify-on-complete",
+  "description": "Posts a short summary to a Slack channel when a task completes or fails",
+  "version": "1.0.0",
+  "runtime": "api",
+  "assets": { "hooks": "hooks.ts" }
+}

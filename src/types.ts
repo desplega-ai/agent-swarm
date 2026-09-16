@@ -3,6 +3,7 @@
 // reference them emit `$ref`s and SDK generators produce named types.
 
 import { normalizeAssetKey } from "./assets/key";
+import { isSafeBundlePath } from "./extensions/bundle-path";
 import { MAX_PROFILE_FILE_LENGTH } from "./utils/constants";
 import { z } from "./utils/zod-openapi";
 // ─── Asset namespaces ──────────────────────────────────────────────────────
@@ -2798,6 +2799,136 @@ export const ScriptVersionRecordSchema = z
   })
   .openapi("ScriptVersionRecord");
 export type ScriptVersionRecord = z.infer<typeof ScriptVersionRecordSchema>;
+
+// ============================================================================
+// Extension Types
+// ============================================================================
+
+const ExtensionNameSchema = z
+  .string()
+  .min(1)
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "must be a lowercase slug");
+
+const SemverSchema = z
+  .string()
+  .regex(
+    /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/,
+    "must be a semantic version",
+  );
+
+export const ExtensionManifestSchema = z
+  .object({
+    name: ExtensionNameSchema,
+    description: z.string(),
+    version: SemverSchema,
+    runtime: z.enum(["api", "worker"]),
+    assets: z
+      .object({
+        hooks: z
+          .string()
+          .min(1)
+          .refine(
+            isSafeBundlePath,
+            "Must be a relative POSIX file path without empty, dot, or parent segments, at most 256 characters",
+          ),
+        skills: z.array(z.string()).optional(),
+        workflows: z.array(z.string()).optional(),
+        schedules: z.array(z.string()).optional(),
+      })
+      .strict(),
+    homepage: z.string().url().optional(),
+    author: z.string().min(1).optional(),
+  })
+  .strict()
+  .openapi("ExtensionManifest");
+const _manifestShapeGuard: import("./extensions/contract").ExtensionManifest = {} as z.infer<
+  typeof ExtensionManifestSchema
+>;
+const _manifestSchemaGuard: z.infer<typeof ExtensionManifestSchema> =
+  {} as import("./extensions/contract").ExtensionManifest;
+void _manifestShapeGuard;
+void _manifestSchemaGuard;
+export type ExtensionManifest = z.infer<typeof ExtensionManifestSchema>;
+
+export const ExtensionStatusSchema = z.enum(["disabled", "enabled", "error", "auto-disabled"]);
+export type ExtensionStatus = z.infer<typeof ExtensionStatusSchema>;
+
+export const ExtensionSchema = z
+  .object({
+    id: z.string(),
+    name: ExtensionNameSchema,
+    description: z.string(),
+    runtime: z.enum(["api", "worker"]),
+    manifestJson: z.string(),
+    contentHash: z.string(),
+    version: z.number().int().min(1),
+    activeVersion: z.number().int().min(1),
+    enabled: z.boolean(),
+    priority: z.number().int(),
+    configJson: z.string(),
+    status: ExtensionStatusSchema,
+    consecutiveFailures: z.number().int().min(0),
+    lastError: z.string().nullable(),
+    agentId: z.string().nullable(),
+    createdByAgentId: z.string().nullable(),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+  })
+  .openapi("Extension");
+export type Extension = z.infer<typeof ExtensionSchema>;
+
+export const ExtensionFileSchema = z
+  .object({
+    id: z.string(),
+    extensionId: z.string(),
+    path: z.string(),
+    content: z.string(),
+    contentHash: z.string(),
+  })
+  .openapi("ExtensionFile");
+export type ExtensionFile = z.infer<typeof ExtensionFileSchema>;
+
+export const ExtensionVersionSchema = z
+  .object({
+    id: z.string(),
+    extensionId: z.string(),
+    version: z.number().int().min(1),
+    manifestJson: z.string(),
+    filesJson: z.string(),
+    contentHash: z.string(),
+    changedByAgentId: z.string().nullable(),
+    changedAt: z.string(),
+    changeReason: z.string().nullable(),
+  })
+  .openapi("ExtensionVersion");
+export type ExtensionVersion = z.infer<typeof ExtensionVersionSchema>;
+
+export const ExtensionRunSchema = z
+  .object({
+    id: z.string(),
+    extensionId: z.string(),
+    version: z.number().int().min(1),
+    event: z.string(),
+    action: z.enum(["continue", "modify", "block", "error", "timeout", "load-error"]),
+    durationMs: z.number().int().nullable(),
+    message: z.string().nullable(),
+    agentId: z.string().nullable(),
+    subject: z.string().nullable(),
+    createdAt: z.string(),
+  })
+  .openapi("ExtensionRun");
+export type ExtensionRun = z.infer<typeof ExtensionRunSchema>;
+
+export const ExtensionInstallBodySchema = z
+  .object({
+    manifest: ExtensionManifestSchema,
+    files: z.record(z.string(), z.string()),
+    priority: z.number().int().optional(),
+    config: z.record(z.string(), z.unknown()).optional(),
+  })
+  .strict()
+  .openapi("ExtensionInstallBody");
+export type ExtensionInstallBody = z.infer<typeof ExtensionInstallBodySchema>;
 
 /** Lean projection served by `GET /api/scripts` — omits `source` (payload size) and raw JSON blobs. */
 export type ScriptListItem = Omit<

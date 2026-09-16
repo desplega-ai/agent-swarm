@@ -580,15 +580,19 @@ async function createInitialJiraTask(input: {
     return;
   }
 
-  const task = await createTaskWithSiblingAwareness(result.text, {
-    agentId: lead?.id ?? "",
-    routingReason: lead ? "skill" : undefined,
-    routingSource: lead ? "engine_default" : undefined,
-    source: "jira",
-    taskType: "jira-issue",
-    requestedByUserId: input.requestedByUserId,
-    contextKey: buildJiraContextKey(input.issueKey),
-  });
+  const task = await createTaskWithSiblingAwareness(
+    result.text,
+    {
+      agentId: lead?.id ?? "",
+      routingReason: lead ? "skill" : undefined,
+      routingSource: lead ? "engine_default" : undefined,
+      source: "jira",
+      taskType: "jira-issue",
+      requestedByUserId: input.requestedByUserId,
+      contextKey: buildJiraContextKey(input.issueKey),
+    },
+    { origin: "webhook" },
+  );
 
   await updateTrackerSyncSwarmId(input.syncRowId, task.id);
 
@@ -627,15 +631,19 @@ async function createCommentMentionTask(input: {
     return;
   }
 
-  const task = await createTaskWithSiblingAwareness(result.text, {
-    agentId: lead?.id ?? "",
-    routingReason: lead ? "skill" : undefined,
-    routingSource: lead ? "engine_default" : undefined,
-    source: "jira",
-    taskType: "jira-issue",
-    requestedByUserId: input.requestedByUserId,
-    contextKey: buildJiraContextKey(input.issueKey),
-  });
+  const task = await createTaskWithSiblingAwareness(
+    result.text,
+    {
+      agentId: lead?.id ?? "",
+      routingReason: lead ? "skill" : undefined,
+      routingSource: lead ? "engine_default" : undefined,
+      source: "jira",
+      taskType: "jira-issue",
+      requestedByUserId: input.requestedByUserId,
+      contextKey: buildJiraContextKey(input.issueKey),
+    },
+    { origin: "webhook" },
+  );
 
   await updateTrackerSyncSwarmId(input.syncRowId, task.id);
 

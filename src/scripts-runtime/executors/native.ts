@@ -92,7 +92,11 @@ async function readRuntimeError(
   }
 }
 
-async function writeBareImportShim(tmpdir: string, name: string, targetUrl: URL): Promise<void> {
+export async function writeBareImportShim(
+  tmpdir: string,
+  name: string,
+  targetUrl: URL,
+): Promise<void> {
   const dir = `${tmpdir}/node_modules/${name}`;
   await Bun.$`mkdir -p ${dir}`;
   await Bun.write(`${dir}/package.json`, JSON.stringify({ type: "module", main: "index.ts" }));

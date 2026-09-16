@@ -65,7 +65,7 @@ Use `defer-task` when your current task needs to resume after other work finishe
 }
 ```
 
-The call completes the current task and schedules one continuation for the same agent. `settled` wakes on completion or failure; use `task.completed` or `task.failed` to watch only that outcome. The required delay or `runAt` is the latest scheduled wake-up time if the event does not arrive. Cancellation is not a `settled` event.
+The call completes the current task and schedules one continuation for the same agent. `settled` wakes on completion, failure, or cancellation; use `task.completed` or `task.failed` to watch only that outcome. Cancellation does not match either named event. The required delay or `runAt` is the latest scheduled wake-up time if the event does not arrive.
 
 To wait for several tasks, replace `taskId` inside `wakeOn` with `taskIds`:
 
@@ -77,11 +77,13 @@ To wait for several tasks, replace `taskId` inside `wakeOn` with `taskIds`:
 }
 ```
 
-`mode` defaults to `all`: every member must match the requested event. Set `mode: "any"` to wake on the first matching member. For example, `all` with `settled` accepts a mix of successes and failures; `all` with `task.completed` cannot wake early if one member fails. The single deadline bounds the whole set.
+`mode` defaults to `all`: every member must match the requested event. Set `mode: "any"` to wake on the first matching member. For example, `all` with `settled` accepts a mix of successes, failures, and cancellations; `all` with `task.completed` cannot wake early if one member fails or is cancelled. The single deadline bounds the whole set.
 
 Provide exactly one of `taskId` or a nonempty, unique `taskIds` array. Every watched task must exist, be nonterminal, and differ from the current task. If any member is already terminal, the whole request is rejected before completing the current task or creating a schedule. Read those results and submit only unfinished IDs; terminal IDs are never silently counted as satisfied.
 
 When a member defers, its completion does not count as a match. That member follows its resume task across further deferrals without changing the set's deadline. Disabling or deleting its successor schedule before it runs makes the parent's completion eligible on reconciliation.
+
+When a member is superseded, the wait follows its `resume` child without waking or changing the deadline. This works whether the child is created before or after supersession, including across API restarts. If no resume child exists, the wait holds to its original deadline. Supersession itself never matches an event.
 
 The event and deadline compete for the same durable wait. Only one creates the continuation, including after an API restart. Tasks with an `outputSchema` must also supply schema-valid JSON in `output`; summary and deferral details are stored separately in the task log.
 

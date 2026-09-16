@@ -9,6 +9,8 @@ export interface EmbeddingProvider {
   readonly dimensions: number;
   embed(text: string): Promise<Float32Array | null>;
   embedBatch(texts: string[]): Promise<(Float32Array | null)[]>;
+  /** True when the provider has a usable API key — no network call. */
+  isConfigured(): boolean;
 }
 
 // ============================================================================

@@ -58,6 +58,10 @@ class FakeEmbeddingProvider implements EmbeddingProvider {
     return Promise.all(texts.map((text) => this.embed(text)));
   }
 
+  isConfigured(): boolean {
+    return true;
+  }
+
   reset(): void {
     this.calls.length = 0;
   }

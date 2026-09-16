@@ -5,6 +5,11 @@ import type {
   ShapeOutput,
   ZodRawShapeCompat,
 } from "@modelcontextprotocol/sdk/server/zod-compat.js";
+import {
+  getParseErrorMessage,
+  normalizeObjectSchema,
+  safeParseAsync,
+} from "@modelcontextprotocol/sdk/server/zod-compat.js";
 import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import type {
   CallToolResult,
@@ -23,9 +28,15 @@ import { scrubObject, scrubSecrets } from "../utils/secret-scrubber";
 type Meta = RequestHandlerExtra<ServerRequest, ServerNotification>;
 
 const scriptSdkRequestOrigins = new WeakSet<object>();
+const extensionRequestOrigins = new WeakSet<object>();
 
 export function markScriptSdkRequestOrigin<T extends object>(meta: T): T {
   scriptSdkRequestOrigins.add(meta);
+  return meta;
+}
+
+export function markExtensionRequestOrigin<T extends object>(meta: T): T {
+  extensionRequestOrigins.add(meta);
   return meta;
 }
 
@@ -36,7 +47,7 @@ export type RequestInfo = {
   runtimeInstanceId: string | undefined;
   sourceTaskId: string | undefined;
   contextKey: string | undefined;
-  callOrigin: "mcp" | "script-sdk";
+  callOrigin: "mcp" | "script-sdk" | "extension";
 };
 
 export const getRequestInfo = (req: Meta): RequestInfo => {
@@ -73,7 +84,11 @@ export const getRequestInfo = (req: Meta): RequestInfo => {
     runtimeInstanceId: typeof runtimeInstanceId === "string" ? runtimeInstanceId : undefined,
     sourceTaskId,
     contextKey,
-    callOrigin: scriptSdkRequestOrigins.has(req) ? "script-sdk" : "mcp",
+    callOrigin: extensionRequestOrigins.has(req)
+      ? "extension"
+      : scriptSdkRequestOrigins.has(req)
+        ? "script-sdk"
+        : "mcp",
   };
 };
 
@@ -622,7 +637,7 @@ const ctxControlMiddleware: FinalizeMiddleware = async (result, ctx) => {
   // Calls made through ctx.swarm.* execute inside a script sandbox, so their
   // response never enters the model's context. The script SDK has a separate,
   // much higher hard response limit to protect the sandbox heap.
-  if (ctx.callOrigin === "script-sdk") return result;
+  if (ctx.callOrigin === "script-sdk" || ctx.callOrigin === "extension") return result;
   if (CTX_CONTROL_EXEMPT_TOOLS.has(ctx.toolName)) return result;
 
   const fullWire = composeWireResult(result);
@@ -770,6 +785,85 @@ export function setPreloadedTools(server: McpServer, names: readonly string[]): 
   preloadedToolsByServer.set(server, new Set(names));
 }
 
+type ExtensionDispatcher = typeof import("../extensions/dispatcher");
+
+async function applyPreToolCall(
+  name: string,
+  args: unknown,
+  requestInfo: RequestInfo,
+  inputSchema?: AnySchema | ZodRawShapeCompat,
+): Promise<{
+  args: unknown;
+  blocked?: SwarmToolResult;
+  dispatcher?: ExtensionDispatcher;
+}> {
+  if (requestInfo.callOrigin !== "mcp") return { args };
+
+  const dispatcher = await import("../extensions/dispatcher");
+  const result = await dispatcher.dispatchPre(
+    "pre.tool.call",
+    { tool: name, args, requestInfo },
+    inputSchema
+      ? {
+          validateModify: async (data) => {
+            const schema = normalizeObjectSchema(inputSchema) ?? inputSchema;
+            const parsed = await safeParseAsync(schema as AnySchema, data.args);
+            if (parsed.success) return { success: true, data: { args: parsed.data } };
+
+            const message = scrubSecrets(getParseErrorMessage(parsed.error));
+            console.warn(
+              `[extensions] Ignored invalid arguments from pre.tool.call for ${name}: ${message}`,
+            );
+            return {
+              success: false,
+              error: new Error(`Modified arguments for tool "${name}" are invalid: ${message}`),
+            };
+          },
+        }
+      : {
+          transformModify: ({ extension }) => {
+            const message = scrubSecrets(
+              `[extensions] Ignored pre.tool.call argument rewrite for tool "${name}" from extension "${extension.name}" because the tool has no input schema`,
+            );
+            console.warn(message);
+            throw new Error(message);
+          },
+        },
+  );
+
+  if (result.action === "block") {
+    return {
+      args,
+      blocked: toolErr(result.reason, {
+        details: `Extension "${result.extension.name}" rejected this tool call.`,
+      }),
+      dispatcher,
+    };
+  }
+  return {
+    args: inputSchema && result.action === "modify" ? result.data.args : args,
+    dispatcher,
+  };
+}
+
+function dispatchPostToolCall(
+  dispatcher: ExtensionDispatcher | undefined,
+  name: string,
+  args: unknown,
+  outcome: SwarmToolResult,
+  requestInfo: RequestInfo,
+  durationMs: number,
+): void {
+  if (!dispatcher) return;
+  void dispatcher.dispatchPost("post.tool.call", {
+    tool: name,
+    args,
+    result: outcome,
+    requestInfo,
+    durationMs,
+  });
+}
+
 /**
  * Creates a tool registration helper that automatically extracts request info
  * and passes it as the second parameter to the callback.
@@ -806,13 +900,24 @@ export const createToolRegistrar = (server: McpServer) => {
         return withSpan(
           "mcp.tool",
           async (span) => {
-            const outcome = await (
-              cb as (
-                requestInfo: RequestInfo,
-                meta: Meta,
-              ) => SwarmToolResult | Promise<SwarmToolResult>
-            )(requestInfo, meta);
+            const pre = await applyPreToolCall(name, {}, requestInfo);
+            let durationMs = 0;
+            let outcome = pre.blocked;
+            if (!outcome) {
+              const startedAt = Date.now();
+              try {
+                outcome = await (
+                  cb as (
+                    requestInfo: RequestInfo,
+                    meta: Meta,
+                  ) => SwarmToolResult | Promise<SwarmToolResult>
+                )(requestInfo, meta);
+              } finally {
+                durationMs = Date.now() - startedAt;
+              }
+            }
             const result = await finalizeSwarmToolResult(name, outcome, requestInfo);
+            dispatchPostToolCall(pre.dispatcher, name, {}, outcome, requestInfo, durationMs);
             span.setAttributes(toolResultAttributes(result));
             return result;
           },
@@ -831,14 +936,33 @@ export const createToolRegistrar = (server: McpServer) => {
         // trace tree. Cardinality is bounded — tool names are a fixed enum.
         `mcp.tool ${name}`,
         async (span) => {
-          const outcome = await (
-            cb as (
-              args: InferInput<InputArgs>,
-              requestInfo: RequestInfo,
-              meta: Meta,
-            ) => SwarmToolResult | Promise<SwarmToolResult>
-          )(args, requestInfo, meta);
+          const pre = await applyPreToolCall(name, args, requestInfo, config.inputSchema);
+          const effectiveArgs = pre.args as InferInput<InputArgs>;
+          let durationMs = 0;
+          let outcome = pre.blocked;
+          if (!outcome) {
+            const startedAt = Date.now();
+            try {
+              outcome = await (
+                cb as (
+                  args: InferInput<InputArgs>,
+                  requestInfo: RequestInfo,
+                  meta: Meta,
+                ) => SwarmToolResult | Promise<SwarmToolResult>
+              )(effectiveArgs, requestInfo, meta);
+            } finally {
+              durationMs = Date.now() - startedAt;
+            }
+          }
           const result = await finalizeSwarmToolResult(name, outcome, requestInfo);
+          dispatchPostToolCall(
+            pre.dispatcher,
+            name,
+            effectiveArgs,
+            outcome,
+            requestInfo,
+            durationMs,
+          );
           span.setAttributes(toolResultAttributes(result));
           return result;
         },

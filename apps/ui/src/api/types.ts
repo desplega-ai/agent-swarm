@@ -1451,6 +1451,111 @@ export interface ScriptsResponse {
   scripts: ScriptListItem[];
 }
 
+// Extensions (`extensions` table — mirrors Extension/ExtensionVersion/ExtensionRun in src/types.ts)
+
+export type ExtensionRuntime = "api" | "worker";
+
+export type ExtensionStatus = "disabled" | "enabled" | "error" | "auto-disabled";
+
+/** Bundle manifest — mirrors `ExtensionManifestSchema` in src/types.ts. */
+export interface ExtensionManifest {
+  name: string;
+  description: string;
+  version: string;
+  runtime: ExtensionRuntime;
+  assets: {
+    hooks: string;
+    skills?: string[];
+    workflows?: string[];
+    schedules?: string[];
+  };
+  homepage?: string;
+  author?: string;
+}
+
+export interface Extension {
+  id: string;
+  name: string;
+  description: string;
+  runtime: ExtensionRuntime;
+  manifestJson: string;
+  contentHash: string;
+  version: number;
+  activeVersion: number;
+  enabled: boolean;
+  priority: number;
+  /** Scrubbed server-side on every read path — never round-trip it back into a PATCH. */
+  configJson: string;
+  status: ExtensionStatus;
+  consecutiveFailures: number;
+  lastError: string | null;
+  agentId: string | null;
+  createdByAgentId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Row served by `GET /api/extensions/{id}/versions`. */
+export interface ExtensionVersion {
+  id: string;
+  extensionId: string;
+  version: number;
+  manifestJson: string;
+  filesJson: string;
+  contentHash: string;
+  changedByAgentId: string | null;
+  changedAt: string;
+  changeReason: string | null;
+}
+
+export type ExtensionRunAction =
+  | "continue"
+  | "modify"
+  | "block"
+  | "error"
+  | "timeout"
+  | "load-error";
+
+/** Row served by `GET /api/extensions/{id}/runs`. */
+export interface ExtensionRun {
+  id: string;
+  extensionId: string;
+  version: number;
+  event: string;
+  action: ExtensionRunAction;
+  durationMs: number | null;
+  message: string | null;
+  agentId: string | null;
+  subject: string | null;
+  createdAt: string;
+}
+
+/** `GET /api/extensions/{id}` — the stored record plus its parsed manifest and files. */
+export interface ExtensionBundle {
+  extension: Extension;
+  manifest: ExtensionManifest;
+  files: Record<string, string>;
+}
+
+export interface ExtensionInstallInput {
+  manifest: ExtensionManifest;
+  files: Record<string, string>;
+  priority?: number;
+  config?: Record<string, unknown>;
+}
+
+export interface ExtensionInstallResult {
+  extension: Extension;
+  manifest: ExtensionManifest;
+  contentDeduped: boolean;
+}
+
+export interface ExtensionPatchInput {
+  priority?: number;
+  config?: Record<string, unknown>;
+  description?: string;
+}
+
 // Script connections (`ctx.api.<slug>` / `ctx.mcp.<slug>`)
 export type ScriptConnectionKind = "openapi" | "graphql" | "mcp";
 export type ScriptConnectionScope = "global" | "agent" | "repo";

@@ -169,7 +169,7 @@ export const registerDeferTaskTool = (server: McpServer) => {
           })
           .optional()
           .describe(
-            "Wake early on a task event. Provide taskId or nonempty, unique taskIds. mode defaults to all (every member must match); any wakes on the first match. settled covers completed or failed. Deferred members follow their continuations. Any already-terminal member rejects the request; one delayMs/runAt ceiling is still required for the whole set.",
+            "Wake early on a task event. Provide taskId or nonempty, unique taskIds. mode defaults to all (every member must match); any wakes on the first match. settled covers completed, failed, or cancelled. Deferred and superseded members follow their continuations; a superseded member without a resume child holds to the ceiling. Any already-terminal member rejects the request; one delayMs/runAt ceiling is still required for the whole set.",
           ),
         summary: z
           .string()

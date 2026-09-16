@@ -1,0 +1,9 @@
+{
+  "name": "suppress-lead-follow-up",
+  "description": "Suppresses lead follow-ups for Slack tasks",
+  "version": "1.0.0",
+  "runtime": "api",
+  "assets": {
+    "hooks": "hooks.ts"
+  }
+}

@@ -73,6 +73,11 @@ const testTemplateGlobals = globalThis as typeof globalThis & {
 // so removing the key just forces the fast failure path (~0ms vs ~2s of API calls).
 delete process.env.OPENROUTER_API_KEY;
 
+// Deployment flags must not change the test suite's default registration and
+// task-admission contracts. Multi-runtime suites opt in by setting this to "true"
+// and restore it (or delete it, which also defaults to disabled) themselves.
+process.env.MULTI_RUNTIME_ENABLED = "false";
+
 // Fixed fixture key for deterministic test runs (32 bytes of 0x00, base64-encoded).
 // Never used in production — the key bootstrap's `:memory:` special case requires
 // an explicit env-var key, so we set one here before initDb runs. Individual tests

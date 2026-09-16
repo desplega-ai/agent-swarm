@@ -28,6 +28,10 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
       : (process.env.EMBEDDING_MODEL ?? DEFAULT_EMBEDDING_MODEL);
   }
 
+  isConfigured(): boolean {
+    return !!this.apiKey;
+  }
+
   private getClient(): OpenAI | null {
     if (!this.apiKey) return null;
     if (!this.client)

@@ -10,10 +10,11 @@ cd "$(dirname "$0")/.."
 # DATABASE_PATH), so build:script-types and this check see the same
 # deterministic clean-DB baseline.
 bun scripts/bundle-script-types.ts
+bun scripts/bundle-extension-types.ts
 
-if [ -n "$(git diff --name-only src/scripts-runtime/types/)" ]; then
-  echo "::error::script SDK types are out of date! Run 'bun run build:script-types' and commit the changes. Source of truth: src/be/scripts/typecheck.ts — never edit the .d.ts files directly."
-  git diff --stat src/scripts-runtime/types/
+if [ -n "$(git diff --name-only src/scripts-runtime/types/ src/extensions/contract-types.generated.ts)" ]; then
+  echo "::error::script or extension types are out of date! Run 'bun run build:script-types' and 'bun run build:extension-types', then commit the changes. Never edit generated .d.ts files directly."
+  git diff --stat src/scripts-runtime/types/ src/extensions/contract-types.generated.ts
   exit 1
 fi
 
