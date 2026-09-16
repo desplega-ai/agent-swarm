@@ -5,7 +5,12 @@ import * as db from "../be/db";
 import { upsertScriptByName } from "../be/scripts/db";
 import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
 import * as scheduleTask from "../scheduler/schedule-task";
-import { executeSchedule, startScheduler, stopScheduler } from "../scheduler/scheduler";
+import {
+  executeSchedule,
+  runScheduleNow,
+  startScheduler,
+  stopScheduler,
+} from "../scheduler/scheduler";
 import * as scripts from "../scripts-runtime/loader";
 import { ExecutorRegistry } from "../workflows/executors/registry";
 
@@ -138,6 +143,41 @@ test("a rescheduled or disabled snapshot loses its claim", async () => {
   expect(dispatch).not.toHaveBeenCalled();
 });
 
+test("schedule advancement failure prevents dispatch and leaves the claim uncommitted", async () => {
+  const schedule = await dueSchedule();
+  await db.getDbClient().run(`CREATE TRIGGER fail_schedule_advance
+    BEFORE UPDATE OF lastRunAt ON scheduled_tasks
+    BEGIN SELECT RAISE(ABORT, 'injected advancement failure'); END`);
+  try {
+    await executeSchedule(schedule);
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(await tasksFor(schedule.id)).toHaveLength(0);
+    const failed = (await db.getScheduledTaskById(schedule.id))!;
+    expect(failed.lastRunAt).toBeUndefined();
+    expect(failed.consecutiveErrors).toBe(1);
+    expect(failed.lastErrorMessage).toBe("injected advancement failure");
+  } finally {
+    await db.getDbClient().run("DROP TRIGGER fail_schedule_advance");
+  }
+
+  await executeSchedule((await db.getScheduledTaskById(schedule.id))!);
+  expect(dispatch).toHaveBeenCalledTimes(1);
+  expect(await tasksFor(schedule.id)).toHaveLength(1);
+});
+
+test("concurrent manual runs remain independent of the scheduled occurrence", async () => {
+  const schedule = await dueSchedule();
+  await Promise.all([runScheduleNow(schedule.id), runScheduleNow(schedule.id)]);
+  const manualTasks = await tasksFor(schedule.id);
+  expect(manualTasks).toHaveLength(2);
+  for (const task of manualTasks) expect(JSON.parse(task.tags)).toContain("manual-run");
+  expect((await db.getScheduledTaskById(schedule.id))?.nextRunAt).toBe(schedule.nextRunAt);
+
+  await executeSchedule(schedule);
+  expect(await tasksFor(schedule.id)).toHaveLength(3);
+  expect((await db.getScheduledTaskById(schedule.id))?.nextRunAt).not.toBe(schedule.nextRunAt);
+});
+
 test.each([
   "recurring",
   "one_time",
@@ -208,6 +248,35 @@ test("a slow failed dispatch cannot overwrite a newer occurrence", async () => {
   } finally {
     release.resolve();
     await first;
+  }
+});
+
+test("recovery rejects a snapshot claimed while its due read was pending", async () => {
+  const schedule = await dueSchedule();
+  const captured = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const getDue = db.getDueScheduledTasks;
+  const due = spyOn(db, "getDueScheduledTasks").mockImplementationOnce(async () => {
+    const snapshot = await getDue();
+    captured.resolve();
+    await release.promise;
+    return snapshot;
+  });
+  try {
+    startScheduler(new ExecutorRegistry(), 60_000);
+    await captured.promise;
+    await executeSchedule(schedule);
+    const claimed = await db.getScheduledTaskById(schedule.id);
+    release.resolve();
+    // The second read is normal polling, after recovery consumed its stale list.
+    await waitUntil(() => due.mock.calls.length >= 2);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(await tasksFor(schedule.id)).toHaveLength(1);
+    expect(await db.getScheduledTaskById(schedule.id)).toEqual(claimed);
+  } finally {
+    release.resolve();
+    stopScheduler();
+    due.mockRestore();
   }
 });
 
