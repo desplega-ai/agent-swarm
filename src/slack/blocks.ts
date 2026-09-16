@@ -555,7 +555,7 @@ export function buildTreeBlocks(roots: TreeNode[]): SlackBlock[] {
   );
 
   const treeTexts = roots.map(renderTree);
-  const blocks: SlackBlock[] = [sectionBlock(treeTexts.join("\n\n"))];
+  const blocks: SlackBlock[] = treeTexts.length > 0 ? [sectionBlock(treeTexts.join("\n\n"))] : [];
 
   // Attachment blocks for completed nodes, with per-tree-message cap.
   const attachmentNodes = collectAttachmentNodes(roots);
