@@ -3,6 +3,7 @@ import { getApiKey } from "@/utils/api-key";
 import { getMcpBaseUrl } from "@/utils/constants";
 import {
   type RequestInfo,
+  type SwarmToolData,
   type SwarmToolResult,
   swarmToolOutputSchema,
   toolErr,
@@ -161,7 +162,37 @@ export async function proxyScriptsApi(args: {
    */
   uncappedDetails?: boolean;
 }): Promise<SwarmToolResult> {
-  if (!args.requestInfo.agentId) return toolErr(SCRIPT_TRANSPORT_ERROR);
+  return proxySwarmApi({
+    ...args,
+    transportError: SCRIPT_TRANSPORT_ERROR,
+    respond: (data, res) => {
+      const toolData = { status: res.status, data };
+      const failure = describeScriptFailure(res.ok, res.status, data);
+      if (failure) {
+        return toolErr(failure.message, {
+          details: failure.details ?? capDetails(args.failureDetails?.(data)),
+          data: toolData,
+        });
+      }
+
+      const successDetails = args.successDetails?.(data);
+      return toolOk(args.successMessage(data), {
+        details: args.uncappedDetails ? successDetails : capDetails(successDetails),
+        data: toolData,
+      });
+    },
+  });
+}
+
+export async function proxySwarmApi<T extends Record<string, unknown>>(args: {
+  method: "GET" | "POST" | "PATCH" | "DELETE";
+  path: string;
+  body?: unknown;
+  requestInfo: RequestInfo;
+  transportError: string;
+  respond: (data: unknown, response: { ok: boolean; status: number }) => SwarmToolResult<T>;
+}): Promise<SwarmToolResult<T>> {
+  if (!args.requestInfo.agentId) return toolErr(args.transportError);
 
   const apiKey = getApiKey();
   const headers: Record<string, string> = {
@@ -172,8 +203,7 @@ export async function proxyScriptsApi(args: {
   if (args.requestInfo.sourceTaskId) {
     headers["X-Source-Task-Id"] = args.requestInfo.sourceTaskId;
   }
-  // Runtime identity is process context from the worker's MCP session — it
-  // rides the proxy like the agent identity, never as tool or script input.
+  // Forward runtime identity from the worker's MCP session, like agent identity.
   if (args.requestInfo.runtimeInstanceId) {
     headers["X-Runtime-Instance-ID"] = args.requestInfo.runtimeInstanceId;
   }
@@ -190,25 +220,16 @@ export async function proxyScriptsApi(args: {
       data = JSON.parse(text);
     } catch {
       const contentType = res.headers.get("content-type") ?? "unknown";
-      return toolErr(
-        `Scripts API returned non-JSON response (HTTP ${res.status}, Content-Type: ${contentType}). Check API/proxy routing.`,
-        { details: capDetails(text), data: { status: res.status } },
+      // Transport-level failure: only `{ status }` is known here, and that shape
+      // is not statically related to the caller's `T`. Tool output schemas are
+      // loose with every data field optional, so the wire result stays valid.
+      const transportData: SwarmToolData = { status: res.status };
+      return toolErr<T>(
+        `Swarm API returned non-JSON response (HTTP ${res.status}, Content-Type: ${contentType}). Check API/proxy routing.`,
+        { details: capDetails(text), data: transportData as T },
       );
     }
   }
 
-  const toolData = { status: res.status, data };
-  const failure = describeScriptFailure(res.ok, res.status, data);
-  if (failure) {
-    return toolErr(failure.message, {
-      details: failure.details ?? capDetails(args.failureDetails?.(data)),
-      data: toolData,
-    });
-  }
-
-  const successDetails = args.successDetails?.(data);
-  return toolOk(args.successMessage(data), {
-    details: args.uncappedDetails ? successDetails : capDetails(successDetails),
-    data: toolData,
-  });
+  return args.respond(data, res);
 }

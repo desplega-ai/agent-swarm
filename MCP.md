@@ -52,6 +52,8 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [script-apis](#script-apis)
   - [script-run](#script-run)
   - [script-upsert](#script-upsert)
+  - [extension-install](#extension-install)
+  - [extension-list](#extension-list)
   - [script-delete](#script-delete)
   - [script-query-types](#script-query-types)
   - [launch-script-run](#launch-script-run)
@@ -630,6 +632,25 @@ Manage external HTTP API endpoints for swarm scripts (POST /api/x/script/<id>). 
 | `intent` | `string` | No | "" | Why this script exists. |
 | `scope` | `unknown` | No | "agent" | Persist under agent or global scope. |
 | `fsMode` | `unknown` | No | "none" | Filesystem mode. v1 supports none only. |
+
+### extension-install
+
+**Extension Install**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `manifest` | `unknown` | Yes | - | Extension bundle manifest. |
+| `files` | `object` | Yes | - | Bundle files keyed by relative path. |
+| `priority` | `number` | No | - | Handler priority. Lower values run first. |
+| `config` | `object` | No | - | Extension configuration. |
+
+### extension-list
+
+**Extension List**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `enabledOnly` | `boolean` | No | - | Return only enabled extensions. |
 
 ### script-delete
 

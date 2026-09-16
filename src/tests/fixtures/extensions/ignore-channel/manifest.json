@@ -1,0 +1,9 @@
+{
+  "name": "ignore-channel",
+  "description": "Ignores Slack messages in one configured channel",
+  "version": "1.0.0",
+  "runtime": "api",
+  "assets": {
+    "hooks": "hooks.ts"
+  }
+}

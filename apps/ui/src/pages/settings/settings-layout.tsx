@@ -1,4 +1,5 @@
 import {
+  Blocks,
   Bug,
   Cable,
   Key,
@@ -39,6 +40,7 @@ const SETTINGS_NAV: SettingsNavItem[] = [
   { title: "API Keys", path: "/settings/api-keys", icon: Key },
   { title: "Integrations", path: "/settings/integrations", icon: Plug },
   { title: "Configuration", path: "/settings/configuration", icon: SlidersHorizontal },
+  { title: "Extensions", path: "/settings/extensions", icon: Blocks },
   { title: "Repos", path: "/settings/repos", icon: SettingsIcon },
   { title: "Debug", path: "/settings/debug", icon: Bug },
 ];

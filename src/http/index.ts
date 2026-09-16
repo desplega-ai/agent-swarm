@@ -25,6 +25,11 @@ import {
 } from "../be/rbac-audit";
 import { startScratchScriptGc, stopScratchScriptGc } from "../be/scripts/retention";
 import { seedLegacyCapabilitiesConfig } from "../be/seed-capabilities";
+import {
+  loadEnabledExtensions,
+  setExtensionLoopbackBaseUrl,
+  stopExtensionRuntime,
+} from "../extensions/lifecycle";
 import { initGitHub } from "../github";
 import { initGitLab } from "../gitlab";
 import { stopHeartbeat } from "../heartbeat";
@@ -65,6 +70,7 @@ import { handleCore, loadGlobalConfigsIntoEnv } from "./core";
 import { handleDbQuery } from "./db-query";
 import { handleEcosystem } from "./ecosystem";
 import { handleEvents } from "./events";
+import { handleExtensions } from "./extensions";
 import { handleFavorites } from "./favorites";
 import { handleFs } from "./fs";
 import { handleHeartbeat } from "./heartbeat";
@@ -151,6 +157,7 @@ const globalState = globalThis as typeof globalThis & {
   __apiGcInterval?: ReturnType<typeof setInterval>;
   __runId?: string;
   __closeRealtime?: () => void;
+  __stopExtensions?: () => Promise<void>;
 };
 
 const API_GC_INTERVAL_MS = 5 * 60 * 1000;
@@ -216,6 +223,7 @@ function startApiGcInterval() {
 // Clean up previous server on hot reload
 if (globalState.__httpServer) {
   globalState.__closeRealtime?.();
+  await globalState.__stopExtensions?.();
   console.log("[HTTP] Hot reload detected, closing previous server...");
   globalState.__httpServer.close();
 }
@@ -363,6 +371,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleApiKeys(req, res, pathSegments, queryParams),
         () => handleHeartbeat(req, res, pathSegments),
         () => handleEvents(req, res, pathSegments, queryParams, myAgentId),
+        () => handleExtensions(req, res, pathSegments, queryParams, myAgentId),
         () => handleFavorites(req, res, pathSegments, queryParams, myAgentId),
         () => handleUsers(req, res, pathSegments, queryParams),
         () => handleSessions(req, res, pathSegments, queryParams),
@@ -431,6 +440,7 @@ globalState.__mcpSessionAgents = mcpSessionAgents;
 globalState.__sessionUsers = sessionUsers;
 globalState.__transportActivity = transportActivity;
 globalState.__transportActivityUser = transportActivityUser;
+globalState.__stopExtensions = stopExtensionRuntime;
 
 async function shutdown() {
   globalState.__closeRealtime?.();
@@ -476,6 +486,8 @@ async function shutdown() {
 
   // Stop scratch-script retention garbage collector
   stopScratchScriptGc();
+
+  await stopExtensionRuntime();
 
   // Stop RBAC audit: retention GC, flush interval, final drain, detach sink
   stopAuditGc();
@@ -610,6 +622,15 @@ try {
   console.error("[startup] Failed to seed built-in entities:", err);
 }
 
+try {
+  await loadEnabledExtensions();
+} catch (err) {
+  console.error(
+    "[startup] Failed to initialize extensions:",
+    scrubSecrets(err instanceof Error ? err.message : String(err)),
+  );
+}
+
 // Wire the RBAC permission-audit sink into can() and start the batched writer
 // (2s flush) + retention GC (daily tick) BEFORE the server accepts traffic —
 // installing it inside the listen callback would leave an unaudited startup
@@ -627,6 +648,10 @@ await initOtel("api");
 
 httpServer
   .listen(port, async () => {
+    const boundAddress = httpServer.address();
+    if (boundAddress && typeof boundAddress === "object") {
+      setExtensionLoopbackBaseUrl(`http://127.0.0.1:${boundAddress.port}`);
+    }
     console.log(`MCP HTTP server running on http://localhost:${port}/mcp`);
 
     ensure({

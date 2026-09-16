@@ -1,0 +1,9 @@
+{
+  "name": "route-channel-to-agent",
+  "description": "Routes one Slack channel to a configured agent",
+  "version": "1.0.0",
+  "runtime": "api",
+  "assets": {
+    "hooks": "hooks.ts"
+  }
+}

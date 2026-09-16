@@ -499,6 +499,15 @@ declare module "swarm-sdk" {
       offset?: number;
     }): Promise<unknown>;
 
+    // --- write: extensions ---
+    extension_install(args: {
+      manifest: Record<string, unknown>;
+      files: Record<string, string>;
+      priority?: number;
+      config?: Record<string, unknown>;
+    }): Promise<unknown>;
+    extension_list(args?: { enabledOnly?: boolean }): Promise<unknown>;
+
     // --- write: repos ---
     repo_update(args: Record<string, unknown>): Promise<unknown>;
 

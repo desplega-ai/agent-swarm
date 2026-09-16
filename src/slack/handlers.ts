@@ -1,14 +1,19 @@
 import type { App } from "@slack/bolt";
 import type { WebClient } from "@slack/web-api";
+import { z } from "zod";
 import {
   getAgentById,
   getAgentWorkingOnThread,
+  getAllAgents,
   getLeadAgent,
   getMostRecentTaskInThread,
   getTasksByAgentId,
 } from "../be/db";
+import { dispatchPre } from "../extensions/dispatcher";
 import { resolveTemplate } from "../prompts/resolver";
 import { slackContextKey } from "../tasks/context-key";
+import { TaskCreationBlockedError } from "../tasks/errors";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import { workflowEventBus } from "../workflows/event-bus";
 import { ackSlackMessage, reactionName } from "./ack";
 import { buildTreeBlocks, type TreeNode } from "./blocks";
@@ -22,7 +27,13 @@ import {
   notifySlackFileFailures,
   type SlackFileFailure,
 } from "./inbound-files";
-import { extractTaskFromMessage, hasOtherUserMention, routeMessage } from "./router";
+import {
+  broadcastMatches,
+  extractTaskFromMessage,
+  hasOtherUserMention,
+  routeMessage,
+} from "./router";
+import type { AgentMatch } from "./types";
 // Side-effect import: registers all Slack event templates in the in-memory registry
 import "./templates";
 import { isEnvFlagEnabled } from "../utils/env-flag";
@@ -31,6 +42,17 @@ import { ensureSlackThreadTree, isSlackRenderV2Enabled } from "./render-v2";
 import { formatSlackSteeringAck, requestSlackThreadSteering } from "./steering";
 import { bufferThreadMessage, getBufferMessageCount, instantFlush } from "./thread-buffer";
 import { registerTreeMessage } from "./watcher";
+
+/** Runtime check for `pre.slack.route` modifications (mirrors `SlackRouteModify`). */
+const SlackRouteModifySchema = z
+  .object({
+    target: z.discriminatedUnion("kind", [
+      z.object({ kind: z.literal("agent"), agentId: z.string().min(1) }).strict(),
+      z.object({ kind: z.literal("lead") }).strict(),
+      z.object({ kind: z.literal("broadcast") }).strict(),
+    ]),
+  })
+  .strict();
 
 // User filtering configuration from environment variables
 const allowedEmailDomains = (process.env.SLACK_ALLOWED_EMAIL_DOMAINS || "")
@@ -444,11 +466,13 @@ export function registerMessageHandler(app: App): void {
       sampleContext: msg.text ?? "",
     });
 
-    // Emit workflow trigger event for Slack messages
+    // Keep channel/user for legacy consumers and channelId/userId for the extension contract.
     workflowEventBus.emit("slack.message", {
       channel: msg.channel,
+      channelId: msg.channel,
       text: msg.text,
       user: msg.user,
+      userId: msg.user,
       ts: msg.ts,
       threadTs: msg.thread_ts,
     });
@@ -557,7 +581,61 @@ export function registerMessageHandler(app: App): void {
     const routingThreadContext = msg.thread_ts
       ? { channelId: msg.channel, threadTs: msg.thread_ts }
       : undefined;
-    const matches = await routeMessage(
+    const routeResult = await dispatchPre(
+      "pre.slack.route",
+      {
+        channelId: msg.channel,
+        userId: msg.user,
+        text: routingText,
+        ...(msg.thread_ts ? { threadTs: msg.thread_ts } : {}),
+        botMentioned: botMentioned || isImplicitMention,
+        ...(routingThreadContext ? { threadContext: routingThreadContext } : {}),
+      },
+      {
+        // A runtime-invalid target (missing, null, unknown kind) is an extension
+        // failure, not a routing input; the built-in router keeps handling the message.
+        validateModify: (data) => {
+          const parsed = SlackRouteModifySchema.safeParse(data);
+          return parsed.success
+            ? { success: true, data: parsed.data }
+            : { success: false, error: new Error(parsed.error.message) };
+        },
+      },
+    );
+    if (routeResult.action === "block") {
+      console.info("[Slack] Extension blocked message routing:", scrubSecrets(routeResult.reason));
+      return;
+    }
+
+    let matches: AgentMatch[] | undefined;
+    if (routeResult.action === "modify") {
+      const { target } = routeResult.data;
+      if (target.kind === "agent") {
+        const agent = await getAgentById(target.agentId);
+        if (agent) {
+          matches = [{ agent, matchedText: "extension" }];
+        } else {
+          console.warn(
+            "[Slack] Extension selected an unknown agent. Using the built-in router:",
+            scrubSecrets(target.agentId),
+          );
+        }
+      } else if (target.kind === "lead") {
+        const leadAgent = await getLeadAgent();
+        if (leadAgent) {
+          matches = [{ agent: leadAgent, matchedText: "extension" }];
+        } else {
+          console.warn(
+            scrubSecrets(
+              "[Slack] Extension selected the lead, but no lead exists. Using the built-in router.",
+            ),
+          );
+        }
+      } else {
+        matches = broadcastMatches(await getAllAgents());
+      }
+    }
+    matches ??= await routeMessage(
       routingText,
       botUserId,
       botMentioned || isImplicitMention,
@@ -785,8 +863,11 @@ export function registerMessageHandler(app: App): void {
         } else {
           results.assigned.push({ agentName: agent.name, taskId: task.id });
         }
-      } catch {
-        results.failed.push({ agentName: agent.name, reason: "error" });
+      } catch (error) {
+        results.failed.push({
+          agentName: agent.name,
+          reason: error instanceof TaskCreationBlockedError ? error.reason : "error",
+        });
       }
     }
 
@@ -802,6 +883,18 @@ export function registerMessageHandler(app: App): void {
       );
       if (isSlackRenderV2Enabled()) {
         if (successfulTaskIds.length > 0) await ensureSlackThreadTree(successfulTaskIds);
+        // The tree only renders tasks that exist. A blocked or failed assignment must
+        // still be answered, or the user gets silence for a policy block.
+        if (results.failed.length > 0) {
+          const failedLines = results.failed
+            .map((f) => `⚠️ Could not assign to: *${f.agentName}* — ${f.reason}`)
+            .join("\n");
+          await say({
+            text: `Could not assign to: ${results.failed.map((f) => f.agentName).join(", ")}`,
+            blocks: [{ type: "context", elements: [{ type: "mrkdwn", text: failedLines }] }],
+            thread_ts: msg.thread_ts || msg.ts,
+          });
+        }
       } else {
         // Build initial tree nodes from assignment results
         const initialNodes: TreeNode[] = results.assigned.map(({ agentName, taskId }) => ({

@@ -30,6 +30,8 @@ import { registerDbQueryTool } from "./tools/db-query";
 import { registerDeferTaskTool } from "./tools/defer-task";
 import { registerDeleteChannelTool } from "./tools/delete-channel";
 import { registerDeletePageTool } from "./tools/delete-page";
+import { registerExtensionInstallTool } from "./tools/extension-install";
+import { registerExtensionListTool } from "./tools/extension-list";
 import { registerGetMetricsTool } from "./tools/get-metrics";
 import { registerGetSwarmTool } from "./tools/get-swarm";
 import { registerGetTaskDetailsTool } from "./tools/get-task-details";
@@ -338,6 +340,8 @@ export async function createServer(
     registerScriptSearchTool(server);
     registerScriptRunTool(server);
     registerScriptUpsertTool(server);
+    registerExtensionInstallTool(server);
+    registerExtensionListTool(server);
     registerScriptDeleteTool(server);
     registerScriptQueryTypesTool(server);
     registerScriptRunsTools(server);
@@ -398,6 +402,8 @@ export async function createServer(
     registerScriptApisTool(server);
     registerScriptRunTool(server);
     registerScriptUpsertTool(server);
+    registerExtensionInstallTool(server);
+    registerExtensionListTool(server);
     registerScriptDeleteTool(server);
     registerScriptQueryTypesTool(server);
     registerScriptRunsTools(server);

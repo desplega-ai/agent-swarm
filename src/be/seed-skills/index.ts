@@ -200,6 +200,12 @@ import stepRunningConfig from "../../../templates/skills/step-running/config.jso
 import stepRunningContent from "../../../templates/skills/step-running/content.md" with {
   type: "text",
 };
+import swarmExtensionsConfig from "../../../templates/skills/swarm-extensions/config.json" with {
+  type: "text",
+};
+import swarmExtensionsContent from "../../../templates/skills/swarm-extensions/content.md" with {
+  type: "text",
+};
 import swarmScriptsConfig from "../../../templates/skills/swarm-scripts/config.json" with {
   type: "text",
 };
@@ -347,6 +353,7 @@ const BUILT_IN_SKILL_SOURCES = [
   { config: reviewingConfig, body: reviewingContent },
   { config: scheduledTaskResilienceConfig, body: scheduledTaskResilienceContent },
   { config: schedulingConfig, body: schedulingContent },
+  { config: swarmExtensionsConfig, body: swarmExtensionsContent },
   { config: scriptBuilderConfig, body: scriptBuilderContent },
   { config: scriptWorkflowsConfig, body: scriptWorkflowsContent },
   { config: slackInteractionConfig, body: slackInteractionContent },

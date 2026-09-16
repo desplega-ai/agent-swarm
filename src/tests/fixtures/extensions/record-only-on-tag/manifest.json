@@ -1,0 +1,9 @@
+{
+  "name": "record-only-on-tag",
+  "description": "Skips heartbeat remediation for tasks with a configured tag",
+  "version": "1.0.0",
+  "runtime": "api",
+  "assets": {
+    "hooks": "hooks.ts"
+  }
+}

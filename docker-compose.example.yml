@@ -16,11 +16,34 @@
 #  In isolated environments where each container has its own network namespace,
 #  you may map all services to the same port (e.g. 3000:3000).
 #
+# Upgrading from an install that mounted `swarm_api:/app`:
+#  The API volume is now `swarm_api_data:/app/data`. The old `/app` mount
+#  shadowed the image's `migrations/` directory, so the API upgraded its code
+#  but kept the migrations it first booted with. Copy your database over before
+#  starting, or the API comes up against an empty database:
+#    docker run --rm -v swarm_api:/old -v swarm_api_data:/new alpine \
+#      sh -c 'cp -a /old/data/. /new/'
+#  Full procedure, including the backup to take first:
+#  https://github.com/desplega-ai/agent-swarm/blob/main/skills/agent-swarm/references/upgrade.md
+#
+# Image version (recommended for anything you depend on):
+#  The API and agent services resolve their tag from AGENT_SWARM_VERSION in
+#  .env. Leaving it blank falls back to `latest`, which is rebuilt and moved on
+#  EVERY commit to main — it is not a release, and `pull_policy: always` means
+#  each `up -d` can silently move the deployment to a newer build.
+#  Pin it to a published release instead, and keep the API and all agents on the
+#  same version. Releases: https://github.com/desplega-ai/agent-swarm/releases
+#    AGENT_SWARM_VERSION=1.150.0
+#  Migrations are forward-only, so re-pinning to an older tag is NOT a rollback.
+#  Back up the database and encryption key before upgrading. Procedure:
+#  https://github.com/desplega-ai/agent-swarm/blob/main/skills/agent-swarm/references/upgrade.md
+#
 # HTTPS (optional):
 #  Start with `--profile tls` to add a Caddy reverse proxy that obtains
 #  Let's Encrypt certificates automatically for SWARM_API_DOMAIN (-> api)
-#  and AGENT_FS_DOMAIN (-> agent-fs). Set both domains, point their DNS at
-#  this host, open ports 80/443, and set PUBLIC_MCP_BASE_URL=https://<api domain>.
+#  and AGENT_FS_DOMAIN (-> agent-fs UI/API and MinIO signed previews).
+#  Set both domains and point their DNS at this host. Open ports 80/443,
+#  and set PUBLIC_MCP_BASE_URL=https://<api domain>.
 #  Requires Docker Compose v2.23.1+ (inline `configs.content`).
 #
 # Provider mapping: claude -> claude, openai -> codex, openrouter -> pi,
@@ -49,7 +72,7 @@ x-agent-entrypoint: &agent-entrypoint
 services:
   # Use quay.io because MinIO's Docker Hub repositories were removed.
   minio:
-    image: quay.io/minio/minio:latest
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -67,7 +90,7 @@ services:
     restart: unless-stopped
 
   minio-init:
-    image: quay.io/minio/mc:latest
+    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
     depends_on:
       minio:
         condition: service_healthy
@@ -91,7 +114,9 @@ services:
       - PORT=7433
       - SERVER_PORT=7433
       - S3_ENDPOINT=http://minio:9000
-      - S3_PUBLIC_ENDPOINT=${AGENT_FS_S3_PUBLIC_ENDPOINT:-http://localhost:9000}
+      # Browsers fetch signed previews directly: use the HTTPS file domain when
+      # configured, otherwise local MinIO. An explicit public endpoint wins.
+      - S3_PUBLIC_ENDPOINT=${AGENT_FS_S3_PUBLIC_ENDPOINT:-${AGENT_FS_DOMAIN:+https://}${AGENT_FS_DOMAIN:-http://localhost:9000}}
       - S3_BUCKET=agentfs
       - S3_ACCESS_KEY_ID=minioadmin
       - S3_SECRET_ACCESS_KEY=minioadmin
@@ -119,7 +144,7 @@ services:
     restart: unless-stopped
 
   api:
-    image: "ghcr.io/desplega-ai/agent-swarm:latest"
+    image: "ghcr.io/desplega-ai/agent-swarm:${AGENT_SWARM_VERSION:-latest}"
     platform: linux/amd64
     pull_policy: always
     stop_grace_period: 60s
@@ -208,7 +233,16 @@ services:
       - "3013:3013"
 
     volumes:
-      - swarm_api:/app
+      # Mount ONLY the data directory. A named volume copies image content on
+      # first population and then shadows that path forever, so mounting `/app`
+      # freezes everything the image ships there — `migrations/`, `package.json`,
+      # `extensions/`, `scripts-runtime/`, `script-types/`, `typescript-lib/`,
+      # `vendored-openapi/` — at install time. The compiled binary lives outside
+      # `/app` (`/usr/local/bin/agent-swarm-api`), so the code upgrades while its
+      # migrations do not, and the API then queries schema no migration created.
+      # `/app/data` holds everything that must persist: the SQLite database
+      # (DATABASE_PATH) and `.page-session-secret` beside it.
+      - swarm_api_data:/app/data
       # Slack files an agent fetches with `slack-download-file` / `slack-read`
       # from a task become task attachments (stored through the file provider),
       # so workers need no shared disk with the API. Only the no-task fallback
@@ -234,7 +268,7 @@ services:
     restart: unless-stopped
 
   lead:
-    image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
+    image: "ghcr.io/desplega-ai/agent-swarm-worker:${AGENT_SWARM_VERSION:-latest}"
     entrypoint: *agent-entrypoint
     platform: linux/amd64
     pull_policy: always
@@ -293,7 +327,7 @@ services:
     restart: unless-stopped
 
   worker-1:
-    image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
+    image: "ghcr.io/desplega-ai/agent-swarm-worker:${AGENT_SWARM_VERSION:-latest}"
     entrypoint: *agent-entrypoint
     platform: linux/amd64
     pull_policy: always
@@ -350,7 +384,7 @@ services:
     restart: unless-stopped
 
   worker-2:
-    image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
+    image: "ghcr.io/desplega-ai/agent-swarm-worker:${AGENT_SWARM_VERSION:-latest}"
     entrypoint: *agent-entrypoint
     platform: linux/amd64
     pull_policy: always
@@ -407,7 +441,7 @@ services:
     restart: unless-stopped
 
   worker-researcher:
-    image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
+    image: "ghcr.io/desplega-ai/agent-swarm-worker:${AGENT_SWARM_VERSION:-latest}"
     entrypoint: *agent-entrypoint
     platform: linux/amd64
     pull_policy: always
@@ -464,7 +498,7 @@ services:
     restart: unless-stopped
 
   worker-reviewer:
-    image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
+    image: "ghcr.io/desplega-ai/agent-swarm-worker:${AGENT_SWARM_VERSION:-latest}"
     entrypoint: *agent-entrypoint
     platform: linux/amd64
     pull_policy: always
@@ -521,7 +555,7 @@ services:
     restart: unless-stopped
 
   worker-tester:
-    image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
+    image: "ghcr.io/desplega-ai/agent-swarm-worker:${AGENT_SWARM_VERSION:-latest}"
     entrypoint: *agent-entrypoint
     platform: linux/amd64
     pull_policy: always
@@ -578,7 +612,7 @@ services:
     restart: unless-stopped
 
   worker-forward-deployed-engineer:
-    image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
+    image: "ghcr.io/desplega-ai/agent-swarm-worker:${AGENT_SWARM_VERSION:-latest}"
     entrypoint: *agent-entrypoint
     platform: linux/amd64
     pull_policy: always
@@ -635,7 +669,7 @@ services:
     restart: unless-stopped
 
   worker-content-writer:
-    image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
+    image: "ghcr.io/desplega-ai/agent-swarm-worker:${AGENT_SWARM_VERSION:-latest}"
     entrypoint: *agent-entrypoint
     platform: linux/amd64
     pull_policy: always
@@ -696,7 +730,7 @@ services:
     restart: unless-stopped
 
   worker-content-reviewer:
-    image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
+    image: "ghcr.io/desplega-ai/agent-swarm-worker:${AGENT_SWARM_VERSION:-latest}"
     entrypoint: *agent-entrypoint
     platform: linux/amd64
     pull_policy: always
@@ -753,7 +787,7 @@ services:
     restart: unless-stopped
 
   worker-content-strategist:
-    image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
+    image: "ghcr.io/desplega-ai/agent-swarm-worker:${AGENT_SWARM_VERSION:-latest}"
     entrypoint: *agent-entrypoint
     platform: linux/amd64
     pull_policy: always
@@ -810,7 +844,7 @@ services:
     restart: unless-stopped
 
   worker-ux-principles:
-    image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
+    image: "ghcr.io/desplega-ai/agent-swarm-worker:${AGENT_SWARM_VERSION:-latest}"
     entrypoint: *agent-entrypoint
     platform: linux/amd64
     pull_policy: always
@@ -867,7 +901,7 @@ services:
     restart: unless-stopped
 
   worker-discoverability-optimizer:
-    image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
+    image: "ghcr.io/desplega-ai/agent-swarm-worker:${AGENT_SWARM_VERSION:-latest}"
     entrypoint: *agent-entrypoint
     platform: linux/amd64
     pull_policy: always
@@ -926,7 +960,7 @@ services:
   # ---------------------------------------------------------------------------
   # Optional HTTPS front door. Only starts with `docker compose --profile tls`.
   # Caddy terminates TLS with automatic Let's Encrypt certificates and proxies
-  # to the API and agent-fs over the compose network. When you use it, stop
+  # to the API, agent-fs, and MinIO over the compose network. When you use it, stop
   # publishing 3013/7433 on a public interface (firewall or remove the `ports`
   # entries above).
   # ---------------------------------------------------------------------------
@@ -961,7 +995,13 @@ configs:
         reverse_proxy api:3013
       }
       {$$AGENT_FS_DOMAIN:swarm-files.localhost} {
-        reverse_proxy agent-fs:7433
+        # Preserve the bucket path and Host for S3 signature validation.
+        handle /agentfs/* {
+          reverse_proxy minio:9000
+        }
+        handle {
+          reverse_proxy agent-fs:7433
+        }
       }
 
 secrets:
@@ -977,7 +1017,11 @@ volumes:
   agent_fs_data:
   caddy_data:
   caddy_config:
-  swarm_api:
+  # Replaces the older `swarm_api` volume, which was mounted at `/app` and
+  # shadowed the image's migrations. Upgrading an existing install requires a
+  # one-time copy of `<swarm_api>/data/.` into this volume before `up -d`:
+  # https://github.com/desplega-ai/agent-swarm/blob/main/skills/agent-swarm/references/upgrade.md
+  swarm_api_data:
   swarm_logs:
   swarm_shared:
   swarm_lead:

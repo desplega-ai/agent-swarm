@@ -1,0 +1,9 @@
+{
+  "name": "no-exclamation-marks",
+  "description": "Rejects progress text that contains an exclamation mark",
+  "version": "1.0.0",
+  "runtime": "api",
+  "assets": {
+    "hooks": "hooks.ts"
+  }
+}

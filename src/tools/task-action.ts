@@ -28,6 +28,7 @@ import {
   updateTaskClaudeSessionId,
 } from "@/be/db";
 import { touchRuntimeInstance } from "@/be/multi-runtime";
+import { applyPreTaskCreate } from "@/extensions/apply-task-create";
 import { assertOwnsTask, ownerCtx, type ToolCtx } from "@/tools/task-tool-ctx";
 import {
   createToolRegistrar,
@@ -39,6 +40,7 @@ import {
 import {
   AssetKeySchema,
   BudgetRefusalCauseSchema,
+  type CreateTaskOptions,
   ModelTierSchema,
   ReasoningEffortSchema,
   splitLegacyModelAlias,
@@ -265,7 +267,14 @@ export async function taskActionHandler(
 
   const agentId = ctx.agentId;
   let assetKey: string | undefined;
+  let preparedCreate: { description: string; options: CreateTaskOptions } | undefined;
   if (action === "create") {
+    if (!task) {
+      return taskActionResult(
+        { success: false, message: "Task description is required for 'create' action." },
+        agentId,
+      );
+    }
     try {
       assetKey = key
         ? await authorizeAssetKeyWrite(key, await resolveTaskAuditUserId(ctx.sourceTaskId, agentId))
@@ -279,33 +288,45 @@ export async function taskActionHandler(
             : String(error);
       return taskActionResult({ success: false, message }, agentId);
     }
+
+    const preCreate = await applyPreTaskCreate({
+      description: task,
+      options: {
+        key: assetKey,
+        creatorAgentId: agentId,
+        source: "mcp",
+        taskType,
+        tags,
+        priority,
+        dependsOn,
+        dir,
+        model: normalizedModel.model,
+        modelTier: normalizedModel.modelTier,
+        effort: input.effort,
+        routingAffinity:
+          leadOnly || requiredCapabilities?.length
+            ? { leadOnly, capabilities: requiredCapabilities ?? [] }
+            : undefined,
+      },
+      origin: "mcp",
+      requestInfo: ctx.requestInfo,
+    });
+    if (preCreate.kind === "blocked") {
+      return taskActionResult({ success: false, message: preCreate.reason }, agentId);
+    }
+    preparedCreate = {
+      description: preCreate.description,
+      options: preCreate.options,
+    };
   }
 
   const result = await getDbClient().transaction(async (): Promise<TaskActionResult> => {
     switch (action) {
       case "create": {
-        if (!task) {
-          return {
-            success: false,
-            message: "Task description is required for 'create' action.",
-          };
-        }
-        const newTask = await createTaskExtended(task, {
-          key: assetKey,
-          creatorAgentId: agentId,
-          taskType,
-          tags,
-          priority,
-          dependsOn,
-          dir,
-          model: normalizedModel.model,
-          modelTier: normalizedModel.modelTier,
-          effort: input.effort,
-          routingAffinity:
-            leadOnly || requiredCapabilities?.length
-              ? { leadOnly, capabilities: requiredCapabilities ?? [] }
-              : undefined,
-        });
+        const newTask = await createTaskExtended(
+          preparedCreate!.description,
+          preparedCreate!.options,
+        );
         return {
           success: true,
           message: `Created unassigned task "${newTask.id}".`,

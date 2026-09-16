@@ -39,6 +39,7 @@ Create a `.env` file in the same directory as `docker-compose.yml`:
 API_KEY=your-secret-api-key
 CLAUDE_CODE_OAUTH_TOKEN=your-oauth-token   # Run `claude setup-token` to get this
 SECRETS_ENCRYPTION_KEY=                     # Run `openssl rand -base64 32` and paste here. See "Encryption Key" below.
+AGENT_SWARM_VERSION=                        # Pin a release here. Blank tracks `latest`. See "Pinning the Image Version" below.
 
 # Docker Compose agent IDs (optional overrides)
 # Leave blank to generate a UUID on first boot and reuse it across restarts.
@@ -70,7 +71,7 @@ You can pass multiple OAuth tokens for load balancing: `CLAUDE_CODE_OAUTH_TOKEN=
 </Callout>
 
 <Callout type="info">
-If you leave `SECRETS_ENCRYPTION_KEY` blank on a brand-new deploy, the API will auto-generate one and write it to the `swarm_api` volume at `.encryption-key`. For production, set it explicitly so you control where it lives and can back it up alongside your other secrets. See [Encryption Key](#encryption-key).
+If you leave `SECRETS_ENCRYPTION_KEY` blank on a brand-new deploy, the API will auto-generate one and write it to the `swarm_api_data` volume at `.encryption-key`. For production, set it explicitly so you control where it lives and can back it up alongside your other secrets. See [Encryption Key](#encryption-key).
 </Callout>
 
 ### Step 3: Choose Optional Agent ID Overrides
@@ -88,7 +89,35 @@ for name in LEAD_AGENT_ID WORKER_1_AGENT_ID WORKER_2_AGENT_ID CONTENT_WRITER_AGE
 done
 ```
 
-### Step 4: Start the Swarm
+### Step 4: Pin the Image Version
+
+The API and every agent service resolve their tag from a single `.env` variable:
+
+```bash title=".env"
+AGENT_SWARM_VERSION=1.150.0
+```
+
+Pick a version from [releases](https://github.com/desplega-ai/agent-swarm/releases). Confirm every service resolved the same tag:
+
+```bash
+docker compose config | grep -E 'image: .*(agent-swarm|agent-swarm-worker):'
+```
+
+<Callout type="warn">
+**Leaving `AGENT_SWARM_VERSION` blank tracks `:latest`, which is not a release.** `:latest` is rebuilt and moved on every commit to `main`; a version tag is published only when the release version changes. The compose example sets `pull_policy: always`, so an unpinned deployment can move to a newer build on any `up -d` or restart — including one you did not intend as an upgrade. Pin anything you depend on.
+</Callout>
+
+Changing this value later is an upgrade, not a restart. Migrations are forward-only, so re-pinning to an older tag does **not** roll back a schema change — a database backup taken before the upgrade does. Back up first ([Backing Up the Database](#backing-up-the-database) and [Backing up the key](#backing-up-the-key)), then:
+
+```bash
+docker compose pull      # explicit: a moved tag is not re-pulled unless pull_policy is always
+docker compose up -d
+docker compose images    # confirm what is actually running
+```
+
+Verify with `/health` **and** a completed task, not `/health` alone. On Kubernetes, the chart pins images through its `appVersion`; pass `--version` to `helm upgrade` or it moves to the newest published chart. See [Kubernetes and Helm](/docs/guides/kubernetes).
+
+### Step 5: Start the Swarm
 
 ```bash
 docker compose up -d
@@ -96,7 +125,7 @@ docker compose up -d
 
 The API service starts first. Workers and lead wait until the API health check passes before starting (via `depends_on: condition: service_healthy`).
 
-### Step 5: Verify It's Running
+### Step 6: Verify It's Running
 
 ```bash
 # Check all services are up
@@ -116,7 +145,7 @@ You should see the lead and workers listed with `status: "idle"`.
 The bundled worker image already includes the Ubuntu runtime libraries required by Playwright's Chromium binary. Browser-driven tasks such as `agent-browser` sessions, Playwright smoke tests, and screenshot workflows no longer need a per-agent `apt install` workaround just to launch the bundled browser.
 </Callout>
 
-### Step 6: HTTPS with Caddy (optional, needed for the hosted dashboard)
+### Step 7: HTTPS with Caddy (optional, needed for the hosted dashboard)
 
 The dashboard at [app.agent-swarm.dev](https://app.agent-swarm.dev) is served over HTTPS, so browsers block a plain-HTTP API. OAuth callbacks, webhooks, and page links also need a public HTTPS origin. The Compose example ships an optional Caddy reverse proxy that obtains Let's Encrypt certificates automatically.
 
@@ -136,9 +165,11 @@ docker compose --profile tls up -d
 curl -fsS https://swarm-api.example.com/health
 ```
 
-Caddy proxies the API domain to `api:3013` and the agent-fs domain to `agent-fs:7433`. Once it runs, stop exposing ports 3013 and 7433 on a public interface (firewall them or remove the `ports` entries). Certificates persist in the `caddy_data` volume. Requires Docker Compose v2.23.1 or newer for the inline Caddyfile.
+Caddy proxies the API domain to `api:3013`. On the agent-fs domain, `/agentfs/*` goes to `minio:9000` for signed image/PDF/video previews and downloads; all other paths go to `agent-fs:7433`. The bucket path and `Host` header are preserved for S3 signature validation, so previews use the existing file domain without another DNS record. Once it runs, stop exposing ports 3013 and 7433 on a public interface (firewall them or remove the `ports` entries). Certificates persist in the `caddy_data` volume. Requires Docker Compose v2.23.1 or newer for the inline Caddyfile.
 
-If you already run a reverse proxy (Caddy, nginx, Traefik, Cloudflare Tunnel), skip the profile and set only `PUBLIC_MCP_BASE_URL` to the HTTPS origin that proxy serves. When self-hosting the dashboard on your own domain, also set `CORS_ALLOWED_ORIGINS` to that origin.
+Signed URLs default to `https://${AGENT_FS_DOMAIN}` when `AGENT_FS_DOMAIN` is set, or `http://localhost:9000` otherwise. A non-empty `AGENT_FS_S3_PUBLIC_ENDPOINT` overrides either default and must be an origin browsers can reach over HTTPS for TLS deployments.
+
+If you already run a reverse proxy (Caddy, nginx, Traefik, Cloudflare Tunnel), skip the profile and set `PUBLIC_MCP_BASE_URL` to the HTTPS API origin that proxy serves. For file previews, set `AGENT_FS_DOMAIN` and configure the same `/agentfs/*` MinIO route without stripping the bucket prefix or rewriting `Host`, or set `AGENT_FS_S3_PUBLIC_ENDPOINT` to a separate browser-reachable HTTPS S3 origin. When self-hosting the dashboard on your own domain, also set `CORS_ALLOWED_ORIGINS` to that origin.
 
 ### Startup-script privilege boundary
 
@@ -187,7 +218,7 @@ The swarm uses Docker named volumes to persist data across restarts and upgrades
 ```
 Docker Volume            → Container Path        → What It Stores
 ─────────────────────────────────────────────────────────────────────
-swarm_api                → /app                  → SQLite DB (all swarm state)
+swarm_api_data           → /app/data             → SQLite DB (all swarm state)
 swarm_logs               → /logs                 → Session logs (all agents)
 swarm_shared             → /workspace/shared     → Shared workspace (all agents)
 swarm_lead               → /workspace/personal   → Lead's private workspace
@@ -199,7 +230,7 @@ swarm_worker_2           → /workspace/personal   → Worker 2's private worksp
 
 | Volume | Critical? | Backup? | Description |
 |--------|-----------|---------|-------------|
-| `swarm_api` | **Yes** | **Yes** | Contains the SQLite database (`agent-swarm-db.sqlite`) with all tasks, agents, schedules, and configuration. Losing this = losing all swarm state. |
+| `swarm_api_data` | **Yes** | **Yes** | Contains the SQLite database (`agent-swarm-db.sqlite`) with all tasks, agents, schedules, and configuration. Losing this = losing all swarm state. Mounted at `/app/data` — see [Migrating from the `/app` mount](#migrating-from-the-app-mount). |
 | `swarm_logs` | No | Optional | Session logs from all agents. Useful for debugging. Can be recreated. |
 | `swarm_shared` | Moderate | Recommended | Shared workspace. Agents store research, plans, and memory under `/workspace/shared/{thoughts,memory,downloads,misc}/$AGENT_ID`. All agents can read each other's files. |
 | `swarm_<agent>` | Low | No | Personal workspace per agent (`/workspace/personal`). Isolated — only that agent can see it. Contains cloned repos, working files, and agent-specific state. |
@@ -212,21 +243,50 @@ Each agent container has two workspace directories:
 
 - **`/workspace/personal`** — Mounted from a per-agent volume (e.g., `swarm_worker_1`). Only that agent can see this. Used for cloned git repos, working files, and private state.
 
+<h3 id="migrating-from-the-app-mount">Migrating from the `/app` mount</h3>
+
+Installs created before this change mount `swarm_api` at `/app` instead of `swarm_api_data` at `/app/data`.
+
+<Callout type="error">
+**Fix this — it silently breaks upgrades.** A Docker named volume copies image content only on *first* population, then shadows that path forever. Mounting `/app` freezes everything the image ships there — `migrations/`, `package.json`, `extensions/`, `scripts-runtime/`, `script-types/`, `typescript-lib/`, `vendored-openapi/` — at install time. The compiled binary lives outside `/app` (`/usr/local/bin/agent-swarm-api`), so **the code upgrades while its migrations do not**. The API then queries columns and tables no migration in its frozen directory created, and every affected write fails with `SQLiteError: table … has no column named …`.
+</Callout>
+
+It is undetectable from the outside: `/health` reads the stale `/app/package.json`, so it reports the **old** version and stays green while newer code runs. Pinning the image version does not prevent this — a pinned install breaks the same way on its next upgrade. The two fixes are complementary.
+
+Compare the running container against its own image:
+
+```bash
+docker compose exec api sh -c 'ls /app/migrations | wc -l; grep \"version\" /app/package.json'
+docker run --rm --entrypoint sh ghcr.io/desplega-ai/agent-swarm:<your tag> \
+  -c 'ls /app/migrations | wc -l; grep \"version\" /app/package.json'
+```
+
+Differing counts or versions confirm the shadowing. Migrate with a one-time copy — only `/app/data` needs to persist:
+
+```bash
+docker compose down
+docker run --rm -v swarm_api:/old -v swarm_api_data:/new alpine \
+  sh -c 'cp -a /old/data/. /new/ && ls -la /new'   # expect agent-swarm-db.sqlite
+docker compose up -d
+```
+
+Keep the old `swarm_api` volume until the upgraded install is verified, then delete it. Worker volumes are unaffected — they mount `/workspace/*` and `/logs`, which is intended agent state.
+
 ### Backing Up the Database
 
 <Callout type="warn">
-The `swarm_api` volume contains your SQLite database — the single source of truth for all swarm state. Back it up regularly.
+The `swarm_api_data` volume contains your SQLite database — the single source of truth for all swarm state. Back it up regularly.
 </Callout>
 
 ```bash
-# Back up the database
-docker run --rm -v swarm_api:/app -v $(pwd):/backup alpine \
-  cp /app/agent-swarm-db.sqlite /backup/agent-swarm-db-backup.sqlite
+# Back up the database, its WAL sidecars, and .page-session-secret
+docker run --rm -v swarm_api_data:/data -v $(pwd):/backup alpine \
+  sh -c 'cp -a /data/. /backup/swarm-api-data-backup/'
 
 # Restore from backup
 docker compose down
-docker run --rm -v swarm_api:/app -v $(pwd):/backup alpine \
-  cp /backup/agent-swarm-db-backup.sqlite /app/agent-swarm-db.sqlite
+docker run --rm -v swarm_api_data:/data -v $(pwd):/backup alpine \
+  sh -c 'cp -a /backup/swarm-api-data-backup/. /data/'
 docker compose up -d
 ```
 
@@ -281,9 +341,9 @@ The encryption key is **just as critical as your database backup**. Losing the k
 
 ```bash
 # Back up DB and key in one shot (Docker Compose deployment)
-docker run --rm -v swarm_api:/app -v $(pwd):/backup alpine sh -c '
-  cp /app/agent-swarm-db.sqlite /backup/agent-swarm-db-backup.sqlite &&
-  cp /app/.encryption-key /backup/encryption-key-backup 2>/dev/null || true
+docker run --rm -v swarm_api_data:/data -v $(pwd):/backup alpine sh -c '
+  cp -a /data/. /backup/swarm-api-data-backup/ &&
+  cp /data/.encryption-key /backup/encryption-key-backup 2>/dev/null || true
 '
 ```
 
@@ -372,7 +432,7 @@ To scale the swarm, copy an existing worker block in `docker-compose.yml`:
 ```yaml title="docker-compose.yml (add a new worker)"
   worker-3:
     entrypoint: *agent-entrypoint
-    image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
+    image: "ghcr.io/desplega-ai/agent-swarm-worker:${AGENT_SWARM_VERSION:-latest}"
     platform: linux/amd64
     pull_policy: always
     stop_grace_period: 60s
@@ -462,7 +522,8 @@ Run individual Claude workers in containers without Compose.
 ### Pull from Registry
 
 ```bash
-docker pull ghcr.io/desplega-ai/agent-swarm-worker:latest
+# Pin a release. `:latest` moves on every commit to `main` and is not a release.
+docker pull ghcr.io/desplega-ai/agent-swarm-worker:1.150.0
 ```
 
 ### Build Locally

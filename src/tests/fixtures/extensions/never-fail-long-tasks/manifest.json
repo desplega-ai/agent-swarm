@@ -1,0 +1,9 @@
+{
+  "name": "never-fail-long-tasks",
+  "description": "Records stalled tasks instead of failing them",
+  "version": "1.0.0",
+  "runtime": "api",
+  "assets": {
+    "hooks": "hooks.ts"
+  }
+}

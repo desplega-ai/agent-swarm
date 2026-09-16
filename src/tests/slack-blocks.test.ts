@@ -298,8 +298,10 @@ describe("buildAssignmentSummaryBlocks", () => {
       failed: [{ agentName: "Delta", reason: "error" }],
     });
 
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].text.text).not.toBe("");
     expect(blocks[0].text.text).toContain("⚠️");
-    expect(blocks[0].text.text).toContain("Could not assign");
+    expect(blocks[0].text.text).toContain("Could not assign to:");
   });
 });
 
@@ -463,6 +465,15 @@ function makeTaskId(prefix: string): string {
 }
 
 describe("buildTreeBlocks", () => {
+  test("empty tree omits the section with empty text", () => {
+    const blocks = buildTreeBlocks([]);
+
+    expect(blocks).toHaveLength(0);
+    expect(blocks.every((block) => block.type !== "section" || block.text.text.length > 0)).toBe(
+      true,
+    );
+  });
+
   test("single root, no children", () => {
     const root: TreeNode = {
       taskId: makeTaskId("aaaa0001"),

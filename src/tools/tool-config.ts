@@ -197,13 +197,15 @@ export const DEFERRED_TOOLS = new Set([
   "room-reset",
   "room-decode",
 
-  // Reusable scripts (6)
+  // Reusable scripts and extensions (8)
   "script-upsert",
   "script-delete",
   "script-apis",
   "launch-script-run",
   "get-script-run",
   "list-script-runs",
+  "extension-install",
+  "extension-list",
 
   // External command routes (1)
   "swarm_x",

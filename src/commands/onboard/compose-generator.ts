@@ -8,6 +8,10 @@ const DEFAULT_WORKER_MAX_CONCURRENT_TASKS = 1;
 // noTemplateCurlyInString rule. We collect them via a helper to keep the
 // suppression comments in one place.
 
+// Image tag for the API and agent images. Blank or unset resolves to `latest`,
+// which moves on every commit to main; operators pin a release in .env.
+// biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
+const IMAGE_TAG_EXPRESSION = "${AGENT_SWARM_VERSION:-latest}";
 // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
 const ENV_API_KEY = "      - API_KEY=${API_KEY}";
 // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
@@ -108,12 +112,20 @@ export function generateCompose(state: OnboardState): string {
   lines.push("#");
   lines.push("# Usage:");
   lines.push("#   docker compose --env-file .env up -d");
+  lines.push("#");
+  lines.push("# Image version: set AGENT_SWARM_VERSION in .env to a published release.");
+  lines.push("# Blank falls back to `latest`, which moves on every commit to main and is");
+  lines.push("# not a release. Releases: https://github.com/desplega-ai/agent-swarm/releases");
+  lines.push("# Upgrade/rollback (migrations are forward-only, so back up first):");
+  lines.push(
+    "# https://github.com/desplega-ai/agent-swarm/blob/main/skills/agent-swarm/references/upgrade.md",
+  );
   lines.push("");
   lines.push("services:");
 
   // ── API service ──
   lines.push("  swarm-api:");
-  lines.push('    image: "ghcr.io/desplega-ai/agent-swarm:latest"');
+  lines.push(`    image: "ghcr.io/desplega-ai/agent-swarm:${IMAGE_TAG_EXPRESSION}"`);
   lines.push("    container_name: swarm-api");
   lines.push(`    pull_policy: ${state.pullPolicy}`);
   lines.push("    stop_grace_period: 60s");
@@ -165,7 +177,7 @@ export function generateCompose(state: OnboardState): string {
 
     lines.push("");
     lines.push(`  ${svc.name}:`);
-    lines.push('    image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"');
+    lines.push(`    image: "ghcr.io/desplega-ai/agent-swarm-worker:${IMAGE_TAG_EXPRESSION}"`);
     lines.push(`    container_name: ${svc.containerName}`);
     lines.push(`    pull_policy: ${state.pullPolicy}`);
     lines.push("    stop_grace_period: 60s");

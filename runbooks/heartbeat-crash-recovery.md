@@ -103,13 +103,26 @@ flowchart TD
   cand -- yes --> steer{"fresh pending steering?<br/>age < 5m"}
   steer -- yes --> defer["defer this sweep"]
   steer -- no --> cls{"classify (per task)"}
-  cls -->|"A — no active session<br/>AND taskAge ≥ 5m"| remA["remediateCrashedWorkerTask<br/>reason = crash_recovery"]
-  cls -->|"B — session stale<br/>hb ≥ 15m AND taskAge ≥ 15m"| remB["remediateCrashedWorkerTask<br/>reason = crash_recovery<br/>(+ cleanup session)"]
-  cls -->|"C — session fresh<br/>AND taskAge ≥ 30m"| esc["escalate to Lead<br/>(stalledTasks, no auto-fail)"]
+  cls -->|"A: no active session<br/>AND taskAge ≥ 5m"| decA["decideRemediation()<br/>default: supersede-resume or fail"]
+  cls -->|"B: session stale<br/>hb ≥ 15m AND taskAge ≥ 15m"| decB["decideRemediation()<br/>default: supersede-resume or fail<br/>cleanup after fail or supersede"]
+  cls -->|"C: session fresh<br/>AND taskAge ≥ 30m"| decC["default: record"]
+  decA --> hook{"pre.heartbeat.remediate"}
+  decB --> hook
+  decC --> hook
+  hook -->|"block"| blocked["record stalled task<br/>and extensionSkipped<br/>perform no remediation"]
+  hook -->|"continue or valid modify"| action{"selected action"}
+  hook -->|"invalid modify"| keep["warn and keep<br/>the default action"]
+  keep --> action
+  action -->|"record"| record["record stalled task<br/>perform no remediation"]
+  action -->|"fail"| fail["fail task<br/>restore agent state"]
+  action -->|"supersede-resume"| resume["supersede task<br/>create crash-recovery resume"]
 ```
 
 - Candidate set = `getStalledInProgressTasks(STALL_THRESHOLD_NO_SESSION_MIN)` → `status='in_progress' AND lastUpdatedAt > 5m`. Tasks in `pending`/`offered` are **not** seen by this sweep. A candidate with a pending steering message newer than `STEERING_STALL_GRACE_MIN` is deferred for that sweep; once the bounded grace expires, normal classification and remediation resume.
 - An **active_session** = one worker-*run* process for a task (`active_sessions`, `UNIQUE(taskId)`), created lazily *after* the provider process spawns, heartbeated by **tool activity** (throttled ~5s; no wall-clock ping between tool calls). "No active session" is AND-gated with `lastUpdatedAt > 5m`, so it means *"no live run **and** no task progress in 5 min."* It can false-positive on a long-but-quiet live worker; the resume-generation budget (`MAX_RESUME_GENERATIONS`) bounds the blast radius.
+- The classifier emits `no-session`, `stale-session`, or `fresh-stalled` only after a task crosses its existing threshold. Extensions cannot change thresholds or classify a healthy task as stalled.
+- `decideRemediation` keeps the default recovery policy. It selects `fail` for workflow steps, excluded task types, existing resume children, and exhausted resume budgets. It otherwise selects `supersede-resume`. A fresh-session stall defaults to `record`.
+- `pre.heartbeat.remediate` receives the task, optional session, classification, proposed action, reason, and age values before any remediation write. An extension can select `supersede-resume`, `fail`, or `record`. A block records the stalled task and an `extensionSkipped` finding, then performs no remediation during that sweep. An invalid action logs a scrubbed warning and keeps the original proposal.
 - Thresholds (env-overridable): `STALL_THRESHOLD_NO_SESSION_MIN=5` (`HEARTBEAT_STALL_NO_SESSION_MIN`), `STALL_THRESHOLD_STALE_HEARTBEAT_MIN=15`, `STALL_THRESHOLD_MINUTES=30`, `STEERING_STALL_GRACE_MIN=5` (`HEARTBEAT_STEERING_GRACE_MIN`), `STALE_CLEANUP_THRESHOLD_MINUTES=30`.
 
 Task creation records the origin of each routing reason as `routingSource`: `declared` for a caller-supplied reason, `engine_default` for reasons chosen by recovery, scheduling, integration, or other engine paths. Historical rows remain unknown (SQL NULL, omitted from task responses). MCP `send-task` calls with an explicit `agentId` require a `routingNote` of at least 10 characters after trim and at most 200 characters; REST creation keeps notes optional.
@@ -135,9 +148,34 @@ A pin **never reclaimed within `HEARTBEAT_RESUME_PIN_GRACE_MIN`** (the agent tha
 ### Pseudocode (current)
 
 ```text
-# detector → on Case A / B:
+# stalled-task detector, after pending-steering grace:
 if task has pending steering newer than STEERING_STALL_GRACE_MIN:
-    defer this sweep                            # bounded; expiry resumes normal remediation
+    defer this sweep
+
+classification = no-session | stale-session | fresh-stalled
+if classification == fresh-stalled:
+    proposed = { action: record, reason: fresh-session stall }
+else:
+    proposed = decideRemediation(task, facts)
+
+extensionResult = dispatchPre(pre.heartbeat.remediate, task, session,
+                              classification, proposed, taskAge, sessionHeartbeatAge)
+if extensionResult blocks:
+    stalledTasks += task
+    extensionSkipped += task + extension + reason
+    continue
+if extensionResult modifies to a valid action:
+    proposed.action = extensionResult.proposedAction
+if proposed.action == record:
+    stalledTasks += task
+    continue
+if proposed.action == fail:
+    failTask(task.id, proposed.reason)
+    clean a stale active session when classification == stale-session
+    restore agent state
+    continue
+
+# proposed.action == supersede-resume:
 supersedeTask(parent)                      # frees the agent's in_progress slot
 promotePendingSteeringForTask(parent)       # pending rows → follow-up tasks, exactly once
 resume = createResumeFollowUp(parent, reason = crash_recovery | graceful_shutdown):
@@ -286,7 +324,17 @@ escalateStarvedPoolTasks():
 
 ---
 
-## Quick reference — env knobs
+## 5. Worker completion follow-ups
+
+`createWorkerTaskFollowUp` skips workflow tasks, Lead-owned tasks, disabled follow-ups, and tasks without a Lead. It renders the completion or failure summary before task creation.
+
+The function dispatches `pre.task.followUp` before it creates the follow-up task. An extension can block creation or modify the description, assignee, priority, and `followUpConfig`.
+
+The resulting task also dispatches `pre.task.create` with origin `followUp`. Both extension events run before any database transaction begins.
+
+---
+
+## Quick reference: env knobs
 
 All of these are read **dynamically** — `heartbeat.ts` exposes them as getter
 functions (`stallThresholdMinutes()`, `maxAutoAssignPerSweep()`,

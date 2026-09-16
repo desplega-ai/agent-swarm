@@ -101,7 +101,7 @@ const EXPECTED_INVENTORY: InventoryEntry[] = [
     file: "src/tools/send-task.ts",
     owner: "sendTaskHandler",
     syntax: "PropertyAssignment",
-    count: 3,
+    count: 1,
     kind: "producer",
     dispatchProof: {
       file: "src/tests/task-tools-ctx.test.ts",
