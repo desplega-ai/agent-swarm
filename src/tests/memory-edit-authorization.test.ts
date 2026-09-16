@@ -293,3 +293,35 @@ test("boot re-embedding still updates rows belonging to multiple agents", async 
     });
   }
 });
+
+// Regression: memories written while no embedding key was configured have
+// embedding = NULL, not a wrong-dimension value. The backfill used to only
+// target `embedding IS NOT NULL AND length != N`, so these rows were never
+// swept once a key landed — the customer-reported symptom (60 memories with
+// 0 embeddings, permanently stuck on FTS/keyword fallback).
+test("boot re-embedding backfills rows that never got an embedding at all", async () => {
+  const memory = await store.store({
+    agentId: owner,
+    scope: "agent",
+    name: randomUUID(),
+    content: "never embedded",
+    source: "manual",
+  });
+  const before = await getDbClient().get<{ embedding: unknown }>(
+    "SELECT embedding FROM agent_memory WHERE id = ?",
+    [memory.id],
+  );
+  expect(before?.embedding).toBeNull();
+
+  await runBootReembed();
+
+  const row = await getDbClient().get(
+    "SELECT agentId, length(embedding) AS bytes, embeddingModel FROM agent_memory WHERE id = ?",
+    [memory.id],
+  );
+  expect(row).toEqual({
+    agentId: memory.agentId,
+    bytes: EMBEDDING_DIMENSIONS * 4,
+    embeddingModel: provider.name,
+  });
+});

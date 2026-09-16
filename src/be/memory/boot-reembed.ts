@@ -1,10 +1,15 @@
 /**
- * Startup backfill: detect agent_memory rows with wrong-dimension embeddings
- * (not 512d) and re-embed them in the background. Runs once per boot,
- * async/non-blocking, idempotent, no-op when the DB is clean.
+ * Backfill: detect agent_memory rows with no embedding at all (never
+ * embedded — e.g. every row written while no key was configured) or a
+ * wrong-dimension embedding (not 512d — legacy rows), and re-embed them in
+ * the background. Runs once per boot, and again whenever a config reload
+ * turns embeddings on for the first time (see scheduleIntegrationsReload in
+ * src/http/core.ts). Async/non-blocking, idempotent, no-op when the DB is
+ * clean or no key resolves.
  *
  * This is the app-level equivalent of a forward-only migration — SQL can't
- * call OpenAI, so the backfill runs at startup instead.
+ * call OpenAI, so the backfill runs at startup (and on the on-transition)
+ * instead.
  */
 
 import { getDbClient } from "@/be/db";
@@ -13,13 +18,13 @@ import { getEmbeddingProvider, getMemoryStore } from "./index";
 
 const VECTOR_BYTES = EMBEDDING_DIMENSIONS * Float32Array.BYTES_PER_ELEMENT;
 const BATCH_SIZE = 20;
+const INVALID_EMBEDDING_WHERE = `embedding IS NULL OR length(embedding) != ${VECTOR_BYTES}`;
 
 export async function runBootReembed(): Promise<void> {
   const invalidCount =
     (
       await getDbClient().get<{ count: number }>(
-        `SELECT COUNT(*) as count FROM agent_memory
-       WHERE embedding IS NOT NULL AND length(embedding) != ${VECTOR_BYTES}`,
+        `SELECT COUNT(*) as count FROM agent_memory WHERE ${INVALID_EMBEDDING_WHERE}`,
       )
     )?.count ?? 0;
 
@@ -31,17 +36,18 @@ export async function runBootReembed(): Promise<void> {
   const testEmbed = await provider.embed("test");
   if (!testEmbed) {
     console.warn(
-      `[boot-reembed] skipped: ${invalidCount} wrong-dimension rows found but no OpenAI key configured`,
+      `[boot-reembed] skipped: ${invalidCount} missing/wrong-dimension rows found but no OpenAI key configured`,
     );
     return;
   }
 
-  console.log(`[boot-reembed] starting: ${invalidCount} rows with wrong embedding dimensions`);
+  console.log(
+    `[boot-reembed] starting: ${invalidCount} rows missing or with wrong embedding dimensions`,
+  );
 
   const store = getMemoryStore();
   const rows = await getDbClient().query<{ id: string; content: string }>(
-    `SELECT id, content FROM agent_memory
-       WHERE embedding IS NOT NULL AND length(embedding) != ${VECTOR_BYTES}`,
+    `SELECT id, content FROM agent_memory WHERE ${INVALID_EMBEDDING_WHERE}`,
   );
 
   let reembedded = 0;
@@ -69,8 +75,7 @@ export async function runBootReembed(): Promise<void> {
   const afterInvalid =
     (
       await getDbClient().get<{ count: number }>(
-        `SELECT COUNT(*) as count FROM agent_memory
-       WHERE embedding IS NOT NULL AND length(embedding) != ${VECTOR_BYTES}`,
+        `SELECT COUNT(*) as count FROM agent_memory WHERE ${INVALID_EMBEDDING_WHERE}`,
       )
     )?.count ?? 0;
 

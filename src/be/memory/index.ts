@@ -12,6 +12,18 @@ export function getEmbeddingProvider(): EmbeddingProvider {
   return embeddingProvider;
 }
 
+/**
+ * Drop the memoized embedding provider so the next `getEmbeddingProvider()`
+ * re-reads process.env. The provider captures its API key once at
+ * construction (see OpenAIEmbeddingProvider), so without a reset here a key
+ * set after boot (or after the first embed attempt) stays inert until the
+ * process restarts. Called from the config reload path — mirrors
+ * `resetFileStorageProvider` in src/fs/registry.ts.
+ */
+export function resetEmbeddingProvider(): void {
+  embeddingProvider = null;
+}
+
 export function getMemoryStore(): MemoryStore {
   if (!memoryStore) {
     const { SqliteMemoryStore } =

@@ -32,6 +32,7 @@ import {
   hasFirstCompletedTask,
   listAgentsWithCredStatusByProvider,
 } from "../be/db";
+import { getEmbeddingProvider } from "../be/memory";
 import { getFileStorageProvider } from "../fs/registry";
 import { type AgentCredStatus, AutomationIntegrationIdSchema, ProviderNameSchema } from "../types";
 import { route } from "./route-def";
@@ -385,10 +386,11 @@ async function harnessMilestone(): Promise<SetupMilestone> {
 }
 
 function embeddingsMilestone(): SetupMilestone {
-  // Keep this precedence identical to OpenAIEmbeddingProvider: an explicitly
-  // empty EMBEDDING_API_KEY disables the OPENAI_API_KEY fallback.
-  const embeddingKey = process.env.EMBEDDING_API_KEY ?? process.env.OPENAI_API_KEY;
-  if (embeddingKey) {
+  // Ask the live provider rather than re-deriving key precedence here — it
+  // reflects whatever the last config reload (or boot) resolved, including
+  // an explicitly empty EMBEDDING_API_KEY disabling the OPENAI_API_KEY
+  // fallback. See OpenAIEmbeddingProvider.isConfigured().
+  if (getEmbeddingProvider().isConfigured()) {
     return {
       id: "embeddings",
       label: "Memory search",

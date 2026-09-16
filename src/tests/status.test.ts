@@ -31,6 +31,7 @@ import {
   updateAgentCredStatus,
 } from "../be/db";
 import { storeOAuthTokens, upsertOAuthApp } from "../be/db-queries/oauth";
+import { resetEmbeddingProvider } from "../be/memory";
 import { validateProviderCredentials } from "../commands/provider-credentials";
 import {
   _resetTestConnectionCache,
@@ -123,6 +124,11 @@ function clearEnv() {
   for (const k of ENV_KEYS_TO_RESET) {
     delete process.env[k];
   }
+  // The embedding provider memoizes its API key at construction (see
+  // OpenAIEmbeddingProvider); reset the singleton so embeddingsMilestone()
+  // (which now reads the live provider, not process.env directly) reflects
+  // whatever this test just set/cleared instead of a stale prior test's key.
+  resetEmbeddingProvider();
 }
 
 function restoreEnv() {
@@ -245,14 +251,20 @@ describe("setup milestones", () => {
       hint: "Memory search is off. Set OPENAI_API_KEY (or EMBEDDING_API_KEY) on the API server to enable it; it is cheap.",
     });
 
+    // The provider memoizes its API key at construction; in production a
+    // config reload resets it (see resetEmbeddingProvider in src/http/core.ts).
+    // Mirror that here after each direct env mutation.
     process.env.OPENAI_API_KEY = "example-openai-embedding-key";
+    resetEmbeddingProvider();
     expect(getMilestone(await buildStatusPayload(), "embeddings").state).toBe("configured");
 
     process.env.EMBEDDING_API_KEY = "";
+    resetEmbeddingProvider();
     expect(getMilestone(await buildStatusPayload(), "embeddings").state).toBe("unverified");
 
     process.env.EMBEDDING_API_KEY = "example-dedicated-embedding-key";
     delete process.env.OPENAI_API_KEY;
+    resetEmbeddingProvider();
     expect(getMilestone(await buildStatusPayload(), "embeddings").state).toBe("configured");
   });
 
