@@ -11540,6 +11540,7 @@ interface InboxItemStateRow {
   snoozeUntil: string | null;
   dismissedAt: string | null;
   doneAt: string | null;
+  readAt: string | null;
   createdAt: string;
   lastUpdatedAt: string;
 }
@@ -11554,6 +11555,7 @@ function rowToInboxItemState(row: InboxItemStateRow): InboxItemState {
     snoozeUntil: row.snoozeUntil ?? undefined,
     dismissedAt: row.dismissedAt ?? undefined,
     doneAt: row.doneAt ?? undefined,
+    readAt: row.readAt ?? undefined,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
   };
@@ -11592,22 +11594,27 @@ export async function upsertInboxState(opts: {
   snoozeUntil?: string;
   dismissedAt?: string;
   doneAt?: string;
+  /** First-viewed timestamp. Sticky: once set, later calls never clear or move it. */
+  readAt?: string;
 }): Promise<InboxItemState> {
   const now = new Date().toISOString();
   // Auto-derive timestamps from status when not explicitly provided.
   const dismissedAt = opts.dismissedAt ?? (opts.status === "dismissed" ? now : null);
   const doneAt = opts.doneAt ?? (opts.status === "done" ? now : null);
   const snoozeUntil = opts.snoozeUntil ?? null;
+  const readAt = opts.readAt ?? null;
 
-  // SQLite upsert via UNIQUE(userId, itemType, itemId).
+  // SQLite upsert via UNIQUE(userId, itemType, itemId). readAt is sticky: the
+  // first non-null value written wins on every subsequent conflict.
   const row = await getDbClient().get<InboxItemStateRow>(
-    `INSERT INTO inbox_item_state (userId, itemType, itemId, status, snoozeUntil, dismissedAt, doneAt, createdAt, lastUpdatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO inbox_item_state (userId, itemType, itemId, status, snoozeUntil, dismissedAt, doneAt, readAt, createdAt, lastUpdatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(userId, itemType, itemId) DO UPDATE SET
          status = excluded.status,
          snoozeUntil = excluded.snoozeUntil,
          dismissedAt = excluded.dismissedAt,
          doneAt = excluded.doneAt,
+         readAt = COALESCE(inbox_item_state.readAt, excluded.readAt),
          lastUpdatedAt = excluded.lastUpdatedAt
        RETURNING *`,
     [
@@ -11618,6 +11625,7 @@ export async function upsertInboxState(opts: {
       snoozeUntil,
       dismissedAt,
       doneAt,
+      readAt,
       now,
       now,
     ],

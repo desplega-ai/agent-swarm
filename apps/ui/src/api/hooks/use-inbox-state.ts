@@ -53,6 +53,8 @@ export interface UpdateInboxItemInput {
   status: InboxItemStatus;
   /** ISO 8601 datetime — required when `status === "snoozed"`. */
   snoozeUntil?: string;
+  /** ISO 8601 datetime — first-viewed marker, sticky server-side (see PATCH /api/inbox-state). */
+  readAt?: string;
 }
 
 interface MutationContext {
@@ -92,11 +94,23 @@ export function useUpdateInboxItem() {
       // update before the server confirms it.
       await queryClient.cancelQueries({ queryKey: ["inbox-state", input.userId] });
 
+      // Snapshot every cache entry under `["inbox-state", userId, …]` so we
+      // can roll all of them back on error.
+      const matches = queryClient.getQueriesData<InboxItemState[]>({
+        queryKey: ["inbox-state", input.userId],
+      });
+
       // Build the optimistic row — only `id`, `createdAt`, `lastUpdatedAt`
       // come back from the server, so we synthesize stable placeholders.
+      // readAt is sticky server-side: preserve any existing value from the
+      // current cache instead of clobbering it when this mutation doesn't
+      // set one explicitly.
       const nowIso = new Date().toISOString();
+      const existing = matches
+        .flatMap(([, rows]) => rows ?? [])
+        .find((row) => row.itemType === input.itemType && row.itemId === input.itemId);
       const optimistic: InboxItemState = {
-        id: `optimistic:${input.itemType}:${input.itemId}`,
+        id: existing?.id ?? `optimistic:${input.itemType}:${input.itemId}`,
         userId: input.userId,
         itemType: input.itemType,
         itemId: input.itemId,
@@ -104,15 +118,10 @@ export function useUpdateInboxItem() {
         snoozeUntil: input.snoozeUntil,
         dismissedAt: input.status === "dismissed" ? nowIso : undefined,
         doneAt: input.status === "done" ? nowIso : undefined,
-        createdAt: nowIso,
+        readAt: existing?.readAt ?? input.readAt,
+        createdAt: existing?.createdAt ?? nowIso,
         lastUpdatedAt: nowIso,
       };
-
-      // Snapshot every cache entry under `["inbox-state", userId, …]` so we
-      // can roll all of them back on error.
-      const matches = queryClient.getQueriesData<InboxItemState[]>({
-        queryKey: ["inbox-state", input.userId],
-      });
       const snapshots: MutationContext["snapshots"] = matches.map(([key, previous]) => ({
         key,
         previous,

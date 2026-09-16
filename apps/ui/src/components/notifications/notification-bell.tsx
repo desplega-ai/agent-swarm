@@ -1,6 +1,6 @@
 import { Bell } from "lucide-react";
 import { useState } from "react";
-import { useInboxState } from "@/api/hooks/use-inbox-state";
+import { useInboxState, useUpdateInboxItem } from "@/api/hooks/use-inbox-state";
 import { useNotificationEvents } from "@/api/hooks/use-notification-events";
 import type { InboxItemState } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
@@ -10,15 +10,21 @@ import { useCurrentUser } from "@/contexts/current-user-context";
 import { NOTIFICATION_DEFINITIONS } from "@/lib/notifications/definitions";
 import { NotificationPanel } from "./notification-panel";
 
-/** True when a definition has no server-side row yet, or is still "open". */
+/**
+ * True when a definition still counts toward the unread badge: no
+ * server-side row yet, or it hasn't been marked read (`readAt` unset).
+ * `readAt` is independent of `status` — a dismissed/done item can still be
+ * browsed in the panel, it just stops driving the badge count.
+ */
 function isUnread(state: InboxItemState | undefined): boolean {
-  return !state || state.status === "open";
+  return !state?.readAt;
 }
 
 export function NotificationBell() {
   const currentUser = useCurrentUser();
   const inboxState = useInboxState({ userId: currentUser.userId, itemType: "notification" });
   const { trackEvent } = useNotificationEvents();
+  const updateInboxItem = useUpdateInboxItem();
   const [open, setOpen] = useState(false);
 
   if (!currentUser.userId) return null;
@@ -31,8 +37,19 @@ export function NotificationBell() {
   function handleOpenChange(next: boolean) {
     setOpen(next);
     if (!next) return;
+    const nowIso = new Date().toISOString();
     for (const definition of NOTIFICATION_DEFINITIONS) {
-      if (isUnread(stateByKey.get(definition.key))) trackEvent(definition.key, "view");
+      const state = stateByKey.get(definition.key);
+      if (!isUnread(state)) continue;
+      trackEvent(definition.key, "view");
+      if (!currentUser.userId) continue;
+      updateInboxItem.mutate({
+        userId: currentUser.userId,
+        itemType: "notification",
+        itemId: definition.key,
+        status: state?.status ?? "open",
+        readAt: nowIso,
+      });
     }
   }
 

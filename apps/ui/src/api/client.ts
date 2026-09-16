@@ -2625,6 +2625,8 @@ class ApiClient {
     status: InboxItemStatus;
     /** ISO 8601 datetime; required when status === "snoozed". */
     snoozeUntil?: string;
+    /** ISO 8601 datetime; first-viewed marker, sticky server-side. */
+    readAt?: string;
   }): Promise<InboxItemState> {
     const url = `${this.getBaseUrl()}/api/inbox-state`;
     const res = await fetch(url, {
