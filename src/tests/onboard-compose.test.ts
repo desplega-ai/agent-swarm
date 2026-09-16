@@ -77,6 +77,31 @@ describe("generateCompose", () => {
     expect(yaml.match(/pull_policy: always/g)).toHaveLength(4);
   });
 
+  test("resolves every image tag from AGENT_SWARM_VERSION instead of hardcoding latest", () => {
+    const yaml = generateCompose(devState);
+
+    // A hardcoded `:latest` tracks every commit on main. The tag must stay an
+    // .env-driven pin, with `latest` only as the unset fallback.
+    expect(yaml).not.toMatch(/image: "ghcr\.io\/desplega-ai\/agent-swarm(-worker)?:latest"/);
+    expect(
+      yaml.match(/image: "ghcr\.io\/desplega-ai\/agent-swarm(-worker)?:\$\{AGENT_SWARM_VERSION/g),
+    ).toHaveLength(4);
+  });
+
+  test("static example resolves every swarm image tag from AGENT_SWARM_VERSION", async () => {
+    const yaml = await Bun.file(
+      new URL("../../docker-compose.example.yml", import.meta.url),
+    ).text();
+
+    expect(yaml).not.toMatch(/image: "ghcr\.io\/desplega-ai\/agent-swarm(-worker)?:latest"/);
+    // 1 API service + 12 agent services.
+    expect(
+      yaml.match(
+        /image: "ghcr\.io\/desplega-ai\/agent-swarm(-worker)?:\$\{AGENT_SWARM_VERSION:-latest\}"/g,
+      ),
+    ).toHaveLength(13);
+  });
+
   test.each([
     "missing",
     "never",

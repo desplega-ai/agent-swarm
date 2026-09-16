@@ -39,6 +39,7 @@ Create a `.env` file in the same directory as `docker-compose.yml`:
 API_KEY=your-secret-api-key
 CLAUDE_CODE_OAUTH_TOKEN=your-oauth-token   # Run `claude setup-token` to get this
 SECRETS_ENCRYPTION_KEY=                     # Run `openssl rand -base64 32` and paste here. See "Encryption Key" below.
+AGENT_SWARM_VERSION=                        # Pin a release here. Blank tracks `latest`. See "Pinning the Image Version" below.
 
 # Docker Compose agent IDs (optional overrides)
 # Leave blank to generate a UUID on first boot and reuse it across restarts.
@@ -88,7 +89,35 @@ for name in LEAD_AGENT_ID WORKER_1_AGENT_ID WORKER_2_AGENT_ID CONTENT_WRITER_AGE
 done
 ```
 
-### Step 4: Start the Swarm
+### Step 4: Pin the Image Version
+
+The API and every agent service resolve their tag from a single `.env` variable:
+
+```bash title=".env"
+AGENT_SWARM_VERSION=1.150.0
+```
+
+Pick a version from [releases](https://github.com/desplega-ai/agent-swarm/releases). Confirm every service resolved the same tag:
+
+```bash
+docker compose config | grep -E 'image: .*(agent-swarm|agent-swarm-worker):'
+```
+
+<Callout type="warn">
+**Leaving `AGENT_SWARM_VERSION` blank tracks `:latest`, which is not a release.** `:latest` is rebuilt and moved on every commit to `main`; a version tag is published only when the release version changes. The compose example sets `pull_policy: always`, so an unpinned deployment can move to a newer build on any `up -d` or restart — including one you did not intend as an upgrade. Pin anything you depend on.
+</Callout>
+
+Changing this value later is an upgrade, not a restart. Migrations are forward-only, so re-pinning to an older tag does **not** roll back a schema change — a database backup taken before the upgrade does. Back up first ([Backing Up the Database](#backing-up-the-database) and [Backing up the key](#backing-up-the-key)), then:
+
+```bash
+docker compose pull      # explicit: a moved tag is not re-pulled unless pull_policy is always
+docker compose up -d
+docker compose images    # confirm what is actually running
+```
+
+Verify with `/health` **and** a completed task, not `/health` alone. On Kubernetes, the chart pins images through its `appVersion`; pass `--version` to `helm upgrade` or it moves to the newest published chart. See [Kubernetes and Helm](/docs/guides/kubernetes).
+
+### Step 5: Start the Swarm
 
 ```bash
 docker compose up -d
@@ -96,7 +125,7 @@ docker compose up -d
 
 The API service starts first. Workers and lead wait until the API health check passes before starting (via `depends_on: condition: service_healthy`).
 
-### Step 5: Verify It's Running
+### Step 6: Verify It's Running
 
 ```bash
 # Check all services are up
@@ -116,7 +145,7 @@ You should see the lead and workers listed with `status: "idle"`.
 The bundled worker image already includes the Ubuntu runtime libraries required by Playwright's Chromium binary. Browser-driven tasks such as `agent-browser` sessions, Playwright smoke tests, and screenshot workflows no longer need a per-agent `apt install` workaround just to launch the bundled browser.
 </Callout>
 
-### Step 6: HTTPS with Caddy (optional, needed for the hosted dashboard)
+### Step 7: HTTPS with Caddy (optional, needed for the hosted dashboard)
 
 The dashboard at [app.agent-swarm.dev](https://app.agent-swarm.dev) is served over HTTPS, so browsers block a plain-HTTP API. OAuth callbacks, webhooks, and page links also need a public HTTPS origin. The Compose example ships an optional Caddy reverse proxy that obtains Let's Encrypt certificates automatically.
 
@@ -374,7 +403,7 @@ To scale the swarm, copy an existing worker block in `docker-compose.yml`:
 ```yaml title="docker-compose.yml (add a new worker)"
   worker-3:
     entrypoint: *agent-entrypoint
-    image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
+    image: "ghcr.io/desplega-ai/agent-swarm-worker:${AGENT_SWARM_VERSION:-latest}"
     platform: linux/amd64
     pull_policy: always
     stop_grace_period: 60s
@@ -464,7 +493,8 @@ Run individual Claude workers in containers without Compose.
 ### Pull from Registry
 
 ```bash
-docker pull ghcr.io/desplega-ai/agent-swarm-worker:latest
+# Pin a release. `:latest` moves on every commit to `main` and is not a release.
+docker pull ghcr.io/desplega-ai/agent-swarm-worker:1.150.0
 ```
 
 ### Build Locally

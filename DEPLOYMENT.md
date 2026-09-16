@@ -55,6 +55,7 @@ cp docker-compose.example.yml docker-compose.yml
 API_KEY=your-secret-api-key
 HARNESS_PROVIDER=claude
 CLAUDE_CODE_OAUTH_TOKEN=your-oauth-token   # Or configure another provider below
+AGENT_SWARM_VERSION=1.150.0                # Pin a release. Blank tracks `:latest` — see Step 4
 
 # ---- Optional ----
 GITHUB_TOKEN=your-github-token             # For git operations inside agents
@@ -84,13 +85,33 @@ To retain an existing identity, set the service's override in `.env` (for exampl
 
 Removing personal volumes also removes generated IDs.
 
-**Step 4:** Start the swarm.
+**Step 4:** Pin the image version.
+
+`AGENT_SWARM_VERSION` in `.env` drives the tag for the API and every agent service. Leaving it blank resolves to `:latest`, which is rebuilt and moved on **every commit to `main`** — it is not a release. A version tag is published only when the release version changes. Because the example sets `pull_policy: always`, an unpinned deployment can move to a newer build on any `up -d` or container restart, which lets the API and the agents drift onto different code.
+
+Pin a version from [releases](https://github.com/desplega-ai/agent-swarm/releases) and confirm every service resolved the same tag:
+
+```bash
+docker compose config | grep -E 'image: .*(agent-swarm|agent-swarm-worker):'
+```
+
+Changing this value later is an upgrade, not a restart. Migrations are forward-only, so re-pinning to an older tag does **not** roll back a schema change — only a database backup taken before the upgrade does. Back it up (see [Volumes & Persistence](#volumes--persistence)), then:
+
+```bash
+docker compose pull      # explicit: a moved tag is not re-pulled unless pull_policy is always
+docker compose up -d
+docker compose images    # confirm what is actually running
+```
+
+Verify with `/health` **and** a completed task, not `/health` alone. On Kubernetes the chart pins images through its `appVersion`; pass `--version` to `helm upgrade` or it moves to the newest published chart.
+
+**Step 5:** Start the swarm.
 
 ```bash
 docker compose up -d
 ```
 
-**Step 5:** Verify everything is running.
+**Step 6:** Verify everything is running.
 
 ```bash
 # Check all services are up
@@ -187,7 +208,8 @@ Run individual Claude workers in containers.
 ### Pull from Registry
 
 ```bash
-docker pull ghcr.io/desplega-ai/agent-swarm-worker:latest
+# Pin a release. `:latest` is rebuilt on every commit to `main` and is not a release.
+docker pull ghcr.io/desplega-ai/agent-swarm-worker:1.150.0
 
 # Slim variant for CI/E2E (all four harnesses, no playwright/postgres/redis/glab
 # or dev toolchain — see docs-site "Published Artifacts" for the full matrix)
