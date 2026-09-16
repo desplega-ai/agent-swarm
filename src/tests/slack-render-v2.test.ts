@@ -6,6 +6,7 @@ import {
   completeTask,
   createAgent,
   createLogEntry,
+  createScheduledTask,
   createTaskExtended,
   ensureSlackDelegationActivation,
   ensureSlackRenderV2Activation,
@@ -26,6 +27,7 @@ import {
   supersedeTask,
   upsertSwarmConfig,
 } from "../be/db";
+import { createStandaloneScheduleTask } from "../scheduler/schedule-task";
 import { getTaskLink, MAX_SECTION_LENGTH } from "../slack/blocks";
 import {
   _resetSlackRenderV2ForTests,
@@ -298,6 +300,77 @@ describe("Slack renderer v2", () => {
       method: "reactions.add",
       payload: { channel: channelId, name: "white_check_mark", timestamp: triggerTs },
     });
+  });
+
+  for (const delegationEnabled of [false, true]) {
+    test(`relays a deferred schedule continuation with delegation=${delegationEnabled}`, async () => {
+      process.env.SLACK_RENDER_V2_DELEGATION = String(delegationEnabled);
+      if (delegationEnabled) await ensureSlackDelegationActivation();
+      const lead = await createAgent({ name: "Continuation Lead", isLead: true, status: "idle" });
+      const { channelId, threadTs } = uniqueSlackAddress("C_CONTINUATION");
+      const ask = await createTaskExtended("answer when ready", {
+        agentId: lead.id,
+        source: "slack",
+        slackChannelId: channelId,
+        slackThreadTs: threadTs,
+        contextKey: slackContextKey({ channelId, threadTs }),
+      });
+      await startTask(ask.id);
+      await completeTask(ask.id, "Waiting for the result.", { addTags: ["deferred"] });
+      await backdateLastUpdated([ask.id], 20);
+      await processSlackRenderV2();
+      expect((await getSlackOutcomeMessage(ask.id))?.finalizedAt).toBeTruthy();
+
+      const schedule = await createScheduledTask({
+        name: "deferred-answer",
+        scheduleType: "one_time",
+        taskTemplate: "Deliver the result",
+        taskType: "deferred",
+        tags: ["deferred"],
+        parentTaskId: ask.id,
+        targetAgentId: lead.id,
+        createdByAgentId: lead.id,
+        nextRunAt: new Date().toISOString(),
+      });
+      const continuation = await createStandaloneScheduleTask(schedule);
+      expect(continuation.source).toBe("schedule");
+      expect(continuation.scheduleId).toBe(schedule.id);
+      expect(continuation.slackChannelId).toBe(channelId);
+      expect(continuation.slackThreadTs).toBe(threadTs);
+      await startTask(continuation.id);
+      await processSlackRenderV2();
+      expect(await getSlackOutcomeMessage(continuation.id)).toBeNull();
+      await completeTask(continuation.id, "Here is the complete answer.");
+      calls.length = 0;
+
+      await processSlackRenderV2();
+      await processSlackRenderV2();
+
+      expect((await getSlackOutcomeMessage(continuation.id))?.finalizedAt).toBeTruthy();
+      const streams = calls.filter((call) => call.method === "chat.startStream");
+      expect(streams).toHaveLength(1);
+      expect(streams[0]?.payload).toMatchObject({
+        channel: channelId,
+        thread_ts: threadTs,
+        markdown_text: "✅\n\nHere is the complete answer.",
+      });
+    });
+  }
+
+  test("does not relay an ordinary scheduled task without Slack context", async () => {
+    const schedule = await createScheduledTask({
+      name: "ordinary-maintenance",
+      scheduleType: "one_time",
+      taskTemplate: "Run maintenance",
+      taskType: "maintenance",
+      nextRunAt: new Date().toISOString(),
+    });
+    const task = await createStandaloneScheduleTask(schedule);
+    await startTask(task.id);
+    await completeTask(task.id, "Maintenance completed.");
+    await processSlackRenderV2();
+    expect(await getSlackOutcomeMessage(task.id)).toBeNull();
+    expect(calls).toHaveLength(0);
   });
 
   test("defaults off and accepts an explicit opt-in", () => {

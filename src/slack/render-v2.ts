@@ -707,6 +707,17 @@ export async function childOutcomeContent(
   return `↳ ✅ ${agentName} — result\n\n${outcomeText(task.output, "Task completed.")}`;
 }
 
+// A deferred wake continues a human conversation even though the scheduler
+// assigns source="schedule". Its answer must not depend on delegation cards.
+function isSlackContinuation(task: AgentTask): boolean {
+  return (
+    task.source === "schedule" &&
+    task.taskType === "deferred" &&
+    !!task.slackChannelId &&
+    !!task.slackThreadTs
+  );
+}
+
 /**
  * True when `task` is a candidate for its own child result card (plan
  * section 3.4, rules 1-4, 3, and part of rule 6). Callers still need the
@@ -716,6 +727,7 @@ export async function childOutcomeContent(
 function isChildCardCandidate(task: AgentTask, delegationActivatedAt: string): boolean {
   return (
     task.source !== "slack" &&
+    !isSlackContinuation(task) &&
     !!task.slackChannelId &&
     !!task.slackThreadTs &&
     (task.status === "completed" || task.status === "failed") &&
@@ -725,9 +737,11 @@ function isChildCardCandidate(task: AgentTask, delegationActivatedAt: string): b
   );
 }
 
-function taskNeedsAskOutcome(task: AgentTask, activatedAt: string): boolean {
+function taskNeedsDirectOutcome(task: AgentTask, activatedAt: string): boolean {
   return (
-    task.source === "slack" && isAskOutcomeStatus(task.status) && task.createdAt >= activatedAt
+    ((task.source === "slack" && isAskOutcomeStatus(task.status)) ||
+      (isSlackContinuation(task) && isOutcomeStatus(task.status))) &&
+    task.createdAt >= activatedAt
   );
 }
 
@@ -1137,13 +1151,14 @@ export async function processSlackRenderV2(): Promise<void> {
       // In-progress asks are eligible only for the timeout backstop. They do
       // not represent immediately active outcome work, so avoid waking an old
       // tree solely to verify its permalink on every render tick.
-      const isAskCandidate = taskNeedsAskOutcome(task, activatedAt) && isOutcomeStatus(task.status);
+      const isDirectCandidate =
+        taskNeedsDirectOutcome(task, activatedAt) && isOutcomeStatus(task.status);
       const isChildCandidate =
         delegationEnabled &&
         delegationActivatedAt !== null &&
         isChildCardCandidate(task, delegationActivatedAt) &&
         !task.slackReplySent;
-      if (isAskCandidate || isChildCandidate) {
+      if (isDirectCandidate || isChildCandidate) {
         needsOutcome = true;
         break;
       }
@@ -1228,10 +1243,10 @@ export async function processSlackRenderV2(): Promise<void> {
 
     for (const task of tasks) {
       if (!isSlackRenderV2Enabled()) return;
-      if (task.source !== "slack") continue;
+      if (!taskNeedsDirectOutcome(task, activatedAt)) continue;
       if ((await getSlackOutcomeMessage(task.id))?.finalizedAt) continue;
-      if (!isAskOutcomeStatus(task.status) || task.createdAt < activatedAt) continue;
       const deferByClosure =
+        task.source === "slack" &&
         delegationEnabled &&
         delegationActivatedAt !== null &&
         task.createdAt >= delegationActivatedAt;
