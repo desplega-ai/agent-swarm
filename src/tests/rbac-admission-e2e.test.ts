@@ -13,13 +13,12 @@ import { join } from "node:path";
 import {
   api,
   makeScratchDir,
-  readAuditRows,
   registerAgent,
   removeScratchDir,
   type SwarmServer,
   spawnSwarmServer,
   WORKER_A,
-  waitForAuditCount,
+  waitForAuditRows,
 } from "./rbac-e2e-helpers";
 
 setDefaultTimeout(120_000);
@@ -358,8 +357,40 @@ describe("RBAC admission over real HTTP", () => {
     });
     expect(operatorCreate.status).toBe(201);
 
-    expect(await waitForAuditCount(dbPath, 2)).toBeGreaterThanOrEqual(2);
-    const userHttpRows = readAuditRows(dbPath).filter(
+    const userHttpRows = (
+      await waitForAuditRows(dbPath, (rows) => {
+        const userRows = rows.filter(
+          (row) =>
+            row.principalType === "user" &&
+            row.principalId === userId &&
+            row.source === "http" &&
+            row.resourceType === "http-route",
+        );
+        return (
+          [
+            "GET /api/agents/{id}/mcp-servers",
+            "GET /api/scripts/{id}/apis/{endpointId}/secret",
+            "PATCH /api/assets/app/{id}/key",
+            "POST /api/scripts/{id}/apis",
+            "POST /api/tasks",
+          ].every((resourceId) =>
+            userRows.some((row) => row.resourceId === resourceId && row.decision === "deny"),
+          ) &&
+          userRows.some(
+            (row) =>
+              row.resourceId === "PUT /api/favorites" &&
+              row.verb === "favorite.write.own" &&
+              row.decision === "allow",
+          ) &&
+          userRows.some(
+            (row) =>
+              row.resourceId === "PATCH /api/assets/app/{id}/key" &&
+              row.verb === "app.manage" &&
+              row.decision === "allow",
+          )
+        );
+      })
+    ).filter(
       (row) =>
         row.principalType === "user" &&
         row.principalId === userId &&
