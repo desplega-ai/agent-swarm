@@ -43,6 +43,7 @@ import { createStandaloneScheduleTask } from "./schedule-task";
 export { createStandaloneScheduleTask } from "./schedule-task";
 
 let schedulerInterval: ReturnType<typeof setInterval> | null = null;
+let schedulerStartup: object | null = null;
 let isProcessing = false;
 let executorRegistry: ExecutorRegistry | null = null;
 
@@ -111,6 +112,8 @@ export interface DispatchScheduleResult {
   triggeredWorkflows: boolean;
   workflowRunIds?: string[];
   task?: AgentTask;
+  skipped?: boolean;
+  scheduleAdvanced?: boolean;
 }
 
 export class AutomationNeedsSetupError extends Error {
@@ -132,6 +135,7 @@ export function renderScheduledTaskParams(schedule: ScheduledTask): ScheduledTas
 export async function dispatchScheduleTarget(
   schedule: ScheduledTask,
   extraTags: string[] = [],
+  advanceSchedule?: () => Promise<void>,
 ): Promise<DispatchScheduleResult> {
   const deferred = await dispatchDeferredTaskWait(schedule.id, "ceiling", extraTags);
   if (deferred) return { triggeredWorkflows: false, ...deferred };
@@ -201,10 +205,20 @@ export async function dispatchScheduleTarget(
         }
       }
       if (!triggeredWorkflows) {
-        const task = await getDbClient().transaction(async () =>
-          createStandaloneScheduleTask(schedule, extraTags),
-        );
-        return { triggeredWorkflows, task };
+        return getDbClient().transaction(async () => {
+          // Polling and recovery may hold the same due snapshot. Claim the
+          // occurrence under the write lock, together with task creation and
+          // advancement, so another dispatcher cannot commit it twice.
+          if (advanceSchedule) {
+            const current = await getScheduledTaskById(schedule.id);
+            if (!current?.enabled || current.nextRunAt !== schedule.nextRunAt) {
+              return { triggeredWorkflows, skipped: true };
+            }
+          }
+          const task = await createStandaloneScheduleTask(schedule, extraTags);
+          if (advanceSchedule) await advanceSchedule();
+          return { triggeredWorkflows, task, scheduleAdvanced: !!advanceSchedule };
+        });
       }
       return { triggeredWorkflows, workflowRunIds };
     }
@@ -264,24 +278,11 @@ async function recoverMissedSchedules(): Promise<void> {
 
     let triggeredWorkflows = false;
     try {
-      ({ triggeredWorkflows } = await dispatchScheduleTarget(schedule, ["recovered"]));
-
-      // Update schedule state regardless of workflow/task path
-      if (schedule.scheduleType === "one_time") {
-        await updateScheduledTask(schedule.id, {
-          lastRunAt: now.toISOString(),
-          nextRunAt: null,
-          enabled: false,
-          lastUpdatedAt: now.toISOString(),
-        });
-      } else {
-        const nextRun = calculateNextRun(schedule, now);
-        await updateScheduledTask(schedule.id, {
-          lastRunAt: now.toISOString(),
-          nextRunAt: nextRun,
-          lastUpdatedAt: now.toISOString(),
-        });
-      }
+      const advance = () => advanceScheduleAfterRun(schedule, now);
+      const result = await dispatchScheduleTarget(schedule, ["recovered"], advance);
+      if (result.skipped) continue;
+      ({ triggeredWorkflows } = result);
+      if (!result.scheduleAdvanced) await advance();
 
       if (schedule.scheduleType === "one_time") {
         console.log(`[Scheduler] One-time schedule "${schedule.name}" recovered and auto-disabled`);
@@ -356,6 +357,18 @@ function getBackoffMs(consecutiveErrors: number): number {
   return ERROR_BACKOFF_MS[Math.max(0, idx)] ?? ERROR_BACKOFF_MS[0]!;
 }
 
+/** Advance a successful run; recovery preserves its existing error counters. */
+async function advanceScheduleAfterRun(schedule: ScheduledTask, recoveredAt?: Date): Promise<void> {
+  const now = recoveredAt ?? new Date();
+  await updateScheduledTask(schedule.id, {
+    lastRunAt: now.toISOString(),
+    nextRunAt: schedule.scheduleType === "one_time" ? null : calculateNextRun(schedule, now),
+    ...(schedule.scheduleType === "one_time" ? { enabled: false } : {}),
+    lastUpdatedAt: now.toISOString(),
+    ...(!recoveredAt ? { consecutiveErrors: 0, lastErrorAt: null, lastErrorMessage: null } : {}),
+  });
+}
+
 /**
  * Execute a single scheduled task by creating an agent task.
  * Tracks consecutive errors and applies exponential backoff on failure.
@@ -364,32 +377,16 @@ export async function executeSchedule(schedule: ScheduledTask): Promise<void> {
   schedule = renderScheduledTaskParams(schedule);
   let triggeredWorkflows = false;
   try {
-    ({ triggeredWorkflows } = await dispatchScheduleTarget(schedule));
+    const advance = () => advanceScheduleAfterRun(schedule);
+    const result = await dispatchScheduleTarget(schedule, [], advance);
+    if (result.skipped) return;
+    ({ triggeredWorkflows } = result);
+    if (!result.scheduleAdvanced) await advance();
 
-    // Update schedule state regardless of workflow/task path
-    const now = new Date().toISOString();
     if (schedule.scheduleType === "one_time") {
-      await updateScheduledTask(schedule.id, {
-        lastRunAt: now,
-        nextRunAt: null,
-        enabled: false,
-        lastUpdatedAt: now,
-        consecutiveErrors: 0,
-        lastErrorAt: null,
-        lastErrorMessage: null,
-      });
       console.log(`[Scheduler] Executed one-time schedule "${schedule.name}", auto-disabled`);
     } else {
-      const nextRun = calculateNextRun(schedule, new Date());
-      await updateScheduledTask(schedule.id, {
-        lastRunAt: now,
-        nextRunAt: nextRun,
-        lastUpdatedAt: now,
-        consecutiveErrors: 0,
-        lastErrorAt: null,
-        lastErrorMessage: null,
-      });
-      console.log(`[Scheduler] Executed schedule "${schedule.name}", next run: ${nextRun}`);
+      console.log(`[Scheduler] Executed schedule "${schedule.name}"`);
     }
     telemetry.schedule("executed", {
       scheduleType: schedule.scheduleType,
@@ -466,7 +463,7 @@ export function startScheduler(
   intervalMs = 10000,
   opts?: { runId?: string },
 ): void {
-  if (schedulerInterval) {
+  if (schedulerInterval || schedulerStartup) {
     console.log("[Scheduler] Already running");
     return;
   }
@@ -474,15 +471,25 @@ export function startScheduler(
   executorRegistry = registry;
   console.log(`[Scheduler] Starting with ${intervalMs}ms polling interval`);
 
-  // Recover missed schedules from downtime, then run normal processing
+  // Keep polling disabled until recovery has settled. The token also prevents
+  // a stopped (or replaced) startup from installing a late timer.
+  const startup = {};
+  schedulerStartup = startup;
   void initDeferredTaskWaits()
-    .then(() => recoverMissedSchedules())
-    .then(() => processSchedules())
-    .catch((err) => console.error("[Scheduler] Recovery failed:", err));
-
-  schedulerInterval = setInterval(async () => {
-    await processSchedules();
-  }, intervalMs);
+    .then(async () => {
+      if (schedulerStartup !== startup) return;
+      await recoverMissedSchedules();
+      if (schedulerStartup !== startup) return;
+      await processSchedules();
+    })
+    .catch((err) => console.error("[Scheduler] Recovery failed:", err))
+    .finally(() => {
+      if (schedulerStartup !== startup) return;
+      schedulerStartup = null;
+      schedulerInterval = setInterval(async () => {
+        await processSchedules();
+      }, intervalMs);
+    });
 
   ensure({
     id: "scheduler_started",
@@ -531,6 +538,7 @@ async function processSchedules(): Promise<void> {
  * Stop the scheduler polling loop.
  */
 export function stopScheduler(): void {
+  schedulerStartup = null;
   stopDeferredTaskWaits();
   if (schedulerInterval) {
     clearInterval(schedulerInterval);
