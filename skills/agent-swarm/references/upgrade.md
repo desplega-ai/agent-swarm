@@ -2,6 +2,38 @@
 
 Applies to Compose. For Kubernetes, the chart already pins and its day-2 upgrade steps are in the [Kubernetes operations procedure](https://github.com/desplega-ai/agent-swarm/blob/main/skills/agent-swarm/references/operate-k8s.md).
 
+Two independent things make a Compose upgrade unsafe. Apply both. Pinning alone does not make upgrades safe while the API volume shadows `/app`, and narrowing the volume alone still leaves the version moving under you.
+
+## Required: mount the API volume at `/app/data`, not `/app`
+
+A named volume copies image content on first population and then shadows that path forever. An API service with `swarm_api:/app` freezes everything the image ships in `/app` at install time, including `migrations/` and `package.json`.
+The compiled binary lives outside `/app`, so the **code upgrades while its migrations do not**. The API then queries schema that no migration in its frozen directory creates, and every affected write fails. `/health` reads the stale `/app/package.json`, so it reports the old version and stays green — nothing detects the split.
+
+Check an existing install:
+
+```bash
+docker compose -f docker-compose.example.yml --env-file .env exec api \
+  sh -c 'ls /app/migrations | wc -l; cat /app/package.json | grep \"version\"'
+docker run --rm --entrypoint sh <api image>:<tag> \
+  -c 'ls /app/migrations | wc -l; cat /app/package.json | grep \"version\"'
+```
+
+Different counts or versions mean the volume is shadowing the image. Fix it with the one-time move below.
+Only `/app/data` must persist: the SQLite database at `DATABASE_PATH` and `.page-session-secret` beside it. The image already declares `VOLUME /app/data`.
+
+### One-time move for an existing install
+
+Do this before `up -d`, after taking the backup below. The new volume starts empty, so skipping the copy brings the API up against an empty database.
+
+```bash
+docker compose -f docker-compose.example.yml --env-file .env down
+docker run --rm -v swarm_api:/old -v swarm_api_data:/new alpine \
+  sh -c 'cp -a /old/data/. /new/ && ls -la /new'
+```
+
+Confirm `agent-swarm-db.sqlite` is listed in `/new` before starting. Keep the old `swarm_api` volume until the upgraded install is verified; delete it only afterwards.
+Do not change the worker volumes. Those mount `/workspace/*` and `/logs`, which is intended agent state.
+
 ## Why pinning is required
 
 `latest` is rebuilt and moved on every commit to `main`. It is a development tag, not a release; a version tag is published only when the release version changes.
@@ -31,13 +63,14 @@ Do this first, every time. Migrations are forward-only, so the backup is the onl
 
 ```bash
 docker compose -f docker-compose.example.yml --env-file .env stop api
-docker run --rm -v swarm_api:/app -v "$(pwd):/backup" alpine \
-  sh -c 'cp /app/agent-swarm-db.sqlite /backup/agent-swarm-db-backup.sqlite && \
-         if [ -f /app/.page-session-secret ]; then cp /app/.page-session-secret /backup/page-session-secret.backup; fi'
+# Use the volume your install currently has: `swarm_api` before the /app/data
+# change, `swarm_api_data` after it. The database lives under `data/` either way.
+docker run --rm -v swarm_api_data:/data -v "$(pwd):/backup" alpine \
+  sh -c 'cp -a /data/. /backup/swarm-api-data-backup/'
 cp encryption_key encryption_key.backup
 ```
 
-Stopping the API first gives a consistent SQLite copy. Store the backup and the encryption key together and off the host; an encrypted database without its actual key is unreadable. Read [secrets encryption](https://docs.agent-swarm.dev/docs/guides/secrets-encryption).
+Stopping the API first gives a consistent SQLite copy. Copy the whole directory so the WAL sidecars and `.page-session-secret` come with it. Store the backup and the encryption key together and off the host; an encrypted database without its actual key is unreadable. Read [secrets encryption](https://docs.agent-swarm.dev/docs/guides/secrets-encryption).
 Never change `SECRETS_ENCRYPTION_KEY` during an upgrade.
 
 ## Upgrade

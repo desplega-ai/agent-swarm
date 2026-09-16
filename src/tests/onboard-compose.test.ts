@@ -88,6 +88,25 @@ describe("generateCompose", () => {
     ).toHaveLength(4);
   });
 
+  test("static example never mounts a named volume over /app", async () => {
+    const yaml = await Bun.file(
+      new URL("../../docker-compose.example.yml", import.meta.url),
+    ).text();
+    const doc = Bun.YAML.parse(yaml) as {
+      services: Record<string, { volumes?: string[] }>;
+    };
+
+    // A named volume copies image content once and then shadows that path, so
+    // an `:/app` mount freezes the image's migrations/ and package.json while
+    // the binary upgrades. Only /app/data must persist.
+    for (const [name, service] of Object.entries(doc.services)) {
+      for (const mount of service.volumes ?? []) {
+        expect(`${name}: ${mount}`).not.toMatch(/:\/app$/);
+      }
+    }
+    expect(doc.services.api?.volumes).toEqual(["swarm_api_data:/app/data"]);
+  });
+
   test("static example resolves every swarm image tag from AGENT_SWARM_VERSION", async () => {
     const yaml = await Bun.file(
       new URL("../../docker-compose.example.yml", import.meta.url),

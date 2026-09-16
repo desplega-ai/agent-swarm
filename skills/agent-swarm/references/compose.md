@@ -16,6 +16,12 @@ openssl rand -hex 32
 Use the last command's output as `API_KEY` in `.env`. Replace the example credential with your selected harness credential.
 For Claude OAuth, obtain it with `claude setup-token`. Remove the placeholder token when using `ANTHROPIC_API_KEY`.
 
+## Check the API volume mount
+
+The API service must mount `swarm_api_data:/app/data`. An older install mounting `swarm_api:/app` shadows the image's `migrations/` and `package.json`, so its code upgrades while its migrations stay frozen at install time. `/health` reads the stale `package.json` and stays green, so nothing reports the split.
+Existing installs need a one-time data move before starting. Execute the [pinning and upgrade procedure](https://github.com/desplega-ai/agent-swarm/blob/main/skills/agent-swarm/references/upgrade.md).
+Leave the worker volumes alone. They mount `/workspace/*` and `/logs`, which is intended agent state.
+
 ## Pin the image version
 
 Set `AGENT_SWARM_VERSION` in `.env` to a published release before starting. It drives the tag for the API and every agent service.

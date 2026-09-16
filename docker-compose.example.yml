@@ -16,6 +16,16 @@
 #  In isolated environments where each container has its own network namespace,
 #  you may map all services to the same port (e.g. 3000:3000).
 #
+# Upgrading from an install that mounted `swarm_api:/app`:
+#  The API volume is now `swarm_api_data:/app/data`. The old `/app` mount
+#  shadowed the image's `migrations/` directory, so the API upgraded its code
+#  but kept the migrations it first booted with. Copy your database over before
+#  starting, or the API comes up against an empty database:
+#    docker run --rm -v swarm_api:/old -v swarm_api_data:/new alpine \
+#      sh -c 'cp -a /old/data/. /new/'
+#  Full procedure, including the backup to take first:
+#  https://github.com/desplega-ai/agent-swarm/blob/main/skills/agent-swarm/references/upgrade.md
+#
 # Image version (recommended for anything you depend on):
 #  The API and agent services resolve their tag from AGENT_SWARM_VERSION in
 #  .env. Leaving it blank falls back to `latest`, which is rebuilt and moved on
@@ -223,7 +233,16 @@ services:
       - "3013:3013"
 
     volumes:
-      - swarm_api:/app
+      # Mount ONLY the data directory. A named volume copies image content on
+      # first population and then shadows that path forever, so mounting `/app`
+      # freezes everything the image ships there — `migrations/`, `package.json`,
+      # `extensions/`, `scripts-runtime/`, `script-types/`, `typescript-lib/`,
+      # `vendored-openapi/` — at install time. The compiled binary lives outside
+      # `/app` (`/usr/local/bin/agent-swarm-api`), so the code upgrades while its
+      # migrations do not, and the API then queries schema no migration created.
+      # `/app/data` holds everything that must persist: the SQLite database
+      # (DATABASE_PATH) and `.page-session-secret` beside it.
+      - swarm_api_data:/app/data
       # Slack files an agent fetches with `slack-download-file` / `slack-read`
       # from a task become task attachments (stored through the file provider),
       # so workers need no shared disk with the API. Only the no-task fallback
@@ -998,7 +1017,11 @@ volumes:
   agent_fs_data:
   caddy_data:
   caddy_config:
-  swarm_api:
+  # Replaces the older `swarm_api` volume, which was mounted at `/app` and
+  # shadowed the image's migrations. Upgrading an existing install requires a
+  # one-time copy of `<swarm_api>/data/.` into this volume before `up -d`:
+  # https://github.com/desplega-ai/agent-swarm/blob/main/skills/agent-swarm/references/upgrade.md
+  swarm_api_data:
   swarm_logs:
   swarm_shared:
   swarm_lead:

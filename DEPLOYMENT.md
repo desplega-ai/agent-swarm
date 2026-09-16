@@ -145,7 +145,7 @@ The swarm uses Docker named volumes to persist data across restarts and upgrades
 ```
 Docker Volume            → Container Path        → What It Stores
 ─────────────────────────────────────────────────────────────────────
-swarm_api                → /app                  → SQLite DB (agent-swarm-db.sqlite)
+swarm_api_data           → /app/data             → SQLite DB (agent-swarm-db.sqlite)
 swarm_logs               → /logs                 → Session logs (all agents share this)
 swarm_shared             → /workspace/shared     → Shared workspace (all agents read/write)
 swarm_lead               → /workspace/personal   → Lead agent's private workspace
@@ -158,7 +158,34 @@ swarm_content_strategist → /workspace/personal   → Content strategist's priv
 
 **How it works:**
 
-- **`swarm_api`** — The most critical volume. Contains the SQLite database with all tasks, agents, schedules, and configuration, plus auto-generated secrets such as `.page-session-secret`. **Back this up regularly.** Losing this volume means losing swarm state and invalidates existing authenticated page sessions.
+- **`swarm_api_data`** — The most critical volume. Contains the SQLite database with all tasks, agents, schedules, and configuration, plus auto-generated secrets such as `.page-session-secret`. **Back this up regularly.** Losing this volume means losing swarm state and invalidates existing authenticated page sessions.
+
+#### Migrating from the `/app` mount
+
+Installs created before this change mount `swarm_api` at `/app` instead of `swarm_api_data` at `/app/data`. **Fix this — it silently breaks upgrades.**
+
+A Docker named volume copies image content only on *first* population, then shadows that path forever. Mounting `/app` therefore freezes everything the image ships there — `migrations/`, `package.json`, `extensions/`, `scripts-runtime/`, `script-types/`, `typescript-lib/`, `vendored-openapi/` — at install time. The compiled binary lives outside `/app` (`/usr/local/bin/agent-swarm-api`), so **the code upgrades while its migrations do not**. The API then queries columns and tables that no migration in its frozen directory ever created, and every affected write fails with `SQLiteError: table … has no column named …`.
+
+It is undetectable from the outside: `/health` reads the stale `/app/package.json`, so it reports the *old* version and stays green while newer code runs.
+
+Detect it by comparing the running container against its own image:
+
+```bash
+docker compose exec api sh -c 'ls /app/migrations | wc -l; grep \"version\" /app/package.json'
+docker run --rm --entrypoint sh ghcr.io/desplega-ai/agent-swarm:<your tag> \
+  -c 'ls /app/migrations | wc -l; grep \"version\" /app/package.json'
+```
+
+Differing counts or versions confirm the shadowing. Migrate with a one-time copy — only `/app/data` needs to persist:
+
+```bash
+docker compose down
+docker run --rm -v swarm_api:/old -v swarm_api_data:/new alpine \
+  sh -c 'cp -a /old/data/. /new/ && ls -la /new'   # expect agent-swarm-db.sqlite
+docker compose up -d
+```
+
+Keep the old `swarm_api` volume until the upgraded install is verified, then delete it. Worker volumes are unaffected — they mount `/workspace/*` and `/logs`, which is intended agent state.
 - **`swarm_logs`** — Shared by all agent containers. Each agent writes session logs here. Useful for debugging but not critical — can be recreated.
 - **`swarm_shared`** — A workspace visible to all agents. Each agent creates subdirectories under `/workspace/shared/{thoughts,memory,downloads,misc}/$AGENT_ID`. Agents can read each other's files but conventionally only write to their own subdirectory.
 - **`swarm_<agent>`** (personal volumes) — Each agent gets an isolated workspace at `/workspace/personal` for its own files. Not visible to other agents.
@@ -166,10 +193,12 @@ swarm_content_strategist → /workspace/personal   → Content strategist's priv
 **Backup:**
 
 ```bash
-# Back up the API database and persisted page-session secret
-docker run --rm -v swarm_api:/app -v $(pwd):/backup alpine \
-  sh -c 'cp /app/agent-swarm-db.sqlite /backup/agent-swarm-db-backup.sqlite && if [ -f /app/.page-session-secret ]; then cp /app/.page-session-secret /backup/page-session-secret.backup; fi'
+# Back up the API database, its WAL sidecars, and the persisted page-session secret
+docker run --rm -v swarm_api_data:/data -v $(pwd):/backup alpine \
+  sh -c 'cp -a /data/. /backup/swarm-api-data-backup/'
 ```
+
+> **Note:** The API volume is `swarm_api_data`, mounted at `/app/data`. Installs created before that change mount `swarm_api` at `/app` — substitute that name and use `-v swarm_api:/old` with `cp -a /old/data/.`. See [Migrating from the `/app` mount](#migrating-from-the-app-mount).
 
 ### Database retention
 
