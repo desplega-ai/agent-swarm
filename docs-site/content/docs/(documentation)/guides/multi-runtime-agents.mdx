@@ -102,12 +102,13 @@ Create a `.env` beside the file first:
 API_KEY=replace-with-a-secret
 AGENT_ID=replace-with-one-stable-uuid
 CLAUDE_CODE_OAUTH_TOKEN=replace-with-your-token
+AGENT_SWARM_VERSION=replace-with-a-pinned-release-tag
 ```
 
 ```yaml title="docker-compose.yml"
 services:
   api:
-    image: ghcr.io/desplega-ai/agent-swarm:latest
+    image: ghcr.io/desplega-ai/agent-swarm:${AGENT_SWARM_VERSION:-latest}
     pull_policy: always
     environment:
       API_KEY: ${API_KEY:?Set API_KEY in .env}
@@ -115,7 +116,7 @@ services:
     ports:
       - "3013:3013"
     volumes:
-      - swarm_api:/app
+      - swarm_api_data:/app/data
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:3013/health || exit 1"]
       interval: 10s
@@ -125,7 +126,7 @@ services:
     restart: unless-stopped
 
   worker:
-    image: ghcr.io/desplega-ai/agent-swarm-worker:latest
+    image: ghcr.io/desplega-ai/agent-swarm-worker:${AGENT_SWARM_VERSION:-latest}
     pull_policy: always
     depends_on:
       api:
@@ -148,7 +149,7 @@ services:
 
 volumes:
   shared_agent_workspace:
-  swarm_api:
+  swarm_api_data:
   swarm_logs:
 ```
 
@@ -158,6 +159,10 @@ Start it with:
 docker compose up -d
 docker compose ps
 ```
+
+Pin `AGENT_SWARM_VERSION` to a release instead of tracking `latest`, and see
+[`upgrade.md`](https://github.com/desplega-ai/agent-swarm/blob/main/skills/agent-swarm/references/upgrade.md)
+before upgrading an existing install.
 
 For a deployment that already has an API, keep the `worker` service and point
 `MCP_BASE_URL` at that API instead. Do not give replicas separate workspace
