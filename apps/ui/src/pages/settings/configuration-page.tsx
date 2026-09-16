@@ -162,9 +162,8 @@ export default function ConfigurationPage() {
       )}
 
       <p className="text-xs text-muted-foreground pb-2">
-        Values set as environment variables take precedence at boot; values saved here are stored in
-        the swarm config and applied on reload. Settings marked Restart required need a server
-        restart.
+        Values saved here are stored in the swarm config and take precedence over environment
+        variables, at boot and on reload. Settings marked Restart required need a server restart.
       </p>
     </div>
   );

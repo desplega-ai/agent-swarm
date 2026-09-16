@@ -549,9 +549,14 @@ startApiGcInterval();
 
 // Load global swarm configs before the server starts listening so decrypt/key
 // failures fail closed instead of leaving the runtime half-initialized.
+// override=true: a value saved in the dashboard wins over the deployment env
+// at boot, matching the reload path and `createServer`. Otherwise a rotated
+// credential saved only in swarm_config silently reverts to the stale env
+// value on the next deploy (2026-09-16 prod Slack outage). Reserved keys
+// (API_KEY, SECRETS_ENCRYPTION_KEY, ...) stay env-only regardless.
 let startupConfigsInjected: string[] = [];
 try {
-  startupConfigsInjected = await loadGlobalConfigsIntoEnv(false);
+  startupConfigsInjected = await loadGlobalConfigsIntoEnv(true);
 } catch (err) {
   console.error("[startup] Failed to load global swarm configs before listen:", err);
   process.exitCode = 1;

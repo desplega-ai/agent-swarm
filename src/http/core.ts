@@ -38,8 +38,10 @@ import { agentWithCapacity, getPathSegments, jsonError, parseQueryParams } from 
 
 /**
  * Load global swarm_config entries into process.env.
- * When override=false (default, used at startup), existing env vars take precedence.
- * When override=true (used for reload), DB values overwrite process.env.
+ * When override=true (used at startup, on reload, and in createServer), DB
+ * values overwrite process.env, so a dashboard-saved value wins over the
+ * deployment env. When override=false, existing env vars take precedence
+ * (only used by callers that want env-first semantics; no boot path does).
  * Reserved keys are filtered before decryption because they must remain
  * environment-only, even if legacy rows still exist in the DB.
  * Returns the list of keys that were set/updated.
