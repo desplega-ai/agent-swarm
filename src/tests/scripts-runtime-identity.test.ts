@@ -374,7 +374,7 @@ describe("script SDK dispatch hits the real runtime gates", () => {
   });
 
   test("with the flag off, the SDK dispatches without runtime identity as before", async () => {
-    delete process.env.MULTI_RUNTIME_ENABLED;
+    process.env.MULTI_RUNTIME_ENABLED = "false";
     const agentId = await makeAgent(1);
     const task = await createTaskExtended("legacy-claim-work");
 

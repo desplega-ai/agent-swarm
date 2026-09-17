@@ -15,6 +15,7 @@ import {
   markdownToSlack,
   splitSlackSectionText,
 } from "./blocks";
+import { isSlackEtaOnlyNotice, slackTaskOutput } from "./task-output";
 
 // Re-export for backward compatibility
 export { markdownToSlack } from "./blocks";
@@ -56,7 +57,7 @@ export function shouldPostInlineCompletionOutput(task: AgentTask): boolean {
   if (!task.slackChannelId || !task.slackThreadTs) return false;
   if (task.slackReplySent) return false;
 
-  const output = task.output?.trim();
+  const output = slackTaskOutput(task)?.trim();
   return !!output && isTreeOutputTruncated(markdownToSlack(output));
 }
 
@@ -85,7 +86,7 @@ export async function sendInlineTaskOutput(task: AgentTask): Promise<boolean> {
   const chunks = formatInlineCompletionOutputChunks({
     agentName: agent.name,
     taskId: task.id,
-    output: task.output,
+    output: slackTaskOutput(task) ?? "",
   });
 
   try {
@@ -115,6 +116,7 @@ export async function sendInlineTaskOutput(task: AgentTask): Promise<boolean> {
  * Send a task completion message to Slack with the agent's persona.
  */
 export async function sendTaskResponse(task: AgentTask): Promise<boolean> {
+  if (isSlackEtaOnlyNotice(task)) return true;
   const app = getSlackApp();
   if (!app || !task.slackChannelId || !task.slackThreadTs) {
     return false;
@@ -136,7 +138,7 @@ export async function sendTaskResponse(task: AgentTask): Promise<boolean> {
 
   try {
     if (task.status === "completed") {
-      const output = task.output || "Task completed.";
+      const output = slackTaskOutput(task) || "Task completed.";
       const slackOutput = markdownToSlack(output);
       const attachmentsBlock = formatAttachmentsBlockForSlack(await getTaskAttachments(task.id));
       const body = slackOutput + attachmentsBlock;
@@ -285,6 +287,7 @@ export async function updateToFinal(
   task: AgentTask,
   messageTs: string,
 ): Promise<SlackUpdateResult> {
+  if (isSlackEtaOnlyNotice(task)) return "ok";
   const app = getSlackApp();
   if (!app || !task.slackChannelId || !task.agentId) return "failed";
 
@@ -297,7 +300,7 @@ export async function updateToFinal(
   let completionBlockBatches: unknown[][] | undefined;
 
   if (task.status === "completed") {
-    const output = task.output || "Task completed.";
+    const output = slackTaskOutput(task) || "Task completed.";
     const slackOutput = markdownToSlack(output);
     const attachmentsBlock = formatAttachmentsBlockForSlack(await getTaskAttachments(task.id));
     const body = slackOutput + attachmentsBlock;

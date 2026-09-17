@@ -27,7 +27,7 @@ Claude Code queue delivery additionally depends on a supported stock CLI invocat
 
 ## Enable steering
 
-Steering is **disabled by default**. Set `STEERING_ENABLED=true` (or `1`) on the API server and worker containers to turn it on. While disabled, new steering requests are rejected across HTTP, MCP, scripts, and Slack; the dashboard hides its steering controls and the server does not register `steer-task` or `accept-steer`. Existing message history stays readable, and delivery callbacks plus terminal-status promotion remain enabled so messages already in flight can finish safely if the flag is turned off again.
+Steering is **enabled by default**. Set `STEERING_ENABLED=false` (or `0`) on the API server and worker containers to turn it off. While disabled, new steering requests are rejected across HTTP, MCP, scripts, and Slack; the dashboard hides its steering controls and the server does not register `steer-task` or `accept-steer`. Existing message history stays readable, and delivery callbacks plus terminal-status promotion remain enabled so messages already in flight can finish safely if the flag is turned off again.
 
 The flag can also be set as a global `swarm_config` entry — global config rows are injected into the server environment at startup and on config reload.
 
@@ -111,7 +111,8 @@ Inspect the audit trail with `GET /api/tasks/{id}/steering-messages`. Worker del
 
 ### Slack
 
-Slack thread steering is opt-in:
+Slack thread steering defaults to the lead with queued delivery. Set
+`SLACK_THREAD_STEERING=off` to disable it, or choose another mode:
 
 ```bash
 SLACK_THREAD_STEERING=lead       # or all

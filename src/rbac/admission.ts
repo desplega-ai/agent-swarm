@@ -15,7 +15,7 @@ export type AdmissionDecision =
   | { allow: false; reason: string; verb?: PermissionVerb };
 
 export function isRbacEnabled(): boolean {
-  return isEnvFlagEnabled("RBAC_ENABLED", false);
+  return isEnvFlagEnabled("RBAC_ENABLED", true);
 }
 
 export function decideAdmission(input: {

@@ -105,6 +105,25 @@ describe("Slack thread steering", () => {
     expect(await getChildTasks(leadTask.id)).toHaveLength(1);
   });
 
+  test("unset configuration steers the lead with queued delivery", async () => {
+    delete process.env.SLACK_THREAD_STEERING;
+    delete process.env.SLACK_THREAD_STEERING_MODE;
+    const channelId = "C_DEFAULT_STEER";
+    const threadTs = "1500.0001";
+    const task = await createRunningSlackTask(leadId, channelId, threadTs);
+    const result = await requestSlackThreadSteering({
+      channelId,
+      threadTs,
+      message: "new context",
+    });
+    expect(result).toMatchObject({
+      task: { id: task.id },
+      result: { outcome: "queued", effectiveMode: "queue" },
+    });
+    expect(await getSteeringMessagesForTask(task.id)).toHaveLength(1);
+    expect(await getChildTasks(task.id)).toEqual([]);
+  });
+
   test("lead mode sends one steering message to an in-progress lead and creates no task", async () => {
     process.env.SLACK_THREAD_STEERING = "lead";
     process.env.SLACK_THREAD_STEERING_MODE = "steer";

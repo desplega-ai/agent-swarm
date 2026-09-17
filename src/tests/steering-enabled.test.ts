@@ -48,12 +48,11 @@ function restoreEnv(name: string, value: string | undefined): void {
 }
 
 /**
- * Steering is opt-in (disabled unless STEERING_ENABLED=true|1), so "disabled"
- * is simply the default: unset the flag for the duration of the callback.
+ * Exercise an explicit opt-out without depending on the deployment default.
  */
 async function withSteeringDisabled<T>(run: () => Promise<T> | T): Promise<T> {
   const previous = process.env.STEERING_ENABLED;
-  delete process.env.STEERING_ENABLED;
+  process.env.STEERING_ENABLED = "false";
   try {
     return await run();
   } finally {
@@ -116,8 +115,7 @@ async function api(
 const originalSteeringEnabled = process.env.STEERING_ENABLED;
 
 beforeAll(async () => {
-  // The "enabled" halves of these tests opt in explicitly (steering is off by
-  // default); withSteeringDisabled() drops the flag to exercise the default.
+  // Pin both branches explicitly so inherited configuration cannot affect them.
   process.env.STEERING_ENABLED = "true";
   await removeTestDb();
   process.env.DATABASE_PATH = TEST_DB_PATH;
@@ -147,9 +145,9 @@ afterAll(async () => {
   await removeTestDb();
 });
 
-describe("STEERING_ENABLED opt-in", () => {
-  test("steering is disabled by default (flag unset) and on falsy values", () => {
-    expect(isSteeringEnabled({})).toBe(false);
+describe("STEERING_ENABLED defaults and overrides", () => {
+  test("steering defaults on and accepts explicit opt-outs", () => {
+    expect(isSteeringEnabled({})).toBe(true);
     expect(isSteeringEnabled({ STEERING_ENABLED: "false" })).toBe(false);
     expect(isSteeringEnabled({ STEERING_ENABLED: "0" })).toBe(false);
     expect(isSteeringEnabled({ STEERING_ENABLED: "true" })).toBe(true);

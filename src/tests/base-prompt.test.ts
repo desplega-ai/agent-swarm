@@ -636,6 +636,7 @@ describe("getBasePrompt: steering section", () => {
   });
 
   test("excluded when steering is not enabled", async () => {
+    process.env.STEERING_ENABLED = "false";
     const result = await getBasePrompt({ ...minimalArgs, traits: steerableTraits });
     expect(result).not.toContain(STEERING_HEADER);
   });

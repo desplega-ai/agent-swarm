@@ -284,7 +284,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     "DB_QUERY_BOUNDED_ENABLED",
     "DB_RETENTION_DRY_RUN",
   ]),
-  ...enumValidator("SLACK_THREAD_STEERING", ["lead", "all"]),
+  ...enumValidator("SLACK_THREAD_STEERING", ["off", "lead", "all"]),
   ...enumValidator("SLACK_THREAD_STEERING_MODE", ["steer", "queue"]),
   ...shortcodeValidators([
     "SLACK_REACTION_ACCEPTED",

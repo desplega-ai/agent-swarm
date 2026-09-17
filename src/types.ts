@@ -981,6 +981,8 @@ export const InboxItemStateSchema = z
     snoozeUntil: z.string().optional(),
     dismissedAt: z.string().optional(),
     doneAt: z.string().optional(),
+    /** First-viewed timestamp, set once on first panel open. Independent of status. */
+    readAt: z.string().optional(),
     createdAt: z.string(),
     lastUpdatedAt: z.string(),
   })

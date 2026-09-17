@@ -69,18 +69,19 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "STEERING_ENABLED",
         label: "Enable steering",
         description:
-          "Master switch for mid-run task steering across harness providers. Off by default — every other steering setting is inert until this is on.",
+          "Master switch for mid-run task steering across harness providers. Enabled by default; turn off to disable new steering requests and worker delivery.",
         kind: "boolean",
-        defaultValue: "false",
+        defaultValue: "true",
         docsUrl: `${DOCS}guides/task-steering`,
       },
       {
         key: "SLACK_THREAD_STEERING",
         label: "Slack thread steering",
         description:
-          "Who may steer a running task by replying in its Slack thread — only the task's lead, or anyone in the thread.",
+          "Target the latest running lead task, the latest active task of any role, or disable thread steering.",
         kind: "enum",
-        options: ["lead", "all"],
+        options: ["off", "lead", "all"],
+        defaultValue: "lead",
         docsUrl: `${DOCS}guides/task-steering`,
       },
       {
@@ -298,7 +299,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         description:
           "Load selected swarm tools without a tool search in Claude sessions. Uses the task type or schedule in Task tool manifests. Takes effect on new MCP sessions.",
         kind: "boolean",
-        defaultValue: "false",
+        defaultValue: "true",
         docsUrl: `${DOCS}ui/configuration`,
       },
       {
@@ -323,9 +324,9 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "MULTI_RUNTIME_ENABLED",
         label: "Multiple runtimes per agent",
         description:
-          "Let several worker processes serve one agent. Each process is tracked separately with its own capacity and liveness, and the agent's task limit moves to its AGENT_MAX_TASKS setting instead of being overwritten by whichever worker registered last. Leave off for one worker per agent.",
+          "Let several worker processes serve one agent. Each process is tracked separately with its own capacity and liveness, and the agent's task limit moves to its AGENT_MAX_TASKS setting instead of being overwritten by whichever worker registered last. Enabled by default; turn off for legacy single-worker registration.",
         kind: "boolean",
-        defaultValue: "false",
+        defaultValue: "true",
         docsUrl: `${DOCS}ui/configuration`,
       },
       {
@@ -527,9 +528,9 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "SLACK_RENDER_V2",
         label: "Slack thread renderer v2",
         description:
-          "Opt in to preview one editable task tree per thread and immutable streamed outcome cards. Leave off to use the legacy per-task message renderer.",
+          "Show one editable task tree per thread and immutable streamed outcome cards by default. Turn off to use the legacy per-task message renderer.",
         kind: "boolean",
-        defaultValue: "false",
+        defaultValue: "true",
         docsUrl: `${DOCS}integrations/slack`,
       },
       {
@@ -740,7 +741,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         description:
           "Enforce role-based access control on the API and MCP surfaces. Off means every authenticated caller is granted all permissions.",
         kind: "boolean",
-        defaultValue: "false",
+        defaultValue: "true",
       },
       {
         key: "RBAC_AUDIT_DISABLED",

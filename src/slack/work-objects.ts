@@ -4,6 +4,7 @@ import { getAgentById, getTaskById } from "../be/db";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { getTaskUrl } from "./blocks";
 import { isUserAllowed } from "./handlers";
+import { slackTaskOutput } from "./task-output";
 
 type DetailsEvent = SlackEventMiddlewareArgs<"entity_details_requested">["event"];
 type Details = Omit<EntityPresentDetailsArguments, "trigger_id" | "token">;
@@ -36,7 +37,7 @@ async function getDetails(event: DetailsEvent, client: WebClient): Promise<Detai
   if (task.slackChannelId !== event.channel) return { error: { status: "restricted" } };
 
   const agent = task.agentId ? await getAgentById(task.agentId) : null;
-  const result = task.output || task.failureReason || task.progress;
+  const result = slackTaskOutput(task) || task.failureReason || task.progress;
   return {
     metadata: {
       entity_type: "slack#/entities/task",

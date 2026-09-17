@@ -399,7 +399,7 @@ const listAgentRuntimeInstances = route({
   pattern: ["api", "agents", null, "runtime-instances"],
   summary: "List runtime instances serving an agent",
   description:
-    "Read-only view of the worker processes currently registered for a logical agent. Rows exist only for multi-runtime registrations (MULTI_RUNTIME_ENABLED), so the list is empty in the default configuration. `isLive` combines `status` with `lastSeenAt` freshness against the server's staleness cutoff (`staleThresholdMinutes`); `reportedSlots` is each process's self-reported capacity, distinct from the agent's logical `maxTasks` policy.",
+    "Read-only view of the worker processes currently registered for a logical agent. Rows exist only for multi-runtime registrations (MULTI_RUNTIME_ENABLED), so the list is empty when the flag is disabled. `isLive` combines `status` with `lastSeenAt` freshness against the server's staleness cutoff (`staleThresholdMinutes`); `reportedSlots` is each process's self-reported capacity, distinct from the agent's logical `maxTasks` policy.",
   tags: ["Agents"],
   params: z.object({ id: z.string() }),
   responses: {

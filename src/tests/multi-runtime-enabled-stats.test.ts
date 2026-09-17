@@ -89,11 +89,11 @@ afterAll(async () => {
 });
 
 describe("MULTI_RUNTIME_ENABLED on the authenticated stats endpoint", () => {
-  test("reports false when the flag is unset — multi-runtime is opt-in", async () => {
+  test("reports true when the flag is unset", async () => {
     await withMultiRuntime(undefined, async () => {
       const stats = await api("GET", "/api/stats");
       expect(stats.status).toBe(200);
-      expect(stats.body.multiRuntimeEnabled).toBe(false);
+      expect(stats.body.multiRuntimeEnabled).toBe(true);
     });
   });
 

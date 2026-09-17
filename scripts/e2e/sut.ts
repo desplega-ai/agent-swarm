@@ -141,6 +141,11 @@ export async function startSut(
     // test, not development: the Slack socket-mode guard refuses to connect
     // under development, and every run drives Slack through the mock.
     NODE_ENV: "test",
+    // Contract fixtures use legacy agent registration without runtime identities.
+    MULTI_RUNTIME_ENABLED: "false",
+    // Legacy Slack scenarios pin their renderer; v2 scenarios opt in via config.
+    SLACK_RENDER_V2: "false",
+    SLACK_THREAD_STEERING: "off",
     AGENT_FS_LOCAL_DIR: fsDir,
     SECRETS_ENCRYPTION_KEY_FILE: secretsPath,
     ...slackEnv,

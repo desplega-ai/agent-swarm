@@ -612,6 +612,8 @@ export interface InboxItemState {
   snoozeUntil?: string;
   dismissedAt?: string;
   doneAt?: string;
+  /** First-viewed timestamp, set once on first notification panel open. */
+  readAt?: string;
   createdAt: string;
   lastUpdatedAt: string;
 }

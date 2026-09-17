@@ -12,7 +12,7 @@ Complete reference for all environment variables used by Agent Swarm.
 | `PORT` | `3013` | Port for MCP HTTP server |
 | `AGENT_SWARM_API_KEY` | — | Preferred, namespaced API key for server authentication — takes precedence over `API_KEY` (set either one). Always read via `getApiKey()` (`src/utils/api-key.ts`), never `process.env.API_KEY` / `process.env.AGENT_SWARM_API_KEY` directly. |
 | `API_KEY` | — | Legacy API key for server authentication (required unless `AGENT_SWARM_API_KEY` is set). See `AGENT_SWARM_API_KEY` above for the preferred, namespaced variable. |
-| `RBAC_ENABLED` | `false` | Gates REST requests authenticated with `aswt_` user tokens against RBAC role grants. Operator API-key requests and agent-authenticated calls are unaffected. Keep it off until you have seeded roles and validated the permission model for your deployment. |
+| `RBAC_ENABLED` | `true` | Gates REST requests authenticated with `aswt_` user tokens against RBAC role grants. Operator API-key requests and agent-authenticated calls are unaffected. Built-in roles and missing user assignments are seeded at boot. Set `false` to opt out. |
 | `SCRIPTS_ONLY_MCP` | `false` (unset/off) | Experimental code-mode. Set to `true` on the API server and agent containers to expose only the eight script tools over MCP while keeping the full swarm SDK available through `script-run`. It can also be configured per agent/repository/global scope through `swarm_config`; see [Scripts-only mode](/docs/guides/scripts-only-mode). |
 | `MCP_BASE_URL` | `https://api.example-swarm.dev` | Internal/worker-facing API base — the URL workers, the UI, and the setup command use to reach the API server. In split deploys this may be an internal/cluster address. |
 | `PUBLIC_MCP_BASE_URL` | Falls back to `MCP_BASE_URL` | Public, browser/externally-reachable API origin used for OAuth redirect URIs and webhook URLs. Defaults to `MCP_BASE_URL` when unset; set it in split deploys where `MCP_BASE_URL` is an internal/cluster address that external providers (Linear, Jira, GitHub) can't reach. |
@@ -24,7 +24,7 @@ Complete reference for all environment variables used by Agent Swarm.
 | `APP_URL` | — | Dashboard URL for Slack message links. `DASHBOARD_URL` is a deprecated alias of `APP_URL`. |
 | `SWARM_DASHBOARD_URL` | Falls back to `APP_URL` | Optional override for the dashboard base URL used to build the "View in Agent Swarm" link posted back to a Linear `AgentSession`. |
 | `TRUST_BODY_REQUESTED_BY_USER_ID` | `true` (unset/on) | When on (default), the server may honor a body-supplied `requestedByUserId` on `POST /api/tasks` (validated against a real user row) if no authenticated/owned-task identity is available — this keeps UI/API task attribution working under a shared operator key. Set to `false` in multi-tenant deployments where callers of the shared key are not all equally trusted, restoring the strict anti-spoofing behavior (body field ignored for operator/global-key callers). |
-| `STEERING_ENABLED` | `false` (unset/off) | Set to `true` or `1` (API server and worker containers) to enable [task steering](/docs/guides/task-steering). Off by default: steering routes reject writes, `steer-task`/`accept-steer` are not registered, and workers skip steering delivery polls. |
+| `STEERING_ENABLED` | `true` | [Task steering](/docs/guides/task-steering) is enabled by default. Set `false` or `0` (API server and worker containers) to opt out: steering routes reject writes, `steer-task`/`accept-steer` are not registered, and workers skip steering delivery polls. |
 | `ENV` | — | Environment mode (`development` adds prefix to Slack agent names) |
 | `DATABASE_PATH` | `./agent-swarm-db.sqlite` | SQLite database file path |
 | `SESSION_LOG_RETENTION_DAYS` | — (disabled) | Permanently delete `session_logs` rows older than this many whole days. Accepted range: 1–1,000,000. Leave unset to disable this table's sweep. Start with `DB_RETENTION_DRY_RUN=true`; deleted session transcripts cannot be restored without a backup. See [Database retention](/docs/guides/deployment#database-retention). |
@@ -73,7 +73,7 @@ Complete reference for all environment variables used by Agent Swarm.
 | `SKILL_FILES_MAX_FILE_BYTES` | `512000` (500 KB) | Max size in bytes for a single file within a skill file-set upsert. |
 | `SKILL_FILES_MAX_TOTAL_BYTES` | `10485760` (10 MB) | Max combined size in bytes for all files in a single skill file-set upsert. |
 | `BUDGET_ADMISSION_DISABLED` | `false` | Operator escape hatch — set to `true` at process boot to make budget admission always return allowed, bypassing the agent/global/user daily-spend budget gates on task claiming. |
-| `MULTI_RUNTIME_ENABLED` | `false` | Lets several worker processes serve one logical agent. Set consistently on the API server and every worker; runtimes sharing an `AGENT_ID` need compatible workspace state. The agent-scoped `AGENT_MAX_TASKS` setting remains the shared logical task limit. |
+| `MULTI_RUNTIME_ENABLED` | `true` | Lets several worker processes serve one logical agent. Set consistently on the API server and every worker; runtimes sharing an `AGENT_ID` need compatible workspace state. The agent-scoped `AGENT_MAX_TASKS` setting remains the shared logical task limit. |
 | `HEARTBEAT_INTERVAL_MS` | `90000` | Heartbeat sweep interval (ms) |
 | `HEARTBEAT_CHECKLIST_DISABLE` | `false` | Disables the periodic `HEARTBEAT.md` checklist polling loop (separate from the infrastructure sweep). |
 | `HEARTBEAT_CHECKLIST_INTERVAL_MS` | `1800000` | Interval (ms) between `HEARTBEAT.md` checklist checks (default 30 min). |
@@ -257,7 +257,7 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `SLACK_SIGNING_SECRET` | Signing Secret (optional for Socket Mode) |
 | `SLACK_DISABLE` | Set to `true` to disable Slack |
 | `SLACK_ALLOW_DEV_SOCKET_MODE` | Set to `true` to explicitly allow a `NODE_ENV=development` API process to connect through Socket Mode (default: `false`) |
-| `SLACK_RENDER_V2` | Set to `true` to opt in to one persistent task tree per physical Slack thread plus streamed, immutable outcome cards (default: `false`) |
+| `SLACK_RENDER_V2` | One persistent task tree per physical Slack thread plus streamed, immutable outcome cards (default: `true`; set `false` to opt out) |
 | `SLACK_WORK_OBJECTS_ENABLED` | Set to `true` to populate task Work Object flexpanes (default: `false`). Apply the updated Slack manifest, reinstall the app, and enable Work Object Previews. See [Slack setup](/docs/integrations/slack#task-work-objects). |
 | `SLACK_RENDER_V2_DELEGATION` | Set to `true` to defer an ask's conclusion card until its whole closure (delegated tasks, children, follow-ups) settles, post child result cards, and gate the checkmark reaction on the closure instead of the ask alone. Requires `SLACK_RENDER_V2=true` (default: `false`) |
 | `SLACK_CONCLUSION_SETTLE_SEC` | Quiet seconds after a closure goes fully terminal before its conclusion card posts (default: `10`) |

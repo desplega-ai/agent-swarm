@@ -18,6 +18,7 @@ agent-swarm.dev is an open-source operating system for AI work. A lead agent del
 - Workers in isolated Docker containers with development environments
 - Memory and identity that persist across sessions
 - Workflows, schedules, scripts, and apps for recurring work
+- [Extensions](https://docs.agent-swarm.dev/docs/guides/extensions) for trusted TypeScript hooks, installed as drafts and activated by an operator
 - [Realtime rooms](./runbooks/realtime-rooms.md) for shared page state, presence, and live channels
 - Your choice of harness and models: Claude Code, Codex, pi, opencode, Devin, or ACP agents
 
@@ -117,3 +118,13 @@ Read [CONTRIBUTING.md](./CONTRIBUTING.md), fork the repository, create a branch,
 ## License
 
 [MIT](./LICENSE) · 2025-2026 [desplega.sh](https://desplega.sh)
+
+### Feature defaults
+
+Fresh deployments enable Slack thread renderer v2, queued Slack steering to the lead,
+task steering, multi-runtime workers, RBAC, and task-tool preloading. Hybrid memory
+search and graph expansion are also enabled. Explicit environment/config overrides
+remain supported; see the [environment reference](https://docs.agent-swarm.dev/docs/reference/environment-variables).
+When upgrading older workers, keep `MULTI_RUNTIME_ENABLED=false` until they support
+runtime identities. Slack delegation rendering remains opt-in, and database retention
+continues to default to dry-run.

@@ -203,7 +203,7 @@ export async function handleMcp(
       const preloadEnabled = parseEnvFlag(
         configs.find((config) => config.key === "TASK_TOOL_PRELOAD_ENABLED")?.value ??
           process.env.TASK_TOOL_PRELOAD_ENABLED,
-        false,
+        true,
       );
       let preloadedTools: string[] = [];
       if (preloadEnabled) {

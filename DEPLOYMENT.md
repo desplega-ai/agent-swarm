@@ -527,7 +527,7 @@ When a worker starts, it:
 | `AGENT_NAME` | No | Display name for the agent (auto-generated if not set) |
 | `MCP_BASE_URL` | No | MCP server URL (default: `http://host.docker.internal:3013`) |
 | `WORKER_API_READY_TIMEOUT_SECONDS` | No | Positive-integer deadline for the entrypoint to reach `${MCP_BASE_URL}/health` before provider setup (default: `90`). This bootstrap-only setting must be present in the container environment. |
-| `MULTI_RUNTIME_ENABLED` | No | Allow multiple worker processes to serve one logical `AGENT_ID` (default: `false`). Set consistently on the API server and every worker; shared-agent runtimes need compatible workspace state. |
+| `MULTI_RUNTIME_ENABLED` | No | Allow multiple worker processes to serve one logical `AGENT_ID` (default: `true`). Set consistently on the API server and every worker; shared-agent runtimes need compatible workspace state. |
 | `SESSION_ID` | No | Log folder name (auto-generated if not provided) |
 | `YOLO` | No | Continue on errors (default: `false`) |
 | `SYSTEM_PROMPT` | No | Custom system prompt text |
@@ -558,7 +558,7 @@ When a worker starts, it:
 | `APP_URL` | Dashboard URL for Slack message links | - |
 | `ENV` | Environment mode (`development` adds prefix to Slack agent names) | - |
 | `SCHEDULER_INTERVAL_MS` | Polling interval for scheduled tasks | `10000` |
-| `MULTI_RUNTIME_ENABLED` | Track multiple worker runtime instances independently for one logical agent. Set consistently on the API server and every worker. | `false` |
+| `MULTI_RUNTIME_ENABLED` | Track multiple worker runtime instances independently for one logical agent. Set consistently on the API server and every worker. | `true` |
 | `RUNTIME_STALE_THRESHOLD_MIN` | Minutes without runtime traffic before an active runtime stops counting and the heartbeat sweep retires it. | `5` |
 | `DATABASE_PATH` | SQLite database file path | `./agent-swarm-db.sqlite` |
 | `MIGRATIONS_DIR` | Directory for packaged `.sql` migrations in compiled-binary deployments. Bun virtual-filesystem paths select this directory explicitly; a missing or empty directory stops a fresh database from booting without its baseline schema. Docker sets it to `/app/migrations`. | - |
@@ -646,7 +646,7 @@ SLACK_SIGNING_SECRET=...      # Signing Secret (optional for Socket Mode)
 # Disable Slack (if not using)
 SLACK_DISABLE=true
 
-# Optional: one persistent task tree plus streamed outcome cards (default: false)
+# One persistent task tree plus streamed outcome cards (default: true)
 # SLACK_RENDER_V2=true
 
 # Optional: Populate Work Object flexpanes (default: false)
@@ -664,8 +664,8 @@ SLACK_ALLOWED_USER_IDS=U12345678,U87654321           # Comma-separated user IDs 
 # By default, replies to swarm-started thread roots also auto-route as follow-ups.
 # SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION=true
 
-# Optional: steer an in-progress task from buffered Slack thread replies.
-# Values: lead | all. Unset/off preserves normal follow-up task routing.
+# Steer an in-progress task from Slack thread replies (default: lead).
+# Values: off | lead | all. Explicit off preserves normal follow-up task routing.
 # SLACK_THREAD_STEERING=lead
 # SLACK_THREAD_STEERING_MODE=queue  # queue (default) | steer
 
@@ -673,8 +673,8 @@ SLACK_ALLOWED_USER_IDS=U12345678,U87654321           # Comma-separated user IDs 
 # 0/false/off/no keeps `-p`; 1/true/on/yes forces stream-json input.
 # CLAUDE_QUEUE_STEERING=off
 
-# Task steering is disabled by default. Set `true`/`1` (API + worker containers)
-# to enable steering MCP/UI surfaces and worker delivery. History reads, in-flight
+# Task steering is enabled by default. Set `false`/`0` (API + worker containers)
+# to disable steering MCP/UI surfaces and worker delivery. History reads, in-flight
 # worker callbacks, and terminal promotion work regardless.
 # STEERING_ENABLED=true
 ```

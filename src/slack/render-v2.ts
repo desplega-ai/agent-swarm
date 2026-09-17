@@ -44,6 +44,7 @@ import {
 import { buildAskClosure, type ClosureState, closureState } from "./closure";
 import { reactionName, type SlackReactionEvent } from "./reaction-shortcode";
 import { getAgentDisplayName, getAgentEmoji } from "./responses";
+import { isSlackEtaOnlyNotice, slackTaskOutput } from "./task-output";
 
 const TREE_UPDATE_DEBOUNCE_MS = 500;
 const TREE_UPDATE_MIN_INTERVAL_MS = 3_000;
@@ -77,7 +78,7 @@ type SlackThreadMessage = {
 };
 
 export function isSlackRenderV2Enabled(): boolean {
-  return isEnvFlagEnabled("SLACK_RENDER_V2", false);
+  return isEnvFlagEnabled("SLACK_RENDER_V2", true);
 }
 
 export function isSlackDelegationEnabled(): boolean {
@@ -757,7 +758,7 @@ async function outcomeContent(task: AgentTask, slackReplySent: boolean): Promise
       : "Agent";
     return `✅ ${agentName} completed`;
   }
-  return `✅\n\n${outcomeText(task.output, "Task completed.")}`;
+  return `✅\n\n${outcomeText(slackTaskOutput(task), "Task completed.")}`;
 }
 
 async function agentDisplayNameFor(task: AgentTask): Promise<string> {
@@ -786,7 +787,7 @@ export async function childOutcomeContent(
   if (slackReplySent && !task.tags?.includes("deferred")) {
     return `↳ ✅ ${agentName} completed`;
   }
-  return `↳ ✅ ${agentName} — result\n\n${outcomeText(task.output, "Task completed.")}`;
+  return `↳ ✅ ${agentName} — result\n\n${outcomeText(slackTaskOutput(task), "Task completed.")}`;
 }
 
 // A deferred wake continues a human conversation even though the scheduler
@@ -808,6 +809,7 @@ function isSlackContinuation(task: AgentTask): boolean {
  */
 function isChildCardCandidate(task: AgentTask, delegationActivatedAt: string): boolean {
   return (
+    !isSlackEtaOnlyNotice(task) &&
     task.source !== "slack" &&
     !isSlackContinuation(task) &&
     !!task.slackChannelId &&
@@ -821,6 +823,7 @@ function isChildCardCandidate(task: AgentTask, delegationActivatedAt: string): b
 
 function taskNeedsDirectOutcome(task: AgentTask, activatedAt: string): boolean {
   return (
+    !isSlackEtaOnlyNotice(task) &&
     ((task.source === "slack" && isAskOutcomeStatus(task.status)) ||
       (isSlackContinuation(task) && isOutcomeStatus(task.status))) &&
     task.createdAt >= activatedAt
@@ -839,7 +842,7 @@ async function conclusionResultsLines(closure: AgentTask[]): Promise<string[]> {
   const lines: string[] = [];
   for (const member of closure) {
     if (member.taskType === "follow-up" || member.taskType === "reroute-decision") continue;
-    if (!isOutcomeStatus(member.status)) continue;
+    if (!isOutcomeStatus(member.status) || isSlackEtaOnlyNotice(member)) continue;
     const glyph = await taskStateGlyph(member, new Date());
     const agentName = await agentDisplayNameFor(member);
     const card = await getSlackOutcomeMessage(member.id);
@@ -847,7 +850,10 @@ async function conclusionResultsLines(closure: AgentTask[]): Promise<string[]> {
       lines.push(`↳ ${glyph} ${agentName} — ${card.permalink}`);
       continue;
     }
-    const raw = outcomeText(member.status === "failed" ? member.failureReason : member.output, "");
+    const raw = outcomeText(
+      member.status === "failed" ? member.failureReason : slackTaskOutput(member),
+      "",
+    );
     const digest =
       raw.length > CONCLUSION_DIGEST_LENGTH
         ? `${raw.slice(0, CONCLUSION_DIGEST_LENGTH).trimEnd()}…`

@@ -41,6 +41,7 @@ const upsertState = route({
     itemId: z.string().min(1),
     status: InboxItemStatusSchema,
     snoozeUntil: z.string().datetime().optional(),
+    readAt: z.string().datetime().optional(),
   }),
   responses: {
     200: {
@@ -83,6 +84,7 @@ export async function handleInboxState(
         itemId: parsed.body.itemId,
         status: parsed.body.status,
         snoozeUntil: parsed.body.snoozeUntil,
+        readAt: parsed.body.readAt,
       });
       upsertState.respond(res, 200, { item });
     } catch (err) {

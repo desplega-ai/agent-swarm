@@ -20,7 +20,7 @@ async function configuredSteeringTarget(
   channelId: string,
   threadTs: string,
 ): Promise<AgentTask | null> {
-  switch (process.env.SLACK_THREAD_STEERING) {
+  switch (process.env.SLACK_THREAD_STEERING ?? "lead") {
     case "lead":
       return getLatestLeadTaskInThread(channelId, threadTs);
     case "all":
@@ -32,8 +32,8 @@ async function configuredSteeringTarget(
 
 /**
  * Request steering for the configured Slack thread target, if it is currently
- * in progress. The default and invalid configuration values deliberately
- * return null so Slack preserves its existing task-creation behavior.
+ * in progress. Unset configuration targets the lead; explicit off or invalid
+ * values return null so Slack preserves its task-creation behavior.
  */
 export async function requestSlackThreadSteering(
   args: SlackThreadSteeringRequest,

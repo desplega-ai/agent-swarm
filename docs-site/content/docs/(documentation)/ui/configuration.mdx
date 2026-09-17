@@ -68,7 +68,7 @@ Every row shows its default, and rows with a stored value offer a **Reset** acti
 </Callout>
 
 <Callout type="info" title="Multiple runtimes per agent">
-  `MULTI_RUNTIME_ENABLED` is off by default: one worker process serves one agent, and that worker's reported concurrency becomes the agent's task limit. Turning it on lets several processes serve the same agent — each is tracked with its own capacity and liveness, and the agent's limit moves to its agent-scoped `AGENT_MAX_TASKS` setting (seeded from the agent's current limit the first time it registers, so enabling the flag does not change what the swarm enforces).
+  `MULTI_RUNTIME_ENABLED` is on by default, letting several processes serve the same agent — each is tracked with its own capacity and liveness, and the agent's limit moves to its agent-scoped `AGENT_MAX_TASKS` setting (seeded from the agent's current limit the first time it registers, so enabling the flag does not change what the swarm enforces).
 
   Workers must be updated before enabling it: with the flag on, a worker that does not identify its runtime is rejected at registration and shutdown. A worker that stops reporting for `RUNTIME_STALE_THRESHOLD_MIN` (default 5 minutes) stops counting toward its agent, and an agent whose last live worker expires is marked offline. See the [multi-runtime agents guide](/docs/guides/multi-runtime-agents) for the rollout order, shared-workspace Compose example, rollback behavior, and the [heartbeat and crash recovery runbook](https://github.com/desplega-ai/agent-swarm/blob/main/runbooks/heartbeat-crash-recovery.md).
 
@@ -95,9 +95,9 @@ Every row shows its default, and rows with a stored value offer a **Reset** acti
   The API server reads this value into a module-level constant at boot, so a saved value takes effect on the next restart (the **Restart required** badge on this row).
 </Callout>
 
-## Task tool preloading (proposal)
+## Task tool preloading
 
-`TASK_TOOL_PRELOAD_ENABLED` defaults to `false`. With it enabled, each new agent MCP session reads
+`TASK_TOOL_PRELOAD_ENABLED` defaults to `true`. With it enabled, each new agent MCP session reads
 `TASK_TOOL_MANIFESTS`, selects tools using the authenticated agent's current task, and marks their
 MCP metadata with `anthropic/alwaysLoad: true`. Claude Code supports this annotation; no reduction
 in tool searches is claimed for other harnesses. Existing sessions retain their original selection.
@@ -126,8 +126,9 @@ and tool-call permissions still apply; preloading never grants access or removes
 
 Each selected tool adds its description and input schema to the initial model context. A long
 schema can cost more than the search it replaces. Compare input/cache tokens, cost, and tool-search
-steps on the same recurring targets before enabling this broadly. Turn the flag off to restore
-ordinary discovery for new sessions. This proposal does not enable either setting.
+steps on the same recurring targets when configuring manifests. Turn the flag off to restore
+ordinary discovery for new sessions. The flag is enabled by default; a matching manifest is still
+required to preload task-specific tools.
 
 ## Seeded automation auto-enable
 
