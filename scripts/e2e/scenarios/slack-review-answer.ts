@@ -18,7 +18,7 @@ import {
 // Lead-review answer that must have its own direct delivery path.
 export const slackReviewAnswer: Scenario = {
   name: "slack-review-answer",
-  order: 135,
+  order: 136,
   groups: ["visuals-v2"],
   async run(ctx) {
     await enableSlackRenderV2Only(ctx);
