@@ -8,6 +8,7 @@
  */
 import { randomUUID } from "node:crypto";
 import pkg from "../package.json";
+import { isSlackConfigured } from "./slack/config";
 import { isEnvFlagEnabled } from "./utils/env-flag";
 
 const TELEMETRY_ENDPOINT = "https://proxy.desplega.sh/v1/events";
@@ -269,9 +270,7 @@ export function _hasEmbeddingKey(env: NodeJS.ProcessEnv = process.env): boolean 
  * Exported for tests; not part of the public API.
  */
 export function _hasSlackChannel(env: NodeJS.ProcessEnv = process.env): boolean {
-  return (
-    !!(env.SLACK_BOT_TOKEN && env.SLACK_APP_TOKEN) && !isEnvFlagEnabled("SLACK_DISABLE", false, env)
-  );
+  return isSlackConfigured(env);
 }
 
 /**

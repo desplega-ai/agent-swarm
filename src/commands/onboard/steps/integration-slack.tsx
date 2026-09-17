@@ -1,9 +1,10 @@
 import { Select, TextInput } from "@inkjs/ui";
 import { Box, Text } from "ink";
 import { useState } from "react";
+import type { SlackMode } from "../../../slack/config.ts";
 import type { StepProps } from "../types.ts";
 
-type SubStep = "manifest_options" | "app_created" | "bot_token" | "app_token";
+type SubStep = "manifest_options" | "app_created" | "mode" | "bot_token" | "credential";
 
 const MANIFEST_URL =
   "https://raw.githubusercontent.com/desplega-ai/agent-swarm/main/slack-manifest.json";
@@ -21,6 +22,7 @@ export function IntegrationSlackStep({ goToNext }: StepProps) {
   const [subStep, setSubStep] = useState<SubStep>("manifest_options");
   const [copied, setCopied] = useState(false);
   const [botToken, setBotToken] = useState("");
+  const [mode, setMode] = useState<SlackMode>("socket");
   const [error, setError] = useState("");
 
   return (
@@ -53,7 +55,7 @@ export function IntegrationSlackStep({ goToNext }: StepProps) {
                   setCopied(false);
                   setSubStep("app_created");
                 } else {
-                  setSubStep("bot_token");
+                  setSubStep("mode");
                 }
               }}
             />
@@ -89,7 +91,28 @@ export function IntegrationSlackStep({ goToNext }: StepProps) {
           <Box marginTop={1}>
             <Select
               options={[{ label: "Continue — I've created the app", value: "continue" }]}
-              onChange={() => setSubStep("bot_token")}
+              onChange={() => setSubStep("mode")}
+            />
+          </Box>
+        </Box>
+      )}
+
+      {subStep === "mode" && (
+        <Box marginTop={1} flexDirection="column">
+          <Text>Select the Slack transport:</Text>
+          <Box marginTop={1}>
+            <Select
+              options={[
+                { label: "Socket Mode (default)", value: "socket" },
+                {
+                  label: "HTTP (configuration only; receiver not installed yet)",
+                  value: "http",
+                },
+              ]}
+              onChange={(value) => {
+                setMode(value as SlackMode);
+                setSubStep("bot_token");
+              }}
             />
           </Box>
         </Box>
@@ -118,42 +141,59 @@ export function IntegrationSlackStep({ goToNext }: StepProps) {
                 }
                 setError("");
                 setBotToken(trimmed);
-                setSubStep("app_token");
+                setSubStep("credential");
               }}
             />
           </Box>
         </Box>
       )}
 
-      {subStep === "app_token" && (
+      {subStep === "credential" && (
         <Box marginTop={1} flexDirection="column">
           <Text dimColor>Bot Token: {botToken.slice(0, 10)}...</Text>
           <Box marginTop={1} flexDirection="column">
-            <Text>
-              Find your App-Level Token under <Text bold>Basic Information → App-Level Tokens</Text>
-              .
-            </Text>
-            <Text dimColor>Create one with connections:write scope if you don't have one.</Text>
+            {mode === "socket" ? (
+              <>
+                <Text>
+                  Find your App-Level Token under{" "}
+                  <Text bold>Basic Information → App-Level Tokens</Text>.
+                </Text>
+                <Text dimColor>Create one with connections:write scope if you don't have one.</Text>
+              </>
+            ) : (
+              <Text>
+                Find your Signing Secret under <Text bold>Basic Information → App Credentials</Text>
+                .
+              </Text>
+            )}
           </Box>
           <Box marginTop={1} flexDirection="column">
-            <Text bold>App Token (SLACK_APP_TOKEN):</Text>
+            <Text bold>
+              {mode === "socket"
+                ? "App Token (SLACK_APP_TOKEN):"
+                : "Signing Secret (SLACK_SIGNING_SECRET):"}
+            </Text>
             <TextInput
-              key="slack-app-token"
-              placeholder="xapp-..."
+              key={`slack-${mode}-credential`}
+              placeholder={mode === "socket" ? "xapp-..." : "signing secret"}
               onSubmit={(value) => {
                 const trimmed = value.trim();
                 if (!trimmed) {
-                  setError("App token is required. Please enter it above.");
+                  setError(
+                    `${mode === "socket" ? "App token" : "Signing secret"} is required. Please enter it above.`,
+                  );
                   return;
                 }
-                if (!trimmed.startsWith("xapp-")) {
+                if (mode === "socket" && !trimmed.startsWith("xapp-")) {
                   setError("App token should start with xapp- — please check and re-enter.");
                   return;
                 }
                 setError("");
                 goToNext({
                   slackBotToken: botToken,
-                  slackAppToken: trimmed,
+                  slackMode: mode,
+                  slackAppToken: mode === "socket" ? trimmed : "",
+                  slackSigningSecret: mode === "http" ? trimmed : "",
                 });
               }}
             />

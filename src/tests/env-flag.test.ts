@@ -62,6 +62,12 @@ describe("swarm-config-guard: Configuration-page value validation", () => {
     expect(validateConfigValue("SLACK_THREAD_STEERING_MODE", "now")).toContain("must be one of");
   });
 
+  test("Slack transport is constrained", () => {
+    expect(validateConfigValue("SLACK_MODE", "socket")).toBeNull();
+    expect(validateConfigValue("SLACK_MODE", "http")).toBeNull();
+    expect(validateConfigValue("SLACK_MODE", "webhook")).toContain("must be one of");
+  });
+
   test("Slack reaction shortcode keys accept bare and colon-wrapped names", () => {
     const keys = [
       "SLACK_REACTION_ACCEPTED",

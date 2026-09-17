@@ -3,6 +3,7 @@ import { Select } from "@inkjs/ui";
 import { Box, Text, useApp, useInput } from "ink";
 import { useCallback, useEffect, useRef, useState } from "react";
 import pkg from "../../package.json";
+import { getSlackConfiguration, isSlackConfigured } from "../slack/config.ts";
 import { getApiKey } from "../utils/api-key.ts";
 import { buildOnboardDashboardUrl } from "./onboard/dashboard-url.ts";
 import {
@@ -189,9 +190,10 @@ export function Onboard({
       }
     }
 
+    const slackConfig = getSlackConfiguration(process.env);
     const integrations = {
       github: !!process.env.GITHUB_TOKEN,
-      slack: !!process.env.SLACK_BOT_TOKEN,
+      slack: isSlackConfigured(process.env),
       gitlab: !!process.env.GITLAB_TOKEN,
       sentry: !!process.env.SENTRY_AUTH_TOKEN,
     };
@@ -223,6 +225,8 @@ export function Onboard({
       githubName: process.env.GITHUB_NAME || "",
       slackBotToken: process.env.SLACK_BOT_TOKEN || "",
       slackAppToken: process.env.SLACK_APP_TOKEN || "",
+      slackSigningSecret: process.env.SLACK_SIGNING_SECRET || "",
+      slackMode: slackConfig.mode ?? "socket",
       gitlabToken: process.env.GITLAB_TOKEN || "",
       gitlabEmail: process.env.GITLAB_EMAIL || "",
       sentryToken: process.env.SENTRY_AUTH_TOKEN || "",

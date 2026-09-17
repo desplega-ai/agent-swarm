@@ -32,6 +32,7 @@ export function generateManifest(state: OnboardState): object {
       gitlab: state.integrations.gitlab,
       sentry: state.integrations.sentry,
     },
+    slackMode: state.slackMode,
     composePath: "./docker-compose.yml",
     envPath: "./.env",
     apiUrl: `http://localhost:${state.apiPort || 3013}`,

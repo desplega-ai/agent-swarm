@@ -96,6 +96,8 @@ const ENV_KEYS_TO_RESET = [
   "DEVIN_ORG_ID",
   "SLACK_BOT_TOKEN",
   "SLACK_APP_TOKEN",
+  "SLACK_SIGNING_SECRET",
+  "SLACK_MODE",
   "SLACK_DISABLE",
   "GITHUB_WEBHOOK_SECRET",
   "GITHUB_APP_ID",
@@ -409,18 +411,36 @@ describe("setup milestones", () => {
     });
   });
 
-  test("slack: needs both bot+app tokens AND not disabled", async () => {
+  test("slack: reports mode-aware credentials as configured, not live-verified", async () => {
     process.env.SLACK_BOT_TOKEN = "xoxb-test";
     const a = await buildStatusPayload();
     expect(getMilestone(a, "slack").state).toBe("unverified");
 
     process.env.SLACK_APP_TOKEN = "xapp-test";
     const b = await buildStatusPayload();
-    expect(getMilestone(b, "slack").state).toBe("verified");
+    expect(getMilestone(b, "slack").state).toBe("configured");
+    expect(getMilestone(b, "slack").hint).toContain("not been verified");
+
+    process.env.SLACK_MODE = "http";
+    delete process.env.SLACK_APP_TOKEN;
+    process.env.SLACK_SIGNING_SECRET = "synthetic-signing-secret";
+    const http = await buildStatusPayload();
+    expect(getMilestone(http, "slack").state).toBe("unverified");
+    expect(getMilestone(http, "slack").hint).toContain("unavailable");
 
     process.env.SLACK_DISABLE = "true";
     const c = await buildStatusPayload();
     expect(getMilestone(c, "slack").state).toBe("unverified");
+  });
+
+  test("slack: invalid mode fails closed with a specific hint", async () => {
+    process.env.SLACK_MODE = "webhook";
+    process.env.SLACK_BOT_TOKEN = "xoxb-test";
+    process.env.SLACK_APP_TOKEN = "xapp-test";
+
+    const milestone = getMilestone(await buildStatusPayload(), "slack");
+    expect(milestone.state).toBe("unverified");
+    expect(milestone.hint).toContain("Invalid SLACK_MODE");
   });
 
   test("github: needs webhook secret + app id + private key", async () => {

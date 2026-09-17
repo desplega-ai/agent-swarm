@@ -159,6 +159,17 @@ export const INTEGRATIONS: IntegrationDef[] = [
     restartRequired: true,
     fields: [
       {
+        key: "SLACK_MODE",
+        label: "Transport",
+        type: "select",
+        default: "socket",
+        options: [
+          { value: "socket", label: "Socket Mode" },
+          { value: "http", label: "HTTP (not available yet)" },
+        ],
+        helpText: "HTTP configuration is preparatory; its receiver is not installed yet.",
+      },
+      {
         key: "SLACK_BOT_TOKEN",
         label: "Bot token",
         type: "password",
@@ -170,9 +181,8 @@ export const INTEGRATIONS: IntegrationDef[] = [
       },
       {
         key: "SLACK_APP_TOKEN",
-        label: "App-level token",
+        label: "App-level token (required for Socket Mode)",
         type: "password",
-        required: true,
         isSecret: true,
         placeholder: "xapp-...",
         helpText: "App-level token with `connections:write` scope, used for Socket Mode.",
@@ -183,6 +193,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
         label: "Signing secret",
         type: "password",
         isSecret: true,
+        writeOnly: true,
         helpText:
           "Only required for HTTP events. Socket Mode (the default) doesn't use it. Found under Basic Information → App Credentials.",
         affectsRestart: true,

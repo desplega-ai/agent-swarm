@@ -99,7 +99,24 @@ describe("generateEnv", () => {
     const env = generateEnv(state);
     expect(env).toContain("SLACK_BOT_TOKEN=example-xoxb-slack-bot");
     expect(env).toContain("SLACK_APP_TOKEN=example-xapp-slack-app");
+    expect(env).toContain("SLACK_MODE=socket");
+    expect(env).not.toContain("SLACK_SIGNING_SECRET=");
     expect(env).toContain("SLACK_DISABLE=false");
+  });
+
+  test("Slack HTTP mode emits only its mode-specific credential", () => {
+    const env = generateEnv(
+      makeState({
+        integrations: { github: false, slack: true, gitlab: false, sentry: false },
+        slackMode: "http",
+        slackBotToken: "example-xoxb-slack-bot",
+        slackSigningSecret: "synthetic-signing-secret",
+      }),
+    );
+    expect(env).toContain("SLACK_MODE=http");
+    expect(env).toContain("SLACK_BOT_TOKEN=example-xoxb-slack-bot");
+    expect(env).toContain("SLACK_SIGNING_SECRET=synthetic-signing-secret");
+    expect(env).not.toContain("SLACK_APP_TOKEN=");
   });
 
   // ── No integrations: only core section ──

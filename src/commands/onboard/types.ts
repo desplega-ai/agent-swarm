@@ -1,3 +1,5 @@
+import type { SlackMode } from "../../slack/config";
+
 export type OnboardStep =
   | "welcome"
   | "deploy_type"
@@ -79,6 +81,8 @@ export interface OnboardState {
   githubName: string;
   slackBotToken: string;
   slackAppToken: string;
+  slackSigningSecret: string;
+  slackMode: SlackMode;
   gitlabToken: string;
   gitlabEmail: string;
   sentryToken: string;
@@ -192,6 +196,8 @@ export const INITIAL_STATE: OnboardState = {
   githubName: "",
   slackBotToken: "",
   slackAppToken: "",
+  slackSigningSecret: "",
+  slackMode: "socket",
   gitlabToken: "",
   gitlabEmail: "",
   sentryToken: "",

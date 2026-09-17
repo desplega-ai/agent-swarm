@@ -252,9 +252,10 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 
 | Variable | Description |
 |----------|-------------|
-| `SLACK_BOT_TOKEN` | Bot User OAuth Token (`xoxb-...`) |
-| `SLACK_APP_TOKEN` | App-Level Token for Socket Mode (`xapp-...`) |
-| `SLACK_SIGNING_SECRET` | Signing Secret (optional for Socket Mode) |
+| `SLACK_MODE` | Transport selection: `socket` (default) or `http`. Invalid values fail closed. HTTP is configuration-only until its receiver is installed and never falls back to Socket Mode. |
+| `SLACK_BOT_TOKEN` | Bot User OAuth Token (`xoxb-...`), required in both modes |
+| `SLACK_APP_TOKEN` | App-Level Token for Socket Mode (`xapp-...`), required only in `socket` mode |
+| `SLACK_SIGNING_SECRET` | Signing Secret, required only in `http` mode |
 | `SLACK_DISABLE` | Set to `true` to disable Slack |
 | `SLACK_ALLOW_DEV_SOCKET_MODE` | Set to `true` to explicitly allow a `NODE_ENV=development` API process to connect through Socket Mode (default: `false`) |
 | `SLACK_RENDER_V2` | One persistent task tree per physical Slack thread plus streamed, immutable outcome cards (default: `true`; set `false` to opt out) |

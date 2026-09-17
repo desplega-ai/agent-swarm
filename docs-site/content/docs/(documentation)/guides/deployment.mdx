@@ -398,7 +398,8 @@ These are the key variables for Docker Compose deployment. For the complete refe
 | `GITHUB_EMAIL` | Git commit email |
 | `GITHUB_NAME` | Git commit name |
 | `SWARM_URL` | Base domain for service discovery (default: `localhost`) |
-| `SLACK_BOT_TOKEN` | Enable Slack integration (also needs `SLACK_APP_TOKEN`) |
+| `SLACK_MODE` | Slack transport: `socket` (default) or `http`; HTTP remains unavailable until its receiver is installed |
+| `SLACK_BOT_TOKEN` | Enable Slack integration; also needs `SLACK_APP_TOKEN` in socket mode or `SLACK_SIGNING_SECRET` in HTTP mode |
 | `SLACK_DISABLE` | Set to `true` to disable Slack (default: `false`) |
 
 ### Secrets Encryption

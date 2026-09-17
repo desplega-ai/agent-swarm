@@ -507,6 +507,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
     icon: Plug,
     entries: [
       {
+        key: "SLACK_MODE",
+        label: "Slack transport",
+        description:
+          "Choose Socket Mode or signed HTTP delivery. HTTP remains unavailable until the HTTP receiver is installed; selecting it never falls back to a socket.",
+        kind: "enum",
+        options: ["socket", "http"],
+        defaultValue: "socket",
+        docsUrl: `${DOCS}integrations/slack`,
+      },
+      {
         key: "SLACK_DISABLE",
         label: "Disable Slack",
         description:

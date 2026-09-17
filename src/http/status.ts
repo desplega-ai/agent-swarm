@@ -34,6 +34,7 @@ import {
 } from "../be/db";
 import { getEmbeddingProvider } from "../be/memory";
 import { getFileStorageProvider } from "../fs/registry";
+import { getSlackConfiguration } from "../slack/config";
 import { type AgentCredStatus, AutomationIntegrationIdSchema, ProviderNameSchema } from "../types";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
@@ -407,26 +408,37 @@ function embeddingsMilestone(): SetupMilestone {
 }
 
 function slackMilestone(state: AutomationSetupStates["slack"]): SetupMilestone {
-  const disable = process.env.SLACK_DISABLE;
-  const disabled = disable === "true" || disable === "1";
+  const config = getSlackConfiguration();
 
   if (state === "unverified") {
+    let hint: string;
+    if (config.disabled) {
+      hint = "Slack is explicitly disabled (SLACK_DISABLE=true).";
+    } else if (!config.mode) {
+      hint = "Invalid SLACK_MODE. Use socket or http.";
+    } else if (config.mode === "http" && config.missingCredentials.length === 0) {
+      hint =
+        "HTTP credentials are configured, but HTTP ingress is unavailable until the receiver is installed.";
+    } else {
+      hint = `Set ${config.missingCredentials.join(" + ")} for Slack ${config.mode} mode.`;
+    }
     return {
       id: "slack",
-      label: "Slack connected",
+      label: "Slack configured",
       state: "unverified",
-      hint: disabled
-        ? "Slack is explicitly disabled (SLACK_DISABLE=true)."
-        : "Set SLACK_BOT_TOKEN + SLACK_APP_TOKEN to connect Slack.",
+      hint,
       action_url: automationIntegrationFixUrl("slack"),
     };
   }
-  // Socket Mode connection state isn't surfaced today — Phase 2+ enhancement.
-  // For now treat env-present as `verified` so the UX matches the brainstorm.
+
   return {
     id: "slack",
-    label: "Slack connected",
-    state: "verified",
+    label: "Slack configured",
+    state: "configured",
+    hint:
+      config.mode === "http"
+        ? "HTTP credentials are configured, but HTTP ingress is unavailable until the receiver is installed."
+        : "Socket Mode credentials are configured; a live connection has not been verified.",
     action_url: automationIntegrationFixUrl("slack"),
   };
 }

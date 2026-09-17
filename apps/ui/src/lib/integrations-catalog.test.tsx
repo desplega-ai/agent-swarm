@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import type { SwarmConfig } from "../api/types";
 import { getIntegrationFields, INTEGRATIONS } from "./integrations-catalog";
+import { deriveIntegrationStatus } from "./integrations-status";
 
 describe("automation integration configure surfaces", () => {
   test("catalogs GSC and AgentFS at their exact dashboard routes", () => {
@@ -32,5 +34,34 @@ describe("automation integration configure surfaces", () => {
       getIntegrationFields(agentFs!).find((field) => field.key === "API_AGENT_FS_API_KEY")
         ?.writeOnly,
     ).toBe(true);
+  });
+});
+
+describe("Slack transport credential status", () => {
+  test("HTTP uses the signing secret and socket still needs an app token", () => {
+    const slack = INTEGRATIONS.find((candidate) => candidate.id === "slack")!;
+    const http: SwarmConfig = {
+      id: "test-mode",
+      scope: "global",
+      scopeId: null,
+      key: "SLACK_MODE",
+      value: "http",
+      isSecret: false,
+      envPath: null,
+      description: null,
+      createdAt: "",
+      lastUpdatedAt: "",
+      encrypted: false,
+    };
+    const presence = { SLACK_BOT_TOKEN: true, SLACK_SIGNING_SECRET: true };
+    expect(deriveIntegrationStatus(slack, [http], presence)).toBe("configured");
+    expect(deriveIntegrationStatus(slack, [], presence)).toBe("partial");
+    expect(
+      deriveIntegrationStatus(slack, [], { SLACK_BOT_TOKEN: true, SLACK_APP_TOKEN: true }),
+    ).toBe("configured");
+    expect(deriveIntegrationStatus(slack, [{ ...http, value: "invalid" }], presence)).toBe(
+      "partial",
+    );
+    expect(deriveIntegrationStatus(slack, [], { ...presence, SLACK_MODE: true })).toBe("partial");
   });
 });

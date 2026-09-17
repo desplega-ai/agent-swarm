@@ -8,6 +8,11 @@ function makeState(overrides: Partial<OnboardState>): OnboardState {
   return { ...INITIAL_STATE, ...overrides };
 }
 
+// biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
+const COMPOSE_SLACK_MODE = "SLACK_MODE=${SLACK_MODE:-socket}";
+// biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
+const COMPOSE_SLACK_SIGNING_SECRET = "SLACK_SIGNING_SECRET=${SLACK_SIGNING_SECRET}";
+
 describe("generateCompose", () => {
   test("uses the full preset by default and includes every official template once", () => {
     const full = getPresetById("full");
@@ -286,6 +291,8 @@ describe("generateCompose", () => {
     // Slack vars on API service
     expect(yaml).toContain("SLACK_BOT_TOKEN");
     expect(yaml).toContain("SLACK_APP_TOKEN");
+    expect(yaml).toContain(COMPOSE_SLACK_MODE);
+    expect(yaml).not.toContain("SLACK_SIGNING_SECRET");
     // GitLab vars on agent services
     expect(yaml).toContain("GITLAB_TOKEN");
     expect(yaml).toContain("GITLAB_EMAIL");
@@ -295,6 +302,13 @@ describe("generateCompose", () => {
     // GitHub enabled flag on API service
     expect(yaml).toContain("GITHUB_DISABLE=false");
     expect(yaml).toContain("SLACK_DISABLE=false");
+  });
+
+  test("HTTP Slack compose configuration uses the signing secret and no app token", () => {
+    const yaml = generateCompose({ ...allIntegrationsState, slackMode: "http" });
+    expect(yaml).toContain(COMPOSE_SLACK_MODE);
+    expect(yaml).toContain(COMPOSE_SLACK_SIGNING_SECRET);
+    expect(yaml).not.toContain("SLACK_APP_TOKEN");
   });
 
   // ── No integrations ──
