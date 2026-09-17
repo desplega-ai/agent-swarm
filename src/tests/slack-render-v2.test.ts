@@ -1789,7 +1789,7 @@ describe("Slack renderer v2", () => {
     expect(outcome?.finalizedAt).toBeDefined();
   });
 
-  test("keeps a deferral's human-facing line even when the agent already sent a slack-reply", async () => {
+  test("omits the deferral ETA even when the agent already sent a slack-reply", async () => {
     const lead = await createAgent({ name: "Deferring Lead", isLead: true, status: "idle" });
     const { channelId, threadTs } = uniqueSlackAddress("C_RENDER_DEFER_AFTER_REPLY");
     const ask = await createTaskExtended("defer after replying by hand", {
@@ -1814,8 +1814,30 @@ describe("Slack renderer v2", () => {
     await processSlackRenderV2();
 
     const started = calls.find((call) => call.method === "chat.startStream");
-    expect(started?.payload.markdown_text).toBe(`✅\n\n${deferralLine}`);
+    expect(started?.payload.markdown_text).toBe("✅\n\nPending: checking the new defer card");
+    expect(JSON.stringify(calls)).not.toContain("17:30:19");
+    expect(JSON.stringify(calls)).not.toContain("Deferred until");
+    expect((await getTaskById(ask.id))?.output).toBe(deferralLine);
     expect(started?.payload.markdown_text).not.toBe(`✅ ${lead.name} completed`);
+  });
+
+  test("does not post an ETA-only deferral notice", async () => {
+    const { channelId, threadTs } = uniqueSlackAddress("C_ETA_ONLY");
+    const ask = await createTaskExtended("wait", {
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+    });
+    await startTask(ask.id);
+    await completeTask(
+      ask.id,
+      "Deferred until today 17:30 UTC ([12345678](https://example.com/schedules/12345678)) -> ",
+      { addTags: ["deferred"] },
+    );
+    calls.length = 0;
+    await processSlackRenderV2();
+    expect(calls.filter((call) => call.method === "chat.startStream")).toHaveLength(0);
+    expect(JSON.stringify(calls)).not.toContain("17:30");
   });
 
   test("refreshes a stream started with stale content before finalizing it", async () => {
