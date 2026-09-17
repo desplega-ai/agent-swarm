@@ -1116,6 +1116,8 @@ export async function streamOutcomeCard(
   // Slack round trips in the outer render loop that run before this function is
   // called for the task.
   const slackReplySent = (await getTaskById(task.id))?.slackReplySent ?? task.slackReplySent;
+  // Review answers are silent once slack-reply has delivered the answer by hand.
+  if (task.tags.includes("slack-answer") && slackReplySent) return null;
   const content = await (options?.buildContent ?? outcomeContent)(task, slackReplySent);
   const presentation = outcomePresentation(task, content, attachment);
   if (!presentation) throw new Error(`Outcome presentation is empty for task ${task.id}`);

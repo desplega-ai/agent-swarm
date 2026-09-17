@@ -19,7 +19,11 @@ import {
   markTaskSlackReplySent,
   startTask,
 } from "../be/db";
-import { _resetSlackRenderV2ForTests, processSlackRenderV2 } from "../slack/render-v2";
+import {
+  _resetSlackRenderV2ForTests,
+  processSlackRenderV2,
+  streamOutcomeCard,
+} from "../slack/render-v2";
 import { slackContextKey } from "../tasks/context-key";
 import { createWorkerTaskFollowUp } from "../tasks/worker-follow-up";
 import { clearVolatileSecretsForTesting } from "../utils/secret-scrubber";
@@ -453,6 +457,28 @@ describe("Lead review answer delivery", () => {
     await processSlackRenderV2();
     expect(calls.filter((call) => call.method === "chat.startStream")).toHaveLength(0);
     expect((await getSlackOutcomeMessage(review.id))!.ts).toBe(card.ts);
+  });
+
+  test("suppresses a review card when a manual reply lands after the caller snapshot", async () => {
+    const { ask, child, channelId, threadTs } = await reviewFixture();
+    await completeTask(ask.id, "Initial answer");
+    await backdateLastUpdated([ask.id, child.id], 60);
+    await processSlackRenderV2();
+    const tree = (await getSlackTreeMessageByThread(channelId, threadTs))!;
+    const review = (await createWorkerTaskFollowUp({ task: child, status: "completed" }))!;
+    await completeTask(review.id, "Reviewed answer");
+    const staleSnapshot = (await getTaskById(review.id))!;
+    expect(staleSnapshot.tags).toContain("slack-answer");
+    expect(staleSnapshot.slackReplySent).toBe(false);
+
+    // slack-reply commits after the render tick reads tasks, before delivery.
+    await markTaskSlackReplySent(review.id);
+    calls.length = 0;
+    const outcome = await streamOutcomeCard(staleSnapshot, tree);
+
+    expect(calls).toHaveLength(0);
+    expect(outcome).toBeNull();
+    expect(await getSlackOutcomeMessage(review.id)).toBeNull();
   });
 
   test("review delivers while the ask is still open", async () => {
