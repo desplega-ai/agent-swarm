@@ -330,6 +330,10 @@ escalateStarvedPoolTasks():
 
 The function dispatches `pre.task.followUp` before it creates the follow-up task. An extension can block creation or modify the description, assignee, priority, and `followUpConfig`.
 
+New Lead-owned worker-review follow-ups get the `slack-answer` tag only when their parent chain reaches a `source="slack"` ask in the same channel/thread. Missing/cyclic ancestry, scheduled or workflow work, reroute decisions, and a `slack-silent` tag anywhere along that chain fail closed. Merely carrying Slack destination fields is insufficient. Tags are not inherited, so historical follow-ups stay silent.
+
+Slack render v2 delivers a tagged follow-up's nonblank completed output through its own persisted outcome card, independently of delegation-card limits and the ask's immutable conclusion. Empty output, non-completed states, `slackReplySent`, and `slack-silent` on the follow-up suppress this path. Leads should leave output empty for administrative reviews with no new answer for the human. Existing child-card and conclusion-results exclusions remain in place. The existing outcome ledger, retry backoff, and stream reconciliation handle delivery and restart deduplication; no second sender is registered.
+
 The resulting task also dispatches `pre.task.create` with origin `followUp`. Both extension events run before any database transaction begins.
 
 ---

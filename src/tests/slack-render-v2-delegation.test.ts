@@ -5,18 +5,23 @@ import {
   completeTask,
   createAgent,
   createTaskExtended,
+  createWorkflow,
+  createWorkflowRun,
   ensureSlackDelegationActivation,
   ensureSlackRenderV2Activation,
   getDbClient,
   getLogsByEventType,
   getSlackOutcomeMessage,
   getSlackTreeMessageByThread,
+  getTaskById,
   initDb,
   isPendingSlackMessage,
+  markTaskSlackReplySent,
   startTask,
 } from "../be/db";
 import { _resetSlackRenderV2ForTests, processSlackRenderV2 } from "../slack/render-v2";
 import { slackContextKey } from "../tasks/context-key";
+import { createWorkerTaskFollowUp } from "../tasks/worker-follow-up";
 import { clearVolatileSecretsForTesting } from "../utils/secret-scrubber";
 
 // End-to-end coverage for T6 (plan section 5): the full delegation story —
@@ -369,5 +374,146 @@ describe("Slack render v2 delegation — crash recovery (T6)", () => {
         (message) => message.channel === channelId && message.ts.startsWith("outcome."),
       ),
     ).toHaveLength(1);
+  });
+});
+
+describe("Lead review answer delivery", () => {
+  async function reviewFixture(
+    options: {
+      source?: "slack" | "system" | "schedule";
+      silent?: boolean;
+      scheduledChild?: boolean;
+      workflowChild?: boolean;
+      rerouteChild?: boolean;
+    } = {},
+  ) {
+    const lead = await createAgent({ name: "Review Lead", isLead: true, status: "idle" });
+    const worker = await createAgent({ name: "Review Worker", isLead: false, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_REVIEW");
+    const ask = await createTaskExtended("Human asks for an assessment", {
+      agentId: lead.id,
+      source: options.source ?? "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+      tags: options.silent ? ["slack-silent"] : [],
+    });
+    const child = await createTaskExtended("Gather evidence", {
+      agentId: worker.id,
+      source: options.scheduledChild ? "schedule" : "mcp",
+      parentTaskId: ask.id,
+      taskType: options.rerouteChild ? "reroute-decision" : undefined,
+    });
+    if (options.workflowChild) {
+      const workflow = await createWorkflow({
+        name: "Review maintenance",
+        definition: { nodes: [], edges: [] },
+      });
+      const run = await createWorkflowRun({ id: crypto.randomUUID(), workflowId: workflow.id });
+      await getDbClient().run("UPDATE agent_tasks SET workflowRunId = ? WHERE id = ?", [
+        run.id,
+        ask.id,
+      ]);
+    }
+    await completeTask(child.id, "Worker evidence");
+    return { ask, child: (await getTaskById(child.id))!, lead, channelId, threadTs };
+  }
+
+  test.each([
+    "true",
+    "false",
+  ])("delivers a review after the ask finalized, once across renderer restart (delegation=%s)", async (delegation) => {
+    process.env.SLACK_RENDER_V2_DELEGATION = delegation;
+    const { ask, child, channelId, threadTs } = await reviewFixture();
+    await completeTask(ask.id, "Initial answer");
+    await backdateLastUpdated([ask.id, child.id], 60);
+    await processSlackRenderV2();
+    const conclusion = (await getSlackOutcomeMessage(ask.id))!;
+    expect(conclusion.finalizedAt).toBeDefined();
+    const originalText = remoteMessages.get(remoteKey(channelId, conclusion.ts))!.text;
+
+    const review = (await createWorkerTaskFollowUp({ task: child, status: "completed" }))!;
+    expect(review.tags).toContain("slack-answer");
+    await completeTask(review.id, "Reviewed answer the human was waiting for");
+    calls.length = 0;
+    await processSlackRenderV2();
+    const card = (await getSlackOutcomeMessage(review.id))!;
+    expect(card.finalizedAt).toBeDefined();
+    const sent = calls.filter((call) => call.method === "chat.startStream");
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.payload.thread_ts).toBe(threadTs);
+    expect(sent[0]!.payload.channel).toBe(channelId);
+    expect(String(sent[0]!.payload.markdown_text)).toContain(
+      "Reviewed answer the human was waiting for",
+    );
+    expect(remoteMessages.get(remoteKey(channelId, conclusion.ts))!.text).toBe(originalText);
+
+    _resetSlackRenderV2ForTests();
+    calls.length = 0;
+    await processSlackRenderV2();
+    expect(calls.filter((call) => call.method === "chat.startStream")).toHaveLength(0);
+    expect((await getSlackOutcomeMessage(review.id))!.ts).toBe(card.ts);
+  });
+
+  test("review delivers while the ask is still open", async () => {
+    const { ask, child } = await reviewFixture();
+    await startTask(ask.id);
+    const review = (await createWorkerTaskFollowUp({ task: child, status: "completed" }))!;
+    await completeTask(review.id, "The reviewed result");
+    await processSlackRenderV2();
+    expect((await getSlackOutcomeMessage(review.id))?.finalizedAt).toBeDefined();
+    expect(await getSlackOutcomeMessage(ask.id)).toBeNull();
+  });
+
+  test.each([
+    { source: "system" as const },
+    { source: "schedule" as const },
+    { silent: true },
+    { scheduledChild: true },
+    { workflowChild: true },
+    { rerouteChild: true },
+  ])("maintenance stays silent despite populated Slack fields: %j", async (options) => {
+    const { child } = await reviewFixture(options);
+    const review = (await createWorkerTaskFollowUp({ task: child, status: "completed" }))!;
+    expect(review.tags).not.toContain("slack-answer");
+    await completeTask(review.id, "Administrative maintenance complete");
+    await processSlackRenderV2();
+    expect(await getSlackOutcomeMessage(review.id)).toBeNull();
+    expect(
+      calls.some((call) =>
+        String(call.payload.markdown_text).includes("Administrative maintenance complete"),
+      ),
+    ).toBe(false);
+  });
+
+  test.each([
+    "empty",
+    "manual",
+    "silent",
+    "failed",
+    "legacy",
+    "non-lead",
+  ])("suppresses %s review outputs", async (mode) => {
+    const { child } = await reviewFixture();
+    const review = (await createWorkerTaskFollowUp({ task: child, status: "completed" }))!;
+    if (mode === "silent" || mode === "legacy") {
+      await getDbClient().run("UPDATE agent_tasks SET tags = ? WHERE id = ?", [
+        JSON.stringify(mode === "silent" ? ["slack-answer", "slack-silent"] : []),
+        review.id,
+      ]);
+    }
+    await completeTask(review.id, mode === "empty" ? "  \n " : "Do not deliver this review");
+    if (mode === "manual") await markTaskSlackReplySent(review.id);
+    if (mode === "non-lead") {
+      await getDbClient().run("UPDATE agent_tasks SET agentId = ? WHERE id = ?", [
+        child.agentId!,
+        review.id,
+      ]);
+    }
+    if (mode === "failed") {
+      await getDbClient().run("UPDATE agent_tasks SET status = 'failed' WHERE id = ?", [review.id]);
+    }
+    await processSlackRenderV2();
+    expect(await getSlackOutcomeMessage(review.id)).toBeNull();
   });
 });
