@@ -231,5 +231,5 @@ export const LEGACY_POLICY = {
   "script.api.rotate": leadOnly,
   "script.api.delete": leadOnly,
   "extension.write": leadOrOperatorOrUser,
-  "extension.activate": operatorOrUser,
+  "extension.activate": leadOrOperatorOrUser,
 } as const satisfies Record<PermissionVerb, LegacyRule>;

@@ -251,7 +251,7 @@ describe("/api/extensions HTTP", () => {
     expect((await rejected.json()).error).toContain("Disable");
   });
 
-  test("type definitions are plain text and activation routes are operator-only", async () => {
+  test("type definitions are plain text and workers cannot activate extensions", async () => {
     await install();
     const extension = await getExtensionByName("minimal");
     const types = await dispatch("/api/extensions/type-defs");
@@ -262,7 +262,7 @@ describe("/api/extensions HTTP", () => {
       (
         await dispatch(`/api/extensions/${extension!.id}/enable`, {
           method: "POST",
-          agentId: leadId,
+          agentId: workerId,
         })
       ).status,
     ).toBe(403);

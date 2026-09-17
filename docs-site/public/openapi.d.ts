@@ -5642,7 +5642,7 @@ export interface paths {
         put?: never;
         /**
          * Enable an extension
-         * @description Loads and enables an extension. This route is operator-only.
+         * @description Loads and enables an extension. Available to leads, operators, and dashboard users.
          */
         post: operations["extensions_enable"];
         delete?: never;
@@ -5662,7 +5662,7 @@ export interface paths {
         put?: never;
         /**
          * Disable an extension
-         * @description Unloads and disables an extension. This route is operator-only.
+         * @description Unloads and disables an extension. Available to leads, operators, and dashboard users.
          */
         post: operations["extensions_disable"];
         delete?: never;
@@ -5682,7 +5682,7 @@ export interface paths {
         put?: never;
         /**
          * Activate an extension version
-         * @description Activates a stored version. This route is operator-only.
+         * @description Activates a stored version. Available to leads, operators, and dashboard users.
          */
         post: operations["extensions_activate_version"];
         delete?: never;

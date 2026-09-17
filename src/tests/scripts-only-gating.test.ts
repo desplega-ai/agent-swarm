@@ -17,6 +17,10 @@ import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-scripts-only-gating.sqlite";
 const SCRIPT_TOOL_NAMES = [
+  "extension-delete",
+  "extension-enable",
+  "extension-disable",
+  "extension-activate-version",
   "extension-install",
   "extension-list",
   "get-script-run",

@@ -9,7 +9,7 @@ import {
 } from "./extension-common";
 
 export const EXTENSION_INSTALL_DESCRIPTION =
-  "Validate and store a TypeScript extension bundle (manifest plus a files map with one hooks.ts). Fetch the hook contract first: GET /api/extensions/type-defs returns swarm-extension.d.ts with every event and modify shape. The extension remains disabled until an operator enables it.";
+  "Validate and store a TypeScript extension bundle (manifest plus a files map with one hooks.ts). Fetch the hook contract first: GET /api/extensions/type-defs returns swarm-extension.d.ts with every event and modify shape. The extension remains disabled until a lead, operator, or dashboard user enables it with extension-enable.";
 
 function extensionInstallResult(data: unknown, fallbackName: string) {
   const body = data as {
@@ -21,7 +21,7 @@ function extensionInstallResult(data: unknown, fallbackName: string) {
   const version = typeof extension.version === "number" ? ` v${extension.version}` : "";
   const deduped = body.contentDeduped === true ? " Content was unchanged." : "";
   const enableInstruction =
-    "An operator must enable it from the dashboard or `POST /api/extensions/{id}/enable`.";
+    "A lead, operator, or dashboard user can enable it with `extension-enable` or `POST /api/extensions/{id}/enable`.";
 
   return toolOk(`Extension \`${name}\`${version} installed.${deduped} ${enableInstruction}`, {
     data: {
