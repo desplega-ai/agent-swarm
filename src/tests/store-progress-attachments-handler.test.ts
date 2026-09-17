@@ -17,7 +17,7 @@
  *      org/drive and credentials
  *   4. missing files and wrong drives both block attachment + task writes
  */
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import crypto from "node:crypto";
 import { unlink } from "node:fs/promises";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -34,6 +34,7 @@ import {
   upsertSwarmConfig,
 } from "../be/db";
 import { registerStoreProgressTool } from "../tools/store-progress";
+import malformedOutput from "./fixtures/store-progress-malformed-output.json";
 
 const TEST_DB_PATH = "./test-store-progress-attachments-handler.sqlite";
 const ORIGINAL_FETCH = globalThis.fetch;
@@ -136,6 +137,104 @@ describe("store-progress handler — attachments insert path", () => {
       requestInfo: { headers: { "x-agent-id": agentId } },
     };
   }
+
+  test("salvages the literal 59811b57 output and registers both URL attachments", async () => {
+    const task = await createTaskExtended("salvage leaked tool parameters", { agentId });
+    await startTask(task.id);
+    const result = (await buildServer().handler(
+      { taskId: task.id, status: "completed", output: malformedOutput.output },
+      buildMeta(),
+    )) as StoreProgressResult;
+
+    expect(result.structuredContent.success).toBe(true);
+    const saved = await getTaskById(task.id);
+    expect(saved?.output).toBe(malformedOutput.output.split("</output>")[0]);
+    expect(saved?.output?.endsWith("reposted clean.")).toBe(true);
+    const attachments = await getTaskAttachments(task.id);
+    expect(attachments).toHaveLength(2);
+    expect(attachments.every((a) => a.kind === "url")).toBe(true);
+    expect(attachments.map((a) => a.url).sort()).toEqual([
+      "https://api.desplega.agent-swarm.dev/p/556b11781dbb40bf9b1eb1b3315adae6",
+      "https://x.com/desplegalabs/status/2100595056939827590",
+    ]);
+    expect(attachments.find((a) => a.isPrimary)?.name).toBe("X reply in the Jev thread");
+  });
+
+  test("preserves clean output byte-for-byte", async () => {
+    const output = "The output is ready: 2 < 3.\n  Keep this whitespace.  ";
+    const task = await createTaskExtended("clean output control", { agentId });
+    await startTask(task.id);
+    const result = (await buildServer().handler(
+      { taskId: task.id, status: "completed", output },
+      buildMeta(),
+    )) as StoreProgressResult;
+    expect(result.structuredContent.success).toBe(true);
+    expect((await getTaskById(task.id))?.output).toBe(output);
+    expect(await getTaskAttachments(task.id)).toHaveLength(0);
+  });
+
+  test.each([
+    ["invalid JSON", '</output>\n<parameter name="attachments">[broken'],
+    ["invalid attachment schema", '</output><parameter name="attachments">[{"kind":"url"}]'],
+    ["unknown parameter", '</output><parameter name="status">"failed"'],
+    ["alternate closing tag", '</parameter>\n<parameter name="progress">Not JSON'],
+    ["bare opener", '<parameter name="progress">Not JSON'],
+    ["non-array JSON", '</output><parameter name="attachments">null'],
+  ])("strips %s without losing the clean result", async (_name, tail) => {
+    const task = await createTaskExtended("unrecoverable tail", { agentId });
+    await startTask(task.id);
+    const warning = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const result = (await buildServer().handler(
+        { taskId: task.id, status: "completed", output: `Clean result.${tail}` },
+        buildMeta(),
+      )) as StoreProgressResult;
+      expect(result.structuredContent.success).toBe(true);
+      expect((await getTaskById(task.id))?.output).toBe("Clean result.");
+      expect((await getTaskById(task.id))?.status).toBe("completed");
+      expect(await getTaskAttachments(task.id)).toHaveLength(0);
+      expect(warning).toHaveBeenCalledTimes(1);
+      expect(warning.mock.calls[0]?.[0]).not.toContain(tail);
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  test("appends recovered pointers to explicit attachments through the normal dedupe path", async () => {
+    const task = await createTaskExtended("mixed explicit and leaked attachments", { agentId });
+    await startTask(task.id);
+    const attachment = { kind: "url", name: "link", url: "https://example.com/link" };
+    const result = (await buildServer().handler(
+      {
+        taskId: task.id,
+        status: "completed",
+        output: `Done.<parameter name="attachments">${JSON.stringify([attachment])}</parameter>`,
+        attachments: [attachment],
+      },
+      buildMeta(),
+    )) as StoreProgressResult;
+    expect(result.structuredContent.success).toBe(true);
+    expect((await getTaskById(task.id))?.output).toBe("Done.");
+    expect(await getTaskAttachments(task.id)).toHaveLength(1);
+  });
+
+  test("recovered agent-fs pointers still require ordinary scope verification", async () => {
+    const task = await createTaskExtended("verify recovered pointer", { agentId });
+    await startTask(task.id);
+    const result = (await buildServer().handler(
+      {
+        taskId: task.id,
+        status: "completed",
+        output:
+          'Done.</output><parameter name="attachments">[{"kind":"agent-fs","name":"missing.md","path":"/missing.md"}]',
+      },
+      buildMeta(),
+    )) as StoreProgressResult;
+    expect(result.structuredContent.success).toBe(false);
+    expect(result.structuredContent.message).toContain("both orgId and driveId must resolve");
+    expect((await getTaskById(task.id))?.status).toBe("in_progress");
+    expect(await getTaskAttachments(task.id)).toHaveLength(0);
+  });
 
   test("inserts attachment row on an in-progress task (baseline)", async () => {
     const task = await createTaskExtended("handler in-progress baseline", {
