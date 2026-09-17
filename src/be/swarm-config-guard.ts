@@ -18,7 +18,13 @@ import { parseTaskToolManifest } from "../utils/task-tool-manifest";
  * Matching is case-insensitive so `api_key`, `Api_Key`, etc. are all
  * rejected at every write path (DB helpers, HTTP routes, MCP tools).
  */
-const RESERVED_KEYS = new Set(["API_KEY", "SECRETS_ENCRYPTION_KEY", "CORS_ALLOW_ANY_ORIGIN"]);
+// Lead activation is also deployment-only: leads can write ordinary global config.
+const RESERVED_KEYS = new Set([
+  "API_KEY",
+  "SECRETS_ENCRYPTION_KEY",
+  "CORS_ALLOW_ANY_ORIGIN",
+  "EXTENSION_ALLOW_LEAD_ACTIVATION",
+]);
 
 export function isReservedConfigKey(key: string): boolean {
   return RESERVED_KEYS.has(key.toUpperCase());

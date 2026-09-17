@@ -227,6 +227,23 @@ describe("reload-config", () => {
     }
   });
 
+  test("stored lead activation gate cannot override the deployment at boot or reload", async () => {
+    const key = "EXTENSION_ALLOW_LEAD_ACTIVATION";
+    const original = process.env[key];
+    const rowId = await insertLegacyReservedRow(key, "true");
+    try {
+      process.env[key] = "false";
+      for (const override of [false, true]) {
+        expect(await loadGlobalConfigsIntoEnv(override)).not.toContain(key);
+        expect(process.env[key]).toBe("false");
+      }
+    } finally {
+      await deleteSwarmConfig(rowId);
+      if (original === undefined) delete process.env[key];
+      else process.env[key] = original;
+    }
+  });
+
   test("loadGlobalConfigsIntoEnv skips unreadable reserved secret rows before decrypting them", async () => {
     const id = await insertUnreadableReservedSecretRow("SECRETS_ENCRYPTION_KEY");
 

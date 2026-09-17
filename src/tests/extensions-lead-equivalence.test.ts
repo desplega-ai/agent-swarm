@@ -28,6 +28,27 @@ describe("extension agents act with lead privileges while registered", () => {
     expect(can(check).allow).toBe(false);
   });
 
+  test("the deployment activation gate also applies to lead-equivalent identities", () => {
+    const original = process.env.EXTENSION_ALLOW_LEAD_ACTIVATION;
+    grantLeadEquivalence(extensionAgentId);
+    try {
+      const check = {
+        principal: { kind: "agent" as const, agentId: extensionAgentId, isLead: false },
+        verb: "extension.activate" as const,
+        source: "mcp" as const,
+      };
+      delete process.env.EXTENSION_ALLOW_LEAD_ACTIVATION;
+      expect(can(check).allow).toBe(true);
+      process.env.EXTENSION_ALLOW_LEAD_ACTIVATION = "false";
+      expect(can(check).allow).toBe(false);
+      expect(can({ ...check, verb: "extension.write" }).allow).toBe(true);
+    } finally {
+      revokeLeadEquivalence(extensionAgentId);
+      if (original === undefined) delete process.env.EXTENSION_ALLOW_LEAD_ACTIVATION;
+      else process.env.EXTENSION_ALLOW_LEAD_ACTIVATION = original;
+    }
+  });
+
   test("operators and plain workers are unaffected", () => {
     expect(
       can({

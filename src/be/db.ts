@@ -6154,7 +6154,7 @@ export async function getInjectableGlobalConfigs(): Promise<SwarmConfig[]> {
   const rows = await getDbClient().query<SwarmConfigRow>(
     `SELECT * FROM swarm_config
        WHERE scope = 'global'
-         AND UPPER(key) NOT IN ('API_KEY', 'SECRETS_ENCRYPTION_KEY', 'CORS_ALLOW_ANY_ORIGIN')
+         AND UPPER(key) NOT IN ('API_KEY', 'SECRETS_ENCRYPTION_KEY', 'CORS_ALLOW_ANY_ORIGIN', 'EXTENSION_ALLOW_LEAD_ACTIVATION')
        ORDER BY key ASC`,
   );
   return rows.map(rowToSwarmConfig);

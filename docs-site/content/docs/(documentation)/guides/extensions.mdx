@@ -10,12 +10,42 @@ Version 1 accepts one `hooks` asset.
 The `skills`, `workflows`, and `schedules` asset keys are reserved.
 The installer rejects bundles that use those keys.
 
-## Trust model
+## Lead activation and trust
 
-Extensions run inside the API server process.
-They are trusted operator code and have no host isolation.
-Leads, operators, and dashboard users can activate an extension.
-Lead agents can install a draft through MCP, but the draft stays disabled.
+Extensions are trusted in-process code with no host isolation. A lead that can
+both install and activate a bundle has code execution with API-server-process
+privileges, including its filesystem, network, and secrets. Import checks,
+TypeScript checks, SDK permissions, and handler timeouts are not a sandbox.
+
+`EXTENSION_ALLOW_LEAD_ACTIVATION` defaults to `true` to preserve autonomous lead
+lifecycle control. Operators who do not accept that trust must set
+`EXTENSION_ALLOW_LEAD_ACTIVATION=false` (or `0`) in the **API server deployment
+environment** and restart every API replica. This restores operator/dashboard-user-only
+`extension.activate` access for enable, disable, and activate-version, across REST,
+MCP, and the script SDK. It also denies lead-equivalent extension identities.
+Leads can still install drafts and delete disabled extensions. Ordinary workers
+remain denied. This reserved key cannot be set through `swarm_config`, `set-config`,
+or the dashboard; agents cannot turn the gate back on through those APIs.
+
+The default accepts server-process execution by trusted leads as part of the
+requested lifecycle feature. Restricting activation to a lead's own bundles would
+not prevent execution of code that lead installed. The switch is an admission
+control, not containment or revocation: already-enabled code continues to run,
+including on restart, and existing code/configuration update paths remain available.
+To stop existing extensions, an operator must disable them; imported modules can
+retain side effects, so review the installation and restart the API as needed.
+
+With permission auditing enabled, `permission_audit` records allow/deny decisions
+for `extension.activate` with the calling agent in `principalId`. The batched
+permission writer is best-effort and can be disabled via `RBAC_AUDIT_DISABLED`.
+Agent lifecycle requests also write `lifecycle.enable.requested`,
+`lifecycle.disable.requested`, or `lifecycle.activate-version.requested` to
+`extension_runs`, with the calling `agentId` and target version, before lifecycle
+side effects. These are request records, not success receipts; load failures get
+separate `load-error` records. The run log retains only the newest 500 entries and
+is deleted on uninstall. Neither log is tamper-proof against in-process code.
+
+## Trust model
 
 The installer accepts imports from `swarm-extension`, `zod`, and `stdlib`.
 It rejects relative imports and other package imports.

@@ -503,6 +503,7 @@ export async function handleExtensions(
     try {
       const extension = await enableExtension(parsed.params.id, {
         by: await resolveHttpAuditUserId(req, writerAgentId),
+        agentId: writerAgentId,
       });
       enableRoute.respond(res, 200, { extension: redactExtension(extension) });
     } catch (error) {
@@ -520,6 +521,7 @@ export async function handleExtensions(
     try {
       const extension = await disableExtension(parsed.params.id, {
         by: await resolveHttpAuditUserId(req, writerAgentId),
+        agentId: writerAgentId,
       });
       disableRoute.respond(res, 200, { extension: redactExtension(extension) });
     } catch (error) {
@@ -537,6 +539,7 @@ export async function handleExtensions(
     try {
       const extension = await activateVersion(parsed.params.id, parsed.body.version, {
         by: await resolveHttpAuditUserId(req, writerAgentId),
+        agentId: writerAgentId,
       });
       activateVersionRoute.respond(res, 200, { extension: redactExtension(extension) });
     } catch (error) {

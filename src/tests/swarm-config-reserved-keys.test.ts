@@ -134,7 +134,12 @@ describe("swarm-config reserved keys guard", () => {
     await unlink(`${TEST_DB_PATH}-shm`).catch(() => {});
   });
 
-  for (const key of ["CORS_ALLOW_ANY_ORIGIN", "cors_allow_any_origin"]) {
+  for (const key of [
+    "CORS_ALLOW_ANY_ORIGIN",
+    "cors_allow_any_origin",
+    "EXTENSION_ALLOW_LEAD_ACTIVATION",
+    "extension_allow_lead_activation",
+  ]) {
     test(`rejects deployment-only ${key} through DB, HTTP, and MCP`, async () => {
       const config = { scope: "global" as const, key, value: "true" };
       await expect(upsertSwarmConfig(config)).rejects.toThrow(EXPECTED_MESSAGE(key));
