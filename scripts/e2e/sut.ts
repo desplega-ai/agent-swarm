@@ -143,6 +143,9 @@ export async function startSut(
     NODE_ENV: "test",
     // Contract fixtures use legacy agent registration without runtime identities.
     MULTI_RUNTIME_ENABLED: "false",
+    // Longer Slack negative controls cross the T+90s boot-triage timer.
+    // Keep background checklist tasks from taking simulated agents' claims.
+    HEARTBEAT_CHECKLIST_DISABLE: "true",
     // Legacy Slack scenarios pin their renderer; v2 scenarios opt in via config.
     SLACK_RENDER_V2: "false",
     SLACK_THREAD_STEERING: "off",
