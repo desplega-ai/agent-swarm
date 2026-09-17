@@ -57,6 +57,10 @@ export const SDK_TOOL_NAME_MAP = {
   script_listRuns: "list-script-runs",
 
   // ── extensions ──
+  extension_delete: "extension-delete",
+  extension_enable: "extension-enable",
+  extension_disable: "extension-disable",
+  extension_activate_version: "extension-activate-version",
   extension_install: "extension-install",
   extension_list: "extension-list",
 

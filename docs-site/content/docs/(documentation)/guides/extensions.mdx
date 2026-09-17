@@ -14,7 +14,7 @@ The installer rejects bundles that use those keys.
 
 Extensions run inside the API server process.
 They are trusted operator code and have no host isolation.
-Only operators and dashboard users can activate an extension.
+Leads, operators, and dashboard users can activate an extension.
 Lead agents can install a draft through MCP, but the draft stays disabled.
 
 The installer accepts imports from `swarm-extension`, `zod`, and `stdlib`.
@@ -46,7 +46,7 @@ Send the manifest and every referenced file in one request:
 
 The install path validates the manifest, bundle paths, imports, and TypeScript types.
 Each changed bundle creates an immutable version snapshot.
-An operator can activate any stored version.
+A lead, operator, or dashboard user can activate any stored version.
 
 The hooks file exports one default `SwarmExtension` function.
 It can also export a Zod schema named `config`.
@@ -152,7 +152,7 @@ The default timeout is five seconds.
 The dispatcher records the failure and continues the operation.
 A successful handler resets that extension's consecutive failure count.
 Five consecutive failures set the extension status to `auto-disabled`.
-An operator must enable it again.
+A lead, operator, or dashboard user must enable it again.
 
 ## Install and operate
 
@@ -177,7 +177,9 @@ curl -X POST "$API/api/extensions/<id>/activate-version" \
 ```
 
 The Settings page provides install, edit, activation, version, and run-log controls.
-Agents can use the `extension-install` and `extension-list` MCP tools.
+Agents can use the `extension-install`, `extension-list`, `extension-enable`, `extension-disable`, `extension-activate-version`, and `extension-delete` MCP tools.
+The script SDK exposes the same names with underscores, such as `ctx.swarm.extension_enable({ id })`.
+Lifecycle mutations require lead permissions. Delete refuses enabled extensions; disable them first.
 The MCP install tool never activates a version.
 
 ## Example hooks

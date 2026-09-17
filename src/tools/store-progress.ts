@@ -167,6 +167,36 @@ export const registerStoreProgressTool = (server: McpServer) => {
           ? requestedStatus
           : undefined;
 
+      // Stock Claude occasionally puts the next tool parameter inside output.
+      // Strip the leaked tail before validation/persistence; recovered pointers
+      // must still pass the ordinary attachment schema and verification below.
+      const leakedParameter = output?.match(
+        /(?:<\/(?:output|parameter)>\s*)?<parameter name="([a-zA-Z_]+)">\s*([\s\S]*)$/,
+      );
+      if (leakedParameter) {
+        output = output?.slice(0, leakedParameter.index);
+        let recovered = false;
+        if (leakedParameter[1] === "attachments") {
+          try {
+            const parsed = z
+              .array(AttachmentInputSchema)
+              .max(20)
+              .safeParse(JSON.parse(leakedParameter[2]!.replace(/\s*<\/parameter>\s*$/, "")));
+            if (parsed.success && (attachments?.length ?? 0) + parsed.data.length <= 20) {
+              attachments = [...(attachments ?? []), ...parsed.data];
+              recovered = true;
+            }
+          } catch {
+            // Malformed JSON must not prevent saving the cleaned task result.
+          }
+        }
+        if (!recovered) {
+          console.warn(
+            `[store-progress] Stripped malformed output tail for task ${taskId}; parameter ${leakedParameter[1]} was not recovered.`,
+          );
+        }
+      }
+
       // Verify agent-fs pointers before opening the write transaction. The
       // registering agent's resolved config selects both credentials and the
       // exact org/drive; never let the provider fall back to a personal drive.

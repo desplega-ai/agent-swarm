@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "1.150.0",
+    "version": "1.151.0",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -16466,7 +16466,7 @@
       "post": {
         "operationId": "extensions_enable",
         "summary": "Enable an extension",
-        "description": "Loads and enables an extension. This route is operator-only.",
+        "description": "Loads and enables an extension. Available to leads, operators, and dashboard users.",
         "tags": [
           "Extensions"
         ],
@@ -16542,7 +16542,7 @@
       "post": {
         "operationId": "extensions_disable",
         "summary": "Disable an extension",
-        "description": "Unloads and disables an extension. This route is operator-only.",
+        "description": "Unloads and disables an extension. Available to leads, operators, and dashboard users.",
         "tags": [
           "Extensions"
         ],
@@ -16608,7 +16608,7 @@
       "post": {
         "operationId": "extensions_activate_version",
         "summary": "Activate an extension version",
-        "description": "Activates a stored version. This route is operator-only.",
+        "description": "Activates a stored version. Available to leads, operators, and dashboard users.",
         "tags": [
           "Extensions"
         ],

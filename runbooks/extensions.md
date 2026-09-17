@@ -19,7 +19,9 @@ The REST install route performs these checks:
 
 An MCP install uses the same REST route.
 It always stores a disabled draft.
-An operator or dashboard user can enable the draft.
+A lead, operator, or dashboard user can enable the draft with `extension-enable`.
+The MCP and script SDK surfaces also expose `extension-disable`, `extension-activate-version`, and `extension-delete`.
+Deletion requires disabling the extension first; ordinary workers cannot change its lifecycle.
 
 Enable creates or updates the `ext:<name>` system agent.
 The agent row keeps `isLead: false`, so lead selection never picks it.
@@ -44,7 +46,7 @@ Uninstall requires a disabled extension and deletes its stored history.
 flowchart TD
     A[Install bundle] --> B[Validate manifest paths imports and types]
     B --> C[Store bundle and version]
-    C --> D{Operator enables it?}
+    C --> D{Lead or operator enables it?}
     D -- No --> E[Keep disabled]
     D -- Yes --> F[Create ext:name identity]
     F --> G[Load active snapshot]
@@ -103,7 +105,7 @@ Each failure increments the extension's consecutive failure count.
 Any successful handler resets the count.
 `EXTENSION_MAX_CONSECUTIVE_FAILURES` controls the limit and defaults to 5.
 The final failure sets `status` to `auto-disabled` and unregisters the extension.
-An operator must enable the extension again.
+A lead or operator must enable the extension again.
 
 The run log keeps the newest 500 records per extension.
 The boot path and reload poll prune older records.

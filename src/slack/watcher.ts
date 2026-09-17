@@ -28,6 +28,7 @@ import {
   updateToFinal,
   updateTreeMessage,
 } from "./responses";
+import { slackTaskOutput } from "./task-output";
 
 let watcherInterval: ReturnType<typeof setInterval> | null = null;
 let isProcessing = false;
@@ -169,7 +170,7 @@ export async function buildTreeNodes(tree: TreeMessageState): Promise<TreeNode[]
           progress: child.progress ?? undefined,
           duration: childDuration,
           slackReplySent: child.slackReplySent,
-          output: child.output ?? undefined,
+          output: slackTaskOutput(child),
           failureReason: child.failureReason ?? undefined,
           attachments: childAttachments,
           steered: childSteered,
@@ -192,7 +193,7 @@ export async function buildTreeNodes(tree: TreeMessageState): Promise<TreeNode[]
       progress: task.progress ?? undefined,
       duration,
       slackReplySent: task.slackReplySent,
-      output: task.output ?? undefined,
+      output: slackTaskOutput(task),
       failureReason: task.failureReason ?? undefined,
       attachments: rootAttachments,
       steered: rootSteered,
