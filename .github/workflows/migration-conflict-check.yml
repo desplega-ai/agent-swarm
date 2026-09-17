@@ -54,6 +54,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          # The repo is public, so PR heads fetch anonymously. Keep the
+          # pull-requests: write token out of git config; only gh gets it.
+          persist-credentials: false
 
       - name: Comment on open PRs whose migrations collide with main's tail
         env:
