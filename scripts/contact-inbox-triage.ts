@@ -2,11 +2,28 @@
 import type { ScriptContext } from "swarm-sdk";
 import * as z from "zod";
 
+const domainSchema = z
+  .string()
+  .max(253)
+  .regex(/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/);
+const loginSchema = z
+  .string()
+  .max(39)
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+// Operator-owned per-provider approvals. Never derive these lists from mail.
+const enrichmentSchema = z.object({
+  dnsDomains: z.array(domainSchema).max(100).default([]),
+  exaDomains: z.array(domainSchema).max(100).default([]),
+  githubLogins: z.array(loginSchema).max(100).default([]),
+});
+type EnrichmentPolicy = z.output<typeof enrichmentSchema>;
+
 export const argsSchema = z
   .object({
     lookbackHours: z.number().positive().max(8760).default(72),
     limit: z.number().int().min(1).max(100).default(25),
     dryRun: z.boolean().default(false),
+    enrichment: enrichmentSchema.optional(),
   })
   .nullish();
 const INBOX = "desplega-contact@agent-swarm.dev";
@@ -168,7 +185,11 @@ function classify(m: RecordData, signals: Signals, threadId: string) {
   };
 }
 
-async function enrich(m: RecordData, ctx: ScriptContext): Promise<Signals> {
+async function enrich(
+  m: RecordData,
+  ctx: ScriptContext,
+  policy: EnrichmentPolicy,
+): Promise<Signals> {
   const e = extract(m);
   const s: Signals = { mx: null, person: false, auth: "unavailable", evidence: [], gaps: [] };
   const auth = e.headers["authentication-results"] || "";
@@ -182,28 +203,30 @@ async function enrich(m: RecordData, ctx: ScriptContext): Promise<Signals> {
   if (!e.attachmentsKnown) s.gaps.push("attachments");
   if (!e.bodyKnown) s.gaps.push("plain-text body");
   if (!e.address || !/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(e.domain)) return s;
-  try {
-    const dns: any = await ctx.stdlib.fetchJson(
-      `https://dns.google/resolve?name=${encodeURIComponent(e.domain)}&type=MX`,
-      { signal: AbortSignal.timeout(2500) },
-    );
-    if (dns.Status === 0)
-      s.mx =
-        Array.isArray(dns.Answer) &&
-        dns.Answer.some((r: any) => r.type === 15 && !/^0\s+\.?$/.test(r.data));
-    else if (dns.Status === 3) s.mx = false;
-    s.evidence.push(
-      `DNS MX ${e.domain}: ${s.mx === null ? "inconclusive" : s.mx ? "present" : "absent"}`,
-    );
-  } catch {
-    s.gaps.push("DNS MX lookup failed");
-  }
+  if (policy.dnsDomains.includes(e.domain)) {
+    try {
+      const dns: any = await ctx.stdlib.fetchJson(
+        `https://dns.google/resolve?name=${encodeURIComponent(e.domain)}&type=MX`,
+        { signal: AbortSignal.timeout(2500) },
+      );
+      if (dns.Status === 0)
+        s.mx =
+          Array.isArray(dns.Answer) &&
+          dns.Answer.some((r: any) => r.type === 15 && !/^0\s+\.?$/.test(r.data));
+      else if (dns.Status === 3) s.mx = false;
+      s.evidence.push(
+        `DNS MX ${e.domain}: ${s.mx === null ? "inconclusive" : s.mx ? "present" : "absent"}`,
+      );
+    } catch {
+      s.gaps.push("DNS MX lookup failed");
+    }
+  } else s.gaps.push("DNS enrichment disabled: domain not explicitly approved");
   if (s.mx === false) return s;
-  if (e.name.split(/\s+/).length >= 2 && !e.freeMail) {
+  if (policy.exaDomains.includes(e.domain)) {
     try {
       const r = await ctx.api.exa.search({
         body: {
-          query: `site:${e.domain} "${e.name.replace(/[^\p{L}\p{N} .-]/gu, "")}"`,
+          query: `site:${e.domain}`,
           numResults: 3,
           type: "fast",
         },
@@ -219,23 +242,23 @@ async function enrich(m: RecordData, ctx: ScriptContext): Promise<Signals> {
         }
         const official = host === e.domain || host.endsWith(`.${e.domain}`);
         const matches = title.toLowerCase().includes(e.name.toLowerCase());
-        if (official && matches) s.person = true;
+        if (official && e.name && matches) s.person = true;
         s.evidence.push(`Exa search result (title-level evidence only): ${title} ${result.url}`);
       }
       if (!s.person) s.gaps.push("person/company corroboration");
     } catch {
       s.gaps.push("Exa enrichment failed");
     }
-  }
+  } else s.gaps.push("Exa enrichment disabled: domain not explicitly approved");
   if (/\b(engineer|developer|cto|technical founder)\b/i.test(e.body)) {
     const login = e.links
       .map((l) => l.match(/^https:\/\/github\.com\/([a-z0-9-]+)\/?(?:[?#].*)?$/i)?.[1])
       .find(Boolean);
-    if (login)
+    if (login && policy.githubLogins.includes(login.toLowerCase()))
       try {
         const r: any = await ctx.api.ghGraphql.graphql(
           `query($login:String!){user(login:$login){login name company url websiteUrl}}`,
-          { login },
+          { login: login.toLowerCase() },
         );
         const user = r?.data?.user ?? r?.user;
         if (user)
@@ -246,7 +269,7 @@ async function enrich(m: RecordData, ctx: ScriptContext): Promise<Signals> {
       } catch {
         s.gaps.push("GitHub enrichment failed");
       }
-    else s.gaps.push("engineering claim has no explicit GitHub profile to verify");
+    else s.gaps.push("GitHub enrichment disabled: no explicitly approved profile login");
   }
   return s;
 }
@@ -381,7 +404,11 @@ export default async function (args: z.input<typeof argsSchema> | undefined, ctx
         if (value.payload.event_type === "message.received.unauthenticated") {
           message.labels = [...(message.labels ?? []), "unauthenticated"];
         }
-        const signals = await enrich(message, ctx);
+        const signals = await enrich(
+          message,
+          ctx,
+          enrichmentSchema.parse(options.enrichment ?? {}),
+        );
         for (const gap of signals.gaps) gaps.add(gap);
         const brief = {
           ...classify(message, signals, message.thread_id),

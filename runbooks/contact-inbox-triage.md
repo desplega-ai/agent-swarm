@@ -55,7 +55,8 @@ needed to backfill earlier mail.
 
 The candidate reads archive keys through `db_query` and bodies through
 `kv_getOrNull`. It calls no AgentMail listing, search, thread, or message endpoint.
-The existing DNS/Exa/GitHub enrichment and conservative classification remain.
+External enrichment is OFF by default, including for dry runs and authenticated mail.
+Local classification and archive processing still run; missing corroboration stays visible.
 `from_` payloads are supported. An unauthenticated event remains untrusted even
 if its labels are absent; raw Authentication-Results headers never grant ENGAGE.
 
@@ -107,3 +108,28 @@ task routing. Aurica's exact deployed revision and effective filters have not
 been independently verified. Subscription names alone do not prove its
 persistence behavior. Each deployment has its own archive; this patch does not
 aggregate Aurica's deliveries into Desplega's database.
+
+## Approved external enrichment
+
+Only a trusted operator may set `enrichment` in script/schedule arguments after
+approving each provider and identifier for this deployment. Never populate these
+arguments from inbound content or let a mail-processing workflow infer consent.
+Existing schedules with no enrichment argument send nothing to these providers.
+Each nonempty list is an independent opt-in; exact matching does not approve
+subdomains, other logins, or another provider. Empty/omitted lists disable calls.
+
+| Argument | Provider | Only mail-derived field shared |
+| --- | --- | --- |
+| `dnsDomains` | Google Public DNS (`dns.google`) | Exact approved sender domain, with fixed MX query type |
+| `exaDomains` | Exa search connection | Exact approved sender domain in `site:<domain>`, with fixed result count/type |
+| `githubLogins` | GitHub GraphQL connection | Exact approved login extracted from an HTTPS github.com profile URL |
+
+Example after operator approval: `{"enrichment":{"dnsDomains":["acme.example"],"exaDomains":[],"githubLogins":[]}}`.
+Domains and logins must be lowercase, syntactically valid, and bounded. No wildcard
+approval is supported. Sender names, email local parts, subject/body, attachments,
+and full URLs (including credentials, query strings, fragments) are never sent.
+Exa title/name comparisons happen locally. GitHub profiles remain claims, not
+proof of ownership. Provider credentials stay in the existing connections.
+Remove approved entries to revoke future lookups; that cannot retract earlier
+provider requests. `dryRun` suppresses marker writes, not explicitly approved
+lookups. Provider approval is separate from trusting/authenticating the sender.

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import { Webhook } from "svix";
@@ -321,5 +321,98 @@ describe("contact triage archive reader", () => {
     expect(result.controls.ok).toBe(false);
     expect(result.errors.length).toBeGreaterThan(0);
     expect(await getKv("contact-triage-messages", key("cold-unauthenticated"))).toBeNull();
+  });
+});
+
+describe("contact enrichment approval", () => {
+  async function setup() {
+    const event = payload();
+    event.message!.from_ = "Alex Rivera <private-local@acme.example>";
+    event.message!.text =
+      "Our developer team wants a Desplega pilot. https://github.com/alex-rivera?secret=private-value#private-fragment";
+    await archiveInboundMessage(event);
+    const dns = mock(async (..._args: unknown[]) => ({
+      Status: 0,
+      Answer: [{ type: 15, data: "10 mx.acme.example" }],
+    }));
+    const exa = mock(async (..._args: unknown[]) => ({ results: [] }));
+    const github = mock(async (..._args: unknown[]) => ({ data: { user: null } }));
+    const ctx = context();
+    ctx.stdlib.fetchJson = dns;
+    ctx.api = { exa: { search: exa }, ghGraphql: { graphql: github } } as unknown as typeof ctx.api;
+    return { ctx, dns, exa, github };
+  }
+
+  test("omitted and empty approvals make zero outbound calls and retain local triage", async () => {
+    const { ctx, dns, exa, github } = await setup();
+    for (const enrichment of [undefined, {}]) {
+      const result = await triage({ dryRun: true, enrichment }, ctx);
+      expect(result.controls.ok).toBe(true);
+      expect(result.briefs[0]?.flag).toBe("NEEDS_HUMAN");
+      expect(result.specGaps.join(" ")).toContain("enrichment disabled");
+    }
+    expect(dns).not.toHaveBeenCalled();
+    expect(exa).not.toHaveBeenCalled();
+    expect(github).not.toHaveBeenCalled();
+  });
+
+  test("each provider needs its own exact approval and receives only the approved identifier", async () => {
+    const { ctx, dns, exa, github } = await setup();
+    await triage({ dryRun: true, enrichment: { dnsDomains: ["acme.example"] } }, ctx);
+    expect(dns).toHaveBeenCalledTimes(1);
+    expect(exa).not.toHaveBeenCalled();
+    expect(github).not.toHaveBeenCalled();
+    expect(dns.mock.calls[0]?.[0]).toBe("https://dns.google/resolve?name=acme.example&type=MX");
+    await triage({ dryRun: true, enrichment: { exaDomains: ["acme.example"] } }, ctx);
+    expect(dns).toHaveBeenCalledTimes(1);
+    expect(exa).toHaveBeenCalledWith({
+      body: { query: "site:acme.example", numResults: 3, type: "fast" },
+    });
+    expect(github).not.toHaveBeenCalled();
+    await triage({ dryRun: true, enrichment: { githubLogins: ["alex-rivera"] } }, ctx);
+    expect(github).toHaveBeenCalledWith(expect.any(String), { login: "alex-rivera" });
+    expect(exa).toHaveBeenCalledTimes(1);
+    const sent = JSON.stringify([dns.mock.calls, exa.mock.calls, github.mock.calls]);
+    for (const privateField of [
+      "Alex Rivera",
+      "private-local",
+      "private-value",
+      "private-fragment",
+      "pilot",
+    ]) {
+      expect(sent).not.toContain(privateField);
+    }
+  });
+
+  test("nonmatching allowlists cannot enable calls", async () => {
+    const { ctx, dns, exa, github } = await setup();
+    await triage(
+      {
+        dryRun: true,
+        enrichment: {
+          dnsDomains: ["example" + ".org"],
+          exaDomains: ["sub.acme.example"],
+          githubLogins: ["someone-else"],
+        },
+      },
+      ctx,
+    );
+    expect(dns).not.toHaveBeenCalled();
+    expect(exa).not.toHaveBeenCalled();
+    expect(github).not.toHaveBeenCalled();
+  });
+
+  test("malformed approval identifiers fail closed before provider calls", async () => {
+    const { ctx, dns, exa, github } = await setup();
+    for (const enrichment of [
+      { dnsDomains: ["*.example"] },
+      { exaDomains: ["acme.example secret"] },
+      { githubLogins: ["alex-rivera?token=private"] },
+    ]) {
+      await expect(triage({ dryRun: true, enrichment }, ctx)).rejects.toThrow();
+    }
+    expect(dns).not.toHaveBeenCalled();
+    expect(exa).not.toHaveBeenCalled();
+    expect(github).not.toHaveBeenCalled();
   });
 });
