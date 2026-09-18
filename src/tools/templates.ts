@@ -65,7 +65,7 @@ Output:
 IMPORTANT: Do NOT re-delegate or re-answer the original request. The worker has already handled it. Your job is ONLY to:
 1. Review the output above
 2. Do not relay the worker's raw output to Slack; the engine owns the thread tree and outcome card
-3. Complete this follow-up task
+3. Complete this follow-up task. For tasks tagged \`slack-answer\`, the engine delivers nonblank output as your human-facing review answer, even after the ask's conclusion. Write only new information the human needs; leave output empty when there is nothing to add. A \`slack-silent\` tag suppresses this delivery.
 
 Use \`get-task-details\` with taskId "{{task_id}}" for full details.`,
   variables: [
@@ -121,7 +121,7 @@ Task: "{{task_desc}}"
 
 Failure reason: {{failure_reason}}{{follow_up_instructions}}
 
-Decide whether to reassign, retry, or handle the failure. Use \`get-task-details\` with taskId "{{task_id}}" for full details.`,
+Decide whether to reassign, retry, or handle the failure. For tasks tagged \`slack-answer\`, nonblank completed output is delivered to the human. Leave output empty for administrative work with nothing new to tell them; \`slack-silent\` suppresses delivery. Use \`get-task-details\` with taskId "{{task_id}}" for full details.`,
   variables: [
     { name: "agent_name", description: "Worker agent name or ID prefix" },
     { name: "creator_agent", description: "Agent ID that originally created the worker task" },

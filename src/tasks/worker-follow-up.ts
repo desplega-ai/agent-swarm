@@ -168,6 +168,30 @@ function formatAttachmentsBlock(attachments: TaskAttachment[]): string {
   return `\n\nAttachments (${attachments.length}):\n${lines.join("\n")}`;
 }
 
+/** Only an unbroken human Slack ancestry authorizes a review answer. */
+async function hasHumanSlackAsk(task: AgentTask): Promise<boolean> {
+  if (!task.slackChannelId || !task.slackThreadTs) return false;
+  const seen = new Set<string>();
+  let ancestor: AgentTask | null = task;
+  while (ancestor && !seen.has(ancestor.id)) {
+    seen.add(ancestor.id);
+    if (
+      ancestor.slackChannelId !== task.slackChannelId ||
+      ancestor.slackThreadTs !== task.slackThreadTs ||
+      ancestor.source === "schedule" ||
+      ancestor.scheduleId ||
+      ancestor.workflowRunId ||
+      ancestor.workflowRunStepId ||
+      ancestor.taskType === "reroute-decision" ||
+      ancestor.tags.includes("slack-silent")
+    )
+      return false;
+    if (ancestor.source === "slack") return true;
+    ancestor = ancestor.parentTaskId ? await getTaskById(ancestor.parentTaskId) : null;
+  }
+  return false;
+}
+
 export async function createWorkerTaskFollowUp(args: {
   task: AgentTask;
   status: "completed" | "failed";
@@ -263,6 +287,9 @@ export async function createWorkerTaskFollowUp(args: {
 
   const changes = preFollowUp.action === "modify" ? preFollowUp.data : {};
   const followUpAgentId = changes.agentId === undefined ? leadAgent.id : changes.agentId;
+  // Stamp only newly created human-review tasks: old control-plane outputs
+  // must never be backfilled when the renderer learns this delivery path.
+  const deliverAnswer = followUpAgentId === leadAgent.id && (await hasHumanSlackAsk(task));
   return await createTaskWithSiblingAwareness(
     changes.description ?? followUpDescription,
     {
@@ -271,6 +298,7 @@ export async function createWorkerTaskFollowUp(args: {
       routingSource: followUpAgentId ? "engine_default" : undefined,
       source: "system",
       taskType: "follow-up",
+      tags: deliverAnswer ? ["slack-answer"] : [],
       priority: changes.priority,
       parentTaskId: task.id,
       slackChannelId: task.slackChannelId,

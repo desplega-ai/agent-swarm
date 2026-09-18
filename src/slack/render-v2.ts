@@ -821,11 +821,33 @@ function isChildCardCandidate(task: AgentTask, delegationActivatedAt: string): b
   );
 }
 
-function taskNeedsDirectOutcome(task: AgentTask, activatedAt: string): boolean {
+// The producer stamps new human-review tasks only; this must not infer
+// eligibility from inherited Slack fields or backfill old control-plane output.
+function isSlackReviewAnswer(task: AgentTask): boolean {
+  return (
+    task.source === "system" &&
+    task.taskType === "follow-up" &&
+    task.tags.includes("slack-answer") &&
+    !task.tags.includes("slack-silent") &&
+    !task.scheduleId &&
+    !task.workflowRunId &&
+    !task.workflowRunStepId &&
+    !!task.slackChannelId &&
+    !!task.slackThreadTs &&
+    task.status === "completed" &&
+    !!task.output?.trim() &&
+    !task.slackReplySent
+  );
+}
+
+async function taskNeedsDirectOutcome(task: AgentTask, activatedAt: string): Promise<boolean> {
   return (
     !isSlackEtaOnlyNotice(task) &&
     ((task.source === "slack" && isAskOutcomeStatus(task.status)) ||
-      (isSlackContinuation(task) && isOutcomeStatus(task.status))) &&
+      (isSlackContinuation(task) && isOutcomeStatus(task.status)) ||
+      (isSlackReviewAnswer(task) &&
+        !!task.agentId &&
+        (await getAgentById(task.agentId))?.isLead === true)) &&
     task.createdAt >= activatedAt
   );
 }
@@ -1100,6 +1122,8 @@ export async function streamOutcomeCard(
   // Slack round trips in the outer render loop that run before this function is
   // called for the task.
   const slackReplySent = (await getTaskById(task.id))?.slackReplySent ?? task.slackReplySent;
+  // Review answers are silent once slack-reply has delivered the answer by hand.
+  if (task.tags.includes("slack-answer") && slackReplySent) return null;
   const content = await (options?.buildContent ?? outcomeContent)(task, slackReplySent);
   const presentation = outcomePresentation(task, content, attachment);
   if (!presentation) throw new Error(`Outcome presentation is empty for task ${task.id}`);
@@ -1270,7 +1294,7 @@ export async function processSlackRenderV2(): Promise<void> {
       // not represent immediately active outcome work, so avoid waking an old
       // tree solely to verify its permalink on every render tick.
       const isDirectCandidate =
-        taskNeedsDirectOutcome(task, activatedAt) && isOutcomeStatus(task.status);
+        (await taskNeedsDirectOutcome(task, activatedAt)) && isOutcomeStatus(task.status);
       const isChildCandidate =
         delegationEnabled &&
         delegationActivatedAt !== null &&
@@ -1320,6 +1344,8 @@ export async function processSlackRenderV2(): Promise<void> {
       const closure = closuresByAskId.get(askId) ?? [];
       let count = 0;
       for (const member of closure) {
+        // Direct Lead answers do not consume the delegated-worker card quota.
+        if (member.taskType === "follow-up") continue;
         if (await getSlackOutcomeMessage(member.id)) count++;
       }
       childCardCounts.set(askId, count);
@@ -1363,7 +1389,7 @@ export async function processSlackRenderV2(): Promise<void> {
 
     for (const task of tasks) {
       if (!isSlackRenderV2Enabled()) return;
-      if (!taskNeedsDirectOutcome(task, activatedAt)) continue;
+      if (!(await taskNeedsDirectOutcome(task, activatedAt))) continue;
       if ((await getSlackOutcomeMessage(task.id))?.finalizedAt) continue;
       const deferByClosure =
         task.source === "slack" &&
