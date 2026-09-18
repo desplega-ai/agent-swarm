@@ -52,6 +52,10 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [script-apis](#script-apis)
   - [script-run](#script-run)
   - [script-upsert](#script-upsert)
+  - [extension-delete](#extension-delete)
+  - [extension-enable](#extension-enable)
+  - [extension-disable](#extension-disable)
+  - [extension-activate-version](#extension-activate-version)
   - [extension-install](#extension-install)
   - [extension-list](#extension-list)
   - [script-delete](#script-delete)
@@ -632,6 +636,47 @@ Manage external HTTP API endpoints for swarm scripts (POST /api/x/script/<id>). 
 | `intent` | `string` | No | "" | Why this script exists. |
 | `scope` | `unknown` | No | "agent" | Persist under agent or global scope. |
 | `fsMode` | `unknown` | No | "none" | Filesystem mode. v1 supports none only. |
+
+### extension-delete
+
+**Extension Delete**
+
+Uninstall a disabled extension and delete its stored history. Disable it first with extension-disable. Requires a lead, operator, or dashboard user.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | Yes | - | Installed extension ID from extension-list. |
+
+### extension-enable
+
+**Extension Enable**
+
+Load and enable an installed extension. Requires a lead, operator, or dashboard user.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | Yes | - | Installed extension ID from extension-list. |
+
+### extension-disable
+
+**Extension Disable**
+
+Unload and disable an installed extension. Requires a lead, operator, or dashboard user.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | Yes | - | Installed extension ID from extension-list. |
+
+### extension-activate-version
+
+**Extension Activate Version**
+
+Activate a stored extension version, reloading it if enabled. Requires a lead, operator, or dashboard user.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | Yes | - | Installed extension ID from extension-list. |
+| `version` | `number` | Yes | - | Stored version number to activate. |
 
 ### extension-install
 

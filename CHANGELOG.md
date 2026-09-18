@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.152.0] - 2026-09-18
+
+### Added
+- **Trusted leads can manage the full extension lifecycle** through MCP and the script SDK: enable, disable, activate a stored version, and delete disabled extensions (#1544).
+
+### Changed
+- **Worker images include agent-browser 0.38.1** (#1538).
+- **Migration conflict checks run in the merge queue**, with stale-PR notifications when main changes (#1542).
+
+### Fixed
+- **Operators can restrict lead extension activation** with the deployment-only `EXTENSION_ALLOW_LEAD_ACTIVATION` switch; agent lifecycle requests record caller and target version before side effects (#1546).
+- **Task output salvages leaked tool parameters before persistence**, recovering valid attachments while stripping malformed tails (#1545).
+- **Slack omits misleading defer ETAs** from task output (#1539).
+
 ## [1.151.0] - 2026-09-17
 
 ### Added

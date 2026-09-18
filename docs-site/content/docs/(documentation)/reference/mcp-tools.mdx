@@ -1155,7 +1155,7 @@ List durable script workflow runs, optionally filtered by status or agent ID.
 
 The `scripts` capability includes tools for trusted TypeScript hook bundles. Extensions run
 inside the API server process. See the [extensions guide](/docs/guides/extensions) for the
-bundle format, event contracts, and operator activation workflow.
+bundle format, event contracts, and lead/operator activation workflow.
 
 ### extension-list
 
@@ -1169,7 +1169,8 @@ List installed extensions with their version, activation state, priority, and fa
 
 Validate and store a manifest and its files as a disabled draft. Fetch
 `GET /api/extensions/type-defs` first for the `swarm-extension` TypeScript contract.
-An operator must enable the draft from the dashboard or the REST API before it runs.
+A trusted lead can enable the draft with `extension-enable`; operators and dashboard users
+can also activate it. Installation itself never enables an extension.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -1177,6 +1178,23 @@ An operator must enable the draft from the dashboard or the REST API before it r
 | `files` | object | Yes | Source files keyed by relative path |
 | `priority` | integer | No | Handler priority; lower values run first |
 | `config` | object | No | Extension configuration |
+
+### Extension lifecycle
+
+Lifecycle mutations require a lead, operator, or dashboard user. Ordinary workers are denied.
+`EXTENSION_ALLOW_LEAD_ACTIVATION=false` restricts enable, disable, and version activation
+to operators/dashboard users; leads can still install drafts and delete disabled extensions.
+Extensions execute inside the API process without host isolation.
+
+| Tool | Required parameters | Behavior |
+|------|---------------------|----------|
+| `extension-enable` | `id` (UUID) | Load and enable an installed extension |
+| `extension-disable` | `id` (UUID) | Disable an extension and remove its registered hooks |
+| `extension-activate-version` | `id` (UUID), `version` (positive integer) | Activate a stored version, reloading it if enabled |
+| `extension-delete` | `id` (UUID) | Delete a disabled extension and its stored history; disable it first |
+
+Get the installed `id` from `extension-list`. The script SDK exposes these tools with
+underscores, for example `ctx.swarm.extension_enable({ id })`.
 
 ## Debug Tools
 
