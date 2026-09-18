@@ -20754,6 +20754,8 @@ export interface components {
             agentmailInboxId?: string;
             agentmailMessageId?: string;
             agentmailThreadId?: string;
+            /** @default false */
+            agentmailReplySent: boolean;
             mentionMessageId?: string;
             mentionChannelId?: string;
             dir?: string;

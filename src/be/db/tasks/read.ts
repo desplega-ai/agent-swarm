@@ -77,6 +77,7 @@ export type AgentTaskRow = {
   agentmailInboxId: string | null;
   agentmailMessageId: string | null;
   agentmailThreadId: string | null;
+  agentmailReplySent: number;
   mentionMessageId: string | null;
   mentionChannelId: string | null;
   dir: string | null;
@@ -200,6 +201,7 @@ export function rowToAgentTask(row: AgentTaskRow): AgentTask {
     agentmailInboxId: row.agentmailInboxId ?? undefined,
     agentmailMessageId: row.agentmailMessageId ?? undefined,
     agentmailThreadId: row.agentmailThreadId ?? undefined,
+    agentmailReplySent: !!row.agentmailReplySent,
     mentionMessageId: row.mentionMessageId ?? undefined,
     mentionChannelId: row.mentionChannelId ?? undefined,
     dir: row.dir ?? undefined,

@@ -1,4 +1,5 @@
 import { Webhook } from "svix";
+import { initAgentMailOutboundSync, teardownAgentMailOutboundSync } from "./outbound";
 
 let initialized = false;
 let webhookSecret: string | null = null;
@@ -13,6 +14,7 @@ export function isAgentMailEnabled(): boolean {
 }
 
 export function resetAgentMail(): void {
+  teardownAgentMailOutboundSync();
   initialized = false;
   webhookSecret = null;
 }
@@ -36,6 +38,11 @@ export function initAgentMail(): boolean {
     console.log("[AgentMail] Missing AGENTMAIL_WEBHOOK_SECRET, AgentMail integration disabled");
     return false;
   }
+
+  // Outbound reply delivery only needs AGENTMAIL_API_KEY, which is
+  // independent of the inbound webhook secret gating this function overall —
+  // but there is no separate init entry point for it, so it rides along here.
+  initAgentMailOutboundSync();
 
   console.log("[AgentMail] Webhook handler initialized");
   return true;

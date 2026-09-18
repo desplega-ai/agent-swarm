@@ -576,6 +576,7 @@ export const AgentTaskSchema = z
     agentmailInboxId: z.string().optional(),
     agentmailMessageId: z.string().optional(),
     agentmailThreadId: z.string().optional(),
+    agentmailReplySent: z.boolean().default(false),
 
     // Mention-to-task metadata (optional). Plain strings, not z.uuid():
     // Slack channel/message IDs (e.g. "C0AR967K0KZ") are not UUIDs — a uuid
