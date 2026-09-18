@@ -475,7 +475,6 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
 # binary itself; it does not apt-install these shared libs.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-      ffmpeg \
       libasound2t64 \
       libatk-bridge2.0-0t64 \
       libatk1.0-0t64 \
@@ -498,6 +497,14 @@ RUN apt-get update \
       libxkbcommon0 \
       libxrandr2 \
     && rm -rf /var/lib/apt/lists/*
+
+# agent-browser recording needs ffmpeg, but not ffprobe or the distro codec deps.
+# Keep the pinned static binary in the full image only.
+ARG FFMPEG_VERSION=7.0.2
+RUN curl -fsSL "https://johnvansickle.com/ffmpeg/releases/ffmpeg-${FFMPEG_VERSION}-${TARGETARCH}-static.tar.xz" -o /tmp/ffmpeg.tar.xz \
+    && tar -xJf /tmp/ffmpeg.tar.xz -C /usr/local/bin --strip-components=1 \
+      "ffmpeg-${FFMPEG_VERSION}-${TARGETARCH}-static/ffmpeg" \
+    && rm /tmp/ffmpeg.tar.xz
 
 # Full-image global npm tools, staged in a SEPARATE dir from worker-base's
 # /opt/global-deps so its layer is never rewritten. Same overrides rationale
