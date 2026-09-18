@@ -504,6 +504,7 @@ ARG FFMPEG_VERSION=7.0.2
 RUN curl -fsSL "https://johnvansickle.com/ffmpeg/releases/ffmpeg-${FFMPEG_VERSION}-${TARGETARCH}-static.tar.xz" -o /tmp/ffmpeg.tar.xz \
     && tar -xJf /tmp/ffmpeg.tar.xz -C /usr/local/bin --strip-components=1 \
       "ffmpeg-${FFMPEG_VERSION}-${TARGETARCH}-static/ffmpeg" \
+    && test -x /usr/local/bin/ffmpeg \
     && rm /tmp/ffmpeg.tar.xz
 
 # Full-image global npm tools, staged in a SEPARATE dir from worker-base's
@@ -593,7 +594,12 @@ ENV AGENT_BROWSER_EXECUTABLE_PATH=/opt/playwright/chromium \
 # so wipe them in the SAME RUN. A stale pid file would confuse the runtime
 # daemon lookup on first use.
 USER worker
-RUN agent-browser open about:blank \
+RUN ffmpeg -version \
+    && ffmpeg -hide_banner -encoders > /tmp/ffmpeg-encoders.txt \
+    && grep -Eq "[[:space:]]libvpx[[:space:]]" /tmp/ffmpeg-encoders.txt \
+    && grep -Eq "[[:space:]]libx264[[:space:]]" /tmp/ffmpeg-encoders.txt \
+    && rm /tmp/ffmpeg-encoders.txt \
+    && agent-browser open about:blank \
     && agent-browser screenshot /tmp/agent-browser-smoke.png \
     && head -c 8 /tmp/agent-browser-smoke.png | grep -q PNG \
     && agent-browser close \
