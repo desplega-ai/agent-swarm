@@ -1,3 +1,8 @@
+---
+name: agent-browser
+description: "Drive a real browser with the agent-browser CLI (headless Chromium over CDP). Use for any browser task: verifying a UI change, taking a screenshot, walking a web page, filling a form, extracting page text, reproducing a frontend bug, or attaching UI evidence to a PR, issue, Linear comment, or Slack thread. Starts with a `command -v agent-browser` check and falls back to manual QA on the slim worker image. Screenshots are shared through agent-fs signed URLs. This is the only browser automation tool; do not use qa-use."
+---
+
 # agent-browser
 
 `agent-browser` (vercel-labs) is the swarm's browser-automation CLI. It drives a headless Chromium over CDP and returns accessibility-tree snapshots with compact `@eN` refs. Use it for any browser task: verify a UI change, take a screenshot, walk a page, fill a form, extract page text, reproduce a frontend bug, or attach UI evidence to a PR, issue, Linear comment, or Slack thread.

@@ -288,9 +288,9 @@ A handful of detail pages are exempt because their identity is an editor or spli
 
 <important if="you are preparing a PR that touches ui/, or running automated UI tests against ui">
 
-## agent-browser & PR screenshot requirement
+## agent-browser & PR screenshot and recording requirement
 
-Use `agent-browser` for browser automation (`agent-browser open <url>`, `snapshot`, `screenshot <path>`). Never `qa-use` unless explicitly asked. Any PR touching `ui/` MUST include screenshots of the changes running locally, uploaded to agent-fs with the signed URL in the PR body. This is a reviewer convention; no CI job enforces it. Recipe: [../LOCAL_TESTING.md § When you need to verify a UI change](../LOCAL_TESTING.md#when-you-need-to-verify-a-ui-change). Port-conflict handling: [../LOCAL_TESTING.md § Dashboard UI](../LOCAL_TESTING.md#dashboard-ui).
+Use the `agent-browser` skill for browser automation commands. Never `qa-use` unless explicitly asked. Any PR touching `ui/` MUST include screenshots of the changes running locally (including static/layout changes) and a recording for interaction/flow changes (navigation, form, modal, drag, animation, or multi-step flow), uploaded to agent-fs with signed URLs in the PR body. This is a reviewer convention; no CI job enforces it. Recipe: [LOCAL_TESTING.md § When you need to verify a UI change](../../LOCAL_TESTING.md#when-you-need-to-verify-a-ui-change). Port-conflict handling: [LOCAL_TESTING.md § Dashboard UI](../../LOCAL_TESTING.md#dashboard-ui).
 
 ## UI E2E
 

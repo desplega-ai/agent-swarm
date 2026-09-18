@@ -433,27 +433,39 @@ Automated browser coverage lives in [UI E2E (bun run e2e:ui)](#ui-e2e-bun-run-e2
 
 ### When you need to verify a UI change
 
-Use `agent-browser` (never `qa-use` unless explicitly asked):
+Use the `agent-browser` skill (never `qa-use` unless explicitly asked). Default for interaction evidence: record with `--cursor`, use `--human` for pointer actions (`click`, `mouse move`, `drag`), and deliver the 1.5x video. Use `--seed` on movement to make a take reproducible. Keep the 1x original only if a reviewer asks for it:
 
 ```bash
 agent-browser skills get core                 # version-matched usage guide, once per session
 agent-browser open http://localhost:5274/tasks
+agent-browser doctor                         # check ffmpeg and recording codecs
+agent-browser record start /tmp/ui-tasks.mp4 --cursor
 agent-browser snapshot                        # accessibility tree with @eN refs
-agent-browser click @e12                      # act on refs from the snapshot
+agent-browser mouse move 600 400 --human --seed 42 --duration 1400
+agent-browser click @e12 --human              # act on refs from the snapshot
+# Re-snapshot after state changes; use --human on drag actions too.
+agent-browser record stop                     # save before closing the browser
 agent-browser screenshot /tmp/ui-tasks.png
 agent-browser close
+ffmpeg -y -i /tmp/ui-tasks.mp4 -filter:v "setpts=PTS/1.5,fps=30" -an \
+  -c:v libx264 -preset veryfast -crf 23 -pix_fmt yuv420p /tmp/ui-tasks-1.5x.mp4
+ffmpeg -i /tmp/ui-tasks-1.5x.mp4 2>&1 | grep Duration
 ```
 
-To share a screenshot (PR body, review comment, Slack), upload it to agent-fs and paste the signed URL:
+`record start` has no speed or human flag; speed-up happens afterward. Keep `fps=30` to preserve steady 30 fps output rather than uneven frame drops at an inferred rate. `-an` disables audio because recordings have no audio track. The worker ships `ffmpeg` only, so duration checks use it rather than `ffprobe`.
+
+To share screenshots and recordings (PR body, review comment, Slack), upload them to the same agent-fs QA path and paste the signed URLs:
 
 ```bash
 agent-fs write qa/agent-swarm/$(date +%F)-<topic>/ui-tasks.png --file /tmp/ui-tasks.png -m "<what it shows>"
 agent-fs signed-url qa/agent-swarm/$(date +%F)-<topic>/ui-tasks.png --json   # 24h default, --expires-in up to 7d
+agent-fs write qa/agent-swarm/$(date +%F)-<topic>/ui-tasks-1.5x.mp4 --file /tmp/ui-tasks-1.5x.mp4 -m "<flow it demonstrates>"
+agent-fs signed-url qa/agent-swarm/$(date +%F)-<topic>/ui-tasks-1.5x.mp4 --json
 ```
 
 `agent-fs write --file` (or piped stdin) is the binary-safe path (CLI >= 0.7.1). `--content` is text-only and mangles PNGs.
 
-**PR requirement**: any PR touching `apps/ui/` or `apps/templates-ui/` must include `agent-browser` screenshots of the change running locally, embedded as `![caption](<signed-url>)`. This is a reviewer convention. No job in `.github/workflows/merge-gate.yml` checks it.
+**PR requirement**: any PR touching `apps/ui/` or `apps/templates-ui/` must include `agent-browser` screenshots of the change running locally, embedded as `![caption](<signed-url>)`. Screenshots stay required for static/layout changes; interaction/flow changes (navigation, form, modal, drag, animation, or multi-step flow) also require a recording, linked as `[Watch the walkthrough](<signed-url>)`. Follow the `agent-browser` skill and the recipe above, using the same agent-fs upload and signed-URL delivery. This is a reviewer convention. No job in `.github/workflows/merge-gate.yml` checks it.
 
 ### Port-conflict resolution
 
