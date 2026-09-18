@@ -475,6 +475,7 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
 # binary itself; it does not apt-install these shared libs.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
+      ffmpeg \
       libasound2t64 \
       libatk-bridge2.0-0t64 \
       libatk1.0-0t64 \

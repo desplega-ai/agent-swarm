@@ -40,6 +40,18 @@ agent-browser close
 - The browser is headless. Local servers inside the worker container are reachable at `http://localhost:<port>`.
 - The image launches Chromium with `--no-sandbox,--disable-dev-shm-usage` through `AGENT_BROWSER_ARGS`. If you pass your own `--args`, include `--no-sandbox` again or Chrome will not start.
 
+## Recording
+
+Record QA walkthroughs with `--cursor` so reviewers can follow the animated pointer and click ripple. Open the page first, then record the interaction:
+
+```bash
+agent-browser record start ./out.webm --cursor
+# Perform the QA steps using snapshots and actions.
+agent-browser record stop
+```
+
+Add `--contact-sheet` to the start command for a timestamped PNG summary of visual changes. Recording needs `ffmpeg` on PATH; check `agent-browser doctor` before starting. Stop the recording before closing the browser so the video is saved.
+
 ## Step 3: share the screenshot through agent-fs
 
 Screenshots on the worker disk disappear with the task. Upload them to agent-fs under the qa path convention and share the signed URL. `--file` is binary-safe. `--content` is text-only and mangles PNGs.
