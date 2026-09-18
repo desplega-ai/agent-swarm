@@ -46581,7 +46581,7 @@
             }
           },
           "503": {
-            "description": "AgentMail integration not configured",
+            "description": "AgentMail integration not configured or inbound archive unavailable",
             "content": {
               "application/json": {
                 "schema": {
