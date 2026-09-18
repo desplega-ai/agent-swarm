@@ -19315,7 +19315,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description AgentMail integration not configured */
+                /** @description AgentMail integration not configured or inbound archive unavailable */
                 503: {
                     headers: {
                         [name: string]: unknown;
