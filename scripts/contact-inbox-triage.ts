@@ -323,7 +323,7 @@ export default async function (args: z.input<typeof argsSchema> | undefined, ctx
   const gaps = new Set<string>([
     "Only verified webhook deliveries captured after deployment are discoverable; historical and undelivered mail require provider replay or known IDs",
     "Subscriptions must include message.received and message.received.unauthenticated; blocked/spam need their subscriptions too",
-    "lookbackHours is retained for schedule compatibility; pending captured messages never age out",
+    "lookbackHours is retained for schedule compatibility; archive deliveries expire 30 days after capture, including unprocessed mail",
     "Trusted receiver authentication verdict is not defined; live ENGAGE remains gated until Lead specifies it",
   ]);
   const archiveNamespace = "agentmail-inbound";
@@ -337,10 +337,12 @@ export default async function (args: z.input<typeof argsSchema> | undefined, ctx
       const response: any = await ctx.swarm.db_query({
         sql: `SELECT a.key FROM kv_entries a
           WHERE a.namespace = ? AND a.key > ?
+          AND (a.expires_at IS NULL OR a.expires_at > ?)
           AND json_extract(a.value, '$.payload.message.inbox_id') = ?
-          AND NOT EXISTS (SELECT 1 FROM kv_entries d WHERE d.namespace = ? AND d.key = a.key)
+          AND NOT EXISTS (SELECT 1 FROM kv_entries d WHERE d.namespace = ? AND d.key = a.key
+            AND (d.expires_at IS NULL OR d.expires_at > ?))
           ORDER BY a.key LIMIT 25`,
-        params: [archiveNamespace, pageToken ?? "", INBOX, dedupeNamespace],
+        params: [archiveNamespace, pageToken ?? "", Date.now(), INBOX, dedupeNamespace, Date.now()],
       });
       const page = response?.data ?? response;
       if (
@@ -440,6 +442,7 @@ export default async function (args: z.input<typeof argsSchema> | undefined, ctx
           key: messageId,
           value,
           valueType: "string",
+          expiresInSec: 30 * 24 * 60 * 60,
         });
         if (saved?.success === false) throw new Error("KV write rejected");
       } catch (error) {

@@ -4,7 +4,11 @@ import { Readable } from "node:stream";
 import { Webhook } from "svix";
 import triage from "../../scripts/contact-inbox-triage";
 import { initAgentMail, resetAgentMail } from "../agentmail/app";
-import { archiveInboundMessage, inboundArchiveKey } from "../agentmail/inbound-archive";
+import {
+  archiveInboundMessage,
+  INBOUND_ARCHIVE_TTL_MS,
+  inboundArchiveKey,
+} from "../agentmail/inbound-archive";
 import type { AgentMailWebhookPayload } from "../agentmail/types";
 import { closeDb, getDbClient, getKv, initDb, upsertKv } from "../be/db";
 import { handleWebhooks } from "../http/webhooks";
@@ -105,10 +109,13 @@ function context() {
         KvKeySchema.parse(key);
         return await getKv(ns, key);
       },
-      async kv_set(input: Parameters<typeof upsertKv>[0]) {
+      async kv_set(input: Parameters<typeof upsertKv>[0] & { expiresInSec?: number }) {
         KvNamespaceSchema.parse(input.namespace);
         KvKeySchema.parse(input.key);
-        await upsertKv(input);
+        await upsertKv({
+          ...input,
+          expiresAt: input.expiresInSec ? Date.now() + input.expiresInSec * 1000 : null,
+        });
         return { success: true };
       },
     },
@@ -125,7 +132,97 @@ describe("verified inbound archive", () => {
   test("cold unauthenticated mail is durable before ACK despite routing filter", async () => {
     const result = await deliver(payload());
     expect(result.status).toBe(200);
-    expect(result.archiveAtAck?.value).toMatchObject({ payload: payload() });
+    expect(result.archiveAtAck?.value).toMatchObject({
+      payload: {
+        event_type: payload().event_type,
+        message: { message_id: payload().message!.message_id },
+      },
+    });
+  });
+  test("stores only bounded discovery fields and scrubs credentials before truncation", async () => {
+    const event = payload();
+    const token = `ghp_${"a".repeat(36)}`;
+    Object.assign(event.message!, {
+      subject: `${token} ${"s".repeat(500)}`,
+      text: `${token} ${"t".repeat(20000)}`,
+      html: "h".repeat(20000),
+      headers: { authorization: "Bearer private-credential" },
+      extra: "unexpected-secret",
+      attachments: [
+        {
+          filename: "pitch.zip",
+          content_type: "application/zip",
+          size: 123,
+          attachment_id: "private-id",
+          content: "private-bytes",
+        },
+      ],
+    });
+    await archiveInboundMessage(event);
+    const entry = await getKv(namespace, key(event.message!.message_id));
+    const value = entry!.value as {
+      capturedAt: string;
+      payload: { message: Record<string, unknown> };
+    };
+    const message = value.payload.message;
+    expect(Object.keys(message).sort()).toEqual(
+      [
+        "inbox_id",
+        "message_id",
+        "thread_id",
+        "from_",
+        "reply_to",
+        "subject",
+        "text",
+        "html",
+        "timestamp",
+        "labels",
+        "attachments",
+      ].sort(),
+    );
+    expect(String(message.subject)).toHaveLength(300);
+    expect(String(message.text)).toHaveLength(16000);
+    expect(String(message.html)).toHaveLength(16000);
+    expect(JSON.stringify(value)).not.toContain(token);
+    expect(JSON.stringify(value)).not.toContain("private-");
+    expect(JSON.stringify(value)).not.toContain("unexpected-secret");
+    expect(message.attachments).toEqual([
+      { filename: "pitch.zip", content_type: "application/zip", size: 123 },
+    ]);
+    expect(entry!.expiresAt).toBe(Date.parse(value.capturedAt) + INBOUND_ARCHIVE_TTL_MS);
+    const triaged = await triage({ dryRun: true }, context());
+    expect(triaged.briefs[0]?.flag).toBe("IGNORE");
+  });
+  test("live retries preserve content and expiry; expired replay starts a new window", async () => {
+    const event = payload();
+    await archiveInboundMessage(event);
+    const first = await getKv(namespace, key(event.message!.message_id));
+    event.message!.subject = "Changed retry";
+    await archiveInboundMessage(event);
+    expect(await getKv(namespace, key(event.message!.message_id))).toEqual(first);
+    await getDbClient().run("UPDATE kv_entries SET expires_at = ? WHERE namespace = ?", [
+      Date.now() - 1,
+      namespace,
+    ]);
+    const expired = await triage({ dryRun: true }, context());
+    expect(expired.briefs).toHaveLength(0);
+    expect(expired.controls.countsValid).toBe(false);
+    await archiveInboundMessage(event);
+    const replay = await getKv(namespace, key(event.message!.message_id));
+    expect(replay?.value).toMatchObject({ payload: { message: { subject: "Changed retry" } } });
+    expect(replay!.expiresAt).toBeGreaterThan(Date.now());
+  });
+  test("new captures physically sweep expired archive rows", async () => {
+    await archiveInboundMessage(payload("expired"));
+    await getDbClient().run("UPDATE kv_entries SET expires_at = ? WHERE namespace = ?", [
+      Date.now() - 1,
+      namespace,
+    ]);
+    await archiveInboundMessage(payload("fresh"));
+    const rows = await getDbClient().query("SELECT key FROM kv_entries WHERE namespace = ?", [
+      namespace,
+    ]);
+    expect(rows).toEqual([{ key: key("fresh") }]);
   });
   test("invalid signatures never enter the archive", async () => {
     expect((await deliver(payload(), false)).status).toBe(401);
@@ -137,7 +234,7 @@ describe("verified inbound archive", () => {
     await getDbClient().run("ALTER TABLE unavailable_kv RENAME TO kv_entries");
     expect((await deliver(payload())).status).toBe(200);
   });
-  test("concurrent retries preserve one full message, distinct inboxes remain separate", async () => {
+  test("concurrent retries preserve one minimized message, distinct inboxes remain separate", async () => {
     await Promise.all(Array.from({ length: 8 }, () => archiveInboundMessage(payload())));
     const other = payload();
     other.message!.inbox_id = "other@example.com";
@@ -204,6 +301,9 @@ describe("contact triage archive reader", () => {
     const first = await triage({ limit: 26 }, context());
     expect(first.briefs).toHaveLength(26);
     expect(first.stats.kvWritten).toBe(26);
+    const marker = await getKv("contact-triage-messages", key("message-00"));
+    expect(marker!.expiresAt).toBeGreaterThan(Date.now());
+    expect(marker!.expiresAt).toBeLessThanOrEqual(Date.now() + INBOUND_ARCHIVE_TTL_MS);
     expect(first.stats.archiveDrained).toBe(false);
     const second = await triage({}, context());
     expect(second.briefs).toHaveLength(1);
