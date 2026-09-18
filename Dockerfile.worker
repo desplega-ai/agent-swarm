@@ -500,8 +500,17 @@ RUN apt-get update \
 
 # agent-browser recording needs ffmpeg, but not ffprobe or the distro codec deps.
 # Keep the pinned static binary in the full image only.
+# Bump the version and both SHA-256 pins together. These pins are trust-on-first-use.
 ARG FFMPEG_VERSION=7.0.2
-RUN curl -fsSL "https://johnvansickle.com/ffmpeg/releases/ffmpeg-${FFMPEG_VERSION}-${TARGETARCH}-static.tar.xz" -o /tmp/ffmpeg.tar.xz \
+ARG FFMPEG_SHA256_AMD64=abda8d77ce8309141f83ab8edf0596834087c52467f6badf376a6a2a4c87cf67
+ARG FFMPEG_SHA256_ARM64=f4149bb2b0784e30e99bdda85471c9b5930d3402014e934a5098b41d0f7201b1
+RUN case "$TARGETARCH" in \
+      amd64) ffmpeg_sha256="$FFMPEG_SHA256_AMD64" ;; \
+      arm64) ffmpeg_sha256="$FFMPEG_SHA256_ARM64" ;; \
+      *) echo "Unsupported ffmpeg architecture: $TARGETARCH" >&2; exit 1 ;; \
+    esac \
+    && curl -fsSL "https://johnvansickle.com/ffmpeg/releases/ffmpeg-${FFMPEG_VERSION}-${TARGETARCH}-static.tar.xz" -o /tmp/ffmpeg.tar.xz \
+    && echo "$ffmpeg_sha256  /tmp/ffmpeg.tar.xz" | sha256sum -c - \
     && tar -xJf /tmp/ffmpeg.tar.xz -C /usr/local/bin --strip-components=1 \
       "ffmpeg-${FFMPEG_VERSION}-${TARGETARCH}-static/ffmpeg" \
     && test -x /usr/local/bin/ffmpeg \
