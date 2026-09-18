@@ -89,7 +89,7 @@ Eight milestones in fixed order. Each carries a `state`: `unverified` (not even 
 |---|---|---|
 | `harness` | `HARNESS_PROVIDER` set + matching cred env present | A successful `POST /status/test-connection` within `SWARM_VERIFY_TTL_MS` |
 | `embeddings` | `OPENAI_API_KEY` or `EMBEDDING_API_KEY` set | (No live verification; this optional milestone never degrades system health) |
-| `slack` | `SLACK_BOT_TOKEN` + `SLACK_APP_TOKEN` + `!SLACK_DISABLE` | Same (Socket Mode connection state not exposed today) |
+| `slack` | `SLACK_BOT_TOKEN` + the selected mode credential (`SLACK_APP_TOKEN` for `socket`, `SLACK_SIGNING_SECRET` for `http`) + `!SLACK_DISABLE` | Not reported yet; configured credentials do not prove live inbound delivery |
 | `github` | `GITHUB_WEBHOOK_SECRET` + `GITHUB_APP_ID` + `GITHUB_APP_PRIVATE_KEY` | Same (App installations validated JIT) |
 | `linear` | Row in `oauth_tokens(provider='linear')` | Same. Hint mentions the keepalive caveat — refresh-failure tracking is a future migration; check `#swarm-alerts` for keepalive errors. |
 | `jira` | Row in `oauth_tokens(provider='jira')` AND `oauth_apps.metadata.cloudId` set | Same as `linear` |

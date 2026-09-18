@@ -52,6 +52,12 @@ beforeAll(async () => {
   });
   await upsertSwarmConfig({
     scope: "global",
+    key: "SLACK_SIGNING_SECRET",
+    value: "synthetic-api-only-signing-secret",
+    isSecret: true,
+  });
+  await upsertSwarmConfig({
+    scope: "global",
     key: "SOME_WORKER_SECRET",
     value: "ok",
     isSecret: true,
@@ -86,6 +92,7 @@ describe("API-only config keys are never served over HTTP", () => {
   test("GET /api/config/resolved WITHOUT agentId strips the bootstrap key", async () => {
     const { configs } = await getJson("/api/config/resolved?includeSecrets=true");
     expect(configs.some((c) => c.key === BOOTSTRAP_KEY)).toBe(false);
+    expect(configs.some((c) => c.key === "SLACK_SIGNING_SECRET")).toBe(false);
     // A legitimate worker secret still comes through.
     expect(configs.some((c) => c.key === "SOME_WORKER_SECRET")).toBe(true);
   });
@@ -95,11 +102,13 @@ describe("API-only config keys are never served over HTTP", () => {
       `/api/config/resolved?includeSecrets=true&agentId=${agentId}`,
     );
     expect(configs.some((c) => c.key === BOOTSTRAP_KEY)).toBe(false);
+    expect(configs.some((c) => c.key === "SLACK_SIGNING_SECRET")).toBe(false);
   });
 
   test("GET /api/config?scope=global strips the bootstrap key", async () => {
     const { configs } = await getJson("/api/config?scope=global&includeSecrets=true");
     expect(configs.some((c) => c.key === BOOTSTRAP_KEY)).toBe(false);
+    expect(configs.some((c) => c.key === "SLACK_SIGNING_SECRET")).toBe(false);
     expect(configs.some((c) => c.key === "SOME_WORKER_SECRET")).toBe(true);
   });
 });

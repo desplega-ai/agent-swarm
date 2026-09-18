@@ -1,5 +1,6 @@
 import { App, LogLevel } from "@slack/bolt";
 import { emitBuiltInIntegrationConnectedOnce, ensureSlackRenderV2Activation } from "../be/db";
+import { getSlackConfiguration } from "./config";
 import { getSlackSocketModeBlockReason, SLACK_DEV_SOCKET_MODE_OPT_IN } from "./socket-mode-guard";
 import { startTaskWatcher, stopTaskWatcher } from "./watcher";
 
@@ -18,20 +19,37 @@ export async function initSlackApp(): Promise<App | null> {
   }
   initialized = true;
 
-  // Check if Slack is explicitly disabled
-  const slackDisable = process.env.SLACK_DISABLE;
-  if (slackDisable === "true" || slackDisable === "1") {
+  const config = getSlackConfiguration();
+  if (config.disabled) {
     console.log("[Slack] Disabled via SLACK_DISABLE");
     return null;
   }
 
-  const botToken = process.env.SLACK_BOT_TOKEN;
-  const appToken = process.env.SLACK_APP_TOKEN;
-
-  if (!botToken || !appToken) {
-    console.log("[Slack] Missing SLACK_BOT_TOKEN or SLACK_APP_TOKEN, Slack integration disabled");
+  if (!config.mode) {
+    console.error(
+      "[Slack] Invalid SLACK_MODE; expected socket or http. Slack integration disabled",
+    );
     return null;
   }
+
+  if (config.missingCredentials.length > 0) {
+    console.log(
+      `[Slack] Missing ${config.missingCredentials.join(" or ")} for ${config.mode} mode, Slack integration disabled`,
+    );
+    return null;
+  }
+
+  // Phase 1 establishes the transport contract only. Never fall back to a
+  // socket when HTTP was explicitly selected; the receiver lands in Phase 3.
+  if (config.mode === "http") {
+    console.error(
+      "[Slack] HTTP mode is configured but unavailable until the HTTP receiver is installed",
+    );
+    return null;
+  }
+
+  const botToken = process.env.SLACK_BOT_TOKEN as string;
+  const appToken = process.env.SLACK_APP_TOKEN as string;
 
   const socketModeBlockReason = getSlackSocketModeBlockReason(process.env);
   if (socketModeBlockReason) {
@@ -69,7 +87,7 @@ export async function initSlackApp(): Promise<App | null> {
   return app;
 }
 
-export async function startSlackApp(): Promise<void> {
+export async function startSlackApp(): Promise<boolean> {
   if (!app) {
     await initSlackApp();
   }
@@ -84,7 +102,10 @@ export async function startSlackApp(): Promise<void> {
 
     // Start watching for task completions
     await startTaskWatcher();
+    return true;
   }
+
+  return false;
 }
 
 export async function stopSlackApp(): Promise<void> {

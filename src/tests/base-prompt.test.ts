@@ -25,6 +25,8 @@ const ENV_KEYS = [
   "SLACK_DISABLE",
   "SLACK_BOT_TOKEN",
   "SLACK_APP_TOKEN",
+  "SLACK_MODE",
+  "SLACK_SIGNING_SECRET",
   "STEERING_ENABLED",
   "AGENT_FS_API_URL",
   "SCRIPTS_ONLY_MCP",
@@ -559,6 +561,29 @@ describe("getBasePrompt: slack section", () => {
     enableSlack();
     const result = await getBasePrompt({ ...minimalArgs, serverCapabilities: ["core", "slack"] });
     expect(result).toContain(SLACK_HEADER);
+  });
+
+  test("a tool capability alone does not bypass the default socket credential gate", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      serverCapabilities: ["core", "slack"],
+    });
+    expect(result).not.toContain(SLACK_HEADER);
+  });
+
+  test("supports the HTTP prompt contract without distributing Slack secrets to the worker", async () => {
+    process.env.SLACK_MODE = "http";
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      serverCapabilities: ["core", "slack"],
+    });
+    expect(result).toContain(SLACK_HEADER);
+
+    const withoutCapability = await getBasePrompt({
+      ...minimalArgs,
+      serverCapabilities: ["core"],
+    });
+    expect(withoutCapability).not.toContain(SLACK_HEADER);
   });
 
   test("a scripts-only worker with a Slack task gets the scripts-only variant only", async () => {

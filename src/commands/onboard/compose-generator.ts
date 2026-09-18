@@ -23,6 +23,10 @@ const ENV_SLACK_BOT_TOKEN = "      - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}";
 // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
 const ENV_SLACK_APP_TOKEN = "      - SLACK_APP_TOKEN=${SLACK_APP_TOKEN}";
 // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
+const ENV_SLACK_SIGNING_SECRET = "      - SLACK_SIGNING_SECRET=${SLACK_SIGNING_SECRET}";
+// biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
+const ENV_SLACK_MODE = "      - SLACK_MODE=${SLACK_MODE:-socket}";
+// biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
 const ENV_CLAUDE_OAUTH = "      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}";
 // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
 const ENV_ANTHROPIC_KEY = "      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}";
@@ -142,8 +146,9 @@ export function generateCompose(state: OnboardState): string {
 
   if (state.integrations.slack) {
     lines.push("      - SLACK_DISABLE=false");
+    lines.push(ENV_SLACK_MODE);
     lines.push(ENV_SLACK_BOT_TOKEN);
-    lines.push(ENV_SLACK_APP_TOKEN);
+    lines.push(state.slackMode === "http" ? ENV_SLACK_SIGNING_SECRET : ENV_SLACK_APP_TOKEN);
   }
 
   if (state.integrations.github) {

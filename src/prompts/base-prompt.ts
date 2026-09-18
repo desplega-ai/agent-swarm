@@ -16,6 +16,7 @@
  */
 
 import type { ProviderTraits } from "../providers/types";
+import { getSlackConfiguration } from "../slack/config";
 import type { ProviderName } from "../types";
 import { isSteeringEnabled } from "../utils/steering-enabled";
 import { matchesDefaultClaudeMd, matchesDefaultIdentityMd } from "./defaults";
@@ -54,11 +55,18 @@ const CLAUDE_MD_INJECT_PROVIDERS: ReadonlySet<string> = new Set(["codex", "openc
 /** Providers that get the repo CLAUDE.md inlined until native loading is verified. */
 const REPO_CLAUDE_MD_INLINE_PROVIDERS: ReadonlySet<string> = new Set(["opencode"]);
 
-export function areSlackPromptToolsEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  const slackDisable = env.SLACK_DISABLE;
-  if (slackDisable === "true" || slackDisable === "1") return false;
+export function areSlackPromptToolsEnabled(
+  env: NodeJS.ProcessEnv = process.env,
+  serverCapabilities?: string[],
+): boolean {
+  const config = getSlackConfiguration(env);
+  if (config.disabled || !config.mode) return false;
 
-  return Boolean(env.SLACK_BOT_TOKEN && env.SLACK_APP_TOKEN);
+  // Preserve the socket credential gate. For the HTTP contract, workers use
+  // the server tool capability without needing the API-owned signing secret.
+  if (serverCapabilities && !serverCapabilities.includes("slack")) return false;
+  if (config.mode === "http" && serverCapabilities) return true;
+  return config.missingCredentials.length === 0;
 }
 
 export type BasePromptArgs = {
@@ -185,8 +193,8 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
 
   // H. Slack. One block for both roles; the scripts-only variant covers Slack
   // via ctx.swarm.slack_* for Slack-originated tasks.
-  const slackPromptToolsEnabled = areSlackPromptToolsEnabled();
-  if (hasMcp && slackPromptToolsEnabled && !scriptsOnlyMode && serverHasCapability("slack", true)) {
+  const slackPromptToolsEnabled = areSlackPromptToolsEnabled(process.env, args.serverCapabilities);
+  if (hasMcp && slackPromptToolsEnabled && !scriptsOnlyMode) {
     const slackResult = await resolveTemplateAsync("system.agent.slack", {});
     prompt += slackResult.text;
   }

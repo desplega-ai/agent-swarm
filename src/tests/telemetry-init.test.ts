@@ -794,6 +794,24 @@ describe("initTelemetry", () => {
       ).toBe(false);
     });
 
+    test("Slack HTTP mode uses the signing secret instead of an app token", () => {
+      expect(
+        _hasSlackChannel({
+          SLACK_MODE: "http",
+          SLACK_BOT_TOKEN: "xoxb-1",
+          SLACK_SIGNING_SECRET: "synthetic-signing-secret",
+        }),
+      ).toBe(true);
+      expect(_hasSlackChannel({ SLACK_MODE: "http", SLACK_BOT_TOKEN: "xoxb-1" })).toBe(false);
+      expect(
+        _hasSlackChannel({
+          SLACK_MODE: "invalid",
+          SLACK_BOT_TOKEN: "xoxb-1",
+          SLACK_APP_TOKEN: "xapp-1",
+        }),
+      ).toBe(false);
+    });
+
     test("Email requires AGENTMAIL_WEBHOOK_SECRET", () => {
       expect(_hasEmailChannel({})).toBe(false);
       expect(_hasEmailChannel({ AGENTMAIL_WEBHOOK_SECRET: "whsec_1" })).toBe(true);

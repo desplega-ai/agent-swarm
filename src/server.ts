@@ -9,6 +9,7 @@ import { registerGithubTaskReactions } from "./github/task-reactions";
 import { loadGlobalConfigsIntoEnv } from "./http/core";
 import { resolveTemplate } from "./prompts/resolver";
 import { isRbacEnabled } from "./rbac";
+import { getSlackConfiguration } from "./slack/config";
 import { registerAcceptSteerTool } from "./tools/accept-steer";
 import { registerAppDiffTool } from "./tools/app-diff";
 import { registerAppGetTool } from "./tools/app-get";
@@ -268,7 +269,12 @@ export function hasCapability(cap: CAPABILITIES_T): boolean {
 }
 
 export function getEnabledCapabilities(): CAPABILITIES_T[] {
-  return Array.from(getCapabilities());
+  const capabilities = Array.from(getCapabilities());
+  // Phase 1 has no HTTP receiver. Do not advertise usable Slack tools to
+  // workers when HTTP (or an invalid transport) was selected.
+  return getSlackConfiguration().mode === "socket"
+    ? capabilities
+    : capabilities.filter((capability) => capability !== "slack");
 }
 
 /**

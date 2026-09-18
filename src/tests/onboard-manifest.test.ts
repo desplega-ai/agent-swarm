@@ -36,6 +36,7 @@ describe("generateManifest", () => {
     expect(manifest).toHaveProperty("harness");
     expect(manifest).toHaveProperty("services");
     expect(manifest).toHaveProperty("integrations");
+    expect(manifest).toHaveProperty("slackMode");
     expect(manifest).toHaveProperty("composePath");
     expect(manifest).toHaveProperty("envPath");
     expect(manifest).toHaveProperty("apiUrl");
@@ -112,6 +113,17 @@ describe("generateManifest", () => {
     expect(integrations.slack).toBe(false);
     expect(integrations.gitlab).toBe(false);
     expect(integrations.sentry).toBe(true);
+    expect(manifest.slackMode).toBe("socket");
+  });
+
+  test("records HTTP transport without persisting its signing secret", () => {
+    const manifest = generateManifest({
+      ...devState,
+      slackMode: "http",
+      slackSigningSecret: "synthetic-signing-secret",
+    }) as Record<string, unknown>;
+    expect(manifest.slackMode).toBe("http");
+    expect(JSON.stringify(manifest)).not.toContain("synthetic-signing-secret");
   });
 
   test("all integrations false when none enabled", () => {

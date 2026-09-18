@@ -323,6 +323,39 @@ describe("reload-config", () => {
     }
   });
 
+  test("reload applies HTTP mode without reporting a Slack socket as reinitialized", async () => {
+    const keys = [
+      "SLACK_MODE",
+      "SLACK_DISABLE",
+      "SLACK_BOT_TOKEN",
+      "SLACK_SIGNING_SECRET",
+    ] as const;
+    const originals = new Map(keys.map((key) => [key, process.env[key]]));
+    process.env.SLACK_DISABLE = "false";
+    process.env.SLACK_BOT_TOKEN = "xoxb-test";
+    process.env.SLACK_SIGNING_SECRET = "synthetic-signing-secret";
+    const config = await upsertSwarmConfig({
+      scope: "global",
+      key: "SLACK_MODE",
+      value: "http",
+    });
+
+    try {
+      const result = await reloadGlobalConfigsAndIntegrations();
+      expect(result.keysUpdated).toContain("SLACK_MODE");
+      expect(result.integrationsReinitialized).not.toContain("slack");
+      expect(process.env.SLACK_MODE).toBe("http");
+    } finally {
+      await deleteSwarmConfig(config.id);
+      await loadGlobalConfigsIntoEnv(true);
+      for (const key of keys) {
+        const value = originals.get(key);
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+
   // Regression: injection used to be one-way. Deleting a global row left the
   // previously-injected value live in process.env until the process restarted,
   // so "reset to default" in the dashboard silently did nothing.

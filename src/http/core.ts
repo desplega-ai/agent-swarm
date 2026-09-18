@@ -150,6 +150,10 @@ async function reloadGlobalConfigsAndIntegrationsInner(): Promise<ReloadConfigRe
 
   const updated = await loadGlobalConfigsIntoEnv(true);
 
+  // Retire the old transport before any other integration can fail during
+  // reload. HTTP/invalid selection must never leave the previous socket live.
+  await stopSlackApp();
+
   // File-storage provider selection reads process.env once and memoizes; the
   // env we just (re)hydrated may flip it (local-fs → agent-fs after late
   // provisioning, or a rotated bootstrap key). Reset so the next fs request
@@ -206,9 +210,7 @@ async function reloadGlobalConfigsAndIntegrationsInner(): Promise<ReloadConfigRe
   resetJira();
   if (await initJira()) integrations.push("jira");
 
-  await stopSlackApp();
-  await startSlackApp();
-  integrations.push("slack");
+  if (await startSlackApp()) integrations.push("slack");
 
   return {
     configsLoaded: updated.length,

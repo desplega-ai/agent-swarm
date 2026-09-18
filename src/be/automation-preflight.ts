@@ -1,4 +1,5 @@
 import type { AutomationIntegrationId, ScheduledTask, Workflow } from "@/types";
+import { getSlackConfiguration, isSlackConfigured } from "../slack/config";
 import { getDbClient } from "./db";
 import { getOAuthApp, getOAuthTokens } from "./db-queries/oauth";
 
@@ -281,11 +282,12 @@ export async function getAutomationSetupStates(): Promise<AutomationSetupStates>
     present(process.env.GSC_SERVICE_ACCOUNT_JSON);
 
   return {
+    // Credential presence is configuration evidence, not proof that inbound
+    // Slack traffic has been observed successfully.
+    // HTTP credentials alone cannot run Slack automations before its receiver lands.
     slack:
-      enabled(process.env.SLACK_DISABLE) &&
-      present(process.env.SLACK_BOT_TOKEN) &&
-      present(process.env.SLACK_APP_TOKEN)
-        ? "verified"
+      getSlackConfiguration().mode === "socket" && isSlackConfigured()
+        ? "configured"
         : "unverified",
     github:
       present(process.env.GITHUB_WEBHOOK_SECRET) &&

@@ -92,8 +92,13 @@ export function generateEnv(state: OnboardState): string {
   if (state.integrations.slack) {
     lines.push("");
     lines.push("# Slack");
+    lines.push(`SLACK_MODE=${state.slackMode}`);
     lines.push(`SLACK_BOT_TOKEN=${state.slackBotToken}`);
-    lines.push(`SLACK_APP_TOKEN=${state.slackAppToken}`);
+    if (state.slackMode === "http") {
+      lines.push(`SLACK_SIGNING_SECRET=${state.slackSigningSecret}`);
+    } else {
+      lines.push(`SLACK_APP_TOKEN=${state.slackAppToken}`);
+    }
     lines.push("SLACK_DISABLE=false");
   } else {
     lines.push("SLACK_DISABLE=true");

@@ -78,6 +78,22 @@ export function deriveIntegrationStatus(
     }
   }
 
+  if (def.id === "slack") {
+    const configuredMode = findConfigForKey(configs, "SLACK_MODE")?.value.trim();
+    // Env presence cannot reveal the selected transport; do not guess readiness.
+    if (!configuredMode && envPresence.SLACK_MODE) return "partial";
+    const mode = configuredMode ?? "socket";
+    if (mode !== "socket" && mode !== "http") return "partial";
+    const bot = isFieldPresent("SLACK_BOT_TOKEN", configs, envPresence);
+    const credential = isFieldPresent(
+      mode === "http" ? "SLACK_SIGNING_SECRET" : "SLACK_APP_TOKEN",
+      configs,
+      envPresence,
+    );
+    if (bot && credential) return "configured";
+    return bot || credential ? "partial" : "none";
+  }
+
   const groups = def.configGroups ?? [];
   if (groups.length > 0) {
     return deriveGroupedStatus(groups, configs, envPresence);

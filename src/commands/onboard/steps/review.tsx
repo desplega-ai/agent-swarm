@@ -51,6 +51,11 @@ export function ReviewStep({ state, dryRun, goToNext, goToStep }: StepProps) {
             {enabledIntegrations.length > 0 ? enabledIntegrations.join(", ") : "none"}
           </Text>
         </Text>
+        {state.integrations.slack ? (
+          <Text>
+            Slack transport: <Text color="cyan">{state.slackMode}</Text>
+          </Text>
+        ) : null}
         <Text>
           Output directory: <Text color="cyan">{state.outputDir}</Text>
         </Text>

@@ -37,7 +37,7 @@ const SECRETS_FORCE_MASK_NOTE =
 // bootstrap admin key would let a compromised worker administer the shared org.
 // The API materializes these into its own process.env at boot via
 // getInjectableGlobalConfigs, so no HTTP consumer legitimately needs them.
-const API_ONLY_CONFIG_KEYS = new Set(["API_AGENT_FS_API_KEY"]);
+const API_ONLY_CONFIG_KEYS = new Set(["API_AGENT_FS_API_KEY", "SLACK_SIGNING_SECRET"]);
 
 function stripApiOnlyKeys<T extends { key: string }>(configs: T[]): T[] {
   return configs.filter((config) => !API_ONLY_CONFIG_KEYS.has(config.key));

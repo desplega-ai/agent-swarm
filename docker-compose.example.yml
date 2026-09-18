@@ -226,8 +226,10 @@ services:
 
       # Optional: Enable Slack integration
       - SLACK_DISABLE=${SLACK_DISABLE:-false}
+      - SLACK_MODE=${SLACK_MODE:-socket}
       - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN:-}
       - SLACK_APP_TOKEN=${SLACK_APP_TOKEN:-}
+      - SLACK_SIGNING_SECRET=${SLACK_SIGNING_SECRET:-}
 
     ports:
       - "3013:3013"
