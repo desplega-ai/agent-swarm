@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.152.1] - 2026-09-20
+
+### Fixed
+- **AgentMail archives verified inbound deliveries before acknowledgment**, including unauthenticated, blocked, and spam events, with minimized content and 30-day retention. Contact triage reads the archive and requires provider-specific approval for external enrichment (#1549).
+
 ## [1.152.0] - 2026-09-18
 
 ### Added

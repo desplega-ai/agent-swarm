@@ -30,12 +30,22 @@ AGENTMAIL_SENDER_DOMAIN_FILTER=gmail.com,company.com
 
 You can restrict which emails are processed using domain filters:
 
-- **`AGENTMAIL_INBOX_DOMAIN_FILTER`** — Only process webhooks for inboxes on the specified domains. Emails to inboxes on other domains are silently dropped.
-- **`AGENTMAIL_SENDER_DOMAIN_FILTER`** — Only process emails from senders on the specified domains. Emails from other sender domains are silently dropped.
+- **`AGENTMAIL_INBOX_DOMAIN_FILTER`** — Only route mail for inboxes on the specified domains. Other inbox domains are excluded from task routing.
+- **`AGENTMAIL_SENDER_DOMAIN_FILTER`** — Only route mail from senders on the specified domains. Other sender domains are excluded from task routing.
 
 Both accept comma-separated domain lists and are optional. When not set, all domains are allowed.
 
 ## How It Works
+
+### Inbound archive
+
+After verifying the Svix signature, the webhook stores `message.received`, `message.received.unauthenticated`, `message.received.blocked`, and `message.received.spam` deliveries in the `agentmail-inbound` KV namespace before acknowledging them. Storage failures or missing routing IDs return HTTP 503 so the provider can retry; invalid signatures return HTTP 401 without storage.
+
+Capture happens before domain filters. Those filters still control task routing, and archiving blocked or spam events does not route them to agents. Subscribe to the event categories you need to capture.
+
+The archive retains minimized, secret-scrubbed content and attachment metadata for 30 days from capture. Retries preserve the first stored copy and its expiry. Attachment bytes are not downloaded. Retained mail remains sensitive and uses the authenticated KV/DB access boundary. Expired entries are removed on KV reads or subsequent inbound capture.
+
+Coverage includes only successfully delivered and acknowledged events still within retention. It does not backfill historical mail or prove that the provider inbox is empty. The [contact inbox triage runbook](https://github.com/desplega-ai/agent-swarm/blob/main/runbooks/contact-inbox-triage.md) covers rollout, deduplication, and provider-specific approval for optional external enrichment, which is off by default.
 
 ### Email Routing
 
