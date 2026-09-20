@@ -26,6 +26,7 @@ export const extensionToolOutputSchema = swarmToolOutputSchema({
   priority: z.number().optional(),
   consecutiveFailures: z.number().optional(),
   contentDeduped: z.boolean().optional(),
+  deleted: z.boolean().optional(),
   extensions: z.array(extensionListItemSchema).optional(),
 });
 
@@ -61,7 +62,7 @@ function renderDiagnostics(data: unknown): string | undefined {
 }
 
 export async function proxyExtensionsApi<T>(args: {
-  method: "GET" | "POST";
+  method: "GET" | "POST" | "DELETE";
   path: string;
   body?: unknown;
   requestInfo: RequestInfo;

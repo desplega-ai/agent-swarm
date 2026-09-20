@@ -197,7 +197,8 @@ const enableRoute = route({
   pattern: ["api", "extensions", null, "enable"],
   operationId: "extensions_enable",
   summary: "Enable an extension",
-  description: "Loads and enables an extension. This route is operator-only.",
+  description:
+    "Loads and enables an extension. Available to leads, operators, and dashboard users.",
   tags: ["Extensions"],
   params: idParamsSchema,
   responses: {
@@ -215,7 +216,8 @@ const disableRoute = route({
   pattern: ["api", "extensions", null, "disable"],
   operationId: "extensions_disable",
   summary: "Disable an extension",
-  description: "Unloads and disables an extension. This route is operator-only.",
+  description:
+    "Unloads and disables an extension. Available to leads, operators, and dashboard users.",
   tags: ["Extensions"],
   params: idParamsSchema,
   responses: {
@@ -232,7 +234,7 @@ const activateVersionRoute = route({
   pattern: ["api", "extensions", null, "activate-version"],
   operationId: "extensions_activate_version",
   summary: "Activate an extension version",
-  description: "Activates a stored version. This route is operator-only.",
+  description: "Activates a stored version. Available to leads, operators, and dashboard users.",
   tags: ["Extensions"],
   params: idParamsSchema,
   body: z.object({ version: z.number().int().min(1) }).strict(),
@@ -501,6 +503,7 @@ export async function handleExtensions(
     try {
       const extension = await enableExtension(parsed.params.id, {
         by: await resolveHttpAuditUserId(req, writerAgentId),
+        agentId: writerAgentId,
       });
       enableRoute.respond(res, 200, { extension: redactExtension(extension) });
     } catch (error) {
@@ -518,6 +521,7 @@ export async function handleExtensions(
     try {
       const extension = await disableExtension(parsed.params.id, {
         by: await resolveHttpAuditUserId(req, writerAgentId),
+        agentId: writerAgentId,
       });
       disableRoute.respond(res, 200, { extension: redactExtension(extension) });
     } catch (error) {
@@ -535,6 +539,7 @@ export async function handleExtensions(
     try {
       const extension = await activateVersion(parsed.params.id, parsed.body.version, {
         by: await resolveHttpAuditUserId(req, writerAgentId),
+        agentId: writerAgentId,
       });
       activateVersionRoute.respond(res, 200, { extension: redactExtension(extension) });
     } catch (error) {

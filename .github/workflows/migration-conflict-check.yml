@@ -4,10 +4,24 @@ on:
   pull_request:
     branches:
       - main
+  # The pull_request run only sees main as it was when the PR event fired.
+  # When main gains a migration later, the PR's green check goes stale and the
+  # collision would otherwise surface in the merge queue as a boot crash across
+  # four Merge Gate jobs. Re-running here fails the queue entry with the real
+  # message instead.
+  merge_group:
+  # Sweep open PRs whenever main gains a migration, so a stale PR learns about
+  # the collision before it enters the queue.
+  push:
+    branches:
+      - main
+    paths:
+      - "src/be/migrations/**"
 
 jobs:
   migration-conflict:
     name: Migration Conflict Check
+    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     # Checkout only; GITHUB_TOKEN needs nothing else.
     permissions:
@@ -21,6 +35,64 @@ jobs:
           fetch-depth: 0
 
       - name: Check for duplicate and mutated migration numbers
-        run: bash scripts/check-migration-conflicts.sh
         env:
-          MIGRATION_BASE_REF: origin/${{ github.base_ref }}
+          # merge_group carries refs/heads/<branch>; pull_request carries <branch>.
+          BASE_REF: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_ref || github.base_ref }}
+        run: |
+          MIGRATION_BASE_REF="origin/${BASE_REF#refs/heads/}" bash scripts/check-migration-conflicts.sh
+
+  notify-stale-prs:
+    name: Notify open PRs of new migration numbers on main
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          # The repo is public, so PR heads fetch anonymously. Keep the
+          # pull-requests: write token out of git config; only gh gets it.
+          persist-credentials: false
+
+      - name: Comment on open PRs whose migrations collide with main's tail
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          tail=$(git ls-tree --name-only origin/main src/be/migrations/ \
+            | grep -oE '/[0-9]+_[^/]+\.sql$' | grep -oE '^/[0-9]+' | tr -d / | sort -n | tail -1)
+          echo "main migration tail: $tail"
+          marker="<!-- migration-conflict-check:$tail -->"
+
+          gh pr list --repo "$REPO" --base main --state open --limit 200 \
+            --json number --jq '.[].number' \
+          | while read -r number; do
+            git fetch -q origin "refs/pull/$number/head" || continue
+            added=$(git diff --name-only --diff-filter=A origin/main...FETCH_HEAD -- src/be/migrations/ \
+              | grep -E '/[0-9]+_[^/]+\.sql$' || true)
+            [ -z "$added" ] && continue
+            stale=""
+            while read -r file; do
+              [ -z "$file" ] && continue
+              n=$(basename "$file" | grep -oE '^[0-9]+')
+              if [ "$((10#$n))" -le "$((10#$tail))" ]; then
+                stale="$stale"$'\n'"- \`$(basename "$file")\`"
+              fi
+            done <<< "$added"
+            [ -z "$stale" ] && continue
+            if gh pr view "$number" --repo "$REPO" --json comments --jq '.comments[].body' | grep -qF "$marker"; then
+              echo "PR #$number already notified for tail $tail"
+              continue
+            fi
+            body="$marker
+          main now ends at migration **$tail**. This PR adds a migration that sorts at or below that number:$stale
+
+          Renumber it above $tail before queueing, or the merge queue fails on \`UNIQUE constraint failed: _migrations.version\`. Never renumber a migration that is already on main."
+            gh pr comment "$number" --repo "$REPO" --body "$body"
+            echo "notified PR #$number"
+          done

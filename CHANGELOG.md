@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.152.0] - 2026-09-18
+
+### Added
+- **Trusted leads can manage the full extension lifecycle** through MCP and the script SDK: enable, disable, activate a stored version, and delete disabled extensions (#1544).
+
+### Changed
+- **Worker images include agent-browser 0.38.1** (#1538).
+- **Migration conflict checks run in the merge queue**, with stale-PR notifications when main changes (#1542).
+
+### Fixed
+- **Operators can restrict lead extension activation** with the deployment-only `EXTENSION_ALLOW_LEAD_ACTIVATION` switch; agent lifecycle requests record caller and target version before side effects (#1546).
+- **Task output salvages leaked tool parameters before persistence**, recovering valid attachments while stripping malformed tails (#1545).
+- **Slack omits misleading defer ETAs** from task output (#1539).
+
+## [1.151.0] - 2026-09-17
+
+### Added
+- **Swarm extensions install trusted TypeScript hook bundles** with versioned configuration, REST and MCP tools, dashboard activation, and lifecycle diagnostics (#1441).
+
+### Changed
+- **Fresh deployments enable production feature defaults** for Slack renderer v2, lead thread steering, task steering, multi-runtime workers, RBAC, and task-tool preloading. Explicit overrides remain supported (#1536).
+
+### Fixed
+- **Deferred waits wake on cancellation and follow superseded tasks**, preserving continuity when watched work is replaced (#1526).
+- **Slack delivers deferred continuation outcomes without delegation rendering**, omits empty tree blocks, and uses fallback delivery with bounded retries for failed outcome messages (#1531, #1530, #1535).
+- **Memory embeddings respond to configuration reloads without an API restart**, including background backfill when credentials become available (#1533).
+- **Slack Connect notification dismissals persist across dashboard loads** (#1527).
+- **Scripts reject non-JSON API responses instead of reporting false success** (#1523).
+- **Compose examples pin swarm images, persist API data without shadowing application files, and route agent-fs previews through HTTPS** (#1525, #1529, #1534).
+
 ## [1.150.0] - 2026-09-16
 
 ### Added

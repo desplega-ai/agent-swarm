@@ -2,11 +2,18 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
-import { getExtensionByName, insertExtensionRun, setExtensionState } from "../be/extensions/db";
+import {
+  getExtensionByName,
+  insertExtensionRun,
+  listExtensionRuns,
+  setExtensionState,
+} from "../be/extensions/db";
+import { enqueueAuditRow, flushAuditBuffer } from "../be/rbac-audit";
 import { stopExtensionRuntime } from "../extensions/lifecycle";
 import { handleCore } from "../http/core";
 import { handleExtensions } from "../http/extensions";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { clearAuditSink, setAuditSink } from "../rbac";
 import type { User } from "../types";
 import { setRequestAuth } from "../utils/request-auth-context";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
@@ -124,6 +131,80 @@ beforeEach(async () => {
 });
 
 describe("/api/extensions HTTP", () => {
+  test("lead activation defaults on, is attributable, and the deployment gate denies lifecycle calls", async () => {
+    const original = process.env.EXTENSION_ALLOW_LEAD_ACTIVATION;
+    const auditDisabled = process.env.RBAC_AUDIT_DISABLED;
+    delete process.env.EXTENSION_ALLOW_LEAD_ACTIVATION;
+    delete process.env.RBAC_AUDIT_DISABLED;
+    setAuditSink(enqueueAuditRow);
+    try {
+      expect((await install("minimal", leadId)).status).toBe(200);
+      const extension = (await getExtensionByName("minimal"))!;
+      const path = `/api/extensions/${extension.id}`;
+      expect((await dispatch(`${path}/enable`, { method: "POST", agentId: leadId })).status).toBe(
+        200,
+      );
+      expect(await listExtensionRuns(extension.id)).toContainEqual(
+        expect.objectContaining({
+          event: "lifecycle.enable.requested",
+          agentId: leadId,
+          version: 1,
+        }),
+      );
+      for (const operation of ["activate-version", "disable"]) {
+        expect(
+          (
+            await dispatch(`${path}/${operation}`, {
+              method: "POST",
+              agentId: leadId,
+              body: JSON.stringify({ version: 1 }),
+            })
+          ).status,
+        ).toBe(200);
+        expect(await listExtensionRuns(extension.id)).toContainEqual(
+          expect.objectContaining({
+            event: `lifecycle.${operation}.requested`,
+            agentId: leadId,
+            version: 1,
+          }),
+        );
+      }
+      for (const value of ["false", "0"]) {
+        process.env.EXTENSION_ALLOW_LEAD_ACTIVATION = value;
+        for (const operation of ["enable", "disable", "activate-version"]) {
+          expect(
+            (
+              await dispatch(`${path}/${operation}`, {
+                method: "POST",
+                agentId: leadId,
+                body: JSON.stringify({ version: 1 }),
+              })
+            ).status,
+          ).toBe(403);
+        }
+      }
+      expect((await getExtensionByName("minimal"))!.enabled).toBe(false);
+      expect((await dispatch(`${path}/enable`, { method: "POST" })).status).toBe(200);
+      expect(
+        (await dispatch(`${path}/disable`, { method: "POST", asUser: crypto.randomUUID() })).status,
+      ).toBe(200);
+      await flushAuditBuffer();
+      const decisions = await getDbClient().query<{ decision: string }>(
+        "SELECT decision FROM permission_audit WHERE verb = ? AND principalId = ?",
+        ["extension.activate", leadId],
+      );
+      expect(decisions).toContainEqual({ decision: "allow" });
+      expect(decisions).toContainEqual({ decision: "deny" });
+    } finally {
+      await flushAuditBuffer();
+      clearAuditSink();
+      if (original === undefined) delete process.env.EXTENSION_ALLOW_LEAD_ACTIVATION;
+      else process.env.EXTENSION_ALLOW_LEAD_ACTIVATION = original;
+      if (auditDisabled === undefined) delete process.env.RBAC_AUDIT_DISABLED;
+      else process.env.RBAC_AUDIT_DISABLED = auditDisabled;
+    }
+  });
+
   test("operator install, list, get, versions, and changed hooks round-trip", async () => {
     const first = await install();
     expect(first.status).toBe(200);
@@ -251,7 +332,7 @@ describe("/api/extensions HTTP", () => {
     expect((await rejected.json()).error).toContain("Disable");
   });
 
-  test("type definitions are plain text and activation routes are operator-only", async () => {
+  test("type definitions are plain text and workers cannot activate extensions", async () => {
     await install();
     const extension = await getExtensionByName("minimal");
     const types = await dispatch("/api/extensions/type-defs");
@@ -262,7 +343,7 @@ describe("/api/extensions HTTP", () => {
       (
         await dispatch(`/api/extensions/${extension!.id}/enable`, {
           method: "POST",
-          agentId: leadId,
+          agentId: workerId,
         })
       ).status,
     ).toBe(403);

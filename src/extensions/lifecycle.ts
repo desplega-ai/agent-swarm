@@ -3,6 +3,7 @@ import {
   getExtensionById,
   getExtensionFiles,
   getExtensionVersion,
+  insertExtensionRun,
   listExtensions,
   pruneExtensionRuns,
   setExtensionState,
@@ -95,14 +96,33 @@ async function removeRegistered(id: string): Promise<void> {
   if (previous) await previous.dispose();
 }
 
+// Record the request before importing code, including attempts whose load fails.
+async function recordLifecycleRequest(
+  record: Extension,
+  operation: string,
+  agentId: string | undefined,
+  version = record.activeVersion,
+): Promise<void> {
+  if (!agentId) return;
+  await insertExtensionRun({
+    extensionId: record.id,
+    version,
+    event: `lifecycle.${operation}.requested`,
+    action: "continue",
+    agentId,
+    subject: record.name,
+  });
+}
+
 export async function enableExtension(
   id: string,
-  opts: { by?: string | null } = {},
+  opts: { by?: string | null; agentId?: string } = {},
 ): Promise<Extension> {
   initExtensionPostBridge();
   let record = await getExtensionById(id);
   if (!record) throw new ExtensionLifecycleError("Extension not found", 404);
 
+  await recordLifecycleRequest(record, "enable", opts.agentId);
   const agentId = await ensureExtensionAgent(record.name);
   const identified = await setExtensionState(id, { agentId, updatedBy: opts.by });
   if (!identified) throw new ExtensionLifecycleError("Extension not found", 404);
@@ -133,10 +153,11 @@ export async function enableExtension(
 
 export async function disableExtension(
   id: string,
-  opts: { by?: string | null } = {},
+  opts: { by?: string | null; agentId?: string } = {},
 ): Promise<Extension> {
   const record = await getExtensionById(id);
   if (!record) throw new ExtensionLifecycleError("Extension not found", 404);
+  await recordLifecycleRequest(record, "disable", opts.agentId);
   await removeRegistered(id);
   attemptedFingerprints.delete(id);
   await deactivateExtensionAgent(record.name);
@@ -152,7 +173,7 @@ export async function disableExtension(
 export async function activateVersion(
   id: string,
   version: number,
-  opts: { by?: string | null } = {},
+  opts: { by?: string | null; agentId?: string } = {},
 ): Promise<Extension> {
   const current = await getExtensionById(id);
   if (!current) throw new ExtensionLifecycleError("Extension not found", 404);
@@ -160,6 +181,7 @@ export async function activateVersion(
     throw new ExtensionLifecycleError(`Extension version ${version} was not found`, 404);
   }
 
+  await recordLifecycleRequest(current, "activate-version", opts.agentId, version);
   const wasEnabled = current.enabled;
   if (wasEnabled) await disableExtension(id, opts);
   const activated = await activateExtensionVersionSnapshot(id, version, opts.by);
@@ -170,7 +192,7 @@ export async function activateVersion(
 
 export async function reloadExtension(
   id: string,
-  opts: { by?: string | null } = {},
+  opts: { by?: string | null; agentId?: string } = {},
 ): Promise<Extension> {
   const record = await getExtensionById(id);
   if (!record) throw new ExtensionLifecycleError("Extension not found", 404);

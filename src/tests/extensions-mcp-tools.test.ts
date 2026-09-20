@@ -4,11 +4,16 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
-import { setExtensionState } from "../be/extensions/db";
+import { getExtensionById, setExtensionState } from "../be/extensions/db";
 import { typecheckScript } from "../be/scripts/typecheck";
+import { stopExtensionRuntime } from "../extensions/lifecycle";
 import { handleCore } from "../http/core";
 import { handleExtensions } from "../http/extensions";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { registerExtensionActivateVersionTool } from "../tools/extension-activate-version";
+import { registerExtensionDeleteTool } from "../tools/extension-delete";
+import { registerExtensionDisableTool } from "../tools/extension-disable";
+import { registerExtensionEnableTool } from "../tools/extension-enable";
 import { registerExtensionInstallTool } from "../tools/extension-install";
 import { registerExtensionListTool } from "../tools/extension-list";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
@@ -40,11 +45,22 @@ async function removeDbFiles(): Promise<void> {
 
 function buildToolServer() {
   const server = new McpServer({ name: "extensions-mcp-tools", version: "1" });
+  registerExtensionDeleteTool(server);
+  registerExtensionEnableTool(server);
+  registerExtensionDisableTool(server);
+  registerExtensionActivateVersionTool(server);
   registerExtensionInstallTool(server);
   registerExtensionListTool(server);
   const tools = (server as unknown as { _registeredTools: Record<string, RegisteredTool> })
     ._registeredTools;
-  return { install: tools["extension-install"]!, list: tools["extension-list"]! };
+  return {
+    install: tools["extension-install"]!,
+    list: tools["extension-list"]!,
+    enable: tools["extension-enable"]!,
+    disable: tools["extension-disable"]!,
+    activate: tools["extension-activate-version"]!,
+    delete: tools["extension-delete"]!,
+  };
 }
 
 function meta(agentId: string) {
@@ -128,6 +144,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await stopExtensionRuntime();
   globalThis.fetch = savedFetch;
   closeDb();
   await removeDbFiles();
@@ -142,11 +159,12 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
+  await stopExtensionRuntime();
   await getDbClient().run("DELETE FROM extensions");
 });
 
 describe("extension MCP HTTP proxy tools", () => {
-  test("script SDK typechecks extension install and list calls", async () => {
+  test("script SDK typechecks the full extension lifecycle", async () => {
     const result = await typecheckScript(`
       import type { ScriptContext } from "swarm-sdk";
       export default async (_args: unknown, ctx: ScriptContext) => {
@@ -154,6 +172,11 @@ describe("extension MCP HTTP proxy tools", () => {
           manifest: {},
           files: { "hooks.ts": "export default () => {}" },
         });
+        const id = "00000000-0000-4000-8000-000000000001";
+        await ctx.swarm.extension_enable({ id });
+        await ctx.swarm.extension_activate_version({ id, version: 1 });
+        await ctx.swarm.extension_disable({ id });
+        await ctx.swarm.extension_delete({ id });
         return await ctx.swarm.extension_list({ enabledOnly: true });
       };
     `);
@@ -241,5 +264,90 @@ describe("extension MCP HTTP proxy tools", () => {
       meta(leadId),
     )) as ToolResult;
     expect(enabledOnly.structuredContent).toMatchObject({ success: true, extensions: [] });
+  });
+});
+
+describe("extension lifecycle MCP tools", () => {
+  test("lead enables, activates, disables, and deletes through the shared HTTP routes", async () => {
+    const tools = buildToolServer();
+    const installed = (await tools.install.handler(
+      await loadBundleFixture("minimal"),
+      meta(leadId),
+    )) as ToolResult;
+    const id = String(installed.structuredContent.id);
+    const enabled = (await tools.enable.handler({ id }, meta(leadId))) as ToolResult;
+    expect(enabled.structuredContent).toMatchObject({
+      success: true,
+      enabled: true,
+      activeVersion: 1,
+    });
+
+    const rejected = await dispatchExtensionsApi(`${API_URL}/api/extensions/${id}`, {
+      method: "DELETE",
+      headers: { "x-agent-id": leadId, authorization: `Bearer ${API_KEY}` },
+    });
+    expect(rejected.status).toBe(409);
+    const blocked = (await tools.delete.handler({ id }, meta(leadId))) as ToolResult;
+    expect(blocked.isError).toBe(true);
+    expect(blocked.structuredContent).toMatchObject({ success: false });
+    expect(blocked.content[0]?.text).toContain("Disable");
+    expect(await getExtensionById(id)).not.toBeNull();
+
+    const changed = await loadBundleFixture("minimal");
+    changed.files["hooks.ts"] += "\n// next lifecycle version\n";
+    await tools.install.handler(changed, meta(leadId));
+    const activated = (await tools.activate.handler(
+      { id, version: 2 },
+      meta(leadId),
+    )) as ToolResult;
+    expect(activated.structuredContent).toMatchObject({
+      success: true,
+      activeVersion: 2,
+      enabled: true,
+    });
+    const disabled = (await tools.disable.handler({ id }, meta(leadId))) as ToolResult;
+    expect(disabled.structuredContent).toMatchObject({ success: true, enabled: false });
+    const deleted = (await tools.delete.handler({ id }, meta(leadId))) as ToolResult;
+    expect(deleted.isError).toBe(false);
+    expect(deleted.structuredContent).toMatchObject({ success: true, id, deleted: true });
+    expect(await getExtensionById(id)).toBeNull();
+  });
+
+  test("workers cannot mutate the extension lifecycle", async () => {
+    const tools = buildToolServer();
+    const installed = (await tools.install.handler(
+      await loadBundleFixture("minimal"),
+      meta(leadId),
+    )) as ToolResult;
+    const id = String(installed.structuredContent.id);
+    for (const tool of [tools.enable, tools.disable, tools.activate, tools.delete]) {
+      const result = (await tool.handler({ id, version: 1 }, meta(workerId))) as ToolResult;
+      expect(result.isError).toBe(true);
+      expect(String(result.structuredContent.message)).toContain("Forbidden");
+    }
+    expect(await getExtensionById(id)).toMatchObject({ enabled: false, activeVersion: 1 });
+  });
+
+  test("missing extensions and versions return error envelopes", async () => {
+    const tools = buildToolServer();
+    const id = crypto.randomUUID();
+    for (const tool of [tools.enable, tools.disable, tools.activate, tools.delete]) {
+      const result = (await tool.handler({ id, version: 1 }, meta(leadId))) as ToolResult;
+      expect(result.isError).toBe(true);
+      expect(result.structuredContent.success).toBe(false);
+    }
+    const installed = (await tools.install.handler(
+      await loadBundleFixture("minimal"),
+      meta(leadId),
+    )) as ToolResult;
+    const result = (await tools.activate.handler(
+      { id: installed.structuredContent.id, version: 99 },
+      meta(leadId),
+    )) as ToolResult;
+    expect(result.isError).toBe(true);
+    expect(await getExtensionById(String(installed.structuredContent.id))).toMatchObject({
+      activeVersion: 1,
+      enabled: false,
+    });
   });
 });

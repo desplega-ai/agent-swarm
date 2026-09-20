@@ -166,6 +166,8 @@ The tree is rendered as footer-weight context blocks and contains status, elapse
 
 Each completed Slack ask gets one outcome card containing the full multi-paragraph Markdown result, bounded only by Slack's presentation limit with a link to the full task when truncation is required. If the agent already delivered the result with `slack-reply`, the outcome card collapses to a compact completion instead of repeating that message. The renderer re-reads this delivery marker before finalizing, so a retry cannot preserve stale duplicate content. Outcome cards do not link back to the tree, which avoids an otherwise redundant Slack permalink unfurl.
 
+Slack displays the pending-work description from `defer-task` without the wake-up ETA or schedule link. The stored task output and schedule remain available in the web UI.
+
 Deferred continuations created by `defer-task` also receive their own outcome card when they finish with inherited Slack channel and thread context, even when delegation cards are disabled or the original ask already has a finalized card. Ordinary scheduled tasks without Slack context remain silent.
 
 Terminal task output is automatically delivered through the thread's outcome card. No additional relay message is created: extra messages only appear when an agent explicitly calls `slack-reply`, `slack-post`, or `slack-start-thread`. When `slack-reply` is used, the outcome card is compacted instead of duplicating that explicit reply. These tools accept optional Block Kit `blocks`; when omitted they generate a mrkdwn section. Their compact context footer contains the originating agent and task without a Slack-message permalink.

@@ -12,12 +12,11 @@ import {
   countAuditRows,
   LEAD,
   makeScratchDir,
-  readAuditRows,
   registerAgent,
   removeScratchDir,
   type SwarmServer,
   spawnSwarmServer,
-  waitForAuditCount,
+  waitForAuditRows,
 } from "./rbac-e2e-helpers";
 
 setDefaultTimeout(120_000);
@@ -312,8 +311,27 @@ describe("RBAC admission over /mcp-user", () => {
       }),
     );
 
-    expect(await waitForAuditCount(enabledDbPath, 10)).toBeGreaterThanOrEqual(10);
-    const mcpRows = readAuditRows(enabledDbPath).filter((row) => row.source === "mcp");
+    const mcpRows = (
+      await waitForAuditRows(enabledDbPath, (rows) => {
+        const auditRows = rows.filter((row) => row.source === "mcp");
+        return (
+          auditRows.some(
+            (row) =>
+              row.principalId === requester.userId &&
+              row.resourceType === "mcp-tool" &&
+              row.resourceId === "send-task" &&
+              row.verb === "task.create.own" &&
+              row.decision === "allow",
+          ) &&
+          ["task.create.own", "task.cancel.own", "task.action.own"].every((verb) =>
+            auditRows.some(
+              (row) =>
+                row.principalId === empty.userId && row.decision === "deny" && row.verb === verb,
+            ),
+          )
+        );
+      })
+    ).filter((row) => row.source === "mcp");
     expect(
       mcpRows.some(
         (row) =>

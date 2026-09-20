@@ -314,3 +314,21 @@ export async function waitForAuditCount(
   }
   return n;
 }
+
+/** Poll until audit rows satisfy `predicate` (writer flushes every 2s). */
+export async function waitForAuditRows(
+  dbPath: string,
+  predicate: (rows: AuditRow[]) => boolean,
+  deadlineMs = 8_000,
+): Promise<AuditRow[]> {
+  const start = Date.now();
+  let rows = readAuditRows(dbPath);
+  while (!predicate(rows)) {
+    if (Date.now() - start >= deadlineMs) {
+      throw new Error(`audit rows did not satisfy predicate within ${deadlineMs}ms`);
+    }
+    await Bun.sleep(250);
+    rows = readAuditRows(dbPath);
+  }
+  return rows;
+}

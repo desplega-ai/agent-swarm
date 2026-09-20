@@ -11,6 +11,7 @@
  * `PermissionVerb` (enforced via `satisfies`).
  */
 
+import { isEnvFlagEnabled } from "../utils/env-flag";
 import { hasLeadEquivalence } from "./elevated-agents";
 import type { PermissionVerb } from "./permissions";
 import type { RbacPrincipal, RbacResource } from "./types";
@@ -53,6 +54,17 @@ const leadOrOperatorOrUser: LegacyRule = {
   denyReason: "requires lead agent, operator, or user authentication",
   evaluate: (principal) =>
     principal.kind === "operator" || principal.kind === "user" || actsAsLead(principal),
+};
+
+// Deployment-only: agents cannot reset this through swarm_config.
+const extensionActivation: LegacyRule = {
+  name: "extension-activation",
+  denyReason:
+    "requires operator/user authentication, or a lead with EXTENSION_ALLOW_LEAD_ACTIVATION enabled",
+  evaluate: (principal) =>
+    principal.kind === "operator" ||
+    principal.kind === "user" ||
+    (actsAsLead(principal) && isEnvFlagEnabled("EXTENSION_ALLOW_LEAD_ACTIVATION", true)),
 };
 
 const leadOrTaskCreator: LegacyRule = {
@@ -231,5 +243,5 @@ export const LEGACY_POLICY = {
   "script.api.rotate": leadOnly,
   "script.api.delete": leadOnly,
   "extension.write": leadOrOperatorOrUser,
-  "extension.activate": operatorOrUser,
+  "extension.activate": extensionActivation,
 } as const satisfies Record<PermissionVerb, LegacyRule>;

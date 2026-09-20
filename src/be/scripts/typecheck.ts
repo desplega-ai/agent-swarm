@@ -318,6 +318,10 @@ export interface SwarmSdk {
   // --- write: extensions ---
   extension_install(args: { manifest: Record<string, unknown>; files: Record<string, string>; priority?: number; config?: Record<string, unknown> }): Promise<unknown>;
   extension_list(args?: { enabledOnly?: boolean }): Promise<unknown>;
+  extension_delete(args: { id: string }): Promise<unknown>;
+  extension_enable(args: { id: string }): Promise<unknown>;
+  extension_disable(args: { id: string }): Promise<unknown>;
+  extension_activate_version(args: { id: string; version: number }): Promise<unknown>;
 
   // --- write: repos ---
   repo_update(args: Record<string, unknown>): Promise<unknown>;

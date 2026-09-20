@@ -64,6 +64,14 @@ const UNGATED_TOOL_FILES: Record<string, string> = {
   "src/tools/create-metric.ts": PIN_REASON,
   "src/tools/create-page.ts": PIN_REASON,
   "src/tools/db-query.ts": PIN_REASON,
+  "src/tools/extension-delete.ts":
+    "proxies to the extensions HTTP route enforcing extension.write",
+  "src/tools/extension-enable.ts":
+    "proxies to the extensions HTTP route enforcing extension.activate",
+  "src/tools/extension-disable.ts":
+    "proxies to the extensions HTTP route enforcing extension.activate",
+  "src/tools/extension-activate-version.ts":
+    "proxies to the extensions HTTP route enforcing extension.activate",
   "src/tools/extension-install.ts":
     "proxies to /api/extensions which enforces extension.write / GET is ungated",
   "src/tools/extension-list.ts":

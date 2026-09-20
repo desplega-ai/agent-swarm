@@ -7,7 +7,7 @@ type RegisteredTool = {
   handler: (args: unknown, extra: unknown) => Promise<unknown>;
 };
 
-test("a lead can draft the minimal bundle while an operator retains activation", async () => {
+test("a lead installs a disabled draft with explicit activation guidance", async () => {
   const previousBaseUrl = process.env.MCP_BASE_URL;
   const previousApiKey = process.env.AGENT_SWARM_API_KEY;
   const savedFetch = globalThis.fetch;
@@ -52,7 +52,7 @@ test("a lead can draft the minimal bundle while an operator retains activation",
 
     expect(result.isError).toBe(false);
     expect(result.structuredContent).toMatchObject({ enabled: false, status: "disabled" });
-    expect(String(result.structuredContent.message)).toContain("operator must enable it");
+    expect(String(result.structuredContent.message)).toContain("extension-enable");
   } finally {
     globalThis.fetch = savedFetch;
     if (previousBaseUrl === undefined) delete process.env.MCP_BASE_URL;

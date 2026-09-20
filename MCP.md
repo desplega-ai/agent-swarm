@@ -52,6 +52,10 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [script-apis](#script-apis)
   - [script-run](#script-run)
   - [script-upsert](#script-upsert)
+  - [extension-delete](#extension-delete)
+  - [extension-enable](#extension-enable)
+  - [extension-disable](#extension-disable)
+  - [extension-activate-version](#extension-activate-version)
   - [extension-install](#extension-install)
   - [extension-list](#extension-list)
   - [script-delete](#script-delete)
@@ -633,6 +637,47 @@ Manage external HTTP API endpoints for swarm scripts (POST /api/x/script/<id>). 
 | `scope` | `unknown` | No | "agent" | Persist under agent or global scope. |
 | `fsMode` | `unknown` | No | "none" | Filesystem mode. v1 supports none only. |
 
+### extension-delete
+
+**Extension Delete**
+
+Uninstall a disabled extension and delete its stored history. Disable it first with extension-disable. Requires a lead, operator, or dashboard user.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | Yes | - | Installed extension ID from extension-list. |
+
+### extension-enable
+
+**Extension Enable**
+
+Load and enable an installed extension. Requires a lead, operator, or dashboard user.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | Yes | - | Installed extension ID from extension-list. |
+
+### extension-disable
+
+**Extension Disable**
+
+Unload and disable an installed extension. Requires a lead, operator, or dashboard user.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | Yes | - | Installed extension ID from extension-list. |
+
+### extension-activate-version
+
+**Extension Activate Version**
+
+Activate a stored extension version, reloading it if enabled. Requires a lead, operator, or dashboard user.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | Yes | - | Installed extension ID from extension-list. |
+| `version` | `number` | Yes | - | Stored version number to activate. |
+
 ### extension-install
 
 **Extension Install**
@@ -952,7 +997,7 @@ Completes this task now with status `completed` and books a wake-up for you. Use
 | `taskId` | `string` | Yes | - | The ID of the task you are working on. |
 | `delayMs` | `number` | No | - | Wake up after this many milliseconds (e.g. 1800000 for 30 min). |
 | `runAt` | `string` | No | - | Wake up at this ISO datetime (e.g. '2026-03-06T15:00:00Z'). Must be future. |
-| `wakeOn` | `object` | No | - | Wake early on a task event. Provide taskId or nonempty, unique taskIds. mode defaults to all (every member must match); any wakes on the first match. settled covers completed or failed. Deferred members follow their continuations. Any already-terminal member rejects the request; one delayMs/runAt ceiling is still required for the whole set. |
+| `wakeOn` | `object` | No | - | Wake early on a task event. Provide taskId or nonempty, unique taskIds. mode defaults to all (every member must match); any wakes on the first match. settled covers completed, failed, or cancelled. Deferred and superseded members follow their continuations; a superseded member without a resume child holds to the ceiling. Any already-terminal member rejects the request; one delayMs/runAt ceiling is still required for the whole set. |
 | `summary` | `string` | Yes | - | What you did so far and where things stand. Stored in the task log for tasks with an outputSchema; otherwise becomes the task's output. |
 | `output` | `string` | No | - | Required when the task has an outputSchema: a JSON string matching that schema, stored verbatim as terminal output. Ignored for tasks without an outputSchema. |
 | `note` | `string` | Yes | - | What is pending, and what to check on wake-up. |

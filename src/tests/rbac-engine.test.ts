@@ -81,8 +81,8 @@ const LEAD_ONLY_VERBS: PermissionVerb[] = [
   "script.api.delete",
 ];
 
-const OPERATOR_ONLY_VERBS: PermissionVerb[] = ["extension.activate"];
-const LEAD_OR_OPERATOR_VERBS: PermissionVerb[] = ["extension.write"];
+const OPERATOR_ONLY_VERBS: PermissionVerb[] = [];
+const LEAD_OR_OPERATOR_VERBS: PermissionVerb[] = ["extension.write", "extension.activate"];
 
 const LEAD_OR_RESOURCE_OWNER_VERBS: PermissionVerb[] = [
   "memory.edit.any",
