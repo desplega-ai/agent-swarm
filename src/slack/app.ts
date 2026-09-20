@@ -17,8 +17,6 @@ export async function initSlackApp(): Promise<App | null> {
     console.log("[Slack] Already initialized, skipping");
     return app;
   }
-  initialized = true;
-
   const config = getSlackConfiguration();
   if (config.disabled) {
     console.log("[Slack] Disabled via SLACK_DISABLE");
@@ -68,6 +66,9 @@ export async function initSlackApp(): Promise<App | null> {
     logLevel: process.env.NODE_ENV === "development" ? LogLevel.DEBUG : LogLevel.INFO,
     ...(slackApiUrl ? { clientOptions: { slackApiUrl } } : {}),
   });
+
+  // Failed validation must remain retryable without requiring stopSlackApp().
+  initialized = true;
 
   // Register handlers
   const { registerMessageHandler } = await import("./handlers");

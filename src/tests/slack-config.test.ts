@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { startSlackMock, stopSlackMock } from "../../scripts/e2e/slack";
+import { closeDb, initDb } from "../be/db";
 import { getEnabledCapabilities } from "../server";
 import { getSlackApp, startSlackApp, stopSlackApp } from "../slack/app";
 import { getSlackConfiguration, isSlackConfigured } from "../slack/config";
@@ -12,6 +14,7 @@ const SLACK_ENV_KEYS = [
   "SLACK_BOT_TOKEN",
   "SLACK_APP_TOKEN",
   "SLACK_SIGNING_SECRET",
+  "SLACK_API_URL",
 ] as const;
 const originalEnv = new Map(SLACK_ENV_KEYS.map((key) => [key, process.env[key]]));
 
@@ -93,3 +96,41 @@ describe("Slack transport configuration", () => {
     }
   });
 });
+
+test.each([
+  "disabled",
+  "invalid mode",
+  "missing credentials",
+  "HTTP unavailable",
+  "socket blocked",
+])("failed init is retryable without stop: %s", async (reason) => {
+  const slack = await startSlackMock(false);
+  initDb(":memory:");
+  try {
+    Object.assign(process.env, slack.mock.env);
+    process.env.SLACK_SIGNING_SECRET = "synthetic-signing-secret";
+    if (reason === "disabled") process.env.SLACK_DISABLE = "true";
+    if (reason === "invalid mode") process.env.SLACK_MODE = "invalid";
+    if (reason === "missing credentials") delete process.env.SLACK_APP_TOKEN;
+    if (reason === "HTTP unavailable") process.env.SLACK_MODE = "http";
+    if (reason === "socket blocked") process.env.NODE_ENV = "development";
+
+    expect(await startSlackApp()).toBe(false);
+    expect(getSlackApp()).toBeNull();
+    expect(slack.mock.apiCalls("apps.connections.open")).toHaveLength(0);
+
+    Object.assign(process.env, slack.mock.env);
+    process.env.SLACK_DISABLE = "false";
+    process.env.SLACK_MODE = "socket";
+    process.env.NODE_ENV = "test";
+    // Deliberately retry without stopSlackApp: failed initialization must not latch.
+    expect(await startSlackApp()).toBe(true);
+    await slack.mock.waitForConnection(10_000);
+    expect(slack.mock.connectionCount).toBe(1);
+    expect(slack.mock.apiCalls("apps.connections.open")).toHaveLength(1);
+  } finally {
+    await stopSlackApp();
+    await stopSlackMock(slack, false);
+    closeDb();
+  }
+}, 20_000);

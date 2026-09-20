@@ -38,3 +38,32 @@ test("config reload disconnects a live socket for HTTP and can return to Socket 
     await stopSlackMock(slack, false);
   }
 }, 30_000);
+
+test("config reload recovers from an initial unavailable HTTP transport", async () => {
+  const slack = await startSlackMock(false);
+  let sut: Sut | undefined;
+  try {
+    sut = await startSut(false, slack.mock.env, {
+      SLACK_MODE: "http",
+      SLACK_SIGNING_SECRET: "synthetic-signing-secret",
+      HEARTBEAT_DISABLE: "true",
+    });
+    const api = createApiClient(sut.baseUrl, sut.apiKey);
+    const initialReload = await api("POST", "/api/config/reload");
+    expect(initialReload.status).toBe(200);
+    expect(
+      (initialReload.json as { integrationsReinitialized: string[] }).integrationsReinitialized,
+    ).not.toContain("slack");
+    expect(slack.mock.apiCalls("apps.connections.open")).toHaveLength(0);
+
+    const socket = await api("PUT", "/api/config", {
+      body: { scope: "global", key: "SLACK_MODE", value: "socket" },
+    });
+    expect(socket.status).toBe(200);
+    expect(await pollUntil(() => slack.mock.connectionCount === 1, 10_000, 50)).toBe(true);
+    expect(slack.mock.apiCalls("apps.connections.open")).toHaveLength(1);
+  } finally {
+    if (sut) await stopSut(sut, false);
+    await stopSlackMock(slack, false);
+  }
+}, 30_000);
