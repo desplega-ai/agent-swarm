@@ -8,6 +8,7 @@ import {
   isSenderAllowed,
   verifyAgentMailWebhook,
 } from "../agentmail";
+import { archiveInboundMessage } from "../agentmail/inbound-archive";
 import type {
   CheckRunEvent,
   CheckSuiteEvent,
@@ -109,7 +110,7 @@ const agentmailWebhook = route({
   responses: {
     200: { description: "Event received", schema: z.object({ received: z.literal(true) }) },
     401: { description: "Invalid signature" },
-    503: { description: "AgentMail integration not configured" },
+    503: { description: "AgentMail integration not configured or inbound archive unavailable" },
   },
 });
 
@@ -486,11 +487,18 @@ export async function handleWebhooks(
       return true;
     }
 
-    // Return 200 immediately — Svix best practice to avoid retries.
-    // Processing happens asynchronously below; dedup is handled in handlers.ts.
-    agentmailWebhook.respond(res, 200, { received: true });
-
     const payload = verified as AgentMailWebhookPayload;
+    try {
+      await archiveInboundMessage(payload);
+    } catch (err) {
+      console.error("[AgentMail] Inbound archive failed; requesting webhook retry", err);
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Inbound archive unavailable" }));
+      return true;
+    }
+    // Only acknowledge received events after durable capture. Task routing below
+    // remains independent: rejected senders and routing failures stay discoverable.
+    agentmailWebhook.respond(res, 200, { received: true });
 
     if (
       payload.message &&
