@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.152.1] - 2026-09-21
+
+### Fixed
+- **AgentMail archives verified inbound deliveries before acknowledgement**, retaining minimized content for 30 days independently of task-routing filters. Contact triage can discover unauthenticated inbound mail without relying on provider listing indexes; external enrichment requires provider-specific operator approval (#1549).
+
 ## [1.152.0] - 2026-09-18
 
 ### Added

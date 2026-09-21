@@ -30,12 +30,22 @@ AGENTMAIL_SENDER_DOMAIN_FILTER=gmail.com,company.com
 
 You can restrict which emails are processed using domain filters:
 
-- **`AGENTMAIL_INBOX_DOMAIN_FILTER`** — Only process webhooks for inboxes on the specified domains. Emails to inboxes on other domains are silently dropped.
-- **`AGENTMAIL_SENDER_DOMAIN_FILTER`** — Only process emails from senders on the specified domains. Emails from other sender domains are silently dropped.
+- **`AGENTMAIL_INBOX_DOMAIN_FILTER`** — Only process webhooks for inboxes on the specified domains. Emails to inboxes on other domains are excluded from task routing.
+- **`AGENTMAIL_SENDER_DOMAIN_FILTER`** — Only process emails from senders on the specified domains. Emails from other sender domains are excluded from task routing.
 
 Both accept comma-separated domain lists and are optional. When not set, all domains are allowed.
 
 ## How It Works
+
+### Inbound Archive
+
+After verifying the webhook signature, the server durably archives inbound `message.received`, `message.received.unauthenticated`, `message.received.blocked`, and `message.received.spam` events before acknowledging them. Archive failures or missing inbox, message, or thread IDs return HTTP 503 so the provider can retry.
+
+Capture happens before domain filters. Filtered messages remain available in the `agentmail-inbound` KV namespace; blocked and spam events are archived without creating tasks. A valid webhook signature verifies the delivery, not the sender's identity.
+
+The archive retains minimized, secret-scrubbed content and attachment metadata for 30 days from capture. It does not download attachments. Retries preserve the first entry and its expiry; a replay after expiry starts a new retention window. Expired entries are hidden on reads and removed on access or subsequent inbound capture.
+
+Coverage is limited to successfully delivered events within retention. It does not recover historical or never-delivered mail. Subscribe to each event category you want to capture. See the [contact inbox triage runbook](https://github.com/desplega-ai/agent-swarm/blob/main/runbooks/contact-inbox-triage.md) for rollout, replay, and provider-specific enrichment approval.
 
 ### Email Routing
 
