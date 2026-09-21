@@ -373,6 +373,16 @@ em {
   transform: translateY(-50%);
 }
 
+.qr-caption {
+  position: absolute;
+  right: 130px;
+  top: calc(50% + 232px);
+  width: 440px;
+  text-align: center;
+  font-size: 28px;
+  color: var(--muted);
+}
+
 .closing-links p {
   font-family: var(--mono);
   font-size: 42px;
