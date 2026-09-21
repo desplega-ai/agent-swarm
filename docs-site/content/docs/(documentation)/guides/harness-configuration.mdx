@@ -417,9 +417,10 @@ Any ACP-speaking agent works. A few starting points:
     HARNESS_PROVIDER=acp
     ACP_TARGET_COMMAND=npx
     ACP_TARGET_ARGS=["-y", "@zed-industries/claude-code-acp"]
+    ACP_TARGET_ENV_KEYS=["CLAUDE_CODE_OAUTH_TOKEN","ANTHROPIC_API_KEY"]
     ```
 
-    Needs `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` in the worker env — the bridge process picks it up the same way the `claude` CLI does. This is a different code path from the swarm's native `HARNESS_PROVIDER=claude` adapter; prefer `claude` directly unless you specifically need the ACP transport.
+    Needs `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` in the worker env. Because this uses the custom ACP target path, list the credential name(s) in `ACP_TARGET_ENV_KEYS` or they will not be passed to the bridge. This is a different code path from the swarm's native `HARNESS_PROVIDER=claude` adapter; prefer `claude` directly unless you specifically need the ACP transport.
   </Tab>
   <Tab value="Gemini CLI">
     Gemini CLI has an experimental ACP mode:
@@ -428,9 +429,10 @@ Any ACP-speaking agent works. A few starting points:
     HARNESS_PROVIDER=acp
     ACP_TARGET_COMMAND=gemini
     ACP_TARGET_ARGS=["--experimental-acp"]
+    ACP_TARGET_ENV_KEYS=["GEMINI_API_KEY"]
     ```
 
-    Needs `GEMINI_API_KEY` (or whatever credential the installed Gemini CLI version expects) in the worker env.
+    Needs `GEMINI_API_KEY` (or whatever credential the installed Gemini CLI version expects) in the worker env. List the credential name(s) in `ACP_TARGET_ENV_KEYS` so the custom target passes them to the Gemini process.
   </Tab>
   <Tab value="Custom">
     Any executable that speaks ACP over stdio (reads ndjson on stdin, writes ndjson on stdout) works without modification:
