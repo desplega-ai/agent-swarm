@@ -433,7 +433,9 @@ em {
 
 .loop-rail {
   position: relative;
-  margin: 150px 0 20px 40px; /* starts below the locked "policy weights" row */
+  margin: 150px 0 0 40px; /* starts below the locked "policy weights" row */
+  align-self: start;
+  height: 215px; /* spans the three rows we run: action, reward, value. The open rows stay outside. */
   border-left: 6px solid var(--amber-500);
 }
 
@@ -518,6 +520,26 @@ tr.locked td:first-child {
 tr.locked td:first-child::before {
   content: "🔒 ";
 }
+
+/* Rows of the mapping that we have not built. Outside the loop arrow. */
+tr.open td {
+  border-bottom-style: dashed;
+}
+
+tr.open:first-of-type td,
+tr.open-first td {
+  border-top: 3px dashed var(--amber-500);
+}
+
+tr.open td:first-child {
+  color: var(--amber-700);
+}
+
+tr.open td:first-child::before {
+  content: "? ";
+  font-family: var(--mono);
+}
+
 
 .gloss {
   font-size: 26px;
