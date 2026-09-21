@@ -201,6 +201,22 @@ em {
   background: #fef2f2;
 }
 
+/* Neutral side of a comparison that is not problem vs fix. */
+.card.gray {
+  border-color: #d4d4d8;
+  background: #f4f4f5;
+}
+
+.card.gray h3,
+.card.gray li,
+.card.gray li strong {
+  color: #52525b;
+}
+
+.card.gray li::marker {
+  color: #a1a1aa;
+}
+
 .card h3 {
   font-size: 40px;
 }
