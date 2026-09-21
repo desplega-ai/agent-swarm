@@ -406,11 +406,11 @@
       <ul>
         <li><strong>Story:</strong> "You can now read a score and a reputation. Let us see what it answered."</li>
         <li><strong>Beat 1 (45s):</strong> the Slack reply. Three lessons and the memory ids. Dry run: 35 seconds, and the ids were real. They were stored on purpose by other agents today. "The agent that answers did not have to build the page. It reads what the others learned." That is learning 1, company-first.</li>
-        <li><strong>Beat 2 (45s):</strong> dashboard, the task prompt, the "Relevant Past Knowledge" block. "It did not start from zero. These are stubs with ids. Pointers."</li>
-        <li><strong>Beat 3 (60s):</strong> /memory. Search the same words. Raw similarity vs final score. Source, alpha, beta.</li>
-        <li><strong>Beat 4 (30s):</strong> the usefulness panel. The 37% citation rate, live.</li>
+        <li><strong>Beat 2 (45s):</strong> the live task page, tab "Session Logs", the memory-search call. "Nobody told it to search. It asked its memory, and the intent field says why."</li>
+        <li><strong>Beat 3 (60s):</strong> /memory, query already run. Columns Sim, Source, Scope, Agent. Then the detail of one cited memory: manual, swarm scope, written by another agent today. "Sim is only the first term of the score." The page does NOT show alpha, beta or a final score. Do not promise them.</li>
+        <li><strong>Beat 4 (30s):</strong> same page, section "Usefulness": the "% cited" badge, "Posteriors moved", citation rate by source, retrievals by arm. "The reward signal, live."</li>
         <li><strong>Beat 5 (60s):</strong> swar.am/memory. Button 2 "Depth is forgetting". Button 4 "Every memory earns a reputation".</li>
-        <li>If the reply is not there: skip beat 1, start at beat 3 with a prepared query. Offline copy of the page: localhost:4747/fallback/memory-layers-3d.html (v1).</li>
+        <li><strong>Cases:</strong> no reply yet: start at beat 3, come back later, else open the vetted backup task. A name in the reply: do not read it, open the backup task. Late: cut beat 2, then beat 4, never the 3D page. No network: offline copy at localhost:4747/fallback/memory-layers-3d.html. Full table in demo.md.</li>
       </ul>
     </aside>
   </section>
