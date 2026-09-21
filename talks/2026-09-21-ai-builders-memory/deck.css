@@ -348,9 +348,13 @@ em {
   margin-top: 40px;
 }
 
-.closing-links img {
-  width: 250px;
-  height: 250px;
+.closing-qr {
+  position: absolute;
+  right: 130px;
+  top: 50%;
+  width: 440px;
+  height: 440px;
+  transform: translateY(-50%);
 }
 
 .closing-links p {
@@ -715,8 +719,8 @@ svg.chart text {
 /* Chrome: footer, progress, notes */
 #topbrand {
   position: absolute;
-  top: 44px;
-  right: 130px;
+  top: 34px;
+  left: 130px;
   display: flex;
   align-items: center;
   gap: 18px;
@@ -727,7 +731,7 @@ svg.chart text {
 }
 
 #topbrand img {
-  height: 40px;
+  height: 30px;
   filter: brightness(0); /* the source PNG is white on transparent */
   opacity: 0.85;
 }
