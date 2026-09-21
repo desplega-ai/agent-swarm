@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1660 480" role="img" aria-labelledby="astra-dial-title">
+  <title id="astra-dial-title">Short-term ↔ long-term is a dial.</title>
+  <defs>
+    <linearGradient id="astra-dial-rail" gradientUnits="userSpaceOnUse" x1="420" y1="260" x2="1230" y2="260">
+      <stop offset="0" stop-color="#fcd34d"/>
+      <stop offset="1" stop-color="#b45309"/>
+    </linearGradient>
+  </defs>
+  <path d="M315 219 L341 174 H1309 L1335 219 V301 L1309 346 H341 L315 301 Z" fill="#fffbeb" stroke="#fef3c7" stroke-width="2"/>
+  <path d="M150 260 H1500" fill="none" stroke="#e4e4e7" stroke-width="18" stroke-linecap="round"/>
+  <path d="M420 260 H1230" fill="none" stroke="url(#astra-dial-rail)" stroke-width="18"/>
+  <path d="M1500 260 H1600 M1585 245 L1600 260 L1585 275" fill="none" stroke="#71717a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <g fill="none" stroke-width="2">
+    <path d="M150 201 V236 M1500 201 V236" stroke="#e4e4e7"/>
+    <path d="M420 201 V236 M690 201 V236 M960 201 V236 M1230 201 V236" stroke="#d97706"/>
+  </g>
+  <g stroke-width="3">
+    <path d="M126 260 L138 239 H162 L174 260 L162 281 H138 Z" fill="#ffffff" stroke="#71717a"/>
+    <path d="M396 260 L408 239 H432 L444 260 L432 281 H408 Z" fill="#fcd34d" stroke="#b45309"/>
+    <path d="M666 260 L678 239 H702 L714 260 L702 281 H678 Z" fill="#f59e0b" stroke="#b45309"/>
+    <path d="M936 260 L948 239 H972 L984 260 L972 281 H948 Z" fill="#d97706" stroke="#b45309"/>
+    <path d="M1206 260 L1218 239 H1242 L1254 260 L1242 281 H1218 Z" fill="#b45309" stroke="#b45309"/>
+    <path d="M1476 260 L1488 239 H1512 L1524 260 L1512 281 H1488 Z" fill="#ffffff" stroke="#71717a"/>
+  </g>
+  <g font-family="Space Grotesk, system-ui, sans-serif" font-size="28" font-weight="600" text-anchor="middle">
+    <text x="150" y="127" style="fill:#71717a;font-family:Space Grotesk, system-ui, sans-serif">context window</text>
+    <text x="420" y="127" style="fill:#09090b;font-family:Space Grotesk, system-ui, sans-serif">session summary</text>
+    <text x="690" y="127" style="fill:#09090b;font-family:Space Grotesk, system-ui, sans-serif">task learning</text>
+    <text x="960" y="127" style="fill:#09090b;font-family:Space Grotesk, system-ui, sans-serif">indexed file</text>
+    <text x="1230" y="127" style="fill:#09090b;font-family:Space Grotesk, system-ui, sans-serif">curated by a human</text>
+    <text x="1500" y="127" style="fill:#71717a;font-family:Space Grotesk, system-ui, sans-serif">model weights</text>
+  </g>
+  <g font-family="Space Mono, ui-monospace, monospace" font-size="23" text-anchor="middle">
+    <text x="150" y="166" style="fill:#71717a;font-family:Space Mono, ui-monospace, monospace">this session</text>
+    <text x="420" y="166" style="fill:#b45309;font-family:Space Mono, ui-monospace, monospace">half-life 7d</text>
+    <text x="690" y="166" style="fill:#b45309;font-family:Space Mono, ui-monospace, monospace">half-life 14d</text>
+    <text x="960" y="166" style="fill:#b45309;font-family:Space Mono, ui-monospace, monospace">half-life 180d</text>
+    <text x="1230" y="166" style="fill:#b45309;font-family:Space Mono, ui-monospace, monospace">half-life ∞</text>
+    <text x="1500" y="166" style="fill:#71717a;font-family:Space Mono, ui-monospace, monospace">frozen</text>
+  </g>
+</svg>

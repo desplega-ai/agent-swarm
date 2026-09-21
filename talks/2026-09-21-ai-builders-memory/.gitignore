@@ -1,0 +1,7 @@
+.vercel
+.env*
+# Working files. They hold review chatter, prod numbers, and internal names.
+comments.json
+script.md
+demo.md
+fallback/

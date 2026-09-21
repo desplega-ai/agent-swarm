@@ -1,0 +1,543 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>On Building Agents That Actually Learn · Agent Swarm · AI Builders</title>
+  <link rel="icon" href="assets/logo.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="deck.css">
+</head>
+<body>
+<div id="stage">
+
+  <!-- 1. TITLE -->
+  <section class="slide">
+    <div class="kicker">AI Builders · 2026-09-21</div>
+    <h1 style="font-size:104px">On building agents<br>that <span class="grad">actually learn</span>.</h1>
+    <p class="small mono"><svg class="star" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/></svg> 817 · 298K+ tasks · 367B tokens · MIT</p>
+    <aside class="notes">
+      <ul>
+        <li>One line: agent-swarm is an open source (MIT), company-first agentic OS. 9 months in production. Today: the part that makes it learn, memory.</li>
+        <li>Thesis to say out loud: memory is a spectrum. How the swarm remembers, forgets, and learns which memories were worth it.</li>
+        <li>Promise: one formula, one chart, one open problem you can help with.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- 2. INTRO + QR (Taras fills) -->
+  <section class="slide">
+    <div class="kicker">whoami</div>
+    <div class="cols wide-left">
+      <div style="display:flex;flex-direction:column;gap:28px;justify-content:center">
+        <h2>Taras Yarema</h2>
+        <p class="lead" style="white-space:nowrap;font-size:42px">Building <strong>Agent Swarm</strong> at Desplega Labs.</p>
+        <ul>
+          <li>Maths by background, techie at core</li>
+          <li>7th hire at Capchase</li>
+          <li>My thoughts at <span class="mono">taras.lol</span></li>
+        </ul>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:center">
+        <div class="qr-wrap">
+          <img class="qr" src="assets/qr-repo.svg" alt="github.com/desplega-ai/agent-swarm">
+        </div>
+      </div>
+    </div>
+    <aside class="notes">
+      <ul>
+        <li>15 seconds. Name, what the swarm is, scan the QR (it opens the GitHub repo).</li>
+        <li>The 367B tokens on the title slide: live public telemetry, the same endpoint the landing uses (agent-swarm-landing/src/lib/swarm-stats.ts).</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- 3. PROBLEM / SOLUTION -->
+  <section class="slide">
+    <div class="kicker">problem → solution</div>
+    <h2>Every agent session starts with amnesia.</h2>
+    <div class="cols">
+      <div class="card bad">
+        <h3>Where we started: embed all, top-k.</h3>
+        <ul>
+          <li>Stale facts never die</li>
+          <li>Noise outranks truth</li>
+          <li>One bad memory reaches every agent</li>
+        </ul>
+      </div>
+      <div class="card amber">
+        <h3 style="white-space:nowrap">A half-life and a reputation.</h3>
+        <ul>
+          <li><strong>Rank:</strong> match × time × use × source × reputation</li>
+          <li><strong>Store</strong> pointers, not payloads</li>
+          <li><strong>Learn:</strong> agents grade memories</li>
+        </ul>
+      </div>
+    </div>
+    <aside class="notes">
+      <ul>
+        <li>Agents are stateless workers in containers. The model forgets everything between tasks.</li>
+        <li><strong>Learning 1, company-first:</strong> a local CLAUDE.md teaches one laptop. A shared memory teaches every agent in the company. Benefit: lessons compound. Cost: one bad memory reaches everyone.</li>
+        <li>Naive RAG as memory is shared mutable global state with embeddings on top.</li>
+        <li>Spoken line for the right card: "a memory that evolves like a brain". It fades, it strengthens with use, it earns trust.</li>
+        <li>Three ideas today: spectrum, pointers, ratings. Then the part we have not solved: evals.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- 4. DEMO -->
+  <section class="slide center">
+    <h1><span class="grad">Demo</span></h1>
+    <p class="small mono">swar.am/memory</p>
+    <aside class="notes">
+      <ul>
+        <li>We ask the swarm to build a public page about its own memory. Meet them where they are: the whole UX is a Slack message.</li>
+        <li><strong>Beat 1 (30s):</strong> send the task from Slack. See demo.md for the exact prompt.</li>
+        <li><strong>Beat 2 (90s):</strong> dashboard. Task picked, session log streaming, the "Relevant Past Knowledge" block in the prompt.</li>
+        <li><strong>Beat 3 (90s):</strong> /memory page. Search one query, show composite score vs raw similarity, sources, alpha and beta.</li>
+        <li><strong>Beat 4 (60s):</strong> open the page the swarm built. If it is not done, open the pre-baked one from the dry run.</li>
+        <li>Always have the dry-run page open in a tab before you start.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- 5. ARCHITECTURE + STACK -->
+  <section class="slide top">
+    <div class="kicker">what you just saw</div>
+    <h2>Three loops, one SQLite file.</h2>
+    <div style="display:flex;flex-direction:column;gap:26px">
+      <div class="lane"><div class="name">WRITE</div><div class="flow">
+        <div class="box"><b>agents + hooks</b><span>intent + automatic</span></div><div class="arrow">→</div>
+        <div class="box"><b>embed</b><span>512d</span></div><div class="arrow">→</div>
+        <div class="box db"><b>SQLite</b><span>vectors · FTS5 · links</span></div>
+      </div></div>
+      <div class="lane"><div class="name">READ</div><div class="flow">
+        <div class="box"><b>task</b><span>automatic + manual</span></div><div class="arrow">→</div>
+        <div class="box hot"><b>hybrid search</b><span>semantic + keyword</span></div><div class="arrow">→</div>
+        <div class="box"><b>graph</b></div><div class="arrow">→</div>
+        <div class="box hot"><b>score</b><span>the formula</span></div><div class="arrow">→</div>
+        <div class="box"><b>context</b></div>
+      </div></div>
+      <div class="lane"><div class="name">LEARN</div><div class="flow">
+        <div class="box"><b>retrieval log</b></div><div class="arrow">→</div>
+        <div class="box"><b>3 raters</b><span>citation · LLM · self</span></div><div class="arrow">→</div>
+        <div class="box hot"><b>α, β</b><span>feeds the next score</span></div>
+      </div></div>
+    </div>
+    <aside class="notes">
+      <ul>
+        <li>Stack, say it aloud: Bun, TypeScript, SQLite with sqlite-vec and FTS5, MCP tools.</li>
+        <li>WRITE: agents call memory-store, hooks write on task done and session end, files get indexed. Chunk, dedup, TTL by source, embed with text-embedding-3-small at 512 dims.</li>
+        <li>READ: hybrid search means semantic (sqlite-vec) plus keyword/pattern (FTS5, BM25), fused with RRF. Then 1-hop graph expansion, then the rerank formula. The prompt gets 300-char stubs plus ids.</li>
+        <li><strong>* Why 1 hop:</strong> every hop multiplies the candidates and the damping compounds (0.7, then 0.49). Two hops add mostly noise. We also cap it at 5 new candidates per search, and the neighbour still has to win the same rerank. Links are outgoing only.</li>
+        <li>"intent + automatic": agents store on purpose (memory-store), hooks store on task done, session end, and file writes. "automatic + manual": memory is injected at task start, and agents can search mid-task.</li>
+        <li>LEARN: we log what we showed, three raters score it, applyRating moves alpha and beta on the same row.</li>
+        <li>The API server is the only owner of the database. Workers are stateless and talk HTTP. Memory survives any container.</li>
+        <li>Two scopes: agent (private) and swarm (shared). No vector database, no queue, no extra service.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- 6. CHALLENGE 1: THE FORMULA -->
+  <section class="slide center">
+    <div class="kicker">challenge 1 · short-term vs long-term</div>
+    <h2><span class="grad">One score</span> does both.</h2>
+    <div class="math">
+      <span class="term"><span><i>score</i></span></span>
+      <span class="op">=</span>
+      <span class="term" data-label="hybrid match"><span>sim(<i>q</i>, <i>m</i>)</span></span>
+      <span class="op">·</span>
+      <span class="term" data-label="time"><span>2<sup>−age / τ<sub>source</sub></sup></span></span>
+      <span class="op">·</span>
+      <span class="term" data-label="use"><span><i>boost</i><sub>access</sub></span></span>
+      <span class="op">·</span>
+      <span class="term" data-label="source"><span><i>trust</i><sub>source</sub></span></span>
+      <span class="op">·</span>
+      <span class="term" data-label="reputation"><span><i>U</i>(α, β)</span></span>
+    </div>
+    <p class="legend"><i>q</i> query · <i>m</i> memory · sim = similarity: semantic + keyword · τ half-life of the source<br>trust = 1.5× stored on purpose … 0.5× session summary · α, β times it helped / did not</p>
+    <aside class="notes">
+      <ul>
+        <li>sim is not raw cosine. In hybrid mode it is the fused rank score of two searches: semantic (vectors) and keyword (FTS5), fused with RRF, k = 60. A memory found by both arms gets both contributions. Raw cosine is kept on the side.</li>
+        <li>trust (source_quality in the code): how much we trust where the memory came from. Stored on purpose (memory-store tool) 1.5x, indexed file 1.0x, task learning 0.7x, session summary 0.5x.</li>
+        <li>Everyone draws two boxes: short-term and long-term. We have one table and one reranker.</li>
+        <li>Short or long is not where a memory is stored. It is how fast its weight falls.</li>
+        <li>Factors: time = 2^(-age / half-life of the source). Use = access boost, up to 1.5x. Source = curated 1.5x down to session summary 0.5x. Reputation = usefulness from ratings, 1x to 2x.</li>
+        <li>Real code: src/be/memory/reranker.ts, about 100 lines. Pure function, takes "now" as an argument.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- 7. DECAY CURVES -->
+  <section class="slide top">
+    <div class="kicker">challenge 1 · time</div>
+    <h2>Four sources, four half-lives.</h2>
+    <svg id="decay-chart" class="chart"></svg>
+    <aside class="notes">
+      <ul>
+        <li>Each source forgets at its own speed: session summary 7d, task learning 14d, indexed file 180d, stored on purpose never.</li>
+        <li><strong>The bug story (red line, day 76):</strong> the decay used to be flat 14 days for everything. A canonical memory, 76 days old, stopped showing. Embedding fine, similarity fine. 2^(-76/14) = 0.02, so the truth ranked below yesterday's chatter.</li>
+        <li>Fix (PR #696): half-life depends on the source. Same memory now scores x0.75 as a file, x1.0 if curated.</li>
+        <li>Lesson: the bug was not semantic. Most memory bugs are ranking bugs.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- 8. THE SPECTRUM -->
+  <section class="slide top">
+    <div class="kicker">challenge 1 · the mental model</div>
+    <h2>Short-term ↔ long-term is a dial.</h2>
+    <svg style="width:100%;height:auto;margin:10px 0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1660 480" role="img" aria-labelledby="astra-dial-title">
+      <title id="astra-dial-title">Short-term ↔ long-term is a dial.</title>
+      <defs>
+        <linearGradient id="astra-dial-rail" gradientUnits="userSpaceOnUse" x1="420" y1="260" x2="1230" y2="260">
+          <stop offset="0" stop-color="#fcd34d"/>
+          <stop offset="1" stop-color="#b45309"/>
+        </linearGradient>
+      </defs>
+      <path d="M315 219 L341 174 H1309 L1335 219 V301 L1309 346 H341 L315 301 Z" fill="#fffbeb" stroke="#fef3c7" stroke-width="2"/>
+      <path d="M150 260 H1500" fill="none" stroke="#e4e4e7" stroke-width="18" stroke-linecap="round"/>
+      <path d="M420 260 H1230" fill="none" stroke="url(#astra-dial-rail)" stroke-width="18"/>
+      <path d="M1500 260 H1600 M1585 245 L1600 260 L1585 275" fill="none" stroke="#71717a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      <g fill="none" stroke-width="2">
+        <path d="M150 201 V236 M1500 201 V236" stroke="#e4e4e7"/>
+        <path d="M420 201 V236 M690 201 V236 M960 201 V236 M1230 201 V236" stroke="#d97706"/>
+      </g>
+      <g stroke-width="3">
+        <path d="M126 260 L138 239 H162 L174 260 L162 281 H138 Z" fill="#ffffff" stroke="#71717a"/>
+        <path d="M396 260 L408 239 H432 L444 260 L432 281 H408 Z" fill="#fcd34d" stroke="#b45309"/>
+        <path d="M666 260 L678 239 H702 L714 260 L702 281 H678 Z" fill="#f59e0b" stroke="#b45309"/>
+        <path d="M936 260 L948 239 H972 L984 260 L972 281 H948 Z" fill="#d97706" stroke="#b45309"/>
+        <path d="M1206 260 L1218 239 H1242 L1254 260 L1242 281 H1218 Z" fill="#b45309" stroke="#b45309"/>
+        <path d="M1476 260 L1488 239 H1512 L1524 260 L1512 281 H1488 Z" fill="#ffffff" stroke="#71717a"/>
+      </g>
+      <g font-family="Space Grotesk, system-ui, sans-serif" font-size="28" font-weight="600" text-anchor="middle">
+        <text x="150" y="127" style="fill:#71717a;font-family:Space Grotesk, system-ui, sans-serif">context window</text>
+        <text x="420" y="127" style="fill:#09090b;font-family:Space Grotesk, system-ui, sans-serif">session_summary</text>
+        <text x="690" y="127" style="fill:#09090b;font-family:Space Grotesk, system-ui, sans-serif">task_completion</text>
+        <text x="960" y="127" style="fill:#09090b;font-family:Space Grotesk, system-ui, sans-serif">file_index</text>
+        <text x="1230" y="127" style="fill:#09090b;font-family:Space Grotesk, system-ui, sans-serif">manual</text>
+        <text x="1500" y="127" style="fill:#71717a;font-family:Space Grotesk, system-ui, sans-serif">model weights</text>
+      </g>
+      <g font-family="Space Mono, ui-monospace, monospace" font-size="23" text-anchor="middle">
+        <text x="150" y="166" style="fill:#71717a;font-family:Space Mono, ui-monospace, monospace">this session</text>
+        <text x="420" y="166" style="fill:#b45309;font-family:Space Mono, ui-monospace, monospace">half-life 7d</text>
+        <text x="690" y="166" style="fill:#b45309;font-family:Space Mono, ui-monospace, monospace">half-life 14d</text>
+        <text x="960" y="166" style="fill:#b45309;font-family:Space Mono, ui-monospace, monospace">half-life 180d</text>
+        <text x="1230" y="166" style="fill:#b45309;font-family:Space Mono, ui-monospace, monospace">half-life ∞</text>
+        <text x="1500" y="166" style="fill:#71717a;font-family:Space Mono, ui-monospace, monospace">frozen</text>
+      </g>
+    </svg>
+    <aside class="notes">
+      <ul>
+        <li>Learning 2 numbers (prod, since 2026-05-19): 12,902 scripts written by the swarm, 128,806 script runs, 82% completed. This shows adoption. It is not a measured performance gain, so do not claim one.</li>
+        <li>Mention the bug here in one line if you skipped it on the chart: one decay speed for everything means the dial is stuck at one position.</li>
+      
+        <li>The ends are not ours: context window on the left, model weights on the right. Memory is everything in between.</li>
+        <li>Names on the dial are the code names, same as the decay chart. manual = stored on purpose through the memory-store tool, mostly by agents.</li>
+        <li>Optional spoken line (dropped from the slide): a memory is a point in 512 dims of similarity plus 4 more axes: age, use, source, reputation.</li>
+        <li>Math footnote for the curious: the score is a product, so log(score) is a sum. Each factor is an independent axis next to the embedding.</li>
+        <li>Use moves a memory to the right: access boost and good ratings fight the decay. That is how a task learning becomes long-term.</li>
+        <li>Honest limit: the dial covers facts and lessons. Procedures are different. A runbook at 0.87 similarity can be 0% executable, so skills get exact, named invocation, never similarity.</li>
+        <li><strong>Learning 2, own scripts:</strong> that procedural end is where the swarm writes its own scripts. Working code is saved as a typed, versioned script and called by name next time. Numbers are in the bullet above.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- 9. CHALLENGE 2: POINTERS + RELATIONS -->
+  <section class="slide top">
+    <div class="kicker">challenge 2 · pointers + relations</div>
+    <h2>You do not remember the spreadsheet.<br>You remember <span class="grad">where it lives</span>.</h2>
+    <svg style="height:570px;width:auto;align-self:center" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1660 640" role="img" aria-labelledby="astra-graph-title">
+      <title id="astra-graph-title">A graph built by regex, not by a librarian.</title>
+      <defs>
+        <marker id="astra-graph-arrow" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="12" markerHeight="12" markerUnits="userSpaceOnUse" orient="auto">
+          <path d="M1 1 L11 6 L1 11" fill="none" stroke="#b45309" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </marker>
+        <marker id="astra-graph-source-arrow" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="12" markerHeight="12" markerUnits="userSpaceOnUse" orient="auto">
+          <path d="M1 1 L11 6 L1 11" fill="none" stroke="#71717a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </marker>
+      </defs>
+      <g fill="none" stroke="#b45309" stroke-width="3" marker-end="url(#astra-graph-arrow)">
+        <path d="M500 176 H528 Q550 176 550 198 V223 Q550 245 560 245 H569"/>
+        <path d="M500 366 H528 Q550 366 550 344 Q550 323 560 323 H569"/>
+        <path d="M1010 284 H1188" stroke-width="4"/>
+      </g>
+      <g fill="none" stroke="#71717a" stroke-width="2" stroke-dasharray="8 8" marker-end="url(#astra-graph-source-arrow)">
+        <path d="M820 408 V478 Q820 524 866 524 H1168"/>
+        <path d="M780 408 V560 Q780 606 826 606 H1168"/>
+      </g>
+      <g font-family="Space Grotesk, system-ui, sans-serif" font-size="25" font-weight="600">
+        <text x="24" y="110" style="fill:#b45309;font-family:Space Grotesk, system-ui, sans-serif">MANUAL · an agent searches</text>
+        <text x="24" y="300" style="fill:#b45309;font-family:Space Grotesk, system-ui, sans-serif">AUTOMATIC · every task start</text>
+      </g>
+      <rect x="2" y="140" width="498" height="72" rx="36" fill="#ffffff" stroke="#e4e4e7" stroke-width="2"/>
+      <rect x="2" y="330" width="498" height="72" rx="36" fill="#ffffff" stroke="#e4e4e7" stroke-width="2"/>
+      <g font-family="Space Mono, ui-monospace, monospace" font-size="22">
+        <text x="251" y="184" text-anchor="middle" style="fill:#09090b;font-family:Space Mono, ui-monospace, monospace">query: "deploy fails on staging"</text>
+        <text x="251" y="374" text-anchor="middle" style="fill:#09090b;font-family:Space Mono, ui-monospace, monospace">task: Monitor release of v1.152.1</text>
+        <text x="530" y="144" style="fill:#b45309;font-family:Space Mono, ui-monospace, monospace">similarity 0.82</text>
+        <text x="1100" y="258" text-anchor="middle" style="fill:#b45309;font-family:Space Mono, ui-monospace, monospace">[[wikilink]]</text>
+      </g>
+      <path d="M596 190 H984 L1010 216 V382 L984 408 H596 L570 382 V216 Z" fill="#fef3c7" stroke="#d97706" stroke-width="2"/>
+      <path d="M1216 164 H1632 L1658 190 V406 L1632 432 H1216 L1190 406 V190 Z" fill="#09090b"/>
+      <g font-family="Space Grotesk, system-ui, sans-serif" font-weight="600">
+        <text x="590" y="277" font-size="36" style="fill:#09090b;font-family:Space Grotesk, system-ui, sans-serif">deploy-gotcha</text>
+        <text x="1216" y="249" font-size="32" style="fill:#ffffff;font-family:Space Grotesk, system-ui, sans-serif">staging-env-quirks</text>
+      </g>
+      <g font-family="Space Mono, ui-monospace, monospace" font-size="22">
+        <text x="590" y="321" style="fill:#b45309;font-family:Space Mono, ui-monospace, monospace">shared/memory/deploy/gotcha.md</text>
+        <text x="1216" y="293" style="fill:#e4e4e7;font-family:Space Mono, ui-monospace, monospace">shared/memory/deploy/staging.md</text>
+      </g>
+      <path d="M1216 327 H1632" stroke="#71717a" stroke-width="1"/>
+      <text x="1216" y="380" font-family="Space Mono, ui-monospace, monospace" font-size="25" style="fill:#fcd34d;font-family:Space Mono, ui-monospace, monospace">0.82 × 1.0 × 0.7 = 0.57</text>
+      <rect x="1170" y="495" width="488" height="58" rx="8" fill="#ffffff" stroke="#e4e4e7" stroke-width="2"/>
+      <rect x="1170" y="577" width="488" height="58" rx="8" fill="#ffffff" stroke="#e4e4e7" stroke-width="2"/>
+      <g font-family="Space Mono, ui-monospace, monospace" font-size="24">
+        <text x="1194" y="533" style="fill:#71717a;font-family:Space Mono, ui-monospace, monospace">github:org/repo#696</text>
+        <text x="1194" y="615" style="fill:#71717a;font-family:Space Mono, ui-monospace, monospace">runbooks/deploy.md</text>
+      </g>
+    </svg>
+    <aside class="notes">
+      <ul>
+        <li><strong>The contrast, say it aloud:</strong> the obvious approach is to ingest everything (copy Notion, GitHub, Slack into the vector store). Result: stale copies, sync issues, huge index, lost permissions.</li>
+        <li>Our take: a memory is a lesson plus pointers. It points at sources (GitHub, runbooks, Notion) and at other memories. Tools fetch the fresh data at read time.</li>
+        <li><strong>Prod numbers (2026-09-21):</strong> 2,709 PR links, 1,146 wikilinks, 1,066 rated source edges. In the retrieval log, about 1 in 5 rows (27,847 of 127,530) arrived through a link, not through search.</li>
+        <li>A graph built by regex, not by a librarian: 0 LLM calls to build it.</li>
+        <li>"Lost permissions": the copy drops the access rules of the source. What only finance could read in Notion, any agent can now retrieve from the vector store.</li>
+        <li>Same idea in the prompt: we inject a 300-char stub plus an id. The agent calls memory-get only if it needs the rest.</li>
+        <li>Humans do not ingest all data. I know the GTM data is in those Notion pages, and I have the tools to read it.</li>
+        <li>Memory stores the lesson and the address. Tools (MCP) fetch the fresh data at read time.</li>
+        <li>Edges: memory → external source, free-form ids (github:, linear:, slack:, customer:). No enum, no parser. New integration costs zero code.</li>
+        <li>Honest status: edges carry their own rating, but they do not drive ranking yet. That is v2.</li>
+        <li>Optional story: an agent audited the same stale repo in 15 sessions. Every memory was accurate, none said what to do. One line ("always git fetch first") stopped it. Store the handler, not the stack trace.</li>
+        <li>Three things relations buy you. Reach: they find what similarity misses. Cost: 0 LLM calls to build. Order: path-like keys, S3 style, organise memories automatically.</li>
+        <li>Two ways in. Manual: an agent calls memory-search mid-task. Automatic: every task start runs the task text as the query. Both hit the same memory and the same graph.</li>
+        <li>Reach: the neighbour never matched the query. It surfaces because a strong hit links to it. It inherits the parent's score times link strength times 0.7. One hop, max 5 new candidates, then the same formula.</li>
+        <li>Cost: parsers find [[wikilinks]], PR refs, file paths. Deterministic link types: wikilink, sequel, PR, agent-fs file, page, external source. The trade: we only get the relations someone wrote down. No inferred links, no contradiction edges yet.</li>
+        <li>Order: every memory has a path-like key. Files written under /workspace/shared/memory/ or /workspace/personal/memory/ are indexed automatically and the path is the key. Other memories get scope/source/id. So memories file themselves, and you can browse by prefix like an S3 bucket.</li>
+        <li>The librarian approach (gbrain, dreaming): an agent files, links, and consolidates. It works, and you pay for it in AI tasks every night. We run one such job too (the daily compounding reflection), but the graph itself needs none.</li>
+        <li>Honest status: memory-to-memory links drive retrieval today. Rated edges to external sources are recorded, but do not drive ranking yet.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- 10. CHALLENGE 3: RATERS -->
+  <section class="slide top">
+    <div class="kicker">challenge 3 · which memories were worth it?</div>
+    <h2>Every memory earns a reputation.</h2>
+    <div class="cols wide-left">
+      <div style="display:flex;flex-direction:column;gap:30px;justify-content:center">
+        <p class="lead"><strong>α</strong> counts the times it helped.<br><strong>β</strong> counts the times it did not.</p>
+        <p class="lead"><span class="mono" style="color:var(--amber-700)">Beta(α, β)</span> = our belief about how often it helps.</p>
+        <table style="font-size:30px">
+          <tr><td>Implicit citation</td><td>cited <strong>+0.5</strong> · ignored <strong>−0.25</strong></td></tr>
+          <tr><td>LLM judge</td><td>rides on the summary call</td></tr>
+          <tr><td>Self-rating</td><td><span class="mono">memory_rate(id, useful)</span></td></tr>
+        </table>
+      </div>
+      <svg id="beta-chart" class="chart"></svg>
+    </div>
+    <div class="math sm">
+      <span><i>f</i>(<i>x</i>; α, β) =</span>
+      <span class="frac"><span><i>x</i><sup>α−1</sup>(1 − <i>x</i>)<sup>β−1</sup></span><span>B(α, β)</span></span>
+      <span class="gap"></span>
+      <span>mean =</span>
+      <span class="frac"><span>α</span><span>α + β</span></span>
+    </div>
+    <aside class="notes">
+      <ul>
+        <li><strong>Prod numbers (2026-09-21, since May):</strong> 227K rating events. Implicit citation 166,588 (37% cited, 63% ignored). LLM judge 56,711 (60% positive). Self-rating 3,987. 3,982 of 15,660 memories have moved off Beta(1,1).</li>
+        <li>The formula, if someone asks: the Beta density over x, the unknown "how often does this memory help". B(α, β) only normalises it. We never compute the curve in prod, we only need the mean, α / (α + β).</li>
+        <li>Problem: retrieval tells you what is similar. Nothing tells you what helped.</li>
+        <li>Explain Beta in one breath: two counters per memory. The curve is wide when we know little, and narrow when we have evidence. A fresh memory is Beta(1,1): flat, no opinion.</li>
+        <li>usefulness = clamp(2α / (α + β), floor, 2.0). Fresh = exactly 1.0, a no-op. Proven climbs to 2x.</li>
+        <li>Three raters, one chokepoint (applyRating). Costs: citation is free, the LLM judge rides on a call we already make, self-rating is one tool call.</li>
+        <li>Anti-cheat: workers cannot send the server-side signal over HTTP. Self-rating is once per task per memory.</li>
+        <li>Default floor is 1.0: we promote proven memories, we do not yet demote bad ones.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- 11. RL MAPPING -->
+  <section class="slide top">
+    <div class="kicker">challenge 3 · the same loop as RL</div>
+    <h2>We cannot fine-tune the model.<br>We can fine-tune <span class="grad">what it remembers</span>.</h2>
+    <div class="loop">
+      <div class="loop-rail"><span>every task</span></div>
+      <table>
+        <tr><th>reinforcement learning</th><th>swarm memory</th></tr>
+        <tr class="locked"><td>Policy weights</td><td>the LLM. Frozen, not ours to train</td></tr>
+        <tr><td>Action</td><td>which memories we surface</td></tr>
+        <tr><td>Reward</td><td>cited, ignored, judged, self-rated</td></tr>
+        <tr><td>Value</td><td>mean of Beta(α, β)</td></tr>
+        <tr><td>Exploration</td><td><em>none yet</em> <span class="gloss">new memories rarely get shown</span></td></tr>
+        <tr><td>Credit assignment</td><td><em>task passed: which memory earned it?</em></td></tr>
+      </table>
+      <div class="bignums">
+        <div><b>90%</b><span>agents rate their own<br>memories "useful"</span></div>
+        <div><b>37%</b><span>of retrieved memories<br>actually get cited</span></div>
+      </div>
+    </div>
+    <aside class="notes">
+      <ul>
+        <li><strong>Reward hacking, with data:</strong> when agents rate their own memories, 90% of ratings are "useful" (3,606 of 3,987). The server-side citation signal says only 37% of retrieved memories get used. That gap is why self-rating cannot be the only reward.</li>
+        <li>First row is the part we do not control: the model weights belong to the lab. Everything below it is ours.</li>
+        <li>Read the table top down: we act (pick memories), we get a reward (ratings), we update the value (alpha, beta). The next task ranks with the new values. That is the loop.</li>
+        <li>The policy is the frozen LLM plus whatever we put in its context. No gradients, no weights. The learnable parameters are two floats per memory in SQLite.</li>
+        <li>It is a Beta-Bernoulli bandit with one arm per memory. Same family as RLHF reward models and click feedback in recommender systems.</li>
+        <li>Exploration: we rank by the posterior mean only. Thompson sampling and UCB are parked, "too probabilistic" for prod. A new memory never gets a lucky chance.</li>
+        <li>Credit assignment: the task passed. Which memory earned it? Reward hacking is real too: an agent that rates its own memories grades its own homework. That is why the implicit signal is server-side.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- 12. LANDSCAPE -->
+  <section class="slide top">
+    <div class="kicker">landscape · where is the intelligence?</div>
+    <h2>Two axes: when it thinks, what it adapts to.</h2>
+    <svg id="landscape" class="chart"></svg>
+    <aside class="notes">
+      <ul>
+        <li>Two questions: when does the system think (write vs read), and what does its ranking adapt to (nothing, time, usage).</li>
+        <li>Supermemory, gbrain, Zep, Mem0: extraction, graphs, nightly "dream" consolidation. Strong at write time.</li>
+        <li><strong>The cost nobody puts on the slide:</strong> write-time intelligence means AI tasks that run to organise memory (librarian, dreaming, extraction), paid per write or per night. Read-time ranking is a few multiplications. Our raters ride on a call we already make.</li>
+        <li>The fair counterpoint: a librarian finds relations and contradictions that nobody wrote down. Our graph does not.</li>
+        <li>OpenClaw: markdown is the source of truth, with a sqlite-vec + FTS5 index and age decay on top. It is not only grep.</li>
+        <li>We found no system that feeds usage or ratings back into ranking. Say "we found none", not "nobody does".</li>
+        <li>We are not purely read-time. The daily compounding reflection runs every night: the lead agent reads the day's completed and failed tasks and folds the lessons into memory, agent identity files, and skills. It learns from usage, and it costs one AI task per night, not one per write.</li>
+        <li>Honest gap: that job adds lessons, it does not clean up. No contradiction handling and no consolidation of old memories yet. That is what the dreaming work is for.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- 13. EVALS -->
+  <section class="slide top">
+    <div class="kicker">challenge 4 · unsolved</div>
+    <h2 style="white-space:nowrap">The part we have not solved: <span class="grad">evals</span>.</h2>
+    <p class="lead">Memory is a new hire. How do you run its performance review?</p>
+    <div class="cols">
+      <div class="card bad">
+        <h3>Why it is hard.</h3>
+        <ul>
+          <li><strong>Time:</strong> no replay of 3 months</li>
+          <li><strong>Chaos:</strong> one memory, new trajectory</li>
+          <li><strong>Counterfactual:</strong> pass without it?</li>
+          <li><strong>Drift:</strong> true today, false tomorrow</li>
+        </ul>
+      </div>
+      <div class="card amber">
+        <h3>What we do today.</h3>
+        <ul>
+          <li><strong>Unit:</strong> tests own the clock</li>
+          <li><strong>Scenario:</strong> 7 facts vs near-miss lies</li>
+          <li><strong>Prod:</strong> citation rate by source</li>
+          <li><strong>Humans:</strong> daily use is the vibe check</li>
+        </ul>
+      </div>
+    </div>
+    <aside class="notes">
+      <ul>
+        <li><strong>The onboarding analogy:</strong> swarm memory is like onboarding a person. It makes mistakes at first, you give it feedback, it learns. So how do you know if a person performs? Not with unit tests. With performance reviews, impact over time, and what colleagues say. Our evals look the same: ratings are the feedback, citation rate is the impact, daily human use is the peer review.</li>
+        <li>The unit level is solved: the reranker is pure, rerank(candidates, now). Inject the clock, assert the ranking.</li>
+        <li>The scenario level is OK: seed memories, tempt the model with plausible wrong defaults, grade facts deterministically. A judge only checks that the agent searched and did not guess.</li>
+        <li>Humans as evaluators: people use the swarm every day and complain fast when it forgets or repeats a mistake. It is a vibe check, not a metric, and today it is our most sensitive signal.</li>
+        <li>The system level is open: does memory make the swarm better over a month? We only have trends from production, no controlled experiment.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- 14. OPEN CHALLENGE -->
+  <section class="slide">
+    <div class="kicker">open challenge</div>
+    <h2>How do you eval memory<br>when <span class="grad">time is a variable</span>?</h2>
+    <div class="closing-links">
+      <div>
+        <p><span>code</span>swar.am/gh</p>
+        <p><span>slides</span>swar.am/aib</p>
+        <p><span>demo</span>swar.am/memory</p>
+        <p><span>newsletter</span>dspl.sh</p>
+      </div>
+      <img src="assets/qr-repo.svg" alt="github.com/desplega-ai/agent-swarm">
+    </div>
+    <aside class="notes">
+      <ul>
+        <li>Ask the room for ideas. Stay on this slide during Q&amp;A.</li>
+        <li>Backup questions if the room is quiet: how do you explore new memories without making prod random? Who gets the credit when the task passes?</li>
+        <li>The three learnings from the abstract, in one breath: company-first (one shared brain), let it write its own scripts, meet them where they are.</li>
+        <li>Everything shown is open source: the reranker, the raters, the eval scenario.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- 15. APPENDIX: PROMPTS (after the closing slide, for Q&A) -->
+  <section class="slide top">
+    <div class="kicker">appendix · simplified prompts</div>
+    <h2>Two prompts: read, learn.</h2>
+    <div class="cols">
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <span class="tag">read · appended to every task</span>
+<pre class="code"><span class="hl">### Relevant Past Knowledge</span>
+These memories from your previous
+sessions may be useful. Use `memory-get`
+with the id to retrieve full details.
+
+- <span class="hl">**deploy-gotcha**</span> (id: 7f3a…):
+  first 300 chars…
+
+<span class="dim">When a memory genuinely helps, or
+actively misleads you, call `memory_rate`.
+2-5 ratings per task is plenty.</span></pre>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <span class="tag">learn · rides on the session summary</span>
+<pre class="code"><span class="dim">// one cheap call, two outputs</span>
+{
+  "summary": "what happened…",
+  <span class="hl">"ratings"</span>: [{
+    "id": "7f3a…",
+    "score": 0.8,
+    "reasoning": "the fix came from here",
+    <span class="hl">"referencesSource"</span>:
+      "github:org/repo#696"
+  }]
+}</pre>
+      </div>
+    </div>
+    <aside class="notes">
+      <ul>
+        <li>Left: progressive disclosure. The prompt holds pointers to memories, not the memories.</li>
+        <li>Right: we already paid for a small-model call to summarise the session. The ratings ride on it for almost nothing.</li>
+        <li>All prompt text lives in a template registry. No string concatenation in runners.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <div id="topbrand"><img src="assets/desplega-logo.png" alt="Desplega Labs"><span>dspl.sh · 2026</span></div>
+  <div id="footer">
+    <div class="brand"><img src="assets/logo.png" alt=""><span>agent-swarm.dev</span></div>
+    <span id="counter"></span>
+  </div>
+  <div id="progress"></div>
+</div>
+
+<div id="notes-overlay"></div>
+
+<div id="presenter">
+  <div class="bar"><span id="p-timer">00:00</span><span>presenter · arrows drive both windows</span></div>
+  <h1 id="p-title"></h1>
+  <div class="body" id="p-body"></div>
+  <div class="next" id="p-next"></div>
+</div>
+
+<script src="deck.js"></script>
+<script>
+  // Review mode is a local tool. The public deploy does not ship debug.js.
+  if (["localhost", "127.0.0.1", ""].includes(location.hostname)) {
+    document.body.appendChild(Object.assign(document.createElement("script"), { src: "debug.js" }));
+  }
+</script>
+</body>
+</html>
