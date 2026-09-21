@@ -37,6 +37,28 @@ describe("inline tool result images", () => {
     });
   }
 
+  test("SVG results remain text without preview images", () => {
+    const svgData = btoa('<svg xmlns="http://www.w3.org/2000/svg"><text>raw SVG</text></svg>');
+    const mimeType = "image/svg+xml";
+    for (const block of [
+      { type: "image", source: { type: "base64", media_type: mimeType, data: svgData } },
+      { type: "image", mimeType, data: svgData },
+      { type: "file", mime: mimeType, url: `data:${mimeType};base64,${svgData}` },
+    ]) {
+      for (const payload of [[block], { content: [block] }, { attachments: [block] }]) {
+        const body = resultPayloadText(payload);
+        expect(imageResultPreview(body)).toBeUndefined();
+        expect(body).toContain(mimeType);
+        expect(body).toContain(svgData);
+      }
+      const mixed = resultPayloadText({ content: [block, pi] });
+      const preview = imageResultPreview(mixed);
+      expect(preview?.images).toEqual([{ mimeType: "image/png", data }]);
+      expect(preview?.text).toContain(mimeType);
+      expect(preview?.text).toContain(svgData);
+    }
+  });
+
   test("mixed results preserve text, unknown blocks, and multiple images", () => {
     const payload = [{ type: "text", text: "before" }, claude, { custom: 42 }, pi];
     const preview = imageResultPreview(resultPayloadText(payload));

@@ -172,7 +172,6 @@ function contentTextFromJson(value: unknown): string | undefined {
       if (typeof part === "string") return resultPayloadText(part);
       if (!isRecord(part)) return stringifyForDisplay(part);
       if (part.type === "text") return resultPayloadText(String(part.text ?? ""));
-      if (part.type === "image") return "[image]";
       return stringifyForDisplay(part);
     })
     .filter((part) => part.length > 0);

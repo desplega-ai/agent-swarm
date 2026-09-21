@@ -3,7 +3,7 @@ export interface ResultImage {
   data: string;
 }
 
-const IMAGE_MIME = /^image\/(?:png|jpeg|gif|webp|avif|svg\+xml)$/;
+const IMAGE_MIME = /^image\/(?:png|jpeg|gif|webp|avif)$/;
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
