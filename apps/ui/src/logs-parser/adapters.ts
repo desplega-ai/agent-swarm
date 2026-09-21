@@ -1,4 +1,5 @@
 import { asString, isRecord, makeItem, resultBlockText } from "./helpers";
+import { resultImages } from "./result-images";
 import type { DecodedRecord, LogRole, NormalizedItem } from "./types";
 
 // Exact Codex CLI advisories only; unknown error items must remain errors.
@@ -628,7 +629,13 @@ export function normalizeOpencode(ordered: DecodedRecord[]): NormalizedItem[] {
   const partUpdateRecIds = new Map<string, string[]>();
   const toolPartByCallId = new Map<
     string,
-    { toolName: string; input: unknown; isError?: boolean; recIds: string[] }
+    {
+      toolName: string;
+      input: unknown;
+      isError?: boolean;
+      recIds: string[];
+      attachments?: unknown[];
+    }
   >();
   const items: NormalizedItem[] = [];
 
@@ -664,6 +671,7 @@ export function normalizeOpencode(ordered: DecodedRecord[]): NormalizedItem[] {
           toolName,
           input,
           isError,
+          attachments: Array.isArray(state?.attachments) ? state.attachments : prev?.attachments,
           recIds: [...(prev?.recIds ?? []), d.rec.id],
         });
       }
@@ -748,7 +756,13 @@ function emitOpencodeEvent(
   event: Record<string, unknown>,
   toolPartByCallId: Map<
     string,
-    { toolName: string; input: unknown; isError?: boolean; recIds: string[] }
+    {
+      toolName: string;
+      input: unknown;
+      isError?: boolean;
+      recIds: string[];
+      attachments?: unknown[];
+    }
   >,
 ) {
   switch (event.type) {
@@ -785,7 +799,10 @@ function emitOpencodeEvent(
           role: "user",
           result: {
             id: callId,
-            payload: event.result,
+            payload:
+              rich?.attachments && resultImages(rich.attachments).length > 0
+                ? { output: event.result, attachments: rich.attachments }
+                : event.result,
             isError: rich?.isError ?? event.isError === true,
           },
           coveredRecIds: rich?.recIds,

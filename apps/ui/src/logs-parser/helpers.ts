@@ -1,3 +1,4 @@
+import { resultImages } from "./result-images";
 import type {
   DecodedRecord,
   NormalizedItem,
@@ -141,6 +142,17 @@ function firstEmbeddedJsonIndex(value: string): number {
 
 export function resultPayloadText(payload: unknown): string {
   const unwrapped = unwrapResult(payload);
+  // Keep image bytes available to the expanded tool result renderer and raw copy.
+  if (resultImages(unwrapped.json).length > 0) {
+    return stringifyForDisplay(
+      unwrapped.prose
+        ? {
+            text: unwrapped.prose,
+            content: Array.isArray(unwrapped.json) ? unwrapped.json : [unwrapped.json],
+          }
+        : unwrapped.json,
+    );
+  }
   const extracted = unwrapped.json !== undefined ? contentTextFromJson(unwrapped.json) : undefined;
   if (extracted !== undefined) {
     return unwrapped.prose ? `${unwrapped.prose}\n\n${extracted}` : extracted;
