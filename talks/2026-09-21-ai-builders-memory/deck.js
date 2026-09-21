@@ -56,6 +56,22 @@ addEventListener("keydown", (e) => {
   e.preventDefault();
 });
 
+// Touch screens: tap the right half to go forward, the left half to go back.
+// Mouse clicks do nothing, so review mode and text selection keep working on a laptop.
+let tapStart = null;
+addEventListener("pointerdown", (e) => {
+  tapStart = e.pointerType === "touch" && e.isPrimary ? { x: e.clientX, y: e.clientY, t: e.timeStamp } : null;
+});
+addEventListener("pointerup", (e) => {
+  const start = tapStart;
+  tapStart = null;
+  if (!start || e.pointerType !== "touch" || isPresenter || document.body.classList.contains("dbg")) return;
+  // A tap, not a swipe, a pinch or a long press.
+  if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > 12 || e.timeStamp - start.t > 500) return;
+  if (e.target.closest?.("a, button, textarea, input, #tmr, #notes-overlay")) return;
+  show(current + (e.clientX < innerWidth / 2 ? -1 : 1));
+});
+
 addEventListener("resize", fit);
 addEventListener("hashchange", () => {
   const i = (Number.parseInt(location.hash.slice(1), 10) || 1) - 1;

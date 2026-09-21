@@ -698,6 +698,26 @@ td:first-child {
   color: var(--red);
 }
 
+/* Phones: a fast tap changes the slide, so no double-tap zoom and no tap highlight. */
+html {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+@media (orientation: portrait) and (pointer: coarse) {
+  body::after {
+    content: "rotate the phone · tap right for next, left for back";
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 28px;
+    text-align: center;
+    font: 13px/1.4 "Space Mono", ui-monospace, monospace;
+    letter-spacing: 0.04em;
+    color: #a1a1aa;
+  }
+}
+
 /* Charts (rendered by deck.js) */
 svg.chart {
   width: 100%;
