@@ -4,7 +4,7 @@
 
 (() => {
   // Planned seconds per slide, from the run of show in script.md. 0 = no target.
-  const PLAN = [10, 15, 30, 300, 25, 30, 30, 20, 35, 35, 30, 25, 25, 0, 0];
+  const PLAN = [10, 15, 30, 40, 25, 30, 30, 20, 35, 35, 30, 240, 25, 25, 0, 0];
   const BUDGET = 600;
   const STORE = "deck-timings:2026-09-21-ai-builders-memory";
 

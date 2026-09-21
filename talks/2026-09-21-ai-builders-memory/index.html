@@ -86,26 +86,24 @@
     </aside>
   </section>
 
-  <!-- 4. DEMO -->
+  <!-- 4. DEMO, PART 1 -->
   <section class="slide center">
     <h1><span class="grad">Demo</span></h1>
-    <p class="small mono">swar.am/memory</p>
+    <p class="small mono">part 1 · one Slack message</p>
     <aside class="notes">
       <ul>
-        <li>Story line: "This is the same memory store today." Then the demo.</li>
-        <li>We ask the swarm to build a public page about its own memory. Meet them where they are: the whole UX is a Slack message.</li>
-        <li><strong>Beat 1 (30s):</strong> send the task from Slack. See demo.md for the exact prompt.</li>
-        <li><strong>Beat 2 (90s):</strong> dashboard. Task picked, session log streaming, the "Relevant Past Knowledge" block in the prompt.</li>
-        <li><strong>Beat 3 (90s):</strong> /memory page. Search one query, show composite score vs raw similarity, sources, alpha and beta.</li>
-        <li><strong>Beat 4 (60s):</strong> open the page the swarm built. If it is not done, open the pre-baked one from the dry run.</li>
-        <li>Always have the dry-run page open in a tab before you start.</li>
+        <li><strong>Story:</strong> "This is the same memory store today."</li>
+        <li><strong>40 seconds in total.</strong> Open swar.am/memory for 10 seconds: "The swarm built this page about its own memory today. One worker failed on it."</li>
+        <li>Send the Slack message (exact text in demo.md): "What did you learn while you built the memory page today? 3 bullets. List the ids of the memories you used."</li>
+        <li>"This is the whole UX. Meet them where they are. It works while I talk."</li>
+        <li>Go back to the slides. Do not wait for the reply.</li>
       </ul>
     </aside>
   </section>
 
   <!-- 5. ARCHITECTURE + STACK -->
   <section class="slide top">
-    <div class="kicker">what you just saw</div>
+    <div class="kicker">what is running right now</div>
     <h2>Three loops, one SQLite file.</h2>
     <div style="display:flex;flex-direction:column;gap:26px">
       <div class="lane"><div class="name">WRITE</div><div class="flow">
@@ -400,7 +398,24 @@
     </aside>
   </section>
 
-  <!-- 12. LANDSCAPE -->
+  <!-- 12. DEMO, PART 2 -->
+  <section class="slide center">
+    <h1><span class="grad">Demo</span></h1>
+    <p class="small mono">part 2 · swar.am/memory</p>
+    <aside class="notes">
+      <ul>
+        <li><strong>Story:</strong> "You can now read a score and a reputation. Let us see what it answered."</li>
+        <li><strong>Beat 1 (45s):</strong> the Slack reply. The lessons and the memory ids. The real one from today: a worker failed because create_page is blocked, the lead found that page_create works.</li>
+        <li><strong>Beat 2 (45s):</strong> dashboard, the task prompt, the "Relevant Past Knowledge" block. "It did not start from zero. These are stubs with ids. Pointers."</li>
+        <li><strong>Beat 3 (60s):</strong> /memory. Search the same words. Raw similarity vs final score. Source, alpha, beta.</li>
+        <li><strong>Beat 4 (30s):</strong> the usefulness panel. The 37% citation rate, live.</li>
+        <li><strong>Beat 5 (60s):</strong> swar.am/memory. Button 2 "Depth is forgetting". Button 4 "Every memory earns a reputation".</li>
+        <li>If the reply is not there: skip beat 1, start at beat 3 with a prepared query. Offline copy of the page: localhost:4747/fallback/memory-layers-3d.html (v1).</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- 13. LANDSCAPE -->
   <section class="slide top">
     <div class="kicker">landscape · where is the intelligence?</div>
     <h2>Two axes: when it thinks, what it adapts to.</h2>
@@ -419,7 +434,7 @@
     </aside>
   </section>
 
-  <!-- 13. EVALS -->
+  <!-- 14. EVALS -->
   <section class="slide top">
     <div class="kicker">challenge 4 · would we catch the next day 76?</div>
     <h2 style="white-space:nowrap">The part we have not solved: <span class="grad">evals</span>.</h2>
@@ -456,7 +471,7 @@
     </aside>
   </section>
 
-  <!-- 14. OPEN CHALLENGE -->
+  <!-- 15. OPEN CHALLENGE -->
   <section class="slide">
     <div class="kicker">open challenge</div>
     <h2>How do you eval memory<br>when <span class="grad">time is a variable</span>?</h2>
@@ -481,7 +496,7 @@
     </aside>
   </section>
 
-  <!-- 15. APPENDIX: PROMPTS (after the closing slide, for Q&A) -->
+  <!-- 16. APPENDIX: PROMPTS (after the closing slide, for Q&A) -->
   <section class="slide top">
     <div class="kicker">appendix · simplified prompts</div>
     <h2>Two prompts: read, learn.</h2>
