@@ -2,6 +2,7 @@
 .env*
 # Working files. They hold review chatter, prod numbers, and internal names.
 comments.json
+timings.json
 script.md
 demo.md
 fallback/

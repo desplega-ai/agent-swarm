@@ -543,9 +543,11 @@ actively misleads you, call `memory_rate`.
 
 <script src="deck.js"></script>
 <script>
-  // Review mode is a local tool. The public deploy does not ship debug.js.
+  // Review mode and the rehearsal timer are local tools. The public deploy does not ship them.
   if (["localhost", "127.0.0.1", ""].includes(location.hostname)) {
-    document.body.appendChild(Object.assign(document.createElement("script"), { src: "debug.js" }));
+    for (const src of ["debug.js", "timer.js"]) {
+      document.body.appendChild(Object.assign(document.createElement("script"), { src }));
+    }
   }
 </script>
 </body>

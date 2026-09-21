@@ -1,7 +1,9 @@
 # Local tooling and working notes. Not part of the public deck.
 debug.js
+timer.js
 serve.ts
 comments.json
+timings.json
 script.md
 demo.md
 fallback
