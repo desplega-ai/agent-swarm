@@ -656,6 +656,10 @@ td:first-child {
   color: var(--muted);
 }
 
+.bad-text {
+  color: var(--red);
+}
+
 /* Charts (rendered by deck.js) */
 svg.chart {
   width: 100%;

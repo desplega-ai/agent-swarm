@@ -30,10 +30,12 @@
   <!-- 2. INTRO + QR (Taras fills) -->
   <section class="slide">
     <div class="kicker">whoami</div>
-    <div>
+    <div class="cols" style="align-items:center">
       <div style="display:flex;flex-direction:column;gap:28px;justify-content:center">
         <h2>Taras</h2>
-        <p class="lead" style="white-space:nowrap;font-size:42px">Building <strong>Agent Swarm</strong> at Desplega Labs.</p>
+        <p class="lead" style="font-size:42px">Building <strong>Agent Swarm</strong><br>at Desplega Labs.</p>
+      </div>
+      <div>
         <ul>
           <li>Maths by background, techie at core</li>
           <li>7th hire at Capchase</li>
@@ -51,8 +53,8 @@
 
   <!-- 3. PROBLEM / SOLUTION -->
   <section class="slide">
-    <div class="kicker">problem → solution</div>
-    <h2>Every agent session starts with amnesia.</h2>
+    <div class="kicker">problem → solution · june 2026</div>
+    <h2>On day 76, the swarm <span class="bad-text">forgot</span>.</h2>
     <div class="cols">
       <div class="card bad">
         <h3>Where we started: embed all, top-k.</h3>
@@ -73,11 +75,13 @@
     </div>
     <aside class="notes">
       <ul>
-        <li>Agents are stateless workers in containers. The model forgets everything between tasks.</li>
+        <li><strong>Story hook (say it, do not explain it):</strong> "In June the swarm stopped finding a memory it relied on. The memory was 76 days old. The embedding was fine. The match was fine. It ranked below yesterday's chatter." The why comes on slide 7.</li>
+        <li>The history in one breath: we started with embed all, top-k, so stale facts never died. We added one flat 14-day half-life. Then old truth died too. That is day 76.</li>
+        <li>Agents are stateless workers in containers. Every session starts with amnesia. The model forgets everything between tasks.</li>
         <li><strong>Learning 1, company-first:</strong> a local CLAUDE.md teaches one laptop. A shared memory teaches every agent in the company. Benefit: lessons compound. Cost: one bad memory reaches everyone.</li>
         <li>Naive RAG as memory is shared mutable global state with embeddings on top.</li>
         <li>Spoken line for the right card: "a memory that evolves like a brain". It fades, it strengthens with use, it earns trust.</li>
-        <li>Three ideas today: spectrum, pointers, ratings. Then the part we have not solved: evals.</li>
+        <li>The arc: one incident, three fixes (time, pointers, reputation), and one failure we have not fixed: evals.</li>
       </ul>
     </aside>
   </section>
@@ -88,6 +92,7 @@
     <p class="small mono">swar.am/memory</p>
     <aside class="notes">
       <ul>
+        <li>Story line: "This is the same memory store today." Then the demo.</li>
         <li>We ask the swarm to build a public page about its own memory. Meet them where they are: the whole UX is a Slack message.</li>
         <li><strong>Beat 1 (30s):</strong> send the task from Slack. See demo.md for the exact prompt.</li>
         <li><strong>Beat 2 (90s):</strong> dashboard. Task picked, session log streaming, the "Relevant Past Knowledge" block in the prompt.</li>
@@ -137,7 +142,7 @@
 
   <!-- 6. CHALLENGE 1: THE FORMULA -->
   <section class="slide center">
-    <div class="kicker">challenge 1 · short-term vs long-term</div>
+    <div class="kicker">challenge 1 · it forgot</div>
     <h2><span class="grad">One score</span> does both.</h2>
     <div class="math">
       <span class="term"><span><i>score</i></span></span>
@@ -155,6 +160,7 @@
     <p class="legend"><i>q</i> query · <i>m</i> memory · sim = similarity: semantic + keyword · τ half-life of the source<br>trust = 1.5× stored on purpose … 0.5× session summary · α, β times it helped / did not</p>
     <aside class="notes">
       <ul>
+        <li><strong>Story:</strong> "Back to day 76. This is the score. One term killed that memory." Point at time.</li>
         <li>sim is not raw cosine. In hybrid mode it is the fused rank score of two searches: semantic (vectors) and keyword (FTS5), fused with RRF, k = 60. A memory found by both arms gets both contributions. Raw cosine is kept on the side.</li>
         <li>trust (source_quality in the code): how much we trust where the memory came from. Stored on purpose (memory-store tool) 1.5x, indexed file 1.0x, task learning 0.7x, session summary 0.5x.</li>
         <li>Everyone draws two boxes: short-term and long-term. We have one table and one reranker.</li>
@@ -167,11 +173,12 @@
 
   <!-- 7. DECAY CURVES -->
   <section class="slide top">
-    <div class="kicker">challenge 1 · time</div>
+    <div class="kicker">challenge 1 · why it forgot</div>
     <h2>Four sources, four half-lives.</h2>
     <svg id="decay-chart" class="chart"></svg>
     <aside class="notes">
       <ul>
+        <li><strong>Story:</strong> The reveal. The red line is the memory from slide 3. Flat 14-day half-life: 2^(-76/14) = 0.02. The fix is the four curves.</li>
         <li>Each source forgets at its own speed: session summary 7d, task learning 14d, indexed file 180d, stored on purpose never.</li>
         <li><strong>The bug story (red line, day 76):</strong> the decay used to be flat 14 days for everything. A canonical memory, 76 days old, stopped showing. Embedding fine, similarity fine. 2^(-76/14) = 0.02, so the truth ranked below yesterday's chatter.</li>
         <li>Fix (PR #696): half-life depends on the source. Same memory now scores x0.75 as a file, x1.0 if curated.</li>
@@ -243,7 +250,7 @@
 
   <!-- 9. CHALLENGE 2: POINTERS + RELATIONS -->
   <section class="slide top">
-    <div class="kicker">challenge 2 · pointers + relations</div>
+    <div class="kicker">challenge 2 · it survives. what should it hold?</div>
     <h2>You do not remember the spreadsheet.<br>You remember <span class="grad">where it lives</span>.</h2>
     <svg style="height:570px;width:auto;align-self:center" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1660 640" role="img" aria-labelledby="astra-graph-title">
       <title id="astra-graph-title">A graph built by regex, not by a librarian.</title>
@@ -297,6 +304,7 @@
     </svg>
     <aside class="notes">
       <ul>
+        <li><strong>Story:</strong> Bridge, not an incident: "Now old truth survives for 180 days or for ever. A copied payload goes stale in that time. A pointer does not." Do not claim a hoarding incident. We have none on record.</li>
         <li><strong>The contrast, say it aloud:</strong> the obvious approach is to ingest everything (copy Notion, GitHub, Slack into the vector store). Result: stale copies, sync issues, huge index, lost permissions.</li>
         <li>Our take: a memory is a lesson plus pointers. It points at sources (GitHub, runbooks, Notion) and at other memories. Tools fetch the fresh data at read time.</li>
         <li><strong>Prod numbers (2026-09-21):</strong> 2,709 PR links, 1,146 wikilinks, 1,066 rated source edges. In the retrieval log, about 1 in 5 rows (27,847 of 127,530) arrived through a link, not through search.</li>
@@ -321,7 +329,7 @@
 
   <!-- 10. CHALLENGE 3: RATERS -->
   <section class="slide top">
-    <div class="kicker">challenge 3 · which memories were worth it?</div>
+    <div class="kicker">challenge 3 · it trusted every memory equally</div>
     <h2>Every memory earns a reputation.</h2>
     <div class="cols wide-left">
       <div style="display:flex;flex-direction:column;gap:30px;justify-content:center">
@@ -344,6 +352,8 @@
     </div>
     <aside class="notes">
       <ul>
+        <li><strong>Trap:</strong> raters shipped 2026-05-06, the day-76 fix 2026-06-08. The chapters follow ideas, not dates. Do not say "then we added ratings".</li>
+        <li><strong>Story:</strong> "Day 76 taught us one more thing: every memory had the same trust. Nothing told the ranker which ones were worth it."</li>
         <li><strong>Prod numbers (2026-09-21, since May):</strong> 227K rating events. Implicit citation 166,588 (37% cited, 63% ignored). LLM judge 56,711 (60% positive). Self-rating 3,987. 3,982 of 15,660 memories have moved off Beta(1,1).</li>
         <li>The formula, if someone asks: the Beta density over x, the unknown "how often does this memory help". B(α, β) only normalises it. We never compute the curve in prod, we only need the mean, α / (α + β).</li>
         <li>Problem: retrieval tells you what is similar. Nothing tells you what helped.</li>
@@ -378,6 +388,7 @@
     </div>
     <aside class="notes">
       <ul>
+        <li><strong>Story:</strong> The twist: agents grade their own memories 90% useful. Citations say 37%. The fix has its own failure. It sets up evals.</li>
         <li><strong>Reward hacking, with data:</strong> when agents rate their own memories, 90% of ratings are "useful" (3,606 of 3,987). The server-side citation signal says only 37% of retrieved memories get used. That gap is why self-rating cannot be the only reward.</li>
         <li>First row is the part we do not control: the model weights belong to the lab. Everything below it is ours.</li>
         <li>Read the table top down: we act (pick memories), we get a reward (ratings), we update the value (alpha, beta). The next task ranks with the new values. That is the loop.</li>
@@ -410,7 +421,7 @@
 
   <!-- 13. EVALS -->
   <section class="slide top">
-    <div class="kicker">challenge 4 · unsolved</div>
+    <div class="kicker">challenge 4 · would we catch the next day 76?</div>
     <h2 style="white-space:nowrap">The part we have not solved: <span class="grad">evals</span>.</h2>
     <p class="lead">Memory is a new hire. How do you run its performance review?</p>
     <div class="cols">
@@ -435,6 +446,7 @@
     </div>
     <aside class="notes">
       <ul>
+        <li><strong>Story:</strong> Callback: "A static eval passes on day 1 and on day 76. Match was fine. Only time changed." Trap: do not say how day 76 was found unless you remember it. I have no record of who noticed.</li>
         <li><strong>The onboarding analogy:</strong> swarm memory is like onboarding a person. It makes mistakes at first, you give it feedback, it learns. So how do you know if a person performs? Not with unit tests. With performance reviews, impact over time, and what colleagues say. Our evals look the same: ratings are the feedback, citation rate is the impact, daily human use is the peer review.</li>
         <li>The unit level is solved: the reranker is pure, rerank(candidates, now). Inject the clock, assert the ranking.</li>
         <li>The scenario level is OK: seed memories, tempt the model with plausible wrong defaults, grade facts deterministically. A judge only checks that the agent searched and did not guess.</li>
@@ -460,6 +472,7 @@
     <img class="closing-qr" src="assets/qr-repo.svg" alt="github.com/desplega-ai/agent-swarm">
     <aside class="notes">
       <ul>
+        <li><strong>Story:</strong> Close the loop: "Day 76 was a time bug. That is why the question has time in it."</li>
         <li>Ask the room for ideas. Stay on this slide during Q&amp;A.</li>
         <li>Backup questions if the room is quiet: how do you explore new memories without making prod random? Who gets the credit when the task passes?</li>
         <li>The three learnings from the abstract, in one breath: company-first (one shared brain), let it write its own scripts, meet them where they are.</li>
