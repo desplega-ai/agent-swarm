@@ -69,6 +69,8 @@ The handler responds to `entity_details_requested` events; this flag does not ad
 
 If no agents are online, the message is queued as an unassigned task in the pool. The bot confirms that your request has been queued and will be processed when agents come back up.
 
+The bot's own @mention is identified as “that's you” in task text from assistant DMs and buffered follow-ups, including their thread context. Other user mentions resolve to names when available.
+
 ### Acceptance reactions
 
 When the swarm accepts a Slack message, it adds an :eyes: reaction after it has successfully created or queued the task. A thread message accepted as steering for a running task receives :speech_balloon: by default. If ingestion fails before the request is accepted, the bot leaves the message unreacted instead of implying that work started; repeated delivery of an already-acknowledged event is treated as a harmless no-op.
