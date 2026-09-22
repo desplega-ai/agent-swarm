@@ -73,6 +73,8 @@ async function pins(client: Client): Promise<string[]> {
     .sort();
 }
 
+// Eight real MCP sessions approach the 10s CI default under parallel runner load.
+// Keep the session-lifetime assertions together with room for connection setup.
 test("wire response is default-on, per-task, additive, and fixed for one MCP session", async () => {
   const task = await createTaskExtended("review fixture", { agentId, taskType: "review" });
   const other = await createTaskExtended("other fixture", { agentId, taskType: "other" });
@@ -115,7 +117,7 @@ test("wire response is default-on, per-task, additive, and fixed for one MCP ses
   await configure("TASK_TOOL_PRELOAD_ENABLED", "true");
   await configure("TASK_TOOL_MANIFESTS", "invalid deployment JSON");
   expect(await pins(await connect(task.id))).toEqual([]);
-});
+}, 30_000);
 
 test("a manifest cannot expand the scripts-only capability surface", async () => {
   const task = await createTaskExtended("script fixture", { agentId, taskType: "script" });
