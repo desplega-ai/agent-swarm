@@ -19,8 +19,9 @@ lifecycle control. Operators who do not accept that trust must set
 environment** and restart every API replica. This restores operator/dashboard-user-only
 `extension.activate` access for enable, disable, and activate-version, across REST,
 MCP, and the script SDK. It also denies lead-equivalent extension identities.
-Leads can still install drafts and delete disabled extensions. Ordinary workers
-remain denied. This reserved key cannot be set through `swarm_config`, `set-config`,
+Any authenticated agent can install a draft, recorded under its `createdByAgentId`.
+Workers can update and delete only their own extensions; enable, disable, and
+activate-version remain denied to workers. Leads retain access to all bundles. This reserved key cannot be set through `swarm_config`, `set-config`,
 or the dashboard; agents cannot turn the gate back on through those APIs.
 
 The default accepts server-process execution by trusted leads as part of the
@@ -41,22 +42,39 @@ side effects. These are request records, not success receipts; load failures get
 separate `load-error` records. The run log retains only the newest 500 entries and
 is deleted on uninstall. Neither log is tamper-proof against in-process code.
 
+## Ownership and drafts
+
+`extension.write` is resource-scoped: workers may create bundles, stage new
+versions of their own bundles, and PATCH or DELETE their own disabled extensions.
+Leads, operators, and dashboard users keep access to all bundles. Reinstalling a
+name owned by another agent (or by an operator) does not transfer ownership.
+`createdByAgentId` stays the original creator; every version records its writer as
+`changedByAgentId`. GET and `extension-list` expose the creator. The separate
+`agentId` belongs to the extension's runtime identity, not its owner.
+
+A new install has `enabled=false`, `status=disabled`, and no runtime agent.
+Validation typechecks source without importing it, so a draft is inert until a
+lead, operator, or dashboard user enables it. An agent's subsequent version stays
+inactive until explicitly activated. For enabled extensions, workers cannot PATCH
+or change config/priority through reinstall: those changes reload live code.
+They can stage code-only versions without replacing the active snapshot.
+
 ## Lifecycle
 
 The REST install route performs these checks:
 
-1. Parse the manifest with `ExtensionManifestSchema`.
+1. Parse the manifest with `ExtensionManifestSchema` and authorize the creator or owner.
 2. Reject unsafe bundle paths.
 3. Reject the worker runtime and reserved asset kinds.
 4. Reject relative, unapproved, and computed imports.
 5. Typecheck the hooks file against `swarm-extension.d.ts`.
-6. Store the current bundle and an immutable version snapshot.
+6. Recheck worker ownership inside the transaction, then store the bundle and an immutable version snapshot.
 
 An MCP install uses the same REST route.
-It always stores a disabled draft.
+A new install stores a disabled draft. Agent updates store inactive versions of existing bundles.
 A lead, operator, or dashboard user can enable the draft with `extension-enable`.
 The MCP and script SDK surfaces also expose `extension-disable`, `extension-activate-version`, and `extension-delete`.
-Deletion requires disabling the extension first; ordinary workers cannot change its lifecycle.
+Deletion requires disabling the extension first; workers may delete their own disabled bundles.
 
 Enable creates or updates the `ext:<name>` system agent.
 The agent row keeps `isLead: false`, so lead selection never picks it.
@@ -69,7 +87,7 @@ It then registers the module's handlers.
 
 Enable and disable update the local registry immediately.
 An operator install reloads an enabled extension immediately.
-PATCH reloads an enabled extension immediately.
+An authorized lead/operator/dashboard-user PATCH reloads an enabled extension immediately.
 Version activation reloads the extension when it is enabled.
 A 30-second poll detects database changes from another API process.
 This poll does not provide coordinated multi-replica execution.

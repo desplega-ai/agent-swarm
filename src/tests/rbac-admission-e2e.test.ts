@@ -10,6 +10,7 @@
 import { Database } from "bun:sqlite";
 import { afterAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { join } from "node:path";
+import { loadBundleFixture } from "./fixtures/extensions/load";
 import {
   api,
   makeScratchDir,
@@ -482,4 +483,57 @@ describe("RBAC admission over real HTTP", () => {
       CONFIG_SECRET_VALUE,
     );
   });
+});
+
+test.each(["true", "false"])("worker extension ownership with RBAC_ENABLED=%s", async (enabled) => {
+  const scratch = await makeScratchDir();
+  const instance = await spawnSwarmServer({
+    dbPath: join(scratch, "extension-admission.sqlite"),
+    logPath: join(scratch, "extension-admission.log"),
+    env: { RBAC_ENABLED: enabled },
+  });
+  try {
+    await registerAgent(instance.base, WORKER_A, "extension-owner", false);
+    const bundle = await loadBundleFixture("minimal");
+    const installed = await api(instance.base, "POST", "/api/extensions/install", {
+      agentId: WORKER_A,
+      body: bundle,
+    });
+    expect(installed.status).toBe(200);
+    expect(installed.body.extension).toMatchObject({
+      createdByAgentId: WORKER_A,
+      enabled: false,
+      status: "disabled",
+    });
+    const path = `/api/extensions/${installed.body.extension.id}`;
+    for (const operation of ["enable", "disable", "activate-version"]) {
+      expect(
+        (
+          await api(instance.base, "POST", `${path}/${operation}`, {
+            agentId: WORKER_A,
+            body: { version: 1 },
+          })
+        ).status,
+      ).toBe(403);
+    }
+    const operatorBundle = { ...bundle, manifest: { ...bundle.manifest, name: "operator-owned" } };
+    const operator = await api(instance.base, "POST", "/api/extensions/install", {
+      body: operatorBundle,
+    });
+    expect(operator.status).toBe(200);
+    expect(operator.body.extension.createdByAgentId).toBeNull();
+    for (const method of ["PATCH", "DELETE"]) {
+      expect(
+        (
+          await api(instance.base, method, `/api/extensions/${operator.body.extension.id}`, {
+            agentId: WORKER_A,
+            ...(method === "PATCH" ? { body: { priority: 1 } } : {}),
+          })
+        ).status,
+      ).toBe(403);
+    }
+  } finally {
+    await instance.stop();
+    await removeScratchDir(scratch);
+  }
 });

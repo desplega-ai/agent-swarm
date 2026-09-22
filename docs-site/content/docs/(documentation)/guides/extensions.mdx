@@ -23,8 +23,9 @@ lifecycle control. Operators who do not accept that trust must set
 environment** and restart every API replica. This restores operator/dashboard-user-only
 `extension.activate` access for enable, disable, and activate-version, across REST,
 MCP, and the script SDK. It also denies lead-equivalent extension identities.
-Leads can still install drafts and delete disabled extensions. Ordinary workers
-remain denied. This reserved key cannot be set through `swarm_config`, `set-config`,
+Any authenticated agent can install a draft, recorded under its `createdByAgentId`.
+Workers can update and delete only their own extensions; enable, disable, and
+activate-version remain denied to workers. Leads retain access to all bundles. This reserved key cannot be set through `swarm_config`, `set-config`,
 or the dashboard; agents cannot turn the gate back on through those APIs.
 
 The default accepts server-process execution by trusted leads as part of the
@@ -44,6 +45,22 @@ Agent lifecycle requests also write `lifecycle.enable.requested`,
 side effects. These are request records, not success receipts; load failures get
 separate `load-error` records. The run log retains only the newest 500 entries and
 is deleted on uninstall. Neither log is tamper-proof against in-process code.
+
+## Ownership and drafts
+
+Any authenticated agent may install an extension. Its `createdByAgentId` is the
+installing agent and remains the owner across later versions. Each version records
+its writer as `changedByAgentId`. GET responses and `extension-list` expose the
+owner. The separate `agentId` is the extension's runtime identity.
+
+Workers may stage versions of their own bundles and PATCH or DELETE their own
+disabled extensions. They cannot overwrite another owner's bundle. Leads,
+operators, and dashboard users retain access to all bundles.
+
+New installs are disabled and inert: validation typechecks the bundle without
+importing it. Enabling and version activation require a lead, operator, or dashboard
+user. Workers may stage code-only versions of an enabled extension, but cannot
+PATCH it or change its live config/priority through reinstall.
 
 ## Trust model
 
@@ -209,7 +226,7 @@ curl -X POST "$API/api/extensions/<id>/activate-version" \
 The Settings page provides install, edit, activation, version, and run-log controls.
 Agents can use the `extension-install`, `extension-list`, `extension-enable`, `extension-disable`, `extension-activate-version`, and `extension-delete` MCP tools.
 The script SDK exposes the same names with underscores, such as `ctx.swarm.extension_enable({ id })`.
-Lifecycle mutations require lead permissions. Delete refuses enabled extensions; disable them first.
+Enable, disable, and activate-version require a lead, operator, or dashboard user. Workers can create extensions and update or delete only their own disabled drafts. Delete refuses enabled extensions; an authorized caller must disable them first.
 The MCP install tool never activates a version.
 
 ## Example hooks

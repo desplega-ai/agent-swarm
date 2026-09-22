@@ -74,6 +74,8 @@ function resourceIdOf(resource: RbacCheck["resource"]): string | null {
       return resource.agentId;
     case "kv-namespace":
       return resource.namespace;
+    case "extension":
+      return resource.extensionId ?? null;
     case "app":
       return resource.appId;
     case "owned":

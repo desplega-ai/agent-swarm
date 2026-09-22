@@ -9,7 +9,7 @@ import {
 } from "./extension-common";
 
 export const EXTENSION_INSTALL_DESCRIPTION =
-  "Validate and store a TypeScript extension bundle (manifest plus a files map with one hooks.ts). Fetch the hook contract first: GET /api/extensions/type-defs returns swarm-extension.d.ts with every event and modify shape. The extension remains disabled until a lead, operator, or dashboard user enables it with extension-enable.";
+  "Any authenticated agent may create and install its own TypeScript extension bundle (manifest plus a files map with one hooks.ts). Fetch the hook contract first: GET /api/extensions/type-defs returns swarm-extension.d.ts with every event and modify shape. The installing agent is recorded as createdByAgentId. Workers may install subsequent versions only for their own extensions; those versions remain inactive. A new extension remains disabled until a lead, operator, or dashboard user enables it with extension-enable.";
 
 function extensionInstallResult(data: unknown, fallbackName: string) {
   const body = data as {

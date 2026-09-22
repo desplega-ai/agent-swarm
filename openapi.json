@@ -15976,6 +15976,7 @@
       "post": {
         "operationId": "extensions_install",
         "summary": "Validate and install an extension bundle",
+        "description": "Any authenticated agent can install a disabled draft owned by its agent ID. Workers can update only their own bundles; activation remains lead/operator-only.",
         "tags": [
           "Extensions"
         ],
@@ -16167,6 +16168,7 @@
       "patch": {
         "operationId": "extensions_update",
         "summary": "Update extension priority, config, or description",
+        "description": "Workers may edit their own disabled extensions. Leads, operators, and dashboard users retain access to all extensions.",
         "tags": [
           "Extensions"
         ],
@@ -16262,6 +16264,7 @@
       "delete": {
         "operationId": "extensions_delete",
         "summary": "Uninstall a disabled extension",
+        "description": "Workers may uninstall their own disabled extensions. Leads, operators, and dashboard users retain access to all extensions.",
         "tags": [
           "Extensions"
         ],

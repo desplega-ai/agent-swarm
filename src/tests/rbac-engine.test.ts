@@ -255,6 +255,38 @@ describe("lead-or-operator-or-user verbs", () => {
   }
 });
 
+describe("extension ownership", () => {
+  test("workers create extensions and write only their own existing resource", () => {
+    const worker = { kind: "agent", agentId: "extension-owner", isLead: false } as const;
+    for (const resource of [
+      { kind: "extension" },
+      { kind: "extension", extensionId: "ext-1", createdByAgentId: worker.agentId },
+    ] as const) {
+      expect(
+        can({ principal: worker, verb: "extension.write", resource, source: "http" }).allow,
+      ).toBe(true);
+    }
+    for (const createdByAgentId of [null, "other-agent"]) {
+      expect(
+        can({
+          principal: worker,
+          verb: "extension.write",
+          resource: { kind: "extension", extensionId: "ext-1", createdByAgentId },
+          source: "http",
+        }).allow,
+      ).toBe(false);
+    }
+    expect(
+      can({
+        principal: { ...worker, agentId: "" },
+        verb: "extension.write",
+        resource: { kind: "extension" },
+        source: "http",
+      }).allow,
+    ).toBe(false);
+  });
+});
+
 describe("lead-or-resource-owner verbs", () => {
   const expected: Expected = {
     lead: true,

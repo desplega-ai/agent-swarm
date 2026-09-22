@@ -8,9 +8,13 @@ Do not use an extension for work that one task, one script, or one schedule can 
 
 `extension-install` and `extension-list`. They are deferred. Load them with your harness tool search before the first call.
 
-`extension-install` validates the bundle (manifest, imports, typecheck against the hook contract) and stores it. Only a lead agent, an operator, or a dashboard user may install. A worker gets `Forbidden` from the tool. When you are a worker, write and validate the bundle, then hand it to your lead with `send-task` (include the manifest, the hooks file, and the config) and report that in your output. Do not call the REST install route with the shared API key to get around the role check. The stored extension stays disabled. An operator enables it from the dashboard (Settings, Extensions) or with `POST /api/extensions/{id}/enable`. Say this in your task report and give the extension name.
+`extension-install` validates the bundle (manifest, imports, typecheck against the hook contract) and stores it. Any authenticated agent, including a worker, can install a new bundle. Your agent is recorded as its owner in `createdByAgentId`; `extension-list` exposes that field. Always send your `X-Agent-ID` when using REST so ownership is attributed to you.
 
-Installing a bundle with the same name and changed files stores a new version. The active version does not change until an operator activates it.
+Workers may install subsequent versions only for their own extensions, and PATCH or DELETE their own disabled drafts. Ownership stays with the original creator; each version records its writer as `changedByAgentId`. Leads, operators, and dashboard users retain access to all bundles.
+
+A new install is disabled and inert. A lead, operator, or dashboard user must enable it with `extension-enable` or `POST /api/extensions/{id}/enable`. Workers cannot enable, disable, or activate versions. Report the extension name and the required activation step.
+
+Installing changed files under your existing name stages a new version without activating it. Workers may stage code-only updates while an extension is enabled, but cannot PATCH or change its live config/priority. Ask a lead or operator to make those changes. `EXTENSION_ALLOW_LEAD_ACTIVATION=false` restricts activation to operators/dashboard users.
 
 ## Get the contract before you write hooks
 
@@ -58,7 +62,7 @@ The bundle is a manifest plus a files map. Version 1 accepts one file, the `asse
 Rules for `hooks.ts`:
 
 - Import only from `swarm-extension`, `zod`, and `stdlib`. Relative imports, other packages, and dynamic imports are rejected.
-- Export the extension as `default`. Export `config` (a Zod schema) when the extension takes configuration. The install validates `config` against it.
+- Export the extension as `default`. Export `config` (a Zod schema) when the extension takes configuration. Activation validates `config` against it.
 - Return `block(reason)` or `modify(data)` from pre hooks. Return nothing to continue.
 - Keep handlers fast. A handler is cancelled after 5 seconds. Five consecutive failures auto-disable the extension.
 - Handlers run outside database transactions and must not assume ordering with other extensions. Use `priority` in `api.on(event, handler, { priority })` when order matters (lower runs first).
@@ -107,7 +111,7 @@ export default extension;
 ## Verify
 
 1. Call `extension-list` and confirm the name, version, and `enabled: false`.
-2. Report the enable step. After an operator enables it, the dashboard run log shows every dispatch with its result (`continue`, `modify`, `block`, or `error`).
+2. Report the enable step. After a lead or operator enables it, the dashboard run log shows every dispatch with its result (`continue`, `modify`, `block`, or `error`).
 3. Trigger the event once and confirm the effect (for example, a blocked REST task returns HTTP 422 with your reason).
 
 ## Common mistakes
@@ -116,5 +120,5 @@ export default extension;
 - Using `import` from a package other than `swarm-extension`, `zod`, or `stdlib`.
 - Returning a plain object instead of `block(...)` or `modify(...)`.
 - Modifying fields the event does not allow. Read the `*Modify` type for that event.
-- Expecting the extension to run after install. It runs only after an operator enables it.
+- Expecting the extension to run after install. It runs only after a lead or operator enables it.
 - Blocking tasks from every origin. Check `event.origin` so schedules, workflows, and follow-ups keep working unless you mean to block them.

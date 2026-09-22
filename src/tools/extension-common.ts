@@ -10,6 +10,7 @@ const extensionListItemSchema = z.looseObject({
   name: z.string().optional(),
   version: z.number().optional(),
   activeVersion: z.number().optional(),
+  createdByAgentId: z.string().nullable().optional(),
   enabled: z.boolean().optional(),
   status: z.string().optional(),
   priority: z.number().optional(),
@@ -21,6 +22,7 @@ export const extensionToolOutputSchema = swarmToolOutputSchema({
   name: z.string().optional(),
   version: z.number().optional(),
   activeVersion: z.number().optional(),
+  createdByAgentId: z.string().nullable().optional(),
   enabled: z.boolean().optional(),
   status: z.string().optional(),
   priority: z.number().optional(),
@@ -38,6 +40,8 @@ export function coerceExtensionSummary(entry: unknown) {
   const extension = isRecord(entry) ? entry : {};
   return {
     id: typeof extension.id === "string" ? extension.id : undefined,
+    createdByAgentId:
+      typeof extension.createdByAgentId === "string" ? extension.createdByAgentId : null,
     name: typeof extension.name === "string" ? extension.name : undefined,
     version: typeof extension.version === "number" ? extension.version : undefined,
     activeVersion:

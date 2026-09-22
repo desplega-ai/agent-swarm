@@ -78,6 +78,8 @@ export async function spawnSwarmServer(opts: {
       API_KEY: E2E_API_KEY,
       AGENT_SWARM_API_KEY: E2E_API_KEY,
       PORT: String(port),
+      // MCP proxy tools must call this scratch server, never an inherited live URL.
+      MCP_BASE_URL: `http://localhost:${port}`,
       SLACK_DISABLE: "true",
       GITHUB_DISABLE: "true",
       JIRA_DISABLE: "true",

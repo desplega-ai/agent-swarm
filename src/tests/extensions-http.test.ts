@@ -6,6 +6,7 @@ import {
   getExtensionByName,
   insertExtensionRun,
   listExtensionRuns,
+  listExtensionVersions,
   setExtensionState,
 } from "../be/extensions/db";
 import { enqueueAuditRow, flushAuditBuffer } from "../be/rbac-audit";
@@ -259,16 +260,159 @@ describe("/api/extensions HTTP", () => {
     expect((await response.json()).runs).toEqual([second, first]);
   });
 
-  test("lead agents may install, workers may not, and agent installs stay disabled", async () => {
-    expect((await install("minimal", workerId)).status).toBe(403);
-    const response = await install("minimal", leadId);
+  test("worker installs are owned, disabled, and cannot activate their own extension", async () => {
+    const response = await install("minimal", workerId);
     expect(response.status).toBe(200);
     const extension = (await response.json()).extension as {
       enabled: boolean;
       createdByAgentId: string | null;
     };
     expect(extension.enabled).toBe(false);
-    expect(extension.createdByAgentId).toBe(leadId);
+    expect(extension.createdByAgentId).toBe(workerId);
+    const stored = (await getExtensionByName("minimal"))!;
+    expect(stored.status).toBe("disabled");
+    expect(stored.agentId).toBeNull();
+    for (const operation of ["enable", "disable", "activate-version"]) {
+      expect(
+        (
+          await dispatch(`/api/extensions/${stored.id}/${operation}`, {
+            method: "POST",
+            agentId: workerId,
+            body: JSON.stringify({ version: 1 }),
+          })
+        ).status,
+      ).toBe(403);
+    }
+    expect(await listExtensionRuns(stored.id)).toHaveLength(0);
+    expect((await dispatch(`/api/extensions/${stored.id}`)).text).toContain(workerId);
+    expect((await dispatch("/api/extensions")).text).toContain(workerId);
+    const changed = await loadBundleFixture("minimal");
+    changed.files["hooks.ts"] += "\n// worker draft v2\n";
+    expect(
+      (
+        await dispatch("/api/extensions/install", {
+          method: "POST",
+          agentId: workerId,
+          body: JSON.stringify(changed),
+        })
+      ).status,
+    ).toBe(200);
+    expect(await getExtensionByName("minimal")).toMatchObject({
+      version: 2,
+      activeVersion: 1,
+      enabled: false,
+      status: "disabled",
+      createdByAgentId: workerId,
+    });
+    const versions = await listExtensionVersions(stored.id);
+    expect(versions).toHaveLength(2);
+    expect(versions.every((version) => version.changedByAgentId === workerId)).toBe(true);
+  });
+
+  test("install never evaluates worker bundle code", async () => {
+    const bundle = await loadBundleFixture("minimal");
+    bundle.files["hooks.ts"] += '\nthrow new Error("must only run on activation");\n';
+    const response = await dispatch("/api/extensions/install", {
+      method: "POST",
+      agentId: workerId,
+      body: JSON.stringify(bundle),
+    });
+    expect(response.status).toBe(200);
+    const stored = (await getExtensionByName("minimal"))!;
+    expect(stored).toMatchObject({ enabled: false, status: "disabled", agentId: null });
+    expect(await listExtensionRuns(stored.id)).toHaveLength(0);
+    const activation = await dispatch(`/api/extensions/${stored.id}/enable`, { method: "POST" });
+    expect(activation.status).toBe(500);
+    expect(activation.text).toContain("must only run on activation");
+  });
+
+  test("workers cannot overwrite, patch, or delete another owner's extension", async () => {
+    await install("minimal", leadId);
+    const stored = (await getExtensionByName("minimal"))!;
+    expect((await install("minimal", workerId)).status).toBe(403);
+    for (const method of ["PATCH", "DELETE"]) {
+      expect(
+        (
+          await dispatch(`/api/extensions/${stored.id}`, {
+            method,
+            agentId: workerId,
+            ...(method === "PATCH" ? { body: JSON.stringify({ priority: 7 }) } : {}),
+          })
+        ).status,
+      ).toBe(403);
+    }
+    expect(await getExtensionByName("minimal")).toMatchObject({
+      createdByAgentId: leadId,
+      priority: 100,
+      version: 1,
+    });
+  });
+
+  test("worker owners edit and delete disabled drafts, but cannot reload live code", async () => {
+    await install("minimal", workerId);
+    const stored = (await getExtensionByName("minimal"))!;
+    const path = `/api/extensions/${stored.id}`;
+    expect(
+      (
+        await dispatch(path, {
+          method: "PATCH",
+          agentId: workerId,
+          body: JSON.stringify({ priority: 7 }),
+        })
+      ).status,
+    ).toBe(200);
+    expect((await dispatch(`${path}/enable`, { method: "POST", agentId: leadId })).status).toBe(
+      200,
+    );
+    expect(
+      (
+        await dispatch(path, {
+          method: "PATCH",
+          agentId: workerId,
+          body: JSON.stringify({ config: { live: true } }),
+        })
+      ).status,
+    ).toBe(403);
+    const changed = await loadBundleFixture("minimal");
+    changed.files["hooks.ts"] += '\nthrow new Error("inactive worker version executed");\n';
+    expect(
+      (
+        await dispatch("/api/extensions/install", {
+          method: "POST",
+          agentId: workerId,
+          body: JSON.stringify({ ...changed, config: { live: true } }),
+        })
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await dispatch("/api/extensions/install", {
+          method: "POST",
+          agentId: workerId,
+          body: JSON.stringify(changed),
+        })
+      ).status,
+    ).toBe(200);
+    // A permitted reload must keep using version 1, never evaluate the worker draft.
+    expect(
+      (
+        await dispatch(path, {
+          method: "PATCH",
+          agentId: leadId,
+          body: JSON.stringify({ priority: 7 }),
+        })
+      ).status,
+    ).toBe(200);
+    expect(await getExtensionByName("minimal")).toMatchObject({
+      version: 2,
+      activeVersion: 1,
+      enabled: true,
+      configJson: "{}",
+    });
+    expect((await dispatch(path, { method: "DELETE", agentId: workerId })).status).toBe(409);
+    expect((await dispatch(`${path}/disable`, { method: "POST" })).status).toBe(200);
+    expect((await dispatch(path, { method: "DELETE", agentId: workerId })).status).toBe(200);
+    expect(await getExtensionByName("minimal")).toBeNull();
   });
 
   test("operator reinstall activates a new version when the extension is enabled", async () => {

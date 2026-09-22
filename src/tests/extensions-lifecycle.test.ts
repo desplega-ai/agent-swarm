@@ -81,6 +81,24 @@ describe("extension lifecycle", () => {
     expect(listRegistered()).toHaveLength(0);
   });
 
+  test("activation loads its immutable snapshot, not a concurrently advanced file projection", async () => {
+    const extension = await install(await loadBundleFixture("minimal"));
+    // Simulate a worker draft replacing the mutable files after activation read its row.
+    await getDbClient().run("UPDATE extension_files SET content = ? WHERE extensionId = ?", [
+      'throw new Error("unapproved draft executed");',
+      extension.id,
+    ]);
+    const enabled = await enableExtension(extension.id);
+    expect(enabled).toMatchObject({ enabled: true, activeVersion: 1 });
+    expect(
+      await dispatchPre("pre.task.create", {
+        options: {},
+        description: "snapshot check",
+        origin: "rest",
+      }),
+    ).toEqual({ action: "continue" });
+  });
+
   test("activate-version swaps source and reloads an enabled extension", async () => {
     const bundle = await loadBundleFixture("priority-a");
     const extension = await install(bundle);

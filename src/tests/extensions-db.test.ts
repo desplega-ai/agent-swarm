@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { closeDb, getDbClient, initDb } from "../be/db";
 import {
   deleteExtension,
+  ExtensionOwnershipError,
   getExtensionById,
   getExtensionFiles,
   getExtensionVersion,
@@ -65,6 +66,46 @@ describe("extension DB helpers", () => {
         )
       )?.count,
     ).toBe(1);
+  });
+
+  test("concurrent worker installs cannot take ownership of the same name", async () => {
+    const bundle = await loadBundleFixture("minimal");
+    const results = await Promise.allSettled(
+      ["worker-a", "worker-b"].map((agentId) =>
+        installExtension({ ...bundle, agentId, ownerOnly: agentId }),
+      ),
+    );
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const rejected = results.find((result) => result.status === "rejected");
+    expect(rejected?.status === "rejected" && rejected.reason).toBeInstanceOf(
+      ExtensionOwnershipError,
+    );
+    const winner = results.find((result) => result.status === "fulfilled");
+    if (winner?.status !== "fulfilled") throw new Error("missing winning install");
+    expect(await listExtensionVersions(winner.value.extension.id)).toHaveLength(1);
+  });
+
+  test("worker metadata writes and deletion recheck disabled ownership at the database write", async () => {
+    const installed = await installExtension({
+      ...(await loadBundleFixture("minimal")),
+      agentId: "owner",
+    });
+    const id = installed.extension.id;
+    await expect(
+      updateExtensionMeta(id, { priority: 7, ownerOnly: "other" }),
+    ).rejects.toBeInstanceOf(ExtensionOwnershipError);
+    await expect(deleteExtension(id, "other")).rejects.toBeInstanceOf(ExtensionOwnershipError);
+    await setExtensionState(id, { enabled: true, status: "enabled" });
+    await expect(
+      updateExtensionMeta(id, { priority: 7, ownerOnly: "owner" }),
+    ).rejects.toBeInstanceOf(ExtensionOwnershipError);
+    await expect(deleteExtension(id, "owner")).rejects.toBeInstanceOf(ExtensionOwnershipError);
+    expect(await getExtensionById(id)).toMatchObject({ enabled: true, priority: 100 });
+    await setExtensionState(id, { enabled: false, status: "disabled" });
+    expect(await updateExtensionMeta(id, { priority: 7, ownerOnly: "owner" })).toMatchObject({
+      priority: 7,
+    });
+    expect(await deleteExtension(id, "owner")).toBe(true);
   });
 
   test("matching bundles dedupe and changed hooks create a complete snapshot", async () => {

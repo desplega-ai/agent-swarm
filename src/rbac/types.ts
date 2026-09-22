@@ -32,6 +32,8 @@ export type RbacResource =
   | { kind: "app"; appId: string }
   /** Skills, mcp-servers, memory entries, scripts. */
   | { kind: "owned"; ownerAgentId?: string | null; scope?: string }
+  /** An omitted extensionId denotes a new install; existing rows retain their creator. */
+  | { kind: "extension"; extensionId?: string; createdByAgentId?: string | null }
   | { kind: "none" };
 
 export type RbacDecision =

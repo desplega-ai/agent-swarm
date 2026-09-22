@@ -4,9 +4,11 @@ import { resolveHttpAuditUserId } from "../be/audit-user";
 import { getAgentById } from "../be/db";
 import {
   deleteExtension,
+  ExtensionOwnershipError,
   getExtensionById,
   getExtensionByName,
   getExtensionFiles,
+  type InstallExtensionResult,
   installExtension,
   listExtensionRuns,
   listExtensions,
@@ -23,8 +25,15 @@ import {
   reloadExtension,
 } from "../extensions/lifecycle";
 import { ExtensionConfigError } from "../extensions/loader";
-import { can, type PermissionVerb, type RbacPrincipal } from "../rbac";
 import {
+  can,
+  LEGACY_RULES,
+  type PermissionVerb,
+  type RbacPrincipal,
+  type RbacResource,
+} from "../rbac";
+import {
+  type Extension,
   ExtensionInstallBodySchema,
   ExtensionManifestSchema,
   ExtensionRunSchema,
@@ -44,6 +53,8 @@ const installRoute = route({
   pattern: ["api", "extensions", "install"],
   operationId: "extensions_install",
   summary: "Validate and install an extension bundle",
+  description:
+    "Any authenticated agent can install a disabled draft owned by its agent ID. Workers can update only their own bundles; activation remains lead/operator-only.",
   tags: ["Extensions"],
   body: ExtensionInstallBodySchema,
   responses: {
@@ -153,6 +164,8 @@ const patchRoute = route({
   pattern: ["api", "extensions", null],
   operationId: "extensions_update",
   summary: "Update extension priority, config, or description",
+  description:
+    "Workers may edit their own disabled extensions. Leads, operators, and dashboard users retain access to all extensions.",
   tags: ["Extensions"],
   params: idParamsSchema,
   body: z
@@ -177,6 +190,8 @@ const deleteRoute = route({
   pattern: ["api", "extensions", null],
   operationId: "extensions_delete",
   summary: "Uninstall a disabled extension",
+  description:
+    "Workers may uninstall their own disabled extensions. Leads, operators, and dashboard users retain access to all extensions.",
   tags: ["Extensions"],
   params: idParamsSchema,
   responses: {
@@ -316,14 +331,23 @@ async function extensionPrincipal(
   return { kind: "agent", agentId: "", isLead: false };
 }
 
+/** Restrict ordinary agents; retain the existing blanket access for elevated writers. */
+function ownerOnlyAgentId(principal: RbacPrincipal): string | undefined {
+  return principal.kind === "agent" &&
+    !LEGACY_RULES["lead-or-operator-or-user"].evaluate(principal, undefined)
+    ? principal.agentId
+    : undefined;
+}
+
 async function requirePermission(
   req: IncomingMessage,
   res: ServerResponse,
   callerAgentId: string | undefined,
   verb: Extract<PermissionVerb, "extension.write" | "extension.activate">,
+  resource: RbacResource = { kind: "none" },
 ): Promise<RbacPrincipal | null> {
   const principal = await extensionPrincipal(req, callerAgentId);
-  const decision = can({ principal, verb, resource: { kind: "none" }, source: "http" });
+  const decision = can({ principal, verb, resource, source: "http" });
   if (decision.allow) return principal;
   jsonError(res, `Forbidden: ${decision.reason}`, 403);
   return null;
@@ -331,11 +355,13 @@ async function requirePermission(
 
 function respondLifecycleError(res: ServerResponse, error: unknown): void {
   const status =
-    error instanceof ExtensionConfigError
-      ? 400
-      : error instanceof ExtensionLifecycleError
-        ? error.status
-        : 500;
+    error instanceof ExtensionOwnershipError
+      ? 403
+      : error instanceof ExtensionConfigError
+        ? 400
+        : error instanceof ExtensionLifecycleError
+          ? error.status
+          : 500;
   jsonError(res, scrubSecrets(error instanceof Error ? error.message : String(error)), status);
 }
 
@@ -349,26 +375,41 @@ export async function handleExtensions(
   if (installRoute.match(req.method, pathSegments)) {
     const parsed = await installRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const principal = await requirePermission(req, res, agentId, "extension.write");
+    const existing = await getExtensionByName(parsed.body.manifest.name);
+    const principal = await requirePermission(req, res, agentId, "extension.write", {
+      kind: "extension",
+      extensionId: existing?.id,
+      createdByAgentId: existing?.createdByAgentId,
+    });
     if (!principal) return true;
     const validation = await validateBundle(parsed.body);
     if (!validation.ok) {
       json(res, { error: "extension_validation_failed", diagnostics: validation.diagnostics }, 400);
       return true;
     }
-    const existing = await getExtensionByName(validation.manifest.name);
     const writerAgentId = principal.kind === "agent" ? principal.agentId : undefined;
     const updatedBy = await resolveHttpAuditUserId(req, writerAgentId);
     const shouldActivate = principal.kind !== "agent" && existing?.enabled === true;
-    const result = await installExtension({
-      manifest: validation.manifest,
-      files: parsed.body.files,
-      priority: parsed.body.priority,
-      config: parsed.body.config,
-      agentId: writerAgentId,
-      createdBy: updatedBy,
-      activate: shouldActivate,
-    });
+    // Enforce ownership again inside the upsert transaction: validation can yield
+    // while another agent installs the same name.
+    const ownerOnly = ownerOnlyAgentId(principal);
+    let result: InstallExtensionResult;
+    try {
+      result = await installExtension({
+        manifest: validation.manifest,
+        files: parsed.body.files,
+        priority: parsed.body.priority,
+        config: parsed.body.config,
+        agentId: writerAgentId,
+        createdBy: updatedBy,
+        activate: shouldActivate,
+        ownerOnly,
+      });
+    } catch (error) {
+      if (!(error instanceof ExtensionOwnershipError)) throw error;
+      jsonError(res, error.message, 403);
+      return true;
+    }
     let extension = result.extension;
     if (shouldActivate) {
       try {
@@ -446,19 +487,42 @@ export async function handleExtensions(
   if (patchRoute.match(req.method, pathSegments)) {
     const parsed = await patchRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const principal = await requirePermission(req, res, agentId, "extension.write");
+    const stored = await getExtensionById(parsed.params.id);
+    if (!stored) {
+      jsonError(res, "Extension not found", 404);
+      return true;
+    }
+    const principal = await requirePermission(req, res, agentId, "extension.write", {
+      kind: "extension",
+      extensionId: stored.id,
+      createdByAgentId: stored.createdByAgentId,
+    });
     if (!principal) return true;
     const writerAgentId = principal.kind === "agent" ? principal.agentId : undefined;
-    const stored = parsed.body.config ? await getExtensionById(parsed.params.id) : null;
-    const config =
-      parsed.body.config && stored
-        ? preserveRedactedConfigValues(parsed.body.config, stored.configJson)
-        : parsed.body.config;
-    let extension = await updateExtensionMeta(parsed.params.id, {
-      ...parsed.body,
-      ...(config === undefined ? {} : { config }),
-      updatedBy: await resolveHttpAuditUserId(req, writerAgentId),
-    });
+    const ownerOnly = ownerOnlyAgentId(principal);
+    // PATCH reloads live code; ordinary owners may edit only disabled drafts.
+    if (
+      stored.enabled &&
+      ownerOnly &&
+      !(await requirePermission(req, res, agentId, "extension.activate"))
+    ) {
+      return true;
+    }
+    const config = parsed.body.config
+      ? preserveRedactedConfigValues(parsed.body.config, stored.configJson)
+      : parsed.body.config;
+    let extension: Extension | null;
+    try {
+      extension = await updateExtensionMeta(parsed.params.id, {
+        ...parsed.body,
+        ...(config === undefined ? {} : { config }),
+        updatedBy: await resolveHttpAuditUserId(req, writerAgentId),
+        ownerOnly,
+      });
+    } catch (error) {
+      respondLifecycleError(res, error);
+      return true;
+    }
     if (!extension) {
       jsonError(res, "Extension not found", 404);
       return true;
@@ -478,18 +542,28 @@ export async function handleExtensions(
   if (deleteRoute.match(req.method, pathSegments)) {
     const parsed = await deleteRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const principal = await requirePermission(req, res, agentId, "extension.write");
-    if (!principal) return true;
-    const extension = await getExtensionById(parsed.params.id);
-    if (!extension) {
+    const stored = await getExtensionById(parsed.params.id);
+    if (!stored) {
       jsonError(res, "Extension not found", 404);
       return true;
     }
+    const principal = await requirePermission(req, res, agentId, "extension.write", {
+      kind: "extension",
+      extensionId: stored.id,
+      createdByAgentId: stored.createdByAgentId,
+    });
+    if (!principal) return true;
+    const extension = stored;
     if (extension.enabled) {
       jsonError(res, "Disable the extension before uninstalling it", 409);
       return true;
     }
-    await deleteExtension(extension.id);
+    try {
+      await deleteExtension(extension.id, ownerOnlyAgentId(principal));
+    } catch (error) {
+      respondLifecycleError(res, error);
+      return true;
+    }
     deleteRoute.respond(res, 200, { deleted: true });
     return true;
   }

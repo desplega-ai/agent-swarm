@@ -200,16 +200,20 @@ describe("extension MCP HTTP proxy tools", () => {
     expect(result.structuredContent.message).toBeTruthy();
   });
 
-  test("worker installation returns the REST permission error in the shared tool envelope", async () => {
+  test("worker installation returns ownership and a disabled draft in the shared tool envelope", async () => {
     const tools = buildToolServer();
     const result = (await tools.install.handler(
       await loadBundleFixture("minimal"),
       meta(workerId),
     )) as ToolResult;
 
-    expect(result.isError).toBe(true);
-    expect(result.structuredContent).toMatchObject({ success: false });
-    expect(String(result.structuredContent.message)).toContain("Forbidden");
+    expect(result.isError).toBe(false);
+    expect(result.structuredContent).toMatchObject({
+      success: true,
+      createdByAgentId: workerId,
+      enabled: false,
+      status: "disabled",
+    });
   });
 
   test("lead reinstall stores an inactive version of an enabled extension", async () => {
@@ -254,7 +258,7 @@ describe("extension MCP HTTP proxy tools", () => {
     const all = (await tools.list.handler({}, meta(leadId))) as ToolResult;
     expect(all.isError).toBe(false);
     expect(all.content[0]?.text).toContain(
-      "| Name | Version | Active | Enabled | Status | Priority | Failures |",
+      "| Name | Owner agent | Version | Active | Enabled | Status | Priority | Failures |",
     );
     expect(all.structuredContent).toMatchObject({ success: true });
     expect((all.structuredContent.extensions as unknown[]).length).toBe(1);

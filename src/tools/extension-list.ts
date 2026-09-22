@@ -24,11 +24,12 @@ function extensionListItems(data: unknown): ExtensionListItem[] {
 }
 
 function renderExtensionsTable(extensions: ExtensionListItem[]): string {
-  const header = "| Name | Version | Active | Enabled | Status | Priority | Failures |";
-  const divider = "| --- | ---: | ---: | --- | --- | ---: | ---: |";
+  const header =
+    "| Name | Owner agent | Version | Active | Enabled | Status | Priority | Failures |";
+  const divider = "| --- | --- | ---: | ---: | --- | --- | ---: | ---: |";
   const rows = extensions.map(
     (extension) =>
-      `| ${extension.name ?? "?"} | ${extension.version ?? "?"} | ${extension.activeVersion ?? "?"} | ${extension.enabled ?? false} | ${extension.status ?? "unknown"} | ${extension.priority ?? "?"} | ${extension.consecutiveFailures ?? 0} |`,
+      `| ${extension.name ?? "?"} | ${extension.createdByAgentId ?? "operator/user"} | ${extension.version ?? "?"} | ${extension.activeVersion ?? "?"} | ${extension.enabled ?? false} | ${extension.status ?? "unknown"} | ${extension.priority ?? "?"} | ${extension.consecutiveFailures ?? 0} |`,
   );
   return [header, divider, ...rows].join("\n");
 }

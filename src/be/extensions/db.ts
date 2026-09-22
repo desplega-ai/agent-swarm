@@ -20,7 +20,11 @@ export type InstallExtensionArgs = {
   createdBy?: string | null;
   activate?: boolean;
   changeReason?: string | null;
+  /** HTTP worker upserts must not claim another creator's name. */
+  ownerOnly?: string;
 };
+
+export class ExtensionOwnershipError extends Error {}
 
 export type InstallExtensionResult = {
   extension: Extension;
@@ -60,6 +64,19 @@ export async function installExtension(
       args.manifest.name,
     ]);
     const existing = existingRow ? rowToExtension(existingRow) : null;
+    if (existing && args.ownerOnly && existing.createdByAgentId !== args.ownerOnly) {
+      throw new ExtensionOwnershipError("Forbidden: extension belongs to another owner");
+    }
+    if (
+      existing?.enabled &&
+      args.ownerOnly &&
+      ((args.config !== undefined && JSON.stringify(args.config) !== existing.configJson) ||
+        (args.priority !== undefined && args.priority !== existing.priority))
+    ) {
+      throw new ExtensionOwnershipError(
+        "Forbidden: only a lead or operator may change live extension configuration",
+      );
+    }
     const now = new Date().toISOString();
 
     if (!existing) {
@@ -313,6 +330,7 @@ export async function updateExtensionMeta(
     config?: Record<string, unknown>;
     description?: string;
     updatedBy?: string | null;
+    ownerOnly?: string;
   },
 ): Promise<Extension | null> {
   const sets: string[] = [];
@@ -329,14 +347,21 @@ export async function updateExtensionMeta(
     sets.push("description = ?");
     values.push(args.description);
   }
-  if (sets.length === 0) return getExtensionById(id);
+  if (sets.length === 0 && !args.ownerOnly) return getExtensionById(id);
 
   sets.push("updated_by = ?", "updatedAt = ?");
   values.push(args.updatedBy ?? null, new Date().toISOString(), id);
+  // The enabled check must be part of the write: a lead may enable the draft
+  // after the HTTP handler has authorized it but before this UPDATE executes.
+  const ownerCondition = args.ownerOnly ? " AND createdByAgentId = ? AND enabled = 0" : "";
+  if (args.ownerOnly) values.push(args.ownerOnly);
   const row = await getDbClient().get<ExtensionRow>(
-    `UPDATE extensions SET ${sets.join(", ")} WHERE id = ? RETURNING *`,
+    `UPDATE extensions SET ${sets.join(", ")} WHERE id = ?${ownerCondition} RETURNING *`,
     values,
   );
+  if (!row && args.ownerOnly) {
+    throw new ExtensionOwnershipError("Forbidden: extension must be your own disabled draft");
+  }
   return row ? rowToExtension(row) : null;
 }
 
@@ -401,8 +426,14 @@ export async function recordExtensionFailure(
   return row ? rowToExtension(row) : null;
 }
 
-export async function deleteExtension(id: string): Promise<boolean> {
-  const result = await getDbClient().run("DELETE FROM extensions WHERE id = ?", [id]);
+export async function deleteExtension(id: string, ownerOnly?: string): Promise<boolean> {
+  const result = await getDbClient().run(
+    `DELETE FROM extensions WHERE id = ?${ownerOnly ? " AND createdByAgentId = ? AND enabled = 0" : ""}`,
+    ownerOnly ? [id, ownerOnly] : [id],
+  );
+  if (result.changes === 0 && ownerOnly) {
+    throw new ExtensionOwnershipError("Forbidden: extension must be your own disabled draft");
+  }
   return result.changes > 0;
 }
 

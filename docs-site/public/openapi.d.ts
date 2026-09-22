@@ -5536,7 +5536,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Validate and install an extension bundle */
+        /**
+         * Validate and install an extension bundle
+         * @description Any authenticated agent can install a disabled draft owned by its agent ID. Workers can update only their own bundles; activation remains lead/operator-only.
+         */
         post: operations["extensions_install"];
         delete?: never;
         options?: never;
@@ -5589,11 +5592,17 @@ export interface paths {
         get: operations["extensions_get"];
         put?: never;
         post?: never;
-        /** Uninstall a disabled extension */
+        /**
+         * Uninstall a disabled extension
+         * @description Workers may uninstall their own disabled extensions. Leads, operators, and dashboard users retain access to all extensions.
+         */
         delete: operations["extensions_delete"];
         options?: never;
         head?: never;
-        /** Update extension priority, config, or description */
+        /**
+         * Update extension priority, config, or description
+         * @description Workers may edit their own disabled extensions. Leads, operators, and dashboard users retain access to all extensions.
+         */
         patch: operations["extensions_update"];
         trace?: never;
     };

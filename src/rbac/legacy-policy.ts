@@ -56,6 +56,20 @@ const leadOrOperatorOrUser: LegacyRule = {
     principal.kind === "operator" || principal.kind === "user" || actsAsLead(principal),
 };
 
+const extensionWrite: LegacyRule = {
+  name: "extension-owner-or-elevated",
+  denyReason: "requires extension owner, lead agent, operator, or user authentication",
+  evaluate: (principal, resource) => {
+    if (leadOrOperatorOrUser.evaluate(principal, resource)) return true;
+    return (
+      principal.kind === "agent" &&
+      principal.agentId !== "" &&
+      resource?.kind === "extension" &&
+      (resource.extensionId === undefined || resource.createdByAgentId === principal.agentId)
+    );
+  },
+};
+
 // Deployment-only: agents cannot reset this through swarm_config.
 const extensionActivation: LegacyRule = {
   name: "extension-activation",
@@ -242,6 +256,6 @@ export const LEGACY_POLICY = {
   "script.api.update": leadOnly,
   "script.api.rotate": leadOnly,
   "script.api.delete": leadOnly,
-  "extension.write": leadOrOperatorOrUser,
+  "extension.write": extensionWrite,
   "extension.activate": extensionActivation,
 } as const satisfies Record<PermissionVerb, LegacyRule>;

@@ -18,6 +18,7 @@
 import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { join } from "node:path";
+import { loadBundleFixture } from "./fixtures/extensions/load";
 import {
   api,
   LEAD,
@@ -119,6 +120,38 @@ afterAll(async () => {
 });
 
 describe("MCP gate matrix", () => {
+  test("worker MCP installs retain ownership and lifecycle calls remain lead-only", async () => {
+    const bundle = await loadBundleFixture("minimal");
+    bundle.manifest.name = "worker-owned-wire";
+    const installed = await mcpCall(base, WORKER_A, sidA, "extension-install", bundle);
+    expect(installed.structuredContent).toMatchObject({ success: true });
+    expect(installed.structuredContent).toMatchObject({
+      createdByAgentId: WORKER_A,
+      enabled: false,
+      status: "disabled",
+    });
+    expectRow({ type: "agent", id: WORKER_A }, "extension.write", "allow", null, "http");
+    const id = installed.structuredContent.id;
+    const listed = await mcpCall(base, WORKER_A, sidA, "extension-list", {});
+    expect(listed.structuredContent.extensions).toContainEqual(
+      expect.objectContaining({ id, createdByAgentId: WORKER_A }),
+    );
+    for (const tool of ["extension-enable", "extension-disable", "extension-activate-version"]) {
+      const denied = await mcpCall(base, WORKER_A, sidA, tool, {
+        id,
+        ...(tool === "extension-activate-version" ? { version: 1 } : {}),
+      });
+      expect(denied.structuredContent.success).toBe(false);
+      expectRow(
+        { type: "agent", id: WORKER_A },
+        "extension.activate",
+        "deny",
+        "requires operator/user authentication, or a lead with EXTENSION_ALLOW_LEAD_ACTIVATION enabled",
+        "http",
+      );
+    }
+  });
+
   test("config: set/delete lead-gated; includeSecrets masks for non-lead (DES-445 follow-up)", async () => {
     // set-config (non-credential key): worker denied, lead allowed.
     const setWorker = await mcpCall(base, WORKER_A, sidA, "set-config", {

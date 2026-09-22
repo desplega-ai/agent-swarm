@@ -1,7 +1,6 @@
 import {
   activateExtensionVersionSnapshot,
   getExtensionById,
-  getExtensionFiles,
   getExtensionVersion,
   insertExtensionRun,
   listExtensions,
@@ -66,28 +65,23 @@ function maxUpdatedAt(extensions: Extension[]): string {
 }
 
 async function loadableExtension(record: Extension): Promise<LoadableExtension> {
-  if (record.activeVersion !== record.version) {
-    const version = await getExtensionVersion(record.id, record.activeVersion);
-    if (!version) {
-      throw new ExtensionLifecycleError(
-        `Extension version ${record.activeVersion} was not found`,
-        404,
-      );
-    }
-    return {
-      record: {
-        ...record,
-        manifestJson: version.manifestJson,
-        contentHash: version.contentHash,
-      },
-      manifest: ExtensionManifestSchema.parse(JSON.parse(version.manifestJson)),
-      files: JSON.parse(version.filesJson) as Record<string, string>,
-    };
+  // Always load the immutable selected version. The mutable current-file projection
+  // can advance while an agent stages a draft after we read the extension row.
+  const version = await getExtensionVersion(record.id, record.activeVersion);
+  if (!version) {
+    throw new ExtensionLifecycleError(
+      `Extension version ${record.activeVersion} was not found`,
+      404,
+    );
   }
   return {
-    record,
-    manifest: ExtensionManifestSchema.parse(JSON.parse(record.manifestJson)),
-    files: await getExtensionFiles(record.id),
+    record: {
+      ...record,
+      manifestJson: version.manifestJson,
+      contentHash: version.contentHash,
+    },
+    manifest: ExtensionManifestSchema.parse(JSON.parse(version.manifestJson)),
+    files: JSON.parse(version.filesJson) as Record<string, string>,
   };
 }
 
