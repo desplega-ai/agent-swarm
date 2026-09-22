@@ -624,6 +624,12 @@ export const AgentTaskSchema = z
     // Pause tracking
     wasPaused: z.boolean().default(false),
 
+    // Set by `defer-task` when this task ends in a deferral. The task's status
+    // is `completed` either way, so this is what tells "parked, resuming in a
+    // wake-up task" apart from "done" — see `isDeferredTask` in
+    // src/slack/render-v2.ts.
+    deferredAt: z.iso.datetime().optional(),
+
     // Context usage aggregates
     compactionCount: z.number().int().min(0).optional(),
     peakContextPercent: z.number().min(0).max(100).optional(),
@@ -1644,6 +1650,11 @@ export const ScheduledTaskSchema = z
     // Set only by `defer-task`: the task this schedule wakes up to continue.
     // Passed through as the created task's `parentTaskId`.
     parentTaskId: z.string().optional(),
+    // Set only by `defer-task`: what the caller asked for, kept because the
+    // scheduler clears `nextRunAt` once a one_time schedule fires. Exactly one
+    // of the two is present. Provenance only — never read to schedule a run.
+    requestedDelayMs: z.number().int().positive().optional(),
+    requestedRunAt: z.iso.datetime().optional(),
     timezone: z.string().default("UTC"),
     consecutiveErrors: z.number().int().min(0).default(0),
     lastErrorAt: z.iso.datetime().optional(),

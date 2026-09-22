@@ -1,6 +1,22 @@
 import type { AgentTask } from "../types";
 
-/** Keep the stored deferral ETA for task details, but omit it from Slack. */
+/**
+ * Legacy deferral output, written before `defer-task` started storing the
+ * human-facing card directly:
+ *   `Deferred until {date} {time} ([shortId](url)) -> {note excerpt}`
+ * Group 1 is the ETA; the schedule link and the note excerpt are dropped.
+ */
+const LEGACY_DEFERRAL_NOTICE = /^Deferred until ([^\n(]+?) \([^\n]*?\) -> .*$/;
+
+/**
+ * The Slack-facing form of a task's stored output.
+ *
+ * For a deferral this is the stored text verbatim — `defer-task` already
+ * writes the human card (`Checking back today at 18:38`, or
+ * `Waiting on Researcher — or today at 18:38 at the latest`). Rows written
+ * before that change carried the agent's internal handoff note plus a raw
+ * schedule UUID link instead, so they are rewritten to the ETA alone.
+ */
 export function slackTaskOutput(
   task: Pick<AgentTask, "output" | "tags" | "outputSchema" | "status">,
 ): string | undefined {
@@ -9,13 +25,8 @@ export function slackTaskOutput(
     return output;
   }
   // Only match the engine-authored line from defer-task, not continuation results.
-  const notice = output?.match(/^Deferred until [^\n]+? \([^\n]+?\) -> (.*)$/);
-  if (!notice) return output;
-  const pending = notice[1]?.trim();
-  return pending ? `Pending: ${pending}` : "";
-}
-
-/** An ETA-only notice has no useful content left to post. */
-export function isSlackEtaOnlyNotice(task: AgentTask): boolean {
-  return !!task.output && slackTaskOutput(task) === "";
+  const legacy = output?.match(LEGACY_DEFERRAL_NOTICE);
+  if (!legacy) return output;
+  const eta = legacy[1]?.trim();
+  return eta ? `Checking back ${eta}` : output;
 }

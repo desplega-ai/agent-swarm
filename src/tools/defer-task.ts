@@ -18,7 +18,6 @@ import { getTaskOutputValidationError } from "@/tasks/terminal-result-guard";
 import { assertOwnsTask, ownerCtx } from "@/tools/task-tool-ctx";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { isTerminalTaskStatus } from "@/types";
-import { getAppUrl } from "@/utils/constants";
 
 /** Thrown inside the transaction to abort and roll back the schedule INSERT. */
 class DeferAbortedError extends Error {}
@@ -55,7 +54,7 @@ function partsInTz(date: Date, tz: string) {
 }
 
 /**
- * "today"/"tomorrow" or "MM-dd" plus "HH:MM:ss", both computed in `tz`.
+ * "today"/"tomorrow" or "MM-dd" plus "HH:MM", both computed in `tz`.
  * Falls back to UTC (parts still computed correctly) if `tz` is not a valid
  * IANA zone — the caller decides whether to label the fallback.
  */
@@ -71,7 +70,9 @@ function formatDeferralDateTime(
     zone = "UTC";
   }
   const t = partsInTz(target, zone);
-  const time = `${t.hour}:${t.minute}:${t.second}`;
+  // Minute precision: this string is read by a human deciding whether to wait,
+  // and the wake-up is scheduler-polled anyway, so seconds were false precision.
+  const time = `${t.hour}:${t.minute}`;
   const n = partsInTz(now, zone);
   if (t.year === n.year && t.month === n.month && t.day === n.day) return { date: "today", time };
   const tm = partsInTz(new Date(now.getTime() + 86_400_000), zone);
@@ -98,38 +99,59 @@ async function resolveRequesterTimezone(
   return { tz: "UTC", isFallback: true };
 }
 
-/** First line of `note`, `Pending:` prefix stripped, capped to ~100 chars. */
-function renderShortDesc(note: string, max = 100): string {
-  const firstLine = (note.split("\n")[0] ?? "").trim().replace(/^pending:\s*/i, "");
-  if (firstLine.length <= max) return firstLine;
-  return `${firstLine.slice(0, max - 1).trimEnd()}…`;
+/** "Researcher", "Researcher and Picateclas", "A, B and C". */
+function joinNames(names: string[]): string {
+  if (names.length < 2) return names[0] ?? "";
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
+/**
+ * Who a `wakeOn` deferral is waiting on, in the card's words: the distinct
+ * agent names behind the watched tasks, or a bare count when none of them is
+ * assigned (an unassigned watched task has no name a human would recognise).
+ */
+export function renderWaitingOn(agentNames: string[], watchedCount: number): string {
+  const named = joinNames([...new Set(agentNames.filter((name) => name.trim()))]);
+  if (named) return named;
+  return `${watchedCount} task${watchedCount === 1 ? "" : "s"}`;
+}
+
+/** "today at 18:38" / "tomorrow at 18:38" / "on 09-24 at 18:38". */
+function renderWhen(nextRunAt: string, tz: string, isFallbackTz: boolean): string {
+  const { date, time } = formatDeferralDateTime(new Date(nextRunAt), new Date(), tz);
+  const timeLabel = isFallbackTz ? `${time} UTC` : time;
+  const day = date === "today" || date === "tomorrow" ? date : `on ${date}`;
+  return `${day} at ${timeLabel}`;
 }
 
 /**
  * Human-facing deferral text for tasks without an outputSchema — this is what
- * lands verbatim in a human's Slack thread as the task's terminal output.
- * One line: `Deferred until {date} {time} ([shortId](url)) -> {short desc}`.
- * No ISO timestamp, no bare UUID, no checks list, no `Pending:` prefix —
- * those stay in the task log. The `[text](url)` link is plain GFM markdown:
- * `markdownToSlack` (src/slack/blocks.ts) already down-converts it to a
- * readable `text (url)` fallback for Slack, and it reads fine verbatim in
- * the non-Slack task-output row / UI too.
+ * lands verbatim in a human's Slack thread as the task's terminal output, and
+ * in the UI's task-detail output row.
+ *
+ * It answers one question — when does this come back — in the two shapes a
+ * deferral actually has:
+ *
+ *   time-based  (no wakeOn)  `Checking back today at 18:38`
+ *   event-based (wakeOn)     `Waiting on Researcher — or today at 18:38 at the latest`
+ *
+ * A wakeOn deferral always carries a time ceiling too (`delayMs`/`runAt` is
+ * required), so the "both" wording is the only event shape reachable — which
+ * is also the honest one: the event resumes it, the ceiling guarantees it.
+ *
+ * Deliberately absent: the agent's `note` (written for the wake-up agent, not
+ * for a human — it goes to the task log and the wake-up task's template), the
+ * `checks` list, the schedule UUID and its app.agent-swarm.dev link. The glyph
+ * is added by the Slack renderer, matching how ✅/❌ outcomes are composed.
  */
 function renderHumanFacingDeferral(
-  note: string,
   nextRunAt: string,
-  scheduleId: string,
   tz: string,
   isFallbackTz: boolean,
+  waitingOn: string | undefined,
 ): string {
-  const now = new Date();
-  const target = new Date(nextRunAt);
-  const { date, time } = formatDeferralDateTime(target, now, tz);
-  const timeLabel = isFallbackTz ? `${time} UTC` : time;
-  const shortId = scheduleId.slice(0, 8);
-  const link = `[${shortId}](${getAppUrl()}/schedules/${scheduleId})`;
-  const shortDesc = renderShortDesc(note);
-  return `Deferred until ${date} ${timeLabel} (${link}) -> ${shortDesc}`;
+  const when = renderWhen(nextRunAt, tz, isFallbackTz);
+  return waitingOn ? `Waiting on ${waitingOn} — or ${when} at the latest` : `Checking back ${when}`;
 }
 
 export const registerDeferTaskTool = (server: McpServer) => {
@@ -284,6 +306,7 @@ export const registerDeferTaskTool = (server: McpServer) => {
 
       try {
         const committed = await getDbClient().transaction(async () => {
+          const watchedAgentNames: string[] = [];
           for (const watchedId of watchedTaskIds) {
             if (watchedId === taskId)
               throw new DeferAbortedError("Cannot wake on the task being deferred.");
@@ -293,6 +316,11 @@ export const registerDeferTaskTool = (server: McpServer) => {
               throw new DeferAbortedError(
                 `Watched task ${watchedId} is already ${watched.status}; read its result instead of deferring.`,
               );
+            // Resolved now, not at render time: the card is baked into the
+            // task's terminal output, and an agent can be renamed or removed
+            // between the deferral and whoever reads the thread later.
+            const watchedAgent = watched.agentId ? await getAgentById(watched.agentId) : null;
+            if (watchedAgent?.name) watchedAgentNames.push(watchedAgent.name);
           }
           const schedule = await createScheduledTask({
             // Unique name (`getScheduledTaskByName` is a unique lookup). The UUID
@@ -308,6 +336,10 @@ export const registerDeferTaskTool = (server: McpServer) => {
             taskType: "deferred",
             tags: ["deferred"],
             priority: task.priority,
+            // Provenance: `nextRunAt` is cleared once this one_time schedule
+            // fires, so the requested delay is only recoverable from here.
+            requestedDelayMs: delayMs,
+            requestedRunAt: runAt,
             // No `model`: a concrete provider model pinned now can be
             // incompatible with the assignee/provider at wake-up, especially
             // after a delay. Only the portable modelTier travels — mirrors
@@ -344,9 +376,15 @@ export const registerDeferTaskTool = (server: McpServer) => {
 
           const terminalOutput = task.outputSchema
             ? output!
-            : renderHumanFacingDeferral(note, nextRunAt, schedule.id, requesterTz, isFallbackTz);
+            : renderHumanFacingDeferral(
+                nextRunAt,
+                requesterTz,
+                isFallbackTz,
+                wakeOn ? renderWaitingOn(watchedAgentNames, watchedTaskIds.length) : undefined,
+              );
           const completed = await completeTask(taskId, terminalOutput, {
             addTags: ["deferred"],
+            deferredAt: new Date().toISOString(),
           });
           if (!completed) {
             // Another writer terminally completed/failed/cancelled this task

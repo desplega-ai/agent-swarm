@@ -11778,6 +11778,9 @@ export interface paths {
                                 nextRunAt?: string;
                                 createdByAgentId?: string;
                                 parentTaskId?: string;
+                                requestedDelayMs?: number;
+                                /** Format: date-time */
+                                requestedRunAt?: string;
                                 /** @default UTC */
                                 timezone: string;
                                 /** @default 0 */
@@ -11841,6 +11844,9 @@ export interface paths {
                                 nextRunAt?: string;
                                 createdByAgentId?: string;
                                 parentTaskId?: string;
+                                requestedDelayMs?: number;
+                                /** Format: date-time */
+                                requestedRunAt?: string;
                                 /** @default UTC */
                                 timezone: string;
                                 /** @default 0 */
@@ -11965,6 +11971,9 @@ export interface paths {
                             nextRunAt?: string;
                             createdByAgentId?: string;
                             parentTaskId?: string;
+                            requestedDelayMs?: number;
+                            /** Format: date-time */
+                            requestedRunAt?: string;
                             /** @default UTC */
                             timezone: string;
                             /** @default 0 */
@@ -12084,6 +12093,9 @@ export interface paths {
                                 nextRunAt?: string;
                                 createdByAgentId?: string;
                                 parentTaskId?: string;
+                                requestedDelayMs?: number;
+                                /** Format: date-time */
+                                requestedRunAt?: string;
                                 /** @default UTC */
                                 timezone: string;
                                 /** @default 0 */
@@ -12203,6 +12215,9 @@ export interface paths {
                             nextRunAt?: string;
                             createdByAgentId?: string;
                             parentTaskId?: string;
+                            requestedDelayMs?: number;
+                            /** Format: date-time */
+                            requestedRunAt?: string;
                             /** @default UTC */
                             timezone: string;
                             /** @default 0 */
@@ -12332,6 +12347,9 @@ export interface paths {
                             nextRunAt?: string;
                             createdByAgentId?: string;
                             parentTaskId?: string;
+                            requestedDelayMs?: number;
+                            /** Format: date-time */
+                            requestedRunAt?: string;
                             /** @default UTC */
                             timezone: string;
                             /** @default 0 */
@@ -12520,6 +12538,9 @@ export interface paths {
                             nextRunAt?: string;
                             createdByAgentId?: string;
                             parentTaskId?: string;
+                            requestedDelayMs?: number;
+                            /** Format: date-time */
+                            requestedRunAt?: string;
                             /** @default UTC */
                             timezone: string;
                             /** @default 0 */
@@ -15552,6 +15573,9 @@ export interface paths {
                                 nextRunAt?: string;
                                 createdByAgentId?: string;
                                 parentTaskId?: string;
+                                requestedDelayMs?: number;
+                                /** Format: date-time */
+                                requestedRunAt?: string;
                                 /** @default UTC */
                                 timezone: string;
                                 /** @default 0 */
@@ -20785,6 +20809,8 @@ export interface components {
             followUpConfig?: components["schemas"]["FollowUpConfig"];
             /** @default false */
             wasPaused: boolean;
+            /** Format: date-time */
+            deferredAt?: string;
             compactionCount?: number;
             peakContextPercent?: number;
             peakContextTokens?: number;

@@ -572,6 +572,9 @@ describe("script connections", () => {
       markMigrationApplied(database, "152_routing_decisions.sql");
       // 156 alters inbox_item_state, which this migration-112-only fixture does not create.
       markMigrationApplied(database, "156_inbox_item_state_read_at.sql");
+      // 157 alters scheduled_tasks and slack_messages, neither of which this
+      // migration-112-only fixture creates.
+      markMigrationApplied(database, "157_defer_provenance_and_marker.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

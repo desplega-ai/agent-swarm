@@ -327,6 +327,7 @@ value:getRecentFailedTasks
 value:getRecentlyCancelledTasksForAgent
 value:getRecentlyFinishedWorkerTasks
 value:getRemainingCapacity
+value:getResolvableDeferralOutcomes
 value:getResolvedConfig
 value:getRetryableSteps
 value:getRootTaskChain
@@ -450,6 +451,7 @@ value:markInboxMessageDelegated
 value:markInboxMessageRead
 value:markInboxMessageResponded
 value:markKeyRateLimited
+value:markSlackDeferralResolved
 value:markSlackRelayAttempted
 value:markSlackRelayDelivered
 value:markSlackTreeRendered

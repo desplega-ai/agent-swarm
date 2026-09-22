@@ -326,7 +326,7 @@ export async function updateTaskTitle(
 export async function completeTask(
   id: string,
   output?: string,
-  options?: { addTags?: string[] },
+  options?: { addTags?: string[]; deferredAt?: string },
 ): Promise<AgentTask | null> {
   const oldTask = await getTaskById(id);
   if (!oldTask) return null;
@@ -362,6 +362,12 @@ export async function completeTask(
       completed = await getDbClient().get<AgentTaskRow>(
         "UPDATE agent_tasks SET tags = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *",
         [JSON.stringify(nextTags), id],
+      );
+    }
+    if (completed && options?.deferredAt) {
+      completed = await getDbClient().get<AgentTaskRow>(
+        "UPDATE agent_tasks SET deferredAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *",
+        [options.deferredAt, id],
       );
     }
     if (completed) {

@@ -184,16 +184,19 @@ describe("defer-task handler", () => {
 
     const stored = await getTaskById(task.id);
     expect(stored?.status).toBe("completed");
-    // Human-facing output: one line, `Deferred until {date} {time} ({link}) -> {desc}`.
-    // No requestedByUserId is set on this task, so it falls back to UTC and
+    expect(stored?.deferredAt).toBeTruthy();
+    // Human-facing output for a time-based defer: when it comes back, nothing
+    // else. No requestedByUserId is set here, so it falls back to UTC and
     // labels it explicitly.
-    const shortId = schedule.id.slice(0, 8);
     expect(stored?.output).toMatch(
-      /^Deferred until (today|tomorrow|\d{2}-\d{2}) \d{2}:\d{2}:\d{2} UTC \(/,
+      /^Checking back (today|tomorrow|on \d{2}-\d{2}) at \d{2}:\d{2} UTC$/,
     );
-    expect(stored?.output).toContain(
-      `([${shortId}](https://app.agent-swarm.dev/schedules/${schedule.id})) -> deploy 42 is still running`,
-    );
+    // The agent's internal note, the checks, the schedule UUID and its link
+    // all stay out of the card — they live in the task log and the wake-up
+    // task's template.
+    expect(stored?.output).not.toContain("deploy 42 is still running");
+    expect(stored?.output).not.toContain(schedule.id);
+    expect(stored?.output).not.toContain("app.agent-swarm.dev");
     expect(stored?.output).not.toContain(schedule.nextRunAt!);
     expect(stored?.output).not.toContain("Checks:");
     expect(stored?.output).not.toContain("- smoke tests pass");
@@ -441,16 +444,15 @@ describe("defer-task handler", () => {
     )) as DeferTaskResult;
     expect(result.structuredContent.success).toBe(true);
     const stored = await getTaskById(task.id);
-    const shortId = result.structuredContent.scheduleId!.slice(0, 8);
     expect(stored?.output).toMatch(
-      /^Deferred until (today|tomorrow|\d{2}-\d{2}) \d{2}:\d{2}:\d{2} UTC \(/,
+      /^Checking back (today|tomorrow|on \d{2}-\d{2}) at \d{2}:\d{2} UTC$/,
     );
-    expect(stored?.output).toContain(`([${shortId}](`);
-    expect(stored?.output).toContain(") -> pending");
+    expect(stored?.output).not.toContain(result.structuredContent.scheduleId!);
+    expect(stored?.output).not.toContain("pending");
     expect(stored?.output).not.toContain(SUMMARY);
   });
 
-  test("human-facing output strips a repeated Pending: prefix and caps a long note", async () => {
+  test("a long note never reaches the card, only the log and the wake-up task", async () => {
     const task = await startedTask("verbose note");
     const longNote = `Pending: ${"x".repeat(300)}\nsecond line is dropped`;
     const result = (await buildTool().handler(
@@ -460,10 +462,11 @@ describe("defer-task handler", () => {
 
     expect(result.structuredContent.success).toBe(true);
     const stored = await getTaskById(task.id);
-    // No doubled "Pending: Pending:", no second line, capped with an ellipsis.
-    expect(stored?.output).not.toContain("Pending: Pending:");
+    // The card answers "when", so there is nothing left to truncate: no note
+    // fragment, no ellipsis, no mid-sentence cut.
+    expect(stored?.output).not.toContain("x");
     expect(stored?.output).not.toContain("second line is dropped");
-    expect(stored?.output).toContain(`-> ${"x".repeat(99)}…`);
+    expect(stored?.output).not.toContain("…");
 
     // The full untrimmed note still reaches the task log and the wake-up task.
     const logs = (await getLogsByTaskId(task.id)).filter(
@@ -489,7 +492,7 @@ describe("defer-task handler", () => {
     const stored = await getTaskById(task.id);
     // A real timezone is on file: no explicit "UTC" label on the time.
     expect(stored?.output).toMatch(
-      /^Deferred until (today|tomorrow|\d{2}-\d{2}) \d{2}:\d{2}:\d{2} \(/,
+      /^Checking back (today|tomorrow|on \d{2}-\d{2}) at \d{2}:\d{2}$/,
     );
   });
 
@@ -561,5 +564,101 @@ describe("defer-task handler", () => {
 
     const stored = await getTaskById(task.id);
     expect(stored?.status).toBe("completed");
+  });
+
+  test("a wakeOn defer names who it is waiting on, with the ceiling as the fallback", async () => {
+    const watchedOwner = (
+      await createAgent({
+        name: "Researcher",
+        description: "Agent whose task is watched",
+        role: "worker",
+        isLead: false,
+        status: "busy",
+        maxTasks: 1,
+        capabilities: [],
+      })
+    ).id;
+    const watched = await startedTask("the work being waited on", watchedOwner);
+    const task = await startedTask("waiting on a sibling");
+
+    const result = (await buildTool().handler(
+      {
+        taskId: task.id,
+        delayMs: 1_800_000,
+        summary: SUMMARY,
+        note: "internal handoff note that must not appear",
+        wakeOn: { event: "settled", taskIds: [watched.id] },
+      },
+      meta(),
+    )) as DeferTaskResult;
+
+    expect(result.structuredContent.success).toBe(true);
+    const stored = await getTaskById(task.id);
+    // Event-based AND time-based: `delayMs`/`runAt` is required even with
+    // wakeOn, so the ceiling is always the honest fallback.
+    expect(stored?.output).toMatch(
+      /^Waiting on Researcher — or (today|tomorrow|on \d{2}-\d{2}) at \d{2}:\d{2} UTC at the latest$/,
+    );
+    expect(stored?.output).not.toContain("internal handoff note");
+    expect(stored?.output).not.toContain(watched.id);
+  });
+
+  test("a wakeOn defer on unassigned tasks falls back to a count, not a UUID", async () => {
+    const watched = await createTaskExtended("unassigned watched work", { source: "mcp" });
+    const task = await startedTask("waiting on an unassigned task");
+
+    await buildTool().handler(
+      {
+        taskId: task.id,
+        delayMs: 60_000,
+        summary: SUMMARY,
+        note: "pending",
+        wakeOn: { event: "settled", taskIds: [watched.id] },
+      },
+      meta(),
+    );
+
+    const stored = await getTaskById(task.id);
+    expect(stored?.output).toStartWith("Waiting on 1 task — or ");
+    expect(stored?.output).not.toContain(watched.id);
+  });
+
+  test("the schedule keeps the delay that was actually requested", async () => {
+    const byDelay = await startedTask("delay provenance");
+    await buildTool().handler(
+      { taskId: byDelay.id, delayMs: 1_800_000, summary: SUMMARY, note: "pending" },
+      meta(),
+    );
+    const delaySchedule = (await schedulesForTask(byDelay.id))[0]!;
+    expect(delaySchedule.requestedDelayMs).toBe(1_800_000);
+    expect(delaySchedule.requestedRunAt).toBeUndefined();
+
+    const runAt = new Date(Date.now() + 3_600_000).toISOString();
+    const byRunAt = await startedTask("runAt provenance");
+    await buildTool().handler(
+      { taskId: byRunAt.id, runAt, summary: SUMMARY, note: "pending" },
+      meta(),
+    );
+    const runAtSchedule = (await schedulesForTask(byRunAt.id))[0]!;
+    expect(runAtSchedule.requestedRunAt).toBe(runAt);
+    expect(runAtSchedule.requestedDelayMs).toBeUndefined();
+  });
+
+  test("deferredAt marks the deferring task, and a plain completion leaves it unset", async () => {
+    const deferred = await startedTask("ends in a deferral");
+    await buildTool().handler(
+      { taskId: deferred.id, delayMs: 60_000, summary: SUMMARY, note: "pending" },
+      meta(),
+    );
+    expect((await getTaskById(deferred.id))?.deferredAt).toBeTruthy();
+
+    // Negative control: the same tag on a task that simply finished. A wake-up
+    // task inherits `deferred` from its schedule, so the tag alone cannot tell
+    // "parked" from "done" — only `deferredAt` can.
+    const finished = await startedTask("ends normally");
+    await completeTask(finished.id, "done", { addTags: ["deferred"] });
+    const storedFinished = await getTaskById(finished.id);
+    expect(storedFinished?.tags).toContain("deferred");
+    expect(storedFinished?.deferredAt).toBeUndefined();
   });
 });

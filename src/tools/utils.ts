@@ -275,7 +275,7 @@ const storeProgressBlockedWaitingNudge = (r: SwarmToolResult): string | undefine
   if (!r.ok) return undefined;
   const ms = (r.data as { blockedWaitingElapsedMs?: unknown } | undefined)?.blockedWaitingElapsedMs;
   if (typeof ms !== "number") return undefined;
-  return `That reads as blocked-waiting, ${formatIdleDuration(ms)} since your last update — call defer-task so a wake-up task resumes you instead of polling manually.`;
+  return `That reads as blocked-waiting, ${formatIdleDuration(ms)} since your last update — keep working if you can, and if the wait is genuinely long, defer-task is one way to resume later instead of polling.`;
 };
 
 const workflowLongScriptTimeoutNudge = (r: SwarmToolResult): string | undefined => {

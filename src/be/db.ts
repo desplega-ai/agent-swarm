@@ -427,6 +427,8 @@ export interface SlackMessageRecord {
   finalizedAt?: string;
   streamChunksAppended: number;
   conclusionKind?: SlackConclusionKind;
+  /** Set once a deferral card has been rewritten into its resolved state. */
+  deferralResolvedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -449,6 +451,7 @@ type SlackMessageRow = {
   finalized_at: string | null;
   stream_chunks_appended: number;
   conclusion_kind: SlackConclusionKind | null;
+  deferral_resolved_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -466,6 +469,7 @@ function rowToSlackMessage(row: SlackMessageRow): SlackMessageRecord {
     finalizedAt: row.finalized_at ?? undefined,
     streamChunksAppended: row.stream_chunks_appended,
     conclusionKind: row.conclusion_kind ?? undefined,
+    deferralResolvedAt: row.deferral_resolved_at ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -673,6 +677,49 @@ export async function getSlackOutcomeMessage(taskId: string): Promise<SlackMessa
     [taskId],
   );
   return row ? rowToSlackMessage(row) : null;
+}
+
+/**
+ * Deferral outcome cards whose wake-up task has since reached a terminal
+ * state, and which have not been rewritten into that resolved state yet.
+ *
+ * The join is `agent_tasks.parentTaskId` — `defer-task` sets it on the
+ * schedule and `createStandaloneScheduleTask` passes it through, so the
+ * wake-up task points back at the task whose card announced the wait.
+ * `deferredAt` (not the `deferred` tag) identifies the deferring task,
+ * because the wake-up task inherits the tag.
+ */
+export async function getResolvableDeferralOutcomes(
+  limit = 50,
+): Promise<{ card: SlackMessageRecord; deferredTaskId: string; wakeTaskId: string }[]> {
+  const rows = await getDbClient().query<SlackMessageRow & { wake_task_id: string }>(
+    `SELECT card.*, wake.id AS wake_task_id
+       FROM slack_messages card
+       JOIN agent_tasks deferred ON deferred.id = card.task_id
+       JOIN agent_tasks wake ON wake.parentTaskId = deferred.id AND wake.taskType = 'deferred'
+       WHERE card.kind = 'outcome'
+         AND card.finalized_at IS NOT NULL
+         AND card.deferral_resolved_at IS NULL
+         AND card.ts NOT LIKE 'pending:%'
+         AND deferred.deferredAt IS NOT NULL
+         AND wake.status IN ('completed', 'failed', 'cancelled')
+       ORDER BY wake.finishedAt ASC
+       LIMIT ?`,
+    [limit],
+  );
+  return rows.map((row) => ({
+    card: rowToSlackMessage(row),
+    deferredTaskId: row.task_id!,
+    wakeTaskId: row.wake_task_id,
+  }));
+}
+
+/** Mark a deferral card as rewritten, so the resolution pass skips it after. */
+export async function markSlackDeferralResolved(id: string): Promise<void> {
+  await getDbClient().run("UPDATE slack_messages SET deferral_resolved_at = ? WHERE id = ?", [
+    new Date().toISOString(),
+    id,
+  ]);
 }
 
 export async function getSlackTreeMessages(): Promise<SlackMessageRecord[]> {
@@ -5474,6 +5521,8 @@ type ScheduledTaskRow = {
   nextRunAt: string | null;
   createdByAgentId: string | null;
   parentTaskId: string | null;
+  requestedDelayMs: number | null;
+  requestedRunAt: string | null;
   timezone: string;
   consecutiveErrors: number | null;
   lastErrorAt: string | null;
@@ -5524,6 +5573,8 @@ function rowToScheduledTask(row: ScheduledTaskRow): ScheduledTask {
     nextRunAt: normalizeDate(row.nextRunAt) ?? undefined,
     createdByAgentId: row.createdByAgentId ?? undefined,
     parentTaskId: row.parentTaskId ?? undefined,
+    requestedDelayMs: row.requestedDelayMs ?? undefined,
+    requestedRunAt: normalizeDate(row.requestedRunAt) ?? undefined,
     timezone: row.timezone,
     consecutiveErrors: row.consecutiveErrors ?? 0,
     lastErrorAt: normalizeDate(row.lastErrorAt) ?? undefined,
@@ -5675,6 +5726,13 @@ export interface CreateScheduledTaskData {
   createdByAgentId?: string;
   /** Only `defer-task` sets this — the task the schedule's run continues. */
   parentTaskId?: string;
+  /**
+   * Only `defer-task` sets these — the delay the caller actually asked for,
+   * kept because the scheduler clears `nextRunAt` once a one_time schedule
+   * fires. Write-once provenance; nothing reads them to decide when to run.
+   */
+  requestedDelayMs?: number;
+  requestedRunAt?: string;
   timezone?: string;
   model?: string;
   modelTier?: ModelTier;
@@ -5697,11 +5755,12 @@ export async function createScheduledTask(data: CreateScheduledTaskData): Promis
     `INSERT INTO scheduled_tasks (
         id, "key", name, description, cronExpression, intervalMs, taskTemplate,
         taskType, tags, priority, targetAgentId, enabled, nextRunAt,
-        createdByAgentId, parentTaskId, timezone, model, modelTier, scheduleType,
+        createdByAgentId, parentTaskId, requestedDelayMs, requestedRunAt,
+        timezone, model, modelTier, scheduleType,
         targetType, workflowId, scriptName, scriptArgs, params, requiredParams, requires,
         createdAt, lastUpdatedAt,
         created_by, updated_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     [
       id,
       normalizeAssetKey(data.key ?? defaultAssetKey("schedule", id)),
@@ -5718,6 +5777,8 @@ export async function createScheduledTask(data: CreateScheduledTaskData): Promis
       data.nextRunAt ?? null,
       data.createdByAgentId ?? null,
       data.parentTaskId ?? null,
+      data.requestedDelayMs ?? null,
+      data.requestedRunAt ?? null,
       data.timezone ?? "UTC",
       data.model ?? null,
       data.modelTier ?? null,

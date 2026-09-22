@@ -1789,7 +1789,7 @@ describe("Slack renderer v2", () => {
     expect(outcome?.finalizedAt).toBeDefined();
   });
 
-  test("omits the deferral ETA even when the agent already sent a slack-reply", async () => {
+  test("renders a legacy deferral as ⏳ with its ETA, even after a slack-reply", async () => {
     const lead = await createAgent({ name: "Deferring Lead", isLead: true, status: "idle" });
     const { channelId, threadTs } = uniqueSlackAddress("C_RENDER_DEFER_AFTER_REPLY");
     const ask = await createTaskExtended("defer after replying by hand", {
@@ -1814,14 +1814,163 @@ describe("Slack renderer v2", () => {
     await processSlackRenderV2();
 
     const started = calls.find((call) => call.method === "chat.startStream");
-    expect(started?.payload.markdown_text).toBe("✅\n\nPending: checking the new defer card");
-    expect(JSON.stringify(calls)).not.toContain("17:30:19");
+    // ⏳ not ✅: the ask was parked, not answered. The ETA is what a human
+    // needs; the agent's internal note and the schedule link are dropped.
+    expect(started?.payload.markdown_text).toBe("⏳\n\nChecking back today 17:30:19 UTC");
+    expect(JSON.stringify(calls)).not.toContain("checking the new defer card");
+    expect(JSON.stringify(calls)).not.toContain("715bf847-fe3e");
     expect(JSON.stringify(calls)).not.toContain("Deferred until");
     expect((await getTaskById(ask.id))?.output).toBe(deferralLine);
     expect(started?.payload.markdown_text).not.toBe(`✅ ${lead.name} completed`);
   });
 
-  test("does not post an ETA-only deferral notice", async () => {
+  test("a deferral card opens with ⏳ and closes in place when the wake-up settles", async () => {
+    const lead = await createAgent({ name: "Parking Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_DEFER_RESOLVE");
+    const ask = await createTaskExtended("answer when the build is done", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    await startTask(ask.id);
+    // Mirrors defer-task.ts: the human card as stored output, plus the marker
+    // that tells "parked" from "done" on a row whose status is `completed`.
+    await completeTask(ask.id, "Checking back today at 18:38", {
+      addTags: ["deferred"],
+      deferredAt: new Date().toISOString(),
+    });
+    await backdateLastUpdated([ask.id], 20);
+    calls.length = 0;
+    await processSlackRenderV2();
+
+    const opening = calls.find((call) => call.method === "chat.startStream");
+    expect(opening?.payload.markdown_text).toBe("⏳\n\nChecking back today at 18:38");
+    const card = await getSlackOutcomeMessage(ask.id);
+    expect(card?.finalizedAt).toBeTruthy();
+    expect(card?.deferralResolvedAt).toBeUndefined();
+
+    // The wake-up task runs and finishes.
+    const schedule = await createScheduledTask({
+      name: "deferred-resolve",
+      scheduleType: "one_time",
+      taskTemplate: "Deliver the result",
+      taskType: "deferred",
+      tags: ["deferred"],
+      parentTaskId: ask.id,
+      targetAgentId: lead.id,
+      createdByAgentId: lead.id,
+      nextRunAt: new Date().toISOString(),
+    });
+    const wake = await createStandaloneScheduleTask(schedule);
+    await startTask(wake.id);
+    await completeTask(wake.id, "The build passed.");
+    calls.length = 0;
+    await processSlackRenderV2();
+
+    // The SAME message is rewritten — no new opening card for the ask.
+    const rewrite = calls.find(
+      (call) => call.method === "chat.update" && call.payload.ts === card?.ts,
+    );
+    expect(rewrite).toBeDefined();
+    expect(rewrite?.payload.text).toContain("✅");
+    expect(rewrite?.payload.text).not.toContain("Checking back");
+    expect((await getSlackOutcomeMessage(ask.id))?.deferralResolvedAt).toBeTruthy();
+
+    // Idempotent: a second tick must not rewrite it again.
+    calls.length = 0;
+    await processSlackRenderV2();
+    expect(
+      calls.filter((call) => call.method === "chat.update" && call.payload.ts === card?.ts),
+    ).toHaveLength(0);
+  });
+
+  test("a wake-up that failed closes the deferral card as failed, not as done", async () => {
+    const lead = await createAgent({ name: "Failing Wake Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_DEFER_RESOLVE_FAIL");
+    const ask = await createTaskExtended("answer later", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    await startTask(ask.id);
+    await completeTask(ask.id, "Waiting on Researcher — or today at 18:38 at the latest", {
+      addTags: ["deferred"],
+      deferredAt: new Date().toISOString(),
+    });
+    await backdateLastUpdated([ask.id], 20);
+    await processSlackRenderV2();
+    const card = await getSlackOutcomeMessage(ask.id);
+
+    const schedule = await createScheduledTask({
+      name: "deferred-resolve-fail",
+      scheduleType: "one_time",
+      taskTemplate: "Deliver the result",
+      taskType: "deferred",
+      tags: ["deferred"],
+      parentTaskId: ask.id,
+      targetAgentId: lead.id,
+      createdByAgentId: lead.id,
+      nextRunAt: new Date().toISOString(),
+    });
+    const wake = await createStandaloneScheduleTask(schedule);
+    await startTask(wake.id);
+    await failTask(wake.id, "the build never finished");
+    calls.length = 0;
+    await processSlackRenderV2();
+
+    const rewrite = calls.find(
+      (call) => call.method === "chat.update" && call.payload.ts === card?.ts,
+    );
+    expect(rewrite?.payload.text).toContain("❌");
+    expect(rewrite?.payload.text).not.toContain("Waiting on Researcher");
+  });
+
+  test("a deferral whose wake-up is still running keeps its ⏳ card untouched", async () => {
+    const lead = await createAgent({ name: "Pending Wake Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_DEFER_STILL_WAITING");
+    const ask = await createTaskExtended("answer eventually", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    await startTask(ask.id);
+    await completeTask(ask.id, "Checking back today at 18:38", {
+      addTags: ["deferred"],
+      deferredAt: new Date().toISOString(),
+    });
+    await backdateLastUpdated([ask.id], 20);
+    await processSlackRenderV2();
+    const card = await getSlackOutcomeMessage(ask.id);
+
+    const schedule = await createScheduledTask({
+      name: "deferred-still-running",
+      scheduleType: "one_time",
+      taskTemplate: "Deliver the result",
+      taskType: "deferred",
+      tags: ["deferred"],
+      parentTaskId: ask.id,
+      targetAgentId: lead.id,
+      createdByAgentId: lead.id,
+      nextRunAt: new Date().toISOString(),
+    });
+    const wake = await createStandaloneScheduleTask(schedule);
+    await startTask(wake.id);
+    calls.length = 0;
+    await processSlackRenderV2();
+
+    expect(
+      calls.filter((call) => call.method === "chat.update" && call.payload.ts === card?.ts),
+    ).toHaveLength(0);
+    expect((await getSlackOutcomeMessage(ask.id))?.deferralResolvedAt).toBeUndefined();
+  });
+
+  test("a deferral with no pending text still posts its ETA", async () => {
     const { channelId, threadTs } = uniqueSlackAddress("C_ETA_ONLY");
     const ask = await createTaskExtended("wait", {
       source: "slack",
@@ -1836,8 +1985,10 @@ describe("Slack renderer v2", () => {
     );
     calls.length = 0;
     await processSlackRenderV2();
-    expect(calls.filter((call) => call.method === "chat.startStream")).toHaveLength(0);
-    expect(JSON.stringify(calls)).not.toContain("17:30");
+    // The ETA IS the message now, so there is no such thing as an "ETA-only"
+    // notice worth suppressing — a thread that says nothing is the bug.
+    const started = calls.find((call) => call.method === "chat.startStream");
+    expect(started?.payload.markdown_text).toBe("⏳\n\nChecking back today 17:30 UTC");
   });
 
   test("refreshes a stream started with stale content before finalizing it", async () => {
