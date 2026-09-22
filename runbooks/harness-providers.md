@@ -20,11 +20,14 @@ Set `HARNESS_PROVIDER=dsh` and `DEEPSEEK_API_KEY` in the worker environment or
 agent-scoped config. This runs DeepSeek's own harness. `MODEL_OVERRIDE` accepts
 its model ID (default `deepseek-flash`; smart/ultra tiers use `deepseek-v4-pro`).
 
-Install `npm install -g @deepseek-ai/dsh@0.1.7-alpha.2`, or let the adapter use
-`npx --yes @deepseek-ai/dsh@0.1.7-alpha.2` when `dsh` is absent from PATH.
-`DSH_BINARY` can name an explicit executable. Use the pinned alpha: npm's
-`latest` tag was `0.1.5-rc.2` when verified and lacks the required stdin/JSON
-surface. The npx fallback requires Node, npm, and network access on first use.
+The full worker image installs `@deepseek-ai/dsh@0.1.7-alpha.2` at build time
+in `worker-full-base`, alongside the optional tools in `/opt/global-deps-full`.
+The slim image does not include dsh: use `worker-full` or provision the pinned
+package in your custom image before starting a dsh worker. Both the entrypoint
+and adapter fail when the executable is absent; startup never downloads npm
+packages. `DSH_BINARY` selects a trusted preinstalled executable, otherwise the
+adapter finds `dsh` on PATH. Use the pinned alpha for its required stdin/JSON
+surface.
 
 The adapter launches `--profile headless --patch <temporary-file> --json -`,
 sends the task over stdin, sets the child working directory, and applies the

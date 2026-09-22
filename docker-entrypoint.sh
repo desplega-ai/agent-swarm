@@ -322,12 +322,12 @@ elif [ "$HARNESS_PROVIDER" = "opencode" ]; then
     fi
     echo "opencode CLI: $(command -v "$OPENCODE_BIN")"
 elif [ "$HARNESS_PROVIDER" = "dsh" ]; then
-    if [ -n "$DSH_BINARY" ]; then
-        command -v "$DSH_BINARY" >/dev/null 2>&1 || { echo "FATAL: dsh CLI not found: $DSH_BINARY"; exit 1; }
-    elif ! command -v dsh >/dev/null 2>&1 && ! command -v npx >/dev/null 2>&1; then
-        echo "FATAL: dsh needs dsh or npx on PATH. Install @deepseek-ai/dsh@0.1.7-alpha.2."
+    DSH_BIN="${DSH_BINARY:-dsh}"
+    if ! command -v "$DSH_BIN" >/dev/null 2>&1; then
+        echo "FATAL: dsh CLI not found: '$DSH_BIN'. Use worker-full or install @deepseek-ai/dsh@0.1.7-alpha.2 during image provisioning."
         exit 1
     fi
+    echo "dsh CLI: $(command -v "$DSH_BIN")"
 elif [ "$HARNESS_PROVIDER" != "pi" ]; then
     CLAUDE_BIN="${CLAUDE_BINARY:-claude}"
     # CLAUDE_BINARY may be a whitespace-separated command string. Only

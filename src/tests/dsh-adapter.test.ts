@@ -113,14 +113,30 @@ describe("dsh harness", () => {
     });
   });
 
-  test("uses the pinned npx package when no dsh binary is installed", async () => {
+  test("fails closed when only npx is installed", async () => {
     const config = await fixture();
     await rename(join(config.cwd, "dsh"), join(config.cwd, "npx"));
+    config.env = { ...config.env, DSH_BINARY: "", PATH: config.cwd };
+    await expect(new DshAdapter().createSession(config)).rejects.toThrow(
+      "dsh CLI not found. Install @deepseek-ai/dsh@0.1.7-alpha.2",
+    );
+    expect(await Bun.file(join(config.cwd, "invocation.json")).exists()).toBe(false);
+  });
+
+  test("uses a preinstalled dsh from PATH without DSH_BINARY", async () => {
+    const config = await fixture();
     config.env = { ...config.env, DSH_BINARY: "", PATH: config.cwd };
     const session = await new DshAdapter().createSession(config);
     expect((await session.waitForCompletion()).isError).toBe(false);
     const invocation = await Bun.file(join(config.cwd, "invocation.json")).json();
-    expect(invocation.args.slice(0, 2)).toEqual(["--yes", "@deepseek-ai/dsh@0.1.7-alpha.2"]);
+    expect(invocation.args[0]).toBe("--profile");
+  });
+
+  test("does not fall back when an explicit DSH_BINARY is missing", async () => {
+    const config = await fixture();
+    config.env = { ...config.env, DSH_BINARY: join(config.cwd, "missing"), PATH: config.cwd };
+    await expect(new DshAdapter().createSession(config)).rejects.toThrow();
+    expect(await Bun.file(join(config.cwd, "invocation.json")).exists()).toBe(false);
   });
 
   for (const mode of ["failure", "missing-final", "malformed"]) {

@@ -165,6 +165,12 @@ export class DshAdapter implements ProviderAdapter {
   async createSession(config: ProviderSessionConfig): Promise<ProviderSession> {
     const env = { ...process.env, ...config.env };
     if (!checkDshCredentials(env).ready) throw new Error("dsh requires DEEPSEEK_API_KEY");
+    const binary = env.DSH_BINARY || Bun.which("dsh", { PATH: env.PATH });
+    if (!binary) {
+      throw new Error(
+        `dsh CLI not found. Install ${DSH_PACKAGE} during image provisioning or set DSH_BINARY to a trusted executable.`,
+      );
+    }
     registerVolatileSecret(env.DEEPSEEK_API_KEY!, "DEEPSEEK_API_KEY");
     const prompt = await resolveSlashSkillPrompt(config.prompt, {
       providerLabel: "dsh",
@@ -186,10 +192,8 @@ export class DshAdapter implements ProviderAdapter {
         ]),
         { mode: 0o600 },
       );
-      const binary = env.DSH_BINARY || Bun.which("dsh", { PATH: env.PATH });
-      const command = binary ? [binary] : ["npx", "--yes", DSH_PACKAGE];
       const proc = registerProcessGroup(
-        Bun.spawn([...command, "--profile", "headless", "--patch", patchPath, "--json", "-"], {
+        Bun.spawn([binary, "--profile", "headless", "--patch", patchPath, "--json", "-"], {
           cwd: config.cwd,
           env,
           stdin: "pipe",

@@ -533,6 +533,7 @@ RUN mkdir -p /opt/global-deps-full && cat > /opt/global-deps-full/package.json <
   "name": "global-deps-full",
   "private": true,
   "dependencies": {
+    "@deepseek-ai/dsh": "0.1.7-alpha.2",
     "@sentry/cli": "3.3.4",
     "@desplega.ai/localtunnel": "2.2.0",
     "@desplega.ai/claude-bridge": "0.2.2",
@@ -570,6 +571,7 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
       && for bin in /opt/global-deps-full/node_modules/.bin/*; do \
            ln -sf "$bin" "/usr/local/bin/$(basename "$bin")"; \
          done \
+      && dsh --help >/dev/null \
       && playwright install chromium' \
     && cd /opt/global-deps-full \
     && chromium_path="$(node -e 'const { chromium } = require("playwright"); process.stdout.write(chromium.executablePath())')" \
