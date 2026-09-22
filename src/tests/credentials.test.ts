@@ -2,7 +2,13 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { validateClaudeCredentials, validateOpencodeCredentials } from "../utils/credentials";
+import {
+  CREDENTIAL_POOL_VARS,
+  deriveProviderFromKeyType,
+  getModelAwareCredentialVars,
+  validateClaudeCredentials,
+  validateOpencodeCredentials,
+} from "../utils/credentials";
 
 // ─── validateClaudeCredentials ───────────────────────────────────────────────
 
@@ -67,6 +73,21 @@ describe("validateOpencodeCredentials", () => {
     expect(validateOpencodeCredentials({ OPENAI_API_KEY: "example-sk-openai-123" })).toBe(
       "openai_api_key",
     );
+  });
+
+  test("accepts DeepSeek credentials and selects only its pool for direct models", () => {
+    expect(validateOpencodeCredentials({ DEEPSEEK_API_KEY: "example-deepseek-key" })).toBe(
+      "deepseek_api_key",
+    );
+    expect(CREDENTIAL_POOL_VARS).toContain("DEEPSEEK_API_KEY");
+    expect(deriveProviderFromKeyType("DEEPSEEK_API_KEY")).toBe("opencode");
+    expect(getModelAwareCredentialVars("opencode", "deepseek/deepseek-v4-flash")).toEqual([
+      "DEEPSEEK_API_KEY",
+    ]);
+    expect(
+      getModelAwareCredentialVars("opencode", "openrouter/deepseek/deepseek-v4-flash"),
+    ).not.toContain("DEEPSEEK_API_KEY");
+    expect(getModelAwareCredentialVars("pi")).not.toContain("DEEPSEEK_API_KEY");
   });
 
   test("returns 'auth_file' when auth.json exists and no env vars are set", () => {

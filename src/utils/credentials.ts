@@ -8,6 +8,7 @@ export const CREDENTIAL_POOL_VARS = [
   "OPENAI_API_KEY",
   "CODEX_OAUTH",
   "DEVIN_API_KEY",
+  "DEEPSEEK_API_KEY",
 ] as const;
 
 /**
@@ -26,7 +27,7 @@ export const PROVIDER_CREDENTIAL_VARS: Record<string, readonly string[]> = {
   pi: ["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"],
   codex: ["OPENAI_API_KEY", "CODEX_OAUTH"],
   devin: ["DEVIN_API_KEY"],
-  opencode: ["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"],
+  opencode: ["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "DEEPSEEK_API_KEY"],
 };
 
 /**
@@ -55,7 +56,14 @@ const SLASH_MODEL_PROVIDERS = new Set(["opencode", "pi"]);
  * All other providers return their static list unchanged.
  */
 export function getModelAwareCredentialVars(provider: string, model?: string): readonly string[] {
-  const base = PROVIDER_CREDENTIAL_VARS[provider];
+  const providerVars = PROVIDER_CREDENTIAL_VARS[provider];
+  if (provider === "opencode" && model?.toLowerCase().startsWith("deepseek/")) {
+    return ["DEEPSEEK_API_KEY"];
+  }
+  const base =
+    provider === "opencode" && model
+      ? providerVars?.filter((v) => v !== "DEEPSEEK_API_KEY")
+      : providerVars;
   if (!base) return CREDENTIAL_POOL_VARS;
   if (!SLASH_MODEL_PROVIDERS.has(provider) || !model) return base;
   if (model.includes("/")) {
@@ -82,6 +90,8 @@ export function deriveProviderFromKeyType(keyType: string): string {
     case "OPENAI_API_KEY":
     case "CODEX_OAUTH":
       return "codex";
+    case "DEEPSEEK_API_KEY":
+      return "opencode";
     case "DEVIN_API_KEY":
       return "devin";
     default:
@@ -208,19 +218,25 @@ export function validateClaudeCredentials(
 
 /**
  * Validate that at least one opencode credential is available.
- * Priority: OPENROUTER_API_KEY → ANTHROPIC_API_KEY → OPENAI_API_KEY → ~/.local/share/opencode/auth.json.
+ * Priority: OPENROUTER_API_KEY → ANTHROPIC_API_KEY → OPENAI_API_KEY → DEEPSEEK_API_KEY → ~/.local/share/opencode/auth.json.
  * Returns the credential type found, or throws if none are available.
  */
 export function validateOpencodeCredentials(
   env: Record<string, string | undefined>,
-): "openrouter_api_key" | "anthropic_api_key" | "openai_api_key" | "auth_file" {
+):
+  | "openrouter_api_key"
+  | "anthropic_api_key"
+  | "openai_api_key"
+  | "deepseek_api_key"
+  | "auth_file" {
   if (env.OPENROUTER_API_KEY) return "openrouter_api_key";
   if (env.ANTHROPIC_API_KEY) return "anthropic_api_key";
   if (env.OPENAI_API_KEY) return "openai_api_key";
+  if (env.DEEPSEEK_API_KEY) return "deepseek_api_key";
   const authFile = `${process.env.HOME ?? "/root"}/.local/share/opencode/auth.json`;
   if (existsSync(authFile)) return "auth_file";
   throw new Error(
-    "No opencode credentials found. Set OPENROUTER_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, or provide ~/.local/share/opencode/auth.json.",
+    "No opencode credentials found. Set OPENROUTER_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, DEEPSEEK_API_KEY, or provide ~/.local/share/opencode/auth.json.",
   );
 }
 

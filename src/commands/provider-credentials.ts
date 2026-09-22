@@ -101,7 +101,7 @@ export const REQUIRED_CRED_VARS_BY_PROVIDER: Record<SupportedProvider, readonly 
   ],
   codex: ["OPENAI_API_KEY", "CODEX_OAUTH"],
   devin: ["DEVIN_API_KEY", "DEVIN_ORG_ID"],
-  opencode: ["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"],
+  opencode: ["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "DEEPSEEK_API_KEY"],
   pi: ["ANTHROPIC_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY"],
   // The ACP target process owns its own auth, so the swarm requires nothing.
   acp: [],
@@ -378,6 +378,30 @@ export async function validateProviderCredentials(provider: string): Promise<Liv
         // calls on non-EC2 hosts).
         if (provider === "pi" && isBedrockMode(env)) {
           return presenceCheckOk();
+        }
+        // DeepSeek is a model provider inside OpenCode. Probe its own API,
+        // including when unrelated provider credentials are also configured.
+        const deepseekModel = env.MODEL_OVERRIDE?.toLowerCase().startsWith("deepseek/");
+        const deepseekOnly =
+          env.DEEPSEEK_API_KEY &&
+          !env.OPENROUTER_API_KEY &&
+          !env.ANTHROPIC_API_KEY &&
+          !env.OPENAI_API_KEY;
+        if (provider === "opencode" && (deepseekModel || deepseekOnly)) {
+          if (!env.DEEPSEEK_API_KEY) {
+            return { ok: false, error: "DEEPSEEK_API_KEY is not set.", latency_ms: 0 };
+          }
+          const r = await timedFetch("https://api.deepseek.com/models", {
+            method: "GET",
+            headers: { Authorization: `Bearer ${env.DEEPSEEK_API_KEY}` },
+          });
+          return r.ok
+            ? { ok: true, latency_ms: r.latency_ms }
+            : {
+                ok: false,
+                error: scrubSecrets(`HTTP ${r.status}: ${r.bodyText.slice(0, 200)}`),
+                latency_ms: r.latency_ms,
+              };
         }
         // Both pi-mono and opencode resolve credentials in the same order:
         // OPENROUTER → ANTHROPIC → OPENAI. Live-test against the matching

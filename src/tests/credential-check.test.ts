@@ -610,6 +610,42 @@ describe("checkOpencodeCredentials", () => {
     ).toBe(true);
   });
 
+  test("DeepSeek readiness requires its key even with unrelated credentials", () => {
+    const env = { MODEL_OVERRIDE: "deepseek/deepseek-v4-flash", OPENROUTER_API_KEY: "other" };
+    const missing = checkOpencodeCredentials(env, { homeDir: HOME, fs: noFiles });
+    expect(missing.ready).toBe(false);
+    expect(missing.missing).toContain("DEEPSEEK_API_KEY");
+    expect(
+      checkOpencodeCredentials({ ...env, DEEPSEEK_API_KEY: "key" }, { fs: noFiles }).ready,
+    ).toBe(true);
+    expect(checkOpencodeCredentials({ DEEPSEEK_API_KEY: "key" }, { fs: noFiles }).ready).toBe(true);
+  });
+
+  test("DeepSeek live check uses its endpoint and reports missing keys", async () => {
+    const oldEnv = { ...process.env };
+    const oldFetch = globalThis.fetch;
+    try {
+      process.env.MODEL_OVERRIDE = "deepseek/deepseek-v4-flash";
+      process.env.OPENROUTER_API_KEY = "unrelated-key";
+      process.env.DEEPSEEK_API_KEY = "example-deepseek-key";
+      const fetchMock = mock(async (url: string | URL | Request, init?: RequestInit) => {
+        expect(url).toBe("https://api.deepseek.com/models");
+        expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer example-deepseek-key");
+        return new Response("{}", { status: 200 });
+      });
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+      expect((await validateProviderCredentials("opencode")).ok).toBe(true);
+      delete process.env.DEEPSEEK_API_KEY;
+      expect((await validateProviderCredentials("opencode")).error).toBe(
+        "DEEPSEEK_API_KEY is not set.",
+      );
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      process.env = oldEnv;
+      globalThis.fetch = oldFetch;
+    }
+  });
+
   test("strict: MODEL_OVERRIDE=openai/... requires OPENAI_API_KEY", () => {
     const env = { MODEL_OVERRIDE: "openai/gpt-4o" };
     expect(checkOpencodeCredentials(env, { homeDir: HOME, fs: noFiles }).ready).toBe(false);

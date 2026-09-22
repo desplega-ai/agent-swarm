@@ -14,6 +14,16 @@ Operational rules for editing or adding harness providers (claude, codex, openco
 | Claude Managed | `claude-managed` | `ClaudeManagedAdapter` | Anthropic managed sandbox; SSE relay |
 | ACP | `acp` | `ACPAdapter` | Curated `opencode` preset or a custom [Agent Client Protocol](https://agentclientprotocol.com) command. Session knobs such as model use `session/set_config_option` when advertised, with target-specific startup fallbacks. No swarm-side *model-provider* credential — the target owns its own model auth. The target receives the worker's swarm API key as the swarm MCP bearer, so point custom targets only at binaries you trust |
 
+## DeepSeek via OpenCode
+
+DeepSeek uses OpenCode's built-in model provider and OpenAI-compatible API.
+Set `HARNESS_PROVIDER=opencode`, `MODEL_OVERRIDE=deepseek/deepseek-v4-flash`,
+and `DEEPSEEK_API_KEY` through the existing secret configuration or worker environment.
+The key supports the same comma-separated credential pools as other API keys.
+OpenCode owns model discovery and API calls; select a current `deepseek/<model-id>`
+from `opencode models deepseek`. No separate DeepSeek CLI or harness is required.
+See [DeepSeek's OpenCode guide](https://api-docs.deepseek.com/quick_start/agent_integrations/opencode/).
+
 ## Claude transport selection
 
 `CLAUDE_TRANSPORT=cli|sdk` selects execution inside `ClaudeAdapter`. CLI remains the default.

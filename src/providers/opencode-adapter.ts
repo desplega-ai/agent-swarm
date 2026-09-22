@@ -52,6 +52,7 @@ function opencodeModelToCredKey(modelStr: string | undefined): string | null {
     if (provider === "anthropic") return "ANTHROPIC_API_KEY";
     if (provider === "openrouter") return "OPENROUTER_API_KEY";
     if (provider === "openai") return "OPENAI_API_KEY";
+    if (provider === "deepseek") return "DEEPSEEK_API_KEY";
   }
   return null;
 }
@@ -63,7 +64,7 @@ function opencodeModelToCredKey(modelStr: string | undefined): string | null {
  *   2. `MODEL_OVERRIDE` resolves to a provider-prefixed model — only that
  *      provider's key is required.
  *   3. Otherwise any one of OPENROUTER_API_KEY / ANTHROPIC_API_KEY /
- *      OPENAI_API_KEY suffices.
+ *      OPENAI_API_KEY / DEEPSEEK_API_KEY suffices.
  */
 export function checkOpencodeCredentials(
   env: Record<string, string | undefined>,
@@ -88,13 +89,24 @@ export function checkOpencodeCredentials(
     };
   }
 
-  if (env.OPENROUTER_API_KEY || env.ANTHROPIC_API_KEY || env.OPENAI_API_KEY) {
+  if (
+    env.OPENROUTER_API_KEY ||
+    env.ANTHROPIC_API_KEY ||
+    env.OPENAI_API_KEY ||
+    env.DEEPSEEK_API_KEY
+  ) {
     return { ready: true, missing: [], satisfiedBy: "env" };
   }
   return {
     ready: false,
-    missing: ["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", authFile],
-    hint: "Set one of OPENROUTER_API_KEY / ANTHROPIC_API_KEY / OPENAI_API_KEY (any one suffices), or run `opencode auth login` to create ~/.local/share/opencode/auth.json.",
+    missing: [
+      "OPENROUTER_API_KEY",
+      "ANTHROPIC_API_KEY",
+      "OPENAI_API_KEY",
+      "DEEPSEEK_API_KEY",
+      authFile,
+    ],
+    hint: "Set one of OPENROUTER_API_KEY / ANTHROPIC_API_KEY / OPENAI_API_KEY / DEEPSEEK_API_KEY (any one suffices), or run `opencode auth login` to create ~/.local/share/opencode/auth.json.",
   };
 }
 
