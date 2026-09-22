@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.152.2] - 2026-09-22
+
+### Added
+- **AI Builders presentation on swarm memory**, with a self-contained slide deck and static deployment instructions (#1563).
+
+### Fixed
+- **Slack identifies the bot's own mention in assistant DMs and buffered follow-ups**, including thread context, instead of labeling it as an unknown user (#1562).
+- **Task logs display inline tool-result images**, loading previews near the viewport and opening them at full size on click (#1564).
+- **AI Builders deck pins static deployment settings** for subsequent Vercel builds (#1565).
+
+## [1.152.1] - 2026-09-21
+
+### Fixed
+- **AgentMail archives verified inbound deliveries before acknowledgement**, retaining minimized content for 30 days independently of task-routing filters. Contact triage can discover unauthenticated inbound mail without relying on provider listing indexes; external enrichment requires provider-specific operator approval (#1549).
+
 ## [1.152.0] - 2026-09-18
 
 ### Added

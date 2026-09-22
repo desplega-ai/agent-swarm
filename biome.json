@@ -15,6 +15,7 @@
       "!src/providers/modelsdev-reasoning.json",
       "!packages/ui-e2e/reporter/ui-e2e-ingest.v1.schema.json",
       "!mockups",
+      "!talks",
       "!!docs-site/public/openapi.d.ts"
     ]
   },

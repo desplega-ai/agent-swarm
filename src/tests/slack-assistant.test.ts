@@ -6,9 +6,15 @@ import {
   createTaskExtended,
   getAgentWorkingOnThread,
   getLeadAgent,
+  getMostRecentTaskInThread,
   getTaskById,
   initDb,
 } from "../be/db";
+import { createAssistant } from "../slack/assistant";
+import { getBufferMessageCount, instantFlush } from "../slack/thread-buffer";
+
+/** The single function Bolt's `Assistant` stores for the `message` event — not part of its public type. */
+type AssistantUserMessageHandler = (args: Record<string, unknown>) => Promise<void>;
 
 process.env.SLACK_RENDER_V2 = "false";
 
@@ -118,6 +124,134 @@ describe("assistant userMessage routing — follow-up (working agent exists)", (
     expect(fetched).toBeDefined();
     expect(fetched!.slackChannelId).toBe("D_FOLLOWUP");
     expect(fetched!.slackThreadTs).toBe("9999999999.000001");
+  });
+});
+
+describe("assistant DM path self-mention rendering — production ingestion path", () => {
+  // Drives `createAssistant()`'s real `userMessage` handler end-to-end (the
+  // production DM path), rather than calling `rewriteSlackMentions` in
+  // isolation. It must fail if the fix at src/slack/assistant.ts (the
+  // `cachedBotUserId ?? undefined` argument to `rewriteSlackMentions`) is
+  // reverted.
+  const BOT_USER_ID = "U0PRODBOT99";
+  const OTHER_USER_ID = "U0PRODOTHR1";
+  const CHANNEL_ID = "D_PROD_DM_SELF_MENTION";
+  const THREAD_TS = "5551112223.000001";
+
+  test("resolves the bot's own mention and leaves another user's mention correct", async () => {
+    const assistant = createAssistant();
+    const userMessage = (assistant as unknown as { userMessage: AssistantUserMessageHandler[] })
+      .userMessage[0];
+
+    const client = {
+      auth: { test: async () => ({ user_id: BOT_USER_ID }) },
+      reactions: { add: async () => ({}) },
+      chat: { postMessage: async () => ({}) },
+      users: { info: async () => ({ user: undefined }) },
+    };
+
+    const message = {
+      channel: CHANNEL_ID,
+      ts: THREAD_TS,
+      thread_ts: THREAD_TS,
+      text: `<@${BOT_USER_ID}> can you loop in <@${OTHER_USER_ID}> on this?`,
+      user: "U_PROD_REQUESTER",
+    };
+
+    await userMessage({
+      message,
+      body: { event_id: "Ev_PROD_DM_SELF_MENTION_1" },
+      say: async () => {},
+      setStatus: async () => ({}),
+      setTitle: async () => ({}),
+      getThreadContext: async () => undefined,
+      client,
+    });
+
+    const task = await getMostRecentTaskInThread(CHANNEL_ID, THREAD_TS);
+    expect(task).toBeDefined();
+    expect(task!.task).toBe(
+      `<@${BOT_USER_ID}> (that's you) can you loop in <@${OTHER_USER_ID}> (unknown user) on this?`,
+    );
+  });
+});
+
+describe("assistant DM path self-mention rendering — buffered follow-up path (ADDITIVE_SLACK)", () => {
+  // With ADDITIVE_SLACK=true and an active agent already on the DM thread,
+  // userMessage buffers the message and returns before the direct
+  // rewriteSlackMentions(..., cachedBotUserId) call runs. The bot ID must
+  // still reach the later flush in thread-buffer.ts, or the bot's own
+  // mention renders as "(unknown user)" instead of "(that's you)".
+  // `cachedBotUserId` in assistant.ts is a module-level singleton resolved
+  // once per process, so this must reuse the ID the earlier describe block
+  // already cached via auth.test() — a fresh ID here would make this
+  // message look like it mentions "someone else" and never reach the
+  // buffered branch at all.
+  const BOT_USER_ID = "U0PRODBOT99";
+  const OTHER_USER_ID = "U0BUFOTHR01";
+  const CHANNEL_ID = "D_BUF_DM_SELF_MENTION";
+  const THREAD_TS = "5552223334.000001";
+
+  const originalAdditiveSlack = process.env.ADDITIVE_SLACK;
+
+  beforeAll(() => {
+    process.env.ADDITIVE_SLACK = "true";
+  });
+
+  afterAll(() => {
+    if (originalAdditiveSlack === undefined) delete process.env.ADDITIVE_SLACK;
+    else process.env.ADDITIVE_SLACK = originalAdditiveSlack;
+  });
+
+  test("bot's own mention resolves through the buffered flush", async () => {
+    const worker = await createAgent({ name: "BufferedDmWorker", isLead: false, status: "idle" });
+    await createTaskExtended("original task in buffered DM thread", {
+      agentId: worker.id,
+      source: "slack",
+      slackChannelId: CHANNEL_ID,
+      slackThreadTs: THREAD_TS,
+      slackUserId: "U_BUF_REQUESTER",
+    });
+
+    const assistant = createAssistant();
+    const userMessage = (assistant as unknown as { userMessage: AssistantUserMessageHandler[] })
+      .userMessage[0];
+
+    const client = {
+      auth: { test: async () => ({ user_id: BOT_USER_ID }) },
+      reactions: { add: async () => ({}) },
+      chat: { postMessage: async () => ({}) },
+      users: { info: async () => ({ user: undefined }) },
+    };
+
+    const message = {
+      channel: CHANNEL_ID,
+      ts: "5552223334.000002",
+      thread_ts: THREAD_TS,
+      text: `<@${BOT_USER_ID}> can you loop in <@${OTHER_USER_ID}> on this?`,
+      user: "U_BUF_REQUESTER",
+    };
+
+    await userMessage({
+      message,
+      body: { event_id: "Ev_BUF_DM_SELF_MENTION_1" },
+      say: async () => {},
+      setStatus: async () => ({}),
+      setTitle: async () => ({}),
+      getThreadContext: async () => undefined,
+      client,
+    });
+
+    // Buffered, not turned into a task synchronously.
+    expect(getBufferMessageCount(`${CHANNEL_ID}:${THREAD_TS}`)).toBe(1);
+
+    await instantFlush(`${CHANNEL_ID}:${THREAD_TS}`);
+
+    const flushed = await getMostRecentTaskInThread(CHANNEL_ID, THREAD_TS);
+    expect(flushed).toBeDefined();
+    expect(flushed!.task).toContain(`<@${BOT_USER_ID}> (that's you)`);
+    expect(flushed!.task).not.toContain(`<@${BOT_USER_ID}> (unknown user)`);
+    expect(flushed!.task).toContain(`<@${OTHER_USER_ID}> (unknown user)`);
   });
 });
 

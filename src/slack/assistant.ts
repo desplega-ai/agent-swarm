@@ -129,7 +129,15 @@ export function createAssistant(): Assistant {
 
         // Follow-up message → buffer text and file metadata until the flush.
         if (workingAgent && workingAgent.status !== "offline" && isAdditiveSlack()) {
-          bufferThreadMessage(channelId, threadTs, messageText, userId, message.ts, files);
+          bufferThreadMessage(
+            channelId,
+            threadTs,
+            messageText,
+            userId,
+            message.ts,
+            files,
+            cachedBotUserId ?? undefined,
+          );
           const count = getBufferMessageCount(`${channelId}:${threadTs}`);
           const event = count === 1 ? "accepted" : "buffered";
           await ackSlackMessage(client, channelId, message.ts, reactionName(event), event);
@@ -147,6 +155,7 @@ export function createAssistant(): Assistant {
         // raw `messageText`, not this rendered copy.
         const renderedMessageText = await rewriteSlackMentions(
           buildEffectiveText(messageText, inbound.files, inbound.failed),
+          cachedBotUserId ?? undefined,
         );
 
         if (workingAgent && workingAgent.status !== "offline") {

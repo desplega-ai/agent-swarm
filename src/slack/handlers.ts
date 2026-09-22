@@ -523,7 +523,15 @@ export function registerMessageHandler(app: App): void {
         );
 
         if (nowMessage || msg.files?.length) {
-          bufferThreadMessage(msg.channel, msg.thread_ts, nowMessage, msg.user, msg.ts, msg.files);
+          bufferThreadMessage(
+            msg.channel,
+            msg.thread_ts,
+            nowMessage,
+            msg.user,
+            msg.ts,
+            msg.files,
+            botUserId,
+          );
         }
 
         // Instant flush — no dependency
@@ -563,6 +571,7 @@ export function registerMessageHandler(app: App): void {
           msg.user,
           msg.ts,
           msg.files,
+          botUserId,
         );
 
         // Slack feedback: react with the accepted reaction on first buffer, buffered on appends

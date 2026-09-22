@@ -41,6 +41,7 @@ import {
   SubagentStatus,
   SubagentWaterfall,
 } from "@/components/shared/subagent-waterfall";
+import { ToolResultImage } from "@/components/shared/tool-result-image";
 import { QueuedSteeringBox } from "@/components/steering/queued-steering-box";
 import {
   SteeringLine,
@@ -61,6 +62,7 @@ import {
   parseSessionLogs,
   type SubagentRun,
 } from "@/logs-parser";
+import { imageResultPreview } from "@/logs-parser/result-images";
 
 // --- Stream model ---
 
@@ -1902,6 +1904,7 @@ function ResultSection({
 }) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const [overflow, setOverflow] = useState(false);
+  const preview = useMemo(() => imageResultPreview(body), [body]);
 
   // Re-measure when the body changes (streaming results grow on refetch) — `body`
   // is the intentional trigger even though the measurement reads the DOM, not it.
@@ -1914,18 +1917,25 @@ function ResultSection({
 
   return (
     <>
+      {preview && (
+        <div className="flex flex-wrap items-start gap-2 px-2.5 py-2">
+          {preview.images.map((image, index) => (
+            <ToolResultImage key={`${body.length}-${index}`} image={image} index={index} />
+          ))}
+        </div>
+      )}
       <div
         ref={wrapRef}
         className={cn("relative overflow-hidden", open ? "max-h-none" : "max-h-[11.5em]")}
       >
         <pre className="m-0 whitespace-pre-wrap break-words px-2.5 pb-2 pt-1 font-mono text-[11.5px] leading-[1.6] text-foreground/85">
-          {body || "(no output)"}
+          {(preview && !open ? preview.text : body) || "(no output)"}
         </pre>
         {overflow && !open && (
           <div className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-surface to-transparent" />
         )}
       </div>
-      {overflow && (
+      {(overflow || preview) && (
         <button
           type="button"
           onClick={onToggle}

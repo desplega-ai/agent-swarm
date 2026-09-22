@@ -30,6 +30,7 @@ interface BufferedMessage {
   channelId: string;
   threadTs: string;
   files?: SlackFile[];
+  botUserId?: string;
 }
 
 const BUFFER_TIMEOUT_MS = Number(process.env.ADDITIVE_SLACK_BUFFER_MS) || 10_000;
@@ -62,6 +63,7 @@ export function bufferThreadMessage(
   userId: string,
   ts: string,
   files?: SlackFile[],
+  botUserId?: string,
 ): void {
   slackBuffer.enqueue(makeKey(channelId, threadTs), {
     text,
@@ -70,6 +72,7 @@ export function bufferThreadMessage(
     channelId,
     threadTs,
     files,
+    botUserId,
   });
 }
 
@@ -98,7 +101,11 @@ export async function instantFlush(key: string): Promise<void> {
 /**
  * Fetch thread context from Slack for the buffer flush task description.
  */
-async function getThreadContextForBuffer(channelId: string, threadTs: string): Promise<string> {
+async function getThreadContextForBuffer(
+  channelId: string,
+  threadTs: string,
+  botUserId?: string,
+): Promise<string> {
   const app = getSlackApp();
   if (!app) return "";
 
@@ -126,7 +133,7 @@ async function getThreadContextForBuffer(channelId: string, threadTs: string): P
       })
       .join("\n");
 
-    return await rewriteSlackMentions(formatted);
+    return await rewriteSlackMentions(formatted, botUserId);
   } catch (error) {
     console.error("[Slack] Failed to fetch thread context for buffer:", error);
     return "";
@@ -153,6 +160,9 @@ async function slackFlush(
   // Buffer is guaranteed to have at least one item — the first carries the
   // original requester's userId (same semantics as the pre-refactor version).
   const originalRequesterId = items[0]!.userId;
+  // Every buffered item is resolved from the same bot's auth.test() cache —
+  // any item carrying it is representative of the whole flush.
+  const botUserId = items.find((item) => item.botUserId)?.botUserId;
 
   console.log(`[Slack] Flushing buffer: ${key} (${items.length} messages, immediate=${immediate})`);
 
@@ -182,6 +192,7 @@ async function slackFlush(
         ),
       )
       .join("\n---\n"),
+    botUserId,
   );
   const description = `[Thread follow-up — ${items.length} message(s) buffered]\n\n${combinedText}`;
 
@@ -234,7 +245,7 @@ async function slackFlush(
   const lead = await getLeadAgent();
 
   // Thread context for the task
-  const threadContext = await getThreadContextForBuffer(channelId, threadTs);
+  const threadContext = await getThreadContextForBuffer(channelId, threadTs, botUserId);
   const fullDescription = threadContext
     ? `<thread_context>\n${threadContext}\n</thread_context>\n\n${description}`
     : description;

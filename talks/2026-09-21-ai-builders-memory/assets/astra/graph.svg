@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1660 640" role="img" aria-labelledby="astra-graph-title">
+  <title id="astra-graph-title">A graph built by regex, not by a librarian.</title>
+  <defs>
+    <marker id="astra-graph-arrow" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="12" markerHeight="12" markerUnits="userSpaceOnUse" orient="auto">
+      <path d="M1 1 L11 6 L1 11" fill="none" stroke="#b45309" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <marker id="astra-graph-source-arrow" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="12" markerHeight="12" markerUnits="userSpaceOnUse" orient="auto">
+      <path d="M1 1 L11 6 L1 11" fill="none" stroke="#71717a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+  <g fill="none" stroke="#b45309" stroke-width="3" marker-end="url(#astra-graph-arrow)">
+    <path d="M500 176 H528 Q550 176 550 198 V223 Q550 245 560 245 H569"/>
+    <path d="M500 366 H528 Q550 366 550 344 Q550 323 560 323 H569"/>
+    <path d="M1010 284 H1188" stroke-width="4"/>
+  </g>
+  <g fill="none" stroke="#71717a" stroke-width="2" stroke-dasharray="8 8" marker-end="url(#astra-graph-source-arrow)">
+    <path d="M820 408 V478 Q820 524 866 524 H1168"/>
+    <path d="M780 408 V560 Q780 606 826 606 H1168"/>
+  </g>
+  <g font-family="Space Grotesk, system-ui, sans-serif" font-size="25" font-weight="600">
+    <text x="24" y="110" style="fill:#b45309;font-family:Space Grotesk, system-ui, sans-serif">MANUAL · an agent searches</text>
+    <text x="24" y="300" style="fill:#b45309;font-family:Space Grotesk, system-ui, sans-serif">AUTOMATIC · every task start</text>
+  </g>
+  <rect x="2" y="140" width="498" height="72" rx="36" fill="#ffffff" stroke="#e4e4e7" stroke-width="2"/>
+  <rect x="2" y="330" width="498" height="72" rx="36" fill="#ffffff" stroke="#e4e4e7" stroke-width="2"/>
+  <g font-family="Space Mono, ui-monospace, monospace" font-size="22">
+    <text x="251" y="184" text-anchor="middle" style="fill:#09090b;font-family:Space Mono, ui-monospace, monospace">query: "deploy fails on staging"</text>
+    <text x="251" y="374" text-anchor="middle" style="fill:#09090b;font-family:Space Mono, ui-monospace, monospace">task: Monitor release of v1.152.1</text>
+    <text x="530" y="144" style="fill:#b45309;font-family:Space Mono, ui-monospace, monospace">similarity 0.82</text>
+    <text x="1100" y="258" text-anchor="middle" style="fill:#b45309;font-family:Space Mono, ui-monospace, monospace">[[wikilink]]</text>
+  </g>
+  <path d="M596 190 H984 L1010 216 V382 L984 408 H596 L570 382 V216 Z" fill="#fef3c7" stroke="#d97706" stroke-width="2"/>
+  <path d="M1216 164 H1632 L1658 190 V406 L1632 432 H1216 L1190 406 V190 Z" fill="#09090b"/>
+  <g font-family="Space Grotesk, system-ui, sans-serif" font-weight="600">
+    <text x="590" y="277" font-size="36" style="fill:#09090b;font-family:Space Grotesk, system-ui, sans-serif">deploy-gotcha</text>
+    <text x="1216" y="249" font-size="32" style="fill:#ffffff;font-family:Space Grotesk, system-ui, sans-serif">staging-env-quirks</text>
+  </g>
+  <g font-family="Space Mono, ui-monospace, monospace" font-size="22">
+    <text x="590" y="321" style="fill:#b45309;font-family:Space Mono, ui-monospace, monospace">shared/memory/deploy/gotcha.md</text>
+    <text x="1216" y="293" style="fill:#e4e4e7;font-family:Space Mono, ui-monospace, monospace">shared/memory/deploy/staging.md</text>
+  </g>
+  <path d="M1216 327 H1632" stroke="#71717a" stroke-width="1"/>
+  <text x="1216" y="380" font-family="Space Mono, ui-monospace, monospace" font-size="25" style="fill:#fcd34d;font-family:Space Mono, ui-monospace, monospace">0.82 × 1.0 × 0.7 = 0.57</text>
+  <rect x="1170" y="495" width="488" height="58" rx="8" fill="#ffffff" stroke="#e4e4e7" stroke-width="2"/>
+  <rect x="1170" y="577" width="488" height="58" rx="8" fill="#ffffff" stroke="#e4e4e7" stroke-width="2"/>
+  <g font-family="Space Mono, ui-monospace, monospace" font-size="24">
+    <text x="1194" y="533" style="fill:#71717a;font-family:Space Mono, ui-monospace, monospace">github:org/repo#696</text>
+    <text x="1194" y="615" style="fill:#71717a;font-family:Space Mono, ui-monospace, monospace">runbooks/deploy.md</text>
+  </g>
+  <text x="1170" y="471" font-family="Space Mono, ui-monospace, monospace" font-size="22" style="fill:#71717a;font-family:Space Mono, ui-monospace, monospace">each edge: its own Beta(α, β)</text>
+</svg>
