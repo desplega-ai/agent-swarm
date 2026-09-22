@@ -1270,13 +1270,35 @@ async function resolvedDeferralContent(wake: AgentTask): Promise<string> {
 }
 
 /**
+ * `callSlackWithRetry` only ever retries rate limits, so any error that
+ * escapes it still carrying a Slack API error code is a verdict rather than a
+ * blip: `message_not_found`, `channel_not_found`, `cant_update_message` and
+ * `msg_too_long` all answer identically on the next tick.
+ */
+function isTerminalSlackError(error: unknown): boolean {
+  const code = (error as { data?: { error?: string } }).data?.error;
+  return typeof code === "string" && code.length > 0 && code !== "ratelimited";
+}
+
+// Everything else reaching the catch has no Slack verdict attached (a socket
+// reset, a DNS blip, a local read that threw), so it is worth retrying — but
+// only a bounded number of times. Without a ceiling a card that fails for a
+// reason we cannot classify is re-attempted at tick cadence forever.
+const DEFERRAL_REFRESH_MAX_ATTEMPTS = 5;
+const deferralRefreshAttempts = new Map<string, number>();
+
+/**
  * Rewrite every ⏳ deferral card whose wake-up task has settled, in place.
  *
  * Runs before the tree loop and independently of it: resolution needs only
  * the retained outcome `ts`, so it must not be skipped when the thread has
  * no other pending render work. Each card is rewritten exactly once
- * (`deferral_resolved_at`); a Slack failure leaves the marker unset so the
- * next tick retries.
+ * (`deferral_resolved_at`).
+ *
+ * The marker is also burned when Slack refuses the rewrite for good, and when
+ * an unclassifiable failure has used up its attempts — a card that can never
+ * be rewritten must stop competing for the per-tick row budget with cards
+ * that still can.
  */
 export async function refreshResolvedDeferralCards(): Promise<void> {
   const app = getSlackApp();
@@ -1292,14 +1314,26 @@ export async function refreshResolvedDeferralCards(): Promise<void> {
         text: content,
       });
       await markSlackDeferralResolved(card.id);
+      deferralRefreshAttempts.delete(card.id);
     } catch (error) {
-      // A card whose message is gone can never be rewritten; burn the marker
-      // so it stops being retried every tick. Anything else is transient.
-      if (isSlackMessageNotFound(error)) {
+      const attempts = (deferralRefreshAttempts.get(card.id) ?? 0) + 1;
+      deferralRefreshAttempts.set(card.id, attempts);
+      const terminal = isTerminalSlackError(error);
+      if (terminal || attempts >= DEFERRAL_REFRESH_MAX_ATTEMPTS) {
         await markSlackDeferralResolved(card.id);
+        deferralRefreshAttempts.delete(card.id);
+        console.error(
+          `[Slack] Giving up on deferral card ${card.id} after ${attempts} attempt(s)` +
+            `${terminal ? " (Slack refused the rewrite)" : ""}:`,
+          error,
+        );
         continue;
       }
-      console.error(`[Slack] Failed to resolve deferral card ${card.id}:`, error);
+      console.error(
+        `[Slack] Failed to resolve deferral card ${card.id} ` +
+          `(attempt ${attempts}/${DEFERRAL_REFRESH_MAX_ATTEMPTS}):`,
+        error,
+      );
     }
   }
 }

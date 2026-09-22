@@ -54,6 +54,9 @@ let permalinkFailuresRemaining = 0;
 let slackAddressSequence = 0;
 let missingMessageTs: string | undefined;
 let updateFailuresRemaining = 0;
+// A `chat.update` that answers with a Slack verdict other than 404 — the
+// permanent, non-retryable class (`cant_update_message`, `channel_not_found`).
+let rejectedUpdateTs: string | undefined;
 let disableRenderAfterMethod: string | undefined;
 
 type RemoteMessage = {
@@ -207,6 +210,7 @@ const mockApiCall = mock(async (method: string, payload: Record<string, unknown>
       throw new Error("temporary update failure");
     }
     if (missingMessageTs === payload.ts) throw { data: { error: "message_not_found" } };
+    if (rejectedUpdateTs === payload.ts) throw { data: { error: "cant_update_message" } };
     const message = remoteMessages.get(remoteKey(String(payload.channel), String(payload.ts)));
     if (!message) throw { data: { error: "message_not_found" } };
     const barrier = nextUpdateBarrier;
@@ -263,6 +267,7 @@ beforeEach(async () => {
   permalinkFailuresRemaining = 0;
   missingMessageTs = undefined;
   updateFailuresRemaining = 0;
+  rejectedUpdateTs = undefined;
   disableRenderAfterMethod = undefined;
   nextUpdateBarrier = undefined;
   _resetSlackRenderV2ForTests();
@@ -1968,6 +1973,91 @@ describe("Slack renderer v2", () => {
       calls.filter((call) => call.method === "chat.update" && call.payload.ts === card?.ts),
     ).toHaveLength(0);
     expect((await getSlackOutcomeMessage(ask.id))?.deferralResolvedAt).toBeUndefined();
+  });
+
+  /**
+   * Sets up a deferral card whose wake-up has already settled, so the next
+   * tick is the one that tries to rewrite the card in place.
+   */
+  async function resolvableDeferralCard(label: string) {
+    const lead = await createAgent({ name: `${label} Lead`, isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress(label);
+    const ask = await createTaskExtended("answer when the build is done", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    await startTask(ask.id);
+    await completeTask(ask.id, "Checking back today at 18:38", {
+      addTags: ["deferred"],
+      deferredAt: new Date().toISOString(),
+    });
+    await backdateLastUpdated([ask.id], 20);
+    await processSlackRenderV2();
+    const card = await getSlackOutcomeMessage(ask.id);
+
+    const schedule = await createScheduledTask({
+      name: `${label}-resolve`,
+      scheduleType: "one_time",
+      taskTemplate: "Deliver the result",
+      taskType: "deferred",
+      tags: ["deferred"],
+      parentTaskId: ask.id,
+      targetAgentId: lead.id,
+      createdByAgentId: lead.id,
+      nextRunAt: new Date().toISOString(),
+    });
+    const wake = await createStandaloneScheduleTask(schedule);
+    await startTask(wake.id);
+    await completeTask(wake.id, "The build passed.");
+    return { askId: ask.id, ts: card!.ts };
+  }
+
+  test("a deferral card Slack refuses for good stops being retried", async () => {
+    const card = await resolvableDeferralCard("C_DEFER_REJECTED");
+    // Not a 404: the message is still there, Slack just will not accept the
+    // rewrite. The old code logged this and left the row eligible, so the
+    // same doomed chat.update ran on every single tick from then on.
+    rejectedUpdateTs = card.ts;
+    calls.length = 0;
+    await processSlackRenderV2();
+    expect(
+      calls.filter((call) => call.method === "chat.update" && call.payload.ts === card.ts),
+    ).toHaveLength(1);
+    expect((await getSlackOutcomeMessage(card.askId))?.deferralResolvedAt).toBeTruthy();
+
+    calls.length = 0;
+    await processSlackRenderV2();
+    await processSlackRenderV2();
+    expect(
+      calls.filter((call) => call.method === "chat.update" && call.payload.ts === card.ts),
+    ).toHaveLength(0);
+  });
+
+  test("a deferral card failing for an unclassifiable reason is retried, but bounded", async () => {
+    const card = await resolvableDeferralCard("C_DEFER_BOUNDED");
+    // No Slack verdict attached, so this class stays retryable — up to a
+    // ceiling. Keep the failure count far above the ceiling to prove the
+    // ceiling, not the mock, is what ends it.
+    updateFailuresRemaining = 100;
+    const attempts = () =>
+      calls.filter((call) => call.method === "chat.update" && call.payload.ts === card.ts).length;
+
+    calls.length = 0;
+    for (let tick = 0; tick < 4; tick++) await processSlackRenderV2();
+    expect(attempts()).toBe(4);
+    expect((await getSlackOutcomeMessage(card.askId))?.deferralResolvedAt).toBeUndefined();
+
+    await processSlackRenderV2();
+    expect(attempts()).toBe(5);
+    expect((await getSlackOutcomeMessage(card.askId))?.deferralResolvedAt).toBeTruthy();
+
+    calls.length = 0;
+    await processSlackRenderV2();
+    await processSlackRenderV2();
+    expect(attempts()).toBe(0);
   });
 
   test("a deferral with no pending text still posts its ETA", async () => {
