@@ -25,6 +25,7 @@ Each harness/provider maps the same tier to its own concrete model:
 | `claude-managed` | `claude-haiku-4-5` | `claude-sonnet-4-6` | `claude-opus-4-8` | `claude-fable-5` |
 | `codex` | `gpt-5.6-luna` | `gpt-5.6-terra` | `gpt-5.6-sol` | `gpt-5.6-sol` |
 | `pi` | `openrouter/deepseek/deepseek-v4-flash` | `openrouter/deepseek/deepseek-v4-flash` | `openrouter/deepseek/deepseek-v4-pro` | `openrouter/anthropic/claude-opus-4.8` |
+| `dsh` | `openrouter/deepseek/deepseek-v4-flash` | `openrouter/deepseek/deepseek-v4-flash` | `openrouter/deepseek/deepseek-v4-pro` | `openrouter/anthropic/claude-opus-4.8` |
 | `opencode` | `openrouter/deepseek/deepseek-v4-flash` | `openrouter/deepseek/deepseek-v4-flash` | `openrouter/deepseek/deepseek-v4-pro` | `openrouter/anthropic/claude-opus-4.8` |
 | `devin` | `devin` | `devin` | `devin` | `devin` |
 

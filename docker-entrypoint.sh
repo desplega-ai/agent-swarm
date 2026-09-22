@@ -92,8 +92,8 @@ if [ "$HARNESS_PROVIDER" = "pi" ]; then
             ;;
     esac
 elif [ "$HARNESS_PROVIDER" = "dsh" ]; then
-    if [ -z "$DEEPSEEK_API_KEY" ]; then
-        echo "Warning: dsh provider has no credentials yet (DEEPSEEK_API_KEY). Worker will park in credential-wait until creds appear in swarm_config."
+    if [ -z "$DEEPSEEK_API_KEY" ] && [ -z "$OPENROUTER_API_KEY" ]; then
+        echo "Warning: dsh provider has no credentials yet (DEEPSEEK_API_KEY / OPENROUTER_API_KEY). Worker will park in credential-wait until creds appear in swarm_config."
     fi
 elif [ "$HARNESS_PROVIDER" = "opencode" ]; then
     # opencode auth: OPENROUTER_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, or auth.json must exist

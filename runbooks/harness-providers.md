@@ -16,9 +16,19 @@ Operational rules for editing or adding harness providers (claude, codex, openco
 
 ## DeepSeek Harness (`dsh`)
 
-Set `HARNESS_PROVIDER=dsh` and `DEEPSEEK_API_KEY` in the worker environment or
-agent-scoped config. This runs DeepSeek's own harness. `MODEL_OVERRIDE` accepts
-its model ID (default `deepseek-flash`; smart/ultra tiers use `deepseek-v4-pro`).
+Set `HARNESS_PROVIDER=dsh` and `OPENROUTER_API_KEY` in the worker environment or
+agent-scoped config. This runs DeepSeek's own harness with the same defaults as
+pi: smol/regular `openrouter/deepseek/deepseek-v4-flash`, smart
+`openrouter/deepseek/deepseek-v4-pro`, ultra `openrouter/anthropic/claude-opus-4.8`.
+
+Routing follows the model prefix, even when both keys are available:
+`MODEL_OVERRIDE=openrouter/<model-id>` uses the bundled `llm-pi-ai` adapter with
+`OPENROUTER_API_KEY`, strips only `openrouter/`, and honors `OPENROUTER_BASE_URL`
+(default `https://openrouter.ai/api/v1`). The selected model is explicitly declared
+so newly released IDs do not depend on the bundled catalog. For direct DeepSeek,
+set `DEEPSEEK_API_KEY` and a bare `MODEL_OVERRIDE` such as `deepseek-v4-pro`;
+this retains the native `llm-deepseek` route. There is no fallback across providers
+when the selected route's key is missing.
 
 The full worker image installs `@deepseek-ai/dsh@0.1.7-alpha.2` at build time
 in `worker-full-base`, alongside the optional tools in `/opt/global-deps-full`.
@@ -32,8 +42,9 @@ surface.
 The adapter launches `--profile headless --patch <temporary-file> --json -`,
 sends the task over stdin, sets the child working directory, and applies the
 model and system prompt through the profile patch. Patch files are private and
-removed after exit or cancellation. Credential readiness checks the environment
-key only; it does not inspect dsh's managed credential store or verify inference.
+removed after exit or cancellation. Credential readiness accepts either environment
+key; session startup requires the key matching the selected model. Readiness
+does not inspect dsh's managed credential store or verify inference.
 
 This minimal integration has local tools and final output, but no swarm MCP
 connection, live steering, native resume, or cost/context telemetry. The runner

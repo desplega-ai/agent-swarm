@@ -107,7 +107,7 @@ export const REQUIRED_CRED_VARS_BY_PROVIDER: Record<SupportedProvider, readonly 
   pi: ["ANTHROPIC_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY"],
   // The ACP target process owns its own auth, so the swarm requires nothing.
   acp: [],
-  dsh: ["DEEPSEEK_API_KEY"],
+  dsh: ["DEEPSEEK_API_KEY", "OPENROUTER_API_KEY"],
 };
 
 type CredentialChecker = (
@@ -425,7 +425,7 @@ export async function validateProviderCredentials(provider: string): Promise<Liv
           ? presenceCheckOk()
           : {
               ok: false,
-              error: "Set DEEPSEEK_API_KEY for dsh.",
+              error: "Set DEEPSEEK_API_KEY or OPENROUTER_API_KEY for dsh.",
               latency_ms: Date.now() - startedAt,
             };
       case "acp":

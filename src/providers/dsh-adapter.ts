@@ -1,6 +1,8 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DEFAULT_MODEL_TIER_MAP } from "../types";
+import { getOpenRouterBaseUrl } from "../utils/openrouter-base-url";
 import {
   detachedProcessGroup,
   registerProcessGroup,
@@ -22,9 +24,13 @@ import type {
 export const DSH_PACKAGE = "@deepseek-ai/dsh@0.1.7-alpha.2";
 
 export function checkDshCredentials(env: Record<string, string | undefined>): CredStatus {
-  return env.DEEPSEEK_API_KEY?.trim()
+  return env.DEEPSEEK_API_KEY?.trim() || env.OPENROUTER_API_KEY?.trim()
     ? { ready: true, missing: [], satisfiedBy: "env" }
-    : { ready: false, missing: ["DEEPSEEK_API_KEY"], hint: "Set DEEPSEEK_API_KEY for dsh." };
+    : {
+        ready: false,
+        missing: ["DEEPSEEK_API_KEY", "OPENROUTER_API_KEY"],
+        hint: "Set DEEPSEEK_API_KEY or OPENROUTER_API_KEY for dsh.",
+      };
 }
 
 class DshSession implements ProviderSession {
@@ -164,14 +170,22 @@ export class DshAdapter implements ProviderAdapter {
 
   async createSession(config: ProviderSessionConfig): Promise<ProviderSession> {
     const env = { ...process.env, ...config.env };
-    if (!checkDshCredentials(env).ready) throw new Error("dsh requires DEEPSEEK_API_KEY");
+    if (!checkDshCredentials(env).ready) {
+      throw new Error("dsh requires DEEPSEEK_API_KEY or OPENROUTER_API_KEY");
+    }
+    const model = config.model || DEFAULT_MODEL_TIER_MAP.dsh.regular;
+    const openrouter = model.startsWith("openrouter/");
+    const modelId = openrouter ? model.slice("openrouter/".length) : model;
+    const keyEnv = openrouter ? "OPENROUTER_API_KEY" : "DEEPSEEK_API_KEY";
+    if (!modelId.trim()) throw new Error("dsh requires a model ID after openrouter/");
+    if (!env[keyEnv]?.trim()) throw new Error(`dsh model ${model} requires ${keyEnv}`);
     const binary = env.DSH_BINARY || Bun.which("dsh", { PATH: env.PATH });
     if (!binary) {
       throw new Error(
         `dsh CLI not found. Install ${DSH_PACKAGE} during image provisioning or set DSH_BINARY to a trusted executable.`,
       );
     }
-    registerVolatileSecret(env.DEEPSEEK_API_KEY!, "DEEPSEEK_API_KEY");
+    registerVolatileSecret(env[keyEnv]!, keyEnv);
     const prompt = await resolveSlashSkillPrompt(config.prompt, {
       providerLabel: "dsh",
       skillsDir: join(env.HOME ?? "/home/worker", ".agents", "skills"),
@@ -185,10 +199,25 @@ export class DshAdapter implements ProviderAdapter {
         JSON.stringify([
           {
             id: "agent-default-model",
-            config: { provider: "deepseek-official", model: config.model || "deepseek-flash" },
+            config: { provider: openrouter ? "openrouter" : "deepseek-official", model: modelId },
           },
           { id: "system-prompt", config: { personaPrefix: config.systemPrompt } },
-          { id: "llm-deepseek", config: { apiKeyEnv: "DEEPSEEK_API_KEY" } },
+          openrouter
+            ? {
+                id: "llm-pi-ai",
+                config: {
+                  providers: {
+                    openrouter: {
+                      apiKeyEnv: keyEnv,
+                      baseURL: getOpenRouterBaseUrl(env),
+                      api: "openai-completions",
+                      // Declare the selected ID even if the bundled catalog predates it.
+                      models: [{ id: modelId }],
+                    },
+                  },
+                },
+              }
+            : { id: "llm-deepseek", config: { apiKeyEnv: keyEnv } },
         ]),
         { mode: 0o600 },
       );

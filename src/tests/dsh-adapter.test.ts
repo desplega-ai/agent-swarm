@@ -7,7 +7,9 @@ import { createProviderAdapter } from "../providers";
 import { checkDshCredentials, DshAdapter } from "../providers/dsh-adapter";
 import type { ProviderEvent, ProviderSessionConfig } from "../providers/types";
 import { DEFAULT_MODEL_TIER_MAP } from "../types";
+import { getModelAwareCredentialVars } from "../utils/credentials";
 import { resolveHarnessProvider } from "../utils/harness-provider";
+import { DEFAULT_OPENROUTER_BASE_URL } from "../utils/openrouter-base-url";
 
 const directories: string[] = [];
 afterEach(async () => {
@@ -59,7 +61,13 @@ else {
     apiKey: "unused",
     cwd,
     logFile: join(cwd, "log.jsonl"),
-    env: { DSH_BINARY: binary, DEEPSEEK_API_KEY: "dsh-test-credential-value", DSH_TEST_MODE: mode },
+    env: {
+      DSH_BINARY: binary,
+      DEEPSEEK_API_KEY: "dsh-test-credential-value",
+      OPENROUTER_API_KEY: "",
+      OPENROUTER_BASE_URL: "",
+      DSH_TEST_MODE: mode,
+    },
   };
 }
 
@@ -67,9 +75,17 @@ describe("dsh harness", () => {
   test("registry, model defaults, and credential dispatch select dsh", async () => {
     expect(await createProviderAdapter("dsh")).toBeInstanceOf(DshAdapter);
     expect(resolveHarnessProvider({ HARNESS_PROVIDER: "dsh" }, {})).toBe("dsh");
-    expect(DEFAULT_MODEL_TIER_MAP.dsh.regular).toBe("deepseek-flash");
+    expect(DEFAULT_MODEL_TIER_MAP.dsh).toEqual(DEFAULT_MODEL_TIER_MAP.pi);
     expect(checkDshCredentials({ OPENAI_API_KEY: "unrelated" }).ready).toBe(false);
     expect(checkDshCredentials({ DEEPSEEK_API_KEY: " " }).ready).toBe(false);
+    expect(checkDshCredentials({}).missing).toEqual(["DEEPSEEK_API_KEY", "OPENROUTER_API_KEY"]);
+    expect((await checkProviderCredentials("dsh", { OPENROUTER_API_KEY: "present" })).ready).toBe(
+      true,
+    );
+    expect(getModelAwareCredentialVars("dsh", DEFAULT_MODEL_TIER_MAP.dsh.ultra)).toEqual([
+      "OPENROUTER_API_KEY",
+    ]);
+    expect(getModelAwareCredentialVars("dsh", "deepseek-v4-pro")).toEqual(["DEEPSEEK_API_KEY"]);
     expect((await checkProviderCredentials("dsh", { DEEPSEEK_API_KEY: "present" })).ready).toBe(
       true,
     );
@@ -111,6 +127,93 @@ describe("dsh harness", () => {
       sessionId: "dsh-test-session",
       provider: "dsh",
     });
+  });
+
+  for (const model of [
+    DEFAULT_MODEL_TIER_MAP.dsh.regular,
+    DEFAULT_MODEL_TIER_MAP.dsh.ultra,
+    "openrouter/vendor/new-model",
+  ]) {
+    test(`routes ${model} through OpenRouter with only its key`, async () => {
+      const config = await fixture();
+      config.model = model;
+      config.env = {
+        ...config.env,
+        DEEPSEEK_API_KEY: "",
+        OPENROUTER_API_KEY: "openrouter-test-key",
+      };
+      const session = await new DshAdapter().createSession(config);
+      expect((await session.waitForCompletion()).isError).toBe(false);
+      const { patch } = await Bun.file(join(config.cwd, "invocation.json")).json();
+      const modelId = model.slice("openrouter/".length);
+      expect(patch).toContainEqual({
+        id: "agent-default-model",
+        config: { provider: "openrouter", model: modelId },
+      });
+      expect(patch).toContainEqual({
+        id: "llm-pi-ai",
+        config: {
+          providers: {
+            openrouter: {
+              apiKeyEnv: "OPENROUTER_API_KEY",
+              baseURL: DEFAULT_OPENROUTER_BASE_URL,
+              api: "openai-completions",
+              models: [{ id: modelId }],
+            },
+          },
+        },
+      });
+      expect(JSON.stringify(patch)).not.toContain("openrouter-test-key");
+    });
+  }
+
+  test("defaults to OpenRouter and honors its base URL when both keys exist", async () => {
+    const config = await fixture();
+    config.model = undefined;
+    config.env = {
+      ...config.env,
+      OPENROUTER_API_KEY: "openrouter-test-key",
+      OPENROUTER_BASE_URL: " https://gateway.example/proxy/v1/// ",
+    };
+    const session = await new DshAdapter().createSession(config);
+    expect((await session.waitForCompletion()).isError).toBe(false);
+    const { patch } = await Bun.file(join(config.cwd, "invocation.json")).json();
+    expect(patch[0].config).toEqual({
+      provider: "openrouter",
+      model: "deepseek/deepseek-v4-flash",
+    });
+    expect(patch[2].config.providers.openrouter.baseURL).toBe("https://gateway.example/proxy/v1");
+  });
+
+  test("bare models keep direct DeepSeek when both keys exist", async () => {
+    const config = await fixture();
+    config.env = { ...config.env, OPENROUTER_API_KEY: "openrouter-test-key" };
+    const session = await new DshAdapter().createSession(config);
+    expect((await session.waitForCompletion()).isError).toBe(false);
+    const { patch } = await Bun.file(join(config.cwd, "invocation.json")).json();
+    expect(patch[0].config.provider).toBe("deepseek-official");
+    expect(patch[2]).toEqual({ id: "llm-deepseek", config: { apiKeyEnv: "DEEPSEEK_API_KEY" } });
+  });
+
+  test("fails closed for absent or mismatched credentials and empty model IDs", async () => {
+    const config = await fixture();
+    config.env = { ...config.env, DEEPSEEK_API_KEY: "", OPENROUTER_API_KEY: "" };
+    await expect(new DshAdapter().createSession(config)).rejects.toThrow(
+      "DEEPSEEK_API_KEY or OPENROUTER_API_KEY",
+    );
+    config.env.DEEPSEEK_API_KEY = "direct-test-key";
+    config.model = DEFAULT_MODEL_TIER_MAP.dsh.regular;
+    await expect(new DshAdapter().createSession(config)).rejects.toThrow(
+      "requires OPENROUTER_API_KEY",
+    );
+    config.env = { ...config.env, DEEPSEEK_API_KEY: "", OPENROUTER_API_KEY: "openrouter-test-key" };
+    config.model = "deepseek-v4-pro";
+    await expect(new DshAdapter().createSession(config)).rejects.toThrow(
+      "requires DEEPSEEK_API_KEY",
+    );
+    config.model = "openrouter/";
+    await expect(new DshAdapter().createSession(config)).rejects.toThrow("requires a model ID");
+    expect(await Bun.file(join(config.cwd, "invocation.json")).exists()).toBe(false);
   });
 
   test("fails closed when only npx is installed", async () => {

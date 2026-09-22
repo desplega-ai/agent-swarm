@@ -27,7 +27,7 @@ export const PROVIDER_CREDENTIAL_VARS: Record<string, readonly string[]> = {
   pi: ["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"],
   codex: ["OPENAI_API_KEY", "CODEX_OAUTH"],
   devin: ["DEVIN_API_KEY"],
-  dsh: ["DEEPSEEK_API_KEY"],
+  dsh: ["OPENROUTER_API_KEY", "DEEPSEEK_API_KEY"],
   opencode: ["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"],
 };
 
@@ -59,6 +59,10 @@ const SLASH_MODEL_PROVIDERS = new Set(["opencode", "pi"]);
 export function getModelAwareCredentialVars(provider: string, model?: string): readonly string[] {
   const base = PROVIDER_CREDENTIAL_VARS[provider];
   if (!base) return CREDENTIAL_POOL_VARS;
+  // dsh has exact prefix routing; the generic slash rule only filters OpenAI keys.
+  if (provider === "dsh" && model) {
+    return model.startsWith("openrouter/") ? ["OPENROUTER_API_KEY"] : ["DEEPSEEK_API_KEY"];
+  }
   if (!SLASH_MODEL_PROVIDERS.has(provider) || !model) return base;
   if (model.includes("/")) {
     return base.filter((v) => v !== "OPENAI_API_KEY");

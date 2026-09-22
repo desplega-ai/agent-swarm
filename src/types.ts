@@ -148,10 +148,10 @@ export const DEFAULT_MODEL_TIER_MAP: Record<ProviderName, Record<ModelTier, stri
     ultra: "openrouter/anthropic/claude-opus-4.8",
   },
   dsh: {
-    smol: "deepseek-flash",
-    regular: "deepseek-flash",
-    smart: "deepseek-v4-pro",
-    ultra: "deepseek-v4-pro",
+    smol: "openrouter/deepseek/deepseek-v4-flash",
+    regular: "openrouter/deepseek/deepseek-v4-flash",
+    smart: "openrouter/deepseek/deepseek-v4-pro",
+    ultra: "openrouter/anthropic/claude-opus-4.8",
   },
   devin: {
     smol: "devin",
