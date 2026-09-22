@@ -14,6 +14,32 @@ Operational rules for editing or adding harness providers (claude, codex, openco
 | Claude Managed | `claude-managed` | `ClaudeManagedAdapter` | Anthropic managed sandbox; SSE relay |
 | ACP | `acp` | `ACPAdapter` | Curated `opencode` preset or a custom [Agent Client Protocol](https://agentclientprotocol.com) command. Session knobs such as model use `session/set_config_option` when advertised, with target-specific startup fallbacks. No swarm-side *model-provider* credential — the target owns its own model auth. The target receives the worker's swarm API key as the swarm MCP bearer, so point custom targets only at binaries you trust |
 
+## DeepSeek Harness (`dsh`)
+
+Set `HARNESS_PROVIDER=dsh` and `DEEPSEEK_API_KEY` in the worker environment or
+agent-scoped config. This runs DeepSeek's own harness. `MODEL_OVERRIDE` accepts
+its model ID (default `deepseek-flash`; smart/ultra tiers use `deepseek-v4-pro`).
+
+Install `npm install -g @deepseek-ai/dsh@0.1.7-alpha.2`, or let the adapter use
+`npx --yes @deepseek-ai/dsh@0.1.7-alpha.2` when `dsh` is absent from PATH.
+`DSH_BINARY` can name an explicit executable. Use the pinned alpha: npm's
+`latest` tag was `0.1.5-rc.2` when verified and lacks the required stdin/JSON
+surface. The npx fallback requires Node, npm, and network access on first use.
+
+The adapter launches `--profile headless --patch <temporary-file> --json -`,
+sends the task over stdin, sets the child working directory, and applies the
+model and system prompt through the profile patch. Patch files are private and
+removed after exit or cancellation. Credential readiness checks the environment
+key only; it does not inspect dsh's managed credential store or verify inference.
+
+This minimal integration has local tools and final output, but no swarm MCP
+connection, live steering, native resume, or cost/context telemetry. The runner
+handles task completion from the returned output. Configure it as a worker;
+lead orchestration needs MCP. Developer-preview compatibility can change.
+
+Verified against the [upstream headless documentation](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.1.7-alpha.2/packages/bundle/headless/README.md)
+and the installed CLI's top-level and headless help.
+
 ## Claude transport selection
 
 `CLAUDE_TRANSPORT=cli|sdk` selects execution inside `ClaudeAdapter`. CLI remains the default.

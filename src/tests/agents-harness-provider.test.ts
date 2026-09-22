@@ -333,6 +333,25 @@ describe("PATCH /api/agents/:id/harness-provider", () => {
 });
 
 describe("PATCH /api/agents/:id/runtime", () => {
+  test("accepts dsh and persists its harness and model for the worker", async () => {
+    const agent = await createAgent({
+      name: "dsh-worker",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+    const res = await fetch(`${baseUrl}/api/agents/${agent.id}/runtime`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ harness_provider: "dsh", model: "deepseek-flash" }),
+    });
+    expect(res.status).toBe(200);
+    expect((await getAgentById(agent.id))?.harnessProvider).toBe("dsh");
+    const rows = await getSwarmConfigs({ scope: "agent", scopeId: agent.id });
+    expect(rows.find((row) => row.key === "HARNESS_PROVIDER")?.value).toBe("dsh");
+    expect(rows.find((row) => row.key === "MODEL_OVERRIDE")?.value).toBe("deepseek-flash");
+  });
+
   test("updates harness_provider and agent-scoped runtime config rows", async () => {
     const a = await createAgent({
       name: "runtime-target-1",

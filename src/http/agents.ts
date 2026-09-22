@@ -181,7 +181,7 @@ const setAgentHarnessProviderRoute = route({
   },
 });
 
-const LocalHarnessProviderSchema = z.enum(["claude", "codex", "pi", "opencode", "acp"]);
+const LocalHarnessProviderSchema = z.enum(["claude", "codex", "pi", "opencode", "acp", "dsh"]);
 const AcpRuntimeConfigSchema = z
   .object({
     target: z.enum(ACP_TARGET_IDS),
@@ -1046,7 +1046,7 @@ export async function handleAgentsRest(
               })
             )[0]?.value ?? "");
       const allowedLevels =
-        harness_provider === "acp"
+        harness_provider === "acp" || harness_provider === "dsh"
           ? []
           : reasoningCapability(harness_provider, modelForValidation ?? "").levels;
       if (!allowedLevels.includes(reasoning_effort)) {

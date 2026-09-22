@@ -31,6 +31,7 @@ const modelsDevFixture = {
 
 const ENTRYPOINT_EXEMPTIONS = new Set(["claude", "acp"]);
 const ENTRYPOINT_OUTPUT: Record<string, string> = {
+  dsh: "Warning: dsh provider has no credentials yet",
   pi: "Warning: pi provider has no credentials yet",
   opencode: "Warning: opencode provider has no credentials yet",
   "claude-managed": "Warning: claude-managed provider missing:",
@@ -71,9 +72,11 @@ describe("provider registration synchronization", () => {
     );
   });
 
-  test("pricing seeder emits rows for every provider except ACP", () => {
+  test("pricing seeder emits rows for providers with cost reporting", () => {
     const registered = new Set(buildPricingSeedRows(modelsDevFixture).map((row) => row.provider));
-    const expected = ProviderNameSchema.options.filter((provider) => provider !== "acp");
+    const expected = ProviderNameSchema.options.filter(
+      (provider) => provider !== "acp" && provider !== "dsh",
+    );
     expect([...registered].filter((provider) => expected.includes(provider)).sort()).toEqual(
       [...expected].sort(),
     );

@@ -429,7 +429,8 @@
               "devin",
               "claude-managed",
               "opencode",
-              "acp"
+              "acp",
+              "dsh"
             ]
           },
           "providerMeta": {
@@ -499,7 +500,8 @@
               "devin",
               "claude-managed",
               "opencode",
-              "acp"
+              "acp",
+              "dsh"
             ]
           },
           "capabilities": {
@@ -646,6 +648,7 @@
               "claude-managed",
               "opencode",
               "acp",
+              "dsh",
               null
             ],
             "default": null
@@ -976,7 +979,8 @@
               "devin",
               "claude-managed",
               "opencode",
-              "acp"
+              "acp",
+              "dsh"
             ]
           },
           "harnessProvider": {
@@ -992,6 +996,7 @@
               "claude-managed",
               "opencode",
               "acp",
+              "dsh",
               null
             ]
           },
@@ -9400,7 +9405,8 @@
                       "devin",
                       "claude-managed",
                       "opencode",
-                      "acp"
+                      "acp",
+                      "dsh"
                     ]
                   },
                   "harness_provider": {
@@ -9412,7 +9418,8 @@
                       "devin",
                       "claude-managed",
                       "opencode",
-                      "acp"
+                      "acp",
+                      "dsh"
                     ]
                   },
                   "runtimeInstanceId": {
@@ -9687,7 +9694,8 @@
                       "devin",
                       "claude-managed",
                       "opencode",
-                      "acp"
+                      "acp",
+                      "dsh"
                     ]
                   }
                 },
@@ -9902,7 +9910,8 @@
                       "codex",
                       "pi",
                       "opencode",
-                      "acp"
+                      "acp",
+                      "dsh"
                     ]
                   },
                   "model": {
@@ -10921,6 +10930,7 @@
                         "claude-managed",
                         "opencode",
                         "acp",
+                        "dsh",
                         null
                       ]
                     },
@@ -10937,6 +10947,7 @@
                         "claude-managed",
                         "opencode",
                         "acp",
+                        "dsh",
                         null
                       ]
                     },
@@ -11055,6 +11066,7 @@
                               "claude-managed",
                               "opencode",
                               "acp",
+                              "dsh",
                               null
                             ]
                           },
@@ -11071,6 +11083,7 @@
                               "claude-managed",
                               "opencode",
                               "acp",
+                              "dsh",
                               null
                             ]
                           },
@@ -35822,7 +35835,8 @@
                                       "devin",
                                       "claude-managed",
                                       "opencode",
-                                      "acp"
+                                      "acp",
+                                      "dsh"
                                     ]
                                   },
                                   "requestedByUserId": {
@@ -40528,7 +40542,8 @@
                               "devin",
                               "claude-managed",
                               "opencode",
-                              "acp"
+                              "acp",
+                              "dsh"
                             ]
                           },
                           "providers": {
@@ -40545,7 +40560,8 @@
                                     "devin",
                                     "claude-managed",
                                     "opencode",
-                                    "acp"
+                                    "acp",
+                                    "dsh"
                                   ]
                                 },
                                 "state": {
@@ -40816,7 +40832,8 @@
                       "devin",
                       "claude-managed",
                       "opencode",
-                      "acp"
+                      "acp",
+                      "dsh"
                     ]
                   }
                 },
@@ -41191,7 +41208,8 @@
                                   "devin",
                                   "claude-managed",
                                   "opencode",
-                                  "acp"
+                                  "acp",
+                                  "dsh"
                                 ]
                               },
                               "requestedByUserId": {
@@ -41587,7 +41605,8 @@
                           "pi",
                           "claude-managed",
                           "opencode",
-                          "acp"
+                          "acp",
+                          "dsh"
                         ]
                       },
                       "model": {

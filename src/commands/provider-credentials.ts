@@ -22,6 +22,7 @@ import { checkClaudeCredentials } from "../providers/claude-adapter";
 import { checkClaudeManagedCredentials } from "../providers/claude-managed-adapter";
 import { checkCodexCredentials } from "../providers/codex-adapter";
 import { checkDevinCredentials } from "../providers/devin-adapter";
+import { checkDshCredentials } from "../providers/dsh-adapter";
 import { checkOpencodeCredentials } from "../providers/opencode-adapter";
 import type { CredCheckOptions, CredStatus } from "../providers/types";
 import type {
@@ -41,7 +42,8 @@ export type SupportedProvider =
   | "devin"
   | "opencode"
   | "pi"
-  | "acp";
+  | "acp"
+  | "dsh";
 
 /**
  * True when the pi harness authenticates against Bedrock rather than a provider
@@ -105,6 +107,7 @@ export const REQUIRED_CRED_VARS_BY_PROVIDER: Record<SupportedProvider, readonly 
   pi: ["ANTHROPIC_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY"],
   // The ACP target process owns its own auth, so the swarm requires nothing.
   acp: [],
+  dsh: ["DEEPSEEK_API_KEY"],
 };
 
 type CredentialChecker = (
@@ -114,6 +117,7 @@ type CredentialChecker = (
 
 /** The handlers used by the credential-readiness dispatcher. */
 export const CREDENTIAL_PROVIDER_CHECKERS: Record<SupportedProvider, CredentialChecker> = {
+  dsh: (env) => checkDshCredentials(env),
   claude: (env) => checkClaudeCredentials(env),
   "claude-managed": (env) => checkClaudeManagedCredentials(env),
   codex: (env, opts) => checkCodexCredentials(env, opts),
@@ -416,12 +420,20 @@ export async function validateProviderCredentials(provider: string): Promise<Liv
           latency_ms: r.latency_ms,
         };
       }
+      case "dsh":
+        return checkDshCredentials(env).ready
+          ? presenceCheckOk()
+          : {
+              ok: false,
+              error: "Set DEEPSEEK_API_KEY for dsh.",
+              latency_ms: Date.now() - startedAt,
+            };
       case "acp":
         return presenceCheckOk();
       default:
         return {
           ok: false,
-          error: `Unknown provider "${provider}". Supported: claude, claude-managed, codex, devin, opencode, pi, acp.`,
+          error: `Unknown provider "${provider}". Supported: claude, claude-managed, codex, devin, opencode, pi, acp, dsh.`,
           latency_ms: Date.now() - startedAt,
         };
     }

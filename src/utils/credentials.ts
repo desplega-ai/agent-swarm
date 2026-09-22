@@ -8,6 +8,7 @@ export const CREDENTIAL_POOL_VARS = [
   "OPENAI_API_KEY",
   "CODEX_OAUTH",
   "DEVIN_API_KEY",
+  "DEEPSEEK_API_KEY",
 ] as const;
 
 /**
@@ -26,6 +27,7 @@ export const PROVIDER_CREDENTIAL_VARS: Record<string, readonly string[]> = {
   pi: ["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"],
   codex: ["OPENAI_API_KEY", "CODEX_OAUTH"],
   devin: ["DEVIN_API_KEY"],
+  dsh: ["DEEPSEEK_API_KEY"],
   opencode: ["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"],
 };
 
@@ -82,6 +84,8 @@ export function deriveProviderFromKeyType(keyType: string): string {
     case "OPENAI_API_KEY":
     case "CODEX_OAUTH":
       return "codex";
+    case "DEEPSEEK_API_KEY":
+      return "dsh";
     case "DEVIN_API_KEY":
       return "devin";
     default:
