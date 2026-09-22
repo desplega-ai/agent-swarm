@@ -147175,6 +147175,33 @@
     "name": "Anthropic",
     "doc": "https://docs.anthropic.com/en/docs/about-claude/models",
     "models": {
+      "claude-opus-5-5": {
+        "id": "claude-opus-5-5",
+        "name": "Claude Opus 5.5",
+        "reasoning": true,
+        "reasoning_options": [
+          {
+            "type": "effort",
+            "values": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ]
+          }
+        ],
+        "cost": {
+          "input": 4,
+          "output": 20,
+          "cache_read": 0.2,
+          "cache_write": 5
+        },
+        "limit": {
+          "context": 1000000,
+          "output": 128000
+        }
+      },
       "claude-sonnet-4-6": {
         "id": "claude-sonnet-4-6",
         "name": "Claude Sonnet 4.6",

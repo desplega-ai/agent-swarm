@@ -89,13 +89,15 @@ const MANUAL_PRICING_OVERRIDES: Array<{
 const ANTHROPIC_SHORTNAME_TO_MODELSDEV: Record<string, string> = {
   fable: "claude-fable-5-1",
   mythos: "claude-mythos-5-1",
-  opus: "claude-opus-5",
+  opus: "claude-opus-5-5",
   sonnet: "claude-sonnet-5",
   haiku: "claude-haiku-4-5",
 };
 
 /** Official rates used until a newly released model reaches the vendored models.dev snapshot. */
 const ANTHROPIC_SHORTNAME_PRICING_FALLBACKS: Record<string, ModelsDevCostBlock> = {
+  // https://platform.claude.com/docs/en/about-claude/pricing (verified 2026-09-22)
+  "claude-opus-5-5": { input: 4, output: 20, cache_read: 0.2, cache_write: 5 },
   "claude-fable-5-1": { input: 10, output: 50, cache_read: 0.25, cache_write: 12.5 },
   "claude-mythos-5-1": { input: 10, output: 50, cache_read: 0.25, cache_write: 12.5 },
 };

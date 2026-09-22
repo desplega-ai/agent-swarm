@@ -54,6 +54,11 @@ describe("agents list model display", () => {
       provider: "Anthropic",
       providerId: "anthropic",
     });
+    expect(getAgentModelPresentation("claude-opus-5-5")).toMatchObject({
+      label: "Claude Opus 5.5",
+      provider: "Anthropic",
+      providerId: "anthropic",
+    });
     expect(getAgentModelPresentation("claude-opus-5")).toMatchObject({
       label: "Claude Opus 5",
       provider: "Anthropic",
@@ -75,7 +80,7 @@ describe("agents list model display", () => {
       providerId: "anthropic",
     });
     expect(getAgentModelPresentation("opus")).toMatchObject({
-      label: "Claude Opus 5",
+      label: "Claude Opus 5.5",
       provider: "Anthropic",
       providerId: "anthropic",
     });

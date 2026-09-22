@@ -898,6 +898,12 @@ describe("ClaudeManagedAdapter (Phase 4) — repo provisioning + cost data", () 
       cacheReadPerMillion: 0.25,
       cacheWritePerMillion: 12.5,
     });
+    expect(CLAUDE_MANAGED_MODEL_PRICING["claude-opus-5-5"]).toEqual({
+      inputPerMillion: 4.0,
+      outputPerMillion: 20.0,
+      cacheReadPerMillion: 0.2,
+      cacheWritePerMillion: 5.0,
+    });
     expect(CLAUDE_MANAGED_MODEL_PRICING["claude-opus-5"]).toEqual({
       inputPerMillion: 5.0,
       outputPerMillion: 25.0,

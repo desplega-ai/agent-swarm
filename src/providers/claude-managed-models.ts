@@ -27,6 +27,7 @@
 export const CLAUDE_MANAGED_MODELS = [
   "claude-fable-5-1",
   "claude-mythos-5-1",
+  "claude-opus-5-5",
   "claude-opus-5",
   "claude-fable-5",
   "claude-mythos-5",
@@ -69,6 +70,7 @@ export interface ClaudeManagedModelPricing extends ClaudeManagedTokenPricing {
  * - claude-mythos-5-1: $10 / $50 / $0.25 / $12.50  (invite only, verified 2026-09-02)
  * - claude-fable-5:   $10 / $50 / $1.00 / $12.50   (verified 2026-06-10)
  * - claude-mythos-5:  $10 / $50 / $1.00 / $12.50   (limited availability, verified 2026-06-10)
+ * - claude-opus-5-5:  $4 / $20 / $0.20 / $5.00     (verified 2026-09-22)
  * - claude-opus-5:    $5 / $25 / $0.50 / $6.25     (verified 2026-07-25)
  * - claude-sonnet-5:  $2 / $10 / $0.20 / $2.50     (standard rate, verified 2026-08-29)
  * - claude-sonnet-4-6: $3 / $15 / $0.30 / $3.75    (in / out / cache-read / cache-write)
@@ -89,6 +91,12 @@ export const CLAUDE_MANAGED_MODEL_PRICING: Record<ClaudeManagedModel, ClaudeMana
     outputPerMillion: 50.0,
     cacheReadPerMillion: 0.25,
     cacheWritePerMillion: 12.5,
+  },
+  "claude-opus-5-5": {
+    inputPerMillion: 4.0,
+    outputPerMillion: 20.0,
+    cacheReadPerMillion: 0.2,
+    cacheWritePerMillion: 5.0,
   },
   "claude-opus-5": {
     inputPerMillion: 5.0,

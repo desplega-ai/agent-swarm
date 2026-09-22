@@ -22,6 +22,14 @@ describe("REASONING_EFFORT_LEVELS", () => {
 });
 
 describe("reasoningCapability — cache-sourced levels", () => {
+  test("Claude Opus 5.5 exposes supported CLI effort levels", () => {
+    expect(reasoningCapability("claude", "claude-opus-5-5").levels).toEqual([
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+    ]);
+  });
   test("claude claude-opus-4-8: levels come from reasoning_options.effort, not the fallback", () => {
     const cap = reasoningCapability("claude", "claude-opus-4-8");
     expect(cap.supported).toBe(true);

@@ -87,7 +87,7 @@ describe("models.dev runtime pricing refresh", () => {
     ).toBe(10);
     expect(
       (await getActivePricingRow("pi", "opus", "cache_write_1h", 500))?.pricePerMillionUsd,
-    ).toBe(10);
+    ).toBe(8);
     expect(
       (await getActivePricingRow("claude", "claude-opus-5", "cache_write", 500))
         ?.pricePerMillionUsd,
