@@ -242,6 +242,8 @@ const DIRECT_MODELS: Record<"claude" | "codex", ModelOption[]> = {
   ],
   codex: [
     directModel("codex", "gpt-6-astra", "GPT-6 Astra", OPENAI_META),
+    directModel("codex", "gpt-6-sol", "GPT-6 Sol", OPENAI_META),
+    directModel("codex", "gpt-6-luna", "GPT-6 Luna", OPENAI_META),
     directModel("codex", "gpt-5.6-sol", "GPT-5.6 Sol", OPENAI_META),
     directModel("codex", "gpt-5.6-terra", "GPT-5.6 Terra", OPENAI_META),
     directModel("codex", "gpt-5.6-luna", "GPT-5.6 Luna", OPENAI_META),

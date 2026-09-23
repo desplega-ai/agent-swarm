@@ -20,6 +20,34 @@ For an operator-facing comparison of the install choices, see the [Provider Capa
 
 ---
 
+## Codex model availability
+
+The direct Codex picker includes `gpt-6-sol` and `gpt-6-luna`, verified against the
+[official Codex catalog](https://developers.openai.com/codex/models) on September 23, 2026.
+Use bare model IDs with the CLI and app-server. Both models support text and image
+input, tools through Responses, a 1,050,000-token context window, and 128,000 output
+tokens. Their API reasoning efforts are `none`, `low`, `medium`, `high`, `xhigh`, and
+`max`; the swarm displays `none` as `off`. Ultra is an orchestration mode, not a
+model reasoning effort.
+
+[Standard API prices](https://developers.openai.com/api/docs/pricing), in USD per
+million tokens, are:
+
+| Model | Input | Cached input | Cache write | Output |
+|---|---:|---:|---:|---:|
+| GPT-6 Sol | 2 | 0.20 | 2.50 | 10 |
+| GPT-6 Luna | 0.10 | 0.01 | 0.125 | 0.50 |
+
+Above 272K input tokens, input and cache rates double and output rates multiply by
+1.5 for the full request. The snapshot preserves these tiers; the existing worker
+estimate and pricing-table seeder use base rates, so long-context costs remain
+estimates. Defaults, aliases, and portable tiers remain on their existing models
+while account availability rolls out.
+
+Codex access depends on account, client, and sign-in method. GPT-5.5 retires from
+ChatGPT-authenticated Codex on October 14, 2026, but its API availability is
+unchanged. Keep API and ChatGPT lifecycle decisions separate.
+
 ## Credential readiness recovery
 
 After boot, a live provider change triggers a fresh credential report. A not-ready report parks the worker in `waiting_for_credentials`; the runner continues polling and rechecks credentials at most once every 30 seconds after reconciling its environment. Once a ready report succeeds, the API restores dispatch eligibility without a restart, using the same runtime identity in multi-runtime mode. Failed checks or report deliveries also retry on that interval, and only one check/report runs at a time.
