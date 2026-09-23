@@ -62,7 +62,7 @@ server-side `implicit-citation` source.
 
 | Var | Default | Purpose |
 |---|---|---|
-| `MEMORY_RATERS` | `explicit-self` | Comma-separated allow-list, e.g. `implicit-citation,llm,explicit-self`. Unset enables self-rating hints, including on existing deployments. An explicitly empty value disables all raters. Deleting a swarm config override restores the deployment value, or the runtime default when unset. |
+| `MEMORY_RATERS` | `implicit-citation,explicit-self` | Comma-separated allow-list, e.g. `implicit-citation,llm,explicit-self`. Unset enables citation ratings and self-rating hints, including on existing deployments. An explicitly empty value disables all raters. Deleting a swarm config override restores the deployment value, or the runtime default when unset. |
 | `MEMORY_RATER_WEIGHTS` | unset (all multipliers = 1.0) | Optional `name:multiplier,...` per-rater weight overrides clamped into `[0, 1]`. Used to dial down a noisy rater without yanking it from the allow-list. |
 | `MEMORY_DEMOTION_FLOOR` | `1.0` (no demotion) | Lower bound for `usefulness(α, β)` in the reranker. Default `1.0` means a thoroughly-disliked memory never ranks below baseline; lower it (e.g. `0.5`) per deployment once telemetry shows the negative signal is reliable (Q1 resolution from the v1.5 plan). |
 

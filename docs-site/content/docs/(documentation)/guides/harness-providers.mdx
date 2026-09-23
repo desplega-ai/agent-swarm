@@ -497,7 +497,7 @@ Native session resume (the `claude --resume <UUID>` CLI flag and `codex.resumeTh
 
 ### Session-summary transcript sourcing
 
-Memory self-rating hints default on across harnesses when `MEMORY_RATERS` is unset, including existing deployments. Set `MEMORY_RATERS=` to disable raters; LLM ratings still require an explicit `llm` entry. Config reload preserves the empty opt-out, and deleting an override restores the deployment value (or the runtime default when unset).
+Memory self-rating hints and server-side citation ratings (`implicit-citation,explicit-self`) default on across harnesses when `MEMORY_RATERS` is unset, including existing deployments. Set `MEMORY_RATERS=` to disable raters; LLM ratings still require an explicit `llm` entry. Config reload preserves the empty opt-out, and deleting an override restores the deployment value (or the runtime default when unset).
 
 Session summaries must not depend solely on harness-managed transcript artifacts being present at shutdown. The Claude adapter owns an in-memory transcript assembled from its stream-json user, assistant, tool-call, and tool-result events, then invokes the session summarizer from the parent process after the CLI exits. Its child Stop hook detects this adapter-owned path and skips the legacy `transcript_path` read; standalone Claude hook installations retain that file fallback.
 

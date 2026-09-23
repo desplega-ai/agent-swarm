@@ -36,11 +36,11 @@ export function generateEnv(state: OnboardState): string {
   }
 
   lines.push("");
-  lines.push("# New-deployment memory preset: API retrieval and API/worker self-rating hints.");
-  lines.push("# Set MEMORY_RATERS= to disable hints; leave SKIP_SESSION_SUMMARY unset.");
+  lines.push("# New-deployment memory preset: retrieval, citation ratings, self-rating hints.");
+  lines.push("# Set MEMORY_RATERS= to disable all raters; leave SKIP_SESSION_SUMMARY unset.");
   lines.push("MEMORY_HYBRID_SEARCH=1");
   lines.push("MEMORY_GRAPH_EXPANSION=1");
-  lines.push("MEMORY_RATERS=explicit-self");
+  lines.push("MEMORY_RATERS=implicit-citation,explicit-self");
   lines.push("MEMORY_DEMOTION_FLOOR=1.0");
 
   // ── Authentication ──
