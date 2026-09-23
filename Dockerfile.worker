@@ -520,8 +520,11 @@ RUN case "$TARGETARCH" in \
 
 # Keep dsh and its transitive lifecycle scripts out of the shared root install.
 # Verify the pinned npm release tarball before installing without lifecycle hooks.
-RUN curl -fsSL https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-0.1.7-alpha.2.tgz -o /tmp/dsh.tgz \
-    && echo "b97b96a1bc26a4dcea14e4c53fad6481fd1a1fc23353d2d63c5f5058251fbf90ceb60b659beebecc7bd031ba047b46c26a2b6e97ad724af52a77898c35179dcf  /tmp/dsh.tgz" | sha512sum -c - \
+# Bump the version and its SHA-512 pin together.
+ARG DSH_VERSION=0.1.7-alpha.2
+ARG DSH_SHA512=b97b96a1bc26a4dcea14e4c53fad6481fd1a1fc23353d2d63c5f5058251fbf90ceb60b659beebecc7bd031ba047b46c26a2b6e97ad724af52a77898c35179dcf
+RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}.tgz" -o /tmp/dsh.tgz \
+    && echo "${DSH_SHA512}  /tmp/dsh.tgz" | sha512sum -c - \
     && HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/dsh --ignore-scripts --no-audit --no-fund /tmp/dsh.tgz \
     && ln -sf /opt/dsh/node_modules/.bin/dsh /usr/local/bin/dsh \
