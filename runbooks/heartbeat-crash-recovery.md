@@ -32,6 +32,22 @@ flowchart TD
 - `autoAssignPoolTasks` and `claimTask`/`assignUnassignedTaskPending` are gated by the **routing-affinity eligibility check** (§4, `isAgentEligibleForTask`) — a pooled task tagged with a `routingAffinity` snapshot (from a resume/retry, or an explicit `requiredCapabilities` on a fresh `send-task`) can only go to a role/capability-matching agent. Untagged tasks are unaffected — assignment stays open to any idle (non-lead) worker, exactly as before. `autoAssignPoolTasks` **does** skip idle workers whose `emptyPollCount >= MAX_EMPTY_POLLS` (the poll gate) — assigning to them would just have them exit on their next poll. The filter reads `emptyPollCount` off the rows `getIdleWorkersWithCapacity()` already returns (no per-worker re-query). Note the poll gate is cleared on a genuine `waiting_for_credentials -> ready` recovery (`updateAgentCredentialState`) and on re-register, but **not** by routine post-task `ready:true` credential reports.
 - `checkWorkerHealth` only flips `busy↔idle` (it pre-filters `offline`) and never sets `offline`. A successful `/api/poll` dispatch updates the agent to `busy` in the same transaction that starts a pre-assigned task or claims a pool task; the worker-only `poll-task` tool does the same for its direct pending-task path. The heartbeat sweep remains the reconciliation backstop for any other task-state transition that leaves `agents.status` stale. Leads can become `busy` while running a directly assigned task, but remain structurally excluded from pool assignment (`getIdleWorkersWithCapacity` and the pool dispatch query filter `isLead=0`). `offline` has two writers: the graceful `POST /close` handler (`src/http/core.ts`), and — only when `MULTI_RUNTIME_ENABLED` is enabled — the stale-runtime expiry in §1a. With the flag explicitly off, a hard-crashed (SIGKILL) worker is still never auto-offlined.
 
+### Workflow recovery
+
+Every cleanup sweep invokes `recoverIncompleteRuns`, also used at server startup.
+Its recovery count is logged only when nonzero; it does not mean the engine or
+container restarted. Running runs with a live graph walk in this API process are
+skipped, including while an executor is awaiting a long script or checkpointing
+its result. Ownership lasts until all overlapping walks settle and is released
+on errors too. Runs without a live walk resume from persisted completed steps;
+waiting runs reconcile finished tasks, approvals, and durable waits.
+
+This ownership guard is process-local, not a distributed lease. It assumes one
+API workflow engine owns the database; multiple worker runtimes do not create
+multiple API engines. Separate API processes sharing a database would need
+cross-process workflow ownership before recovery could safely distinguish their
+live work from interrupted work.
+
 ## 1a. Runtime liveness (`MULTI_RUNTIME_ENABLED` only)
 
 With multi-runtime mode enabled, one logical agent may be served by several

@@ -198,6 +198,14 @@ interface StepResult {
   successors: WorkflowNode[];
 }
 
+// A run may have overlapping resume walks. Keep ownership until the last walk
+// settles, including checkpointing and routing between executor calls.
+const activeWalks = new Map<string, number>();
+
+export function isWorkflowRunActive(runId: string): boolean {
+  return activeWalks.has(runId);
+}
+
 /**
  * Event-loop style graph walker.
  *
@@ -206,6 +214,26 @@ interface StepResult {
  * predecessors), then executes the next batch. Repeats until done.
  */
 export async function walkGraph(
+  def: WorkflowDefinition,
+  runId: string,
+  ctx: Record<string, unknown>,
+  startNodes: WorkflowNode[],
+  registry: ExecutorRegistry,
+  workflowId?: string,
+  secretKeys: Set<string> = new Set(),
+  options: WorkflowExecutionOptions = {},
+): Promise<void> {
+  activeWalks.set(runId, (activeWalks.get(runId) ?? 0) + 1);
+  try {
+    await walkGraphOwned(def, runId, ctx, startNodes, registry, workflowId, secretKeys, options);
+  } finally {
+    const remaining = activeWalks.get(runId)! - 1;
+    if (remaining === 0) activeWalks.delete(runId);
+    else activeWalks.set(runId, remaining);
+  }
+}
+
+async function walkGraphOwned(
   def: WorkflowDefinition,
   runId: string,
   ctx: Record<string, unknown>,
