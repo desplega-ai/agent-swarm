@@ -43,6 +43,7 @@ describe("e2e redaction", () => {
     const saved = { ...process.env };
     try {
       process.env.OPENROUTER_API_KEY = "example-sk-or-v1-known-value-1234";
+      process.env.DEEPSEEK_API_KEY = "deepseek-known-value-1234";
       process.env.CODEX_OAUTH = JSON.stringify({
         access: "access-token-value-1234",
         refresh: "refresh-token-value-1234",
@@ -51,6 +52,7 @@ describe("e2e redaction", () => {
       });
       const known = knownSecrets(["extra-secret-value"]);
       expect(known).toContain("example-sk-or-v1-known-value-1234");
+      expect(known).toContain("deepseek-known-value-1234");
       expect(known).toContain("access-token-value-1234");
       expect(known).toContain("refresh-token-value-1234");
       expect(known).toContain("extra-secret-value");

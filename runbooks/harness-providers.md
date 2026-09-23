@@ -18,8 +18,8 @@ Operational rules for editing or adding harness providers (claude, codex, openco
 
 Set `HARNESS_PROVIDER=dsh` and `OPENROUTER_API_KEY` in the worker environment or
 agent-scoped config. This runs DeepSeek's own harness with the same defaults as
-pi: smol/regular `openrouter/deepseek/deepseek-v4-flash`, smart
-`openrouter/deepseek/deepseek-v4-pro`, ultra `openrouter/anthropic/claude-opus-4.8`.
+pi: smol/regular `openrouter/deepseek/deepseek-v4.1-flash`, smart
+`openrouter/deepseek/deepseek-v4-pro-0813`, ultra `openrouter/anthropic/claude-opus-5.5`.
 
 Routing follows the model prefix, even when both keys are available:
 `MODEL_OVERRIDE=openrouter/<model-id>` uses the bundled `llm-pi-ai` adapter with
@@ -27,8 +27,9 @@ Routing follows the model prefix, even when both keys are available:
 (default `https://openrouter.ai/api/v1`). The selected model is explicitly declared
 so newly released IDs do not depend on the bundled catalog. For direct DeepSeek,
 set `DEEPSEEK_API_KEY` and a bare `MODEL_OVERRIDE` such as `deepseek-v4-pro`;
-this retains the native `llm-deepseek` route. There is no fallback across providers
-when the selected route's key is missing.
+this retains the native `llm-deepseek` route. The native Flash ID is
+`deepseek-flash` (V4.1 Flash); OpenRouter uses `deepseek/deepseek-v4.1-flash`.
+There is no fallback across providers when the selected route's key is missing.
 
 The full worker image installs `@deepseek-ai/dsh@0.1.7-alpha.2` at build time
 in `worker-full-base`, alongside the optional tools in `/opt/global-deps-full`.

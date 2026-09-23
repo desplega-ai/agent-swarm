@@ -15,7 +15,7 @@ import { parseArgs } from "node:util";
 import type { E2eResult, HarnessResult, ScenarioResult } from "./report";
 import { harnessFailureDetails, harnessLegName, harnessTable, markdownCell, usd } from "./report";
 
-export const DEFAULT_PROVIDERS = ["claude", "claude-sdk", "codex", "pi", "opencode"];
+export const DEFAULT_PROVIDERS = ["claude", "claude-sdk", "codex", "pi", "opencode", "dsh"];
 const TREND_LIMIT = 14;
 
 export type ContractSummary = {

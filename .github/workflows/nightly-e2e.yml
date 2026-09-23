@@ -74,6 +74,8 @@ jobs:
             leg: pi
           - provider: opencode
             leg: opencode
+          - provider: dsh
+            leg: dsh
     name: harness (${{ matrix.leg }})
     runs-on: ubuntu-latest
     container:
@@ -91,7 +93,7 @@ jobs:
       E2E_MODEL_CLAUDE: claude-haiku-4-5
       CLAUDE_CODE_OAUTH_TOKEN: ${{ matrix.provider == 'claude' && secrets.E2E_CLAUDE_CODE_OAUTH_TOKEN || '' }}
       CODEX_OAUTH: ${{ matrix.provider == 'codex' && secrets.E2E_CODEX_OAUTH || '' }}
-      OPENROUTER_API_KEY: ${{ (matrix.provider == 'pi' || matrix.provider == 'opencode') && secrets.E2E_OPENROUTER_API_KEY || '' }}
+      OPENROUTER_API_KEY: ${{ (matrix.provider == 'pi' || matrix.provider == 'opencode' || matrix.provider == 'dsh') && secrets.E2E_OPENROUTER_API_KEY || '' }}
 
     steps:
       - name: Checkout repository
@@ -101,6 +103,14 @@ jobs:
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      # Provision explicitly: slim has no dsh, and the full image may predate this PR.
+      # Keep the pin aligned with Dockerfile.worker; the adapter never installs at runtime.
+      - name: Install pinned dsh
+        if: matrix.provider == 'dsh'
+        run: |
+          npm install --global --prefix "$RUNNER_TEMP/dsh" @deepseek-ai/dsh@0.1.7-alpha.2
+          echo "DSH_BINARY=$RUNNER_TEMP/dsh/bin/dsh" >> "$GITHUB_ENV"
 
       # `--only health` keeps the contract scenarios in the contract job. The retry lives in
       # the runner so both attempts land in the result file with their cost and log tail.

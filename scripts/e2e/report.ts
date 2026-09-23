@@ -83,7 +83,7 @@ export const helpText = `Usage: bun run e2e [options]
 
 Options:
   --harness p1,p2               Run real harness legs after the contract scenarios
-                                (claude, codex, pi, opencode)
+                                (claude, codex, pi, opencode, dsh)
   --harness-attempts N          Run a failed harness leg again, N attempts in total
                                 (1 through 5, default: 1)
   --only name,name              Run only named contract scenarios
@@ -181,7 +181,7 @@ export function parseOptions(
     throw new Error(`Unknown scenario group: ${options.group}`);
   }
   for (const provider of options.harness) {
-    if (!["claude", "codex", "pi", "opencode"].includes(provider)) {
+    if (!["claude", "codex", "pi", "opencode", "dsh"].includes(provider)) {
       throw new Error(`Unknown harness provider: ${provider}`);
     }
   }

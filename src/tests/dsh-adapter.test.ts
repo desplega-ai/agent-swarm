@@ -180,7 +180,7 @@ describe("dsh harness", () => {
     const { patch } = await Bun.file(join(config.cwd, "invocation.json")).json();
     expect(patch[0].config).toEqual({
       provider: "openrouter",
-      model: "deepseek/deepseek-v4-flash",
+      model: "deepseek/deepseek-v4.1-flash",
     });
     expect(patch[2].config.providers.openrouter.baseURL).toBe("https://gateway.example/proxy/v1");
   });

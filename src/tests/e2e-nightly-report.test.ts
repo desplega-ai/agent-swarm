@@ -85,11 +85,11 @@ describe("nightly report", () => {
     });
     expect(report.ok).toBe(true);
     expect(report.missingLegs).toEqual([]);
-    expect(report.totalCostUsd).toBeCloseTo(0.0615, 6);
+    expect(report.totalCostUsd).toBeCloseTo(0.0738, 6);
     expect(report.warnings).toEqual([]);
     const markdown = nightlyMarkdown(report, [], DEFAULT_PROVIDERS);
     expect(markdown).toContain("## Nightly E2E: PASS");
-    expect(markdown).toContain("5/5 harness legs passed");
+    expect(markdown).toContain("6/6 harness legs passed");
     expect(markdown).toContain("| claude | claude-model | PASS | 1 |");
     expect(markdown).not.toContain("### Warnings");
   });
@@ -159,7 +159,7 @@ describe("nightly report", () => {
       results: [contractResult(), harnessResult([leg("claude")]), harnessResult([failed])],
     });
     expect(report.ok).toBe(false);
-    expect(report.missingLegs).toEqual(["claude-sdk", "pi", "opencode"]);
+    expect(report.missingLegs).toEqual(["claude-sdk", "pi", "opencode", "dsh"]);
     expect(report.warnings).toContain("pi: no result file from the leg.");
     expect(report.warnings).toContain("codex: needed 2 attempts.");
     const markdown = nightlyMarkdown(report, [], DEFAULT_PROVIDERS);
