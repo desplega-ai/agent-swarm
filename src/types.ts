@@ -408,6 +408,8 @@ export const SteeringMessageSchema = z
     status: SteeringStatusSchema,
     deliveredMode: SteerModeSchema.optional(),
     source: SteeringSourceSchema,
+    /** Display label resolved by the API from the sender identity. */
+    senderLabel: z.string().optional(),
     createdByKind: z.enum(["user", "agent", "system"]),
     createdByUserId: z.string().optional(),
     createdByAgentId: z.string().optional(),

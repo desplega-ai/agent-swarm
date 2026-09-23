@@ -4211,6 +4211,9 @@
               "api"
             ]
           },
+          "senderLabel": {
+            "type": "string"
+          },
           "createdByKind": {
             "type": "string",
             "enum": [

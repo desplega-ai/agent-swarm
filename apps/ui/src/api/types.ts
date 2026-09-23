@@ -332,6 +332,7 @@ export interface SteeringMessage {
   /** Mode the worker actually delivered in — may differ from `mode` after a degrade. */
   deliveredMode?: SteerMode;
   source: SteeringSource;
+  senderLabel?: string;
   createdByKind: "user" | "agent" | "system";
   createdByUserId?: string;
   createdByAgentId?: string;

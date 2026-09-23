@@ -190,7 +190,7 @@ describe("steering worker transport", () => {
   });
 
   test("delivers pending rows once and reports the adapter's actual mode", async () => {
-    const pending = pendingMessage();
+    const pending = pendingMessage({ createdByKind: "agent", senderLabel: "Lead (agent)" });
     const nonPending = pendingMessage({ id: crypto.randomUUID(), status: "delivered" });
     const deliveries: Array<{ mode: string; text: string }> = [];
     const reports: Array<{ path: string; body: unknown }> = [];
@@ -220,7 +220,7 @@ describe("steering worker transport", () => {
     // The body is wrapped in the delivery envelope, which MUST carry the
     // steering message ID — `accept-steer` needs it, and it is the only route
     // to `handled`. Without it the agent obeys but can never acknowledge.
-    expect(deliveries[0]?.text).toContain("change course");
+    expect(deliveries[0]?.text).toContain("From Lead (agent): change course");
     expect(deliveries[0]?.text).toContain(pending.id);
     expect(deliveries[0]?.text).toContain("accept-steer");
     expect(state.dispatchedIds.has(pending.id)).toBe(true);

@@ -21761,6 +21761,7 @@ export interface components {
             deliveredMode?: "steer" | "queue";
             /** @enum {string} */
             source: "ui" | "mcp" | "script" | "slack" | "api";
+            senderLabel?: string;
             /** @enum {string} */
             createdByKind: "user" | "agent" | "system";
             createdByUserId?: string;

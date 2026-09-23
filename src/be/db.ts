@@ -1733,6 +1733,7 @@ type TaskSteeringMessageRow = {
   status: string;
   delivered_mode: string | null;
   source: string;
+  sender_name?: string | null;
   created_by_kind: string;
   created_by_user_id: string | null;
   created_by_agent_id: string | null;
@@ -1743,7 +1744,20 @@ type TaskSteeringMessageRow = {
   handled_note: string | null;
 };
 
+// Resolve names in the API so workers need no database access or identity lookups.
+const STEERING_MESSAGE_SELECT = `SELECT m.*,
+  CASE m.created_by_kind WHEN 'user' THEN u.name WHEN 'agent' THEN a.name END AS sender_name
+  FROM task_steering_messages m
+  LEFT JOIN users u ON m.created_by_kind = 'user' AND u.id = m.created_by_user_id
+  LEFT JOIN agents a ON m.created_by_kind = 'agent' AND a.id = m.created_by_agent_id`;
+
 function rowToSteeringMessage(row: TaskSteeringMessageRow): SteeringMessage {
+  const senderId =
+    row.created_by_kind === "user" ? row.created_by_user_id : row.created_by_agent_id;
+  const senderLabel =
+    row.created_by_kind === "system"
+      ? "system"
+      : `${row.sender_name?.trim() || senderId || "Unknown"} (${row.created_by_kind})`;
   return {
     id: row.id,
     taskId: row.task_id,
@@ -1752,6 +1766,7 @@ function rowToSteeringMessage(row: TaskSteeringMessageRow): SteeringMessage {
     status: row.status as SteeringStatus,
     deliveredMode: (row.delivered_mode as SteerMode | null) ?? undefined,
     source: row.source as SteeringSource,
+    senderLabel,
     createdByKind: row.created_by_kind as SteeringMessage["createdByKind"],
     createdByUserId: row.created_by_user_id ?? undefined,
     createdByAgentId: row.created_by_agent_id ?? undefined,
@@ -1810,7 +1825,7 @@ export async function createSteeringMessage(
     });
   } catch {}
 
-  return rowToSteeringMessage(row);
+  return (await getSteeringMessageById(id))!;
 }
 
 export async function getSteeringMessagesForTask(
@@ -1819,15 +1834,15 @@ export async function getSteeringMessagesForTask(
 ): Promise<SteeringMessage[]> {
   const rows = opts?.status
     ? await getDbClient().query<TaskSteeringMessageRow>(
-        `SELECT * FROM task_steering_messages
-           WHERE task_id = ? AND status = ?
-           ORDER BY created_at ASC, rowid ASC`,
+        `${STEERING_MESSAGE_SELECT}
+           WHERE m.task_id = ? AND m.status = ?
+           ORDER BY m.created_at ASC, m.rowid ASC`,
         [taskId, opts.status],
       )
     : await getDbClient().query<TaskSteeringMessageRow>(
-        `SELECT * FROM task_steering_messages
-           WHERE task_id = ?
-           ORDER BY created_at ASC, rowid ASC`,
+        `${STEERING_MESSAGE_SELECT}
+           WHERE m.task_id = ?
+           ORDER BY m.created_at ASC, m.rowid ASC`,
         [taskId],
       );
   return rows.map(rowToSteeringMessage);
@@ -1835,8 +1850,8 @@ export async function getSteeringMessagesForTask(
 
 export async function getSteeringMessageById(id: string): Promise<SteeringMessage | null> {
   const row = await getDbClient().get<TaskSteeringMessageRow>(
-    `SELECT * FROM task_steering_messages
-       WHERE id = ?`,
+    `${STEERING_MESSAGE_SELECT}
+       WHERE m.id = ?`,
     [id],
   );
   return row ? rowToSteeringMessage(row) : null;
@@ -1848,8 +1863,7 @@ export async function getPendingSteeringForTask(taskId: string): Promise<Steerin
 
 export async function getPendingSteeringForAgent(agentId: string): Promise<SteeringMessage[]> {
   const rows = await getDbClient().query<TaskSteeringMessageRow>(
-    `SELECT m.*
-       FROM task_steering_messages m
+    `${STEERING_MESSAGE_SELECT}
        JOIN agent_tasks t ON t.id = m.task_id
        WHERE t.agentId = ? AND m.status = 'pending'
        ORDER BY m.created_at ASC, m.rowid ASC`,
@@ -1887,7 +1901,7 @@ export async function markSteeringDelivered(
     } catch {}
   }
 
-  return row ? rowToSteeringMessage(row) : null;
+  return row ? await getSteeringMessageById(id) : null;
 }
 
 export async function markSteeringHandled(
@@ -1903,7 +1917,7 @@ export async function markSteeringHandled(
        RETURNING *`,
     [note ?? null, id],
   );
-  return row ? rowToSteeringMessage(row) : null;
+  return row ? await getSteeringMessageById(id) : null;
 }
 
 export async function markSteeringPromoted(
@@ -1918,7 +1932,7 @@ export async function markSteeringPromoted(
        RETURNING *`,
     [promotedTaskId, id],
   );
-  return row ? rowToSteeringMessage(row) : null;
+  return row ? await getSteeringMessageById(id) : null;
 }
 
 export async function cancelPendingSteeringForTask(taskId: string): Promise<number> {

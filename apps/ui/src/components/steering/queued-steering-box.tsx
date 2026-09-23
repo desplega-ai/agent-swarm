@@ -14,7 +14,7 @@ import { ChevronRight } from "lucide-react";
 import { useState } from "react";
 import type { SteeringMessage } from "@/api/types";
 import { cn } from "@/lib/utils";
-import { SteeringLine } from "./steering-message-chips";
+import { SteeringLine, steeringSenderLabel } from "./steering-message-chips";
 
 export interface QueuedSteeringBoxProps {
   messages: SteeringMessage[];
@@ -44,7 +44,9 @@ export function QueuedSteeringBox({ messages, className }: QueuedSteeringBoxProp
           {messages.length} queued
         </span>
         <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
-          {open ? null : messages[0]?.body.replace(/\s+/g, " ").trim()}
+          {open || !messages[0]
+            ? null
+            : `${steeringSenderLabel(messages[0])}: ${messages[0].body.replace(/\s+/g, " ").trim()}`}
         </span>
       </button>
       {open ? (

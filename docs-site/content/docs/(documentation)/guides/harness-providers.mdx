@@ -197,6 +197,8 @@ See [configuration and limits](/docs/ui/configuration#task-tool-preloading-propo
 
 ### Live task steering
 
+Live deliveries include `[steering <id>] From <sender>: <body>`, where the API resolves the sender's name and kind (user or agent), or `system`. Missing names fall back to the sender ID and kind. The marker remains unchanged for `accept-steer`. The runner uses this envelope for every provider's live delivery; the legacy Codex hook uses the same renderer. Template resolution failures still deliver the bare body. The dashboard displays the same sender label in steering rows, queued previews, and session activity.
+
 Running tasks can receive more input through the optional `ProviderSession.deliverSteering()` method. `queue` adds context at the next turn boundary. `steer` requests an interrupt of the current turn; provider implementations must not advertise it unless they can deliver that semantic.
 
 | Provider | Advertised modes | `mode: "steer"` result | Notes |
