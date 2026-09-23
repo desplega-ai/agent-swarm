@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.153.0] - 2026-09-23
+
+### Added
+- **Agents can install and own inert extension drafts**, with owner-scoped worker updates and deletion, creator metadata, and validation that does not import the bundle. Activation remains restricted to leads, operators, and dashboard users (#1567).
+- **Claude Opus 5.5 is available in the model catalog and pickers**, with managed-provider support, pricing, reasoning settings, and context-window metadata (#1575).
+
+### Changed
+- **Slack transport selection is explicit** through `SLACK_MODE`. Socket Mode remains the available ingress; selecting HTTP validates its credential contract but leaves Slack unavailable until the HTTP receiver ships (#1543).
+- **The Opus alias used for pricing and model display, and the UI Claude fallback, now resolve to Opus 5.5** (#1575).
+- **Docker build workflows use build-push-action 7.4.0 and setup-buildx-action 4.4.1** (#1573, #1574).
+
 ## [1.152.2] - 2026-09-22
 
 ### Added

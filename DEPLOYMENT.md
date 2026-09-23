@@ -637,8 +637,14 @@ Files shared with the bot, and files fetched by task-scoped `slack-read` or `sla
 
 ### Configuration
 
+Keep `SLACK_MODE=socket` for working Slack ingress. The `http` value validates
+`SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET`, but the HTTP receiver is not yet
+available: no listener or Socket Mode fallback is started. Invalid mode values
+also leave Slack unavailable.
+
 ```bash
-# Required for Slack
+# Socket Mode (default and currently available)
+SLACK_MODE=socket
 SLACK_BOT_TOKEN=xoxb-...      # Bot User OAuth Token
 SLACK_APP_TOKEN=xapp-...      # App-Level Token (Socket Mode)
 SLACK_SIGNING_SECRET=...      # Signing Secret (optional for Socket Mode)

@@ -1159,7 +1159,8 @@ bundle format, event contracts, and lead/operator activation workflow.
 
 ### extension-list
 
-List installed extensions with their version, activation state, priority, and failure count.
+List installed extensions with their version, activation state, priority, failure count,
+and owner (`createdByAgentId`). The owner differs from the extension runtime `agentId`.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -1167,7 +1168,10 @@ List installed extensions with their version, activation state, priority, and fa
 
 ### extension-install
 
-Validate and store a manifest and its files as a disabled draft. Fetch
+Any authenticated agent can validate and store a manifest and its files as an inert,
+disabled draft. Validation typechecks the bundle without importing it. The installing
+agent becomes its owner; workers may stage subsequent versions only for their own
+extensions, without activating them. Fetch
 `GET /api/extensions/type-defs` first for the `swarm-extension` TypeScript contract.
 A trusted lead can enable the draft with `extension-enable`; operators and dashboard users
 can also activate it. Installation itself never enables an extension.
@@ -1181,7 +1185,9 @@ can also activate it. Installation itself never enables an extension.
 
 ### Extension lifecycle
 
-Lifecycle mutations require a lead, operator, or dashboard user. Ordinary workers are denied.
+Enable, disable, and version activation require a lead, operator, or dashboard user.
+Workers can delete their own disabled extensions, but cannot activate any extension
+or modify another owner's bundle.
 `EXTENSION_ALLOW_LEAD_ACTIVATION=false` restricts enable, disable, and version activation
 to operators/dashboard users; leads can still install drafts and delete disabled extensions.
 Extensions execute inside the API process without host isolation.
