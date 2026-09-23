@@ -491,6 +491,7 @@ value:releaseStaleReviewingTasks
 value:releaseTask
 value:replaceTaskAttachment
 value:reserveSlackMessage
+value:reservedRoleViolation
 value:resetEmptyPollCount
 value:resetOrphanedInProgressTasksForAgent
 value:resetPromptTemplateToDefault

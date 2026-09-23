@@ -195,6 +195,7 @@ export {
   MAX_EMPTY_POLLS,
   NOT_EXTENSION_AGENT_SQL,
   ReservedAgentRoleError,
+  reservedRoleViolation,
   resetEmptyPollCount,
   setAgentHarnessProvider,
   shouldBlockPolling,
