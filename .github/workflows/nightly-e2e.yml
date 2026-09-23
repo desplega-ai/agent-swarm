@@ -84,16 +84,9 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
-    # Each leg receives only its provider credential. The :slim tag is built and
-    # published by this repo's docker-and-deploy workflow from main, so the trust
-    # boundary is write access to main; scoping keeps a single leg from seeing
-    # the other provider credentials.
     env:
       E2E_CLAUDE_TRANSPORT: ${{ matrix.transport || '' }}
       E2E_MODEL_CLAUDE: claude-haiku-4-5
-      CLAUDE_CODE_OAUTH_TOKEN: ${{ matrix.provider == 'claude' && secrets.E2E_CLAUDE_CODE_OAUTH_TOKEN || '' }}
-      CODEX_OAUTH: ${{ matrix.provider == 'codex' && secrets.E2E_CODEX_OAUTH || '' }}
-      OPENROUTER_API_KEY: ${{ (matrix.provider == 'pi' || matrix.provider == 'opencode' || matrix.provider == 'dsh') && secrets.E2E_OPENROUTER_API_KEY || '' }}
 
     steps:
       - name: Checkout repository
@@ -109,13 +102,20 @@ jobs:
       - name: Install pinned dsh
         if: matrix.provider == 'dsh'
         run: |
-          npm install --global --prefix "$RUNNER_TEMP/dsh" @deepseek-ai/dsh@0.1.7-alpha.2
+          npm install --ignore-scripts --global --prefix "$RUNNER_TEMP/dsh" @deepseek-ai/dsh@0.1.7-alpha.2
+          "$RUNNER_TEMP/dsh/bin/dsh" --version
           echo "DSH_BINARY=$RUNNER_TEMP/dsh/bin/dsh" >> "$GITHUB_ENV"
 
       # `--only health` keeps the contract scenarios in the contract job. The retry lives in
       # the runner so both attempts land in the result file with their cost and log tail.
       # `--keep` leaves the SUT log on disk for the upload step below.
+      # Only inference and exact-value log redaction receive provider credentials.
+      # Keep provisioning and artifact uploads outside that scope.
       - name: Run harness leg
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ matrix.provider == 'claude' && secrets.E2E_CLAUDE_CODE_OAUTH_TOKEN || '' }}
+          CODEX_OAUTH: ${{ matrix.provider == 'codex' && secrets.E2E_CODEX_OAUTH || '' }}
+          OPENROUTER_API_KEY: ${{ (matrix.provider == 'pi' || matrix.provider == 'opencode' || matrix.provider == 'dsh') && secrets.E2E_OPENROUTER_API_KEY || '' }}
         run: >-
           bun run e2e --only health --harness "${{ matrix.provider }}" --harness-attempts 2
           --keep --json out/e2e-results.json
@@ -125,6 +125,10 @@ jobs:
       # The container job runs `sh -e`, not bash: keep this POSIX (no pipefail).
       - name: Collect redacted logs
         if: always()
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ matrix.provider == 'claude' && secrets.E2E_CLAUDE_CODE_OAUTH_TOKEN || '' }}
+          CODEX_OAUTH: ${{ matrix.provider == 'codex' && secrets.E2E_CODEX_OAUTH || '' }}
+          OPENROUTER_API_KEY: ${{ (matrix.provider == 'pi' || matrix.provider == 'opencode' || matrix.provider == 'dsh') && secrets.E2E_OPENROUTER_API_KEY || '' }}
         run: |
           mkdir -p out/logs
           ls /tmp/e2e-*.log >/dev/null 2>&1 || exit 0
