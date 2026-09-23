@@ -11,7 +11,7 @@ describe("resolveWorkflowLlmConfig", () => {
     expect(config).toEqual({
       apiKey: "sk-or-test",
       baseURL: "https://gateway.example.test/v1",
-      model: "google/gemini-3-flash-preview",
+      model: "deepseek/deepseek-v4.1-flash",
     });
   });
 
@@ -23,7 +23,7 @@ describe("resolveWorkflowLlmConfig", () => {
     expect(config).toEqual({
       apiKey: "example-sk-openai-test",
       baseURL: undefined,
-      model: "gpt-5.4-mini",
+      model: "gpt-6-luna",
     });
   });
 
@@ -34,7 +34,7 @@ describe("resolveWorkflowLlmConfig", () => {
       const config = await resolveWorkflowLlmConfig(undefined, {
         OPENAI_API_KEY: "example-sk-openai-test",
       });
-      expect(config.model).toBe("gpt-5.4-mini");
+      expect(config.model).toBe("gpt-6-luna");
     } finally {
       if (previous === undefined) delete process.env.MEMORY_RATER_MODEL;
       else process.env.MEMORY_RATER_MODEL = previous;

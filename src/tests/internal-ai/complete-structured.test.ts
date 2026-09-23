@@ -51,7 +51,7 @@ describe("completeStructured", () => {
       _credentialOverride: {
         kind: "openrouter",
         apiKey: "test",
-        modelDefault: "openrouter/google/gemini-3-flash-preview",
+        modelDefault: "openrouter/deepseek/deepseek-v4.1-flash",
       },
       _complete: async () => {
         invocations++;
@@ -98,7 +98,7 @@ describe("completeStructured", () => {
         _credentialOverride: {
           kind: "openrouter",
           apiKey: "test",
-          modelDefault: "openrouter/google/gemini-3-flash-preview",
+          modelDefault: "openrouter/deepseek/deepseek-v4.1-flash",
         },
         _complete: async () => {
           invocations++;
@@ -139,13 +139,13 @@ describe("completeStructured", () => {
       {
         kind: "openrouter",
         apiKey: "test",
-        modelDefault: "openrouter/google/gemini-3-flash-preview",
+        modelDefault: "openrouter/deepseek/deepseek-v4.1-flash",
       },
-      { kind: "openai", apiKey: "test", modelDefault: "openai/gpt-5.4-mini" },
+      { kind: "openai", apiKey: "test", modelDefault: "openai/gpt-6-luna" },
       {
         kind: "openai-codex",
         apiKey: "test",
-        modelDefault: "openai-codex/gpt-5.5",
+        modelDefault: "openai-codex/gpt-6-luna",
       },
       {
         kind: "anthropic",
@@ -195,7 +195,7 @@ describe("completeStructured", () => {
       _credentialOverride: {
         kind: "openrouter",
         apiKey: "test",
-        modelDefault: "openrouter/google/gemini-3-flash-preview",
+        modelDefault: "openrouter/deepseek/deepseek-v4.1-flash",
       },
       _complete: async () => {
         invocations++;
@@ -233,7 +233,7 @@ describe("completeStructured", () => {
         _credentialOverride: {
           kind: "openrouter",
           apiKey: "test",
-          modelDefault: "openrouter/google/gemini-3-flash-preview",
+          modelDefault: "openrouter/deepseek/deepseek-v4.1-flash",
         },
         _complete: async () => {
           invocations++;
@@ -264,7 +264,7 @@ describe("completeStructured", () => {
       _credentialOverride: {
         kind: "openrouter",
         apiKey: "test",
-        modelDefault: "openrouter/google/gemini-3-flash-preview",
+        modelDefault: "openrouter/deepseek/deepseek-v4.1-flash",
       },
       _complete: async () => {
         invocations++;
@@ -441,7 +441,7 @@ describe("completeStructured", () => {
         _credentialOverride: {
           kind: "openrouter",
           apiKey: "test",
-          modelDefault: "openrouter/google/gemini-3-flash-preview",
+          modelDefault: "openrouter/deepseek/deepseek-v4.1-flash",
         },
         _complete: async () =>
           makeMsg([

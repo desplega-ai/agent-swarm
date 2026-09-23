@@ -30,7 +30,7 @@ describe("resolveCredential", () => {
     expect(cred?.kind).toBe("openrouter");
     if (cred?.kind === "openrouter") {
       expect(cred.apiKey).toBe("or-1");
-      expect(cred.modelDefault).toBe("openrouter/google/gemini-3-flash-preview");
+      expect(cred.modelDefault).toBe("openrouter/deepseek/deepseek-v4.1-flash");
     }
   });
 
@@ -50,7 +50,7 @@ describe("resolveCredential", () => {
     expect(cred?.kind).toBe("openai");
     if (cred?.kind === "openai") {
       expect(cred.apiKey).toBe("sk-o-1");
-      expect(cred.modelDefault).toBe("openai/gpt-5.4-mini");
+      expect(cred.modelDefault).toBe("openai/gpt-6-luna");
     }
   });
 
@@ -79,7 +79,7 @@ describe("resolveCredential", () => {
     expect(cred?.kind).toBe("openai-codex");
     if (cred?.kind === "openai-codex") {
       expect(cred.apiKey).toBe("example-codex-api-key-derived");
-      expect(cred.modelDefault).toBe("openai-codex/gpt-5.5");
+      expect(cred.modelDefault).toBe("openai-codex/gpt-6-luna");
     }
   });
 
@@ -101,7 +101,7 @@ describe("resolveCredential", () => {
     expect(cred).toEqual({
       kind: "openai-codex",
       apiKey: "example-at_provider_runtime",
-      modelDefault: "openai-codex/gpt-5.5",
+      modelDefault: "openai-codex/gpt-6-luna",
     });
   });
 

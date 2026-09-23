@@ -17,10 +17,10 @@ export type CredentialKind = "openrouter" | "anthropic" | "openai" | "openai-cod
  * shellout, not pi-ai's `getModel`.
  */
 export const DEFAULT_MODEL: Record<CredentialKind, string> = {
-  openrouter: "openrouter/google/gemini-3-flash-preview",
+  openrouter: "openrouter/deepseek/deepseek-v4.1-flash",
   anthropic: "anthropic/claude-haiku-4-5",
-  openai: "openai/gpt-5.4-mini",
-  "openai-codex": "openai-codex/gpt-5.5",
+  openai: "openai/gpt-6-luna",
+  "openai-codex": "openai-codex/gpt-6-luna",
   "claude-cli": "haiku",
 };
 
@@ -35,8 +35,8 @@ export function resolveModelString(kind: CredentialKind): string {
 
 /**
  * Split a `provider/model-id` string on the FIRST `/` so that OpenRouter
- * compound IDs like `openrouter/google/gemini-3-flash-preview` parse as
- * `("openrouter", "google/gemini-3-flash-preview")`. Mirrors the existing
+ * compound IDs like `openrouter/deepseek/deepseek-v4.1-flash` parse as
+ * `("openrouter", "deepseek/deepseek-v4.1-flash")`. Mirrors the existing
  * convention in `src/providers/pi-mono-adapter.ts:161-170`.
  */
 export function parseModelStr(modelStr: string): [provider: string, modelId: string] {
