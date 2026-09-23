@@ -258,7 +258,7 @@ agentFs:
     registry: ghcr.io
     repository: desplega-ai/agent-fs
     pullPolicy: IfNotPresent
-    tag: 0.13.6
+    tag: 0.13.7
   port: 7433
   storageProvider: local          # objects live on the agent-fs PVC at /data/storage; no S3 needed
   apiKey: ""                      # blank = API boot seeder mints and stores the bootstrap key
