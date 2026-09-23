@@ -20,6 +20,7 @@ RUN bun install --frozen-lockfile
 
 # Copy source files
 COPY src/ ./src/
+COPY plugin/opencode-plugins/lib/memory-raters.ts ./plugin/opencode-plugins/lib/memory-raters.ts
 COPY templates/ ./templates/
 COPY tsconfig.json ./
 

@@ -10,6 +10,7 @@ import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { buildRatingsFromLlm, fetchRetrievalsForTask, postRatings } from "../be/memory/raters/llm";
 import { checkToolLoop, clearToolHistory } from "../hooks/tool-loop-detection";
 import { summarizeSession as runSummarize } from "../utils/internal-ai";
+import { getMemoryRaterNames } from "../utils/memory-raters";
 import { scrubSecrets } from "../utils/secret-scrubber";
 
 export interface SwarmHooksConfig {
@@ -341,11 +342,7 @@ export async function summarizeSessionForPi(
 
     const taskDetails = await fetchTaskDetails(config).catch(() => null);
 
-    const memoryRaters = (process.env.MEMORY_RATERS ?? "")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    const wantRatings = memoryRaters.includes("llm");
+    const wantRatings = getMemoryRaterNames().includes("llm");
     const retrievals = wantRatings
       ? await _fetchRetrievals({
           apiUrl: config.apiUrl,

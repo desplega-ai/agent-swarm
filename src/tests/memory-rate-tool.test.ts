@@ -212,16 +212,13 @@ describe("renderMemoriesPrompt — conditional rate-tool hint", () => {
     expect(result).toBeNull();
   });
 
-  test("MEMORY_RATERS unset → no rate-tool hint (byte-identical to pre-step-5)", () => {
-    const result = renderMemoriesPrompt(sampleMemories);
-    expect(result).not.toBeNull();
-    expect(result).not.toContain("memory_rate");
-    expect(result).toContain("### Relevant Past Knowledge");
-    expect(result).toContain("- **Foo bug fix** (id: m-1):");
-    // Snapshot — exact byte parity with main's runner.ts:1579 block.
-    expect(result).toBe(
-      `\n\n### Relevant Past Knowledge\n\nThese memories from your previous sessions may be useful. Use \`memory-get\` with the memory ID to retrieve full details.\n\n- **Foo bug fix** (id: m-1): use Bun.serve not express\n`,
-    );
+  test("MEMORY_RATERS unset → self-rating hint", () => {
+    expect(renderMemoriesPrompt(sampleMemories)).toContain("memory_rate");
+  });
+
+  test("MEMORY_RATERS=llm → no self-rating hint", () => {
+    process.env.MEMORY_RATERS = "llm";
+    expect(renderMemoriesPrompt(sampleMemories)).not.toContain("memory_rate");
   });
 
   test("MEMORY_RATERS empty string → no hint", () => {

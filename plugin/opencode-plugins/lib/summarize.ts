@@ -28,6 +28,7 @@
 
 import type { PluginInput } from "@opencode-ai/plugin";
 import type { Message, Part } from "@opencode-ai/sdk";
+import { getMemoryRaterNames } from "./memory-raters";
 import { type ResolvedCredential, resolveOpencodeAuth } from "./opencode-auth";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -576,11 +577,7 @@ export async function summarizeSessionForOpencode(
 
     const taskDetails = await _fetchTaskDetails(config).catch(() => null);
 
-    const memoryRaters = (process.env.MEMORY_RATERS ?? "")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    const wantRatings = memoryRaters.includes("llm");
+    const wantRatings = getMemoryRaterNames().includes("llm");
     const retrievals = wantRatings
       ? await _fetchRetrievals({
           apiUrl: config.apiUrl,

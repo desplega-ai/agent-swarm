@@ -41,6 +41,7 @@
     "plugin/commands/",
     "plugin/agents/",
     "plugin/pi-skills/",
+    "plugin/opencode-plugins/lib/memory-raters.ts",
     "templates/",
     "vendored-openapi/",
     "openapi.json"

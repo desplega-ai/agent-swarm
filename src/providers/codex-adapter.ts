@@ -39,6 +39,7 @@ import {
 } from "../utils/context-window";
 import { SessionErrorTracker } from "../utils/error-tracker";
 import { summarizeSession as runSummarize } from "../utils/internal-ai";
+import { getMemoryRaterNames } from "../utils/memory-raters";
 import { swarmRuntimeInstanceId } from "../utils/multi-runtime";
 import {
   detachedProcessGroup,
@@ -1797,11 +1798,7 @@ export class CodexSession implements ProviderSession {
     const _postRatings = this.summarizeDeps.postRatings ?? postRatings;
     const _buildRatings = this.summarizeDeps.buildRatingsFromLlm ?? buildRatingsFromLlm;
 
-    const memoryRaters = (process.env.MEMORY_RATERS ?? "")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    const wantRatings = memoryRaters.includes("llm");
+    const wantRatings = getMemoryRaterNames().includes("llm");
     const retrievals = wantRatings
       ? await _fetchRetrievals({ apiUrl, apiKey, agentId, taskId }).catch(() => [])
       : [];
@@ -2145,7 +2142,7 @@ class CodexSubprocessSession implements ProviderSession {
           ...(process.env.SKIP_SESSION_SUMMARY
             ? { SKIP_SESSION_SUMMARY: process.env.SKIP_SESSION_SUMMARY }
             : {}),
-          ...(process.env.MEMORY_RATERS ? { MEMORY_RATERS: process.env.MEMORY_RATERS } : {}),
+          MEMORY_RATERS: getMemoryRaterNames().join(","),
         },
         stdin: "pipe",
         stdout: "pipe",

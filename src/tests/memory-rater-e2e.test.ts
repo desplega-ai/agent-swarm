@@ -292,9 +292,8 @@ describe("memory-rater v1.5 — cross-cutting e2e", () => {
 
     // Fire the server-rater orchestration the way `store-progress` does.
     // Inject the rater explicitly — the test process inherits its own
-    // MEMORY_RATERS env (typically unset to avoid disturbing other suites),
-    // and we want to exercise this rater regardless. Step G covers the
-    // unset-env "byte-identical" backward-compat case separately.
+    // MEMORY_RATERS env (unset now defaults to explicit-self),
+    // and we want to exercise implicit-citation regardless.
     const evidenceRows = await getDbClient().query<{ content: string }>(
       "SELECT content FROM session_logs WHERE taskId = ? ORDER BY iteration, lineNumber",
       [taskId],

@@ -765,6 +765,9 @@ export interface ResolvedEnvResult {
   resolvedProvider: ProviderName;
 }
 
+// Preserve the deployment value before config reloads mutate process.env.
+const deploymentMemoryRaters = process.env.MEMORY_RATERS;
+
 export async function fetchResolvedEnv(
   apiUrl: string,
   apiKey: string,
@@ -791,6 +794,12 @@ export async function fetchResolvedEnv(
         const data = (await response.json()) as {
           configs: Array<{ key: string; value: string }>;
         };
+
+        // A deleted row restores the deployment value (including unset), while
+        // an explicit empty row below remains the disable-all-raters override.
+        // Only reset after a successful fetch so outages retain the current value.
+        env.MEMORY_RATERS =
+          baseEnv === process.env ? deploymentMemoryRaters : baseEnv.MEMORY_RATERS;
 
         if (data.configs?.length) {
           scriptsOnlyConfigValue = data.configs.find(
@@ -1060,7 +1069,10 @@ export function applyResolvedEnvToProcessEnv(
   const changed: string[] = [];
   for (const key of RELOADABLE_ENV_KEYS) {
     const next = freshEnv[key];
-    if (next !== undefined && next !== process.env[key]) {
+    if (key === "MEMORY_RATERS" && next === undefined && process.env[key] !== undefined) {
+      delete process.env[key];
+      changed.push(key);
+    } else if (next !== undefined && next !== process.env[key]) {
       const previous = process.env[key];
       process.env[key] = next;
       changed.push(key);

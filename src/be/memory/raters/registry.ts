@@ -1,3 +1,4 @@
+import { getMemoryRaterNames } from "../../../utils/memory-raters";
 import { ExplicitSelfRatingRater } from "./explicit-self";
 import { ImplicitCitationRater } from "./implicit-citation";
 import { LlmRater } from "./llm";
@@ -8,7 +9,7 @@ import type { MemoryRater } from "./types";
  * Plan: thoughts/taras/plans/2026-05-05-memory-rater-v1.5/step-1.md §4
  *
  * `MEMORY_RATERS` env — comma-separated list of rater names. Defaults to
- * `[NoopRater]` when unset/empty so existing deployments stay byte-identical.
+ * `explicit-self` when unset. An explicit empty value selects `[NoopRater]`.
  *
  * `MEMORY_RATER_WEIGHTS` env — optional `name:multiplier,...` overrides.
  * Multiplier is applied to every emitted RatingEvent.weight before
@@ -43,15 +44,7 @@ const FACTORIES: Record<string, RaterFactory> = {
 export const SERVER_RATERS = new Set<string>(["implicit-citation"]);
 
 export function getRegisteredRaters(): MemoryRater[] {
-  const raw = process.env.MEMORY_RATERS;
-  if (!raw || raw.trim() === "") {
-    return [new NoopRater()];
-  }
-
-  const names = raw
-    .split(",")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
+  const names = getMemoryRaterNames();
 
   const raters: MemoryRater[] = [];
   for (const name of names) {

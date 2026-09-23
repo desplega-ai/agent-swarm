@@ -414,3 +414,46 @@ describe("applyResolvedEnvToProcessEnv", () => {
     expect(process.env.MODEL_OVERRIDE).toBe("new-value");
   });
 });
+
+describe("memory rater config reload", () => {
+  const deploymentValue = process.env.MEMORY_RATERS;
+  afterEach(() => {
+    if (deploymentValue === undefined) delete process.env.MEMORY_RATERS;
+    else process.env.MEMORY_RATERS = deploymentValue;
+  });
+
+  test("empty override survives reload; deleting it restores the deployment value", async () => {
+    const agentId = "memory-rater-reload";
+    mockResponsesByAgentId.set(agentId, {
+      status: 200,
+      body: { configs: [{ key: "MEMORY_RATERS", value: "" }] },
+    });
+    const disabled = await fetchResolvedEnv(testUrl, "key", agentId);
+    applyResolvedEnvToProcessEnv(disabled.env);
+    expect(process.env.MEMORY_RATERS).toBe("");
+    const repeated = await fetchResolvedEnv(testUrl, "key", agentId);
+    expect(repeated.env.MEMORY_RATERS).toBe("");
+
+    mockResponsesByAgentId.set(agentId, { status: 200, body: { configs: [] } });
+    const removed = await fetchResolvedEnv(testUrl, "key", agentId);
+    applyResolvedEnvToProcessEnv(removed.env);
+    expect(process.env.MEMORY_RATERS).toBe(deploymentValue);
+  });
+
+  test.each([undefined, "", "llm"])("missing row restores base value %s", async (value) => {
+    const result = await fetchResolvedEnv(testUrl, "key", "memory-rater-base", {
+      MEMORY_RATERS: value,
+    });
+    process.env.MEMORY_RATERS = "explicit-self,llm";
+    applyResolvedEnvToProcessEnv(result.env);
+    expect(process.env.MEMORY_RATERS).toBe(value);
+  });
+
+  test("failed reload retains the last applied empty override", async () => {
+    process.env.MEMORY_RATERS = "";
+    mockResponsesByAgentId.set("memory-rater-failure", { status: 500, body: {} });
+    const result = await fetchResolvedEnv(testUrl, "key", "memory-rater-failure");
+    applyResolvedEnvToProcessEnv(result.env);
+    expect(process.env.MEMORY_RATERS).toBe("");
+  });
+});

@@ -17,6 +17,7 @@
  * touch `bun:sqlite` or `src/be/db`. The boundary check enforces it.
  */
 import { z } from "zod";
+import { getMemoryRaterNames } from "../../../utils/memory-raters";
 import { ClaudeCliLlmRaterClient, type LlmRaterClient, type LlmRaterResult } from "./llm-client";
 import {
   type MemoryRater,
@@ -246,12 +247,7 @@ ${memoryBlock}`;
  * path — strict opt-in so existing deployments are byte-identical when unset.
  */
 export function isLlmRaterEnabled(): boolean {
-  const raw = process.env.MEMORY_RATERS;
-  if (!raw || raw.trim() === "") return false;
-  return raw
-    .split(",")
-    .map((s) => s.trim())
-    .includes("llm");
+  return getMemoryRaterNames().includes("llm");
 }
 
 /** Memory snapshot returned by `GET /api/memory/retrievals`. */

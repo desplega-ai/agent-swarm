@@ -7,9 +7,11 @@
  * scripts/check-db-boundary.sh.
  *
  * The conditional hint at the end is gated on `MEMORY_RATERS` containing
- * `explicit-self`. When the gate is closed (the default), the rendered
- * prompt is byte-identical to pre-rater builds — strict backward compat.
+ * `explicit-self` (the default when unset). An explicitly empty value
+ * closes the gate and preserves the prompt without rating hints.
  */
+
+import { getMemoryRaterNames } from "../utils/memory-raters";
 
 export type RelevantMemory = {
   id: string;
@@ -54,9 +56,5 @@ export function renderMemoriesPrompt(memories: RelevantMemory[]): string | null 
  * env var between renders without re-importing the module.
  */
 export function isExplicitSelfRaterEnabled(): boolean {
-  const ratersEnabled = (process.env.MEMORY_RATERS ?? "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  return ratersEnabled.includes("explicit-self");
+  return getMemoryRaterNames().includes("explicit-self");
 }

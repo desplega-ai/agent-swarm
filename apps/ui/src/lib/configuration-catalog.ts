@@ -174,7 +174,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "MEMORY_RATERS",
         label: "Active memory raters",
         description:
-          "Comma-separated list of memory raters to run — the main lever on memory scoring. Unknown names are skipped; leave unset to run no raters.",
+          "Comma-separated list of memory raters to run — the main lever on memory scoring. Unknown names are skipped; unset enables explicit-self, while an explicitly empty value disables all raters.",
         kind: "string",
         placeholder: "e.g. implicit-citation",
         docsUrl: `${DOCS}architecture/memory`,

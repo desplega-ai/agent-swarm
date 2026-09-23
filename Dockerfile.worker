@@ -38,6 +38,7 @@ COPY apps/templates-ui/package.json ./apps/templates-ui/package.json
 COPY apps/evals/package.json ./apps/evals/package.json
 RUN bun install --frozen-lockfile
 COPY src/ ./src/
+COPY plugin/opencode-plugins/lib/memory-raters.ts ./plugin/opencode-plugins/lib/memory-raters.ts
 COPY templates/ ./templates/
 COPY tsconfig.json ./
 # --bytecode --format=esm (Bun 1.4 lifted the CJS-only restriction): the binary
