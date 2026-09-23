@@ -9,7 +9,8 @@ import type { MemoryRater } from "./types";
  * Plan: thoughts/taras/plans/2026-05-05-memory-rater-v1.5/step-1.md §4
  *
  * `MEMORY_RATERS` env — comma-separated list of rater names. Defaults to
- * `explicit-self` when unset. An explicit empty value selects `[NoopRater]`.
+ * `implicit-citation,explicit-self` when unset. An explicit empty value selects
+ * `[NoopRater]`.
  *
  * `MEMORY_RATER_WEIGHTS` env — optional `name:multiplier,...` overrides.
  * Multiplier is applied to every emitted RatingEvent.weight before

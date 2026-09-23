@@ -9,7 +9,7 @@ afterEach(() => {
 
 describe("memory rater defaults", () => {
   test.each([
-    [undefined, ["explicit-self"]],
+    [undefined, ["implicit-citation", "explicit-self"]],
     ["", ["noop"]],
     ["  ", ["noop"]],
     ["llm", ["llm"]],

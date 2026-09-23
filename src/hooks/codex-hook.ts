@@ -100,7 +100,13 @@ export async function collectDeliverableSteering(
     } catch {
       continue;
     }
-    delivered.push(await renderSteeringDelivery(message.id, message.body));
+    delivered.push(
+      await renderSteeringDelivery(
+        message.id,
+        message.body,
+        message.senderLabel ?? message.createdByKind,
+      ),
+    );
   }
   return delivered;
 }

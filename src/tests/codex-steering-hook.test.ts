@@ -101,7 +101,7 @@ describe("codex steering hook", () => {
   );
 
   test("PostToolUse injects the envelope and marks the row delivered first", async () => {
-    const pending = message();
+    const pending = message({ createdByKind: "user", senderLabel: "Taras (user)" });
     const deliveredCalls: string[] = [];
     const output = await handleCodexHookEvent(
       { hook_event_name: "PostToolUse" },
@@ -116,7 +116,7 @@ describe("codex steering hook", () => {
       additionalContext: string;
     };
     expect(hookOutput.hookEventName).toBe("PostToolUse");
-    expect(hookOutput.additionalContext).toContain(pending.body);
+    expect(hookOutput.additionalContext).toContain(`From Taras (user): ${pending.body}`);
     expect(hookOutput.additionalContext).toContain(`[steering ${pending.id}]`);
     expect(hookOutput.additionalContext).toContain("accept-steer");
   });

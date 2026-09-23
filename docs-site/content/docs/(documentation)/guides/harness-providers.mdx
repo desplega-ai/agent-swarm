@@ -197,6 +197,8 @@ See [configuration and limits](/docs/ui/configuration#task-tool-preloading-propo
 
 ### Live task steering
 
+Live deliveries include `[steering <id>] From <sender>: <body>`, where the API resolves the sender's name and kind (user or agent), or `system`. Missing names fall back to the sender ID and kind. The marker remains unchanged for `accept-steer`. The runner uses this envelope for every provider's live delivery; the legacy Codex hook uses the same renderer. Template resolution failures still deliver the bare body. The dashboard displays the same sender label in steering rows, queued previews, and session activity.
+
 Running tasks can receive more input through the optional `ProviderSession.deliverSteering()` method. `queue` adds context at the next turn boundary. `steer` requests an interrupt of the current turn; provider implementations must not advertise it unless they can deliver that semantic.
 
 | Provider | Advertised modes | `mode: "steer"` result | Notes |
@@ -497,7 +499,7 @@ Native session resume (the `claude --resume <UUID>` CLI flag and `codex.resumeTh
 
 ### Session-summary transcript sourcing
 
-Memory self-rating hints default on across harnesses when `MEMORY_RATERS` is unset, including existing deployments. Set `MEMORY_RATERS=` to disable raters; LLM ratings still require an explicit `llm` entry. Config reload preserves the empty opt-out, and deleting an override restores the deployment value (or the runtime default when unset).
+Memory self-rating hints and server-side citation ratings (`implicit-citation,explicit-self`) default on across harnesses when `MEMORY_RATERS` is unset, including existing deployments. Set `MEMORY_RATERS=` to disable raters; LLM ratings still require an explicit `llm` entry. Config reload preserves the empty opt-out, and deleting an override restores the deployment value (or the runtime default when unset).
 
 Session summaries must not depend solely on harness-managed transcript artifacts being present at shutdown. The Claude adapter owns an in-memory transcript assembled from its stream-json user, assistant, tool-call, and tool-result events, then invokes the session summarizer from the parent process after the CLI exits. Its child Stop hook detects this adapter-owned path and skips the legacy `transcript_path` read; standalone Claude hook installations retain that file fallback.
 

@@ -610,7 +610,11 @@ async function pollAndStartSteeringDispatches(
       prepared.push(item);
       item.text =
         session.deliverSteering && !state.outcomes.has(message.id)
-          ? await renderSteeringDelivery(message.id, message.body)
+          ? await renderSteeringDelivery(
+              message.id,
+              message.body,
+              message.senderLabel ?? message.createdByKind,
+            )
           : undefined;
     }
   } catch (error) {

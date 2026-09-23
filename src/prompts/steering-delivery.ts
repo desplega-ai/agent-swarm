@@ -19,11 +19,13 @@ import { resolveTemplateAsync } from "./resolver.ts";
 export async function renderSteeringDelivery(
   steeringMessageId: string,
   body: string,
+  sender = "Unknown sender",
 ): Promise<string> {
   try {
     const result = await resolveTemplateAsync("system.agent.steering.delivery", {
       steeringMessageId,
       body,
+      sender: sender.replace(/\s+/g, " ").trim(),
     });
     return result.skipped || !result.text.trim() ? body : result.text;
   } catch {

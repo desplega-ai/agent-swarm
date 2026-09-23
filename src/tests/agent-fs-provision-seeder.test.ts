@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import {
   closeDb,
@@ -110,6 +110,7 @@ function createFetchStub(
         orgId: "personal-org",
       });
     }
+    if (url.pathname === "/auth/profile" && method === "PATCH") return Response.json(body);
     if (url.pathname === "/auth/me" && method === "GET") {
       return Response.json({
         userId: "admin-user",
@@ -502,11 +503,64 @@ describe("agent-fs provisioning seeder", () => {
       role: "editor",
     });
 
+    expect(records.find((r) => r.path === "/auth/profile")).toMatchObject({
+      method: "PATCH",
+      body: { displayName: worker.name },
+      authorization: "Bearer example-afs-agent-key",
+      hasSignal: true,
+    });
     records.length = 0;
     const second = await ensureAgentFsCredentialsForAgent(worker.id);
 
     expect(second.created).toBe(false);
-    expect(records).toEqual([]);
+    expect(records).toEqual([
+      {
+        method: "PATCH",
+        path: "/auth/profile",
+        body: { displayName: "Credential Worker" },
+        authorization: "Bearer example-afs-agent-key",
+        hasSignal: true,
+      },
+    ]);
+  });
+
+  test("profile sync failures leave existing credentials usable and retry later", async () => {
+    process.env.AGENT_FS_API_URL = "https://agent-fs.example.test";
+    const worker = await createAgent({
+      name: "Legacy Worker",
+      description: "Profile compatibility",
+      role: "worker",
+      isLead: false,
+      status: "idle",
+      maxTasks: 1,
+      capabilities: [],
+    });
+    await upsertSwarmConfig({
+      scope: "agent",
+      scopeId: worker.id,
+      key: "AGENT_FS_API_KEY",
+      value: "example-profile-key",
+      isSecret: true,
+    });
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      for (const status of [404, 405, 500, 0]) {
+        setAgentFsProvisionFetchForTests((async (_input, init) => {
+          expect(init?.signal).toBeInstanceOf(AbortSignal);
+          if (!status) throw new DOMException("Timed out", "TimeoutError");
+          return Response.json({ error: "unsupported" }, { status });
+        }) as typeof fetch);
+        expect((await ensureAgentFsCredentialsForAgent(worker.id)).created).toBe(false);
+      }
+      expect(warn).toHaveBeenCalledTimes(4);
+      const records: RequestRecord[] = [];
+      setAgentFsProvisionFetchForTests(createFetchStub(records));
+      await ensureAgentFsCredentialsForAgent(worker.id);
+      expect(records[0].body).toEqual({ displayName: "Legacy Worker" });
+      expect(records[0].authorization).toBe("Bearer example-profile-key");
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   test("recovers a lost agent credential by registering an alias after a 409", async () => {

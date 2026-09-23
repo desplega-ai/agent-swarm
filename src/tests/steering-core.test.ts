@@ -144,6 +144,41 @@ describe("task steering core", () => {
     return started!;
   }
 
+  test("sender labels resolve on task reads, worker polls, and lifecycle responses", async () => {
+    const task = await runningTask("pi", "sender labels");
+    const user = await createUser({ name: "Taras" });
+    const unnamed = await createUser({ name: " " });
+    for (const [creator, expected] of [
+      [{ createdByKind: "user", createdByUserId: user.id }, "Taras (user)"],
+      [
+        { createdByKind: "agent", createdByAgentId: agentIds.get("lead")! },
+        "Steering lead (agent)",
+      ],
+      [{ createdByKind: "system" }, "system"],
+      [{ createdByKind: "user", createdByUserId: unnamed.id }, `${unnamed.id} (user)`],
+      [{ createdByKind: "agent", createdByAgentId: "deleted-agent" }, "deleted-agent (agent)"],
+      [{ createdByKind: "user" }, "Unknown (user)"],
+    ] as const) {
+      const message = await createSteeringMessage({
+        taskId: task.id,
+        body: "sender test",
+        mode: "queue",
+        source: "api",
+        ...creator,
+      });
+      expect(message.senderLabel).toBe(expected);
+      expect((await getSteeringMessageById(message.id))?.senderLabel).toBe(expected);
+      const taskRead = await api("GET", `/api/tasks/${task.id}/steering-messages`);
+      expect(taskRead.status).toBe(200);
+      expect(taskRead.body.messages).toContainEqual(
+        expect.objectContaining({ id: message.id, senderLabel: expected }),
+      );
+      expect(await getPendingSteeringForAgent(agentIds.get("pi")!)).toContainEqual(message);
+      expect((await markSteeringDelivered(message.id, "queue"))?.senderLabel).toBe(expected);
+      expect((await markSteeringHandled(message.id))?.senderLabel).toBe(expected);
+    }
+  });
+
   test("row lifecycle transitions pending -> delivered -> handled", async () => {
     const task = await runningTask("pi", "lifecycle");
     const created = await createSteeringMessage({

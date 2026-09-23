@@ -77,6 +77,13 @@ function statusTimestampLine(message: SteeringMessage): string {
   return `Sent ${formatSmartTime(message.createdAt)}`;
 }
 
+export function steeringSenderLabel(message: SteeringMessage): string {
+  if (message.senderLabel) return message.senderLabel;
+  if (message.createdByKind === "system") return "system";
+  const id = message.createdByKind === "user" ? message.createdByUserId : message.createdByAgentId;
+  return `${id || "Unknown"} (${message.createdByKind})`;
+}
+
 export interface SteeringChipProps {
   message: SteeringMessage;
   side?: "top" | "right" | "bottom" | "left";
@@ -107,6 +114,7 @@ export function SteeringChip({ message, side = "top", className }: SteeringChipP
         </Badge>
       </TooltipTrigger>
       <TooltipContent side={side} className="max-w-xs">
+        <span className="block">From {steeringSenderLabel(message)}</span>
         <span className="block">{STEERING_STATUS_HINT[message.status]}</span>
         {degraded ? (
           <span className="block opacity-80">Delivered as {message.deliveredMode}.</span>
@@ -161,6 +169,12 @@ export function SteeringLine({ message, marker, trailing, className }: SteeringL
     >
       {marker}
       <SteeringChip message={message} />
+      <span
+        className="max-w-48 shrink-0 truncate text-muted-foreground"
+        title={steeringSenderLabel(message)}
+      >
+        {steeringSenderLabel(message)}
+      </span>
       {hasMore ? (
         <Tooltip>
           <TooltipTrigger asChild>

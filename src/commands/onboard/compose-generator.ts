@@ -145,7 +145,7 @@ export function generateCompose(state: OnboardState): string {
   // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
   lines.push("      - MEMORY_GRAPH_EXPANSION=${MEMORY_GRAPH_EXPANSION-1}");
   // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
-  lines.push("      - MEMORY_RATERS=${MEMORY_RATERS-explicit-self}");
+  lines.push("      - MEMORY_RATERS=${MEMORY_RATERS-implicit-citation,explicit-self}");
   // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
   lines.push("      - MEMORY_DEMOTION_FLOOR=${MEMORY_DEMOTION_FLOOR-1.0}");
   appendProviderEnvironment(lines, state, false);
@@ -203,7 +203,7 @@ export function generateCompose(state: OnboardState): string {
     appendProviderEnvironment(lines, state, true);
     lines.push(ENV_API_KEY);
     // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
-    lines.push("      - MEMORY_RATERS=${MEMORY_RATERS-explicit-self}");
+    lines.push("      - MEMORY_RATERS=${MEMORY_RATERS-implicit-citation,explicit-self}");
     lines.push(`      - AGENT_ID=${svc.agentId}`);
     lines.push(`      - AGENT_NAME=${agentName}`);
     lines.push(`      - AGENT_ROLE=${agentRole}`);

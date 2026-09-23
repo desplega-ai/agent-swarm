@@ -51,11 +51,11 @@ config:
   appUrl: https://app.agent-swarm.dev          # hosted dashboard (default)
   publicMcpBaseUrl: https://swarm-api.example.com
   # New-install memory preset. Shared with workers; retrieval knobs are API-only.
-  # Leave SKIP_SESSION_SUMMARY unset. Set MEMORY_RATERS to "" to disable hints.
+  # Leave SKIP_SESSION_SUMMARY unset. Set MEMORY_RATERS to "" to disable all raters.
   extraEnv:
     MEMORY_HYBRID_SEARCH: "1"
     MEMORY_GRAPH_EXPANSION: "1"
-    MEMORY_RATERS: "explicit-self"
+    MEMORY_RATERS: "implicit-citation,explicit-self"
     MEMORY_DEMOTION_FLOOR: "1.0"
 
 # ---------------------------------------------------------------------------
@@ -258,7 +258,7 @@ agentFs:
     registry: ghcr.io
     repository: desplega-ai/agent-fs
     pullPolicy: IfNotPresent
-    tag: 0.13.6
+    tag: 0.13.7
   port: 7433
   storageProvider: local          # objects live on the agent-fs PVC at /data/storage; no S3 needed
   apiKey: ""                      # blank = API boot seeder mints and stores the bootstrap key

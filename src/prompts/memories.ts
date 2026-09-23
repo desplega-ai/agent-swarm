@@ -7,7 +7,7 @@
  * scripts/check-db-boundary.sh.
  *
  * The conditional hint at the end is gated on `MEMORY_RATERS` containing
- * `explicit-self` (the default when unset). An explicitly empty value
+ * `explicit-self` (part of the default when unset). An explicitly empty value
  * closes the gate and preserves the prompt without rating hints.
  */
 
