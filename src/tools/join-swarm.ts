@@ -84,7 +84,7 @@ export const registerJoinSwarmTool = (server: McpServer) => {
 
       try {
         const agent = await getDbClient().transaction(async () => {
-          const agents = await getAllAgents();
+          const agents = await getAllAgents({ includeExtensions: true });
 
           const existingIdAgent = agents.find((agent) => agent.id === agentId);
 

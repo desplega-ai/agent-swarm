@@ -4,10 +4,12 @@ import * as z from "zod";
 import { authorizeAssetKeyWrite } from "@/be/asset-key-auth";
 import { resolveTaskAuditUserId } from "@/be/audit-user";
 import {
+  extensionAgentAssignmentError,
   getAgentById,
   getScheduledTaskById,
   getScheduledTaskByName,
   getWorkflow,
+  isExtensionAgent,
   updateScheduledTask,
 } from "@/be/db";
 import { mergeScheduleTiming, validateRecurringTiming } from "@/be/schedules/validate";
@@ -185,6 +187,9 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
         const agent = await getAgentById(targetAgentId);
         if (!agent) {
           return toolErr(`Target agent not found: ${targetAgentId}`);
+        }
+        if (isExtensionAgent(agent)) {
+          return toolErr(extensionAgentAssignmentError(agent));
         }
       }
 

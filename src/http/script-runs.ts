@@ -7,6 +7,7 @@ import {
   countScriptRuns,
   createScriptRun,
   createTaskExtended,
+  ExtensionAgentAssignmentError,
   getAgentById,
   getDbClient,
   getLatestScriptRunStepTaskByContextKey,
@@ -618,32 +619,40 @@ export async function handleScriptRuns(
     const contextKey = `script-run:${run.id}:${parsed.body.stepKey}`;
     let task = await getLatestScriptRunStepTaskByContextKey(contextKey);
     if (!task) {
-      task = await createTaskExtended(
-        parsed.body.template ?? parsed.body.task ?? parsed.body.stepKey,
-        {
-          agentId: parsed.body.agentId,
-          routingReason:
-            parsed.body.routingReason ?? (parsed.body.agentId ? "human_pinned" : undefined),
-          routingNote: parsed.body.routingNote,
-          routingSource: parsed.body.routingReason
-            ? "declared"
-            : parsed.body.agentId
-              ? "engine_default"
-              : undefined,
-          tags: parsed.body.tags,
-          priority: parsed.body.priority,
-          offeredTo: parsed.body.offerMode ? parsed.body.agentId : undefined,
-          taskType: "script-run-step",
-          source: "mcp",
-          dir: parsed.body.dir,
-          vcsRepo: parsed.body.vcsRepo,
-          model: parsed.body.model,
-          parentTaskId: parsed.body.parentTaskId,
-          requestedByUserId: parsed.body.requestedByUserId ?? run.requestedByUserId,
-          outputSchema: parsed.body.outputSchema,
-          contextKey,
-        },
-      );
+      try {
+        task = await createTaskExtended(
+          parsed.body.template ?? parsed.body.task ?? parsed.body.stepKey,
+          {
+            agentId: parsed.body.agentId,
+            routingReason:
+              parsed.body.routingReason ?? (parsed.body.agentId ? "human_pinned" : undefined),
+            routingNote: parsed.body.routingNote,
+            routingSource: parsed.body.routingReason
+              ? "declared"
+              : parsed.body.agentId
+                ? "engine_default"
+                : undefined,
+            tags: parsed.body.tags,
+            priority: parsed.body.priority,
+            offeredTo: parsed.body.offerMode ? parsed.body.agentId : undefined,
+            taskType: "script-run-step",
+            source: "mcp",
+            dir: parsed.body.dir,
+            vcsRepo: parsed.body.vcsRepo,
+            model: parsed.body.model,
+            parentTaskId: parsed.body.parentTaskId,
+            requestedByUserId: parsed.body.requestedByUserId ?? run.requestedByUserId,
+            outputSchema: parsed.body.outputSchema,
+            contextKey,
+          },
+        );
+      } catch (error) {
+        if (error instanceof ExtensionAgentAssignmentError) {
+          jsonError(res, error.message, 400);
+          return true;
+        }
+        throw error;
+      }
     }
 
     const deadline = Date.now() + 30_000;

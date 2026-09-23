@@ -4,6 +4,7 @@ import { AssetKeyAuthorizationError, authorizeAssetKeyWrite } from "@/be/asset-k
 import { resolveTaskAuditUserId } from "@/be/audit-user";
 import {
   createTaskExtended,
+  extensionAgentAssignmentError,
   findCompletedTaskInThread,
   findExistingLinearTrackerContextWork,
   findRecentCancelledTaskInThread,
@@ -13,6 +14,7 @@ import {
   getTaskById,
   getUserById,
   hasCapacity,
+  isExtensionAgent,
 } from "@/be/db";
 import { repointTrackerSyncBySwarmId } from "@/be/db-queries/tracker";
 import { applyPreTaskCreate } from "@/extensions/apply-task-create";
@@ -560,6 +562,10 @@ export async function sendTaskHandler(
         success: false,
         message: `Agent with ID "${targetAgentId}" not found.`,
       };
+    }
+
+    if (isExtensionAgent(agent)) {
+      return { success: false, message: extensionAgentAssignmentError(agent) };
     }
 
     if (taskOptions.routingAffinity?.leadOnly && !agent.isLead) {

@@ -6,11 +6,13 @@ import { resolveHttpAuditUserId } from "../be/audit-user";
 import {
   createScheduledTask,
   deleteScheduledTask,
+  extensionAgentAssignmentError,
   getAgentById,
   getScheduledTaskById,
   getScheduledTaskByName,
   getScheduledTasks,
   getWorkflow,
+  isExtensionAgent,
   updateScheduledTask,
   withFavoriteFlags,
 } from "../be/db";
@@ -355,6 +357,10 @@ export async function handleSchedules(
         jsonError(res, "Target agent not found", 400);
         return true;
       }
+      if (isExtensionAgent(agent)) {
+        jsonError(res, extensionAgentAssignmentError(agent), 400);
+        return true;
+      }
     }
 
     const targetType = body.targetType ?? "agent-task";
@@ -581,6 +587,10 @@ export async function handleSchedules(
       const agent = await getAgentById(parsed.body.targetAgentId);
       if (!agent) {
         jsonError(res, "Target agent not found", 400);
+        return true;
+      }
+      if (isExtensionAgent(agent)) {
+        jsonError(res, extensionAgentAssignmentError(agent), 400);
         return true;
       }
     }

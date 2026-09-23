@@ -65,7 +65,9 @@ describe("extension lifecycle", () => {
     expect(enabled).toMatchObject({ enabled: true, status: "enabled" });
     expect(listRegistered().map((loaded) => loaded.record.id)).toEqual([extension.id]);
 
-    const agent = (await getAllAgents()).find((candidate) => candidate.name === "ext:minimal");
+    const agent = (await getAllAgents({ includeExtensions: true })).find(
+      (candidate) => candidate.name === "ext:minimal",
+    );
     expect(agent).toMatchObject({
       id: enabled.agentId,
       status: "offline",

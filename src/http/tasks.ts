@@ -7,6 +7,7 @@ import {
   backfillSupersedeTaskResumeTaskId,
   cancelTask,
   completeTask,
+  ExtensionAgentAssignmentError,
   failTask,
   getAgentById,
   getAllTasks,
@@ -259,7 +260,7 @@ const createTask = route({
     }),
   responses: {
     201: { description: "Task created", schema: AgentTaskSchema },
-    400: { description: "Validation error" },
+    400: { description: "Validation error, or agentId/offeredTo targets an extension identity" },
     422: {
       description: "Task creation blocked by an extension",
       schema: z.object({
@@ -904,6 +905,10 @@ export async function handleTasks(
     } catch (error) {
       if (error instanceof TaskCreationBlockedError) {
         createTask.respond(res, 422, { error: error.reason, extension: error.extension });
+        return true;
+      }
+      if (error instanceof ExtensionAgentAssignmentError) {
+        jsonError(res, error.message, 400);
         return true;
       }
       console.error("[HTTP] Failed to create task:", error);

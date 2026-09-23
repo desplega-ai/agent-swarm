@@ -141,10 +141,13 @@ import { normalizeDate, normalizeDateRequired } from "./date-utils";
 import {
   type AgentRow,
   configureAgentDependencies,
+  ExtensionAgentAssignmentError,
   getActiveTaskCount,
   getAgentById,
   getAllAgents,
   isAgentEligibleForTask,
+  isExtensionAgent,
+  NOT_EXTENSION_AGENT_SQL,
   rowToAgent,
 } from "./db/agents";
 import {
@@ -172,6 +175,9 @@ export {
   buildRoutingAffinityFromAgent,
   createAgent,
   deleteAgent,
+  EXTENSION_AGENT_ROLE,
+  ExtensionAgentAssignmentError,
+  extensionAgentAssignmentError,
   getActiveTaskCount,
   getAgentById,
   getAgentHarnessProviders,
@@ -181,9 +187,11 @@ export {
   hasCapacity,
   incrementEmptyPollCount,
   isAgentEligibleForTask,
+  isExtensionAgent,
   isPoolAffinityEnforcementEnabled,
   listAgentsWithCredStatusByProvider,
   MAX_EMPTY_POLLS,
+  NOT_EXTENSION_AGENT_SQL,
   resetEmptyPollCount,
   setAgentHarnessProvider,
   shouldBlockPolling,
@@ -2475,6 +2483,17 @@ export async function createTaskExtended(
   // (explicit `leadOnly`/`capabilities`, or a lead-only ratchet) still gates
   // as before.
   const targetAgentId = options.agentId ?? options.offeredTo;
+  // Extension identities (`ext:<name>`, role "extension") are API principals,
+  // never executors. This is the shared chokepoint for every creation path
+  // (send-task, POST /api/tasks, schedules, workflow agent-task nodes, script
+  // runs, apps, Slack fan-out, pre.task.create hook rewrites).
+  for (const id of new Set([options.agentId, options.offeredTo])) {
+    if (!id) continue;
+    const target = await getAgentById(id);
+    if (target && isExtensionAgent(target)) {
+      throw new ExtensionAgentAssignmentError(target);
+    }
+  }
   if (options.routingAffinity && targetAgentId && !routingAffinityIsInheritedProvenance) {
     const target = await getAgentById(targetAgentId);
     if (!target || !isAgentEligibleForTask(target, { routingAffinity: options.routingAffinity })) {
@@ -2763,6 +2782,9 @@ export async function acceptTask(taskId: string, agentId: string): Promise<Agent
   const task = await getTaskById(taskId);
   if (!task) return null;
   const agent = await getAgentById(agentId);
+  // Extension identities never take work, including offers left over from
+  // before creation-time rejection existed.
+  if (isExtensionAgent(agent)) return null;
   if (
     (task.routingAffinity?.leadOnly || task.routingAffinityInvalid) &&
     (!agent || !isAgentEligibleForTask(agent, task))
@@ -3053,6 +3075,7 @@ export async function claimOfferedTask(taskId: string, agentId: string): Promise
   if (!task) return null;
   if (task.status !== "offered" || task.offeredTo !== agentId) return null;
   const agent = await getAgentById(agentId);
+  if (isExtensionAgent(agent)) return null;
   if (
     (task.routingAffinity?.leadOnly || task.routingAffinityInvalid) &&
     (!agent || !isAgentEligibleForTask(agent, task))
@@ -12565,9 +12588,10 @@ export async function getSwarmMetrics(): Promise<SwarmMetrics> {
 
   const groupCounts = async (
     table: string,
+    where?: string,
   ): Promise<{ total: number; by_status: Record<string, number> }> => {
     const rows = await client.query<{ status: string; count: number }>(
-      `SELECT status, COUNT(*) AS count FROM ${table} GROUP BY status`,
+      `SELECT status, COUNT(*) AS count FROM ${table}${where ? ` WHERE ${where}` : ""} GROUP BY status`,
     );
     const by_status: Record<string, number> = {};
     let total = 0;
@@ -12589,7 +12613,7 @@ export async function getSwarmMetrics(): Promise<SwarmMetrics> {
 
   return {
     tasks: await groupCounts("agent_tasks"),
-    agents: await groupCounts("agents"),
+    agents: await groupCounts("agents", NOT_EXTENSION_AGENT_SQL),
     workflows: { total: workflowRow?.total ?? 0, enabled: workflowRow?.enabled ?? 0 },
     pages: { total: pagesRow?.count ?? 0 },
     sessions: { active: sessionsRow?.count ?? 0 },

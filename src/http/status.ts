@@ -31,6 +31,7 @@ import {
   getLiveAgentCounts,
   hasFirstCompletedTask,
   listAgentsWithCredStatusByProvider,
+  NOT_EXTENSION_AGENT_SQL,
 } from "../be/db";
 import { getEmbeddingProvider } from "../be/memory";
 import { getFileStorageProvider } from "../fs/registry";
@@ -539,7 +540,7 @@ async function workersMilestone(): Promise<SetupMilestone> {
   // `configured` if ≥1 row in agents; `verified` if both lead+worker alive
   // within the last 5 minutes.
   const totalRow = await getDbClient().get<{ count: number }>(
-    `SELECT COUNT(*) AS count FROM agents`,
+    `SELECT COUNT(*) AS count FROM agents WHERE ${NOT_EXTENSION_AGENT_SQL}`,
   );
   const totalAgents = totalRow?.count ?? 0;
 

@@ -21,6 +21,7 @@ import {
   getUnassignedTaskIdsForAgent,
   getUserById,
   hasCapacity,
+  isExtensionAgent,
   recordBudgetRefusalNotification,
   startTask,
   updateAgentStatusFromCapacity,
@@ -308,6 +309,12 @@ export async function handlePoll(
         const agent = await getAgentById(myAgentId);
         if (!agent) {
           return { error: "Agent not found", status: 404 };
+        }
+
+        // Extension identities authenticate to the API but never execute
+        // work: no offers, no pending assignments, no pool claims.
+        if (isExtensionAgent(agent)) {
+          return { trigger: null };
         }
 
         // A process whose runtime has been retired must not be handed work: it

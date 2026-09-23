@@ -1,5 +1,6 @@
 import {
   createAgent,
+  EXTENSION_AGENT_ROLE,
   getAllAgents,
   getDbClient,
   updateAgentMaxTasks,
@@ -14,7 +15,9 @@ function extensionAgentName(name: string): string {
 export async function ensureExtensionAgent(name: string): Promise<string> {
   const agentName = extensionAgentName(name);
   return await getDbClient().transaction(async () => {
-    let agent = (await getAllAgents()).find((candidate) => candidate.name === agentName);
+    let agent = (await getAllAgents({ includeExtensions: true })).find(
+      (candidate) => candidate.name === agentName,
+    );
     if (!agent) {
       agent = await createAgent({
         name: agentName,
@@ -29,7 +32,7 @@ export async function ensureExtensionAgent(name: string): Promise<string> {
     if (agent.maxTasks !== 0) await updateAgentMaxTasks(agent.id, 0);
     await updateAgentProfile(agent.id, {
       description: `System agent for extension ${name}`,
-      role: "extension",
+      role: EXTENSION_AGENT_ROLE,
       capabilities: [],
     });
     return agent.id;
@@ -37,7 +40,7 @@ export async function ensureExtensionAgent(name: string): Promise<string> {
 }
 
 export async function deactivateExtensionAgent(name: string): Promise<void> {
-  const agent = (await getAllAgents()).find(
+  const agent = (await getAllAgents({ includeExtensions: true })).find(
     (candidate) => candidate.name === extensionAgentName(name),
   );
   if (agent && agent.status !== "offline") await updateAgentStatus(agent.id, "offline");

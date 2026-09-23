@@ -3,7 +3,14 @@ import { CronExpressionParser } from "cron-parser";
 import * as z from "zod";
 import { authorizeAssetKeyWrite } from "@/be/asset-key-auth";
 import { resolveTaskAuditUserId } from "@/be/audit-user";
-import { createScheduledTask, getAgentById, getScheduledTaskByName, getWorkflow } from "@/be/db";
+import {
+  createScheduledTask,
+  extensionAgentAssignmentError,
+  getAgentById,
+  getScheduledTaskByName,
+  getWorkflow,
+  isExtensionAgent,
+} from "@/be/db";
 import { getScript } from "@/be/scripts/db";
 import { calculateNextRun } from "@/scheduler";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
@@ -228,6 +235,9 @@ export const registerCreateScheduleTool = (server: McpServer) => {
         const agent = await getAgentById(targetAgentId);
         if (!agent) {
           return toolErr(`Target agent not found: ${targetAgentId}`);
+        }
+        if (isExtensionAgent(agent)) {
+          return toolErr(extensionAgentAssignmentError(agent));
         }
       }
 

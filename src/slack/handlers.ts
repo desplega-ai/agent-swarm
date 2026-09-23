@@ -8,6 +8,7 @@ import {
   getLeadAgent,
   getMostRecentTaskInThread,
   getTasksByAgentId,
+  isExtensionAgent,
 } from "../be/db";
 import { dispatchPre } from "../extensions/dispatcher";
 import { resolveTemplate } from "../prompts/resolver";
@@ -621,7 +622,12 @@ export function registerMessageHandler(app: App): void {
       const { target } = routeResult.data;
       if (target.kind === "agent") {
         const agent = await getAgentById(target.agentId);
-        if (agent) {
+        if (agent && isExtensionAgent(agent)) {
+          console.warn(
+            "[Slack] Extension selected an extension-identity agent. Using the built-in router:",
+            scrubSecrets(target.agentId),
+          );
+        } else if (agent) {
           matches = [{ agent, matchedText: "extension" }];
         } else {
           console.warn(
