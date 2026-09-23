@@ -20,3 +20,8 @@ ALTER TABLE agent_tasks ADD COLUMN deferredAt TEXT;
 -- state, so the resolution pass rewrites each card exactly once instead of on
 -- every render tick.
 ALTER TABLE slack_messages ADD COLUMN deferral_resolved_at TEXT;
+
+-- Set alongside `deferral_resolved_at` when the rewrite was given up on
+-- (Slack refused it, or it kept failing). The wake-up's answer then never
+-- reached the ⏳ card, so the wake-up posts its own outcome card instead.
+ALTER TABLE slack_messages ADD COLUMN deferral_abandoned_at TEXT;

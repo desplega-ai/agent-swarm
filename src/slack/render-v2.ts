@@ -46,7 +46,7 @@ import {
 import { buildAskClosure, type ClosureState, closureState } from "./closure";
 import { reactionName, type SlackReactionEvent } from "./reaction-shortcode";
 import { getAgentDisplayName, getAgentEmoji } from "./responses";
-import { slackTaskOutput } from "./task-output";
+import { isAwaitingWake, isDeferredTask, slackTaskOutput } from "./task-output";
 
 const TREE_UPDATE_DEBOUNCE_MS = 500;
 const TREE_UPDATE_MIN_INTERVAL_MS = 3_000;
@@ -217,33 +217,20 @@ function isStalledMember(task: AgentTask, now: Date): boolean {
 }
 
 /**
- * A task that ENDED in a deferral. It is stored `completed` — `defer-task`
- * ends the task and books a wake-up — but to a human reading the thread the
- * work is still outstanding, so every glyph and card treats it as waiting.
- *
- * `deferredAt` is the exact signal. The `deferred` tag is not: `defer-task`
- * puts it on both the deferring task and the wake-up schedule, so a wake-up
- * child that simply finished is tag-identical to one that deferred again.
- * The tag is still consulted for rows written before `deferredAt` existed,
- * narrowed to tasks the scheduler did not create (`taskType !== "deferred"`),
- * where it is unambiguous.
- */
-export function isDeferredTask(
-  task: Pick<AgentTask, "tags" | "status" | "deferredAt" | "taskType">,
-): boolean {
-  if (task.status !== "completed") return false;
-  if (task.deferredAt) return true;
-  return !!task.tags?.includes("deferred") && task.taskType !== "deferred";
-}
-
-/**
  * One glyph per task line in the tree, replacing the old `statusIcon`.
  * Blocked detection reuses `checkDependencies` — the same source `get-tasks`
  * `readyOnly` uses — rather than re-deriving it from the tree's own task list,
  * since a dependency can point outside the current Slack thread.
+ *
+ * A deferral reads ⏳ only while it is parked: once its wake-up settles in
+ * `threadTasks`, it falls through to the `completed` it is stored as.
  */
-async function taskStateGlyph(task: AgentTask, now: Date): Promise<string> {
-  if (isDeferredTask(task)) return "⏳";
+async function taskStateGlyph(
+  task: AgentTask,
+  now: Date,
+  threadTasks: readonly AgentTask[] = [],
+): Promise<string> {
+  if (isAwaitingWake(task, threadTasks)) return "⏳";
   switch (task.status) {
     case "backlog":
     case "unassigned":
@@ -358,6 +345,7 @@ async function renderNodeLines(
   depth: number,
   now: Date,
   isAsk: boolean,
+  threadTasks: readonly AgentTask[],
 ): Promise<string[]> {
   const duration = formatV2Duration(new Date(node.task.createdAt), terminalEnd(node.task, now));
   const indent = FIGURE_SPACE.repeat(
@@ -367,7 +355,7 @@ async function renderNodeLines(
     indent.length > MAX_TREE_PREFIX_LENGTH
       ? `${indent.slice(0, MAX_TREE_PREFIX_LENGTH - 1)}…`
       : indent;
-  let line = `${boundedPrefix}↳ ${await taskStateGlyph(node.task, now)} ${await renderNodeLabel(node, isAsk)} · ${duration} · ${getTaskLink(node.task.id)}`;
+  let line = `${boundedPrefix}↳ ${await taskStateGlyph(node.task, now, threadTasks)} ${await renderNodeLabel(node, isAsk)} · ${duration} · ${getTaskLink(node.task.id)}`;
   const progress = renderProgress(node.task.progress);
   const suffix = isTerminalTreeStatus(node.task.status) ? "" : progress ? ` · ${progress}` : "";
   if (suffix && line.length + suffix.length <= MAX_TREE_NODE_LINE_LENGTH) {
@@ -378,7 +366,7 @@ async function renderNodeLines(
   }
   const lines = [line];
   for (const child of node.children) {
-    lines.push(...(await renderNodeLines(child, depth + 1, now, false)));
+    lines.push(...(await renderNodeLines(child, depth + 1, now, false, threadTasks)));
   }
   return lines;
 }
@@ -405,6 +393,8 @@ function threadHeaderText(tasks: AgentTask[], now: Date, duration: string): stri
   if (tasks.some((task) => isStalledMember(task, now))) return `🧵 ⚠️ stalled — ${duration}`;
   if (tasks.some((task) => !isTerminalTreeStatus(task.status)))
     return `🧵 🔄 working — ${duration}`;
+  // A parked deferral is stored `completed`, but the ask is not answered yet.
+  if (tasks.some((task) => isAwaitingWake(task, tasks))) return `🧵 ⏳ waiting — ${duration}`;
   const hasFailure = tasks.some((task) => task.status === "failed");
   return hasFailure ? `🧵 ❌ done with failures — ${duration}` : `🧵 ✅ done — ${duration}`;
 }
@@ -429,7 +419,7 @@ export async function renderThreadTree(
   const lines = [threadHeaderText(tasks, now, threadDuration)];
   const roots = buildRenderForest(tasks);
   for (const root of roots) {
-    lines.push(...(await renderNodeLines(root, 1, now, root.task.source === "slack")));
+    lines.push(...(await renderNodeLines(root, 1, now, root.task.source === "slack", tasks)));
   }
   const text = normalizeV2Text(lines.join("\n"));
   if (text.length <= MAX_SECTION_LENGTH) return text;
@@ -439,7 +429,7 @@ export async function renderThreadTree(
   for (let index = tasks.length - 1; index >= 0; index--) {
     const task = tasks[index]!;
     const recentLine = (
-      await renderNodeLines({ task, children: [] }, 1, now, task.source === "slack")
+      await renderNodeLines({ task, children: [] }, 1, now, task.source === "slack", tasks)
     )[0]!;
     const candidateLines = [recentLine, ...recentLines];
     const omitted = index;
@@ -1244,29 +1234,42 @@ export async function streamOutcomeCard(
 
 /**
  * The body a resolved deferral card is rewritten to. The ⏳ block promised
- * the thread an answer; this is that promise being kept in place, rather
- * than in a second card that only gets posted about half the time.
+ * the thread an answer; this is that promise being kept in place, instead of
+ * in a second card below it — `isAnsweredByDeferralCard` keeps the wake-up
+ * from posting one, so the answer lands in the thread exactly once. It is
+ * the card the wake-up would have posted, collapsed the same way when the
+ * wake-up already answered by hand with `slack-reply`.
  *
- * When the wake-up task published its own card the body points at it, so the
- * result is not duplicated in the thread; otherwise the result is inlined.
- * A wake-up that deferred again stays ⏳ — the chain is still open, and the
- * new deferral's own card carries the new ETA.
+ * A wake-up that deferred again does post its own card — the next ⏳ in the
+ * chain, which its own wake-up resolves — so this card only points at it.
  */
 async function resolvedDeferralContent(wake: AgentTask): Promise<string> {
-  const agentName = await agentDisplayNameFor(wake);
+  if (!isDeferredTask(wake)) {
+    const content = await outcomeContent(wake, wake.slackReplySent);
+    return outcomePresentation(wake, content, attachmentLine(await getTaskAttachments(wake.id)));
+  }
   const card = await getSlackOutcomeMessage(wake.id);
-  const pointer = card?.permalink ? ` — ${card.permalink}` : "";
-  if (wake.status === "cancelled") {
-    return `🚫\n\nResumed and cancelled${pointer || `.\n\n${outcomeText(wake.failureReason, "")}`}`;
-  }
-  if (wake.status === "failed") {
-    return `❌\n\nResumed and failed${pointer || `.\n\n${outcomeText(wake.failureReason, "Task failed.")}`}`;
-  }
-  if (isDeferredTask(wake)) {
-    return `⏳\n\n${outcomeText(slackTaskOutput(wake), "Still waiting.")}`;
-  }
-  if (pointer) return `✅\n\nResumed by ${agentName}${pointer}`;
-  return `✅\n\n${outcomeText(slackTaskOutput(wake), "Resumed and completed.")}`;
+  const pointer = card?.permalink ? ` — ${card.permalink}` : ".";
+  return `↪️\n\nResumed by ${await agentDisplayNameFor(wake)} and deferred again${pointer}`;
+}
+
+/**
+ * True when `task` is a wake-up whose answer goes into its deferral's ⏳ card
+ * (`refreshResolvedDeferralCards`), so it must not post an outcome card of
+ * its own. False — and the wake-up posts its own card as before — when it
+ * deferred again, when the deferral never got a card, and when the in-place
+ * rewrite was abandoned.
+ */
+async function isAnsweredByDeferralCard(
+  task: AgentTask,
+  threadTasks: readonly AgentTask[],
+): Promise<boolean> {
+  if (!isSlackContinuation(task) || !task.parentTaskId || isDeferredTask(task)) return false;
+  const deferred = threadTasks.find((candidate) => candidate.id === task.parentTaskId);
+  // Mirrors getResolvableDeferralOutcomes: only a `deferredAt` card is rewritten.
+  if (!deferred?.deferredAt) return false;
+  const card = await getSlackOutcomeMessage(deferred.id);
+  return !!card?.finalizedAt && !isPendingSlackMessage(card) && !card.deferralAbandonedAt;
 }
 
 /**
@@ -1290,15 +1293,17 @@ const deferralRefreshAttempts = new Map<string, number>();
 /**
  * Rewrite every ⏳ deferral card whose wake-up task has settled, in place.
  *
- * Runs before the tree loop and independently of it: resolution needs only
+ * Runs after the tree loop and independently of it: resolution needs only
  * the retained outcome `ts`, so it must not be skipped when the thread has
- * no other pending render work. Each card is rewritten exactly once
- * (`deferral_resolved_at`).
+ * no other pending render work. After, so a wake-up that deferred again has
+ * already posted the card this one points at. Each card is rewritten exactly
+ * once (`deferral_resolved_at`).
  *
  * The marker is also burned when Slack refuses the rewrite for good, and when
  * an unclassifiable failure has used up its attempts — a card that can never
  * be rewritten must stop competing for the per-tick row budget with cards
- * that still can.
+ * that still can. Those are marked abandoned, so the wake-up's answer goes
+ * out in its own card on the next tick instead of being lost.
  */
 export async function refreshResolvedDeferralCards(): Promise<void> {
   const app = getSlackApp();
@@ -1315,12 +1320,14 @@ export async function refreshResolvedDeferralCards(): Promise<void> {
       });
       await markSlackDeferralResolved(card.id);
       deferralRefreshAttempts.delete(card.id);
+      // The rewrite is the wake-up's outcome, so it settles the ask's reaction.
+      await finalizeTerminalSlackReactions([wake]);
     } catch (error) {
       const attempts = (deferralRefreshAttempts.get(card.id) ?? 0) + 1;
       deferralRefreshAttempts.set(card.id, attempts);
       const terminal = isTerminalSlackError(error);
       if (terminal || attempts >= DEFERRAL_REFRESH_MAX_ATTEMPTS) {
-        await markSlackDeferralResolved(card.id);
+        await markSlackDeferralResolved(card.id, { abandoned: true });
         deferralRefreshAttempts.delete(card.id);
         console.error(
           `[Slack] Giving up on deferral card ${card.id} after ${attempts} attempt(s)` +
@@ -1343,8 +1350,6 @@ export async function processSlackRenderV2(): Promise<void> {
   const activatedAt = await ensureSlackRenderV2Activation();
   const delegationEnabled = isSlackDelegationEnabled();
   const delegationActivatedAt = delegationEnabled ? await ensureSlackDelegationActivation() : null;
-
-  await refreshResolvedDeferralCards();
 
   for (const task of await getSlackTasksMissingTree()) {
     if (!isSlackRenderV2Enabled()) return;
@@ -1398,7 +1403,9 @@ export async function processSlackRenderV2(): Promise<void> {
       // not represent immediately active outcome work, so avoid waking an old
       // tree solely to verify its permalink on every render tick.
       const isDirectCandidate =
-        taskNeedsDirectOutcome(task, activatedAt) && isOutcomeStatus(task.status);
+        taskNeedsDirectOutcome(task, activatedAt) &&
+        isOutcomeStatus(task.status) &&
+        !(await isAnsweredByDeferralCard(task, tasks));
       const isChildCandidate =
         delegationEnabled &&
         delegationActivatedAt !== null &&
@@ -1493,6 +1500,7 @@ export async function processSlackRenderV2(): Promise<void> {
       if (!isSlackRenderV2Enabled()) return;
       if (!taskNeedsDirectOutcome(task, activatedAt)) continue;
       if ((await getSlackOutcomeMessage(task.id))?.finalizedAt) continue;
+      if (await isAnsweredByDeferralCard(task, tasks)) continue;
       const deferByClosure =
         task.source === "slack" &&
         delegationEnabled &&
@@ -1572,6 +1580,8 @@ export async function processSlackRenderV2(): Promise<void> {
       console.error(`[Slack] Failed to update v2 tree ${tree.id}:`, error);
     }
   }
+
+  await refreshResolvedDeferralCards();
 }
 
 export function _resetSlackRenderV2ForTests(): void {

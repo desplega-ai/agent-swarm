@@ -429,6 +429,8 @@ export interface SlackMessageRecord {
   conclusionKind?: SlackConclusionKind;
   /** Set once a deferral card has been rewritten into its resolved state. */
   deferralResolvedAt?: string;
+  /** Set with `deferralResolvedAt` when the rewrite was given up on. */
+  deferralAbandonedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -452,6 +454,7 @@ type SlackMessageRow = {
   stream_chunks_appended: number;
   conclusion_kind: SlackConclusionKind | null;
   deferral_resolved_at: string | null;
+  deferral_abandoned_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -470,6 +473,7 @@ function rowToSlackMessage(row: SlackMessageRow): SlackMessageRecord {
     streamChunksAppended: row.stream_chunks_appended,
     conclusionKind: row.conclusion_kind ?? undefined,
     deferralResolvedAt: row.deferral_resolved_at ?? undefined,
+    deferralAbandonedAt: row.deferral_abandoned_at ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -714,12 +718,20 @@ export async function getResolvableDeferralOutcomes(
   }));
 }
 
-/** Mark a deferral card as rewritten, so the resolution pass skips it after. */
-export async function markSlackDeferralResolved(id: string): Promise<void> {
-  await getDbClient().run("UPDATE slack_messages SET deferral_resolved_at = ? WHERE id = ?", [
-    new Date().toISOString(),
-    id,
-  ]);
+/**
+ * Mark a deferral card as resolved, so the resolution pass skips it after.
+ * `abandoned` records that the rewrite was given up on, which hands the
+ * answer back to the wake-up's own outcome card.
+ */
+export async function markSlackDeferralResolved(
+  id: string,
+  options: { abandoned?: boolean } = {},
+): Promise<void> {
+  const now = new Date().toISOString();
+  await getDbClient().run(
+    "UPDATE slack_messages SET deferral_resolved_at = ?, deferral_abandoned_at = ? WHERE id = ?",
+    [now, options.abandoned ? now : null, id],
+  );
 }
 
 export async function getSlackTreeMessages(): Promise<SlackMessageRecord[]> {

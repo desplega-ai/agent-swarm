@@ -346,3 +346,26 @@ export async function waitForOutcome(
     );
   }
 }
+
+/**
+ * Optional pause between steps, so a live recording of the mock's web UI
+ * shows each card state long enough to read. Zero in CI.
+ */
+const slackPaceMs = Number(process.env.E2E_SLACK_PACE_MS ?? 0);
+
+/** When paced, `step` is printed as `E2E_SLACK_STEP <step>` for a recorder to sync on. */
+export function slackPace(step?: string): Promise<void> {
+  if (slackPaceMs <= 0) return Promise.resolve();
+  if (step) console.log(`E2E_SLACK_STEP ${step}`);
+  return Bun.sleep(slackPaceMs);
+}
+
+/**
+ * When paced, print a live-view URL of the mock (`E2E_SLACK_UI <url>`) and
+ * pause, so a recorder can open it before the next step. A no-op in CI.
+ */
+export async function announceLiveView(ctx: ScenarioContext, path: string): Promise<void> {
+  if (slackPaceMs <= 0) return;
+  console.log(`E2E_SLACK_UI ${ctx.slack.baseUrl.replace(/\/$/, "")}${path}`);
+  await slackPace();
+}

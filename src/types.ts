@@ -627,7 +627,7 @@ export const AgentTaskSchema = z
     // Set by `defer-task` when this task ends in a deferral. The task's status
     // is `completed` either way, so this is what tells "parked, resuming in a
     // wake-up task" apart from "done" — see `isDeferredTask` in
-    // src/slack/render-v2.ts.
+    // src/slack/task-output.ts.
     deferredAt: z.iso.datetime().optional(),
 
     // Context usage aggregates

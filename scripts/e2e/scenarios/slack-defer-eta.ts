@@ -1,11 +1,13 @@
-import { asRecord, expect, expectStatus } from "../http";
+import { asRecord, expect, expectStatus, pollUntil } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
 import {
+  announceLiveView,
   ask,
   claim,
   enableSlackRenderV2Only,
   findSlackTask,
   registerLead,
+  slackPace,
   waitForEyes,
   waitForOutcome,
   waitForReaction,
@@ -13,9 +15,12 @@ import {
 
 async function deferAndCheckSlack(ctx: ScenarioContext, renderer: "legacy" | "v2") {
   await registerLead(ctx, `e2e-lead-defer-${renderer}`);
+  await announceLiveView(ctx, "/c/general");
   const message = await ask(ctx, "check the staging deployment when it finishes");
   ctx.markThread(`defer-eta-${renderer}`, "C0GENERAL0", message.ts);
+  await announceLiveView(ctx, `/c/C0GENERAL0/t/${message.ts}`);
   await waitForEyes(ctx, message.ts);
+  await slackPace("eyes");
   const task = await findSlackTask(ctx, message.ts);
   const taskId = String(task.id);
   const leadId = String(task.agentId);
@@ -69,7 +74,34 @@ async function deferAndCheckSlack(ctx: ScenarioContext, renderer: "legacy" | "v2
     });
     expect(stopped.ok === true, "Deferred outcome card did not finish streaming");
   }
-  await waitForReaction(ctx, message.ts, "white_check_mark");
+  // Parked is not answered: the ask keeps 👀 and gets no ✅. The reaction is
+  // settled in the same pass that posts the card, so a short window suffices.
+  await waitForReaction(ctx, message.ts, "eyes");
+  const done = await pollUntil(
+    () =>
+      ctx.slack
+        .messages("general")
+        .find((entry) => entry.ts === message.ts)
+        ?.reactions?.some((reaction) => reaction.name === "white_check_mark") === true,
+    3_000,
+  );
+  expect(!done, `${renderer}: a parked ask must not get a ✅ reaction`);
+  if (renderer === "v2") {
+    // Nothing else is running, so the tree header is the deferral's state.
+    const header = await pollUntil(
+      () =>
+        ctx.slack
+          .messages("general")
+          .some(
+            (entry) =>
+              entry.thread_ts === message.ts &&
+              String(entry.text ?? "").startsWith("🧵 ⏳ waiting"),
+          ),
+      15_000,
+    );
+    expect(header, "v2 thread tree must read ⏳ waiting while the ask is parked");
+  }
+  await slackPace("checking-back");
 
   const thread = JSON.stringify(
     ctx.slack.messages("general").filter((entry) => entry.thread_ts === message.ts),
@@ -87,10 +119,7 @@ async function deferAndCheckSlack(ctx: ScenarioContext, renderer: "legacy" | "v2
     !thread.includes(pendingWork),
     `${renderer} Slack thread leaked the agent's internal handoff note`,
   );
-  expect(
-    !thread.includes("Deferred until"),
-    `${renderer} Slack thread used the old defer wording`,
-  );
+  expect(!thread.includes("Deferred until"), `${renderer} Slack thread used the old defer wording`);
   expect(
     !thread.includes("/schedules/"),
     `${renderer} Slack thread leaked the defer schedule link`,

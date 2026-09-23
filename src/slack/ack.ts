@@ -1,5 +1,5 @@
 import type { WebClient } from "@slack/web-api";
-import { getLogsByTaskIdChronological, getSlackTasksInThread } from "../be/db";
+import { getLogsByTaskIdChronological, getSlackTasksInThread, getTaskById } from "../be/db";
 import { recordSlackReactionInvalidName } from "../otel";
 import { type AgentTask, isTerminalTaskStatus } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
@@ -10,6 +10,7 @@ import {
   SLACK_REACTION_DEFAULTS,
   type SlackReactionEvent,
 } from "./reaction-shortcode";
+import { deferralWakes, isAwaitingWake } from "./task-output";
 
 export { reactionName, type SlackReactionEvent } from "./reaction-shortcode";
 
@@ -170,28 +171,62 @@ export async function finalizeSlackSteerReactions(
   }
 }
 
+// Deferral chains are short; the cap only guards against a parent cycle.
+const MAX_DEFERRAL_CHAIN_HOPS = 10;
+
+/**
+ * The Slack message a task answers. A deferral's wake-up does not inherit
+ * `slackTriggerMessageTs`, so walk its `parentTaskId` chain back to the task
+ * that deferred on the human's message.
+ */
+async function triggerMessageTs(task: AgentTask): Promise<string | undefined> {
+  let current: AgentTask | null = task;
+  for (let hop = 0; current && hop <= MAX_DEFERRAL_CHAIN_HOPS; hop++) {
+    if (current.slackTriggerMessageTs) return current.slackTriggerMessageTs;
+    if (current.taskType !== "deferred" || !current.parentTaskId) return undefined;
+    current = await getTaskById(current.parentTaskId);
+  }
+  return undefined;
+}
+
+/** The tasks answering `timestamp`, plus the wake-ups that continue them. */
+function tasksAnsweringTrigger(threadTasks: AgentTask[], timestamp: string): AgentTask[] {
+  const linked = threadTasks.filter((task) => task.slackTriggerMessageTs === timestamp);
+  for (let index = 0; index < linked.length; index++) {
+    for (const wake of deferralWakes(linked[index]!, threadTasks)) {
+      if (!linked.includes(wake)) linked.push(wake);
+    }
+  }
+  return linked;
+}
+
 export async function finalizeTerminalSlackReactions(tasks: AgentTask[]): Promise<void> {
   const app = getSlackApp();
   if (!app) return;
 
   const triggers = new Map<string, { channelId: string; threadTs: string; timestamp: string }>();
   for (const task of tasks) {
-    if (!task.slackChannelId || !task.slackThreadTs || !task.slackTriggerMessageTs) continue;
-    const key = `${task.slackChannelId}\0${task.slackTriggerMessageTs}`;
+    if (!task.slackChannelId || !task.slackThreadTs) continue;
+    const timestamp = await triggerMessageTs(task);
+    if (!timestamp) continue;
+    const key = `${task.slackChannelId}\0${timestamp}`;
     triggers.set(key, {
       channelId: task.slackChannelId,
       threadTs: task.slackThreadTs,
-      timestamp: task.slackTriggerMessageTs,
+      timestamp,
     });
   }
 
   for (const { channelId, threadTs, timestamp } of triggers.values()) {
-    const linkedTasks = (await getSlackTasksInThread(channelId, threadTs)).filter(
-      (task) => task.slackTriggerMessageTs === timestamp,
-    );
+    const threadTasks = await getSlackTasksInThread(channelId, threadTs);
+    const linkedTasks = tasksAnsweringTrigger(threadTasks, timestamp);
+    // A parked deferral is stored `completed`, but the message is not
+    // answered yet: keep 👀 until its wake-up settles.
     if (
       linkedTasks.length === 0 ||
-      linkedTasks.some((task) => !isTerminalTaskStatus(task.status))
+      linkedTasks.some(
+        (task) => !isTerminalTaskStatus(task.status) || isAwaitingWake(task, threadTasks),
+      )
     ) {
       continue;
     }
