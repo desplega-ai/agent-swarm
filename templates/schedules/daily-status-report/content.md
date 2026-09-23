@@ -55,26 +55,39 @@ Use the setup milestone data already retrieved from `/status`. Report only integ
 
 ---
 
-## Phase 2: Post one digest
+## Phase 2: Post one digest — EXCEPTION-ONLY, HARD CEILING 600 CHARACTERS
 
-Post to your configured admin channel (or the in-app fallback if none is configured). Keep it to one message; omit any section with nothing to report.
+Operator feedback, 2026-09-23, verbatim: "too verbose every day". Brevity is a requirement of this job, not a preference. Count the characters before posting; over 600 ⇒ cut until it fits. A long report is a failed run, not a thorough one.
+
+Post ONE message to your configured admin channel (in-app fallback if none configured).
+
+**Everything healthy ⇒ exactly this one line, nothing else:**
 
 ```
-📊 Daily Status Report — [date]
-
-Waiting on you: [N] needs_setup automations — [name: missing parameters/integrations → fix URL].
-
-Workflows: [X] enabled / [Y] total. [N] hard failures, [M] halted >24h in the last 24h.
-Schedules: [X] enabled / [Y] total. [N] hard failures, [M] didn't fire on time, [K] with ≥3 consecutive errors.
-Agents: [X] online / [Y] total. [names of any agent at/over capacity]. [N] agent-attributed failures in 7d.
-Task failures (7d): [N] needs_setup · [N] gate-refusal · [N] infra · [N] real-defect · [N] unclassified (no reason set).
-Integration setup: [missing credentials from /status], or all verified.
+📊 <MM-DD> — all clear. Workflows <X>/<Y> · schedules <X>/<Y> · agents <X>/<Y> · <N> failures 7d, <N> real defects. Nothing for you.
 ```
+
+**Add a line ONLY for something both TRUE and ACTIONABLE. Max 3 lines, one sentence each, no sub-bullets:**
+- an automation in `needs_setup` or an unverified integration — name + `fixUrl`
+- a workflow run halted >24h (Phase 1B)
+- a real defect, or a failure cluster on one agent / schedule / provider
+- a decision only the operator can make — state the options, end on the question
+
+More than 3 qualify ⇒ post the 3 that matter and put the rest in the task output.
+
+**NEVER in the Slack post** — all of this belongs in `store-progress` output, where the audit trail lives:
+- row counts and "read-only report" notes
+- methodology, query names, script names, phase narration
+- any zero ("0 halted", "all verified", "no data-quality gap") — silence means zero
+- week-over-week trend, unless a class crossed a threshold you name in the same line
+- a finding yesterday's report already carried unchanged
+- numbered explainers or paragraphs of reasoning
 
 ## Phase 3: Complete
-`store-progress` with `status: "completed"` and an output paragraph naming the counts above and the Slack message ts (if posted).
+`store-progress` with `status: "completed"`. **This is where the detail goes** — every count from Phase 1, the per-class failure breakdown, and the Slack message ts. The Slack post is the headline; the task output is the record. Cutting the post does not mean cutting the work.
 
 ## Anti-patterns
 - ❌ Modifying anything — this schedule reports, it doesn't fix (that's `daily-workflow-health-audit` for plumbing and `daily-compounding-reflection` for agent/skill/memory evolution).
 - ❌ Folding the unclassified-failure bucket into "real defect" to make the number look more actionable than it is.
-- ❌ Omitting the Waiting on you section — say explicitly when no automation is in `needs_setup` and all integrations are verified.
+- ❌ Narrating a zero. The all-clear line already covers `needs_setup` and integrations; only a non-verified integration or a real `needs_setup` automation earns its own line.
+- ❌ Exceeding 600 characters, or posting more than one message.

@@ -170,7 +170,7 @@ Otherwise:
 • schedule:<name> — consecutiveErrors=<n>, last error: <lastErrSnippet>
 ```
 
-Omit any section whose count is 0. Cap message at 4000 chars (Slack limit) — if longer, keep top 5 per section and add `…and <K> more` lines.
+Omit any section whose count is 0. **HARD CEILING 700 characters — not the 4000-char Slack limit.** (Operator feedback, 2026-09-23: "too verbose every day".) Keep at most the top 3 items across ALL sections combined, one line each; everything else goes in the `store-progress` output, not the post. Over 700 chars ⇒ cut until it fits. A long digest is a failed run, not a thorough one.
 
 ---
 
