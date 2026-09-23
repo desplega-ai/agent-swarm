@@ -1,8 +1,37 @@
 import { describe, expect, test } from "bun:test";
+import type { LiveModelsCatalog } from "../../apps/ui/src/lib/agent-runtime-models";
 import {
   getAgentModelDisplay,
   getAgentModelPresentation,
 } from "../../apps/ui/src/lib/agents-list-model-display";
+
+const liveCatalog: LiveModelsCatalog = {
+  openrouter: {
+    id: "openrouter",
+    name: "OpenRouter",
+    models: {
+      "deepseek/deepseek-v4-pro": { id: "deepseek/deepseek-v4-pro", name: "DeepSeek V4 Pro" },
+      "deepseek/deepseek-v4.1-flash": {
+        id: "deepseek/deepseek-v4.1-flash",
+        name: "DeepSeek V4.1 Flash",
+      },
+    },
+  },
+  opencode: {
+    id: "opencode",
+    name: "OpenCode Zen",
+    models: {
+      "glm-5.3-flash": { id: "glm-5.3-flash", name: "GLM-5.3-Flash" },
+    },
+  },
+  anthropic: {
+    id: "anthropic",
+    name: "Anthropic",
+    models: {
+      "claude-opus-5-5": { id: "claude-opus-5-5", name: "Claude Opus 5.5" },
+    },
+  },
+};
 
 describe("agents list model display", () => {
   test("shows configured and last-used models when they diverge", () => {
@@ -41,6 +70,31 @@ describe("agents list model display", () => {
       provider: "OpenRouter",
       providerId: "openrouter",
     });
+  });
+
+  test.each([
+    ["openrouter/deepseek/deepseek-v4-pro", "DeepSeek V4 Pro", "OpenRouter"],
+    ["openrouter/deepseek/deepseek-v4.1-flash", "DeepSeek V4.1 Flash", "OpenRouter"],
+    ["opencode/glm-5.3-flash", "GLM-5.3-Flash", "OpenCode Zen"],
+    ["claude-opus-5-5", "Claude Opus 5.5", "Anthropic"],
+  ])("resolves %s from the live catalog", (model, label, provider) => {
+    expect(getAgentModelPresentation(model, liveCatalog)).toMatchObject({
+      raw: model,
+      label,
+      provider,
+    });
+  });
+
+  test("title-cases an uncatalogued model id without a maintained label entry", () => {
+    expect(
+      getAgentModelPresentation("opencode/future-model-v8.2-preview", liveCatalog),
+    ).toMatchObject({
+      label: "Future Model V8.2 Preview",
+      provider: null,
+    });
+    expect(
+      getAgentModelPresentation("openrouter/deepseek/deepseek-v5.1-flash", liveCatalog)?.label,
+    ).toBe("Deepseek V5.1 Flash");
   });
 
   test("presents latest Anthropic direct model ids as readable labels", () => {

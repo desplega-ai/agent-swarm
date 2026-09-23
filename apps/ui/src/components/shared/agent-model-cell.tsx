@@ -1,21 +1,23 @@
 import { ReasoningEffortIcon } from "@/components/shared/reasoning-effort-icon";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import type { LiveModelsCatalog } from "@/lib/agent-runtime-models";
 import { type AgentModelDisplay, getAgentModelPresentation } from "@/lib/agents-list-model-display";
 import { ProviderIcon } from "./provider-icon";
 
 interface AgentModelCellProps {
   display: AgentModelDisplay;
+  liveCatalog?: LiveModelsCatalog;
 }
 
-export function AgentModelCell({ display }: AgentModelCellProps) {
-  const primary = getAgentModelPresentation(display.primary);
+export function AgentModelCell({ display, liveCatalog }: AgentModelCellProps) {
+  const primary = getAgentModelPresentation(display.primary, liveCatalog);
 
   if (!primary) {
     return <span className="text-muted-foreground">—</span>;
   }
 
-  const configured = getAgentModelPresentation(display.configured);
-  const lastUsed = getAgentModelPresentation(display.lastUsed);
+  const configured = getAgentModelPresentation(display.configured, liveCatalog);
+  const lastUsed = getAgentModelPresentation(display.lastUsed, liveCatalog);
   // "off" is a real, explicit setting but not visually distinct enough to
   // warrant a badge next to the model name — only show one for low/medium/high/xhigh.
   const showBadge = display.reasoningEffort && display.reasoningEffort !== "off";

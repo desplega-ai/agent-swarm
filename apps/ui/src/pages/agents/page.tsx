@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useConfigs } from "@/api/hooks/use-config-api";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
+import { useModelsCatalog } from "@/api/hooks/use-models-catalog";
 import type { AgentStatus, AgentWithTasks } from "@/api/types";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { AgentModelCell } from "@/components/shared/agent-model-cell";
@@ -29,6 +30,7 @@ export default function AgentsPage() {
   const { searchParams, setParam } = useUrlSearchState();
   const { data: agents, isLoading } = useAgents();
   const { data: agentConfigs } = useConfigs({ scope: "agent" });
+  const { data: modelsCatalog } = useModelsCatalog();
   const search = readStringParam(searchParams, "search");
   const statusFilter = readStringParam(searchParams, "status", "all");
 
@@ -71,7 +73,7 @@ export default function AgentsPage() {
           agent.credStatus?.latestModel?.model,
           agent.credStatus?.latestModel?.reasoningEffort,
         );
-        const primary = getAgentModelPresentation(display.primary);
+        const primary = getAgentModelPresentation(display.primary, modelsCatalog?.providers);
         return [
           primary?.label,
           primary?.raw,
@@ -90,7 +92,7 @@ export default function AgentsPage() {
           agent.credStatus?.latestModel?.model,
           agent.credStatus?.latestModel?.reasoningEffort,
         );
-        return <AgentModelCell display={display} />;
+        return <AgentModelCell display={display} liveCatalog={modelsCatalog?.providers} />;
       },
     };
     return [
@@ -170,7 +172,7 @@ export default function AgentsPage() {
         valueFormatter: (params) => (params.value ? formatSmartTime(params.value) : ""),
       },
     ];
-  }, [configuredModelByAgentId, modelColumnGate.supported]);
+  }, [configuredModelByAgentId, modelColumnGate.supported, modelsCatalog?.providers]);
 
   const onRowClicked = useCallback(
     (event: RowClickedEvent<AgentWithTasks>) => {

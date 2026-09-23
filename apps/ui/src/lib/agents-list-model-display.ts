@@ -1,5 +1,10 @@
 import type { ReasoningEffortLevel } from "@/api/types";
-import { findKnownModel, type ProviderIconKey } from "./agent-runtime-models";
+import {
+  findKnownModel,
+  humanizeModelId,
+  type LiveModelsCatalog,
+  type ProviderIconKey,
+} from "./agent-runtime-models";
 
 export interface AgentModelDisplay {
   configured: string | null;
@@ -24,17 +29,24 @@ function cleanModel(value: string | null | undefined): string | null {
 
 export function getAgentModelPresentation(
   value: string | null | undefined,
+  liveCatalog?: LiveModelsCatalog,
 ): AgentModelPresentation | null {
   const raw = cleanModel(value);
   if (!raw) return null;
 
-  const known = findKnownModel(raw);
+  const known = findKnownModel(raw, liveCatalog);
   return {
     raw,
-    label: known?.label ?? raw,
+    label: known?.label ?? formatUnknownModelLabel(raw),
     provider: known?.provider ?? null,
     providerId: known?.providerId ?? null,
   };
+}
+
+function formatUnknownModelLabel(model: string): string {
+  const segments = model.split("/");
+  const id = segments.length > 1 ? segments[segments.length - 1] : model;
+  return humanizeModelId(id);
 }
 
 export function getAgentModelDisplay(

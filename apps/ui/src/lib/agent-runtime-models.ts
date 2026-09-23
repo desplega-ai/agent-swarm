@@ -516,12 +516,17 @@ const ANTHROPIC_SHORTNAME_TO_ID: Record<string, string> = {
 };
 
 /**
- * Stateless lookup across every known harness/snapshot — for read-only surfaces
- * (agent list, telemetry rows) that don't have configs/env presence in scope.
- * Returns `null` for custom or unknown model ids.
+ * Lookup across the live catalog first, then every known harness/snapshot — for
+ * read-only surfaces (agent list, telemetry rows) that don't have configs/env
+ * presence in scope. Returns `null` for custom or unknown model ids.
  */
-export function findKnownModel(model: string | null | undefined): ModelOption | null {
+export function findKnownModel(
+  model: string | null | undefined,
+  liveCatalog?: LiveModelsCatalog,
+): ModelOption | null {
   if (!model) return null;
+  const live = findLiveModel(model, liveCatalog);
+  if (live) return live;
   const aliased = ANTHROPIC_SHORTNAME_TO_ID[model] ?? model;
   for (const arr of Object.values(DIRECT_MODELS)) {
     const found = arr.find((m) => m.id === aliased);
@@ -565,6 +570,52 @@ export function findKnownModel(model: string | null | undefined): ModelOption | 
   return null;
 }
 
+function findLiveModel(model: string, catalog?: LiveModelsCatalog): ModelOption | null {
+  if (!catalog) return null;
+  const separator = model.indexOf("/");
+  const providerId = separator < 0 ? null : model.slice(0, separator);
+  const tail = separator < 0 ? model : model.slice(separator + 1);
+
+  // Provider-qualified IDs are resolved first, preserving nested OpenRouter
+  // IDs such as `openrouter/deepseek/deepseek-v4.1-flash`.
+  if (providerId && Object.hasOwn(catalog, providerId)) {
+    const provider = catalog[providerId as keyof LiveModelsCatalog];
+    const cached = provider?.models[tail];
+    if (cached && provider) return liveModelOption(model, providerId, provider, cached);
+  }
+
+  // Bare model IDs can be reported by harnesses that omit the provider.
+  for (const [id, provider] of Object.entries(catalog)) {
+    if (!provider) continue;
+    const cached = provider.models[model];
+    if (cached) return liveModelOption(model, id, provider, cached);
+  }
+  return null;
+}
+
+function liveModelOption(
+  id: string,
+  providerId: string,
+  provider: CachedProvider,
+  model: CachedModel,
+): ModelOption {
+  const iconByProvider: Partial<Record<string, ProviderIconKey>> = {
+    anthropic: "anthropic",
+    openai: "openai",
+    openrouter: "openrouter",
+    "amazon-bedrock": "amazon-bedrock",
+  };
+  return {
+    id,
+    label: model.name ?? model.id,
+    provider: provider.name ?? providerId,
+    providerId: iconByProvider[providerId] ?? null,
+    requiredKey: "",
+    cost: model.cost,
+    contextWindow: model.limit?.context,
+  };
+}
+
 function findByLabel(raw: string): ModelOption | null {
   const candidates = new Set<string>();
   candidates.add(raw);
@@ -600,7 +651,15 @@ function findByLabel(raw: string): ModelOption | null {
 function humanizeModelTail(tail: string): string {
   const last = tail.split("/").pop() ?? tail;
   if (!last) return tail;
-  return last.charAt(0).toUpperCase() + last.slice(1);
+  return humanizeModelId(last);
+}
+
+/** Title-case slug segments while preserving dotted numeric versions. */
+export function humanizeModelId(id: string): string {
+  const words = id.match(/[a-z]+\d+(?:\.\d+)+|[a-z]+\d*|\d+(?:\.\d+)+|[A-Z]+\d*|\d+/g) ?? [id];
+  return words
+    .map((word) => (/[a-z]/i.test(word) ? word[0].toUpperCase() + word.slice(1) : word))
+    .join(" ");
 }
 
 export function pickDefaultModelForHarness(
