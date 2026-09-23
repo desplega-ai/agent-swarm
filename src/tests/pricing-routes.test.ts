@@ -13,6 +13,7 @@ import {
   type ServerResponse,
 } from "node:http";
 import { closeDb, getDbClient, getLogsByEventType, initDb } from "../be/db";
+import { seedPricingFromModelsDev } from "../be/seed-pricing";
 import { handleCore } from "../http/core";
 import { handlePricing } from "../http/pricing";
 import { getPathSegments, parseQueryParams } from "../http/utils";
@@ -53,6 +54,7 @@ let port: number;
 beforeAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
   initDb(TEST_DB_PATH);
+  seedPricingFromModelsDev({ quiet: true });
   server = createTestServer(API_KEY);
   port = await listenOnFreePort(server);
 });
@@ -103,13 +105,23 @@ describe("Phase 6 — /api/pricing REST surface", () => {
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.rows).toBeInstanceOf(Array);
-      // Codex seed rows include the migration 046 baseline plus later model
-      // backfills. They should all be present here.
+      // Boot seeding adds current snapshot models alongside historical rows.
+      // Check each current model rather than a fixed three-row total: some
+      // models also publish cache-write prices.
       const seedRows = body.rows.filter(
         (r: { provider: string; effectiveFrom: number }) =>
           r.provider === "codex" && r.effectiveFrom === 0,
       );
-      expect(seedRows.length).toBe(Object.keys(CODEX_MODEL_PRICING).length * 3);
+      for (const model of Object.keys(CODEX_MODEL_PRICING)) {
+        for (const tokenClass of ["input", "cached_input", "output"]) {
+          expect(
+            seedRows.some(
+              (row: { model: string; tokenClass: string }) =>
+                row.model === model && row.tokenClass === tokenClass,
+            ),
+          ).toBe(true);
+        }
+      }
     });
 
     test("GET /api/pricing/{provider}/{model}/{tokenClass} returns rows latest-first", async () => {

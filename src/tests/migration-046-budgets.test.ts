@@ -21,6 +21,8 @@ async function removeDbFiles(path: string): Promise<void> {
 
 beforeAll(() => {
   initDb(TEST_DB_PATH);
+  // Mirror API boot: new releases are snapshot-seeded, not new migrations.
+  seedPricingFromModelsDev({ quiet: true });
 });
 
 afterAll(async () => {
