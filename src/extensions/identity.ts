@@ -30,11 +30,16 @@ export async function ensureExtensionAgent(name: string): Promise<string> {
 
     if (agent.status !== "offline") await updateAgentStatus(agent.id, "offline");
     if (agent.maxTasks !== 0) await updateAgentMaxTasks(agent.id, 0);
-    await updateAgentProfile(agent.id, {
-      description: `System agent for extension ${name}`,
-      role: EXTENSION_AGENT_ROLE,
-      capabilities: [],
-    });
+    await updateAgentProfile(
+      agent.id,
+      {
+        description: `System agent for extension ${name}`,
+        role: EXTENSION_AGENT_ROLE,
+        capabilities: [],
+      },
+      undefined,
+      { allowExtensionRole: true },
+    );
     return agent.id;
   });
 }

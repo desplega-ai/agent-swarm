@@ -28,20 +28,23 @@ import {
   getSwarmMetrics,
   initDb,
   isAgentEligibleForTask,
+  updateAgentProfile,
 } from "../be/db";
 import { assignUnassignedTaskPending } from "../be/db/tasks/write";
 import { ensureExtensionAgent } from "../extensions/identity";
-import { handleAgentsRest } from "../http/agents";
+import { handleAgentRegister, handleAgentsRest } from "../http/agents";
 import { handlePoll } from "../http/poll";
 import { handleSchedules } from "../http/schedules";
 import { handleTasks } from "../http/tasks";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { createStandaloneScheduleTask } from "../scheduler/schedule-task";
 import { registerGetSwarmTool } from "../tools/get-swarm";
+import { registerJoinSwarmTool } from "../tools/join-swarm";
 import { registerCreateScheduleTool } from "../tools/schedules/create-schedule";
 import { registerPatchScheduleTool } from "../tools/schedules/patch-schedule";
 import { registerUpdateScheduleTool } from "../tools/schedules/update-schedule";
 import { registerSendTaskTool } from "../tools/send-task";
+import { registerUpdateProfileTool } from "../tools/update-profile";
 import { setRequestAuth } from "../utils/request-auth-context";
 import { workflowEventBus } from "../workflows/event-bus";
 import { AgentTaskExecutor } from "../workflows/executors/agent-task";
@@ -49,6 +52,8 @@ import { interpolate } from "../workflows/template";
 
 const TEST_DB_PATH = "./test-extension-agent-visibility.sqlite";
 const EXTENSION_ERROR = /is an extension identity and cannot be assigned/;
+const RESERVED_ERROR = /reserved for extension identities/;
+const LOCKED_ERROR = /Extension identities keep the "extension" role/;
 
 let server: Server;
 let baseUrl = "";
@@ -65,6 +70,8 @@ function buildMcp(): McpServer {
   registerCreateScheduleTool(mcp);
   registerUpdateScheduleTool(mcp);
   registerPatchScheduleTool(mcp);
+  registerJoinSwarmTool(mcp);
+  registerUpdateProfileTool(mcp);
   return mcp;
 }
 
@@ -127,6 +134,7 @@ beforeAll(async () => {
     const pathSegments = getPathSegments(req.url ?? "");
     const query = parseQueryParams(req.url ?? "");
     const callerAgentId = req.headers["x-agent-id"] as string | undefined;
+    if (await handleAgentRegister(req, res, pathSegments, callerAgentId)) return;
     for (const handler of [handleAgentsRest, handleTasks, handleSchedules, handlePoll]) {
       if (await handler(req, res, pathSegments, query, callerAgentId)) return;
     }
@@ -366,5 +374,101 @@ describe("extension identities never take work", () => {
     const res = await api("GET", "/api/poll", undefined, extId);
     expect(res.status).toBe(200);
     expect(res.body.trigger).toBeNull();
+  });
+});
+
+describe("the extension role is reserved", () => {
+  async function expectWorkerUnchanged() {
+    const worker = await getAgentById(workerId);
+    expect(worker?.role).not.toBe("extension");
+    expect((await getAllAgents()).map((a) => a.id)).toContain(workerId);
+    expect(isAgentEligibleForTask(worker!, { routingAffinity: undefined })).toBe(true);
+  }
+
+  async function expectExtensionUnchanged() {
+    const ext = await getAgentById(extId);
+    expect(ext?.role).toBe("extension");
+    expect((await getAllAgents()).map((a) => a.id)).not.toContain(extId);
+    await expect(createTaskExtended("still blocked", { agentId: extId })).rejects.toThrow(
+      EXTENSION_ERROR,
+    );
+  }
+
+  test("updateAgentProfile refuses to grant or strip it without the lifecycle flag", async () => {
+    await expect(updateAgentProfile(workerId, { role: "extension" })).rejects.toThrow(
+      RESERVED_ERROR,
+    );
+    await expect(updateAgentProfile(extId, { role: "worker" })).rejects.toThrow(LOCKED_ERROR);
+    await expectWorkerUnchanged();
+    await expectExtensionUnchanged();
+  });
+
+  test("update-profile tool: a worker cannot take it, a lead cannot strip it", async () => {
+    const mcp = buildMcp();
+    const self = structured(await callTool(mcp, "update-profile", { role: "extension" }, workerId));
+    expect(self.success).toBe(false);
+    expect(self.message).toMatch(RESERVED_ERROR);
+
+    const byLead = structured(
+      await callTool(mcp, "update-profile", { agentId: workerId, role: "extension" }, leadId),
+    );
+    expect(byLead.success).toBe(false);
+    expect(byLead.message).toMatch(RESERVED_ERROR);
+
+    const strip = structured(
+      await callTool(mcp, "update-profile", { agentId: extId, role: "worker" }, leadId),
+    );
+    expect(strip.success).toBe(false);
+    expect(strip.message).toMatch(LOCKED_ERROR);
+
+    await expectWorkerUnchanged();
+    await expectExtensionUnchanged();
+  });
+
+  test("join-swarm cannot register with it", async () => {
+    const newId = crypto.randomUUID();
+    const result = structured(
+      await callTool(
+        buildMcp(),
+        "join-swarm",
+        { name: "sneaky-ext", role: "extension", requestedId: newId },
+        newId,
+      ),
+    );
+    expect(result.success).toBe(false);
+    expect(result.message).toMatch(RESERVED_ERROR);
+    expect(await getAgentById(newId)).toBeNull();
+  });
+
+  test("HTTP register and profile update answer 400", async () => {
+    const newId = crypto.randomUUID();
+    const registered = await api(
+      "POST",
+      "/api/agents",
+      { name: "sneaky-http-ext", role: "extension" },
+      newId,
+    );
+    expect(registered.status).toBe(400);
+    expect(registered.body.error).toMatch(RESERVED_ERROR);
+    expect(await getAgentById(newId)).toBeNull();
+
+    const grant = await api("PUT", `/api/agents/${workerId}/profile`, { role: "extension" });
+    expect(grant.status).toBe(400);
+    expect(grant.body.error).toMatch(RESERVED_ERROR);
+
+    const strip = await api("PUT", `/api/agents/${extId}/profile`, { role: "worker" });
+    expect(strip.status).toBe(400);
+    expect(strip.body.error).toMatch(LOCKED_ERROR);
+
+    await expectWorkerUnchanged();
+    await expectExtensionUnchanged();
+  });
+
+  test("unrelated profile edits still work on both kinds of agent", async () => {
+    expect((await updateAgentProfile(workerId, { role: "reviewer" }))?.role).toBe("reviewer");
+    expect((await updateAgentProfile(extId, { description: "still an extension" }))?.role).toBe(
+      "extension",
+    );
+    expect(await ensureExtensionAgent("tool-call-tracker")).toBe(extId);
   });
 });

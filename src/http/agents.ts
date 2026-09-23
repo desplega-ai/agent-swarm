@@ -5,6 +5,7 @@ import {
   computeContentHash,
   createAgent,
   deleteSwarmConfigByKey,
+  EXTENSION_AGENT_ROLE,
   getAgentById,
   getAgentWithTasks,
   getAllAgents,
@@ -12,6 +13,7 @@ import {
   getDbClient,
   getResolvedConfig,
   getSwarmConfigs,
+  ReservedAgentRoleError,
   resetEmptyPollCount,
   setAgentHarnessProvider,
   updateAgentActivity,
@@ -578,6 +580,12 @@ export async function handleAgentRegister(
     const parsed = await registerAgent.parse(req, res, pathSegments, new URLSearchParams());
     if (!parsed) return true;
 
+    // Extension identities are created only by the extension lifecycle.
+    if (parsed.body.role === EXTENSION_AGENT_ROLE) {
+      jsonError(res, `Role "${EXTENSION_AGENT_ROLE}" is reserved for extension identities.`, 400);
+      return true;
+    }
+
     const agentId = myAgentId || crypto.randomUUID();
     // Read once so one mode applies consistently even if a config reload
     // flips the flag mid-request.
@@ -877,7 +885,7 @@ export async function handleAgentsRest(
         },
       );
     } catch (error) {
-      if (error instanceof HeartbeatExpiryError) {
+      if (error instanceof HeartbeatExpiryError || error instanceof ReservedAgentRoleError) {
         jsonError(res, error.message, 400);
         return true;
       }

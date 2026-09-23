@@ -226,6 +226,37 @@ export function extensionAgentAssignmentError(agent: Pick<Agent, "id" | "name">)
   return `Agent "${agent.name}" (${agent.id}) is an extension identity and cannot be assigned, offered, or scheduled tasks. Target a worker or lead agent instead.`;
 }
 
+/**
+ * Thrown when an ordinary registration or profile update tries to grant the
+ * reserved extension role, or to strip it from an extension identity. Only
+ * `ensureExtensionAgent` may set it.
+ */
+export class ReservedAgentRoleError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ReservedAgentRoleError";
+  }
+}
+
+/**
+ * Returns the reason a role change is refused, or null when it is allowed.
+ * `allowExtensionRole` is passed only by the extension identity lifecycle.
+ */
+export function reservedRoleViolation(
+  currentRole: string | null | undefined,
+  nextRole: string | undefined,
+  opts?: { allowExtensionRole?: boolean },
+): string | null {
+  if (nextRole === undefined || nextRole === currentRole) return null;
+  if (currentRole === EXTENSION_AGENT_ROLE) {
+    return `Extension identities keep the "${EXTENSION_AGENT_ROLE}" role; it cannot be changed.`;
+  }
+  if (nextRole === EXTENSION_AGENT_ROLE && !opts?.allowExtensionRole) {
+    return `Role "${EXTENSION_AGENT_ROLE}" is reserved for extension identities.`;
+  }
+  return null;
+}
+
 /** Thrown by task creation when the assignee or offer target is an extension identity. */
 export class ExtensionAgentAssignmentError extends Error {
   constructor(agent: Pick<Agent, "id" | "name">) {

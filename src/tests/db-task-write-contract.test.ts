@@ -100,6 +100,7 @@ value:ExtensionAgentAssignmentError
 value:KvTypeCollisionError
 value:MAX_EMPTY_POLLS
 value:NOT_EXTENSION_AGENT_SQL
+value:ReservedAgentRoleError
 value:SKILL_FILE_LIMITS
 value:UNATTRIBUTED_USER_ID
 value:__resetSqliteVecExtensionPathCacheForTests

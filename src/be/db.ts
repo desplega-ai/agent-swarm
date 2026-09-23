@@ -148,6 +148,8 @@ import {
   isAgentEligibleForTask,
   isExtensionAgent,
   NOT_EXTENSION_AGENT_SQL,
+  ReservedAgentRoleError,
+  reservedRoleViolation,
   rowToAgent,
 } from "./db/agents";
 import {
@@ -192,6 +194,7 @@ export {
   listAgentsWithCredStatusByProvider,
   MAX_EMPTY_POLLS,
   NOT_EXTENSION_AGENT_SQL,
+  ReservedAgentRoleError,
   resetEmptyPollCount,
   setAgentHarnessProvider,
   shouldBlockPolling,
@@ -3314,12 +3317,19 @@ export async function updateAgentProfile(
     expectedHashes?: ProfileExpectedHashes;
     /** Called once per field dropped because its expected hash was stale. */
     onConflict?: (conflict: ProfileSyncConflict) => void;
+    /** Only the extension identity lifecycle may grant the reserved extension role. */
+    allowExtensionRole?: boolean;
   },
 ): Promise<Agent | null> {
   return await getDbClient().transaction(async (tx) => {
     // Get current agent state for version comparison
     const current = await tx.get<AgentRow>("SELECT * FROM agents WHERE id = ?", [id]);
     if (!current) return null;
+
+    const roleViolation = reservedRoleViolation(current.role, updates.role, {
+      allowExtensionRole: guard?.allowExtensionRole,
+    });
+    if (roleViolation) throw new ReservedAgentRoleError(roleViolation);
 
     // Compare with the old metadata before replacing it. Persist refreshed defaults
     // atomically so both running workers and restarted workers see matching blobs.
