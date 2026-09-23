@@ -39,6 +39,7 @@ import {
   processSlackRenderV2,
   renderThreadTree,
   streamOutcomeCard,
+  withStatusLead,
 } from "../slack/render-v2";
 import { getAgentDisplayName, getAgentEmoji } from "../slack/responses";
 import { slackContextKey } from "../tasks/context-key";
@@ -357,7 +358,7 @@ describe("Slack renderer v2", () => {
       expect(streams[0]?.payload).toMatchObject({
         channel: channelId,
         thread_ts: threadTs,
-        markdown_text: "✅\n\nHere is the complete answer.",
+        markdown_text: "✅ Here is the complete answer.",
       });
     });
   }
@@ -1185,7 +1186,7 @@ describe("Slack renderer v2", () => {
     const outcomeBody = outcomeChunks.join("");
     expect(outcomeChunks).toHaveLength(1);
     expect(outcomeBody).toBe(
-      "✅\n\nImplemented the Slack renderer and opened a focused pull request.\n\nSecond paragraph that must be rendered.",
+      "✅ Implemented the Slack renderer and opened a focused pull request.\n\nSecond paragraph that must be rendered.",
     );
     expect(outcomeBody).not.toMatch(/\n{3,}/);
     expect(outcomeBody).toBe(outcomeBody.trim());
@@ -1195,7 +1196,7 @@ describe("Slack renderer v2", () => {
     expect(started.payload.thread_ts).toBe(threadTs);
     expect(started.payload.recipient_user_id).toBe("U_REQUESTER");
     expect(started.payload.recipient_team_id).toBe("T_TEST");
-    expect(String(started.payload.markdown_text).startsWith("✅\n\nImplemented")).toBe(true);
+    expect(String(started.payload.markdown_text).startsWith("✅ Implemented")).toBe(true);
     expect(Object.keys(started.payload).sort()).toEqual([
       "channel",
       "icon_emoji",
@@ -1379,7 +1380,7 @@ describe("Slack renderer v2", () => {
       await processSlackRenderV2();
 
       const started = calls.find((call) => call.method === "chat.startStream");
-      expect(started?.payload.markdown_text).toBe(`✅\n\nDone${expected ? `\n\n${expected}` : ""}`);
+      expect(started?.payload.markdown_text).toBe(`✅ Done${expected ? `\n\n${expected}` : ""}`);
     } finally {
       if (originalHost === undefined) delete process.env.AGENT_FS_LIVE_URL;
       else process.env.AGENT_FS_LIVE_URL = originalHost;
@@ -1457,10 +1458,10 @@ describe("Slack renderer v2", () => {
     await processSlackRenderV2();
 
     const started = calls.find((call) => call.method === "chat.startStream");
-    expect(started?.payload.markdown_text).toContain("❌ **Failed**");
+    expect(started?.payload.markdown_text).toContain("❌ **Failed:**");
     const outcome = await getSlackOutcomeMessage(ask.id);
     const remote = remoteMessages.get(remoteKey(channelId, outcome!.ts));
-    expect(remote?.text).toBe(`❌ **Failed**\n\n${reason.trim()}`);
+    expect(remote?.text).toBe(`❌ **Failed:** ${reason.trim()}`);
     expect(remote?.text).not.toContain(getTaskLink(ask.id));
     expect(calls.some((call) => call.method === "chat.appendStream")).toBe(false);
     const update = calls.find(
@@ -1490,11 +1491,11 @@ describe("Slack renderer v2", () => {
     await processSlackRenderV2();
 
     const started = calls.find((call) => call.method === "chat.startStream");
-    expect(started?.payload.markdown_text).toContain("🚫 **Cancelled**");
+    expect(started?.payload.markdown_text).toContain("🚫 **Cancelled:**");
     const outcome = (await getSlackOutcomeMessage(ask.id))!;
     const remote = remoteMessages.get(remoteKey(channelId, outcome.ts));
     expect(remote?.text).toBe(
-      `🚫 **Cancelled**\n\nrequester changed direction ${"context ".repeat(200)}`.trim(),
+      `🚫 **Cancelled:** requester changed direction ${"context ".repeat(200)}`.trim(),
     );
     expect(remote?.text).not.toContain(getTaskLink(ask.id));
     expect(calls.some((call) => call.method === "chat.appendStream")).toBe(false);
@@ -1759,7 +1760,7 @@ describe("Slack renderer v2", () => {
 
     const started = calls.find((call) => call.method === "chat.startStream");
     expect(started?.payload.markdown_text).toBe(
-      "✅\n\nThis output must reach Slack since no slack-reply was sent.",
+      "✅ This output must reach Slack since no slack-reply was sent.",
     );
   });
 
@@ -1798,7 +1799,7 @@ describe("Slack renderer v2", () => {
 
     const started = calls.find((call) => call.method === "chat.startStream");
     expect(started?.payload.markdown_text).toBe(
-      `✅\n\nArtifact: https://example.test/downloads/${redacted}/result.json`,
+      `✅ Artifact: https://example.test/downloads/${redacted}/result.json`,
     );
     expect(started?.payload.markdown_text).not.toContain(secret);
   });
@@ -1856,7 +1857,7 @@ describe("Slack renderer v2", () => {
     const started = calls.find((call) => call.method === "chat.startStream");
     // ⏳ not ✅: the ask was parked, not answered. The ETA is what a human
     // needs; the agent's internal note and the schedule link are dropped.
-    expect(started?.payload.markdown_text).toBe("⏳\n\nChecking back today 17:30:19 UTC");
+    expect(started?.payload.markdown_text).toBe("⏳ Checking back today 17:30:19 UTC");
     expect(JSON.stringify(calls)).not.toContain("checking the new defer card");
     expect(JSON.stringify(calls)).not.toContain("715bf847-fe3e");
     expect(JSON.stringify(calls)).not.toContain("Deferred until");
@@ -1886,7 +1887,7 @@ describe("Slack renderer v2", () => {
     await processSlackRenderV2();
 
     const opening = calls.find((call) => call.method === "chat.startStream");
-    expect(opening?.payload.markdown_text).toBe("⏳\n\nChecking back today at 18:38");
+    expect(opening?.payload.markdown_text).toBe("⏳ Checking back today at 18:38");
     const card = await getSlackOutcomeMessage(ask.id);
     expect(card?.finalizedAt).toBeTruthy();
     expect(card?.deferralResolvedAt).toBeUndefined();
@@ -1914,7 +1915,7 @@ describe("Slack renderer v2", () => {
       (call) => call.method === "chat.update" && call.payload.ts === card?.ts,
     );
     expect(rewrite).toBeDefined();
-    expect(rewrite?.payload.text).toBe("✅\n\nThe build passed.");
+    expect(rewrite?.payload.text).toBe("✅ The build passed.");
     expect(rewrite?.payload.text).not.toContain("Checking back");
     expect((await getSlackOutcomeMessage(ask.id))?.deferralResolvedAt).toBeTruthy();
     // The rewrite IS the wake-up's answer: no second card repeating it.
@@ -2019,7 +2020,7 @@ describe("Slack renderer v2", () => {
 
     // The chain continues on a new ⏳ card, which the next wake-up resolves.
     const next = calls.find((call) => call.method === "chat.startStream");
-    expect(next?.payload.markdown_text).toBe("⏳\n\nChecking back today at 20:00");
+    expect(next?.payload.markdown_text).toBe("⏳ Checking back today at 20:00");
     const nextCard = await getSlackOutcomeMessage(wake.id);
     expect(nextCard?.permalink).toBeTruthy();
     // The old card hands over to it rather than repeating the new ETA.
@@ -2027,7 +2028,7 @@ describe("Slack renderer v2", () => {
       (call) => call.method === "chat.update" && call.payload.ts === card?.ts,
     );
     expect(rewrite?.payload.text).toBe(
-      `↪️\n\nResumed by ${lead.name} and deferred again — ${nextCard?.permalink}`,
+      `↪️ Resumed by ${lead.name} and deferred again — ${nextCard?.permalink}`,
     );
   });
 
@@ -2181,7 +2182,7 @@ describe("Slack renderer v2", () => {
     // The answer never reached the card, so the wake-up delivers it itself.
     const fallback = calls.filter((call) => call.method === "chat.startStream");
     expect(fallback).toHaveLength(1);
-    expect(fallback[0]?.payload.markdown_text).toBe("✅\n\nThe build passed.");
+    expect(fallback[0]?.payload.markdown_text).toBe("✅ The build passed.");
     expect((await getSlackOutcomeMessage(card.wakeId))?.finalizedAt).toBeTruthy();
   });
 
@@ -2227,7 +2228,7 @@ describe("Slack renderer v2", () => {
     // The ETA IS the message now, so there is no such thing as an "ETA-only"
     // notice worth suppressing — a thread that says nothing is the bug.
     const started = calls.find((call) => call.method === "chat.startStream");
-    expect(started?.payload.markdown_text).toBe("⏳\n\nChecking back today 17:30 UTC");
+    expect(started?.payload.markdown_text).toBe("⏳ Checking back today 17:30 UTC");
   });
 
   test("refreshes a stream started with stale content before finalizing it", async () => {
@@ -3257,5 +3258,44 @@ describe("Slack renderer v2 delegation (SLACK_RENDER_V2_DELEGATION)", () => {
         (await getSlackOutcomeMessage(child.id))?.permalink,
       );
     }
+  });
+});
+
+describe("withStatusLead", () => {
+  test.each([
+    ["✅", "Hybrid and graph already match.", "✅ Hybrid and graph already match."],
+    ["⏳", "Checking back at 18:00.", "⏳ Checking back at 18:00."],
+    ["❌ **Failed:**", "build broke", "❌ **Failed:** build broke"],
+    [
+      "🚫 **Cancelled:**",
+      "requester changed direction",
+      "🚫 **Cancelled:** requester changed direction",
+    ],
+    [
+      "↳ ✅ Worker — result:",
+      "Opened PR.\n\nDetails.",
+      "↳ ✅ Worker — result: Opened PR.\n\nDetails.",
+    ],
+    ["✅", "\n\n  Leading blank lines drop.", "✅ Leading blank lines drop."],
+    ["✅", "**Bold** opener stays inline.", "✅ **Bold** opener stays inline."],
+    ["✅", "1.5x faster than before.", "✅ 1.5x faster than before."],
+  ])("inlines %p with a plain opener", (lead, body, expected) => {
+    expect(withStatusLead(lead, body)).toBe(expected);
+  });
+
+  test.each([
+    ["code fence", "```ts\nconst x = 1;\n```"],
+    ["tilde fence", "~~~\nraw\n~~~"],
+    ["dash list", "- first\n- second"],
+    ["star list", "* first"],
+    ["ordered list", "1. first\n2. second"],
+    ["blockquote", "> quoted"],
+    ["heading", "# Title\n\nBody"],
+    ["table", "| a | b |\n| - | - |"],
+    ["thematic break", "---\nafter"],
+    ["indented code", "    indented"],
+  ])("keeps the blank line before a %s", (_name, body) => {
+    expect(withStatusLead("✅", body)).toBe(`✅\n\n${body}`);
+    expect(withStatusLead("❌ **Failed:**", body)).toBe(`❌ **Failed:**\n\n${body}`);
   });
 });

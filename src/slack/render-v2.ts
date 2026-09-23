@@ -754,12 +754,34 @@ function outcomeText(value: string | null | undefined, fallback: string): string
   return value?.trim() ? value : fallback;
 }
 
+// Markdown that only parses at the start of a line: a code fence, a list
+// item, a blockquote, a heading, a table row, a thematic break, or an
+// indented code block. Put after the status icon, it would render as literal
+// text, so the body keeps its own line.
+const LINE_START_BLOCK =
+  /^(?:`{3}|~{3}|[-*+]\s|\d+[.)]\s|>|#{1,6}\s|\||(?:-{3,}|\*{3,}|_{3,})[ \t]*(?:\r?\n|$)|(?: {4}|\t))/;
+
+/**
+ * `✅ The build passed.` — the status icon (and label, when there is one)
+ * opens the body's first line instead of standing alone above it. A body
+ * that opens with a line-start construct (see `LINE_START_BLOCK`) keeps the
+ * blank line so its markdown still renders.
+ */
+export function withStatusLead(lead: string, body: string): string {
+  const text = body.replace(/^(?:[ \t]*\r?\n)+/, "");
+  if (LINE_START_BLOCK.test(text)) return `${lead}\n\n${body}`;
+  return `${lead} ${text.trimStart()}`;
+}
+
 async function outcomeContent(task: AgentTask, slackReplySent: boolean): Promise<string> {
   if (task.status === "failed") {
-    return `❌ **Failed**\n\n${outcomeText(task.failureReason, "Task failed.")}`;
+    return withStatusLead("❌ **Failed:**", outcomeText(task.failureReason, "Task failed."));
   }
   if (task.status === "cancelled") {
-    return `🚫 **Cancelled**\n\n${outcomeText(task.failureReason, "Task was cancelled.")}`;
+    return withStatusLead(
+      "🚫 **Cancelled:**",
+      outcomeText(task.failureReason, "Task was cancelled."),
+    );
   }
   // A deferral's output is engine-authored, never posted by hand via
   // slack-reply, so it must not collapse into the "agent completed" summary
@@ -775,9 +797,9 @@ async function outcomeContent(task: AgentTask, slackReplySent: boolean): Promise
   // work resumes in a wake-up task. Rendering it ✅ told the thread the ask
   // was answered when it was only parked.
   if (isDeferred) {
-    return `⏳\n\n${outcomeText(slackTaskOutput(task), "Deferred.")}`;
+    return withStatusLead("⏳", outcomeText(slackTaskOutput(task), "Deferred."));
   }
-  return `✅\n\n${outcomeText(slackTaskOutput(task), "Task completed.")}`;
+  return withStatusLead("✅", outcomeText(slackTaskOutput(task), "Task completed."));
 }
 
 async function agentDisplayNameFor(task: AgentTask): Promise<string> {
@@ -801,15 +823,24 @@ export async function childOutcomeContent(
 ): Promise<string> {
   const agentName = await agentDisplayNameFor(task);
   if (task.status === "failed") {
-    return `↳ ❌ ${agentName} — failed\n\n${outcomeText(task.failureReason, "Task failed.")}`;
+    return withStatusLead(
+      `↳ ❌ ${agentName} — failed:`,
+      outcomeText(task.failureReason, "Task failed."),
+    );
   }
   if (slackReplySent && !isDeferredTask(task)) {
     return `↳ ✅ ${agentName} completed`;
   }
   if (isDeferredTask(task)) {
-    return `↳ ⏳ ${agentName} — deferred\n\n${outcomeText(slackTaskOutput(task), "Deferred.")}`;
+    return withStatusLead(
+      `↳ ⏳ ${agentName} — deferred:`,
+      outcomeText(slackTaskOutput(task), "Deferred."),
+    );
   }
-  return `↳ ✅ ${agentName} — result\n\n${outcomeText(slackTaskOutput(task), "Task completed.")}`;
+  return withStatusLead(
+    `↳ ✅ ${agentName} — result:`,
+    outcomeText(slackTaskOutput(task), "Task completed."),
+  );
 }
 
 // A deferred wake continues a human conversation even though the scheduler
@@ -1250,7 +1281,7 @@ async function resolvedDeferralContent(wake: AgentTask): Promise<string> {
   }
   const card = await getSlackOutcomeMessage(wake.id);
   const pointer = card?.permalink ? ` — ${card.permalink}` : ".";
-  return `↪️\n\nResumed by ${await agentDisplayNameFor(wake)} and deferred again${pointer}`;
+  return `↪️ Resumed by ${await agentDisplayNameFor(wake)} and deferred again${pointer}`;
 }
 
 /**
