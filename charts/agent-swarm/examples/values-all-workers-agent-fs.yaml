@@ -50,7 +50,13 @@ config:
   githubName: Swarm Bot
   appUrl: https://app.agent-swarm.dev          # hosted dashboard (default)
   publicMcpBaseUrl: https://swarm-api.example.com
-  extraEnv: {}
+  # New-install memory preset. Shared with workers; retrieval knobs are API-only.
+  # Leave SKIP_SESSION_SUMMARY unset. Set MEMORY_RATERS to "" to disable hints.
+  extraEnv:
+    MEMORY_HYBRID_SEARCH: "1"
+    MEMORY_GRAPH_EXPANSION: "1"
+    MEMORY_RATERS: "explicit-self"
+    MEMORY_DEMOTION_FLOOR: "1.0"
 
 # ---------------------------------------------------------------------------
 # API control plane (single replica, SQLite)

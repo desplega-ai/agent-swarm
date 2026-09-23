@@ -140,6 +140,14 @@ export function generateCompose(state: OnboardState): string {
   lines.push(ENV_API_KEY);
   lines.push(ENV_INSTALL_METHOD);
   lines.push(ENV_INSTALL_PRESET);
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
+  lines.push("      - MEMORY_HYBRID_SEARCH=${MEMORY_HYBRID_SEARCH-1}");
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
+  lines.push("      - MEMORY_GRAPH_EXPANSION=${MEMORY_GRAPH_EXPANSION-1}");
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
+  lines.push("      - MEMORY_RATERS=${MEMORY_RATERS-explicit-self}");
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
+  lines.push("      - MEMORY_DEMOTION_FLOOR=${MEMORY_DEMOTION_FLOOR-1.0}");
   appendProviderEnvironment(lines, state, false);
   lines.push(`      - MCP_BASE_URL=http://localhost:${port}`);
   lines.push("      - APP_URL=https://app.agent-swarm.dev");
@@ -194,6 +202,8 @@ export function generateCompose(state: OnboardState): string {
     lines.push("    environment:");
     appendProviderEnvironment(lines, state, true);
     lines.push(ENV_API_KEY);
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
+    lines.push("      - MEMORY_RATERS=${MEMORY_RATERS-explicit-self}");
     lines.push(`      - AGENT_ID=${svc.agentId}`);
     lines.push(`      - AGENT_NAME=${agentName}`);
     lines.push(`      - AGENT_ROLE=${agentRole}`);
