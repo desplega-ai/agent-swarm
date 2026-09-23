@@ -284,6 +284,14 @@ export async function completeStructured<TZod extends z.ZodTypeAny>(
     return null;
   }
 
+  // Dynamic IDs can be absent even though the typed catalog overload is non-nullable.
+  if (!model) {
+    console.error(
+      scrubSecrets(`internal-ai: unknown model ${provider}/${modelId} (callerTag=${callerTag})`),
+    );
+    return null;
+  }
+
   // The builtin catalog hardcodes openrouter.ai; OPENROUTER_BASE_URL reroutes
   // through a gateway (pi-ai's stream path uses `model.baseUrl` verbatim).
   // Resolved from the caller's session env when provided — swarm_config

@@ -20,7 +20,7 @@ export const DEFAULT_MODEL: Record<CredentialKind, string> = {
   openrouter: "openrouter/google/gemini-3-flash-preview",
   anthropic: "anthropic/claude-haiku-4-5",
   openai: "openai/gpt-5.4-mini",
-  "openai-codex": "openai-codex/gpt-5.4-mini",
+  "openai-codex": "openai-codex/gpt-5.5",
   "claude-cli": "haiku",
 };
 

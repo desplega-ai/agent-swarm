@@ -111,6 +111,29 @@ describe("completeStructured", () => {
     });
   }
 
+  test("unknown catalog model returns null without calling complete", async () => {
+    let invocations = 0;
+    const result = await completeStructured({
+      zodSchema: ResultZodSchema,
+      toolSchema: ResultToolSchema,
+      toolName: "record_result",
+      toolDescription: "Record the result.",
+      systemPrompt: "sys",
+      userPrompt: "user",
+      _credentialOverride: {
+        kind: "openai-codex",
+        apiKey: "test",
+        modelDefault: "openai-codex/nonexistent-model",
+      },
+      _complete: async () => {
+        invocations++;
+        return makeMsg([]);
+      },
+    });
+    expect(result).toBeNull();
+    expect(invocations).toBe(0);
+  });
+
   test("passes a provider-compatible forced tool choice", async () => {
     const credentials: ResolvedCredential[] = [
       {
@@ -122,7 +145,7 @@ describe("completeStructured", () => {
       {
         kind: "openai-codex",
         apiKey: "test",
-        modelDefault: "openai-codex/gpt-5.4-mini",
+        modelDefault: "openai-codex/gpt-5.5",
       },
       {
         kind: "anthropic",

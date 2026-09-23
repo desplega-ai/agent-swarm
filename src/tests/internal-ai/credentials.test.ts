@@ -79,7 +79,7 @@ describe("resolveCredential", () => {
     expect(cred?.kind).toBe("openai-codex");
     if (cred?.kind === "openai-codex") {
       expect(cred.apiKey).toBe("example-codex-api-key-derived");
-      expect(cred.modelDefault).toBe("openai-codex/gpt-5.4-mini");
+      expect(cred.modelDefault).toBe("openai-codex/gpt-5.5");
     }
   });
 
@@ -101,7 +101,7 @@ describe("resolveCredential", () => {
     expect(cred).toEqual({
       kind: "openai-codex",
       apiKey: "example-at_provider_runtime",
-      modelDefault: "openai-codex/gpt-5.4-mini",
+      modelDefault: "openai-codex/gpt-5.5",
     });
   });
 
