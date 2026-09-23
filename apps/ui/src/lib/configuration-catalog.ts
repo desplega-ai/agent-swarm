@@ -26,9 +26,18 @@ import {
   Workflow,
 } from "lucide-react";
 
+import type { DurationUnit } from "./configuration-values";
+
 const DOCS = "https://docs.agent-swarm.dev/docs/";
 
-export type ConfigCatalogKind = "boolean" | "enum" | "number" | "string";
+export type ConfigCatalogKind =
+  | "boolean"
+  | "enum"
+  | "number"
+  | "string"
+  | "multiselect"
+  | "json"
+  | "color";
 
 export interface ConfigCatalogEntry {
   /** swarm_config key — also the env var name (e.g. "STEERING_ENABLED"). */
@@ -36,7 +45,9 @@ export interface ConfigCatalogEntry {
   label: string;
   description: string;
   kind: ConfigCatalogKind;
-  /** Allowed values for `kind: "enum"`. */
+  /** Native storage unit for numeric durations. Never inferred by the renderer. */
+  unit?: DurationUnit;
+  /** Allowed values for enum and comma-separated multiselect controls. */
   options?: string[];
   /**
    * Effective value when neither an env var nor a DB row is present. Rendered
@@ -132,11 +143,12 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
       },
       {
         key: "MEMORY_RECENCY_HALF_LIFE_DAYS",
-        label: "Recency half-life (days)",
+        label: "Recency half-life",
         description:
           "Global override for the recency-decay half-life. Leave unset to keep the per-memory-type defaults.",
         kind: "number",
-        defaultValue: "per-type (180/14/7)",
+        unit: "days",
+        defaultValue: "per-type (180/14/7 days)",
         placeholder: "180",
         docsUrl: `${DOCS}architecture/memory`,
       },
@@ -175,7 +187,9 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         label: "Active memory raters",
         description:
           "Comma-separated list of memory raters to run — the main lever on memory scoring. Unknown names are skipped; unset enables explicit-self, while an explicitly empty value disables all raters.",
-        kind: "string",
+        kind: "multiselect",
+        options: ["explicit-self", "implicit-citation", "llm", "noop"],
+        defaultValue: "explicit-self",
         placeholder: "e.g. implicit-citation",
         docsUrl: `${DOCS}architecture/memory`,
       },
@@ -199,45 +213,50 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
       },
       {
         key: "HEARTBEAT_INTERVAL_MS",
-        label: "Sweep interval (ms)",
+        label: "Sweep interval",
         description: "How long the server waits between heartbeat sweeps.",
         kind: "number",
+        unit: "ms",
         defaultValue: "90000",
         placeholder: "90000",
         restartRequired: true,
       },
       {
         key: "HEARTBEAT_STALL_THRESHOLD_MIN",
-        label: "Stall threshold (min)",
+        label: "Stall threshold",
         description: "Minutes without any task update before a task is classified as stalled.",
         kind: "number",
+        unit: "min",
         defaultValue: "30",
         placeholder: "30",
       },
       {
         key: "RUNTIME_STALE_THRESHOLD_MIN",
-        label: "Runtime stale threshold (min)",
+        label: "Runtime stale threshold",
         description:
           "Minutes without a worker ping before that worker process stops counting as serving its agent. Only applies when multiple runtimes per agent is enabled; an agent whose last live worker expires is marked offline.",
         kind: "number",
+        unit: "min",
         defaultValue: "5",
         placeholder: "5",
         docsUrl: `${DOCS}ui/configuration`,
       },
       {
         key: "HEARTBEAT_STALL_NO_SESSION_MIN",
-        label: "No-session threshold (min)",
+        label: "No-session threshold",
         description:
           "Minutes a claimed task may go without a live session before its worker is presumed dead.",
         kind: "number",
+        unit: "min",
         defaultValue: "5",
         placeholder: "5",
       },
       {
         key: "HEARTBEAT_STALL_STALE_HB_MIN",
-        label: "Stale-heartbeat threshold (min)",
+        label: "Stale-heartbeat threshold",
         description: "Minutes of stale heartbeat that hand a task to the stall classifier.",
         kind: "number",
+        unit: "min",
         defaultValue: "15",
         placeholder: "15",
       },
@@ -307,7 +326,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         label: "Task tool manifests",
         description:
           "JSON maps named taskTypes and schedules to arrays of up to 16 swarm tool names. A schedule entry overrides its task type. Requires Preload task tools; other tools remain searchable.",
-        kind: "string",
+        kind: "json",
         defaultValue: "{}",
         docsUrl: `${DOCS}ui/configuration`,
       },
@@ -353,6 +372,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         description:
           "How long docker-entrypoint.sh waits for the control-plane API's /health endpoint before exiting the worker/lead container non-zero. This is a bootstrap-only setting read from the container's environment before the API is reachable — saving a value here documents and validates the intended deployment env var, it cannot affect a container that is already waiting.",
         kind: "number",
+        unit: "s",
         defaultValue: "90",
         placeholder: "90",
         restartRequired: true,
@@ -380,28 +400,31 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
     entries: [
       {
         key: "SESSION_LOG_RETENTION_DAYS",
-        label: "Session log retention (days)",
+        label: "Session log retention",
         description:
           "Delete session_logs rows older than this many days. Leave unset to disable this table's sweep. Deletion permanently removes session transcripts.",
         kind: "number",
+        unit: "days",
         placeholder: "30",
         docsUrl: `${DOCS}guides/deployment#database-retention`,
       },
       {
         key: "AGENT_LOG_RETENTION_DAYS",
-        label: "Agent log retention (days)",
+        label: "Agent log retention",
         description:
           "Delete agent_log rows older than this many days. Leave unset to disable this table's sweep. Deletion permanently removes task and agent history.",
         kind: "number",
+        unit: "days",
         placeholder: "30",
         docsUrl: `${DOCS}guides/deployment#database-retention`,
       },
       {
         key: "EVENTS_RETENTION_DAYS",
-        label: "Event retention (days)",
+        label: "Event retention",
         description:
           "Delete events rows older than this many days. Leave unset to disable this table's sweep. Aggregate event totals become retention-window totals.",
         kind: "number",
+        unit: "days",
         placeholder: "30",
         docsUrl: `${DOCS}guides/deployment#database-retention`,
       },
@@ -416,30 +439,33 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
       },
       {
         key: "DB_RETENTION_TICK_BUDGET_MS",
-        label: "Retention tick budget (ms)",
+        label: "Retention tick budget",
         description:
           "Wall-clock budget for one retention sweep tick, shared evenly across enabled tables. Accepts 1000 to 300000.",
         kind: "number",
+        unit: "ms",
         defaultValue: "30000",
         placeholder: "30000",
         docsUrl: `${DOCS}guides/deployment#database-retention`,
       },
       {
         key: "DB_RETENTION_CATCHUP_INTERVAL_MS",
-        label: "Retention catch-up interval (ms)",
+        label: "Retention catch-up interval",
         description:
           "Delay before the next retention tick when a table is still undrained. The normal cadence stays hourly once every enabled table is drained. Accepts 5000 to 3600000.",
         kind: "number",
+        unit: "ms",
         defaultValue: "60000",
         placeholder: "60000",
         docsUrl: `${DOCS}guides/deployment#database-retention`,
       },
       {
         key: "DB_RETENTION_MAX_STATEMENT_MS",
-        label: "Retention statement target (ms)",
+        label: "Retention statement target",
         description:
           "Target ceiling for one retention DELETE statement, measured as driver execution time. The adaptive batch sizer tunes its batch size against this. Accepts 25 to 5000.",
         kind: "number",
+        unit: "ms",
         defaultValue: "250",
         placeholder: "250",
         docsUrl: `${DOCS}guides/deployment#database-retention`,
@@ -454,10 +480,11 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
       },
       {
         key: "DB_QUERY_HTTP_BUDGET_MS",
-        label: "HTTP query budget (ms)",
+        label: "HTTP query budget",
         description:
           "Wall-clock budget for a /api/db-query request before its child process is killed. Only applies while bounded execution is on.",
         kind: "number",
+        unit: "ms",
         defaultValue: "10000",
         placeholder: "10000",
       },
@@ -472,10 +499,11 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
       },
       {
         key: "DB_QUERY_MCP_BUDGET_MS",
-        label: "MCP query budget (ms)",
+        label: "MCP query budget",
         description:
           "Wall-clock budget for the MCP db-query tool before its child process is killed. Only applies while bounded execution is on.",
         kind: "number",
+        unit: "ms",
         defaultValue: "5000",
         placeholder: "5000",
       },
@@ -554,30 +582,33 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
       },
       {
         key: "SLACK_CONCLUSION_SETTLE_SEC",
-        label: "Conclusion settle window (sec)",
+        label: "Conclusion settle window",
         description:
           "Quiet seconds after every member of an ask's closure goes terminal before the conclusion card posts. Absorbs the gap between a child's terminal write and its follow-up task.",
         kind: "number",
+        unit: "s",
         defaultValue: "10",
         placeholder: "10",
         docsUrl: `${DOCS}guides/slack-integration`,
       },
       {
         key: "SLACK_CONCLUSION_TIMEOUT_MIN",
-        label: "Conclusion timeout (min)",
+        label: "Conclusion timeout",
         description:
           "Idle minutes before an ask's closure concludes with unfinished work, posting a timeout card and a warning reaction. Last-resort backstop behind heartbeat stall remediation.",
         kind: "number",
+        unit: "min",
         defaultValue: "240",
         placeholder: "240",
         docsUrl: `${DOCS}guides/slack-integration`,
       },
       {
         key: "SLACK_TREE_STALL_MIN",
-        label: "Tree stall threshold (min)",
+        label: "Tree stall threshold",
         description:
           "Minutes without a task update before the thread tree shows a stalled glyph for that task.",
         kind: "number",
+        unit: "min",
         defaultValue: "15",
         placeholder: "15",
         docsUrl: `${DOCS}guides/slack-integration`,
@@ -713,7 +744,8 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         label: "Linear pickup states",
         description:
           "Comma-separated Linear workflow state types eligible for swarm pickup. Leave unset for the default `unstarted,started,completed,canceled` — which excludes `triage` and `backlog`.",
-        kind: "string",
+        kind: "multiselect",
+        options: ["triage", "backlog", "unstarted", "started", "completed", "canceled"],
         defaultValue: "unstarted,started,completed,canceled",
         placeholder: "unstarted,started,completed,canceled",
         docsUrl: `${DOCS}integrations/linear`,
@@ -729,10 +761,11 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
       },
       {
         key: "AGENT_FS_REQUEST_TIMEOUT_MS",
-        label: "agent-fs request timeout (ms)",
+        label: "agent-fs request timeout",
         description:
           "Deadline in milliseconds for each agent-fs data-plane request (upload, delete, list). Uploads get extra time proportional to size. A stalled provider fails the attachment with 504 after this long.",
         kind: "number",
+        unit: "ms",
         defaultValue: "20000",
         placeholder: "20000",
         docsUrl: `${DOCS}ui/configuration`,
@@ -763,9 +796,10 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
       },
       {
         key: "RBAC_AUDIT_RETENTION_DAYS",
-        label: "Audit retention (days)",
+        label: "Audit retention",
         description: "How long RBAC audit log entries are kept before being pruned.",
         kind: "number",
+        unit: "days",
         defaultValue: "30",
         placeholder: "30",
       },
@@ -824,9 +858,10 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
       },
       {
         key: "SCHEDULER_INTERVAL_MS",
-        label: "Scheduler tick (ms)",
+        label: "Scheduler tick",
         description: "How often the scheduler wakes up to evaluate due schedules.",
         kind: "number",
+        unit: "ms",
         defaultValue: "10000",
         placeholder: "10000",
         restartRequired: true,
@@ -852,9 +887,10 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
       },
       {
         key: "EXTENSION_HANDLER_TIMEOUT_MS",
-        label: "Extension handler timeout (ms)",
+        label: "Extension handler timeout",
         description: "Maximum time for one extension handler before execution continues.",
         kind: "number",
+        unit: "ms",
         defaultValue: "5000",
         placeholder: "5000",
       },
@@ -936,7 +972,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         label: "Brand accent color",
         description:
           "Accent color used for branded surfaces. Hex notation, including the leading hash.",
-        kind: "string",
+        kind: "color",
         placeholder: "#RRGGBB",
         docsUrl: `${DOCS}guides/personalization`,
       },

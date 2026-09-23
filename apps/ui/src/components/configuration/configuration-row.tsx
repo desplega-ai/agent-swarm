@@ -12,10 +12,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { isTruthyConfigValue, useSwarmConfig } from "@/hooks/use-swarm-config";
 import type { ConfigCatalogEntry } from "@/lib/configuration-catalog";
+import { formatDuration, isJsonObject } from "@/lib/configuration-values";
 import { cn } from "@/lib/utils";
+import { ConfigurationMultiselect } from "./configuration-multiselect";
+import { DurationInput } from "./duration-input";
 
 // Radix `SelectItem` rejects an empty string value, so "fall back to the
 // default" needs its own sentinel. It never reaches the API — picking it
@@ -65,20 +69,28 @@ export interface ConfigurationRowProps {
 }
 
 export function ConfigurationRow({ entry, inEnv }: ConfigurationRowProps) {
-  const { config, value: savedValue, save, reset, isSaving } = useSwarmConfig(entry.key);
+  const { config, value: savedValue, save, reset, isSaving, isLoading } = useSwarmConfig(entry.key);
   const inputId = `config-${entry.key}`;
-  const isPending = isSaving;
+  const isPending = isSaving || isLoading;
   const sourceChip = deriveSourceChip(config !== undefined, inEnv);
 
   // Text/number rows are draft-edited and committed with an explicit Save.
   // Re-sync whenever the server value changes underneath us (save, reset,
   // reload, or another tab).
-  const [draft, setDraft] = useState(savedValue ?? "");
+  const initialDraft =
+    savedValue ?? (entry.kind === "multiselect" ? entry.defaultValue : undefined) ?? "";
+  const [draft, setDraft] = useState(initialDraft);
   useEffect(() => {
-    setDraft(savedValue ?? "");
-  }, [savedValue]);
+    setDraft(initialDraft);
+  }, [initialDraft]);
 
-  const isDirty = draft !== (savedValue ?? "");
+  const isDirty = draft !== initialDraft;
+  const invalidDraft =
+    entry.kind === "number"
+      ? draft !== "" &&
+        (!Number.isFinite(Number(draft)) ||
+          (entry.unit !== undefined && !Number.isInteger(Number(draft))))
+      : entry.kind === "json" && !isJsonObject(draft);
 
   // A key present in the server's `process.env` with no DB row: the API only
   // exposes presence, never the env value, so rendering a control seeded from
@@ -96,6 +108,11 @@ export function ConfigurationRow({ entry, inEnv }: ConfigurationRowProps) {
   const [choiceDraft, setChoiceDraft] = useState<string | null>(null);
 
   function beginOverride() {
+    setDraft(
+      entry.kind === "number" && !Number.isFinite(Number(entry.defaultValue))
+        ? ""
+        : (entry.defaultValue ?? ""),
+    );
     setChoiceDraft(
       entry.kind === "boolean"
         ? isTruthyConfigValue(entry.defaultValue)
@@ -119,7 +136,7 @@ export function ConfigurationRow({ entry, inEnv }: ConfigurationRowProps) {
   }
 
   function cancelOverride() {
-    setDraft(savedValue ?? "");
+    setDraft(initialDraft);
     setChoiceDraft(null);
     setIsOverriding(false);
   }
@@ -206,12 +223,15 @@ export function ConfigurationRow({ entry, inEnv }: ConfigurationRowProps) {
         <p className="text-xs text-muted-foreground">{entry.description}</p>
         {entry.defaultValue && (
           <p className="text-[11px] text-muted-foreground">
-            Default: <code className="font-mono">{entry.defaultValue}</code>
+            Default:{" "}
+            <code className="font-mono">
+              {entry.unit ? formatDuration(entry.defaultValue, entry.unit) : entry.defaultValue}
+            </code>
           </p>
         )}
       </div>
 
-      <div className="flex items-center gap-2 shrink-0 sm:w-80 sm:justify-end">
+      <div className="flex flex-wrap items-center gap-2 shrink-0 sm:w-80 sm:justify-end">
         {showEnvOnly && (
           <>
             <Tooltip>
@@ -270,9 +290,7 @@ export function ConfigurationRow({ entry, inEnv }: ConfigurationRowProps) {
           <>
             <Select
               value={
-                isDraftOverride
-                  ? (choiceDraft ?? UNSET_SENTINEL)
-                  : (savedValue ?? entry.defaultValue ?? UNSET_SENTINEL)
+                isDraftOverride ? (choiceDraft ?? UNSET_SENTINEL) : savedValue || UNSET_SENTINEL
               }
               disabled={isPending}
               onValueChange={(next) => {
@@ -294,6 +312,9 @@ export function ConfigurationRow({ entry, inEnv }: ConfigurationRowProps) {
                 <SelectItem value={UNSET_SENTINEL}>
                   {entry.defaultValue ? `Default (${entry.defaultValue})` : "Not set"}
                 </SelectItem>
+                {savedValue && !entry.options?.includes(savedValue) && (
+                  <SelectItem value={savedValue}>{savedValue} (unrecognized)</SelectItem>
+                )}
                 {(entry.options ?? []).map((opt) => (
                   <SelectItem key={opt} value={opt}>
                     {opt}
@@ -317,28 +338,87 @@ export function ConfigurationRow({ entry, inEnv }: ConfigurationRowProps) {
           </>
         )}
 
-        {!showEnvOnly && (entry.kind === "string" || entry.kind === "number") && (
+        {!showEnvOnly && entry.kind !== "boolean" && entry.kind !== "enum" && (
           <>
-            <Input
-              id={inputId}
-              type={entry.kind === "number" ? "number" : "text"}
-              value={draft}
-              placeholder={entry.placeholder ?? entry.defaultValue}
-              disabled={isPending}
-              onChange={(e) => setDraft(e.target.value)}
-              className="w-full sm:w-56 font-mono text-xs"
-            />
+            {entry.unit ? (
+              <DurationInput
+                id={inputId}
+                value={draft}
+                nativeUnit={entry.unit}
+                defaultValue={entry.defaultValue}
+                disabled={isPending}
+                onChange={setDraft}
+              />
+            ) : entry.kind === "multiselect" ? (
+              <ConfigurationMultiselect
+                id={inputId}
+                value={draft}
+                options={entry.options ?? []}
+                disabled={isPending}
+                onChange={setDraft}
+              />
+            ) : entry.kind === "json" ? (
+              <Textarea
+                id={inputId}
+                value={draft}
+                placeholder={entry.defaultValue}
+                disabled={isPending}
+                onChange={(event) => setDraft(event.target.value)}
+                aria-invalid={invalidDraft}
+                className="min-w-0 font-mono text-xs"
+                rows={4}
+              />
+            ) : (
+              <>
+                {entry.kind === "color" && (
+                  <Input
+                    type="color"
+                    aria-label={`${entry.label} picker`}
+                    value={/^#[0-9a-f]{6}$/i.test(draft) ? draft : "#000000"}
+                    disabled={isPending}
+                    onChange={(event) => setDraft(event.target.value)}
+                    className="w-10 shrink-0 p-1"
+                  />
+                )}
+                <Input
+                  id={inputId}
+                  type={entry.kind === "number" ? "number" : "text"}
+                  step={entry.kind === "number" ? "any" : undefined}
+                  value={draft}
+                  placeholder={entry.placeholder ?? entry.defaultValue}
+                  disabled={isPending}
+                  onChange={(event) => setDraft(event.target.value)}
+                  className="min-w-0 w-full font-mono text-xs"
+                />
+              </>
+            )}
             <Button
               type="button"
               size="sm"
               variant="outline"
-              disabled={!isDirty || isPending}
-              onClick={() => handleSave(draft)}
+              disabled={
+                (!isDirty && !isDraftOverride) ||
+                isPending ||
+                invalidDraft ||
+                (entry.kind === "number" && draft === "" && !config)
+              }
+              onClick={() =>
+                entry.kind === "number" && draft.trim() === "" ? reset() : handleSave(draft)
+              }
             >
               Save
             </Button>
             {cancelOverrideButton}
             {resetButton}
+            {invalidDraft && draft !== "" && (
+              <p role="alert" className="w-full text-xs text-status-error-strong">
+                {entry.kind === "json"
+                  ? "Enter a valid JSON object."
+                  : entry.unit
+                    ? `Use a whole number of ${entry.unit}.`
+                    : "Enter a finite number."}
+              </p>
+            )}
           </>
         )}
       </div>

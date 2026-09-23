@@ -41,3 +41,69 @@ test("configuration flips STEERING_ENABLED and persists it", async ({ page, api,
 
   await clean.assertClean();
 });
+
+test("duration units save native values and blank resets the setting", async ({
+  page,
+  api,
+  seed,
+}) => {
+  test.skip(!seed, "remote run without seed");
+  await api.put("/api/config", {
+    scope: "global",
+    key: "HEARTBEAT_INTERVAL_MS",
+    value: "600000",
+    isSecret: false,
+  });
+  await page.goto("/settings/configuration");
+  const row = page.locator("#setting-HEARTBEAT_INTERVAL_MS");
+  const amount = row.getByRole("spinbutton");
+  await expect(amount).toHaveValue("10");
+  await row.getByRole("combobox").click();
+  await page.getByRole("option", { name: "s", exact: true }).click();
+  await expect(amount).toHaveValue("600");
+  await expect(row.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+  await amount.fill("1.5");
+  await row.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByText("Saved HEARTBEAT_INTERVAL_MS", { exact: true })).toBeVisible();
+  const { configs } = await api.get<{ configs: ConfigRow[] }>("/api/config?scope=global");
+  expect(configs.find((config) => config.key === "HEARTBEAT_INTERVAL_MS")?.value).toBe("1500");
+  await expect(row.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+  await page.reload();
+  await row.getByRole("combobox").click();
+  await page.getByRole("option", { name: "ms", exact: true }).click();
+  await expect(amount).toHaveValue("1500");
+  await amount.fill("");
+  await row.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByText("Reset HEARTBEAT_INTERVAL_MS to its default")).toBeVisible();
+  const reset = await api.get<{ configs: ConfigRow[] }>("/api/config?scope=global");
+  expect(reset.configs.some((config) => config.key === "HEARTBEAT_INTERVAL_MS")).toBe(false);
+});
+
+test("multi-select can save no raters and preserves unknown saved names", async ({
+  page,
+  api,
+  seed,
+}) => {
+  test.skip(!seed, "remote run without seed");
+  await api.put("/api/config", {
+    scope: "global",
+    key: "MEMORY_RATERS",
+    value: "llm,future-rater",
+    isSecret: false,
+  });
+  await page.goto("/settings/configuration");
+  const row = page.locator("#setting-MEMORY_RATERS");
+  await row.getByRole("button", { name: "Active memory raters", exact: true }).click();
+  await expect(
+    page.getByRole("menuitemcheckbox", { name: "future-rater (unrecognized)" }),
+  ).toBeChecked();
+  await page.getByRole("menuitemcheckbox", { name: "llm", exact: true }).click();
+  await page.getByRole("menuitemcheckbox", { name: "future-rater (unrecognized)" }).click();
+  await page.keyboard.press("Escape");
+  await row.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByText("Saved MEMORY_RATERS", { exact: true })).toBeVisible();
+  const { configs } = await api.get<{ configs: ConfigRow[] }>("/api/config?scope=global");
+  expect(configs.find((config) => config.key === "MEMORY_RATERS")?.value).toBe("");
+  await page.reload();
+  await expect(row.getByText("None selected", { exact: true })).toBeVisible();
+});

@@ -12,6 +12,9 @@ export interface ConfigFilters {
 export function useConfigs(filters?: ConfigFilters) {
   return useQuery({
     queryKey: ["configs", filters],
+    // A reload immediately after Save can restore a still-fresh persisted snapshot.
+    // Configuration controls must confirm their saved values with the server.
+    refetchOnMount: "always",
     queryFn: () => api.fetchConfigs(filters),
     select: (data) => data.configs,
   });
