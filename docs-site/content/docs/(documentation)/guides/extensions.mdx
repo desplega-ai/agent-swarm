@@ -252,7 +252,8 @@ The default timeout is five seconds.
 The dispatcher records the failure and continues the operation.
 A successful handler resets that extension's consecutive failure count.
 Five consecutive failures set the extension status to `auto-disabled`.
-A lead, operator, or dashboard user must enable it again.
+Auto-disable also pauses the extension's schedules, workflows, and skills, the same way an explicit disable does.
+A lead, operator, or dashboard user must enable it again, which restores them.
 
 ## Install and operate
 
@@ -458,7 +459,6 @@ export default extension;
 - Schedules can target only a script.
 - Skills are never swarm-wide, and the extension does not install them on agents.
 - The dashboard does not show upgrade drift. Skipped assets appear only in the API response.
-- Auto-disable after consecutive hook failures does not turn assets off. Only an explicit disable does.
 - Scheduled script runs do not check the state of the extension's hooks.
 - Tool events cover agent-facing MCP calls only.
 - Slack route events cover the Slack message handler only.

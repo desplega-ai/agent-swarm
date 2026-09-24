@@ -177,7 +177,8 @@ function scheduleHash(spec: ScheduleSpec): string {
 function liveScheduleSpec(schedule: ScheduledTask): ScheduleSpec {
   return {
     name: schedule.name,
-    description: schedule.description ?? null,
+    // An update writes "" for a missing description; hash it as missing.
+    description: schedule.description || null,
     scriptName: schedule.scriptName ?? "",
     cronExpression: schedule.cronExpression ?? null,
     intervalMs: schedule.intervalMs ?? null,
@@ -249,7 +250,7 @@ export async function preflightAssets(
   for (const schedule of manifest.assets.schedules ?? []) {
     const spec: ScheduleSpec = {
       name: schedule.name,
-      description: schedule.description ?? null,
+      description: schedule.description || null,
       scriptName: schedule.script,
       cronExpression: schedule.cronExpression ?? null,
       intervalMs: schedule.intervalMs ?? null,

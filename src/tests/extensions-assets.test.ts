@@ -74,6 +74,7 @@ function bundle(
     version?: string;
     workflow?: string | false;
     skill?: string | false;
+    scheduleDescription?: string;
   } = {},
 ): Bundle {
   const files: Record<string, string> = {
@@ -100,6 +101,7 @@ function bundle(
               schedules: [
                 {
                   name: "digest-daily",
+                  ...(opts.scheduleDescription ? { description: opts.scheduleDescription } : {}),
                   script: "digest-collect",
                   cronExpression: "0 9 * * *",
                   args: { hours: 24 },
@@ -338,6 +340,24 @@ describe("extension assets", () => {
     expect((await getScript({ name: "digest-collect", scope: "global" }))?.source).toBe(
       EDITED_SCRIPT,
     );
+  });
+
+  test("dropping a schedule description keeps the schedule pristine", async () => {
+    const { extension } = await install(bundle({ scheduleDescription: "Daily digest" }));
+    await install(bundle({ version: "2.0.0" }));
+    await activateVersion(extension.id, 2);
+    expect((await getScheduledTaskByName("digest-daily"))?.description).toBe("");
+
+    // The update wrote "" for the missing description: still the extension's own write.
+    const again = await install(bundle({ version: "3.0.0" }), true);
+    expect(again.assets).toMatchObject({ updated: [], skipped: [] });
+    expect(await uninstallExtension(extension.id)).toMatchObject({
+      deleted: [
+        { kind: "schedule", name: "digest-daily" },
+        { kind: "script", name: "digest-collect" },
+      ],
+      detached: [],
+    });
   });
 
   test("activating a version without the schedule deletes it", async () => {
