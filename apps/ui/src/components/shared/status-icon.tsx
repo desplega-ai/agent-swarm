@@ -1,7 +1,6 @@
 import { AlertCircle, AlertTriangle, Check, CircleCheck } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { type ReactNode, useState } from "react";
-import type { AutosavePhase } from "@/components/onboarding/use-autosave";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
@@ -9,15 +8,24 @@ import { cn } from "@/lib/utils";
  * One status vocabulary (`/setup`, credentials panels, ...): a small icon
  * with its meaning in a tooltip, instead of a sentence.
  *
- * - `done`: verified or connected. Amber like the `/setup` stepper: no green
- *   checks next to amber progress.
+ * - `done`: verified or connected, inside `/setup`. Amber like its stepper:
+ *   no green checks next to amber progress.
+ * - `success`: verified or healthy, outside `/setup` (green check).
  * - `busy`: something is running now: a save, a probe, a worker check (amber ring).
  * - `saved`: stored, nothing to verify yet (quiet check).
  * - `dirty`: an edit waits for the debounce (hollow ring).
  * - `warning` / `error`: needs attention.
  * - `none`: keeps the slot, shows nothing.
  */
-export type StatusTone = "done" | "busy" | "saved" | "dirty" | "warning" | "error" | "none";
+export type StatusTone =
+  | "done"
+  | "success"
+  | "busy"
+  | "saved"
+  | "dirty"
+  | "warning"
+  | "error"
+  | "none";
 
 const SNAPPY = [0.2, 0, 0, 1] as const;
 
@@ -38,6 +46,8 @@ function Glyph({ tone }: { tone: Exclude<StatusTone, "none"> }) {
   switch (tone) {
     case "done":
       return <CircleCheck className="size-4 text-primary" aria-hidden />;
+    case "success":
+      return <CircleCheck className="size-4 text-status-success-strong" aria-hidden />;
     case "busy":
       return <Spinner />;
     case "saved":
@@ -107,68 +117,6 @@ export function StatusIcon({
       </TooltipTrigger>
       {hasLabel ? <TooltipContent className="max-w-64">{label}</TooltipContent> : null}
     </Tooltip>
-  );
-}
-
-const PHASE_TONE: Record<AutosavePhase, StatusTone> = {
-  idle: "none",
-  pending: "dirty",
-  saving: "busy",
-  saved: "saved",
-  error: "error",
-};
-
-/** Autosave state of one field (or one card) as a `StatusIcon`. */
-export function SaveIndicator({
-  phase,
-  error,
-  className,
-}: {
-  phase: AutosavePhase;
-  error?: string | null;
-  className?: string;
-}) {
-  const label =
-    phase === "pending"
-      ? "Saves when you stop typing"
-      : phase === "saving"
-        ? "Saving…"
-        : phase === "saved"
-          ? "Saved"
-          : phase === "error"
-            ? (error ?? "Not saved.")
-            : undefined;
-  return <StatusIcon tone={PHASE_TONE[phase]} label={label} className={className} />;
-}
-
-/**
- * An input (or textarea) with a status icon inside its right edge. Give the
- * control enough right padding (`pr-8`, or `pr-16` with an eye toggle).
- */
-export function WithIndicator({
-  indicator,
-  multiline,
-  children,
-  className,
-}: {
-  indicator: ReactNode;
-  /** Pin the icon to the top-right corner instead of the vertical center. */
-  multiline?: boolean;
-  children: ReactNode;
-  className?: string;
-}) {
-  return (
-    <div className={cn("relative", className)}>
-      {children}
-      <span
-        className={cn(
-          "absolute right-2.5 flex items-center",
-          multiline ? "top-2.5" : "top-1/2 -translate-y-1/2",
-        )}
-      >
-        {indicator}
-      </span>
-    </div>
   );
 }
 

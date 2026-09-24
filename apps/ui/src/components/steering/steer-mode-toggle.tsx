@@ -3,10 +3,12 @@
  * group with the sliding amber pill).
  *
  * Decision 16: we never offer a mode the target harness can't honor. When
- * `canInterrupt` is false, the Interrupt option is unavailable and shows the
- * reason on hover and focus, instead of accepting the click and silently
- * downgrading. `SegmentedControl` marks it `aria-disabled` (not `disabled`),
- * so it stays hoverable and focusable for the tooltip.
+ * `canInterrupt` is false, the Interrupt option is unavailable: a click,
+ * Enter, or Space does nothing, instead of silently downgrading.
+ * `SegmentedControl` marks it `aria-disabled` (not `disabled`), so the
+ * pointer and the arrow keys still reach it. Its tooltip shows the reason on
+ * hover and focus, and screen readers read the reason as the option's
+ * description.
  */
 
 import { Clock, Zap } from "lucide-react";

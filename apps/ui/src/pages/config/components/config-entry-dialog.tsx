@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useAgents } from "@/api/hooks/use-agents";
 import type { SwarmConfig, SwarmConfigScope } from "@/api/types";
-import { SecretInput } from "@/components/shared/secret-field";
+import { SecretInput } from "@/components/shared/secret-input";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,

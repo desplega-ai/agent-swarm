@@ -19,6 +19,24 @@ const REASONING_EFFORT_LEVELS: readonly ReasoningEffortLevel[] = [
   "max",
 ];
 
+/**
+ * Nearest supported level by canonical-order distance. On a tie the first
+ * listed level wins (the lower one, as `levels` come in canonical order).
+ * `null` when `levels` is empty.
+ */
+export function nearestSupportedLevel(
+  level: ReasoningEffortLevel,
+  levels: ReadonlyArray<ReasoningEffortLevel>,
+): ReasoningEffortLevel | null {
+  if (levels.length === 0) return null;
+  const idx = REASONING_EFFORT_LEVELS.indexOf(level);
+  return [...levels].sort(
+    (a, b) =>
+      Math.abs(REASONING_EFFORT_LEVELS.indexOf(a) - idx) -
+      Math.abs(REASONING_EFFORT_LEVELS.indexOf(b) - idx),
+  )[0];
+}
+
 export type LocalHarnessProvider = "claude" | "codex" | "pi" | "opencode" | "acp";
 
 export interface ModelOption {

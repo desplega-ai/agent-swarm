@@ -134,8 +134,8 @@ export function CodexCard({
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           {startButton(saved ? "Add another ChatGPT account" : "Sign in with ChatGPT")}
           <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            Needs device code login in ChatGPT
-            <InfoTip content='Turn on "Allow device code login" in ChatGPT Settings, Security. Workspace admins control it for team workspaces.' />
+            First turn on "Allow device code login" in ChatGPT Settings, Security.
+            <InfoTip content="Workspace admins control it for team workspaces." />
           </span>
         </div>
       ) : null}

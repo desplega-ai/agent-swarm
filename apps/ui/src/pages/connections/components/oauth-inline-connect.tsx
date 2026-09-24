@@ -7,7 +7,7 @@ import {
   useUpsertOAuthApp,
 } from "@/api/hooks/use-script-connections";
 import type { OAuthAppSummary, OAuthAuthorizationSummary } from "@/api/types";
-import { SecretInput } from "@/components/shared/secret-field";
+import { SecretInput } from "@/components/shared/secret-input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

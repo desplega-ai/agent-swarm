@@ -1,6 +1,6 @@
 import { Check, Copy } from "lucide-react";
 import type { SwarmConfig } from "@/api/types";
-import { SecretInput } from "@/components/shared/secret-field";
+import { SecretInput } from "@/components/shared/secret-input";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -280,6 +280,7 @@ function renderInput({
           placeholder={field.placeholder}
           value={value}
           onChange={onChange}
+          autoComplete="new-password"
           describedBy={field.helpText ? `${inputId}-help` : undefined}
         />
       );

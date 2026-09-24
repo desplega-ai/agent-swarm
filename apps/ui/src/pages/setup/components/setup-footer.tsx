@@ -124,8 +124,12 @@ function Keycap({ tone, children }: { tone?: "inverted"; children: string }) {
   );
 }
 
-/** Focus in one of these types text: letters and Enter belong to the field. */
-const TYPING_TARGET = 'input, textarea, select, [contenteditable]:not([contenteditable="false"])';
+/**
+ * Focus in one of these types text or picks from a list: letters, Enter, and
+ * Escape belong to the control.
+ */
+const TYPING_TARGET =
+  'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="combobox"], [role="listbox"], [role="menu"], [role="option"]';
 /** An open popover, dropdown, select, or dialog owns the keyboard. */
 const OPEN_OVERLAY = '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]';
 /** Enter already activates a focused control. */

@@ -6,8 +6,8 @@ import { useConfigs } from "@/api/hooks/use-config-api";
 import { useEnvPresence } from "@/api/hooks/use-integrations-meta";
 import type { OnboardingAiMethod } from "@/api/types";
 import { setupExitHref } from "@/components/onboarding/onboarding-redirect";
-import { AutosaveScopeContext, useAutosaveScope } from "@/components/onboarding/use-autosave";
 import { Button } from "@/components/ui/button";
+import { AutosaveScopeContext, useAutosaveScope } from "@/hooks/use-autosave";
 import type { StepProps } from "../step-contract";
 import { AgentModels } from "./ai/agent-models";
 import { ClaudeCard } from "./ai/claude-card";
@@ -33,6 +33,11 @@ export function StepAi({ onboarding, act, setContinueBlocker, setContinueAction 
   // The card the user saved on, and the method that save completes the step with.
   const pending = useRef<{ card: AiCardId; method: OnboardingAiMethod } | null>(null);
   const cliRecorded = useRef(false);
+  // Agents whose harness the operator switched here: only their level carries over.
+  const [switchedAgentIds, setSwitchedAgentIds] = useState<ReadonlySet<string>>(() => new Set());
+  const onHarnessSwitched = useCallback((ids: string[]) => {
+    if (ids.length > 0) setSwitchedAgentIds((prev) => new Set([...prev, ...ids]));
+  }, []);
 
   const providers = onboarding.signals.providers;
   const rollups = useMemo(
@@ -86,6 +91,7 @@ export function StepAi({ onboarding, act, setContinueBlocker, setContinueAction 
     configs,
     agents,
     onSaved,
+    onHarnessSwitched,
   });
 
   return (
@@ -118,6 +124,7 @@ export function StepAi({ onboarding, act, setContinueBlocker, setContinueAction 
           agents={agents}
           configs={configs}
           presence={presence}
+          switchedAgentIds={switchedAgentIds}
           setContinueAction={setContinueAction}
         />
       </div>

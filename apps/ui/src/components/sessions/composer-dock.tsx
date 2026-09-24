@@ -109,7 +109,8 @@ export interface ComposerDockProps {
   /**
    * Let the card span the full available width instead of the chat-style
    * centered `max-w-3xl` column. Used by the task-detail steering dock, where
-   * the composer sits under a full-width log viewer.
+   * the composer sits under a full-width log viewer, and by the `/setup`
+   * first task, which spans the setup column.
    */
   fullWidth?: boolean;
   /**

@@ -1,10 +1,10 @@
 import { type ReactNode, useState } from "react";
-import { useAutosave } from "@/components/onboarding/use-autosave";
-import { SecretField } from "@/components/shared/secret-field";
-import { SaveIndicator, WithIndicator } from "@/components/shared/status-icon";
+import { AutosaveSecretField } from "@/components/onboarding/autosave-secret-field";
+import { SaveIndicator, WithIndicator } from "@/components/onboarding/save-indicator";
 import { InfoTip } from "@/components/ui/info-tip";
 import { Input } from "@/components/ui/input";
 import { SettingsRow } from "@/components/ui/settings-row";
+import { useAutosave } from "@/hooks/use-autosave";
 import { cn } from "@/lib/utils";
 import type { SetupFieldSpec } from "./catalog";
 import type { ConfigForm } from "./use-config-form";
@@ -35,7 +35,7 @@ export function SetupField({ spec, form }: { spec: SetupFieldSpec; form: ConfigF
       className={cn(spec.multiline && "sm:col-span-2")}
       label={fieldLabel(spec)}
     >
-      <SecretField
+      <AutosaveSecretField
         id={id}
         saved={form.isSaved(spec.key)}
         multiline={spec.multiline}

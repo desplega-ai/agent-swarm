@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { isOnboardingOpen, useOnboarding } from "@/api/hooks/use-onboarding";
 import { useConfig } from "@/hooks/use-config";
@@ -38,8 +38,12 @@ export function OnboardingRedirect() {
   });
   const [mountedAt] = useState(Date.now);
 
-  if (fromSetup) markSetupVisited(config.apiUrl);
-  if (setupVisited.has(config.apiUrl) || pendingConnection || !data) return null;
+  // Record the marker after render. This render already skips the redirect.
+  useEffect(() => {
+    if (fromSetup) markSetupVisited(config.apiUrl);
+  }, [fromSetup, config.apiUrl]);
+
+  if (fromSetup || setupVisited.has(config.apiUrl) || pendingConnection || !data) return null;
   // Decide on a payload fetched after this mount, never on the persisted
   // cache: hydration can count as "fetched after mount" without a request,
   // so the timestamp check backs up `isFetchedAfterMount`.

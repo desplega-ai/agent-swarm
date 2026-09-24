@@ -11,7 +11,11 @@ export interface SegmentedControlOption<T extends string> {
   label: ReactNode;
   /** Shown on hover and focus. */
   tooltip?: ReactNode;
-  /** Unavailable: stays hoverable for its tooltip, but cannot be picked. */
+  /**
+   * Unavailable: cannot be picked, but stays hoverable and reachable by the
+   * arrow keys, so its tooltip (the reason) shows on hover and focus. Screen
+   * readers get the tooltip as the option's description.
+   */
   disabled?: boolean;
 }
 
@@ -32,8 +36,10 @@ export interface SegmentedControlProps<T extends string> {
  * A row of mutually exclusive options (radio group semantics). An amber pill
  * sits behind the selected option and slides to a new one on a spring
  * (transform only; reduced motion drops the slide). Arrow keys, Home, and
- * End move the selection like native radios. Clicking the selected option
- * calls `onValueChange` again, so a caller can use it as a retry.
+ * End move the selection like native radios. On an unavailable option they
+ * move focus only: its reason shows, and the selection stays. Clicking the
+ * selected option calls `onValueChange` again, so a caller can use it as a
+ * retry.
  */
 export function SegmentedControl<T extends string>({
   value,
@@ -51,48 +57,41 @@ export function SegmentedControl<T extends string>({
 
   const pickable = (index: number) => !disabled && !options[index]?.disabled;
   const checkedIndex = options.findIndex((option) => option.value === value);
-  // Roving tab stop: the selected option, else the first one that can be picked.
-  const tabStop =
-    checkedIndex >= 0 && pickable(checkedIndex)
-      ? checkedIndex
-      : options.findIndex((_, index) => pickable(index));
+  // Roving tab stop: the selected option, else the first one that can be
+  // picked, else the first one (an unavailable option still shows its reason).
+  const firstPickable = options.findIndex((_, index) => pickable(index));
+  const tabStop = checkedIndex >= 0 ? checkedIndex : Math.max(firstPickable, 0);
 
-  function select(index: number) {
+  // Focus follows the arrow keys over every option. Only an available one is
+  // selected: an unavailable one gets focus, so its tooltip shows the reason.
+  function moveTo(index: number) {
     buttons.current[index]?.focus();
-    onValueChange(options[index].value);
-  }
-
-  /** Next pickable index from `from` in `step` direction, wrapping around. */
-  function nextPickable(from: number, step: 1 | -1): number {
-    for (let i = 1; i <= options.length; i++) {
-      const index = (from + step * i + options.length) % options.length;
-      if (pickable(index)) return index;
-    }
-    return from;
+    if (pickable(index)) onValueChange(options[index].value);
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+    const count = options.length;
     let target: number;
     switch (event.key) {
       case "ArrowRight":
       case "ArrowDown":
-        target = nextPickable(index, 1);
+        target = (index + 1) % count;
         break;
       case "ArrowLeft":
       case "ArrowUp":
-        target = nextPickable(index, -1);
+        target = (index - 1 + count) % count;
         break;
       case "Home":
-        target = nextPickable(-1, 1);
+        target = 0;
         break;
       case "End":
-        target = nextPickable(options.length, -1);
+        target = count - 1;
         break;
       default:
         return;
     }
     event.preventDefault();
-    if (pickable(target)) select(target);
+    moveTo(target);
   }
 
   return (
@@ -111,6 +110,9 @@ export function SegmentedControl<T extends string>({
       {options.map((option, index) => {
         const checked = index === checkedIndex;
         const unavailable = !disabled && option.disabled;
+        // The reason of an unavailable option, for screen readers (hover and
+        // focus show the same text in the tooltip).
+        const reasonId = unavailable && option.tooltip ? `${pillId}-reason-${index}` : undefined;
         const button = (
           // biome-ignore lint/a11y/useSemanticElements: a button hosts the tooltip trigger and the pill; roving tabindex and arrow keys follow the WAI-ARIA radio group pattern
           <button
@@ -120,8 +122,12 @@ export function SegmentedControl<T extends string>({
             type="button"
             role="radio"
             aria-checked={checked}
-            // `aria-disabled` keeps an unavailable option hoverable for its tooltip.
+            // `aria-disabled`, not `disabled`: an unavailable option stays
+            // hoverable and focusable, so its tooltip can show the reason.
             aria-disabled={unavailable || undefined}
+            // Only when set: an explicit `undefined` would override the
+            // description the tooltip trigger adds while it is open.
+            {...(reasonId ? { "aria-describedby": reasonId } : {})}
             disabled={disabled}
             tabIndex={index === tabStop ? 0 : -1}
             onClick={() => {
@@ -153,6 +159,11 @@ export function SegmentedControl<T extends string>({
         );
         return (
           <Fragment key={option.value}>
+            {reasonId ? (
+              <span id={reasonId} className="sr-only">
+                {option.tooltip}
+              </span>
+            ) : null}
             {option.tooltip ? (
               <Tooltip>
                 <TooltipTrigger asChild>{button}</TooltipTrigger>

@@ -4,7 +4,6 @@ import { StatusIcon, type StatusTone } from "@/components/shared/status-icon";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { DefinitionList, InfoRow } from "@/components/ui/info-row";
-import { InfoTip } from "@/components/ui/info-tip";
 import { cn } from "@/lib/utils";
 
 type CredHealth = "verified" | "configured" | "blocked" | "untested" | "unreported";
@@ -17,11 +16,12 @@ function classify(s: AgentCredStatus | null | undefined): CredHealth {
   return "untested";
 }
 
-// Glyphs follow the `/setup` status language: amber check = verified,
-// warning = the live test failed, hollow ring = not checked yet.
+// Glyphs: green check = verified (the amber check is for `/setup` progress
+// only), warning = the live test failed, hollow ring = not checked yet. The
+// icon takes focus and shows `help` in its tooltip, next to the visible label.
 const TONE: Record<CredHealth, { icon: StatusTone; ring: string; label: string; help: string }> = {
   verified: {
-    icon: "done",
+    icon: "success",
     ring: "border-status-success/30",
     label: "Verified",
     help: "At least one live test passed within the verify TTL.",
@@ -48,7 +48,7 @@ const TONE: Record<CredHealth, { icon: StatusTone; ring: string; label: string; 
     icon: "dirty",
     ring: "border-status-neutral/30",
     label: "Unreported",
-    help: "Worker hasn't reported credential state yet — still booting, or `CRED_CHECK_DISABLE=1` is set.",
+    help: "Worker hasn't reported credential state yet: still booting, or `CRED_CHECK_DISABLE=1` is set.",
   },
 };
 
@@ -71,7 +71,7 @@ function formatRelative(ms: number): string {
 // ---------------------------------------------------------------------------
 
 function BedrockProbeCard({ bedrock }: { bedrock: AgentBedrockStatus | null | undefined }) {
-  const icon: StatusTone = bedrock == null ? "dirty" : bedrock.ready ? "done" : "error";
+  const icon: StatusTone = bedrock == null ? "dirty" : bedrock.ready ? "success" : "error";
   const ring =
     bedrock == null
       ? "border-status-neutral/30"
@@ -86,18 +86,17 @@ function BedrockProbeCard({ bedrock }: { bedrock: AgentBedrockStatus | null | un
         : "AWS Bedrock blocked";
   const help =
     bedrock == null
-      ? "Worker hasn't reported Bedrock status yet — still booting, not in Bedrock mode, or CRED_CHECK_DISABLE is set."
+      ? "Worker hasn't reported Bedrock status yet: still booting, not in Bedrock mode, or CRED_CHECK_DISABLE is set."
       : bedrock.ready
-        ? "Probe succeeded — the SDK credential chain is valid for this region."
+        ? "Probe succeeded: the SDK credential chain is valid for this region."
         : "Probe failed. Worker is parked at credential-wait. Check AWS credentials and AWS_REGION.";
 
   return (
     <Card className={cn("border", ring)}>
       <CardContent className="p-4 space-y-3">
         <div className="flex items-center gap-2">
-          <StatusIcon tone={icon} />
+          <StatusIcon tone={icon} label={help} />
           <span className="font-semibold text-sm">{label}</span>
-          <InfoTip content={help} />
         </div>
 
         {bedrock != null ? (
@@ -163,9 +162,8 @@ export function CredentialsPanel({ agent }: { agent: Agent }) {
         <CardContent className="p-4 space-y-3">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
-              <StatusIcon tone={tone.icon} />
+              <StatusIcon tone={tone.icon} label={tone.help} />
               <span className="font-semibold text-sm">{tone.label}</span>
-              <InfoTip content={tone.help} />
             </div>
             <HarnessCell
               harnessProvider={agent.harnessProvider}
@@ -202,7 +200,7 @@ export function CredentialsPanel({ agent }: { agent: Agent }) {
               {cred?.liveTest ? (
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
-                    <StatusIcon tone={cred.liveTest.ok ? "done" : "error"} />
+                    <StatusIcon tone={cred.liveTest.ok ? "success" : "error"} />
                     <span>
                       {cred.liveTest.ok ? "passed" : "failed"} · {cred.liveTest.latency_ms}ms ·{" "}
                       <span className="text-muted-foreground">

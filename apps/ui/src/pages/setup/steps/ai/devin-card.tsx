@@ -1,6 +1,6 @@
+import { KEY_RULES } from "@/components/onboarding/autosave-secret-field";
 import { useSetupSave } from "@/components/onboarding/use-setup-save";
 import { BrandLogo } from "@/components/shared/brand-logo";
-import { KEY_RULES } from "@/components/shared/secret-field";
 import { SecretKeyField, TextField } from "./fields";
 import { type AiCardProps, globalConfigValue } from "./model";
 import { ProviderCard } from "./provider-card";

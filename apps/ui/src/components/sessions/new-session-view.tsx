@@ -10,13 +10,13 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { useTaskTemplates } from "@/api/hooks/use-task-templates";
+import { SuggestionChips } from "@/components/shared/suggestion-chips";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import {
   formatComposeAttachmentUploadError,
   uploadComposeAttachments,
 } from "./compose-attachment-upload";
 import { ComposerDock } from "./composer-dock";
-import { SuggestionChips } from "./suggestion-chips";
 
 export const SUGGESTIONS = [
   "Investigate a flaky test in the auth suite",

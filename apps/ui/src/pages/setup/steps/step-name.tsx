@@ -2,19 +2,20 @@ import { Bot, House, ListTodo } from "lucide-react";
 import { useState } from "react";
 import { useConfigs } from "@/api/hooks/use-config-api";
 import { useStatus } from "@/api/hooks/use-status";
+import { SaveIndicator, WithIndicator } from "@/components/onboarding/save-indicator";
 import { SetupCard } from "@/components/onboarding/setup-card";
+import { useSetupSave } from "@/components/onboarding/use-setup-save";
+import { StatusIcon } from "@/components/shared/status-icon";
+import { InfoTip } from "@/components/ui/info-tip";
+import { Input } from "@/components/ui/input";
+import { SettingsRow } from "@/components/ui/settings-row";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   AutosaveScopeContext,
   useAutosave,
   useAutosaveScope,
   useContinueAction,
-} from "@/components/onboarding/use-autosave";
-import { useSetupSave } from "@/components/onboarding/use-setup-save";
-import { SaveIndicator, StatusIcon, WithIndicator } from "@/components/shared/status-icon";
-import { InfoTip } from "@/components/ui/info-tip";
-import { Input } from "@/components/ui/input";
-import { SettingsRow } from "@/components/ui/settings-row";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+} from "@/hooks/use-autosave";
 import { AVATAR_COLOR_INPUT_FALLBACK, AVATAR_SUGGESTED_SWATCHES } from "@/lib/agent-color";
 import { cn } from "@/lib/utils";
 import { httpUrlError } from "../components/http-url";

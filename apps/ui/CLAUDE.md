@@ -8,7 +8,7 @@ Strategic design context lives in [PRODUCT.md](./PRODUCT.md) (register, users, p
 
 <important if="you are building or changing UI in apps/ui">
 
-Load the `dashboard-ui` maintainer skill ([.claude/internal-skills/dashboard-ui/SKILL.md](../../.claude/internal-skills/dashboard-ui/SKILL.md)): more primitives (`SegmentedControl`, `SecretField`, `StatusIcon`, ...), autosave, motion and layout recipes, interaction rules, and the verification checklist.
+Load the `dashboard-ui` maintainer skill ([.claude/internal-skills/dashboard-ui/SKILL.md](../../.claude/internal-skills/dashboard-ui/SKILL.md)): more primitives (`SegmentedControl`, `SecretInput`, `StatusIcon`, ...), autosave, motion and layout recipes, interaction rules, and the verification checklist.
 
 </important>
 

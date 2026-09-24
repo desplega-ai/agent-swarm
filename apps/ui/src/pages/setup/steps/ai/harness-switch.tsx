@@ -35,12 +35,15 @@ export function HarnessSwitch({
   harnessPhrase,
   targets,
   agents,
+  onSwitched,
 }: {
   /** "Codex", or "Pi-Mono, Opencode, or DeepSeek (dsh)" for the open harnesses card. */
   harnessPhrase: string;
   /** Harnesses the user can switch to. More than one renders a picker. */
   targets: readonly ProviderName[];
   agents: AgentWithTasks[];
+  /** The agents whose switch succeeded (their model level carries over). */
+  onSwitched: (agentIds: string[]) => void;
 }) {
   const queryClient = useQueryClient();
   const [target, setTarget] = useState<ProviderName>(targets[0]);
@@ -67,6 +70,7 @@ export function HarnessSwitch({
     );
     const failures = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
     const switched = ids.length - failures.length;
+    onSwitched(ids.filter((_, index) => results[index].status === "fulfilled"));
     if (failures.length === 0) {
       toast.success(
         `Switched ${switched} agent${switched === 1 ? "" : "s"} to ${targetName}. They pick it up within about 10 seconds.`,

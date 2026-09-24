@@ -1,12 +1,12 @@
 import { Check, Copy } from "lucide-react";
 import { type ComponentProps, type ReactNode, useState } from "react";
-import { useAutosave } from "@/components/onboarding/use-autosave";
-import { SecretField } from "@/components/shared/secret-field";
-import { SaveIndicator, WithIndicator } from "@/components/shared/status-icon";
+import { AutosaveSecretField } from "@/components/onboarding/autosave-secret-field";
+import { SaveIndicator, WithIndicator } from "@/components/onboarding/save-indicator";
 import { Button } from "@/components/ui/button";
 import { InfoTip } from "@/components/ui/info-tip";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useAutosave } from "@/hooks/use-autosave";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 
 /** Env key label in machine voice, with an optional brand mark and info tip. */
@@ -67,14 +67,14 @@ function KeyField({
   );
 }
 
-/** A step 3 secret: the shared autosaving `SecretField` under its env key. */
+/** A step 3 secret: the autosaving `AutosaveSecretField` under its env key. */
 export function SecretKeyField({
   envKey,
   logo,
   info,
   helper,
   ...field
-}: ComponentProps<typeof SecretField> & {
+}: ComponentProps<typeof AutosaveSecretField> & {
   envKey: string;
   logo?: ReactNode;
   info?: ReactNode;
@@ -82,7 +82,7 @@ export function SecretKeyField({
 }) {
   return (
     <KeyField id={field.id} envKey={envKey} logo={logo} info={info} helper={helper}>
-      <SecretField {...field} describedBy={helper ? `${field.id}-help` : undefined} />
+      <AutosaveSecretField {...field} describedBy={helper ? `${field.id}-help` : undefined} />
     </KeyField>
   );
 }

@@ -1,21 +1,17 @@
 import { type UseQueryResult, useQueries, useQueryClient } from "@tanstack/react-query";
-import { Gauge } from "lucide-react";
+import { AlertCircle, Gauge } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api } from "@/api/client";
+import { useUpdateAgentRuntime } from "@/api/hooks/use-agents";
+import { resolvedConfigsQuery } from "@/api/hooks/use-config-api";
 import type { EnvPresenceMap } from "@/api/hooks/use-integrations-meta";
-import type {
-  AgentWithTasks,
-  ReasoningEffortLevel,
-  SwarmConfig,
-  SwarmConfigsResponse,
-} from "@/api/types";
+import type { AgentWithTasks, ReasoningEffortLevel, SwarmConfig } from "@/api/types";
 import { SetupCard, SetupChip } from "@/components/onboarding/setup-card";
-import { useAutosave, useContinueAction } from "@/components/onboarding/use-autosave";
 import { REASONING_EFFORT_LABEL } from "@/components/shared/reasoning-effort-icon";
 import { StatusIcon } from "@/components/shared/status-icon";
 import { InfoTip } from "@/components/ui/info-tip";
 import { SegmentedControl, type SegmentedControlOption } from "@/components/ui/segmented-control";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useAutosave, useContinueAction, useContinueHold } from "@/hooks/use-autosave";
 import { HARNESS_LABEL, hasRuntimeCredential } from "@/lib/agent-runtime-models";
 import { formatCost } from "@/lib/cost-format";
 import {
@@ -44,6 +40,7 @@ const MANAGED_BY: Record<string, string> = {
 };
 
 const NOT_APPLIED = "Not applied yet. Continue applies Optimal.";
+const LOAD_FAILED = "The model did not load, so Continue skips this agent. Click to retry.";
 
 /** A level the operator picked. `nonce` makes a repeated pick store again (a retry). */
 interface Intent {
@@ -55,14 +52,20 @@ interface Row {
   agent: AgentWithTasks;
   /** `null`: the harness picks its own model (Devin, Claude Managed, ACP) or is unknown. */
   harness: DialHarness | null;
-  /** The resolved config is still loading. */
+  /** A dial row's resolved config is still loading (or loading again after a failure). */
   loading: boolean;
+  /** A dial row's resolved config did not load: Continue skips this agent. */
   loadFailed: boolean;
+  /** Load the resolved config again. */
+  retry: () => void;
   model: string;
   effort: string;
   position: DialPosition | null;
   intent: Intent | undefined;
-  /** What to store now: the picked level, or the level carried over after a harness switch. */
+  /**
+   * What to store now: the picked level, or the level carried over after the
+   * operator switched this agent's harness in this session.
+   */
   target: DialSetting | null;
   applied: boolean;
   /** The level the dial shows. `null` selects none (custom model, or loading). */
@@ -80,6 +83,7 @@ function buildRow(
   query: UseQueryResult<SwarmConfig[]>,
   intent: Intent | undefined,
   remembered: DialLevel | undefined,
+  switched: boolean,
   context: DialContext,
 ): Row {
   const harness = dialHarness(agent.harnessProvider);
@@ -88,14 +92,16 @@ function buildRow(
   const modelRow = configValue(configs, "MODEL_OVERRIDE");
   const model = modelRow?.value ?? "";
   const effort = configValue(configs, "REASONING_EFFORT_OVERRIDE")?.value ?? "";
-  const matches = harness ? dialMatches(harness, model, effort) : [];
+  const matches = harness ? dialMatches(harness, model, effort, context) : [];
   const first = matches.length > 0 ? matches[0] : undefined;
   const position: DialPosition | null = harness && model ? (first ?? "custom") : null;
-  // A dial model of another harness, set on this agent: its harness was
-  // switched. Carry the level over. Global or repo overrides stay as they are.
+  // The operator switched this agent's harness here (the R2 switch), and it
+  // still runs a dial model of its old harness: carry the level over. Any
+  // other model outside the dial (Custom) changes only on an explicit pick.
+  // Global or repo overrides stay as they are.
   const carried =
-    position === "custom" && modelRow?.scope === "agent"
-      ? dialLevelOfAnyHarness(model, effort)
+    switched && position === "custom" && modelRow?.scope === "agent"
+      ? dialLevelOfAnyHarness(model, effort, context)
       : null;
   const level = intent?.level ?? carried;
   const target = harness && level ? dialSetting(harness, level, context) : null;
@@ -105,8 +111,10 @@ function buildRow(
   return {
     agent,
     harness,
-    loading: query.isPending,
-    loadFailed: query.isError && !loaded,
+    // Only a dial row needs its resolved config.
+    loading: Boolean(harness) && !loaded && (query.isPending || query.isFetching),
+    loadFailed: Boolean(harness) && !loaded && query.isError && !query.isFetching,
+    retry: () => void query.refetch(),
     model,
     effort,
     position,
@@ -152,13 +160,15 @@ function levelOptions(
 /**
  * Step 3, under the provider cards: one dial per agent (Cheap, Optimal,
  * Max) that stores a concrete model and effort for the agent's harness.
- * Picks store at once. Agents without a model override show Optimal with
- * a hollow dot, and Continue stores Optimal for them.
+ * Picks store at once. Viewing never stores: agents without a model
+ * override show Optimal with a hollow dot, and Continue stores Optimal for
+ * them. Continue waits until every dial row has loaded.
  */
 export function AgentModels({
   agents,
   configs,
   presence,
+  switchedAgentIds,
   setContinueAction,
   className,
 }: {
@@ -166,6 +176,8 @@ export function AgentModels({
   /** Global config rows, to see a stored OpenRouter key. */
   configs: SwarmConfig[];
   presence: EnvPresenceMap;
+  /** Agents whose harness the operator switched in this session (the R2 switch). */
+  switchedAgentIds: ReadonlySet<string>;
   setContinueAction: StepProps["setContinueAction"];
   className?: string;
 }) {
@@ -184,9 +196,7 @@ export function AgentModels({
   // The call and cache entry of `useResolvedConfigs({ agentId })`, one per agent.
   const resolved = useQueries({
     queries: listed.map((agent) => ({
-      queryKey: ["configs", "resolved", { agentId: agent.id }],
-      queryFn: () => api.fetchResolvedConfig({ agentId: agent.id }),
-      select: (data: SwarmConfigsResponse) => data.configs,
+      ...resolvedConfigsQuery({ agentId: agent.id }),
       // A save refetches its own row; other changes can arrive slower.
       refetchInterval: 30_000,
     })),
@@ -212,29 +222,37 @@ export function AgentModels({
     });
   }, []);
 
+  const { mutateAsync: updateRuntime } = useUpdateAgentRuntime();
   const write = useCallback(
     async (agentId: string, setting: DialSetting) => {
-      await api.updateAgentRuntime({
+      await updateRuntime({
         id: agentId,
         harnessProvider: setting.harness,
         model: setting.model,
         allowCustomModel: setting.custom,
         reasoningEffort: setting.effort,
       });
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["configs", "resolved", { agentId }] }),
-        queryClient.invalidateQueries({ queryKey: ["agents"] }),
-        queryClient.invalidateQueries({ queryKey: ["agent", agentId] }),
-        queryClient.invalidateQueries({ queryKey: ["agent-runtime", agentId] }),
-      ]);
+      // The hook already invalidated the rows: wait for this agent's refetch.
+      await queryClient.invalidateQueries(
+        { queryKey: resolvedConfigsQuery({ agentId }).queryKey },
+        { cancelRefetch: false },
+      );
     },
-    [queryClient],
+    [updateRuntime, queryClient],
   );
 
   const rows = listed.map((agent, index) =>
-    buildRow(agent, resolved[index], intents[agent.id], remembered[agent.id], context),
+    buildRow(
+      agent,
+      resolved[index],
+      intents[agent.id],
+      remembered[agent.id],
+      switchedAgentIds.has(agent.id),
+      context,
+    ),
   );
   const dialRows = rows.filter((row) => row.harness !== null);
+  useContinueHold(dialRows.some((row) => row.loading) ? "Loading agent settings…" : null);
   const shownLevels = dialRows.map((row) => row.shown);
   const allLevel =
     shownLevels.length > 0 &&
@@ -243,7 +261,8 @@ export function AgentModels({
       : null;
   const harnessesInUse = [...new Set(dialRows.map((row) => row.harness as DialHarness))];
 
-  // Continue stores Optimal on agents that have no model override yet.
+  // Continue stores Optimal on agents that have no model override yet. A row
+  // that did not load is not among them (its icon says so).
   const defaults = dialRows.filter((row) => row.notApplied);
   useContinueAction(
     setContinueAction,
@@ -365,11 +384,13 @@ function AgentModelRow({
     ? (HARNESS_LABEL[agent.harnessProvider] ?? agent.harnessProvider)
     : "Unknown";
 
-  let status: { tone: "busy" | "saved" | "dirty" | "error" | "none"; label?: string };
+  let status: { tone: "busy" | "saved" | "dirty" | "error" | "none"; label?: string } | null;
   if (save.phase === "pending" || save.phase === "saving")
     status = { tone: "busy", label: "Saving…" };
   else if (save.phase === "error") status = { tone: "error", label: save.error ?? "Not saved." };
-  else if (row.loadFailed) status = { tone: "error", label: "Could not read the current model." };
+  else if (row.loading) status = { tone: "busy", label: "Loading the current model…" };
+  // `null`: the retry button takes the slot.
+  else if (row.loadFailed) status = null;
   else if (row.notApplied) status = { tone: "dirty", label: NOT_APPLIED };
   else if (save.phase === "saved") status = { tone: "saved", label: "Saved" };
   else status = { tone: "none" };
@@ -403,9 +424,30 @@ function AgentModelRow({
             {(agent.harnessProvider && MANAGED_BY[agent.harnessProvider]) ?? "No harness reported"}
           </span>
         )}
-        <StatusIcon tone={status.tone} label={status.label} />
+        {status ? (
+          <StatusIcon tone={status.tone} label={status.label} />
+        ) : (
+          <LoadRetry onRetry={row.retry} />
+        )}
       </span>
     </li>
+  );
+}
+
+/** The error icon of a row whose model did not load. A click loads it again. */
+function LoadRetry({ onRetry }: { onRetry: () => void }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        type="button"
+        onClick={onRetry}
+        aria-label="Retry loading the model"
+        className="inline-flex size-4 shrink-0 items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+      >
+        <AlertCircle className="size-4 text-status-error-strong" aria-hidden />
+      </TooltipTrigger>
+      <TooltipContent className="max-w-64">{LOAD_FAILED}</TooltipContent>
+    </Tooltip>
   );
 }
 

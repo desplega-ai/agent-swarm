@@ -28,8 +28,9 @@ export function ProviderCard({
   onOpenChange,
   rollup,
   agents,
+  onHarnessSwitched,
   children,
-}: Pick<AiCardProps, "open" | "onOpenChange" | "rollup" | "agents"> & {
+}: Pick<AiCardProps, "open" | "onOpenChange" | "rollup" | "agents" | "onHarnessSwitched"> & {
   card: AiCardId;
   icon: ReactNode;
   title: string;
@@ -92,7 +93,12 @@ export function ProviderCard({
       ) : null}
       {/* A key only verifies on a worker that runs this harness. */}
       {noWorker ? (
-        <HarnessSwitch harnessPhrase={harnessPhrase(card)} targets={harnesses} agents={agents} />
+        <HarnessSwitch
+          harnessPhrase={harnessPhrase(card)}
+          targets={harnesses}
+          agents={agents}
+          onSwitched={onHarnessSwitched}
+        />
       ) : null}
     </SetupCard>
   );

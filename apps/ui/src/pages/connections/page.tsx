@@ -15,7 +15,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useAgents } from "@/api/hooks/use-agents";
@@ -57,7 +57,7 @@ import type {
 } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
 import { MarkdownView } from "@/components/shared/markdown-view";
-import { SecretInput } from "@/components/shared/secret-field";
+import { SecretInput } from "@/components/shared/secret-input";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import {
   AlertDialog,
@@ -2552,7 +2552,6 @@ export function OAuthAppDialog({
   const [extraParams, setExtraParams] = useState<Array<{ key: string; value: string }>>([]);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const isEdit = Boolean(app);
-  const clientSecretId = useId();
 
   const selectedPreset = useMemo<OAuthPreset | null>(
     () => presets.find((preset) => preset.id === presetId) ?? null,
@@ -2745,9 +2744,10 @@ export function OAuthAppDialog({
               Client Secret
             </FieldLabel>
             <SecretInput
-              id={clientSecretId}
               value={clientSecret}
               onChange={setClientSecret}
+              autoComplete="new-password"
+              aria-label="Client secret"
               placeholder={isEdit ? "unchanged" : "3c9d1f2e8ab74650cd1208d586cf1a2b34e5d6f7"}
             />
           </div>

@@ -218,8 +218,8 @@ and integers only. Rows in `docs-site/content/docs/(documentation)/reference/tel
 - [x] API review fix round (70e22ee94) + memory rejection fix (99c7232db) + readiness signal (a208d65ed) + footprint test (ead92e761)
 - [x] UI round 2 (dffe8bacc)
 - [x] UI fix round 3 (round-2 reviews, 19 items) + Taras QA round 3 items 20-25 (step icons, hide Skip when done, no footer check, Enter/S/Escape shortcuts, step 6 full width, step 3 title)
-- [x] Per-agent model dial inside step 3 (values approved by Taras; implementation running)
-- [x] Adopt the new UI primitives in existing dashboard components (survey running; Taras confirms the list)
+- [x] Per-agent model dial inside step 3 (values approved by Taras; implemented in c82b5913f)
+- [x] Adopt the new UI primitives in existing dashboard components (survey done, adopted in 85748cbf5 and 70c6b0311; Taras confirms the list)
 - [x] Dev skill for UI work in `.claude/internal-skills/` (symlinked in `.claude/skills/` + `.agents/skills/`)
 - [ ] Phase 6: integration pass, gates, code review, commit, push to #1604, PR body
 - [ ] Phase 7: local QA + design feedback loop with Taras

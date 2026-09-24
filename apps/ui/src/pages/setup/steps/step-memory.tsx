@@ -8,27 +8,23 @@ import type {
   OnboardingMemoryTestRequest,
   OnboardingMemoryTestResponse,
 } from "@/api/types";
-import { FadeIn } from "@/components/onboarding/fade-in";
-import { SetupCard } from "@/components/onboarding/setup-card";
-import {
-  AutosaveScopeContext,
-  useAutosave,
-  useAutosaveScope,
-} from "@/components/onboarding/use-autosave";
-import { BrandLogo } from "@/components/shared/brand-logo";
 import {
   checkSecret,
   KEY_RULES,
-  SecretInput,
   type SecretRule,
   usePasteCommit,
-} from "@/components/shared/secret-field";
+} from "@/components/onboarding/autosave-secret-field";
+import { FadeIn } from "@/components/onboarding/fade-in";
+import { SetupCard } from "@/components/onboarding/setup-card";
+import { BrandLogo } from "@/components/shared/brand-logo";
+import { SecretInput } from "@/components/shared/secret-input";
 import { StatusIcon, StatusLine, type StatusTone } from "@/components/shared/status-icon";
 import { Button } from "@/components/ui/button";
 import { InfoTip } from "@/components/ui/info-tip";
 import { Input } from "@/components/ui/input";
 import { SettingsRow } from "@/components/ui/settings-row";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { AutosaveScopeContext, useAutosave, useAutosaveScope } from "@/hooks/use-autosave";
 import { cn } from "@/lib/utils";
 import type { StepProps } from "../step-contract";
 import { baseUrlError } from "./ai/model";
@@ -362,6 +358,7 @@ export function StepMemory({ onboarding, setContinueBlocker }: StepProps) {
                   probe.commit();
                 }}
                 onPaste={paste.onPaste}
+                autoComplete="new-password"
                 placeholder={usingReuse ? "Using the key from step 3" : preset.placeholder}
                 disabled={usingReuse}
                 invalid={Boolean(keyProblem)}

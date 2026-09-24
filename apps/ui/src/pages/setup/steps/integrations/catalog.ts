@@ -1,5 +1,5 @@
 import type { OnboardingIntegrationMethod, OnboardingSignals } from "@/api/types";
-import { KEY_RULES, type SecretRule } from "@/components/shared/secret-field";
+import { KEY_RULES, type SecretRule } from "@/components/onboarding/autosave-secret-field";
 import { INTEGRATIONS } from "@/lib/integrations-catalog";
 import { httpUrlError } from "../../components/http-url";
 

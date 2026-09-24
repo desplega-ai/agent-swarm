@@ -5,6 +5,7 @@ import {
   type LocalHarnessProvider,
   type ModelGroup,
   modelGroupsForHarness,
+  nearestSupportedLevel,
 } from "./agent-runtime-models";
 
 /**
@@ -95,29 +96,16 @@ export function dialHarness(harness: string | null | undefined): DialHarness | n
   return DIAL_HARNESSES.find((h) => h === harness) ?? null;
 }
 
-const EFFORT_ORDER: readonly ReasoningEffortLevel[] = [
-  "off",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-];
-
 /**
- * Nearest supported level by canonical-order distance, lower level on a tie
- * (the same rule as `nearestSupportedLevel` in the runtime settings).
- * `null` when the model has no effort data: the API rejects any level then.
+ * The supported level nearest to `level` (`nearestSupportedLevel`, the same
+ * rule as the runtime settings). `null` when the model has no effort data:
+ * the API rejects any level then.
  */
 function clampEffort(
   level: ReasoningEffortLevel,
   levels: ReadonlyArray<ReasoningEffortLevel> | undefined,
 ): ReasoningEffortLevel | null {
-  if (!levels?.length) return null;
-  if (levels.includes(level)) return level;
-  const target = EFFORT_ORDER.indexOf(level);
-  const distance = (l: ReasoningEffortLevel) => Math.abs(EFFORT_ORDER.indexOf(l) - target);
-  return [...levels].sort((a, b) => distance(a) - distance(b))[0];
+  return levels ? nearestSupportedLevel(level, levels) : null;
 }
 
 // The API validates effort against the bundled snapshot
@@ -166,59 +154,46 @@ function computeSetting(harness: DialHarness, level: DialLevel, context: DialCon
   };
 }
 
-/** The stored model and effort equal what `setting` writes. dsh ignores effort. */
+/**
+ * The stored model and effort equal exactly what `setting` writes. A setting
+ * without effort (dsh, or no effort data) matches only a cleared effort.
+ */
 export function dialSettingApplied(
   setting: DialSetting,
   model: string | null | undefined,
   effort: string | null | undefined,
 ): boolean {
-  if (setting.model !== (model ?? "")) return false;
-  return setting.harness === "dsh" || setting.effort === (effort || null);
+  return setting.model === (model ?? "") && setting.effort === (effort || null);
 }
 
 /**
- * Every level whose setting equals the stored model and effort, in dial
- * order. More than one when two levels write the same (dsh Optimal and Max).
- * For dsh, both the OpenRouter and the bare DeepSeek id match.
+ * Every level whose setting (in `context`) equals the stored model and
+ * effort, in dial order. More than one when two levels write the same (dsh
+ * Optimal and Max). dsh matches only the id form it writes in `context`.
  */
 export function dialMatches(
   harness: DialHarness,
   model: string | null | undefined,
   effort: string | null | undefined,
+  context: DialContext,
 ): DialLevel[] {
   if (!model) return [];
   return DIAL_LEVELS.filter((level) =>
-    harness === "dsh"
-      ? DSH_MODELS.openrouter[level] === model || DSH_MODELS.deepseek[level] === model
-      : dialSettingApplied(dialSetting(harness, level, { openrouter: false }), model, effort),
+    dialSettingApplied(dialSetting(harness, level, context), model, effort),
   );
 }
 
 /**
- * Where the stored model sits on the dial of `harness`. `null` when the
- * harness has no dial or the agent has no model override.
- */
-export function dialPositionFor(
-  harness: string | null | undefined,
-  model: string | null | undefined,
-  effort: string | null | undefined,
-): DialPosition | null {
-  const dial = dialHarness(harness);
-  if (!dial || !model) return null;
-  const matches = dialMatches(dial, model, effort);
-  return matches.length > 0 ? matches[0] : "custom";
-}
-
-/**
- * The level of another harness's dial that the stored model matches. After a
- * harness switch, this level carries over to the new harness.
+ * The level of any harness's dial that the stored model matches. After the
+ * operator switches an agent's harness, this level carries over to the new one.
  */
 export function dialLevelOfAnyHarness(
   model: string | null | undefined,
   effort: string | null | undefined,
+  context: DialContext,
 ): DialLevel | null {
   for (const harness of DIAL_HARNESSES) {
-    const matches = dialMatches(harness, model, effort);
+    const matches = dialMatches(harness, model, effort, context);
     if (matches.length > 0) return matches[0];
   }
   return null;

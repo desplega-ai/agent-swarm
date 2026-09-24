@@ -9,12 +9,11 @@ import {
   useRef,
   useState,
 } from "react";
-import type { StepProps } from "@/pages/setup/step-contract";
 
 /**
- * Autosave for `/setup` fields: no Save buttons. A field stores itself after
- * the operator stops typing (debounce), or at once on a commit (blur, paste,
- * a swatch click). Only valid values are stored.
+ * Autosave for the fields of a multi-step flow (`/setup`): no Save buttons.
+ * A field stores itself after the operator stops typing (debounce), or at
+ * once on a commit (blur, paste, a swatch click). Only valid values are stored.
  *
  * `pending` = a debounced save is scheduled. `saved` = the last save in this
  * session succeeded and the field still shows that value.
@@ -26,13 +25,24 @@ const SAVING_REASON = "Saving…";
 /** Store about 800 ms after typing stops. */
 const AUTOSAVE_DELAY_MS = 800;
 
+/**
+ * Holds or releases the step's Continue with a reason (its tooltip). `busy`
+ * marks work in flight. The `/setup` shell passes `StepProps.setContinueBlocker`.
+ */
+export type ContinueBlockerSetter = (reason: string | null, options?: { busy?: boolean }) => void;
+
+/** Sets or removes the step's Continue action (`StepProps.setContinueAction` in `/setup`). */
+export type ContinueActionSetter = (action: (() => Promise<void>) | null) => void;
+
 interface AutosaveScopeValue {
-  setBusy: (id: string, busy: boolean) => void;
+  /** Hold Continue with `reason` while it is not null. One hold per `id`. */
+  hold: (id: string, reason: string | null) => void;
 }
 
 /**
  * Every autosave field inside a step reports here, so the step can hold the
- * shell's Continue while any save is scheduled or in flight.
+ * shell's Continue while any save is scheduled or in flight. Other work
+ * holds it through `useContinueHold` (for example a value that still loads).
  */
 export const AutosaveScopeContext = createContext<AutosaveScopeValue | null>(null);
 
@@ -50,7 +60,7 @@ function useLatest<T>(value: T) {
  * `busy` marks work in flight (the footer shows a spinner). Releases on unmount.
  */
 export function useContinueBlocker(
-  setContinueBlocker: StepProps["setContinueBlocker"],
+  setContinueBlocker: ContinueBlockerSetter,
   reason: string | null,
   options?: { busy?: boolean },
 ) {
@@ -66,11 +76,11 @@ export function useContinueBlocker(
 
 /**
  * Offer `action` as the shell's Continue action while it is not null (see
- * `StepProps.setContinueAction`). The shell always runs the newest `action`.
+ * `ContinueActionSetter`). The shell always runs the newest `action`.
  * Removes it on unmount.
  */
 export function useContinueAction(
-  setContinueAction: StepProps["setContinueAction"],
+  setContinueAction: ContinueActionSetter,
   action: (() => Promise<void>) | null,
 ) {
   const setter = useLatest(setContinueAction);
@@ -84,27 +94,40 @@ export function useContinueAction(
 
 /**
  * Step-level scope. Provide the result through `AutosaveScopeContext` around
- * the step body. Holds Continue with "Saving…" while any field saves.
+ * the step body. Holds Continue with "Saving…" while any field saves, else
+ * with the reason of the first other hold. Every hold shows the spinner.
  */
-export function useAutosaveScope(
-  setContinueBlocker: StepProps["setContinueBlocker"],
-): AutosaveScopeValue {
-  const [busyIds, setBusyIds] = useState<ReadonlySet<string>>(() => new Set());
+export function useAutosaveScope(setContinueBlocker: ContinueBlockerSetter): AutosaveScopeValue {
+  const [holds, setHolds] = useState<ReadonlyMap<string, string>>(() => new Map());
 
-  const setBusy = useCallback((id: string, busy: boolean) => {
-    setBusyIds((prev) => {
-      if (prev.has(id) === busy) return prev;
-      const next = new Set(prev);
-      if (busy) next.add(id);
-      else next.delete(id);
+  const hold = useCallback((id: string, reason: string | null) => {
+    setHolds((prev) => {
+      if ((prev.get(id) ?? null) === reason) return prev;
+      const next = new Map(prev);
+      if (reason === null) next.delete(id);
+      else next.set(id, reason);
       return next;
     });
   }, []);
 
-  const saving = busyIds.size > 0;
-  useContinueBlocker(setContinueBlocker, saving ? SAVING_REASON : null, { busy: saving });
+  const reasons = [...holds.values()];
+  const reason = reasons.includes(SAVING_REASON) ? SAVING_REASON : (reasons[0] ?? null);
+  useContinueBlocker(setContinueBlocker, reason, { busy: reason !== null });
 
-  return useMemo(() => ({ setBusy }), [setBusy]);
+  return useMemo(() => ({ hold }), [hold]);
+}
+
+/**
+ * Hold the step's Continue with `reason` while it is not null, through the
+ * surrounding `AutosaveScopeContext`. Releases on unmount.
+ */
+export function useContinueHold(reason: string | null) {
+  const scope = useContext(AutosaveScopeContext);
+  const id = useId();
+  useEffect(() => {
+    scope?.hold(id, reason);
+  }, [scope, id, reason]);
+  useEffect(() => () => scope?.hold(id, null), [scope, id]);
 }
 
 export interface AutosaveOptions {
@@ -140,8 +163,6 @@ export function useAutosave({
   save,
   delayMs = AUTOSAVE_DELAY_MS,
 }: AutosaveOptions): Autosave {
-  const scope = useContext(AutosaveScopeContext);
-  const id = useId();
   const [phase, setPhase] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -234,11 +255,7 @@ export function useAutosave({
     };
   }, [latest, enqueue]);
 
-  const busy = pending || phase === "saving";
-  useEffect(() => {
-    scope?.setBusy(id, busy);
-  }, [scope, id, busy]);
-  useEffect(() => () => scope?.setBusy(id, false), [scope, id]);
+  useContinueHold(pending || phase === "saving" ? SAVING_REASON : null);
 
   const commit = useCallback(() => setCommitTick((t) => t + 1), []);
 

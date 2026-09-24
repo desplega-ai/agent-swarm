@@ -657,18 +657,22 @@ export default function ExtensionDetailPage() {
           <div className="flex flex-col gap-1.5">
             <div className="flex items-center gap-1.5">
               <Label htmlFor="ext-config">Config (JSON)</Label>
-              <InfoTip content="Stored values are scrubbed on read, so secrets show as placeholders. Saving replaces the whole object. The server validates it against the extension schema on enable." />
+              <InfoTip content="Stored values are scrubbed on read, so secrets show as placeholders. The server validates the config against the extension schema on enable." />
             </div>
             <Textarea
               id="ext-config"
               value={configText}
               rows={6}
               className="font-mono text-xs"
+              aria-describedby="ext-config-note"
               onChange={(e) => {
                 setConfigText(e.target.value);
                 setConfigDirty(true);
               }}
             />
+            <p id="ext-config-note" className="text-xs text-muted-foreground">
+              Saving replaces the whole object.
+            </p>
           </div>
           <div className="flex justify-end">
             <Button

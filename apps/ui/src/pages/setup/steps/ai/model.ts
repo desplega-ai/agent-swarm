@@ -74,6 +74,8 @@ export interface AiCardProps {
   agents: AgentWithTasks[];
   /** Called after a save succeeds, with the method that save completes the step with. */
   onSaved: (method: OnboardingAiMethod) => void;
+  /** Called with the agents whose harness the R2 switch changed. */
+  onHarnessSwitched: (agentIds: string[]) => void;
 }
 
 /** Value of a non-secret global config row, for prefilling a field. */

@@ -1,78 +1,10 @@
-import { Eye, EyeOff } from "lucide-react";
-import { type ComponentProps, type ReactNode, useLayoutEffect, useRef, useState } from "react";
-import { useAutosave } from "@/components/onboarding/use-autosave";
-import { SaveIndicator, WithIndicator } from "@/components/shared/status-icon";
+import { type FocusEvent, useLayoutEffect, useRef, useState } from "react";
+import { SaveIndicator, WithIndicator } from "@/components/onboarding/save-indicator";
+import { SecretInput } from "@/components/shared/secret-input";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { cn } from "@/lib/utils";
-
-/**
- * Every `Input` prop passes through to the `<input>` (`id`, `ref`, `name`,
- * `required`, `placeholder`, `disabled`, `aria-*`, focus and paste handlers),
- * except the ones this component owns: `type` (the eye toggle), `className`,
- * and `onChange`, which takes the new value.
- */
-interface SecretInputProps
-  extends Omit<ComponentProps<typeof Input>, "type" | "value" | "onChange" | "className"> {
-  value: string;
-  onChange: (value: string) => void;
-  /** Id of the helper line under the field. Wins over `aria-describedby`. */
-  describedBy?: string;
-  invalid?: boolean;
-  /** Status icon inside the field, left of the eye toggle. */
-  indicator?: ReactNode;
-}
-
-/**
- * Password input with an eye toggle inside the field. `autoComplete` defaults
- * to `"off"`. Pass `"new-password"` on forms that store a credential, so the
- * browser does not fill a saved login.
- */
-export function SecretInput({
-  value,
-  onChange,
-  disabled,
-  describedBy,
-  invalid,
-  indicator,
-  autoComplete = "off",
-  ...inputProps
-}: SecretInputProps) {
-  const [shown, setShown] = useState(false);
-  return (
-    <div className="relative">
-      <Input
-        spellCheck={false}
-        {...inputProps}
-        type={shown ? "text" : "password"}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        disabled={disabled}
-        autoComplete={autoComplete}
-        aria-describedby={describedBy ?? inputProps["aria-describedby"]}
-        aria-invalid={invalid || inputProps["aria-invalid"] || undefined}
-        className={cn("font-mono", indicator ? "pr-16" : "pr-10")}
-      />
-      <span className="absolute top-1/2 right-1.5 flex -translate-y-1/2 items-center gap-1.5">
-        {indicator}
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          // A pointer click keeps focus in the field: peeking is not a blur (no save).
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => setShown((s) => !s)}
-          disabled={disabled}
-          aria-label={shown ? "Hide value" : "Show value"}
-          className="text-muted-foreground"
-        >
-          {shown ? <EyeOff /> : <Eye />}
-        </Button>
-      </span>
-    </div>
-  );
-}
+import { useAutosave } from "@/hooks/use-autosave";
 
 /**
  * How a secret proves it is complete before it is stored. A half-typed key
@@ -194,7 +126,7 @@ export function usePasteCommit(commit: () => void) {
   };
 }
 
-interface SecretFieldProps {
+interface AutosaveSecretFieldProps {
   id: string;
   /** The server has a value for this key. */
   saved: boolean;
@@ -212,11 +144,12 @@ interface SecretFieldProps {
 /**
  * Write-only secret field that saves itself (autosave, no Save button). A
  * saved secret shows as masked dots with a Replace action, and its value
- * never comes back from the API. A new value stores on a paste or a blur, once it passes `rule`
- * (see `SecretRule`), never while typing. The masked view comes back on blur,
- * never under a focused field.
+ * never comes back from the API. A new value stores on a paste, or when focus
+ * leaves the whole field (input, eye toggle, "Keep saved value"), once it
+ * passes `rule` (see `SecretRule`), never while typing. The masked view comes
+ * back on blur, never under a focused field.
  */
-export function SecretField({
+export function AutosaveSecretField({
   id,
   saved,
   onSave,
@@ -225,7 +158,7 @@ export function SecretField({
   disabled,
   describedBy,
   multiline,
-}: SecretFieldProps) {
+}: AutosaveSecretFieldProps) {
   const [draft, setDraft] = useState("");
   const [replacing, setReplacing] = useState(false);
   const [focused, setFocused] = useState(false);
@@ -265,7 +198,11 @@ export function SecretField({
     paste.afterChange(draft, next);
     setDraft(next);
   };
-  const onBlur = () => {
+  // Focus that moves to the eye toggle or "Keep saved value" stays in the
+  // field: only focus that leaves the whole group commits the draft.
+  const onGroupBlur = (event: FocusEvent<HTMLDivElement>) => {
+    if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget))
+      return;
     setFocused(false);
     setBlurred(true);
     autosave.commit();
@@ -313,8 +250,6 @@ export function SecretField({
         ref={textareaRef}
         value={draft}
         onChange={(e) => onChange(e.target.value)}
-        onFocus={() => setFocused(true)}
-        onBlur={onBlur}
         onPaste={paste.onPaste}
         placeholder={placeholder}
         disabled={disabled}
@@ -330,11 +265,10 @@ export function SecretField({
       ref={inputRef}
       value={draft}
       onChange={onChange}
-      onFocus={() => setFocused(true)}
-      onBlur={onBlur}
       onPaste={paste.onPaste}
       placeholder={placeholder}
       disabled={disabled}
+      autoComplete="new-password"
       describedBy={described}
       invalid={Boolean(problem)}
       indicator={indicator}
@@ -342,7 +276,7 @@ export function SecretField({
   );
 
   return (
-    <div className="space-y-1">
+    <div className="space-y-1" onFocus={() => setFocused(true)} onBlur={onGroupBlur}>
       {field}
       {problem ? (
         <p id={problemId} className="text-xs text-status-error-strong">

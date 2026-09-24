@@ -10,10 +10,10 @@ import { setupExitHref } from "@/components/onboarding/onboarding-redirect";
 import { SetupCard } from "@/components/onboarding/setup-card";
 import { ComposerDock } from "@/components/sessions/composer-dock";
 import { SUGGESTIONS } from "@/components/sessions/new-session-view";
-import { SuggestionChips } from "@/components/sessions/suggestion-chips";
 import { BorderBeam } from "@/components/shared/border-beam";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { StatusLine } from "@/components/shared/status-icon";
+import { SuggestionChips } from "@/components/shared/suggestion-chips";
 import { Button } from "@/components/ui/button";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { cn } from "@/lib/utils";
@@ -22,10 +22,11 @@ import type { StepProps } from "../../step-contract";
 type BadgeStatus = ComponentProps<typeof StatusBadge>["status"];
 
 /**
- * The first task: the sessions composer, centered, with the starter
- * suggestions under it. Sending creates a UI task for the current user,
- * records it as the onboarding first task, minimizes setup, and opens the
- * session. Step 6 completes when that task completes.
+ * The first task: the sessions composer at the full setup column width
+ * (`SETUP_COLUMN`), with the starter suggestions under it. Sending creates a
+ * UI task for the current user, records it as the onboarding first task,
+ * minimizes setup, and opens the session. Step 6 completes when that task
+ * completes.
  */
 export function FirstTaskComposer({
   onboarding,
@@ -88,7 +89,7 @@ export function FirstTaskComposer({
     const firstTask = onboarding.signals.firstTask;
     const done = onboarding.state.steps.first_task.status === "done";
     return (
-      <div className="mx-auto w-full max-w-3xl space-y-3">
+      <div className="w-full space-y-3">
         <SetupCard
           icon={<Send className="size-4" />}
           title="First task sent"
@@ -113,13 +114,13 @@ export function FirstTaskComposer({
   }
 
   return (
-    // Full column width: the composer centers itself at its own max width.
+    // The identity card and the composer span the setup column, like the other steps.
     <div className="flex w-full flex-col items-center gap-4">
       {needsIdentity ? (
         <SetupCard
           title="Who is sending this?"
           description="The swarm attributes tasks to this user."
-          className="w-full max-w-3xl"
+          className="w-full"
         >
           <IdentityForm autoFocus={false} instant submitLabels={{ create: "Create user" }} />
         </SetupCard>
@@ -139,6 +140,7 @@ export function FirstTaskComposer({
         disabled={!live}
         sendLabel="Send first task"
         autoFocus={live && !wentLive}
+        fullWidth
         className="bg-transparent p-0"
         // Always mounted, so the agents poll never replays an entrance: only opacity changes.
         decoration={
