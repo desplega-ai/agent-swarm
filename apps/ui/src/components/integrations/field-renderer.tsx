@@ -1,5 +1,6 @@
 import { Check, Copy } from "lucide-react";
 import type { SwarmConfig } from "@/api/types";
+import { SecretInput } from "@/components/onboarding/secret-field";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -274,14 +275,12 @@ function renderInput({
       );
     case "password":
       return (
-        <Input
+        <SecretInput
           id={inputId}
-          type="password"
           placeholder={field.placeholder}
           value={value}
-          onChange={(e) => onChange(e.target.value)}
-          autoComplete="off"
-          aria-describedby={field.helpText ? `${inputId}-help` : undefined}
+          onChange={onChange}
+          describedBy={field.helpText ? `${inputId}-help` : undefined}
         />
       );
     default:

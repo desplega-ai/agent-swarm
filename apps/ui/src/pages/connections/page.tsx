@@ -15,7 +15,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useAgents } from "@/api/hooks/use-agents";
@@ -55,6 +55,7 @@ import type {
   ScriptCredentialBinding,
   SwarmConfigScope,
 } from "@/api/types";
+import { SecretInput } from "@/components/onboarding/secret-field";
 import { DataGrid } from "@/components/shared/data-grid";
 import { MarkdownView } from "@/components/shared/markdown-view";
 import { AlertCallout } from "@/components/ui/alert-callout";
@@ -2551,6 +2552,7 @@ export function OAuthAppDialog({
   const [extraParams, setExtraParams] = useState<Array<{ key: string; value: string }>>([]);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const isEdit = Boolean(app);
+  const clientSecretId = useId();
 
   const selectedPreset = useMemo<OAuthPreset | null>(
     () => presets.find((preset) => preset.id === presetId) ?? null,
@@ -2742,10 +2744,10 @@ export function OAuthAppDialog({
             <FieldLabel tip="From the provider's developer console. Stored write-only - never shown again.">
               Client Secret
             </FieldLabel>
-            <Input
-              type="password"
+            <SecretInput
+              id={clientSecretId}
               value={clientSecret}
-              onChange={(event) => setClientSecret(event.target.value)}
+              onChange={setClientSecret}
               placeholder={isEdit ? "unchanged" : "3c9d1f2e8ab74650cd1208d586cf1a2b34e5d6f7"}
             />
           </div>

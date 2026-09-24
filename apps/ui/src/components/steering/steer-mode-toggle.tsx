@@ -3,8 +3,9 @@
  *
  * There is no `ToggleGroup` / `RadioGroup` primitive in `components/ui/`, and
  * this control is small enough that pulling one in would be a dependency for
- * two buttons. It is composed from `Button` variants instead: the selected
- * segment takes `default` (amber primary), the other `ghost`.
+ * two buttons. It is composed from `ghost` `Button`s instead: an amber pill
+ * sits behind the selected segment and slides between segments on a spring
+ * (the `/setup` stepper pattern). Reduced motion drops the slide.
  *
  * Decision 16 — we never offer a mode the target harness can't honor. When
  * `canInterrupt` is false the Interrupt segment renders as unavailable with the
@@ -15,10 +16,32 @@
  */
 
 import { Clock, Zap } from "lucide-react";
+import { motion, type Transition } from "motion/react";
+import { useId } from "react";
 import type { SteerMode } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+
+/** Same spring as the `/setup` stepper pill. */
+const SPRING: Transition = { type: "spring", stiffness: 520, damping: 42, mass: 0.9 };
+
+/** Amber pill behind the selected segment. `layoutId` slides it between segments. */
+function ActivePill({ layoutId }: { layoutId: string }) {
+  return (
+    <motion.span
+      layoutId={layoutId}
+      transition={SPRING}
+      // Motion corrects the radius under layout scale only when it is a style (6px = rounded-sm).
+      style={{ borderRadius: 6 }}
+      aria-hidden="true"
+      className="absolute inset-0 -z-10 bg-primary shadow-xs"
+    />
+  );
+}
+
+/** Selected segment: amber text-on-pill that keeps its color on hover. */
+const SELECTED = "text-primary-foreground hover:bg-transparent hover:text-primary-foreground";
 
 export interface SteerModeToggleProps {
   value: SteerMode;
@@ -40,11 +63,13 @@ export function SteerModeToggle({
   disabled,
   className,
 }: SteerModeToggleProps) {
+  // One pill per toggle instance, so two composers never share a slide.
+  const pillId = useId();
   const interruptButton = (
     <Button
       type="button"
       size="xs"
-      variant={value === "steer" ? "default" : "ghost"}
+      variant="ghost"
       disabled={disabled}
       aria-pressed={value === "steer"}
       aria-disabled={canInterrupt ? undefined : true}
@@ -53,10 +78,12 @@ export function SteerModeToggle({
         onChange("steer");
       }}
       className={cn(
-        "rounded-sm px-2",
+        "relative isolate rounded-sm px-2",
+        value === "steer" && SELECTED,
         canInterrupt ? null : "cursor-not-allowed opacity-50 hover:bg-transparent",
       )}
     >
+      {value === "steer" ? <ActivePill layoutId={pillId} /> : null}
       <Zap />
       Interrupt
     </Button>
@@ -73,12 +100,13 @@ export function SteerModeToggle({
       <Button
         type="button"
         size="xs"
-        variant={value === "queue" ? "default" : "ghost"}
+        variant="ghost"
         disabled={disabled}
         aria-pressed={value === "queue"}
         onClick={() => onChange("queue")}
-        className="rounded-sm px-2"
+        className={cn("relative isolate rounded-sm px-2", value === "queue" && SELECTED)}
       >
+        {value === "queue" ? <ActivePill layoutId={pillId} /> : null}
         <Clock />
         Queue
       </Button>

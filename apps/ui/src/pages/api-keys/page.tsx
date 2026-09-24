@@ -44,16 +44,16 @@ import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state
 import { formatCost } from "@/lib/cost-format";
 import { cn, formatSmartTime } from "@/lib/utils";
 
-const statusConfig: Record<ApiKeyStatusType, { label: string; dot: string; text: string }> = {
+const statusConfig: Record<ApiKeyStatusType, { label: string; dot: string; tone: string }> = {
   available: {
     label: "AVAILABLE",
     dot: "bg-status-success",
-    text: "text-status-success-strong",
+    tone: "border-status-success/30 text-status-success-strong",
   },
   rate_limited: {
     label: "RATE LIMITED",
     dot: "bg-status-error",
-    text: "text-status-error-strong",
+    tone: "border-status-error/30 text-status-error-strong",
   },
 };
 
@@ -61,15 +61,12 @@ function KeyStatusBadge({ status }: { status: ApiKeyStatusType }) {
   const config = statusConfig[status] ?? {
     label: status,
     dot: "bg-status-neutral",
-    text: "text-status-neutral-strong",
+    tone: "border-status-neutral/30 text-status-neutral-strong",
   };
   return (
-    <Badge
-      variant="outline"
-      className="gap-1.5 text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center"
-    >
-      <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", config.dot)} />
-      <span className={config.text}>{config.label}</span>
+    <Badge variant="outline" size="tag" className={cn("gap-1.5", config.tone)}>
+      <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", config.dot)} />
+      {config.label}
     </Badge>
   );
 }

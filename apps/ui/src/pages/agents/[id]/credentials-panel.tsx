@@ -1,8 +1,10 @@
 import type { Agent, AgentBedrockStatus, AgentCredStatus } from "@/api/types";
+import { StatusIcon, type StatusTone } from "@/components/onboarding/save-indicator";
 import { HarnessCell } from "@/components/shared/harness-cell";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { DefinitionList, InfoRow } from "@/components/ui/info-row";
+import { InfoTip } from "@/components/ui/info-tip";
 import { cn } from "@/lib/utils";
 
 type CredHealth = "verified" | "configured" | "blocked" | "untested" | "unreported";
@@ -15,33 +17,35 @@ function classify(s: AgentCredStatus | null | undefined): CredHealth {
   return "untested";
 }
 
-const TONE: Record<CredHealth, { dot: string; ring: string; label: string; help: string }> = {
+// Glyphs follow the `/setup` status language: amber check = verified,
+// warning = the live test failed, hollow ring = not checked yet.
+const TONE: Record<CredHealth, { icon: StatusTone; ring: string; label: string; help: string }> = {
   verified: {
-    dot: "bg-status-success",
+    icon: "done",
     ring: "border-status-success/30",
     label: "Verified",
     help: "At least one live test passed within the verify TTL.",
   },
   configured: {
-    dot: "bg-status-warning",
+    icon: "warning",
     ring: "border-status-warning/30",
     label: "Live test failed",
     help: "Presence check OK, but the worker's last live test against the upstream API failed.",
   },
   untested: {
-    dot: "bg-status-pending",
+    icon: "dirty",
     ring: "border-status-pending/30",
     label: "Presence ok, untested",
     help: "Worker has the credentials but no live upstream call has been made yet (boot fast-path or live test disabled).",
   },
   blocked: {
-    dot: "bg-status-error",
+    icon: "error",
     ring: "border-status-error/30",
     label: "Missing credentials",
     help: "Worker reported one or more required env vars / auth files are not present. It will park on `waiting_for_credentials`.",
   },
   unreported: {
-    dot: "bg-status-neutral",
+    icon: "dirty",
     ring: "border-status-neutral/30",
     label: "Unreported",
     help: "Worker hasn't reported credential state yet — still booting, or `CRED_CHECK_DISABLE=1` is set.",
@@ -67,8 +71,7 @@ function formatRelative(ms: number): string {
 // ---------------------------------------------------------------------------
 
 function BedrockProbeCard({ bedrock }: { bedrock: AgentBedrockStatus | null | undefined }) {
-  const dot =
-    bedrock == null ? "bg-status-neutral" : bedrock.ready ? "bg-status-success" : "bg-status-error";
+  const icon: StatusTone = bedrock == null ? "dirty" : bedrock.ready ? "done" : "error";
   const ring =
     bedrock == null
       ? "border-status-neutral/30"
@@ -91,12 +94,10 @@ function BedrockProbeCard({ bedrock }: { bedrock: AgentBedrockStatus | null | un
   return (
     <Card className={cn("border", ring)}>
       <CardContent className="p-4 space-y-3">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <span className={cn("h-2 w-2 rounded-full", dot)} />
-            <span className="font-semibold text-sm">{label}</span>
-          </div>
-          <p className="text-xs text-muted-foreground max-w-prose">{help}</p>
+        <div className="flex items-center gap-2">
+          <StatusIcon tone={icon} />
+          <span className="font-semibold text-sm">{label}</span>
+          <InfoTip content={help} />
         </div>
 
         {bedrock != null ? (
@@ -160,13 +161,11 @@ export function CredentialsPanel({ agent }: { agent: Agent }) {
     <div className="space-y-4">
       <Card className={cn("border", tone.ring)}>
         <CardContent className="p-4 space-y-3">
-          <div className="flex items-start justify-between gap-3">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <span className={cn("h-2 w-2 rounded-full", tone.dot)} />
-                <span className="font-semibold text-sm">{tone.label}</span>
-              </div>
-              <p className="text-xs text-muted-foreground max-w-prose">{tone.help}</p>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <StatusIcon tone={tone.icon} />
+              <span className="font-semibold text-sm">{tone.label}</span>
+              <InfoTip content={tone.help} />
             </div>
             <HarnessCell
               harnessProvider={agent.harnessProvider}
@@ -203,12 +202,7 @@ export function CredentialsPanel({ agent }: { agent: Agent }) {
               {cred?.liveTest ? (
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
-                    <span
-                      className={cn(
-                        "h-1.5 w-1.5 rounded-full",
-                        cred.liveTest.ok ? "bg-status-success" : "bg-status-error",
-                      )}
-                    />
+                    <StatusIcon tone={cred.liveTest.ok ? "done" : "error"} />
                     <span>
                       {cred.liveTest.ok ? "passed" : "failed"} · {cred.liveTest.latency_ms}ms ·{" "}
                       <span className="text-muted-foreground">

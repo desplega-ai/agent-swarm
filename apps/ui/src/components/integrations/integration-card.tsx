@@ -21,6 +21,7 @@ import {
   SquareCheckBig,
 } from "lucide-react";
 import { Link } from "react-router-dom";
+import { BrandLogo } from "@/components/onboarding/setup-card";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import type { IntegrationDef } from "@/lib/integrations-catalog";
@@ -65,12 +66,7 @@ interface IntegrationCardProps {
 export function IntegrationCard({ def, status, className }: IntegrationCardProps) {
   const Icon = resolveIcon(def.iconKey);
   const logo = def.logoSrc ? (
-    <img
-      src={def.logoSrc}
-      alt=""
-      className="h-5 w-5 object-contain dark:invert"
-      aria-hidden="true"
-    />
+    <BrandLogo src={def.logoSrc} className="size-5 text-foreground" />
   ) : (
     <Icon className="h-5 w-5 text-foreground" aria-hidden="true" />
   );
