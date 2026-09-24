@@ -44,7 +44,8 @@ const NOISE_TITLES = [
 /** Classify one signal into the default classification schema (proposal §3.2). */
 export default async function classify(args: z.input<typeof argsSchema>, ctx: ScriptContext) {
   const signal = args?.signal;
-  if (!signal) return { ok: false, error: "no signal: ingest rejected the payload" };
+  if (!signal)
+    return { ok: false, error: "no signal: ingest rejected or deduplicated the payload" };
 
   const backend = await loadClassifier(ctx);
   if (backend !== "rules") {

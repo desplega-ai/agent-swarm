@@ -1,9 +1,12 @@
 # Webhook: POST /api/webhooks/<workflowId> with a Sentry-shaped body.
-# The trigger is unsigned on purpose for the curl MVP; see README.md.
+# Signed: the body must carry an HMAC-SHA256 of the raw body in X-Hub-Signature-256
+# (sha256=<hex>), keyed with the global secret SELF_DRIVING_WEBHOOK_SECRET. See README.md.
 name: self-driving-signal
 description: Ingest, classify and cluster one Sentry-shaped signal, then propose a dry-run task
 triggers:
   - type: webhook
+    hmacSecret: secret.SELF_DRIVING_WEBHOOK_SECRET
+    hmacHeader: X-Hub-Signature-256
 triggerSchema:
   type: object
   required: [project, event]

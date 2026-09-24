@@ -9,6 +9,7 @@ export const config = z.object({
   threshold: z.number().int().min(1).default(3),
   repos: z.array(z.object({ project: z.string().min(1), repo: z.string().min(1) })).default([]),
   dispatch: z.literal(false).default(false),
+  cooldownSeconds: z.number().int().min(0).default(300),
 });
 
 const manifest = {
