@@ -6,6 +6,7 @@ import {
   closeDb,
   completeTask,
   createAgent,
+  createInboxMessage,
   createLogEntry,
   createScheduledTask,
   createTaskExtended,
@@ -13,6 +14,7 @@ import {
   ensureSlackRenderV2Activation,
   failTask,
   getDbClient,
+  getInboxMessageById,
   getLogsByEventType,
   getSlackOutcomeMessage,
   getSlackRenderV2ActivatedAt,
@@ -1304,6 +1306,59 @@ describe("Slack renderer v2", () => {
     expect(JSON.stringify(payload?.blocks)).not.toContain("[citation:");
     expect(JSON.stringify(payload?.blocks)).not.toContain("[9]");
     expect(payload?.text).toContain("|[1]> remains");
+  });
+
+  test("slack-reply rejects a mixed inbox/task context before reading or posting task citations", async () => {
+    const owner = await createAgent({ name: "Citation owner", isLead: false, status: "idle" });
+    const caller = await createAgent({ name: "Inbox caller", isLead: false, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_MIXED_CITATIONS");
+    const inbox = await createInboxMessage(caller.id, "Reply here", {
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+    });
+    const task = await createTaskExtended("Private source", {
+      agentId: owner.id,
+      source: "system",
+    });
+    await upsertTaskCitations(task.id, [
+      { index: 1, kind: "url", ref: "https://example.com/private", label: "Private evidence" },
+    ]);
+    const server = new McpServer({ name: "mixed-citation-reply", version: "1" });
+    registerSlackReplyTool(server);
+    const handler = (
+      server as unknown as {
+        _registeredTools: Record<
+          string,
+          {
+            handler: (
+              args: unknown,
+              meta: unknown,
+            ) => Promise<{ structuredContent: { success: boolean; message: string } }>;
+          }
+        >;
+      }
+    )._registeredTools["slack-reply"]!.handler;
+    const meta = { requestInfo: { headers: { "x-agent-id": caller.id } } };
+    const result = await handler(
+      { inboxMessageId: inbox.id, taskId: task.id, message: "Claim [citation:1]" },
+      meta,
+    );
+    expect(result.structuredContent.success).toBe(false);
+    expect(result.structuredContent.message).toContain("not both");
+    expect(calls.some((call) => call.method === "chat.postMessage")).toBe(false);
+    expect((await getInboxMessageById(inbox.id))?.status).toBe("unread");
+    expect((await getTaskById(task.id))?.slackReplySent).toBe(false);
+
+    // The authorized inbox path still works and never pulls another task's sources.
+    const authorized = await handler(
+      { inboxMessageId: inbox.id, message: "Reply [citation:1] here" },
+      meta,
+    );
+    expect(authorized.structuredContent.success).toBe(true);
+    const payload = calls.find((call) => call.method === "chat.postMessage")?.payload;
+    expect(payload?.text).toBe("Reply here");
+    expect(JSON.stringify(payload)).not.toContain("Private evidence");
+    expect((await getInboxMessageById(inbox.id))?.status).toBe("responded");
   });
 
   test("slack-reply drops invalid sources and markers from every custom text object", async () => {

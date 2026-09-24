@@ -60,6 +60,12 @@ export const registerSlackReplyTool = (server: McpServer) => {
       let slackThreadTs: string | undefined;
       let contextKey: string | undefined;
 
+      // A reply must have one authorized context, never an inbox destination
+      // paired with an unrelated task's citations or reply state.
+      if (inboxMessageId && taskId) {
+        return toolErr("Provide either inboxMessageId or taskId, not both.");
+      }
+
       // Determine Slack context from inbox message or task
       if (inboxMessageId) {
         const inboxMsg = await getInboxMessageById(inboxMessageId);
