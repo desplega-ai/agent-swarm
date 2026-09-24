@@ -1,5 +1,5 @@
 import type { ChatUpdateArguments, WebClient } from "@slack/web-api";
-import { getAgentById, getTaskAttachments, markTaskSlackReplySent } from "../be/db";
+import { getAgentById, markTaskSlackReplySent } from "../be/db";
 import type { Agent, AgentTask } from "../types";
 import { getSlackApp } from "./app";
 import {
@@ -15,6 +15,7 @@ import {
   markdownToSlack,
   splitSlackSectionText,
 } from "./blocks";
+import { getSlackOutputAttachments } from "./task-attachments";
 import { slackTaskOutput } from "./task-output";
 
 // Re-export for backward compatibility
@@ -139,7 +140,9 @@ export async function sendTaskResponse(task: AgentTask): Promise<boolean> {
     if (task.status === "completed") {
       const output = slackTaskOutput(task) || "Task completed.";
       const slackOutput = markdownToSlack(output);
-      const attachmentsBlock = formatAttachmentsBlockForSlack(await getTaskAttachments(task.id));
+      const attachmentsBlock = formatAttachmentsBlockForSlack(
+        await getSlackOutputAttachments(task.id),
+      );
       const body = slackOutput + attachmentsBlock;
       const duration =
         task.finishedAt && task.createdAt
@@ -300,7 +303,9 @@ export async function updateToFinal(
   if (task.status === "completed") {
     const output = slackTaskOutput(task) || "Task completed.";
     const slackOutput = markdownToSlack(output);
-    const attachmentsBlock = formatAttachmentsBlockForSlack(await getTaskAttachments(task.id));
+    const attachmentsBlock = formatAttachmentsBlockForSlack(
+      await getSlackOutputAttachments(task.id),
+    );
     const body = slackOutput + attachmentsBlock;
     const duration =
       task.finishedAt && task.createdAt

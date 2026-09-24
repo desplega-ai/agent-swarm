@@ -1433,6 +1433,16 @@ describe("Slack renderer v2", () => {
         slackThreadTs: threadTs,
         contextKey: slackContextKey({ channelId, threadTs }),
       });
+      for (const intent of ["user-upload", "slack-file"]) {
+        await insertTaskAttachment({
+          taskId: ask.id,
+          name: "input.png",
+          kind: "url",
+          url: "https://example.com/input.png",
+          intent,
+          isPrimary: true,
+        });
+      }
       await insertTaskAttachment({
         ...attachment,
         taskId: ask.id,

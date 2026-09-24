@@ -454,6 +454,18 @@ describe("buildTreeNodes", () => {
       driveId: "drive-1",
     });
 
+    for (const task of [parent, child]) {
+      for (const intent of ["user-upload", "slack-file"]) {
+        await insertTaskAttachment({
+          taskId: task.id,
+          name: "input.png",
+          kind: "url",
+          url: "https://example.com/input.png",
+          intent,
+        });
+      }
+    }
+
     const messageTs = "2020202020.000002";
     await registerTreeMessage(parent.id, "C_ATTACH", "2020202020.000001", messageTs);
 

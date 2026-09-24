@@ -15,7 +15,6 @@ import {
   getSlackTreeMessage,
   getSlackTreeMessageByThread,
   getSlackTreeMessages,
-  getTaskAttachments,
   getTaskById,
   isPendingSlackMessage,
   markSlackDeferralResolved,
@@ -48,6 +47,7 @@ import {
 import { buildAskClosure, type ClosureState, closureState } from "./closure";
 import { reactionName, type SlackReactionEvent } from "./reaction-shortcode";
 import { getAgentDisplayName, getAgentEmoji } from "./responses";
+import { getSlackOutputAttachments } from "./task-attachments";
 import { isAwaitingWake, isDeferredTask, slackTaskOutput } from "./task-output";
 
 const TREE_UPDATE_DEBOUNCE_MS = 500;
@@ -1154,7 +1154,7 @@ export async function streamOutcomeCard(
 
   const tasks = await getSlackTasksInThread(task.slackChannelId, task.slackThreadTs);
   const duration = formatV2Duration(new Date(task.createdAt), terminalEnd(task, new Date()));
-  const attachment = attachmentLine(await getTaskAttachments(task.id));
+  const attachment = attachmentLine(await getSlackOutputAttachments(task.id));
   // Re-read slackReplySent rather than trusting the caller's snapshot: it can flip
   // (via the slack-reply tool) between processSlackRenderV2's task fetch and the
   // Slack round trips in the outer render loop that run before this function is
@@ -1293,7 +1293,7 @@ async function resolvedDeferralContent(wake: AgentTask): Promise<string> {
     return outcomePresentation(
       wake,
       renderTaskCitations(content, await getTaskCitations(wake.id)),
-      attachmentLine(await getTaskAttachments(wake.id)),
+      attachmentLine(await getSlackOutputAttachments(wake.id)),
     );
   }
   const card = await getSlackOutcomeMessage(wake.id);

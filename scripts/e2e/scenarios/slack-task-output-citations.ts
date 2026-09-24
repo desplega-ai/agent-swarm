@@ -1,7 +1,6 @@
 import { asRecord, expect, expectStatus } from "../http";
 import type { Scenario } from "../run";
 import {
-  ask,
   claim,
   enableSlackRenderV2Only,
   findSlackTask,
@@ -32,7 +31,13 @@ export const slackTaskOutputCitations: Scenario = {
     ];
 
     for (const testCase of cases) {
-      const message = await ask(ctx, `summarize the release with ${testCase.name} citations`);
+      // Keep these three asks out of Alice's shared 10-per-minute allowance,
+      // which the other visuals scenarios consume in the same API process.
+      const message = await ctx.slack.postMessage({
+        channel: "general",
+        user: "bob",
+        text: `<@${ctx.slack.bot.userId}> summarize the release with ${testCase.name} citations`,
+      });
       ctx.markThread(testCase.name, "C0GENERAL0", message.ts);
       await waitForEyes(ctx, message.ts);
       const task = await findSlackTask(ctx, message.ts);
