@@ -1660,6 +1660,9 @@
       "ExtensionManifest": {
         "type": "object",
         "properties": {
+          "$schema": {
+            "type": "string"
+          },
           "name": {
             "type": "string",
             "minLength": 1,
@@ -1686,6 +1689,85 @@
                 "type": "string",
                 "minLength": 1
               },
+              "scripts": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200,
+                      "description": "Global script name. Must start with `<extension name>-`."
+                    },
+                    "file": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Bundle path of the script source."
+                    },
+                    "description": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "intent": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Defaults to `description`."
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "file",
+                    "description"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "schedules": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200,
+                      "description": "Schedule name. Must start with `<extension name>-`."
+                    },
+                    "description": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "script": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200,
+                      "description": "Name of a script declared in `assets.scripts`."
+                    },
+                    "cronExpression": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "intervalMs": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0
+                    },
+                    "timezone": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "args": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "script"
+                  ],
+                  "additionalProperties": false
+                }
+              },
               "skills": {
                 "type": "array",
                 "items": {
@@ -1693,12 +1775,6 @@
                 }
               },
               "workflows": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "schedules": {
                 "type": "array",
                 "items": {
                   "type": "string"
@@ -1731,14 +1807,11 @@
       "ExtensionInstallBody": {
         "type": "object",
         "properties": {
-          "manifest": {
-            "$ref": "#/components/schemas/ExtensionManifest"
-          },
-          "files": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "string"
-            }
+          "template": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            "description": "Name of a predefined extension in the catalog (`GET /api/extensions/catalog`)."
           },
           "priority": {
             "type": "integer"
@@ -1749,10 +1822,69 @@
           }
         },
         "required": [
-          "manifest",
-          "files"
+          "template"
         ],
         "additionalProperties": false
+      },
+      "ExtensionCatalogItem": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "manifestFile": {
+            "type": "string"
+          },
+          "assets": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "readme": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "installed": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "integer"
+              },
+              "enabled": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "version",
+              "enabled"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "version",
+          "manifestFile",
+          "assets",
+          "readme",
+          "installed"
+        ]
       },
       "ExtensionVersion": {
         "type": "object",
@@ -15995,8 +16127,8 @@
     "/api/extensions/install": {
       "post": {
         "operationId": "extensions_install",
-        "summary": "Validate and install an extension bundle",
-        "description": "Any authenticated agent can install a disabled draft owned by its agent ID. Workers can update only their own bundles; activation remains lead/operator-only.",
+        "summary": "Install a predefined extension from the catalog",
+        "description": "Installs the named template from `GET /api/extensions/catalog`. Inline bundles (`manifest`/`files`) are rejected with `inline_install_disabled`. Any authenticated agent can install a disabled draft owned by its agent ID. Workers can update only their own bundles; activation remains lead/operator-only.",
         "tags": [
           "Extensions"
         ],
@@ -16030,19 +16162,156 @@
                     },
                     "contentDeduped": {
                       "type": "boolean"
+                    },
+                    "assets": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "created": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "script",
+                                  "schedule",
+                                  "workflow",
+                                  "skill"
+                                ]
+                              },
+                              "name": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "name"
+                            ]
+                          }
+                        },
+                        "updated": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "script",
+                                  "schedule",
+                                  "workflow",
+                                  "skill"
+                                ]
+                              },
+                              "name": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "name"
+                            ]
+                          }
+                        },
+                        "skipped": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "script",
+                                  "schedule",
+                                  "workflow",
+                                  "skill"
+                                ]
+                              },
+                              "name": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "name"
+                            ]
+                          }
+                        },
+                        "deleted": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "script",
+                                  "schedule",
+                                  "workflow",
+                                  "skill"
+                                ]
+                              },
+                              "name": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "name"
+                            ]
+                          }
+                        },
+                        "detached": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "script",
+                                  "schedule",
+                                  "workflow",
+                                  "skill"
+                                ]
+                              },
+                              "name": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "name"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "created",
+                        "updated",
+                        "skipped",
+                        "deleted",
+                        "detached"
+                      ],
+                      "description": "Asset changes made by this install. Null when the installed version is staged, not active."
                     }
                   },
                   "required": [
                     "extension",
                     "manifest",
-                    "contentDeduped"
+                    "contentDeduped",
+                    "assets"
                   ]
                 }
               }
             }
           },
           "400": {
-            "description": "Bundle validation failed",
+            "description": "Inline bundle rejected or bundle validation failed",
             "content": {
               "application/json": {
                 "schema": {
@@ -16057,6 +16326,53 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Template not found in the catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/extensions/catalog": {
+      "get": {
+        "operationId": "extensions_catalog",
+        "summary": "List predefined extensions available to install",
+        "tags": [
+          "Extensions"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Predefined extensions with their installed state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "extensions": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ExtensionCatalogItem"
+                      }
+                    }
+                  },
+                  "required": [
+                    "extensions"
+                  ]
                 }
               }
             }
@@ -16317,10 +16633,68 @@
                       "enum": [
                         true
                       ]
+                    },
+                    "assets": {
+                      "type": "object",
+                      "properties": {
+                        "deleted": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "script",
+                                  "schedule",
+                                  "workflow",
+                                  "skill"
+                                ]
+                              },
+                              "name": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "name"
+                            ]
+                          }
+                        },
+                        "detached": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "script",
+                                  "schedule",
+                                  "workflow",
+                                  "skill"
+                                ]
+                              },
+                              "name": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "name"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "deleted",
+                        "detached"
+                      ]
                     }
                   },
                   "required": [
-                    "deleted"
+                    "deleted",
+                    "assets"
                   ]
                 }
               }

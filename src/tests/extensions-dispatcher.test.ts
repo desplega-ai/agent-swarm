@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { closeDb, getDbClient, getKv, initDb } from "../be/db";
+import type { InstallExtensionArgs as ExtensionInstallBody } from "../be/extensions/db";
 import {
   getExtensionById,
   installExtension,
@@ -24,7 +25,6 @@ import {
   stopExtensionRuntime,
 } from "../extensions/lifecycle";
 import { cleanExtensionTmpRoot, loadExtension } from "../extensions/loader";
-import type { ExtensionInstallBody } from "../types";
 import { loadBundleFixture } from "./fixtures/extensions/load";
 
 const TEST_DB_PATH = "./test-extensions-dispatcher.sqlite";

@@ -5,6 +5,7 @@ import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
 import {
   getExtensionByName,
   insertExtensionRun,
+  installExtension,
   listExtensionRuns,
   listExtensionVersions,
   setExtensionState,
@@ -18,7 +19,11 @@ import { clearAuditSink, setAuditSink } from "../rbac";
 import type { User } from "../types";
 import { setRequestAuth } from "../utils/request-auth-context";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
-import { loadBundleFixture } from "./fixtures/extensions/load";
+import {
+  loadBundleFixture,
+  resetFixtureCatalog,
+  useFixtureCatalog,
+} from "./fixtures/extensions/load";
 
 const TEST_DB_PATH = "./test-extensions-http.sqlite";
 const API_KEY = "test-extensions-http-key-1234567890";
@@ -92,12 +97,32 @@ async function dispatch(
   };
 }
 
-async function install(name = "minimal", agentId?: string): Promise<TestResponse> {
+/** Fixtures registered as the catalog before every test; install accepts only these names. */
+const CATALOG_FIXTURES = [
+  "minimal",
+  "post-logger",
+  "bad-import",
+  "worker-runtime",
+  "reserved-assets",
+];
+
+async function install(
+  template = "minimal",
+  agentId?: string,
+  extra: { priority?: number; config?: Record<string, unknown> } = {},
+): Promise<TestResponse> {
   return dispatch("/api/extensions/install", {
     method: "POST",
     agentId,
-    body: JSON.stringify(await loadBundleFixture(name)),
+    body: JSON.stringify({ template, ...extra }),
   });
+}
+
+/** Replace the `minimal` catalog entry with a changed hooks file, as a new template release would. */
+async function useChangedMinimal(suffix: string): Promise<void> {
+  const bundle = await loadBundleFixture("minimal");
+  bundle.files["hooks.ts"] += suffix;
+  await useFixtureCatalog({ minimal: bundle });
 }
 
 let leadId: string;
@@ -116,6 +141,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  resetFixtureCatalog();
   await stopExtensionRuntime();
   closeDb();
   await removeDbFiles();
@@ -129,6 +155,7 @@ afterAll(async () => {
 beforeEach(async () => {
   await stopExtensionRuntime();
   await getDbClient().run("DELETE FROM extensions");
+  await useFixtureCatalog(CATALOG_FIXTURES);
 });
 
 describe("/api/extensions HTTP", () => {
@@ -223,12 +250,8 @@ describe("/api/extensions HTTP", () => {
     expect((detailBody.manifest as { name: string }).name).toBe("minimal");
     expect((detailBody.files as Record<string, string>)["hooks.ts"]).toContain("SwarmExtension");
 
-    const changedBundle = await loadBundleFixture("minimal");
-    changedBundle.files["hooks.ts"] += "\n// changed hooks\n";
-    const changed = await dispatch("/api/extensions/install", {
-      method: "POST",
-      body: JSON.stringify(changedBundle),
-    });
+    await useChangedMinimal("\n// changed hooks\n");
+    const changed = await install();
     expect(changed.status).toBe(200);
     expect(((await changed.json()).extension as { version: number }).version).toBe(2);
 
@@ -286,17 +309,8 @@ describe("/api/extensions HTTP", () => {
     expect(await listExtensionRuns(stored.id)).toHaveLength(0);
     expect((await dispatch(`/api/extensions/${stored.id}`)).text).toContain(workerId);
     expect((await dispatch("/api/extensions")).text).toContain(workerId);
-    const changed = await loadBundleFixture("minimal");
-    changed.files["hooks.ts"] += "\n// worker draft v2\n";
-    expect(
-      (
-        await dispatch("/api/extensions/install", {
-          method: "POST",
-          agentId: workerId,
-          body: JSON.stringify(changed),
-        })
-      ).status,
-    ).toBe(200);
+    await useChangedMinimal("\n// worker draft v2\n");
+    expect((await install("minimal", workerId)).status).toBe(200);
     expect(await getExtensionByName("minimal")).toMatchObject({
       version: 2,
       activeVersion: 1,
@@ -310,13 +324,8 @@ describe("/api/extensions HTTP", () => {
   });
 
   test("install never evaluates worker bundle code", async () => {
-    const bundle = await loadBundleFixture("minimal");
-    bundle.files["hooks.ts"] += '\nthrow new Error("must only run on activation");\n';
-    const response = await dispatch("/api/extensions/install", {
-      method: "POST",
-      agentId: workerId,
-      body: JSON.stringify(bundle),
-    });
+    await useChangedMinimal('\nthrow new Error("must only run on activation");\n');
+    const response = await install("minimal", workerId);
     expect(response.status).toBe(200);
     const stored = (await getExtensionByName("minimal"))!;
     expect(stored).toMatchObject({ enabled: false, status: "disabled", agentId: null });
@@ -373,26 +382,9 @@ describe("/api/extensions HTTP", () => {
         })
       ).status,
     ).toBe(403);
-    const changed = await loadBundleFixture("minimal");
-    changed.files["hooks.ts"] += '\nthrow new Error("inactive worker version executed");\n';
-    expect(
-      (
-        await dispatch("/api/extensions/install", {
-          method: "POST",
-          agentId: workerId,
-          body: JSON.stringify({ ...changed, config: { live: true } }),
-        })
-      ).status,
-    ).toBe(403);
-    expect(
-      (
-        await dispatch("/api/extensions/install", {
-          method: "POST",
-          agentId: workerId,
-          body: JSON.stringify(changed),
-        })
-      ).status,
-    ).toBe(200);
+    await useChangedMinimal('\nthrow new Error("inactive worker version executed");\n');
+    expect((await install("minimal", workerId, { config: { live: true } })).status).toBe(403);
+    expect((await install("minimal", workerId)).status).toBe(200);
     // A permitted reload must keep using version 1, never evaluate the worker draft.
     expect(
       (
@@ -420,12 +412,8 @@ describe("/api/extensions HTTP", () => {
     const existing = await getExtensionByName("minimal");
     await setExtensionState(existing!.id, { enabled: true, status: "enabled" });
 
-    const changedBundle = await loadBundleFixture("minimal");
-    changedBundle.files["hooks.ts"] += "\n// operator update\n";
-    const response = await dispatch("/api/extensions/install", {
-      method: "POST",
-      body: JSON.stringify(changedBundle),
-    });
+    await useChangedMinimal("\n// operator update\n");
+    const response = await install();
 
     expect(response.status).toBe(200);
     const extension = (await response.json()).extension as {
@@ -441,13 +429,8 @@ describe("/api/extensions HTTP", () => {
     const existing = await getExtensionByName("minimal");
     await setExtensionState(existing!.id, { enabled: true, status: "enabled" });
 
-    const changedBundle = await loadBundleFixture("minimal");
-    changedBundle.files["hooks.ts"] += "\n// lead update\n";
-    const response = await dispatch("/api/extensions/install", {
-      method: "POST",
-      agentId: leadId,
-      body: JSON.stringify(changedBundle),
-    });
+    await useChangedMinimal("\n// lead update\n");
+    const response = await install("minimal", leadId);
 
     expect(response.status).toBe(200);
     const extension = (await response.json()).extension as {
@@ -537,10 +520,9 @@ export const config = z.object({ channelId: z.string() });
 const extension: SwarmExtension = () => {};
 export default extension;
 `;
-    const installed = await dispatch("/api/extensions/install", {
-      method: "POST",
-      body: JSON.stringify(bundle),
-    });
+    await useFixtureCatalog({ configured: bundle });
+    const installed = await install("configured");
+    expect(installed.status).toBe(200);
     const extension = (await installed.json()).extension as { id: string };
 
     const invalid = await dispatch(`/api/extensions/${extension.id}/enable`, { method: "POST" });
@@ -564,13 +546,8 @@ export default extension;
     process.env.EXT_QA_TOKEN = "extqaTOKENvalue_1234567890abcdef";
     refreshSecretScrubberCache();
     try {
-      const bundle = await loadBundleFixture("minimal");
-      const installed = await dispatch("/api/extensions/install", {
-        method: "POST",
-        body: JSON.stringify({
-          ...bundle,
-          config: { token: "extqaTOKENvalue_1234567890abcdef", other: "a" },
-        }),
+      const installed = await install("minimal", undefined, {
+        config: { token: "extqaTOKENvalue_1234567890abcdef", other: "a" },
       });
       expect(installed.status).toBe(200);
       const extension = await getExtensionByName("minimal");
@@ -645,12 +622,144 @@ export default extension;
     const expected = [
       ["bad-import", "node:fs"],
       ["worker-runtime", 'runtime "worker" is not supported in v1'],
-      ["reserved-assets", "assets.skills is not supported in v1"],
+      ["reserved-assets", "assets.skills is not supported yet"],
     ];
     for (const [fixture, diagnostic] of expected) {
       const response = await install(fixture);
       expect(response.status).toBe(400);
-      expect(((await response.json()).diagnostics as string[]).join("\n")).toContain(diagnostic!);
+      const body = await response.json();
+      expect(body.error).toBe("extension_validation_failed");
+      expect((body.diagnostics as string[]).join("\n")).toContain(diagnostic!);
     }
+    expect((await (await dispatch("/api/extensions")).json()).extensions).toEqual([]);
+  });
+
+  test("inline bundles are rejected before anything is stored", async () => {
+    const bundle = await loadBundleFixture("minimal");
+    for (const body of [bundle, { template: "minimal", files: bundle.files }]) {
+      const response = await dispatch("/api/extensions/install", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      expect(response.status).toBe(400);
+      const json = await response.json();
+      expect(json.error).toBe("inline_install_disabled");
+      expect(json.message).toContain("template");
+    }
+    expect(await getExtensionByName("minimal")).toBeNull();
+  });
+
+  test("unknown templates return 404", async () => {
+    const response = await install("not-in-catalog");
+    expect(response.status).toBe(404);
+    const body = await response.json();
+    expect(body.error).toBe("extension_template_not_found");
+    expect(body.message).toContain("not-in-catalog");
+    expect(await getExtensionByName("not-in-catalog")).toBeNull();
+  });
+
+  test("install reports asset changes for the active version and null for a staged one", async () => {
+    const first = await install("minimal", leadId);
+    expect((await first.json()).assets).toEqual({
+      created: [],
+      updated: [],
+      skipped: [],
+      deleted: [],
+      detached: [],
+    });
+    const stored = (await getExtensionByName("minimal"))!;
+    await setExtensionState(stored.id, { enabled: true, status: "enabled" });
+    await useChangedMinimal("\n// staged by lead\n");
+    const staged = await install("minimal", leadId);
+    expect(staged.status).toBe(200);
+    const stagedBody = await staged.json();
+    expect(stagedBody.extension).toMatchObject({ version: 2, activeVersion: 1 });
+    expect(stagedBody.assets).toBeNull();
+  });
+
+  test("template assets are created on install and removed on delete", async () => {
+    await useFixtureCatalog(["with-assets"]);
+    const installed = await install("with-assets");
+    expect(installed.status).toBe(200);
+    const body = await installed.json();
+    expect(body.assets).toMatchObject({
+      created: expect.arrayContaining([
+        { kind: "script", name: "with-assets-echo" },
+        { kind: "schedule", name: "with-assets-hourly" },
+      ]),
+      deleted: [],
+      detached: [],
+    });
+    const catalog = (await (await dispatch("/api/extensions/catalog")).json()).extensions;
+    expect(catalog).toEqual([
+      expect.objectContaining({ name: "with-assets", assets: { scripts: 1, schedules: 1 } }),
+    ]);
+
+    const id = (body.extension as { id: string }).id;
+    const deleted = await dispatch(`/api/extensions/${id}`, { method: "DELETE" });
+    expect(deleted.status).toBe(200);
+    expect(((await deleted.json()).assets as { deleted: unknown[] }).deleted).toEqual(
+      expect.arrayContaining([
+        { kind: "script", name: "with-assets-echo" },
+        { kind: "schedule", name: "with-assets-hourly" },
+      ]),
+    );
+  });
+
+  test("GET catalog lists templates with their installed state", async () => {
+    const before = await dispatch("/api/extensions/catalog");
+    expect(before.status).toBe(200);
+    const beforeItems = (await before.json()).extensions as Array<Record<string, unknown>>;
+    expect(beforeItems.map((item) => item.name).sort()).toEqual([...CATALOG_FIXTURES].sort());
+    expect(beforeItems.find((item) => item.name === "minimal")).toEqual({
+      name: "minimal",
+      description: "Minimal extension",
+      version: "1.0.0",
+      manifestFile: "manifest.json",
+      assets: {},
+      readme: null,
+      installed: null,
+    });
+    expect(beforeItems.find((item) => item.name === "reserved-assets")?.assets).toEqual({
+      skills: 1,
+    });
+
+    const installed = await install("minimal", workerId);
+    expect(installed.status).toBe(200);
+    const id = ((await installed.json()).extension as { id: string }).id;
+    const after = (await (await dispatch("/api/extensions/catalog", { agentId: workerId })).json())
+      .extensions as Array<Record<string, unknown>>;
+    expect(after.find((item) => item.name === "minimal")?.installed).toEqual({
+      id,
+      version: 1,
+      enabled: false,
+    });
+    expect(after.find((item) => item.name === "post-logger")?.installed).toBeNull();
+  });
+
+  test("extensions installed inline before the catalog keep their lifecycle", async () => {
+    // Simulate a pre-catalog inline install: no catalog entry and no extension_assets rows.
+    const bundle = await loadBundleFixture("minimal");
+    bundle.manifest = { ...bundle.manifest, name: "legacy-inline" };
+    const { extension } = await installExtension({ ...bundle, createdBy: "legacy-operator" });
+    const path = `/api/extensions/${extension.id}`;
+    expect(
+      (await (await dispatch("/api/extensions/catalog")).json()).extensions as unknown[],
+    ).not.toContainEqual(expect.objectContaining({ name: "legacy-inline" }));
+
+    const enabled = await dispatch(`${path}/enable`, { method: "POST" });
+    expect(enabled.status).toBe(200);
+    expect(await getExtensionByName("legacy-inline")).toMatchObject({
+      enabled: true,
+      status: "enabled",
+      activeVersion: 1,
+    });
+    expect((await dispatch(`${path}/disable`, { method: "POST" })).status).toBe(200);
+    expect(await getExtensionByName("legacy-inline")).toMatchObject({ enabled: false });
+
+    const deleted = await dispatch(path, { method: "DELETE" });
+    expect(deleted.status).toBe(200);
+    expect(await deleted.json()).toEqual({ deleted: true, assets: { deleted: [], detached: [] } });
+    expect(await getExtensionByName("legacy-inline")).toBeNull();
   });
 });

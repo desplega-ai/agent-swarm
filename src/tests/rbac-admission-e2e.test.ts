@@ -10,7 +10,6 @@
 import { Database } from "bun:sqlite";
 import { afterAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { join } from "node:path";
-import { loadBundleFixture } from "./fixtures/extensions/load";
 import {
   api,
   makeScratchDir,
@@ -494,10 +493,10 @@ test.each(["true", "false"])("worker extension ownership with RBAC_ENABLED=%s", 
   });
   try {
     await registerAgent(instance.base, WORKER_A, "extension-owner", false);
-    const bundle = await loadBundleFixture("minimal");
+    // The server subprocess serves the bundled catalog (templates/extensions), not test fixtures.
     const installed = await api(instance.base, "POST", "/api/extensions/install", {
       agentId: WORKER_A,
-      body: bundle,
+      body: { template: "require-ticket-ref" },
     });
     expect(installed.status).toBe(200);
     expect(installed.body.extension).toMatchObject({
@@ -516,9 +515,8 @@ test.each(["true", "false"])("worker extension ownership with RBAC_ENABLED=%s", 
         ).status,
       ).toBe(403);
     }
-    const operatorBundle = { ...bundle, manifest: { ...bundle.manifest, name: "operator-owned" } };
     const operator = await api(instance.base, "POST", "/api/extensions/install", {
-      body: operatorBundle,
+      body: { template: "notify-on-complete" },
     });
     expect(operator.status).toBe(200);
     expect(operator.body.extension.createdByAgentId).toBeNull();

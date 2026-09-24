@@ -21,6 +21,7 @@ const SCRIPT_TOOL_NAMES = [
   "extension-enable",
   "extension-disable",
   "extension-activate-version",
+  "extension-catalog",
   "extension-install",
   "extension-list",
   "get-script-run",

@@ -146,16 +146,99 @@ export default extension;
 
     const reserved = await validateBundle(await loadBundleFixture("reserved-assets"));
     expect(reserved.ok).toBe(false);
-    if (!reserved.ok)
-      expect(reserved.diagnostics).toContain("assets.skills is not supported in v1");
+    if (!reserved.ok) expect(reserved.diagnostics).toContain("assets.skills is not supported yet");
+
+    const workflows = await loadBundleFixture("minimal");
+    workflows.manifest.assets.workflows = ["flow.json"];
+    const workflowsResult = await validateBundle(workflows);
+    expect(workflowsResult).toEqual({
+      ok: false,
+      diagnostics: ["assets.workflows is not supported yet"],
+    });
+  });
+
+  test("accepts declared scripts and schedules", async () => {
+    const bundle = await loadBundleFixture("with-assets");
+    expect(Object.keys(bundle.files).sort()).toEqual(["hooks.ts", "scripts/echo.ts"]);
+    expect(await validateBundle(bundle)).toEqual({ ok: true, manifest: bundle.manifest });
+
+    const cron = await loadBundleFixture("with-assets");
+    cron.manifest.assets.schedules = [
+      {
+        name: "with-assets-daily",
+        script: "with-assets-echo",
+        cronExpression: "0 9 * * *",
+        timezone: "UTC",
+      },
+    ];
+    expect((await validateBundle(cron)).ok).toBe(true);
+  });
+
+  test("rejects a referenced script file missing from files", async () => {
+    const bundle = await loadBundleFixture("with-assets");
+    delete bundle.files["scripts/echo.ts"];
+    expect(await validateBundle(bundle)).toEqual({
+      ok: false,
+      diagnostics: ['Referenced file "scripts/echo.ts" is missing from files'],
+    });
+  });
+
+  test("rejects asset names without the extension prefix", async () => {
+    const bundle = await loadBundleFixture("with-assets");
+    bundle.manifest.assets.scripts = [
+      { name: "echo", file: "scripts/echo.ts", description: "Echo the configured label" },
+    ];
+    bundle.manifest.assets.schedules = [{ name: "hourly", script: "echo", intervalMs: 3_600_000 }];
+    const result = await validateBundle(bundle);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      const diagnostics = result.diagnostics.join("\n");
+      expect(diagnostics).toContain(
+        'assets.scripts.0.name: script name must start with "with-assets-"',
+      );
+      expect(diagnostics).toContain(
+        'assets.schedules.0.name: schedule name must start with "with-assets-"',
+      );
+    }
+  });
+
+  test("rejects schedules for undeclared scripts and without exactly one trigger", async () => {
+    const cases = [
+      [
+        { name: "with-assets-orphan", script: "with-assets-missing", intervalMs: 60_000 },
+        'schedule script "with-assets-missing" is not declared in assets.scripts',
+      ],
+      [
+        { name: "with-assets-none", script: "with-assets-echo" },
+        "schedule needs exactly one of cronExpression or intervalMs",
+      ],
+      [
+        {
+          name: "with-assets-both",
+          script: "with-assets-echo",
+          cronExpression: "0 9 * * *",
+          intervalMs: 60_000,
+        },
+        "schedule needs exactly one of cronExpression or intervalMs",
+      ],
+    ] as const;
+    for (const [schedule, diagnostic] of cases) {
+      const bundle = await loadBundleFixture("with-assets");
+      bundle.manifest.assets.schedules = [schedule];
+      const result = await validateBundle(bundle);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.diagnostics.join("\n")).toContain(diagnostic);
+    }
   });
 
   test("rejects extra files and a missing hooks file", async () => {
     const extra = await loadBundleFixture("minimal");
     extra.files["helper.ts"] = "export const helper = true;";
     const extraResult = await validateBundle(extra);
-    expect(extraResult.ok).toBe(false);
-    if (!extraResult.ok) expect(extraResult.diagnostics.join("\n")).toContain("helper.ts");
+    expect(extraResult).toEqual({
+      ok: false,
+      diagnostics: ["Files not referenced by the manifest are not allowed: helper.ts"],
+    });
 
     const missing = await loadBundleFixture("minimal");
     missing.manifest.assets.hooks = "missing.ts";

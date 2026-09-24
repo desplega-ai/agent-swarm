@@ -2838,30 +2838,98 @@ const SemverSchema = z
     "must be a semantic version",
   );
 
+const ExtensionBundlePathSchema = z
+  .string()
+  .min(1)
+  .refine(
+    isSafeBundlePath,
+    "Must be a relative POSIX file path without empty, dot, or parent segments, at most 256 characters",
+  );
+
+const ExtensionAssetNameSchema = z.string().min(1).max(200);
+
+export const ExtensionScriptAssetSchema = z
+  .object({
+    name: ExtensionAssetNameSchema.describe(
+      "Global script name. Must start with `<extension name>-`.",
+    ),
+    file: ExtensionBundlePathSchema.describe("Bundle path of the script source."),
+    description: z.string().min(1),
+    intent: z.string().min(1).optional().describe("Defaults to `description`."),
+  })
+  .strict();
+export type ExtensionScriptAsset = z.infer<typeof ExtensionScriptAssetSchema>;
+
+export const ExtensionScheduleAssetSchema = z
+  .object({
+    name: ExtensionAssetNameSchema.describe("Schedule name. Must start with `<extension name>-`."),
+    description: z.string().min(1).optional(),
+    script: ExtensionAssetNameSchema.describe("Name of a script declared in `assets.scripts`."),
+    cronExpression: z.string().min(1).optional(),
+    intervalMs: z.number().int().positive().optional(),
+    timezone: z.string().min(1).optional(),
+    args: z.record(z.string(), z.unknown()).optional(),
+  })
+  .strict();
+export type ExtensionScheduleAsset = z.infer<typeof ExtensionScheduleAssetSchema>;
+
 export const ExtensionManifestSchema = z
   .object({
+    $schema: z.string().optional(),
     name: ExtensionNameSchema,
     description: z.string(),
     version: SemverSchema,
     runtime: z.enum(["api", "worker"]),
     assets: z
       .object({
-        hooks: z
-          .string()
-          .min(1)
-          .refine(
-            isSafeBundlePath,
-            "Must be a relative POSIX file path without empty, dot, or parent segments, at most 256 characters",
-          ),
-        skills: z.array(z.string()).optional(),
-        workflows: z.array(z.string()).optional(),
-        schedules: z.array(z.string()).optional(),
+        hooks: ExtensionBundlePathSchema,
+        // Readonly so a hooks file's `const manifest = {...} as const` satisfies the type.
+        scripts: z.array(ExtensionScriptAssetSchema).readonly().optional(),
+        schedules: z.array(ExtensionScheduleAssetSchema).readonly().optional(),
+        skills: z.array(z.string()).readonly().optional(),
+        workflows: z.array(z.string()).readonly().optional(),
       })
       .strict(),
     homepage: z.string().url().optional(),
     author: z.string().min(1).optional(),
   })
   .strict()
+  .superRefine((manifest, ctx) => {
+    const prefix = `${manifest.name}-`;
+    const scriptNames = new Set<string>();
+    const seen = new Set<string>();
+    const checkName = (kind: string, name: string, path: (string | number)[]) => {
+      if (!name.startsWith(prefix)) {
+        ctx.addIssue({ code: "custom", path, message: `${kind} name must start with "${prefix}"` });
+      }
+      const key = `${kind}:${name}`;
+      if (seen.has(key)) {
+        ctx.addIssue({ code: "custom", path, message: `duplicate ${kind} name "${name}"` });
+      }
+      seen.add(key);
+    };
+    for (const [index, script] of (manifest.assets.scripts ?? []).entries()) {
+      checkName("script", script.name, ["assets", "scripts", index, "name"]);
+      scriptNames.add(script.name);
+    }
+    for (const [index, schedule] of (manifest.assets.schedules ?? []).entries()) {
+      checkName("schedule", schedule.name, ["assets", "schedules", index, "name"]);
+      if (!scriptNames.has(schedule.script)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["assets", "schedules", index, "script"],
+          message: `schedule script "${schedule.script}" is not declared in assets.scripts`,
+        });
+      }
+      if ((schedule.cronExpression === undefined) === (schedule.intervalMs === undefined)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["assets", "schedules", index],
+          message: "schedule needs exactly one of cronExpression or intervalMs",
+        });
+      }
+    }
+  })
   .openapi("ExtensionManifest");
 const _manifestShapeGuard: import("./extensions/contract").ExtensionManifest = {} as z.infer<
   typeof ExtensionManifestSchema
@@ -2943,8 +3011,9 @@ export type ExtensionRun = z.infer<typeof ExtensionRunSchema>;
 
 export const ExtensionInstallBodySchema = z
   .object({
-    manifest: ExtensionManifestSchema,
-    files: z.record(z.string(), z.string()),
+    template: ExtensionNameSchema.describe(
+      "Name of a predefined extension in the catalog (`GET /api/extensions/catalog`).",
+    ),
     priority: z.number().int().optional(),
     config: z.record(z.string(), z.unknown()).optional(),
   })

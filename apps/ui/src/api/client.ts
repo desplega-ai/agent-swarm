@@ -38,6 +38,8 @@ import type {
   EventDefinition,
   Extension,
   ExtensionBundle,
+  ExtensionCatalogItem,
+  ExtensionDeleteResult,
   ExtensionInstallInput,
   ExtensionInstallResult,
   ExtensionPatchInput,
@@ -223,9 +225,10 @@ async function throwTriggerSchemaErrorIfMatch(res: Response, genericLabel: strin
 }
 
 /**
- * A rejected extension bundle. `POST /api/extensions/install` answers 400 with
- * `{ error: "extension_validation_failed", diagnostics: string[] }`; the detail
- * page renders `diagnostics` inline next to the editor, one line per finding.
+ * A rejected extension install. `POST /api/extensions/install` answers 400 with
+ * `{ error: "extension_validation_failed", diagnostics: string[] }` when the
+ * catalog bundle fails validation, and 404 for an unknown template; the catalog
+ * page renders `diagnostics` inline, one line per finding.
  */
 export class ExtensionInstallError extends Error {
   readonly diagnostics: string[];
@@ -1374,23 +1377,47 @@ class ApiClient {
     return res.text();
   }
 
+  /** Predefined bundles (`templates/extensions/`) with their installed state. */
+  async fetchExtensionCatalog(): Promise<ExtensionCatalogItem[]> {
+    const url = `${this.getBaseUrl()}/api/extensions/catalog`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch extension catalog: ${res.status}`);
+    const data = (await res.json()) as { extensions: ExtensionCatalogItem[] };
+    return data.extensions;
+  }
+
+  /** Install (or stage a new version of) a catalog template by name. */
   async installExtension(input: ExtensionInstallInput): Promise<ExtensionInstallResult> {
     const url = `${this.getBaseUrl()}/api/extensions/install`;
+    const body: ExtensionInstallInput = { template: input.template };
+    if (input.priority !== undefined) body.priority = input.priority;
+    if (input.config !== undefined) body.config = input.config;
     const res = await fetch(url, {
       method: "POST",
       headers: this.getHeaders(),
-      body: JSON.stringify(input),
+      body: JSON.stringify(body),
     });
     if (!res.ok) {
-      const body = (await res.json().catch(() => ({}))) as {
+      const err = (await res.json().catch(() => ({}))) as {
         error?: string;
+        message?: string;
         diagnostics?: string[];
       };
       const message =
-        body.error === "extension_validation_failed"
+        err.error === "extension_validation_failed"
           ? "Bundle validation failed"
-          : body.error || `Failed to install extension (${res.status})`;
-      throw new ExtensionInstallError(message, body.diagnostics ?? []);
+          : err.message || err.error || `Failed to install extension (${res.status})`;
+      throw new ExtensionInstallError(message, err.diagnostics ?? []);
+    }
+    return res.json();
+  }
+
+  async deleteExtension(id: string): Promise<ExtensionDeleteResult> {
+    const url = `${this.getBaseUrl()}/api/extensions/${encodeURIComponent(id)}`;
+    const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });
+    if (!res.ok) {
+      const err = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+      throw new Error(err.message || err.error || `Failed to delete extension (${res.status})`);
     }
     return res.json();
   }

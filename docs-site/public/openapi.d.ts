@@ -5537,10 +5537,27 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Validate and install an extension bundle
-         * @description Any authenticated agent can install a disabled draft owned by its agent ID. Workers can update only their own bundles; activation remains lead/operator-only.
+         * Install a predefined extension from the catalog
+         * @description Installs the named template from `GET /api/extensions/catalog`. Inline bundles (`manifest`/`files`) are rejected with `inline_install_disabled`. Any authenticated agent can install a disabled draft owned by its agent ID. Workers can update only their own bundles; activation remains lead/operator-only.
          */
         post: operations["extensions_install"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/extensions/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List predefined extensions available to install */
+        get: operations["extensions_catalog"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -21120,6 +21137,7 @@ export interface components {
             updatedAt: string;
         };
         ExtensionManifest: {
+            $schema?: string;
             name: string;
             description: string;
             version: string;
@@ -21127,23 +21145,57 @@ export interface components {
             runtime: "api" | "worker";
             assets: {
                 hooks: string;
+                scripts?: {
+                    /** @description Global script name. Must start with `<extension name>-`. */
+                    name: string;
+                    /** @description Bundle path of the script source. */
+                    file: string;
+                    description: string;
+                    /** @description Defaults to `description`. */
+                    intent?: string;
+                }[];
+                schedules?: {
+                    /** @description Schedule name. Must start with `<extension name>-`. */
+                    name: string;
+                    description?: string;
+                    /** @description Name of a script declared in `assets.scripts`. */
+                    script: string;
+                    cronExpression?: string;
+                    intervalMs?: number;
+                    timezone?: string;
+                    args?: {
+                        [key: string]: unknown;
+                    };
+                }[];
                 skills?: string[];
                 workflows?: string[];
-                schedules?: string[];
             };
             /** Format: uri */
             homepage?: string;
             author?: string;
         };
         ExtensionInstallBody: {
-            manifest: components["schemas"]["ExtensionManifest"];
-            files: {
-                [key: string]: string;
-            };
+            /** @description Name of a predefined extension in the catalog (`GET /api/extensions/catalog`). */
+            template: string;
             priority?: number;
             config?: {
                 [key: string]: unknown;
             };
+        };
+        ExtensionCatalogItem: {
+            name: string;
+            description: string;
+            version: string;
+            manifestFile: string;
+            assets: {
+                [key: string]: number;
+            };
+            readme: string | null;
+            installed: {
+                id: string;
+                version: number;
+                enabled: boolean;
+            } | null;
         };
         ExtensionVersion: {
             id: string;
@@ -22193,10 +22245,38 @@ export interface operations {
                         extension: components["schemas"]["Extension"];
                         manifest: components["schemas"]["ExtensionManifest"];
                         contentDeduped: boolean;
+                        /** @description Asset changes made by this install. Null when the installed version is staged, not active. */
+                        assets: {
+                            created: {
+                                /** @enum {string} */
+                                kind: "script" | "schedule" | "workflow" | "skill";
+                                name: string;
+                            }[];
+                            updated: {
+                                /** @enum {string} */
+                                kind: "script" | "schedule" | "workflow" | "skill";
+                                name: string;
+                            }[];
+                            skipped: {
+                                /** @enum {string} */
+                                kind: "script" | "schedule" | "workflow" | "skill";
+                                name: string;
+                            }[];
+                            deleted: {
+                                /** @enum {string} */
+                                kind: "script" | "schedule" | "workflow" | "skill";
+                                name: string;
+                            }[];
+                            detached: {
+                                /** @enum {string} */
+                                kind: "script" | "schedule" | "workflow" | "skill";
+                                name: string;
+                            }[];
+                        } | null;
                     };
                 };
             };
-            /** @description Bundle validation failed */
+            /** @description Inline bundle rejected or bundle validation failed */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -22212,6 +22292,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Template not found in the catalog */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    extensions_catalog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Predefined extensions with their installed state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        extensions: components["schemas"]["ExtensionCatalogItem"][];
+                    };
                 };
             };
         };
@@ -22313,6 +22424,18 @@ export interface operations {
                     "application/json": {
                         /** @enum {boolean} */
                         deleted: true;
+                        assets: {
+                            deleted: {
+                                /** @enum {string} */
+                                kind: "script" | "schedule" | "workflow" | "skill";
+                                name: string;
+                            }[];
+                            detached: {
+                                /** @enum {string} */
+                                kind: "script" | "schedule" | "workflow" | "skill";
+                                name: string;
+                            }[];
+                        };
                     };
                 };
             };

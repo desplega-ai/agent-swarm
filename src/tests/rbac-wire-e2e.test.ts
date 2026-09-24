@@ -18,7 +18,6 @@
 import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { join } from "node:path";
-import { loadBundleFixture } from "./fixtures/extensions/load";
 import {
   api,
   LEAD,
@@ -121,9 +120,10 @@ afterAll(async () => {
 
 describe("MCP gate matrix", () => {
   test("worker MCP installs retain ownership and lifecycle calls remain lead-only", async () => {
-    const bundle = await loadBundleFixture("minimal");
-    bundle.manifest.name = "worker-owned-wire";
-    const installed = await mcpCall(base, WORKER_A, sidA, "extension-install", bundle);
+    // The server subprocess serves the bundled catalog (templates/extensions), not test fixtures.
+    const installed = await mcpCall(base, WORKER_A, sidA, "extension-install", {
+      template: "require-verification-note",
+    });
     expect(installed.structuredContent).toMatchObject({ success: true });
     expect(installed.structuredContent).toMatchObject({
       createdByAgentId: WORKER_A,

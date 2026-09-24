@@ -32,6 +32,7 @@ import { registerDeferTaskTool } from "./tools/defer-task";
 import { registerDeleteChannelTool } from "./tools/delete-channel";
 import { registerDeletePageTool } from "./tools/delete-page";
 import { registerExtensionActivateVersionTool } from "./tools/extension-activate-version";
+import { registerExtensionCatalogTool } from "./tools/extension-catalog";
 import { registerExtensionDeleteTool } from "./tools/extension-delete";
 import { registerExtensionDisableTool } from "./tools/extension-disable";
 import { registerExtensionEnableTool } from "./tools/extension-enable";
@@ -354,6 +355,7 @@ export async function createServer(
     registerExtensionEnableTool(server);
     registerExtensionDisableTool(server);
     registerExtensionActivateVersionTool(server);
+    registerExtensionCatalogTool(server);
     registerExtensionInstallTool(server);
     registerExtensionListTool(server);
     registerScriptDeleteTool(server);
@@ -420,6 +422,7 @@ export async function createServer(
     registerExtensionEnableTool(server);
     registerExtensionDisableTool(server);
     registerExtensionActivateVersionTool(server);
+    registerExtensionCatalogTool(server);
     registerExtensionInstallTool(server);
     registerExtensionListTool(server);
     registerScriptDeleteTool(server);

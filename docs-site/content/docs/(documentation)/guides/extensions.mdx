@@ -4,11 +4,12 @@ description: Install trusted TypeScript hooks that change swarm orchestration at
 ---
 
 Extensions let operators change swarm behavior without changing the API server source.
-Each extension is a bundle with a JSON manifest and a files map.
+Each extension is a bundle with a YAML or JSON manifest and the files it references.
+You install extensions by name from a predefined catalog.
 
-Version 1 accepts one `hooks` asset.
-The `skills`, `workflows`, and `schedules` asset keys are reserved.
-The installer rejects bundles that use those keys.
+A bundle has one `hooks` file and can also ship scripts and schedules.
+The `skills` and `workflows` asset keys are reserved.
+The installer rejects bundles that list anything under those keys.
 
 Extension identities are internal execution principals. They do not appear in normal agent listings, status counts, or Slack rosters, and cannot receive task or schedule assignments.
 
@@ -59,8 +60,9 @@ Workers may stage versions of their own bundles and PATCH or DELETE their own
 disabled extensions. They cannot overwrite another owner's bundle. Leads,
 operators, and dashboard users retain access to all bundles.
 
-New installs are disabled and inert: validation typechecks the bundle without
-importing it. Enabling and version activation require a lead, operator, or dashboard
+New installs are disabled: validation typechecks the bundle without importing it,
+so the hooks stay inert. Bundled scripts are callable from install; see
+[Bundled assets](#bundled-assets). Enabling and version activation require a lead, operator, or dashboard
 user. Workers may stage code-only versions of an enabled extension, but cannot
 PATCH it or change its live config/priority through reinstall.
 
@@ -72,28 +74,50 @@ It also rejects computed `import()` and `require()` expressions.
 
 ## Bundle format
 
-Send the manifest and every referenced file in one request:
+Each predefined extension is a directory under `templates/extensions/`.
+The directory holds exactly one `manifest.yaml`, `manifest.yml`, or `manifest.json`, the files the manifest references, and a `README.md`.
+The directory name must equal the manifest `name`.
 
-```json
-{
-  "manifest": {
-    "name": "route-channel-to-agent",
-    "description": "Routes one Slack channel to a configured agent",
-    "version": "1.0.0",
-    "runtime": "api",
-    "assets": { "hooks": "hooks.ts" }
-  },
-  "files": {
-    "hooks.ts": "import type { SwarmExtension } from \"swarm-extension\";\nconst extension: SwarmExtension = (api) => { /* handlers */ };\nexport default extension;"
-  },
-  "config": {
-    "channelId": "C01234567",
-    "agentId": "2ce0c478-c7c4-4df7-bc68-1fb4e2f2a12c"
-  }
-}
+This manifest from the `task-digest` template ships hooks, a script, and a schedule:
+
+```yaml
+# yaml-language-server: $schema=../manifest.schema.json
+name: task-digest
+description: Daily digest of tasks completed and failed in the last 24 hours
+version: 1.0.0
+runtime: api
+assets:
+  hooks: hooks.ts
+  scripts:
+    - name: task-digest-collect
+      file: scripts/collect.ts
+      description: Count tasks completed and failed in the last 24 hours and summarize them
+      intent: Produce a daily digest of swarm task outcomes
+  schedules:
+    - name: task-digest-daily
+      description: Runs task-digest-collect every day at 09:00 UTC
+      script: task-digest-collect
+      cronExpression: "0 9 * * *"
+      timezone: UTC
+      args:
+        hours: 24
 ```
 
+A JSON manifest sets `"$schema": "../manifest.schema.json"` instead of the comment.
+`templates/extensions/manifest.schema.json` gives your editor completion and shape checks.
+
+A script entry has `name`, `file`, `description`, and an optional `intent` that defaults to `description`.
+A schedule entry has `name`, an optional `description`, `script`, exactly one of `cronExpression` or `intervalMs`, an optional `timezone` (default `UTC`), and optional `args`.
+
+Install also enforces rules that the JSON Schema does not contain:
+
+- Every script and schedule name starts with the extension name and a hyphen, such as `task-digest-`.
+- A schedule's `script` names a script declared in `assets.scripts`.
+- A schedule sets exactly one of `cronExpression` or `intervalMs`.
+- Names do not repeat within a kind.
+
 The install path validates the manifest, bundle paths, imports, and TypeScript types.
+It also typechecks every script and checks every schedule's timing before it writes anything.
 Each changed bundle creates an immutable version snapshot.
 A lead, operator, or dashboard user can activate any stored version.
 
@@ -205,13 +229,22 @@ A lead, operator, or dashboard user must enable it again.
 
 ## Install and operate
 
-Use REST for complete lifecycle control:
+The catalog is the only install source.
+List it with `GET /api/extensions/catalog` or the `extension-catalog` MCP tool.
+Each entry shows the template's asset counts, its README, and whether it is installed.
+In the dashboard, open Settings, Extensions, and select **Install extension** to reach the catalog page at `/settings/extensions/new`.
+
+Install a template by name.
+The body accepts only `template`, `priority`, and `config`:
 
 ```bash
+curl "$API/api/extensions/catalog" \
+  -H "Authorization: Bearer $KEY"
+
 curl -X POST "$API/api/extensions/install" \
   -H "Authorization: Bearer $KEY" \
   -H "Content-Type: application/json" \
-  --data-binary @bundle.json
+  -d '{"template":"task-digest"}'
 
 curl -X POST "$API/api/extensions/<id>/enable" \
   -H "Authorization: Bearer $KEY"
@@ -225,11 +258,43 @@ curl -X POST "$API/api/extensions/<id>/activate-version" \
   -d '{"version":1}'
 ```
 
+A body with `manifest` or `files` returns 400 `inline_install_disabled`.
+An unknown template returns 404 `extension_template_not_found`.
+The install response includes `assets` with the `created`, `updated`, `skipped`, `deleted`, and `detached` assets.
+`assets` is `null` when the installed version is staged, not active.
+If a script or schedule with the same name already exists outside this extension, install fails and writes nothing.
+
 The Settings page provides install, edit, activation, version, and run-log controls.
-Agents can use the `extension-install`, `extension-list`, `extension-enable`, `extension-disable`, `extension-activate-version`, and `extension-delete` MCP tools.
+Agents can use the `extension-catalog`, `extension-install`, `extension-list`, `extension-enable`, `extension-disable`, `extension-activate-version`, and `extension-delete` MCP tools.
 The script SDK exposes the same names with underscores, such as `ctx.swarm.extension_enable({ id })`.
 Enable, disable, and activate-version require a lead, operator, or dashboard user. Workers can create extensions and update or delete only their own disabled drafts. Delete refuses enabled extensions; an authorized caller must disable them first.
 The MCP install tool never activates a version.
+Its input is `{ template, priority?, config? }`.
+
+Extensions installed from inline bundles before the catalog keep loading, enabling, disabling, and uninstalling.
+They have no bundled assets and cannot receive new inline versions.
+Installing a catalog template with the same name adds a version to the existing extension.
+
+## Bundled assets
+
+Install writes the scripts and schedules in the same transaction as the extension, when the installed version is active.
+Scripts are global and owned by the `ext:<name>` agent.
+Scripts have no enabled state: they are callable from install, whether or not the extension is enabled.
+Schedules run their script as the `ext:<name>` agent.
+
+| Action | Scripts | Schedules |
+| --- | --- | --- |
+| Install | Created and callable at once | Created disabled |
+| Enable | No change | The first enable turns them on. Later enables restore the state recorded at disable, so a schedule you turned off stays off. |
+| Disable | No change | Paused |
+| Upgrade | Unedited scripts update. Edited scripts stay and report as `skipped`. | Same rule |
+| Upgrade drops the asset | Deleted if unedited, detached if edited | Same rule |
+| Uninstall | Deleted if unedited, detached if edited | Same rule |
+
+An upgrade is a version activation, or an install that activates the new version.
+A detached asset stays in place, but the extension no longer tracks it.
+Uninstall works only on a disabled extension.
+`DELETE /api/extensions/{id}` returns `{ deleted: true, assets: { deleted, detached } }`.
 
 ## Example hooks
 
@@ -341,7 +406,10 @@ export default extension;
 ## Version 1 limits
 
 - Only API runtime hooks can run.
-- Only the hooks asset can install.
+- Extensions install only from the catalog. Inline bundles are rejected.
+- Hooks, scripts, and schedules are the only assets. Skills and workflows are not supported yet.
+- Auto-disable after consecutive hook failures does not pause schedules. Only an explicit disable pauses them.
+- Scheduled script runs do not check the state of the extension's hooks.
 - Tool events cover agent-facing MCP calls only.
 - Slack route events cover the Slack message handler only.
 - Heartbeat hooks can change remediation only after the sweep finds a stalled task.

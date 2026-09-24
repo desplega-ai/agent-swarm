@@ -49,11 +49,23 @@ export function useExtensionTypeDefs() {
   });
 }
 
-/** Invalidate every query that reads an extension after a write. */
+/** Predefined bundles from `templates/extensions/`, each with its installed state. */
+export function useExtensionCatalog() {
+  return useQuery({
+    queryKey: ["extension-catalog"],
+    queryFn: () => api.fetchExtensionCatalog(),
+  });
+}
+
+/**
+ * Invalidate every query that reads an extension after a write. The catalog
+ * carries each template's installed state, so it is refreshed on every write.
+ */
 function useExtensionInvalidator() {
   const queryClient = useQueryClient();
   return (id?: string) => {
     void queryClient.invalidateQueries({ queryKey: ["extensions"] });
+    void queryClient.invalidateQueries({ queryKey: ["extension-catalog"] });
     if (id) {
       void queryClient.invalidateQueries({ queryKey: ["extension", id] });
       void queryClient.invalidateQueries({ queryKey: ["extension-versions", id] });
@@ -67,6 +79,21 @@ export function useInstallExtension() {
   return useMutation({
     mutationFn: (input: ExtensionInstallInput) => api.installExtension(input),
     onSuccess: (result) => invalidate(result.extension.id),
+  });
+}
+
+export function useDeleteExtension(id: string) {
+  const invalidate = useExtensionInvalidator();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.deleteExtension(id),
+    onSuccess: () => {
+      invalidate();
+      // The record is gone; drop its per-id caches instead of refetching a 404.
+      queryClient.removeQueries({ queryKey: ["extension", id] });
+      queryClient.removeQueries({ queryKey: ["extension-versions", id] });
+      queryClient.removeQueries({ queryKey: ["extension-runs", id] });
+    },
   });
 }
 

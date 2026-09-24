@@ -4,17 +4,25 @@ An extension is a trusted TypeScript hook bundle that runs inside the swarm API 
 
 Do not use an extension for work that one task, one script, or one schedule can do.
 
+## Install only from the catalog
+
+Extensions install only from the predefined catalog in the repo (`templates/extensions/<name>/`). Inline bundles are rejected with `inline_install_disabled`. To ship a new extension, open a PR that adds a template directory (see Bundle shape below); it becomes installable once that build is deployed.
+
 ## Tools
 
-`extension-install` and `extension-list`. They are deferred. Load them with your harness tool search before the first call.
+`extension-catalog`, `extension-install` and `extension-list`. They are deferred. Load them with your harness tool search before the first call.
 
-`extension-install` validates the bundle (manifest, imports, typecheck against the hook contract) and stores it. Any authenticated agent, including a worker, can install a new bundle. Your agent is recorded as its owner in `createdByAgentId`; `extension-list` exposes that field. Always send your `X-Agent-ID` when using REST so ownership is attributed to you.
+`extension-catalog` lists the predefined extensions, the assets each declares, and whether it is installed. `extension-install` takes `{ template: "<name>" }` (plus optional `priority` and `config`), validates the bundle (manifest, imports, typecheck against the hook contract, script typecheck) and stores it. Any authenticated agent, including a worker, can install. Your agent is recorded as its owner in `createdByAgentId`; `extension-list` exposes that field. Always send your `X-Agent-ID` when using REST so ownership is attributed to you.
+
+Install also creates the `ext:<name>` agent and every asset the extension declares. Scripts are live and callable right away (scripts have no enabled state). Schedules are created disabled.
 
 Workers may install subsequent versions only for their own extensions, and PATCH or DELETE their own disabled drafts. Ownership stays with the original creator; each version records its writer as `changedByAgentId`. Leads, operators, and dashboard users retain access to all bundles.
 
-A new install is disabled and inert. A lead, operator, or dashboard user must enable it with `extension-enable` or `POST /api/extensions/{id}/enable`. Workers cannot enable, disable, or activate versions. Report the extension name and the required activation step.
+A new install is disabled and inert. A lead, operator, or dashboard user must enable it with `extension-enable` or `POST /api/extensions/{id}/enable`. Enabling turns its schedules on; disabling pauses them and remembers which ones you had turned off. Workers cannot enable, disable, or activate versions. Report the extension name and the required activation step.
 
-Installing changed files under your existing name stages a new version without activating it. Workers may stage code-only updates while an extension is enabled, but cannot PATCH or change its live config/priority. Ask a lead or operator to make those changes. `EXTENSION_ALLOW_LEAD_ACTIVATION=false` restricts activation to operators/dashboard users.
+Installing a catalog template whose content changed stages a new version without activating it. Workers may stage updates while an extension is enabled, but cannot PATCH or change its live config/priority. Ask a lead or operator to make those changes. `EXTENSION_ALLOW_LEAD_ACTIVATION=false` restricts activation to operators/dashboard users.
+
+Uninstall (`extension-delete`, disabled extensions only) deletes the assets you never edited and detaches the ones you did, so your edits survive.
 
 ## Get the contract before you write hooks
 
@@ -43,21 +51,28 @@ curl -s "$MCP_BASE_URL/api/extensions/type-defs" \
 
 ## Bundle shape
 
-The bundle is a manifest plus a files map. Version 1 accepts one file, the `assets.hooks` TypeScript file, and only `runtime: "api"`.
+A predefined extension is a directory `templates/extensions/<name>/` with exactly one manifest, `manifest.yaml`, `manifest.yml` or `manifest.json`, plus the files it references and a `README.md`. Only `runtime: "api"` is supported. Type the manifest with the generated JSON Schema, `templates/extensions/manifest.schema.json`:
 
-```json
-{
-  "manifest": {
-    "name": "require-ticket-ref",
-    "description": "Blocks REST and MCP tasks that do not name a ticket",
-    "version": "1.0.0",
-    "runtime": "api",
-    "assets": { "hooks": "hooks.ts" }
-  },
-  "files": { "hooks.ts": "<file content>" },
-  "config": { "pattern": "DES-\\d+" }
-}
+```yaml
+# yaml-language-server: $schema=../manifest.schema.json
+name: task-digest
+description: Daily digest of completed and failed tasks
+version: 1.0.0
+runtime: api
+assets:
+  hooks: hooks.ts
+  scripts:
+    - name: task-digest-collect          # must start with "<name>-"
+      file: scripts/collect.ts
+      description: Count tasks finished in the last 24 hours
+  schedules:
+    - name: task-digest-daily            # must start with "<name>-"
+      script: task-digest-collect        # a script declared above
+      cronExpression: "0 9 * * *"        # or intervalMs, exactly one
+      timezone: UTC
 ```
+
+A JSON manifest carries `"$schema": "../manifest.schema.json"` instead. After changing a template, run `bun run build:extension-catalog` and commit `src/extensions/catalog.generated.json`.
 
 Rules for `hooks.ts`:
 
@@ -110,7 +125,7 @@ export default extension;
 
 ## Verify
 
-1. Call `extension-list` and confirm the name, version, and `enabled: false`.
+1. Call `extension-list` and confirm the name, version, and `enabled: false`. The install response lists the assets it created.
 2. Report the enable step. After a lead or operator enables it, the dashboard run log shows every dispatch with its result (`continue`, `modify`, `block`, or `error`).
 3. Trigger the event once and confirm the effect (for example, a blocked REST task returns HTTP 422 with your reason).
 
@@ -120,5 +135,6 @@ export default extension;
 - Using `import` from a package other than `swarm-extension`, `zod`, or `stdlib`.
 - Returning a plain object instead of `block(...)` or `modify(...)`.
 - Modifying fields the event does not allow. Read the `*Modify` type for that event.
-- Expecting the extension to run after install. It runs only after a lead or operator enables it.
+- Expecting the extension to run after install. Its hooks and schedules run only after a lead or operator enables it.
+- Sending an inline `manifest`/`files` bundle. Install takes a catalog `template` name only.
 - Blocking tasks from every origin. Check `event.origin` so schedules, workflows, and follow-ups keep working unless you mean to block them.

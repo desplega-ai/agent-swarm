@@ -1,7 +1,6 @@
 import { expect, test } from "bun:test";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerExtensionInstallTool } from "../tools/extension-install";
-import { loadBundleFixture } from "./fixtures/extensions/load";
 
 type RegisteredTool = {
   handler: (args: unknown, extra: unknown) => Promise<unknown>;
@@ -17,6 +16,7 @@ test("a lead installs a disabled draft with explicit activation guidance", async
   process.env.AGENT_SWARM_API_KEY = "extensions-example-key";
   globalThis.fetch = (async (_input, init) => {
     const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    expect(body).toEqual({ template: "minimal" });
     expect(body.enabled).toBeUndefined();
     expect(body.activeVersion).toBeUndefined();
     return new Response(
@@ -32,6 +32,7 @@ test("a lead installs a disabled draft with explicit activation guidance", async
           consecutiveFailures: 0,
         },
         contentDeduped: false,
+        assets: { created: [], updated: [], skipped: [], deleted: [], detached: [] },
       }),
       { status: 200, headers: { "Content-Type": "application/json" } },
     );
@@ -42,10 +43,13 @@ test("a lead installs a disabled draft with explicit activation guidance", async
     registerExtensionInstallTool(server);
     const tool = (server as unknown as { _registeredTools: Record<string, RegisteredTool> })
       ._registeredTools["extension-install"]!;
-    const result = (await tool.handler(await loadBundleFixture("minimal"), {
-      sessionId: "extensions-example",
-      requestInfo: { headers: { "x-agent-id": leadId } },
-    })) as {
+    const result = (await tool.handler(
+      { template: "minimal" },
+      {
+        sessionId: "extensions-example",
+        requestInfo: { headers: { "x-agent-id": leadId } },
+      },
+    )) as {
       isError?: boolean;
       structuredContent: Record<string, unknown>;
     };

@@ -76,7 +76,7 @@ jobs:
           # install), and the dep-graph inputs (.dependency-cruiser.cjs, plugin/) are all
           # load-bearing for this job since the workspace migration. The Dockerfiles
           # feed the Bun version-pin check (check:bun-version).
-          LINT=$(match '^(src/|apps/evals/|package\.json$|bun\.lock|bunfig\.toml$|turbo\.json$|konsistent\.json$|tsconfig\.json$|biome\.json$|\.dependency-cruiser\.cjs$|plugin/opencode-plugins/|apps/(ui|templates-ui)/package\.json$|Dockerfile$|Dockerfile\.worker$|scripts/check-bun-version\.ts$)')
+          LINT=$(match '^(src/|apps/evals/|package\.json$|bun\.lock|bunfig\.toml$|turbo\.json$|konsistent\.json$|tsconfig\.json$|biome\.json$|\.dependency-cruiser\.cjs$|plugin/opencode-plugins/|apps/(ui|templates-ui)/package\.json$|Dockerfile$|Dockerfile\.worker$|scripts/check-bun-version\.ts$|templates/extensions/|scripts/build-extension-(catalog|manifest-schema)\.ts$)')
 
           # tests: src/ + scripts that tests import + lockfile/tsconfig + bunfig ([test]
           # preload + pathIgnorePatterns) + member manifests (root frozen install).
@@ -181,6 +181,13 @@ jobs:
           echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
           echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
           exit $code
+
+      - name: Check extension catalog and manifest schema freshness
+        # templates/extensions/ is embedded as src/extensions/catalog.generated.json and
+        # ExtensionManifestSchema is published as templates/extensions/manifest.schema.json.
+        run: |
+          bun run check:extension-catalog
+          bun run check:extension-schema
 
       - name: Run structural consistency lint
         id: structural-lint

@@ -1,0 +1,90 @@
+{
+  "notify-on-complete": {
+    "manifestFile": "manifest.json",
+    "manifest": {
+      "$schema": "../manifest.schema.json",
+      "name": "notify-on-complete",
+      "description": "Posts a short summary to a Slack channel when a task completes or fails",
+      "version": "1.0.0",
+      "runtime": "api",
+      "assets": {
+        "hooks": "hooks.ts"
+      }
+    },
+    "files": {
+      "hooks.ts": "import type { CtxFor, SwarmExtension } from \"swarm-extension\";\nimport { z } from \"zod\";\n\nexport const config = z.object({\n  channelId: z.string().min(1),\n  includeFailed: z.boolean().default(true),\n  maxOutputChars: z.number().int().min(40).max(2000).default(400),\n});\n\nconst manifest = {\n  name: \"notify-on-complete\",\n  description: \"Posts a short summary to a Slack channel when a task completes or fails\",\n  version: \"1.0.0\",\n  runtime: \"api\",\n  assets: { hooks: \"hooks.ts\" },\n  config,\n} as const;\n\ntype SdkResult = { success?: boolean; status?: number; data?: unknown };\n\n// SDK calls resolve with { success, status, data } and do not throw on a tool error.\n// Throwing here makes the failure visible in the run log and counts toward auto-disable.\nasync function post(ctx: CtxFor<typeof manifest>, message: string): Promise<void> {\n  const result = (await ctx.swarm.slack_post({\n    channelId: ctx.config.channelId,\n    message,\n  })) as SdkResult;\n  if (!result?.success) {\n    throw new Error(\n      `slack_post failed (${result?.status ?? \"no status\"}): ${JSON.stringify(result?.data ?? null).slice(0, 200)}`,\n    );\n  }\n}\n\nfunction clip(text: string, max: number): string {\n  const single = text.replace(/\\s+/g, \" \").trim();\n  return single.length > max ? `${single.slice(0, max - 1)}…` : single;\n}\n\nconst extension: SwarmExtension<typeof manifest> = (api) => {\n  api.on(\"post.task.completed\", async (event, ctx) => {\n    const title = event.task.title ?? clip(event.task.task, 80);\n    await post(\n      ctx,\n      `:white_check_mark: *${title}* completed (task \\`${event.task.id.slice(0, 8)}\\`)\\n${clip(event.output, ctx.config.maxOutputChars)}`,\n    );\n    await ctx.state.incr(\"notified:completed\");\n  });\n\n  api.on(\"post.task.failed\", async (event, ctx) => {\n    if (!ctx.config.includeFailed) return;\n    const title = event.task.title ?? clip(event.task.task, 80);\n    await post(\n      ctx,\n      `:x: *${title}* failed (task \\`${event.task.id.slice(0, 8)}\\`)\\n${clip(event.failureReason, ctx.config.maxOutputChars)}`,\n    );\n    await ctx.state.incr(\"notified:failed\");\n  });\n};\n\nexport default extension;\n"
+    },
+    "readme": "# notify-on-complete\n\nPosts one Slack message per finished task to a channel of your choice. Uses `ctx.swarm.slack_post`, so the message is sent by the swarm bot on behalf of the `ext:notify-on-complete` identity.\n\nConfig:\n\n```json\n{ \"channelId\": \"C0123456789\", \"includeFailed\": true, \"maxOutputChars\": 400 }\n```\n\nPost hooks run after the task change is committed and cannot block or modify anything. A Slack failure counts as a handler failure; five in a row auto-disable the extension.\n"
+  },
+  "require-ticket-ref": {
+    "manifestFile": "manifest.json",
+    "manifest": {
+      "$schema": "../manifest.schema.json",
+      "name": "require-ticket-ref",
+      "description": "Blocks new tasks from selected origins unless the description names a ticket",
+      "version": "1.0.0",
+      "runtime": "api",
+      "assets": {
+        "hooks": "hooks.ts"
+      }
+    },
+    "files": {
+      "hooks.ts": "import { block, type SwarmExtension } from \"swarm-extension\";\nimport { z } from \"zod\";\n\n// Config: which origins to police and what a ticket reference looks like.\nexport const config = z.object({\n  pattern: z.string().default(\"\\\\b[A-Z]{2,10}-\\\\d+\\\\b\"),\n  origins: z.array(z.string()).default([\"rest\", \"mcp\", \"slack\"]),\n});\n\nconst manifest = {\n  name: \"require-ticket-ref\",\n  description: \"Blocks new tasks from selected origins unless the description names a ticket\",\n  version: \"1.0.0\",\n  runtime: \"api\",\n  assets: { hooks: \"hooks.ts\" },\n  config,\n} as const;\n\nconst extension: SwarmExtension<typeof manifest> = (api) => {\n  api.on(\"pre.task.create\", async (event, ctx) => {\n    if (!ctx.config.origins.includes(event.origin)) return;\n    if (new RegExp(ctx.config.pattern).test(event.description)) return;\n    await ctx.state.incr(`blocked:${event.origin}`);\n    return block(\n      `Task must reference a ticket (pattern ${ctx.config.pattern}). Add the ticket id to the description and retry.`,\n    );\n  });\n};\n\nexport default extension;\n"
+    },
+    "readme": "# require-ticket-ref\n\nBlocks new tasks that do not name a ticket. Applies to the origins listed in `config.origins` (default `rest`, `mcp`, `slack`), so schedules, workflows, webhooks, and follow-ups keep working.\n\nConfig:\n\n```json\n{ \"pattern\": \"\\\\bDES-\\\\d+\\\\b\", \"origins\": [\"rest\", \"mcp\", \"slack\"] }\n```\n\nEffect: REST returns `422` with the reason, `send-task` returns an error result, and Slack replies with the reason in the thread. The extension state keeps a `blocked:<origin>` counter.\n"
+  },
+  "require-verification-note": {
+    "manifestFile": "manifest.json",
+    "manifest": {
+      "$schema": "../manifest.schema.json",
+      "name": "require-verification-note",
+      "description": "Refuses task completion unless the output contains a verification line",
+      "version": "1.0.0",
+      "runtime": "api",
+      "assets": {
+        "hooks": "hooks.ts"
+      }
+    },
+    "files": {
+      "hooks.ts": "import { block, type SwarmExtension } from \"swarm-extension\";\nimport { z } from \"zod\";\n\nexport const config = z.object({\n  marker: z.string().min(1).default(\"Verified:\"),\n});\n\nconst manifest = {\n  name: \"require-verification-note\",\n  description: \"Refuses task completion unless the output contains a verification line\",\n  version: \"1.0.0\",\n  runtime: \"api\",\n  assets: { hooks: \"hooks.ts\" },\n  config,\n} as const;\n\ntype StoreProgressArgs = { status?: unknown; output?: unknown };\n\nconst extension: SwarmExtension<typeof manifest> = (api) => {\n  api.on(\"pre.tool.call\", (event, ctx) => {\n    if (event.tool !== \"store-progress\") return;\n    if (!event.args || typeof event.args !== \"object\") return;\n    const { status, output } = event.args as StoreProgressArgs;\n    if (status !== \"completed\") return;\n    if (typeof output === \"string\" && output.includes(ctx.config.marker)) return;\n    return block(\n      `Completion output must contain a \"${ctx.config.marker}\" line that says how the result was checked. Add it and call store-progress again.`,\n    );\n  });\n};\n\nexport default extension;\n"
+    },
+    "readme": "# require-verification-note\n\nGuards `store-progress` with `status: \"completed\"`. The call is refused until the `output` contains the configured marker (default `Verified:`). The agent sees the reason as a tool error and can retry with a corrected output.\n\nConfig:\n\n```json\n{ \"marker\": \"Verified:\" }\n```\n\nThe guard covers agent MCP calls only. REST and dashboard completions are not tool calls and pass through.\n"
+  },
+  "task-digest": {
+    "manifestFile": "manifest.yaml",
+    "manifest": {
+      "name": "task-digest",
+      "description": "Daily digest of tasks completed and failed in the last 24 hours",
+      "version": "1.0.0",
+      "runtime": "api",
+      "assets": {
+        "hooks": "hooks.ts",
+        "scripts": [
+          {
+            "name": "task-digest-collect",
+            "file": "scripts/collect.ts",
+            "description": "Count tasks completed and failed in the last 24 hours and summarize them",
+            "intent": "Produce a daily digest of swarm task outcomes"
+          }
+        ],
+        "schedules": [
+          {
+            "name": "task-digest-daily",
+            "description": "Runs task-digest-collect every day at 09:00 UTC",
+            "script": "task-digest-collect",
+            "cronExpression": "0 9 * * *",
+            "timezone": "UTC",
+            "args": {
+              "hours": 24
+            }
+          }
+        ]
+      }
+    },
+    "files": {
+      "hooks.ts": "import type { SwarmExtension } from \"swarm-extension\";\n\nconst manifest = {\n  name: \"task-digest\",\n  description: \"Daily digest of tasks completed and failed in the last 24 hours\",\n  version: \"1.0.0\",\n  runtime: \"api\",\n  assets: { hooks: \"hooks.ts\" },\n} as const;\n\n// Keep a running count between digests; the scheduled script reads task history\n// directly, this counter is only a cheap live signal in the extension state.\nconst extension: SwarmExtension<typeof manifest> = (api) => {\n  api.on(\"post.task.completed\", async (_event, ctx) => {\n    await ctx.state.incr(\"completed\");\n  });\n  api.on(\"post.task.failed\", async (_event, ctx) => {\n    await ctx.state.incr(\"failed\");\n  });\n};\n\nexport default extension;\n",
+      "scripts/collect.ts": "import type { ScriptContext } from \"swarm-sdk\";\nimport { z } from \"zod\";\n\nexport const argsSchema = z.object({\n  hours: z\n    .number()\n    .int()\n    .positive()\n    .max(24 * 30)\n    .optional()\n    .describe(\"Look back this many hours (default 24)\"),\n});\n\ntype TaskRow = { agentId?: string | null };\ntype SdkResult = { success?: boolean; status?: number; data?: { tasks?: TaskRow[] } };\n\nasync function listTasks(\n  ctx: ScriptContext,\n  status: \"completed\" | \"failed\",\n  since: string,\n): Promise<TaskRow[]> {\n  const res = (await ctx.swarm.task_list({\n    status,\n    createdAfter: since,\n    limit: 500,\n  })) as SdkResult;\n  if (res?.success === false) throw new Error(`task_list ${status} failed (${res.status})`);\n  return Array.isArray(res?.data?.tasks) ? res.data.tasks : [];\n}\n\n/** Count tasks completed and failed in the last N hours, grouped by agent. */\nexport default async function collect(args: z.input<typeof argsSchema>, ctx: ScriptContext) {\n  const parsed = argsSchema.safeParse(args ?? {});\n  if (!parsed.success) return { ok: false, error: `invalid args: ${parsed.error.message}` };\n  const hours = parsed.data.hours ?? 24;\n  const since = new Date(Date.now() - hours * 3_600_000).toISOString();\n\n  const completed = await listTasks(ctx, \"completed\", since);\n  const failed = await listTasks(ctx, \"failed\", since);\n\n  const byAgent: Record<string, { completed: number; failed: number }> = {};\n  for (const [status, tasks] of [\n    [\"completed\", completed],\n    [\"failed\", failed],\n  ] as const) {\n    for (const task of tasks) {\n      const agent = task.agentId || \"(unassigned)\";\n      byAgent[agent] ??= { completed: 0, failed: 0 };\n      byAgent[agent][status]++;\n    }\n  }\n\n  return {\n    ok: true,\n    since,\n    completed: completed.length,\n    failed: failed.length,\n    byAgent,\n    summary: `${completed.length} completed, ${failed.length} failed in the last ${hours}h`,\n  };\n}\n"
+    },
+    "readme": "# task-digest\n\nShips a script and a schedule alongside its hooks. It is the reference for extensions that bundle assets.\n\n| Asset | Name | What it does |\n|---|---|---|\n| Script | `task-digest-collect` | Counts tasks completed and failed in the last `hours` (default 24), grouped by agent |\n| Schedule | `task-digest-daily` | Runs the script every day at 09:00 UTC with `{ \"hours\": 24 }` |\n| Hooks | `hooks.ts` | Counts `post.task.completed` and `post.task.failed` in the extension state |\n\nInstall creates the script and the schedule, owned by the `ext:task-digest` agent. The schedule stays off until the extension is enabled. Disabling the extension pauses it again.\n\n```bash\nbun scripts/extensions/install-template.ts task-digest --enable\n```\n\nRun the script by hand with `script-run name=\"task-digest-collect\" scope=\"global\" args={\"hours\":24}`.\n\nNo config.\n"
+  }
+}

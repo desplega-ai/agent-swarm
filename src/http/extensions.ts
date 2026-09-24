@@ -2,27 +2,30 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { resolveHttpAuditUserId } from "../be/audit-user";
 import { getAgentById } from "../be/db";
+import { ExtensionAssetConflictError } from "../be/extensions/assets";
 import {
-  deleteExtension,
   ExtensionOwnershipError,
   getExtensionById,
   getExtensionByName,
   getExtensionFiles,
-  type InstallExtensionResult,
-  installExtension,
   listExtensionRuns,
   listExtensions,
   listExtensionVersions,
   updateExtensionMeta,
 } from "../be/extensions/db";
 import { validateBundle } from "../be/extensions/validate";
+import { getCatalogEntry, getExtensionCatalog } from "../extensions/catalog";
 import { EXTENSION_TYPE_DEFINITIONS } from "../extensions/contract-types.generated";
 import {
   activateVersion,
   disableExtension,
+  ExtensionAssetsInvalidError,
   ExtensionLifecycleError,
   enableExtension,
+  type InstallWithAssetsResult,
+  installExtensionWithAssets,
   reloadExtension,
+  uninstallExtension,
 } from "../extensions/lifecycle";
 import { ExtensionConfigError } from "../extensions/loader";
 import {
@@ -47,16 +50,45 @@ import { json, jsonError } from "./utils";
 
 const idParamsSchema = z.object({ id: z.string().min(1) });
 
+class InlineInstallDisabledError extends Error {}
+
+/** Inline bundles predate the catalog; name the reason instead of a generic unknown-key error. */
+function rejectInlineInstall(body: unknown): unknown {
+  if (typeof body === "object" && body !== null && ("manifest" in body || "files" in body)) {
+    throw new InlineInstallDisabledError(
+      'Inline extension bundles are disabled. Install a predefined extension by name: {"template": "<name>"} (see GET /api/extensions/catalog).',
+    );
+  }
+  return body;
+}
+
+const ExtensionAssetRefSchema = z.object({
+  kind: z.enum(["script", "schedule", "workflow", "skill"]),
+  name: z.string(),
+});
+
+const ExtensionAssetsReconcileSchema = z
+  .object({
+    created: z.array(ExtensionAssetRefSchema),
+    updated: z.array(ExtensionAssetRefSchema),
+    skipped: z.array(ExtensionAssetRefSchema),
+    deleted: z.array(ExtensionAssetRefSchema),
+    detached: z.array(ExtensionAssetRefSchema),
+  })
+  .describe(
+    "Asset changes made by this install. Null when the installed version is staged, not active.",
+  );
+
 const installRoute = route({
   method: "post",
   path: "/api/extensions/install",
   pattern: ["api", "extensions", "install"],
   operationId: "extensions_install",
-  summary: "Validate and install an extension bundle",
+  summary: "Install a predefined extension from the catalog",
   description:
-    "Any authenticated agent can install a disabled draft owned by its agent ID. Workers can update only their own bundles; activation remains lead/operator-only.",
+    "Installs the named template from `GET /api/extensions/catalog`. Inline bundles (`manifest`/`files`) are rejected with `inline_install_disabled`. Any authenticated agent can install a disabled draft owned by its agent ID. Workers can update only their own bundles; activation remains lead/operator-only.",
   tags: ["Extensions"],
-  body: ExtensionInstallBodySchema,
+  body: z.preprocess(rejectInlineInstall, ExtensionInstallBodySchema),
   responses: {
     200: {
       description: "Installed extension",
@@ -64,12 +96,43 @@ const installRoute = route({
         extension: ExtensionSchema,
         manifest: ExtensionManifestSchema,
         contentDeduped: z.boolean(),
+        assets: ExtensionAssetsReconcileSchema.nullable(),
       }),
     },
-    400: { description: "Bundle validation failed" },
+    400: { description: "Inline bundle rejected or bundle validation failed" },
     403: { description: "Permission denied" },
+    404: { description: "Template not found in the catalog" },
   },
   rbac: { permission: "extension.write" },
+});
+
+const ExtensionCatalogItemSchema = z
+  .object({
+    name: z.string(),
+    description: z.string(),
+    version: z.string(),
+    manifestFile: z.string(),
+    assets: z.record(z.string(), z.number().int()),
+    readme: z.string().nullable(),
+    installed: z
+      .object({ id: z.string(), version: z.number().int(), enabled: z.boolean() })
+      .nullable(),
+  })
+  .openapi("ExtensionCatalogItem");
+
+const catalogRoute = route({
+  method: "get",
+  path: "/api/extensions/catalog",
+  pattern: ["api", "extensions", "catalog"],
+  operationId: "extensions_catalog",
+  summary: "List predefined extensions available to install",
+  tags: ["Extensions"],
+  responses: {
+    200: {
+      description: "Predefined extensions with their installed state",
+      schema: z.object({ extensions: z.array(ExtensionCatalogItemSchema) }),
+    },
+  },
 });
 
 const listRoute = route({
@@ -197,7 +260,13 @@ const deleteRoute = route({
   responses: {
     200: {
       description: "Extension uninstalled",
-      schema: z.object({ deleted: z.literal(true) }),
+      schema: z.object({
+        deleted: z.literal(true),
+        assets: z.object({
+          deleted: z.array(ExtensionAssetRefSchema),
+          detached: z.array(ExtensionAssetRefSchema),
+        }),
+      }),
     },
     403: { description: "Permission denied" },
     404: { description: "Extension not found" },
@@ -373,16 +442,38 @@ export async function handleExtensions(
   agentId?: string,
 ): Promise<boolean> {
   if (installRoute.match(req.method, pathSegments)) {
-    const parsed = await installRoute.parse(req, res, pathSegments, queryParams);
+    let parsed: Awaited<ReturnType<typeof installRoute.parse>>;
+    try {
+      parsed = await installRoute.parse(req, res, pathSegments, queryParams);
+    } catch (error) {
+      if (!(error instanceof InlineInstallDisabledError)) throw error;
+      json(res, { error: "inline_install_disabled", message: error.message }, 400);
+      return true;
+    }
     if (!parsed) return true;
-    const existing = await getExtensionByName(parsed.body.manifest.name);
+    const template = getCatalogEntry(parsed.body.template);
+    if (!template) {
+      json(
+        res,
+        {
+          error: "extension_template_not_found",
+          message: `No predefined extension named "${parsed.body.template}"`,
+        },
+        404,
+      );
+      return true;
+    }
+    const existing = await getExtensionByName(template.manifest.name);
     const principal = await requirePermission(req, res, agentId, "extension.write", {
       kind: "extension",
       extensionId: existing?.id,
       createdByAgentId: existing?.createdByAgentId,
     });
     if (!principal) return true;
-    const validation = await validateBundle(parsed.body);
+    const validation = await validateBundle({
+      manifest: template.manifest,
+      files: template.files,
+    });
     if (!validation.ok) {
       json(res, { error: "extension_validation_failed", diagnostics: validation.diagnostics }, 400);
       return true;
@@ -393,11 +484,11 @@ export async function handleExtensions(
     // Enforce ownership again inside the upsert transaction: validation can yield
     // while another agent installs the same name.
     const ownerOnly = ownerOnlyAgentId(principal);
-    let result: InstallExtensionResult;
+    let result: InstallWithAssetsResult;
     try {
-      result = await installExtension({
+      result = await installExtensionWithAssets({
         manifest: validation.manifest,
-        files: parsed.body.files,
+        files: template.files,
         priority: parsed.body.priority,
         config: parsed.body.config,
         agentId: writerAgentId,
@@ -406,6 +497,13 @@ export async function handleExtensions(
         ownerOnly,
       });
     } catch (error) {
+      if (
+        error instanceof ExtensionAssetsInvalidError ||
+        error instanceof ExtensionAssetConflictError
+      ) {
+        json(res, { error: "extension_validation_failed", diagnostics: error.diagnostics }, 400);
+        return true;
+      }
       if (!(error instanceof ExtensionOwnershipError)) throw error;
       jsonError(res, error.message, 403);
       return true;
@@ -423,6 +521,7 @@ export async function handleExtensions(
       extension: redactExtension(extension),
       manifest: validation.manifest,
       contentDeduped: result.contentDeduped,
+      assets: result.assets,
     });
     return true;
   }
@@ -431,6 +530,29 @@ export async function handleExtensions(
     const parsed = await listRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     listRoute.respond(res, 200, { extensions: (await listExtensions()).map(redactExtension) });
+    return true;
+  }
+
+  if (catalogRoute.match(req.method, pathSegments)) {
+    const parsed = await catalogRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const installed = new Map((await listExtensions()).map((row) => [row.name, row]));
+    const extensions = Object.values(getExtensionCatalog()).map((entry) => {
+      const row = installed.get(entry.manifest.name);
+      const { hooks: _hooks, ...declared } = entry.manifest.assets;
+      return {
+        name: entry.manifest.name,
+        description: entry.manifest.description,
+        version: entry.manifest.version,
+        manifestFile: entry.manifestFile,
+        assets: Object.fromEntries(
+          Object.entries(declared).map(([kind, list]) => [kind, list?.length ?? 0]),
+        ),
+        readme: entry.readme,
+        installed: row ? { id: row.id, version: row.version, enabled: row.enabled } : null,
+      };
+    });
+    catalogRoute.respond(res, 200, { extensions });
     return true;
   }
 
@@ -558,13 +680,14 @@ export async function handleExtensions(
       jsonError(res, "Disable the extension before uninstalling it", 409);
       return true;
     }
+    let assets: Awaited<ReturnType<typeof uninstallExtension>>;
     try {
-      await deleteExtension(extension.id, ownerOnlyAgentId(principal));
+      assets = await uninstallExtension(extension.id, ownerOnlyAgentId(principal));
     } catch (error) {
       respondLifecycleError(res, error);
       return true;
     }
-    deleteRoute.respond(res, 200, { deleted: true });
+    deleteRoute.respond(res, 200, { deleted: true, assets });
     return true;
   }
 

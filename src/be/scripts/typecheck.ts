@@ -316,7 +316,8 @@ export interface SwarmSdk {
   script_listRuns(args?: { status?: "running" | "paused" | "completed" | "failed" | "cancelled" | "aborted_limit"; agentId?: string; limit?: number; offset?: number }): Promise<unknown>;
 
   // --- write: extensions ---
-  extension_install(args: { manifest: Record<string, unknown>; files: Record<string, string>; priority?: number; config?: Record<string, unknown> }): Promise<unknown>;
+  extension_catalog(args?: Record<string, never>): Promise<unknown>;
+  extension_install(args: { template: string; priority?: number; config?: Record<string, unknown> }): Promise<unknown>;
   extension_list(args?: { enabledOnly?: boolean }): Promise<unknown>;
   extension_delete(args: { id: string }): Promise<unknown>;
   extension_enable(args: { id: string }): Promise<unknown>;

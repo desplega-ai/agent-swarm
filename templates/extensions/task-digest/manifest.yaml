@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=../manifest.schema.json
+name: task-digest
+description: Daily digest of tasks completed and failed in the last 24 hours
+version: 1.0.0
+runtime: api
+assets:
+  hooks: hooks.ts
+  scripts:
+    - name: task-digest-collect
+      file: scripts/collect.ts
+      description: Count tasks completed and failed in the last 24 hours and summarize them
+      intent: Produce a daily digest of swarm task outcomes
+  schedules:
+    - name: task-digest-daily
+      description: Runs task-digest-collect every day at 09:00 UTC
+      script: task-digest-collect
+      cronExpression: "0 9 * * *"
+      timezone: UTC
+      args:
+        hours: 24

@@ -1458,20 +1458,60 @@ export type ExtensionRuntime = "api" | "worker";
 
 export type ExtensionStatus = "disabled" | "enabled" | "error" | "auto-disabled";
 
+/** A global script a bundle ships — mirrors `ExtensionScriptAssetSchema` in src/types.ts. */
+export interface ExtensionScriptAsset {
+  /** Global script name; starts with `<extension name>-`. */
+  name: string;
+  /** Bundle path of the script source. */
+  file: string;
+  description: string;
+  intent?: string;
+}
+
+/** A schedule a bundle ships — mirrors `ExtensionScheduleAssetSchema` in src/types.ts. */
+export interface ExtensionScheduleAsset {
+  /** Schedule name; starts with `<extension name>-`. */
+  name: string;
+  description?: string;
+  /** Name of a script declared in `assets.scripts`. */
+  script: string;
+  cronExpression?: string;
+  intervalMs?: number;
+  timezone?: string;
+  args?: Record<string, unknown>;
+}
+
 /** Bundle manifest — mirrors `ExtensionManifestSchema` in src/types.ts. */
 export interface ExtensionManifest {
+  $schema?: string;
   name: string;
   description: string;
   version: string;
   runtime: ExtensionRuntime;
   assets: {
     hooks: string;
+    scripts?: ExtensionScriptAsset[];
+    schedules?: ExtensionScheduleAsset[];
     skills?: string[];
     workflows?: string[];
-    schedules?: string[];
   };
   homepage?: string;
   author?: string;
+}
+
+/** Row served by `GET /api/extensions/catalog` — a predefined bundle from `templates/extensions/`. */
+export interface ExtensionCatalogItem {
+  name: string;
+  description: string;
+  /** Semver of the catalog manifest. */
+  version: string;
+  /** `manifest.yaml`, `manifest.yml`, or `manifest.json`. */
+  manifestFile: string;
+  /** Declared asset counts by kind (`scripts`, `schedules`, `skills`, `workflows`); hooks are not counted. */
+  assets: Record<string, number>;
+  /** README markdown, when the template ships one. */
+  readme: string | null;
+  installed: { id: string; version: number; enabled: boolean } | null;
 }
 
 export interface Extension {
@@ -1538,17 +1578,36 @@ export interface ExtensionBundle {
   files: Record<string, string>;
 }
 
+/**
+ * `POST /api/extensions/install` body. Only catalog templates install; an
+ * inline `manifest`/`files` bundle is rejected with `inline_install_disabled`.
+ */
 export interface ExtensionInstallInput {
-  manifest: ExtensionManifest;
-  files: Record<string, string>;
+  /** Catalog name from `GET /api/extensions/catalog`. */
+  template: string;
   priority?: number;
   config?: Record<string, unknown>;
+}
+
+/** Global assets the install reconciled, by name. */
+export interface ExtensionInstallAssets {
+  created: string[];
+  updated: string[];
+  skipped: string[];
 }
 
 export interface ExtensionInstallResult {
   extension: Extension;
   manifest: ExtensionManifest;
+  /** True when the template matched the stored content, so no new version was staged. */
   contentDeduped: boolean;
+  assets?: ExtensionInstallAssets;
+}
+
+/** `DELETE /api/extensions/{id}` response. */
+export interface ExtensionDeleteResult {
+  deleted: true;
+  assets?: { deleted: string[]; detached: string[] };
 }
 
 export interface ExtensionPatchInput {

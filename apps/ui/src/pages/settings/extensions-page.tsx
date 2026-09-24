@@ -24,8 +24,9 @@ export function statusBadgeVariant(
 
 /**
  * Installed extensions — the operator view of `GET /api/extensions`. Each row
- * links to the detail page, where the bundle is edited, enabled, versioned,
- * and its run log read.
+ * links to the detail page, where the bundle is inspected, enabled, versioned,
+ * and its run log read. New bundles install from the catalog at
+ * `/settings/extensions/new`.
  */
 export default function ExtensionsPage() {
   const navigate = useNavigate();
@@ -116,7 +117,7 @@ export default function ExtensionsPage() {
         action={
           <Button type="button" size="sm" onClick={() => navigate("/settings/extensions/new")}>
             <Plus className="h-4 w-4" />
-            New extension
+            Install extension
           </Button>
         }
       />
@@ -133,11 +134,11 @@ export default function ExtensionsPage() {
         <EmptyState
           icon={Blocks}
           title="No extensions installed"
-          description="Install a bundle to change routing, follow-up, heartbeat, or tool-call behaviour without a core change."
+          description="Install a predefined bundle to change routing, follow-up, heartbeat, or tool-call behaviour without a core change."
           action={
             <Button type="button" size="sm" onClick={() => navigate("/settings/extensions/new")}>
               <Plus className="h-4 w-4" />
-              New extension
+              Install extension
             </Button>
           }
         />

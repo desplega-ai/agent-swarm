@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { closeDb, createTaskExtended, getAllAgents, getDbClient, getKv, initDb } from "../be/db";
+import type { InstallExtensionArgs as ExtensionInstallBody } from "../be/extensions/db";
 import {
   getExtensionById,
   installExtension,
@@ -14,7 +15,6 @@ import {
   loadEnabledExtensions,
   stopExtensionRuntime,
 } from "../extensions/lifecycle";
-import type { ExtensionInstallBody } from "../types";
 import { loadBundleFixture } from "./fixtures/extensions/load";
 
 const TEST_DB_PATH = "./test-extensions-lifecycle.sqlite";

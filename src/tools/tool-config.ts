@@ -197,7 +197,7 @@ export const DEFERRED_TOOLS = new Set([
   "room-reset",
   "room-decode",
 
-  // Reusable scripts and extensions (12)
+  // Reusable scripts and extensions (13)
   "script-upsert",
   "script-delete",
   "script-apis",
@@ -208,6 +208,7 @@ export const DEFERRED_TOOLS = new Set([
   "extension-enable",
   "extension-disable",
   "extension-activate-version",
+  "extension-catalog",
   "extension-install",
   "extension-list",
 

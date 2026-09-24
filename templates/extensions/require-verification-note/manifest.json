@@ -1,4 +1,5 @@
 {
+  "$schema": "../manifest.schema.json",
   "name": "require-verification-note",
   "description": "Refuses task completion unless the output contains a verification line",
   "version": "1.0.0",

@@ -87,6 +87,7 @@ declare module "swarm-extension" {
             | "claude-managed"
             | "opencode"
             | "acp"
+            | "dsh"
             | undefined;
           leadOnly?: boolean | undefined;
         }
@@ -190,6 +191,7 @@ declare module "swarm-extension" {
           onFailed?: string | undefined;
         }
       | undefined;
+    deferredAt?: string | undefined;
     compactionCount?: number | undefined;
     peakContextPercent?: number | undefined;
     peakContextTokens?: number | undefined;
@@ -206,6 +208,7 @@ declare module "swarm-extension" {
       | "claude-managed"
       | "opencode"
       | "acp"
+      | "dsh"
       | undefined;
     providerMeta?: Record<string, unknown> | undefined;
     harnessVariant?: string | undefined;
@@ -224,6 +227,7 @@ declare module "swarm-extension" {
             | "claude-managed"
             | "opencode"
             | "acp"
+            | "dsh"
             | undefined;
           leadOnly?: boolean | undefined;
         }
@@ -257,16 +261,33 @@ declare module "swarm-extension" {
   import type { SwarmSdk } from "swarm-sdk";
   import type { z } from "zod";
   export type Runtime = "api" | "worker";
+  export interface ExtensionScriptAsset {
+    name: string;
+    file: string;
+    description: string;
+    intent?: string;
+  }
+  export interface ExtensionScheduleAsset {
+    name: string;
+    description?: string;
+    script: string;
+    cronExpression?: string;
+    intervalMs?: number;
+    timezone?: string;
+    args?: Record<string, unknown>;
+  }
   export interface ExtensionManifest {
+    $schema?: string;
     name: string;
     description: string;
     version: string;
     runtime: Runtime;
     assets: {
       hooks: string;
-      skills?: string[];
-      workflows?: string[];
-      schedules?: string[];
+      scripts?: readonly ExtensionScriptAsset[];
+      schedules?: readonly ExtensionScheduleAsset[];
+      skills?: readonly string[];
+      workflows?: readonly string[];
     };
     homepage?: string;
     author?: string;

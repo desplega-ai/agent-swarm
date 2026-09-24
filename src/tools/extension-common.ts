@@ -55,7 +55,12 @@ export function coerceExtensionSummary(entry: unknown) {
 }
 
 function errorMessage(data: unknown, status: number): string {
-  if (isRecord(data) && typeof data.error === "string" && data.error) return data.error;
+  if (isRecord(data) && typeof data.error === "string" && data.error) {
+    // Coded errors (inline_install_disabled, extension_template_not_found) carry the explanation in `message`.
+    return typeof data.message === "string" && data.message
+      ? `${data.error}: ${data.message}`
+      : data.error;
+  }
   return `Extensions API request failed with ${status}`;
 }
 

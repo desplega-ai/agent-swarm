@@ -61,6 +61,7 @@ export const SDK_TOOL_NAME_MAP = {
   extension_enable: "extension-enable",
   extension_disable: "extension-disable",
   extension_activate_version: "extension-activate-version",
+  extension_catalog: "extension-catalog",
   extension_install: "extension-install",
   extension_list: "extension-list",
 

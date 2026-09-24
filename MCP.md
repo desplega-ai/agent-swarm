@@ -56,6 +56,7 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [extension-enable](#extension-enable)
   - [extension-disable](#extension-disable)
   - [extension-activate-version](#extension-activate-version)
+  - [extension-catalog](#extension-catalog)
   - [extension-install](#extension-install)
   - [extension-list](#extension-list)
   - [script-delete](#script-delete)
@@ -678,14 +679,19 @@ Activate a stored extension version, reloading it if enabled. Requires a lead, o
 | `id` | `string` | Yes | - | Installed extension ID from extension-list. |
 | `version` | `number` | Yes | - | Stored version number to activate. |
 
+### extension-catalog
+
+**Extension Catalog**
+
+*No parameters*
+
 ### extension-install
 
 **Extension Install**
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `manifest` | `unknown` | Yes | - | Extension bundle manifest. |
-| `files` | `object` | Yes | - | Bundle files keyed by relative path. |
+| `template` | `string` | Yes | - | Name of a predefined extension from extension-catalog. |
 | `priority` | `number` | No | - | Handler priority. Lower values run first. |
 | `config` | `object` | No | - | Extension configuration. |
 

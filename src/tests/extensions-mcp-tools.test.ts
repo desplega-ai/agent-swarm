@@ -11,13 +11,18 @@ import { handleCore } from "../http/core";
 import { handleExtensions } from "../http/extensions";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { registerExtensionActivateVersionTool } from "../tools/extension-activate-version";
+import { registerExtensionCatalogTool } from "../tools/extension-catalog";
 import { registerExtensionDeleteTool } from "../tools/extension-delete";
 import { registerExtensionDisableTool } from "../tools/extension-disable";
 import { registerExtensionEnableTool } from "../tools/extension-enable";
 import { registerExtensionInstallTool } from "../tools/extension-install";
 import { registerExtensionListTool } from "../tools/extension-list";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
-import { loadBundleFixture } from "./fixtures/extensions/load";
+import {
+  loadBundleFixture,
+  resetFixtureCatalog,
+  useFixtureCatalog,
+} from "./fixtures/extensions/load";
 
 const TEST_DB_PATH = "./test-extensions-mcp-tools.sqlite";
 const API_KEY = "test-extensions-mcp-tools-key-1234567890";
@@ -49,11 +54,13 @@ function buildToolServer() {
   registerExtensionEnableTool(server);
   registerExtensionDisableTool(server);
   registerExtensionActivateVersionTool(server);
+  registerExtensionCatalogTool(server);
   registerExtensionInstallTool(server);
   registerExtensionListTool(server);
   const tools = (server as unknown as { _registeredTools: Record<string, RegisteredTool> })
     ._registeredTools;
   return {
+    catalog: tools["extension-catalog"]!,
     install: tools["extension-install"]!,
     list: tools["extension-list"]!,
     enable: tools["extension-enable"]!,
@@ -143,7 +150,15 @@ beforeAll(async () => {
   }) as typeof globalThis.fetch;
 });
 
+/** Replace the `minimal` catalog entry with a changed hooks file, as a new template release would. */
+async function useChangedMinimal(suffix: string): Promise<void> {
+  const bundle = await loadBundleFixture("minimal");
+  bundle.files["hooks.ts"] += suffix;
+  await useFixtureCatalog({ minimal: bundle });
+}
+
 afterAll(async () => {
+  resetFixtureCatalog();
   await stopExtensionRuntime();
   globalThis.fetch = savedFetch;
   closeDb();
@@ -161,6 +176,7 @@ afterAll(async () => {
 beforeEach(async () => {
   await stopExtensionRuntime();
   await getDbClient().run("DELETE FROM extensions");
+  await useFixtureCatalog(["minimal", "post-logger"]);
 });
 
 describe("extension MCP HTTP proxy tools", () => {
@@ -168,10 +184,8 @@ describe("extension MCP HTTP proxy tools", () => {
     const result = await typecheckScript(`
       import type { ScriptContext } from "swarm-sdk";
       export default async (_args: unknown, ctx: ScriptContext) => {
-        await ctx.swarm.extension_install({
-          manifest: {},
-          files: { "hooks.ts": "export default () => {}" },
-        });
+        await ctx.swarm.extension_catalog({});
+        await ctx.swarm.extension_install({ template: "minimal", config: { label: "a" } });
         const id = "00000000-0000-4000-8000-000000000001";
         await ctx.swarm.extension_enable({ id });
         await ctx.swarm.extension_activate_version({ id, version: 1 });
@@ -186,7 +200,7 @@ describe("extension MCP HTTP proxy tools", () => {
   test("lead installation stays disabled and returns the shared tool envelope", async () => {
     const tools = buildToolServer();
     const result = (await tools.install.handler(
-      await loadBundleFixture("minimal"),
+      { template: "minimal" },
       meta(leadId),
     )) as ToolResult;
 
@@ -203,7 +217,7 @@ describe("extension MCP HTTP proxy tools", () => {
   test("worker installation returns ownership and a disabled draft in the shared tool envelope", async () => {
     const tools = buildToolServer();
     const result = (await tools.install.handler(
-      await loadBundleFixture("minimal"),
+      { template: "minimal" },
       meta(workerId),
     )) as ToolResult;
 
@@ -219,15 +233,17 @@ describe("extension MCP HTTP proxy tools", () => {
   test("lead reinstall stores an inactive version of an enabled extension", async () => {
     const tools = buildToolServer();
     const first = (await tools.install.handler(
-      await loadBundleFixture("minimal"),
+      { template: "minimal" },
       meta(leadId),
     )) as ToolResult;
     const id = String(first.structuredContent.id);
     await setExtensionState(id, { enabled: true, status: "enabled" });
 
-    const changed = await loadBundleFixture("minimal");
-    changed.files["hooks.ts"] += "\n// updated by MCP\n";
-    const result = (await tools.install.handler(changed, meta(leadId))) as ToolResult;
+    await useChangedMinimal("\n// updated by MCP\n");
+    const result = (await tools.install.handler(
+      { template: "minimal" },
+      meta(leadId),
+    )) as ToolResult;
 
     expect(result.isError).toBe(false);
     expect(result.structuredContent).toMatchObject({
@@ -241,7 +257,11 @@ describe("extension MCP HTTP proxy tools", () => {
     const tools = buildToolServer();
     const broken = await loadBundleFixture("minimal");
     broken.files["hooks.ts"] = "export default 42;";
-    const result = (await tools.install.handler(broken, meta(leadId))) as ToolResult;
+    await useFixtureCatalog({ minimal: broken });
+    const result = (await tools.install.handler(
+      { template: "minimal" },
+      meta(leadId),
+    )) as ToolResult;
 
     expect(result.isError).toBe(true);
     expect(result.structuredContent).toMatchObject({
@@ -253,7 +273,7 @@ describe("extension MCP HTTP proxy tools", () => {
 
   test("extension-list renders a table and supports enabledOnly", async () => {
     const tools = buildToolServer();
-    await tools.install.handler(await loadBundleFixture("minimal"), meta(leadId));
+    await tools.install.handler({ template: "minimal" }, meta(leadId));
 
     const all = (await tools.list.handler({}, meta(leadId))) as ToolResult;
     expect(all.isError).toBe(false);
@@ -269,13 +289,57 @@ describe("extension MCP HTTP proxy tools", () => {
     )) as ToolResult;
     expect(enabledOnly.structuredContent).toMatchObject({ success: true, extensions: [] });
   });
+
+  test("extension-install rejects templates missing from the catalog", async () => {
+    const tools = buildToolServer();
+    const result = (await tools.install.handler(
+      { template: "not-in-catalog" },
+      meta(leadId),
+    )) as ToolResult;
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toMatchObject({ success: false });
+    expect(JSON.stringify(result.structuredContent)).toMatch(
+      /extension_template_not_found|not-in-catalog/,
+    );
+    expect(await getDbClient().query("SELECT id FROM extensions")).toEqual([]);
+  });
+
+  test("extension-catalog renders the catalog with installed state", async () => {
+    const tools = buildToolServer();
+    const empty = (await tools.catalog.handler({}, meta(workerId))) as ToolResult;
+    expect(empty.isError).toBe(false);
+    expect(empty.content[0]?.text).toContain(
+      "| Name | Version | Assets | Installed | Description |",
+    );
+    expect(empty.content[0]?.text).toContain("| minimal | 1.0.0 | hooks only | no |");
+    expect(empty.structuredContent).toMatchObject({ success: true });
+    expect(
+      (empty.structuredContent.extensions as Array<{ name: string }>).map((item) => item.name),
+    ).toEqual(["minimal", "post-logger"]);
+
+    const installed = (await tools.install.handler(
+      { template: "minimal" },
+      meta(leadId),
+    )) as ToolResult;
+    const listed = (await tools.catalog.handler({}, meta(workerId))) as ToolResult;
+    expect(listed.content[0]?.text).toContain("| minimal | 1.0.0 | hooks only | v1, disabled |");
+    expect(listed.structuredContent.extensions).toContainEqual(
+      expect.objectContaining({
+        name: "minimal",
+        installed: { id: installed.structuredContent.id, version: 1, enabled: false },
+      }),
+    );
+    expect(listed.structuredContent.extensions).not.toContainEqual(
+      expect.objectContaining({ readme: expect.anything() }),
+    );
+  });
 });
 
 describe("extension lifecycle MCP tools", () => {
   test("lead enables, activates, disables, and deletes through the shared HTTP routes", async () => {
     const tools = buildToolServer();
     const installed = (await tools.install.handler(
-      await loadBundleFixture("minimal"),
+      { template: "minimal" },
       meta(leadId),
     )) as ToolResult;
     const id = String(installed.structuredContent.id);
@@ -297,9 +361,8 @@ describe("extension lifecycle MCP tools", () => {
     expect(blocked.content[0]?.text).toContain("Disable");
     expect(await getExtensionById(id)).not.toBeNull();
 
-    const changed = await loadBundleFixture("minimal");
-    changed.files["hooks.ts"] += "\n// next lifecycle version\n";
-    await tools.install.handler(changed, meta(leadId));
+    await useChangedMinimal("\n// next lifecycle version\n");
+    await tools.install.handler({ template: "minimal" }, meta(leadId));
     const activated = (await tools.activate.handler(
       { id, version: 2 },
       meta(leadId),
@@ -320,7 +383,7 @@ describe("extension lifecycle MCP tools", () => {
   test("workers cannot mutate the extension lifecycle", async () => {
     const tools = buildToolServer();
     const installed = (await tools.install.handler(
-      await loadBundleFixture("minimal"),
+      { template: "minimal" },
       meta(leadId),
     )) as ToolResult;
     const id = String(installed.structuredContent.id);
@@ -341,7 +404,7 @@ describe("extension lifecycle MCP tools", () => {
       expect(result.structuredContent.success).toBe(false);
     }
     const installed = (await tools.install.handler(
-      await loadBundleFixture("minimal"),
+      { template: "minimal" },
       meta(leadId),
     )) as ToolResult;
     const result = (await tools.activate.handler(

@@ -18,6 +18,7 @@ import {
   startTask,
 } from "../be/db";
 import * as dbClient from "../be/db-client";
+import type { InstallExtensionArgs as ExtensionInstallBody } from "../be/extensions/db";
 import { installExtension, listExtensionRuns } from "../be/extensions/db";
 import { disableExtension, enableExtension, stopExtensionRuntime } from "../extensions/lifecycle";
 import { handleTasks } from "../http/tasks";
@@ -27,7 +28,6 @@ import { createWorkerTaskFollowUp } from "../tasks/worker-follow-up";
 import { registerSendTaskTool } from "../tools/send-task";
 import { registerTaskActionTool } from "../tools/task-action";
 import { markExtensionRequestOrigin } from "../tools/utils";
-import type { ExtensionInstallBody } from "../types";
 import { workflowEventBus } from "../workflows/event-bus";
 import { AgentTaskExecutor } from "../workflows/executors/agent-task";
 import { loadBundleFixture } from "./fixtures/extensions/load";

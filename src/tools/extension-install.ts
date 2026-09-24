@@ -1,7 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { createToolRegistrar, toolOk } from "@/tools/utils";
-import { ExtensionManifestSchema } from "@/types";
 import {
   coerceExtensionSummary,
   extensionToolOutputSchema,
@@ -9,7 +8,7 @@ import {
 } from "./extension-common";
 
 export const EXTENSION_INSTALL_DESCRIPTION =
-  "Any authenticated agent may create and install its own TypeScript extension bundle (manifest plus a files map with one hooks.ts). Fetch the hook contract first: GET /api/extensions/type-defs returns swarm-extension.d.ts with every event and modify shape. The installing agent is recorded as createdByAgentId. Workers may install subsequent versions only for their own extensions; those versions remain inactive. A new extension remains disabled until a lead, operator, or dashboard user enables it with extension-enable.";
+  "Install a predefined extension by name. Only extensions in the catalog (extension-catalog, GET /api/extensions/catalog) can be installed; inline bundles are rejected. Install creates the extension, its ext:<name> agent and every asset it declares (scripts, and disabled schedules). Any authenticated agent may install; the installing agent is recorded as createdByAgentId. Workers may install subsequent versions only for their own extensions; those versions remain inactive. A new extension remains disabled until a lead, operator, or dashboard user enables it with extension-enable.";
 
 function extensionInstallResult(data: unknown, fallbackName: string) {
   const body = data as {
@@ -41,8 +40,10 @@ export const registerExtensionInstallTool = (server: McpServer) => {
       annotations: { openWorldHint: false },
       inputSchema: z
         .object({
-          manifest: ExtensionManifestSchema.describe("Extension bundle manifest."),
-          files: z.record(z.string(), z.string()).describe("Bundle files keyed by relative path."),
+          template: z
+            .string()
+            .min(1)
+            .describe("Name of a predefined extension from extension-catalog."),
           priority: z
             .number()
             .int()
@@ -59,7 +60,7 @@ export const registerExtensionInstallTool = (server: McpServer) => {
         path: "/api/extensions/install",
         body: args,
         requestInfo,
-        success: (data) => extensionInstallResult(data, args.manifest.name),
+        success: (data) => extensionInstallResult(data, args.template),
       }),
   );
 };

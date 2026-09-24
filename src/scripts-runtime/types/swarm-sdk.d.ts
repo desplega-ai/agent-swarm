@@ -500,9 +500,9 @@ declare module "swarm-sdk" {
     }): Promise<unknown>;
 
     // --- write: extensions ---
+    extension_catalog(args?: Record<string, never>): Promise<unknown>;
     extension_install(args: {
-      manifest: Record<string, unknown>;
-      files: Record<string, string>;
+      template: string;
       priority?: number;
       config?: Record<string, unknown>;
     }): Promise<unknown>;

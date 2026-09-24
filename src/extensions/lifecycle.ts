@@ -1,8 +1,22 @@
+import { getDbClient } from "../be/db";
+import {
+  type AssetPlan,
+  preflightAssets,
+  type ReconcileResult,
+  type RemoveResult,
+  reconcileAssets,
+  removeAssets,
+  setAssetsEnabled,
+} from "../be/extensions/assets";
 import {
   activateExtensionVersionSnapshot,
+  deleteExtension,
   getExtensionById,
   getExtensionVersion,
+  type InstallExtensionArgs,
+  type InstallExtensionResult,
   insertExtensionRun,
+  installExtension,
   listExtensions,
   pruneExtensionRuns,
   setExtensionState,
@@ -127,6 +141,8 @@ export async function enableExtension(
   const loaded = await loadExtension(await loadableExtension(record));
   registerLoaded(loaded);
   try {
+    // After the hooks load: a load error leaves the assets paused.
+    await setAssetsEnabled(id, true, opts.by);
     const enabled = await setExtensionState(id, {
       enabled: true,
       status: "enabled",
@@ -152,6 +168,7 @@ export async function disableExtension(
   const record = await getExtensionById(id);
   if (!record) throw new ExtensionLifecycleError("Extension not found", 404);
   await recordLifecycleRequest(record, "disable", opts.agentId);
+  await setAssetsEnabled(id, false, opts.by);
   await removeRegistered(id);
   attemptedFingerprints.delete(id);
   await deactivateExtensionAgent(record.name);
@@ -175,13 +192,85 @@ export async function activateVersion(
     throw new ExtensionLifecycleError(`Extension version ${version} was not found`, 404);
   }
 
+  const snapshot = await getExtensionVersion(id, version);
+  if (!snapshot) {
+    throw new ExtensionLifecycleError(`Extension version ${version} was not found`, 404);
+  }
+  const plan = await planAssets(
+    ExtensionManifestSchema.parse(JSON.parse(snapshot.manifestJson)),
+    JSON.parse(snapshot.filesJson) as Record<string, string>,
+  );
+
   await recordLifecycleRequest(current, "activate-version", opts.agentId, version);
   const wasEnabled = current.enabled;
   if (wasEnabled) await disableExtension(id, opts);
-  const activated = await activateExtensionVersionSnapshot(id, version, opts.by);
+  const activated = await getDbClient().transaction(async () => {
+    const agentId = await ensureExtensionAgent(current.name);
+    const row = await activateExtensionVersionSnapshot(id, version, opts.by);
+    if (!row) return null;
+    await reconcileAssets({ extensionId: id, agentId, plan, actor: opts.by });
+    return row;
+  });
   if (!activated)
     throw new ExtensionLifecycleError(`Extension version ${version} was not found`, 404);
   return wasEnabled ? await enableExtension(id, opts) : activated;
+}
+
+async function planAssets(
+  manifest: Parameters<typeof preflightAssets>[0],
+  files: Record<string, string>,
+): Promise<AssetPlan> {
+  const preflight = await preflightAssets(manifest, files);
+  if (!preflight.ok) throw new ExtensionAssetsInvalidError(preflight.diagnostics);
+  return preflight.plan;
+}
+
+/** A bundle's scripts or schedules failed their checks; nothing was written. */
+export class ExtensionAssetsInvalidError extends Error {
+  constructor(readonly diagnostics: string[]) {
+    super(diagnostics.join("\n"));
+    this.name = "ExtensionAssetsInvalidError";
+  }
+}
+
+export type InstallWithAssetsResult = InstallExtensionResult & {
+  assets: ReconcileResult | null;
+};
+
+/**
+ * Install a validated bundle and the assets it declares in one transaction:
+ * the `ext:<name>` agent, the extension rows, then every asset (created disabled).
+ * Asset checks run first, outside the transaction. Assets are written only when the
+ * installed version is the active one; a staged version gets them on activation.
+ */
+export async function installExtensionWithAssets(
+  args: InstallExtensionArgs,
+): Promise<InstallWithAssetsResult> {
+  const plan = await planAssets(args.manifest, args.files);
+  return await getDbClient().transaction(async () => {
+    const agentId = await ensureExtensionAgent(args.manifest.name);
+    const installed = await installExtension(args);
+    const extension = installed.extension;
+    const assets =
+      extension.activeVersion === extension.version
+        ? await reconcileAssets({
+            extensionId: extension.id,
+            agentId,
+            plan,
+            actor: args.createdBy ?? null,
+          })
+        : null;
+    return { ...installed, assets };
+  });
+}
+
+/** Uninstall: remove pristine assets, detach edited ones, and delete the extension. */
+export async function uninstallExtension(id: string, ownerOnly?: string): Promise<RemoveResult> {
+  return await getDbClient().transaction(async () => {
+    const assets = await removeAssets(id);
+    await deleteExtension(id, ownerOnly);
+    return assets;
+  });
 }
 
 export async function reloadExtension(

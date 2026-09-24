@@ -1,17 +1,17 @@
 import type { ColDef, ICellRendererParams } from "ag-grid-community";
-import { ArrowLeft, Save } from "lucide-react";
+import { ArrowLeft, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ExtensionInstallError } from "@/api/client";
+import { toast } from "sonner";
 import {
   useActivateExtensionVersion,
+  useDeleteExtension,
   useDisableExtension,
   useEnableExtension,
   useExtension,
   useExtensionRuns,
   useExtensionTypeDefs,
   useExtensionVersions,
-  useInstallExtension,
   usePatchExtension,
 } from "@/api/hooks/use-extensions";
 import type { ExtensionManifest, ExtensionRun, ExtensionVersion } from "@/api/types";
@@ -19,33 +19,30 @@ import { ScriptSourceEditor } from "@/components/scripts/script-source-editor";
 import { DataGrid } from "@/components/shared/data-grid";
 import { PageSkeleton } from "@/components/shared/page-skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { InfoRow } from "@/components/ui/info-row";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { Textarea } from "@/components/ui/textarea";
+import { describeCron, formatInterval } from "@/lib/schedule-format";
 import { formatSmartTime } from "@/lib/utils";
 import { statusBadgeVariant } from "./extensions-page";
 
-/** The `minimal` fixture bundle, used as the starting point for a new extension. */
-const TEMPLATE_HOOKS = `import type { SwarmExtension } from "swarm-extension";
-
-const extension: SwarmExtension = (api) => {
-  api.on("pre.task.create", () => ({ action: "continue" }));
-};
-
-export default extension;
-`;
-
-const TEMPLATE_FORM = {
-  name: "",
-  description: "",
-  version: "1.0.0",
-  hooksPath: "hooks.ts",
-  source: TEMPLATE_HOOKS,
-};
+/** Bundle paths Monaco should render as TypeScript; anything else shows as plain text. */
+const TS_FILE = /\.(?:[cm]?[jt]sx?)$/;
 
 /** Version history for one bundle, with the activate action on each row. */
 function VersionsGrid({
@@ -234,36 +231,183 @@ function RunLogGrid({ runs }: { runs: ExtensionRun[] }) {
 }
 
 /**
- * One extension bundle: manifest fields, the `hooks.ts` editor typed against
- * `swarm-extension.d.ts`, enable/disable, priority and config, the version
- * list, and the tail of the run log.
- *
- * `:id` is `new` for an unsaved bundle — the same form, seeded from the
- * minimal template, whose first Save installs version 1.
+ * Read-only viewer over the active snapshot's files. The hooks entry opens
+ * first; `.ts`/`.js` files get Monaco, anything else renders as plain text.
+ */
+function BundleFiles({
+  files,
+  hooksPath,
+  typeDefs,
+}: {
+  files: Record<string, string>;
+  hooksPath: string;
+  typeDefs?: { sdkTypes: string; stdlibTypes: string };
+}) {
+  const paths = useMemo(
+    () =>
+      Object.keys(files).sort((a, b) =>
+        a === hooksPath ? -1 : b === hooksPath ? 1 : a.localeCompare(b),
+      ),
+    [files, hooksPath],
+  );
+  const [selected, setSelected] = useState<string | null>(null);
+  const current = selected && selected in files ? selected : (paths[0] ?? null);
+
+  if (!current) return <p className="text-sm text-muted-foreground">No files in this bundle.</p>;
+
+  const source = files[current] ?? "";
+  return (
+    <div className="flex flex-col gap-3">
+      {paths.length > 1 && (
+        <div className="flex flex-wrap gap-1.5">
+          {paths.map((path) => (
+            <Button
+              key={path}
+              type="button"
+              size="sm"
+              variant={path === current ? "secondary" : "ghost"}
+              className="font-mono text-xs"
+              onClick={() => setSelected(path)}
+            >
+              {path}
+            </Button>
+          ))}
+        </div>
+      )}
+      {TS_FILE.test(current) ? (
+        <ScriptSourceEditor
+          source={source}
+          typeDefs={current === hooksPath ? typeDefs : undefined}
+          readOnly
+          height="360px"
+        />
+      ) : (
+        <pre className="max-h-[360px] overflow-auto rounded-md border bg-card p-3 font-mono text-xs whitespace-pre-wrap">
+          {source}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+/** Scripts, schedules, skills, and workflows the manifest declares. */
+function ManifestAssets({ assets }: { assets: ExtensionManifest["assets"] }) {
+  const scripts = assets.scripts ?? [];
+  const schedules = assets.schedules ?? [];
+  const skills = assets.skills ?? [];
+  const workflows = assets.workflows ?? [];
+  if (
+    scripts.length === 0 &&
+    schedules.length === 0 &&
+    skills.length === 0 &&
+    workflows.length === 0
+  ) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        Hooks only — this bundle declares no scripts, schedules, skills, or workflows.
+      </p>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-4">
+      {scripts.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <h4 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Scripts
+          </h4>
+          <ul className="flex flex-col gap-1.5">
+            {scripts.map((script) => (
+              <li key={script.name} className="text-sm">
+                <span className="font-mono">{script.name}</span>
+                <span className="font-mono text-xs text-muted-foreground"> · {script.file}</span>
+                <div className="text-xs text-muted-foreground">{script.description}</div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {schedules.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <h4 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Schedules
+          </h4>
+          <ul className="flex flex-col gap-1.5">
+            {schedules.map((schedule) => {
+              const cadence = schedule.cronExpression
+                ? describeCron(schedule.cronExpression)
+                : schedule.intervalMs
+                  ? `Every ${formatInterval(schedule.intervalMs)}`
+                  : "No cadence";
+              return (
+                <li key={schedule.name} className="text-sm">
+                  <span className="font-mono">{schedule.name}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {" "}
+                    · runs <span className="font-mono">{schedule.script}</span> · {cadence}
+                    {schedule.cronExpression && (
+                      <code className="ml-1 font-mono">({schedule.cronExpression})</code>
+                    )}
+                    {schedule.timezone ? ` · ${schedule.timezone}` : ""}
+                  </span>
+                  {schedule.description && (
+                    <div className="text-xs text-muted-foreground">{schedule.description}</div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+      {(skills.length > 0 || workflows.length > 0) && (
+        <div className="flex flex-col gap-1.5">
+          <h4 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Skills &amp; workflows
+          </h4>
+          <div className="flex flex-wrap gap-1.5">
+            {skills.map((name) => (
+              <Badge key={`skill:${name}`} variant="outline" size="tag">
+                skill · {name}
+              </Badge>
+            ))}
+            {workflows.map((name) => (
+              <Badge key={`workflow:${name}`} variant="outline" size="tag">
+                workflow · {name}
+              </Badge>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * One installed extension: its manifest and the active snapshot's files
+ * (read-only — bundles come from the catalog, see `/settings/extensions/new`),
+ * enable/disable, priority and config, the version list, and the tail of the
+ * run log.
  */
 export default function ExtensionDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const isNew = !id || id === "new";
-  const extensionId = isNew ? undefined : id;
+  const extensionId = id ?? "";
 
-  const { data: bundle, isLoading } = useExtension(extensionId);
-  const { data: versions } = useExtensionVersions(extensionId);
-  const { data: runs } = useExtensionRuns(extensionId);
+  const { data: bundle, isLoading, error } = useExtension(id);
+  const { data: versions } = useExtensionVersions(id);
+  const { data: runs } = useExtensionRuns(id);
   const { data: typeDefsText } = useExtensionTypeDefs();
 
-  const install = useInstallExtension();
-  const patch = usePatchExtension(extensionId ?? "");
-  const enable = useEnableExtension(extensionId ?? "");
-  const disable = useDisableExtension(extensionId ?? "");
-  const activate = useActivateExtensionVersion(extensionId ?? "");
+  const patch = usePatchExtension(extensionId);
+  const enable = useEnableExtension(extensionId);
+  const disable = useDisableExtension(extensionId);
+  const activate = useActivateExtensionVersion(extensionId);
+  const remove = useDeleteExtension(extensionId);
 
-  const [form, setForm] = useState(TEMPLATE_FORM);
   const [priority, setPriority] = useState("0");
   const [configText, setConfigText] = useState("{}");
   const [configDirty, setConfigDirty] = useState(false);
-  const [diagnostics, setDiagnostics] = useState<string[]>([]);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   // The extension query is on the global poll; only adopt server state when the
   // stored bundle actually changed, otherwise a refetch would discard edits.
   const loadedKey = useRef<string | null>(null);
@@ -273,14 +417,6 @@ export default function ExtensionDetailPage() {
     const key = `${bundle.extension.id}:${bundle.extension.contentHash}`;
     if (loadedKey.current === key) return;
     loadedKey.current = key;
-    const hooksPath = bundle.manifest.assets.hooks;
-    setForm({
-      name: bundle.manifest.name,
-      description: bundle.manifest.description,
-      version: bundle.manifest.version,
-      hooksPath,
-      source: bundle.files[hooksPath] ?? "",
-    });
     setPriority(String(bundle.extension.priority));
     if (!configDirty) setConfigText(bundle.extension.configJson || "{}");
   }, [bundle, configDirty]);
@@ -293,9 +429,34 @@ export default function ExtensionDetailPage() {
     [typeDefsText],
   );
 
-  if (!isNew && isLoading) return <PageSkeleton />;
+  if (isLoading) return <PageSkeleton />;
 
-  const extension = bundle?.extension;
+  if (!bundle) {
+    return (
+      <div className="flex flex-col flex-1 min-h-0 gap-6">
+        <PageHeader
+          title="Extension not found"
+          action={
+            <Button type="button" size="sm" variant="ghost" asChild>
+              <Link to="/settings/extensions">
+                <ArrowLeft className="h-4 w-4" />
+                Back
+              </Link>
+            </Button>
+          }
+        />
+        {error && (
+          <Alert variant="destructive">
+            <AlertDescription>
+              {error instanceof Error ? error.message : String(error)}
+            </AlertDescription>
+          </Alert>
+        )}
+      </div>
+    );
+  }
+
+  const { extension, manifest, files } = bundle;
 
   function parseConfig(): Record<string, unknown> | null {
     const text = configText.trim();
@@ -307,39 +468,10 @@ export default function ExtensionDetailPage() {
         return null;
       }
       return parsed as Record<string, unknown>;
-    } catch (error) {
-      setSaveError(`Config is not valid JSON: ${(error as Error).message}`);
+    } catch (err) {
+      setSaveError(`Config is not valid JSON: ${(err as Error).message}`);
       return null;
     }
-  }
-
-  function handleSaveBundle() {
-    setDiagnostics([]);
-    setSaveError(null);
-    const manifest: ExtensionManifest = {
-      name: form.name.trim(),
-      description: form.description,
-      version: form.version.trim(),
-      runtime: "api",
-      assets: { hooks: form.hooksPath },
-    };
-    install.mutate(
-      { manifest, files: { [form.hooksPath]: form.source } },
-      {
-        onSuccess: (result) => {
-          loadedKey.current = null;
-          if (isNew) void navigate(`/settings/extensions/${result.extension.id}`);
-        },
-        onError: (error) => {
-          if (error instanceof ExtensionInstallError) {
-            setDiagnostics(error.diagnostics);
-            setSaveError(error.message);
-            return;
-          }
-          setSaveError(error instanceof Error ? error.message : String(error));
-        },
-      },
-    );
   }
 
   function handleSaveSettings() {
@@ -350,31 +482,49 @@ export default function ExtensionDetailPage() {
       { priority: Number(priority) || 0, ...(config ? { config } : {}) },
       {
         onSuccess: () => setConfigDirty(false),
-        onError: (error) => setSaveError(error instanceof Error ? error.message : String(error)),
+        onError: (err) => setSaveError(err instanceof Error ? err.message : String(err)),
       },
     );
   }
 
-  const busy = install.isPending || patch.isPending || enable.isPending || disable.isPending;
+  function handleDelete() {
+    setSaveError(null);
+    remove.mutate(undefined, {
+      onSuccess: (result) => {
+        const deleted = result.assets?.deleted.length ?? 0;
+        const detached = result.assets?.detached.length ?? 0;
+        const parts = [
+          deleted > 0 ? `${deleted} asset${deleted === 1 ? "" : "s"} deleted` : null,
+          detached > 0 ? `${detached} detached` : null,
+        ].filter((part): part is string => part !== null);
+        toast.success(`Deleted ${extension.name}`, {
+          description: parts.length > 0 ? parts.join(", ") : undefined,
+        });
+        void navigate("/settings/extensions");
+      },
+      onError: (err) => setSaveError(err.message),
+    });
+  }
+
+  const busy =
+    patch.isPending ||
+    enable.isPending ||
+    disable.isPending ||
+    activate.isPending ||
+    remove.isPending;
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-6">
       <PageHeader
         title={
           <div className="flex items-center gap-2 min-w-0">
-            <span className="truncate">{isNew ? "New extension" : extension?.name}</span>
-            {extension && (
-              <Badge variant={statusBadgeVariant(extension.status)} size="tag">
-                {extension.status}
-              </Badge>
-            )}
+            <span className="truncate">{extension.name}</span>
+            <Badge variant={statusBadgeVariant(extension.status)} size="tag">
+              {extension.status}
+            </Badge>
           </div>
         }
-        description={
-          extension
-            ? `Active v${extension.activeVersion} of ${extension.version} · ${extension.consecutiveFailures} consecutive failures`
-            : "Seeded from the minimal bundle. Save to install version 1."
-        }
+        description={`Active v${extension.activeVersion} of ${extension.version} · ${extension.consecutiveFailures} consecutive failures`}
         action={
           <div className="flex items-center gap-2">
             <Button type="button" size="sm" variant="ghost" asChild>
@@ -383,55 +533,55 @@ export default function ExtensionDetailPage() {
                 Back
               </Link>
             </Button>
-            {extension &&
-              (extension.enabled ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={busy}
-                  onClick={() =>
-                    disable.mutate(undefined, {
-                      onError: (error) => setSaveError(error.message),
-                    })
-                  }
-                >
-                  Disable
-                </Button>
-              ) : (
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={busy}
-                  onClick={() =>
-                    enable.mutate(undefined, {
-                      onError: (error) => setSaveError(error.message),
-                    })
-                  }
-                >
-                  Enable
-                </Button>
-              ))}
+            <Button
+              type="button"
+              size="sm"
+              variant="destructive-outline"
+              disabled={busy}
+              onClick={() => setConfirmDelete(true)}
+            >
+              <Trash2 className="h-4 w-4" />
+              Delete
+            </Button>
+            {extension.enabled ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() =>
+                  disable.mutate(undefined, {
+                    onError: (err) => setSaveError(err.message),
+                  })
+                }
+              >
+                Disable
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                size="sm"
+                disabled={busy}
+                onClick={() =>
+                  enable.mutate(undefined, {
+                    onError: (err) => setSaveError(err.message),
+                  })
+                }
+              >
+                Enable
+              </Button>
+            )}
           </div>
         }
       />
 
       {saveError && (
         <Alert variant="destructive">
-          <AlertDescription>
-            <p>{saveError}</p>
-            {diagnostics.length > 0 && (
-              <ul className="mt-2 list-disc pl-4 font-mono text-[11px] leading-relaxed">
-                {diagnostics.map((line) => (
-                  <li key={line}>{line}</li>
-                ))}
-              </ul>
-            )}
-          </AlertDescription>
+          <AlertDescription>{saveError}</AlertDescription>
         </Alert>
       )}
 
-      {extension?.lastError && (
+      {extension.lastError && (
         <Alert variant="destructive">
           <AlertDescription className="font-mono text-[11px] break-all">
             {extension.lastError}
@@ -444,139 +594,153 @@ export default function ExtensionDetailPage() {
           <CardTitle>Bundle</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <div className="grid gap-4 sm:grid-cols-3">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="ext-name">Name</Label>
-              <Input
-                id="ext-name"
-                value={form.name}
-                placeholder="my-extension"
-                disabled={!isNew}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="ext-version">Manifest version</Label>
-              <Input
-                id="ext-version"
-                value={form.version}
-                placeholder="1.0.0"
-                onChange={(e) => setForm({ ...form, version: e.target.value })}
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="ext-hooks">Hooks asset</Label>
-              <Input id="ext-hooks" value={form.hooksPath} disabled readOnly />
-            </div>
+          <div className="grid gap-4 sm:grid-cols-4">
+            <InfoRow label="Manifest version">
+              <span className="font-mono text-xs">{manifest.version}</span>
+            </InfoRow>
+            <InfoRow label="Runtime">
+              <span className="font-mono text-xs">{manifest.runtime}</span>
+            </InfoRow>
+            <InfoRow label="Hooks asset">
+              <span className="font-mono text-xs break-all">{manifest.assets.hooks}</span>
+            </InfoRow>
+            <InfoRow label="Author">{manifest.author || "—"}</InfoRow>
           </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="ext-description">Description</Label>
+          <InfoRow label="Description">{manifest.description || "—"}</InfoRow>
+          {manifest.homepage && (
+            <InfoRow label="Homepage">
+              <a
+                href={manifest.homepage}
+                target="_blank"
+                rel="noreferrer"
+                className="break-all underline underline-offset-2"
+              >
+                {manifest.homepage}
+              </a>
+            </InfoRow>
+          )}
+          <BundleFiles files={files} hooksPath={manifest.assets.hooks} typeDefs={typeDefs} />
+          <p className="text-xs text-muted-foreground">
+            Read-only. Bundles install from the{" "}
+            <Link to="/settings/extensions/new" className="underline underline-offset-2">
+              extension catalog
+            </Link>
+            ; reinstall from there to pick up a newer version.
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Assets</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ManifestAssets assets={manifest.assets} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Settings</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <div className="flex flex-col gap-1.5 max-w-[160px]">
+            <Label htmlFor="ext-priority">Priority</Label>
             <Input
-              id="ext-description"
-              value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
+              id="ext-priority"
+              type="number"
+              value={priority}
+              onChange={(e) => setPriority(e.target.value)}
             />
           </div>
-          <ScriptSourceEditor
-            source={form.source}
-            onChange={(source) => setForm({ ...form, source })}
-            typeDefs={typeDefs}
-            readOnly={false}
-            height="360px"
-          />
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="ext-config">Config (JSON)</Label>
+            <Textarea
+              id="ext-config"
+              value={configText}
+              rows={6}
+              className="font-mono text-xs"
+              onChange={(e) => {
+                setConfigText(e.target.value);
+                setConfigDirty(true);
+              }}
+            />
+            <p className="text-xs text-muted-foreground">
+              Stored values are scrubbed on read, so secrets show as placeholders. Saving replaces
+              the whole object. The server validates it against the extension schema on enable.
+            </p>
+          </div>
           <div className="flex justify-end">
-            <Button type="button" size="sm" disabled={busy} onClick={handleSaveBundle}>
-              <Save className="h-4 w-4" />
-              {isNew ? "Install" : "Save new version"}
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={handleSaveSettings}
+            >
+              Save settings
             </Button>
           </div>
         </CardContent>
       </Card>
 
-      {extension && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Settings</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-4">
-            <div className="flex flex-col gap-1.5 max-w-[160px]">
-              <Label htmlFor="ext-priority">Priority</Label>
-              <Input
-                id="ext-priority"
-                type="number"
-                value={priority}
-                onChange={(e) => setPriority(e.target.value)}
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="ext-config">Config (JSON)</Label>
-              <Textarea
-                id="ext-config"
-                value={configText}
-                rows={6}
-                className="font-mono text-xs"
-                onChange={(e) => {
-                  setConfigText(e.target.value);
-                  setConfigDirty(true);
-                }}
-              />
-              <p className="text-xs text-muted-foreground">
-                Stored values are scrubbed on read, so secrets show as placeholders. Saving replaces
-                the whole object. The server validates it against the extension schema on enable.
-              </p>
-            </div>
-            <div className="flex justify-end">
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={busy}
-                onClick={handleSaveSettings}
-              >
-                Save settings
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      <Card>
+        <CardHeader>
+          <CardTitle>Versions</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <VersionsGrid
+            versions={versions ?? []}
+            activeVersion={extension.activeVersion}
+            busy={busy}
+            onActivate={(version) => {
+              loadedKey.current = null;
+              activate.mutate(version, {
+                onError: (err) => setSaveError(err.message),
+              });
+            }}
+          />
+        </CardContent>
+      </Card>
 
-      {extension && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Versions</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <VersionsGrid
-              versions={versions ?? []}
-              activeVersion={extension.activeVersion}
-              busy={busy}
-              onActivate={(version) => {
-                loadedKey.current = null;
-                activate.mutate(version, {
-                  onError: (error) => setSaveError(error.message),
-                });
+      <Card>
+        <CardHeader>
+          <CardTitle>Run log</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {(runs?.length ?? 0) === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No runs yet. Entries appear once an enabled extension handles an event.
+            </p>
+          ) : (
+            <RunLogGrid runs={runs ?? []} />
+          )}
+        </CardContent>
+      </Card>
+
+      <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {extension.name}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Removes the extension. Scripts and schedules it installed are deleted, except ones
+              edited since install, which are kept and detached. You can reinstall it from the
+              catalog.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setConfirmDelete(false);
+                handleDelete();
               }}
-            />
-          </CardContent>
-        </Card>
-      )}
-
-      {extension && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Run log</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {(runs?.length ?? 0) === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No runs yet. Entries appear once an enabled extension handles an event.
-              </p>
-            ) : (
-              <RunLogGrid runs={runs ?? []} />
-            )}
-          </CardContent>
-        </Card>
-      )}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

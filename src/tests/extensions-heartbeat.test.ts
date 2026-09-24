@@ -10,11 +10,11 @@ import {
   insertActiveSession,
   startTask,
 } from "../be/db";
+import type { InstallExtensionArgs as ExtensionInstallBody } from "../be/extensions/db";
 import { installExtension, listExtensionRuns } from "../be/extensions/db";
 import { validateBundle } from "../be/extensions/validate";
 import { disableExtension, enableExtension, stopExtensionRuntime } from "../extensions/lifecycle";
 import { codeLevelTriage } from "../heartbeat/heartbeat";
-import type { ExtensionInstallBody } from "../types";
 import { loadBundleFixture } from "./fixtures/extensions/load";
 
 const TEST_DB_PATH = "./test-extensions-heartbeat.sqlite";

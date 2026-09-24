@@ -1,0 +1,24 @@
+{
+  "name": "with-assets",
+  "description": "Extension that declares a script and a schedule",
+  "version": "1.0.0",
+  "runtime": "api",
+  "assets": {
+    "hooks": "hooks.ts",
+    "scripts": [
+      {
+        "name": "with-assets-echo",
+        "file": "scripts/echo.ts",
+        "description": "Echo the configured label"
+      }
+    ],
+    "schedules": [
+      {
+        "name": "with-assets-hourly",
+        "script": "with-assets-echo",
+        "intervalMs": 3600000,
+        "args": { "label": "hourly" }
+      }
+    ]
+  }
+}
