@@ -587,11 +587,13 @@ export async function buildRoutingAffinityFromAgent(
  * `task-action claim`, `autoAssignPoolTasks`) MUST use before handing a task
  * to an agent. Exact-match on the snapshotted role string (no keyword
  * taxonomy in v1); `harnessProvider` is informational only and never
- * enforced (native session resume is deprecated). Missing role data on
- * either side is treated as INELIGIBLE — never fail-open to "anyone" — so a
- * capability-only requirement (no `role` set) can only ever be claimed by
- * its `sourceAgentId`, and otherwise queues until the starvation escalation
- * hands it to the Lead. Lead-only work is different: any Lead may claim it
+ * enforced (native session resume is deprecated). A caller-declared affinity
+ * (no `role`, no `sourceAgentId`, e.g. `requiredCapabilities` on send-task)
+ * matches on capabilities alone: any agent holding every required capability
+ * is eligible. A snapshot affinity (has `sourceAgentId`) with missing role
+ * data on either side stays INELIGIBLE — never fail-open to "anyone" — so it
+ * can only be claimed by its `sourceAgentId`, and otherwise queues until the
+ * starvation escalation hands it to the Lead. Lead-only work is different: any Lead may claim it
  * (subject to explicitly required capabilities), because its source/role is
  * only recovery provenance and must not turn a worker's old role into a
  * constraint on the Lead pool.
