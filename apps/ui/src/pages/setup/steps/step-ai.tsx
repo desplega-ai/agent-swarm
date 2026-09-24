@@ -5,6 +5,7 @@ import { useAgents } from "@/api/hooks/use-agents";
 import { useConfigs } from "@/api/hooks/use-config-api";
 import { useEnvPresence } from "@/api/hooks/use-integrations-meta";
 import type { OnboardingAiMethod } from "@/api/types";
+import { setupExitHref } from "@/components/onboarding/onboarding-redirect";
 import { AutosaveScopeContext, useAutosaveScope } from "@/components/onboarding/use-autosave";
 import { Button } from "@/components/ui/button";
 import type { StepProps } from "../step-contract";
@@ -95,9 +96,18 @@ export function StepAi({ onboarding, act, setContinueBlocker, setContinueAction 
         <OpenHarnessCard {...cardProps("open")} />
         <DevinCard {...cardProps("devin")} />
         <div className="pt-2">
-          <Button asChild variant="link" size="xs" className="h-auto px-0 has-[>svg]:px-0">
+          <Button
+            asChild
+            variant="link"
+            size="xs"
+            className="h-auto max-w-full whitespace-normal px-0 text-left has-[>svg]:px-0"
+          >
             {/* A new tab keeps setup open in this one. */}
-            <Link to="/settings/integrations" target="_blank" rel="noopener noreferrer">
+            <Link
+              to={setupExitHref("/settings/integrations")}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
               More providers (OpenAI, Bedrock, Claude Managed) in Settings
               <ArrowUpRight />
             </Link>

@@ -21,7 +21,7 @@ import {
   useOnboardingAction,
 } from "@/api/hooks/use-onboarding";
 import type { OnboardingResponse, OnboardingStepId, OnboardingStepStatus } from "@/api/types";
-import { markSetupVisited } from "@/components/onboarding/onboarding-redirect";
+import { markSetupVisited, setupExitHref } from "@/components/onboarding/onboarding-redirect";
 import { stepNumber } from "@/components/onboarding/step-status";
 import { ErrorBoundary } from "@/components/shared/error-boundary";
 import { HiveLoadingScreen } from "@/components/shared/hive-loading-screen";
@@ -508,7 +508,7 @@ function SetupError({ message, onRetry }: { message: string; onRetry: () => void
           {message}. Check the API URL and key in{" "}
           {/* A new tab: this one keeps its place and retries once the connection is fixed. */}
           <Link
-            to="/settings/connections"
+            to={setupExitHref("/settings/connections")}
             target="_blank"
             rel="noopener noreferrer"
             className="underline underline-offset-2"

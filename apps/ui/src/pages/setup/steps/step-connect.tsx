@@ -5,6 +5,7 @@ import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import type { OnboardingResponse } from "@/api/types";
 import { IdentityForm } from "@/components/identity/identity-form";
 import { FadeIn } from "@/components/onboarding/fade-in";
+import { setupExitHref } from "@/components/onboarding/onboarding-redirect";
 import { SetupCard } from "@/components/onboarding/setup-card";
 import { useContinueBlocker } from "@/components/onboarding/use-autosave";
 import { SecretInput } from "@/components/shared/secret-field";
@@ -80,7 +81,11 @@ function ConnectedSummary({
         connectionLocked ? null : (
           <Button asChild variant="ghost" size="sm" className="text-muted-foreground">
             {/* A new tab keeps setup open in this one. */}
-            <Link to="/settings/connections" target="_blank" rel="noopener noreferrer">
+            <Link
+              to={setupExitHref("/settings/connections")}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
               Manage
               <ExternalLink />
             </Link>

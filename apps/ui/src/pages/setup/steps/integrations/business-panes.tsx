@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useOAuthApps, useOAuthRedirectUri } from "@/api/hooks/use-script-connections";
 import type { OAuthAppSummary, OAuthAuthorizationSummary } from "@/api/types";
+import { setupExitHref } from "@/components/onboarding/onboarding-redirect";
 import { CopyableField } from "@/components/shared/copyable-fields";
 import { StatusLine } from "@/components/shared/status-icon";
 import { Button } from "@/components/ui/button";
@@ -86,7 +87,7 @@ function OpenConnections({ tool, note }: { tool: BusinessTool; note: string }) {
       </p>
       <Button asChild variant="outline" size="sm">
         {/* A new tab keeps setup open in this one. */}
-        <Link to="/connections" target="_blank" rel="noopener noreferrer">
+        <Link to={setupExitHref("/connections")} target="_blank" rel="noopener noreferrer">
           Open Connections
           <ExternalLink />
         </Link>

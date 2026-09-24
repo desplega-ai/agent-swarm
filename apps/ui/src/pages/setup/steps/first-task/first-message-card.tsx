@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { api } from "@/api/client";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { IdentityForm } from "@/components/identity/identity-form";
+import { setupExitHref } from "@/components/onboarding/onboarding-redirect";
 import { SetupCard } from "@/components/onboarding/setup-card";
 import { ComposerDock } from "@/components/sessions/composer-dock";
 import { SUGGESTIONS } from "@/components/sessions/new-session-view";
@@ -95,7 +96,11 @@ export function FirstTaskComposer({
           actions={
             <Button asChild variant="outline" size="sm">
               {/* A new tab keeps setup open in this one. */}
-              <Link to={taskPath(firstTaskId)} target="_blank" rel="noopener noreferrer">
+              <Link
+                to={setupExitHref(taskPath(firstTaskId))}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
                 {usersSupported ? "Open session" : "Open task"}
                 <ExternalLink />
               </Link>

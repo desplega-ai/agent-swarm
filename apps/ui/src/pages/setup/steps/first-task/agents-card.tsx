@@ -1,6 +1,7 @@
 import { ChevronDown, ExternalLink } from "lucide-react";
 import { Link } from "react-router-dom";
 import type { Agent } from "@/api/types";
+import { setupExitHref } from "@/components/onboarding/onboarding-redirect";
 import { HarnessIcon } from "@/components/shared/harness-icon";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { StatusLine } from "@/components/shared/status-icon";
@@ -128,7 +129,7 @@ function AgentList({ agents, loading }: { agents: Agent[]; loading: boolean }) {
       </ul>
       {hidden > 0 ? (
         <Link
-          to="/agents"
+          to={setupExitHref("/agents")}
           target="_blank"
           rel="noopener noreferrer"
           className="flex items-center gap-1 border-t border-border-subtle px-3 py-2 text-xs text-muted-foreground hover:text-foreground hover-linger transition-colors"

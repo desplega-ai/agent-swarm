@@ -8,6 +8,7 @@ import { useEnvPresence } from "@/api/hooks/use-integrations-meta";
 import { ONBOARDING_QUERY_KEY } from "@/api/hooks/use-onboarding";
 import { useOAuthApps } from "@/api/hooks/use-script-connections";
 import { FadeIn } from "@/components/onboarding/fade-in";
+import { setupExitHref } from "@/components/onboarding/onboarding-redirect";
 import { SetupCard, SetupChip } from "@/components/onboarding/setup-card";
 import { AutosaveScopeContext, useAutosaveScope } from "@/components/onboarding/use-autosave";
 import { BrandLogo } from "@/components/shared/brand-logo";
@@ -132,7 +133,7 @@ export function StepIntegrations({ onboarding, act, setContinueBlocker }: StepPr
             </Fragment>
           ))}
           <Link
-            to="/settings/integrations"
+            to={setupExitHref("/settings/integrations")}
             target="_blank"
             rel="noopener noreferrer"
             className="flex h-8 shrink-0 items-center gap-2 rounded-full border px-3 text-sm text-muted-foreground hover:text-foreground hover-linger transition-colors sm:mt-1 sm:h-auto sm:rounded-none sm:border-0 sm:border-t sm:border-border-subtle sm:px-3 sm:py-2.5"

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
 import { isOnboardingOpen, useOnboarding } from "@/api/hooks/use-onboarding";
 import { useConfig } from "@/hooks/use-config";
 
@@ -15,6 +15,15 @@ export function markSetupVisited(apiUrl: string) {
   setupVisited.add(apiUrl);
 }
 
+// Links from `/setup` open other dashboard pages in a new tab. A new tab is a
+// new page load, so it carries this marker instead of the in-memory flag.
+const FROM_SETUP_PARAM = "fromSetup";
+
+/** Href for a link out of `/setup`: the landing tab must not bounce back. */
+export function setupExitHref(path: string): string {
+  return `${path}${path.includes("?") ? "&" : "?"}${FROM_SETUP_PARAM}=1`;
+}
+
 /**
  * Mounted in the configured app shell. Sends the operator to `/setup` while
  * onboarding is open and not minimized. It is also the one poller of the
@@ -22,12 +31,14 @@ export function markSetupVisited(apiUrl: string) {
  */
 export function OnboardingRedirect() {
   const { config, pendingConnection } = useConfig();
+  const fromSetup = new URLSearchParams(useLocation().search).has(FROM_SETUP_PARAM);
   const { data, dataUpdatedAt, isFetchedAfterMount } = useOnboarding({
     // No polling once onboarding is finished, dismissed, or absent.
     refetchInterval: (query) => (isOnboardingOpen(query.state.data) ? 30_000 : false),
   });
   const [mountedAt] = useState(Date.now);
 
+  if (fromSetup) markSetupVisited(config.apiUrl);
   if (setupVisited.has(config.apiUrl) || pendingConnection || !data) return null;
   // Decide on a payload fetched after this mount, never on the persisted
   // cache: hydration can count as "fetched after mount" without a request,
