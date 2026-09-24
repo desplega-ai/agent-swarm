@@ -146,6 +146,8 @@ export async function startSut(
     // Legacy Slack scenarios pin their renderer; v2 scenarios opt in via config.
     SLACK_RENDER_V2: "false",
     SLACK_THREAD_STEERING: "off",
+    // Background boot triage at T+90s must not steal a scenario's next poll.
+    HEARTBEAT_CHECKLIST_DISABLE: "true",
     AGENT_FS_LOCAL_DIR: fsDir,
     SECRETS_ENCRYPTION_KEY_FILE: secretsPath,
     ...slackEnv,
