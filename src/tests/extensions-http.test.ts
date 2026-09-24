@@ -1,7 +1,14 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
-import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
+import {
+  closeDb,
+  createAgent,
+  createScheduledTask,
+  getDbClient,
+  getScheduledTaskByName,
+  initDb,
+} from "../be/db";
 import {
   getExtensionByName,
   insertExtensionRun,
@@ -11,6 +18,7 @@ import {
   setExtensionState,
 } from "../be/extensions/db";
 import { enqueueAuditRow, flushAuditBuffer } from "../be/rbac-audit";
+import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
 import { stopExtensionRuntime } from "../extensions/lifecycle";
 import { handleCore } from "../http/core";
 import { handleExtensions } from "../http/extensions";
@@ -133,6 +141,17 @@ beforeAll(async () => {
   savedEnv = { ...process.env };
   await removeDbFiles();
   initDb(TEST_DB_PATH);
+  // Tests delete template scripts right after install: keep background embeddings out of the way.
+  setScriptEmbeddingProviderForTests({
+    name: "test/noop-extensions-http",
+    dimensions: 1,
+    async embed() {
+      return null;
+    },
+    async embedBatch(texts: string[]) {
+      return texts.map(() => null);
+    },
+  });
   process.env.AGENT_SWARM_API_KEY = API_KEY;
   delete process.env.API_KEY;
   refreshSecretScrubberCache();
@@ -143,6 +162,7 @@ beforeAll(async () => {
 afterAll(async () => {
   resetFixtureCatalog();
   await stopExtensionRuntime();
+  setScriptEmbeddingProviderForTests(null);
   closeDb();
   await removeDbFiles();
   for (const key of Object.keys(process.env)) {
@@ -761,5 +781,57 @@ export default extension;
     expect(deleted.status).toBe(200);
     expect(await deleted.json()).toEqual({ deleted: true, assets: { deleted: [], detached: [] } });
     expect(await getExtensionByName("legacy-inline")).toBeNull();
+  });
+  test("activate-version with an asset conflict answers 400 and keeps the old version on", async () => {
+    await useFixtureCatalog(["with-assets"]);
+    const installed = await install("with-assets");
+    const id = ((await installed.json()).extension as { id: string }).id;
+    const path = `/api/extensions/${id}`;
+    expect((await dispatch(`${path}/enable`, { method: "POST" })).status).toBe(200);
+
+    // Stage v2 (a lead install never activates it) with a schedule someone else holds.
+    const next = await loadBundleFixture("with-assets");
+    next.manifest = {
+      ...next.manifest,
+      version: "1.1.0",
+      assets: {
+        ...next.manifest.assets,
+        schedules: [
+          ...(next.manifest.assets.schedules ?? []),
+          { name: "with-assets-daily", script: "with-assets-echo", intervalMs: 86_400_000 },
+        ],
+      },
+    };
+    await useFixtureCatalog({ "with-assets": next });
+    expect((await install("with-assets", leadId)).status).toBe(200);
+    await createScheduledTask({
+      name: "with-assets-daily",
+      intervalMs: 60_000,
+      taskTemplate: "someone else's",
+    });
+
+    try {
+      const response = await dispatch(`${path}/activate-version`, {
+        method: "POST",
+        body: JSON.stringify({ version: 2 }),
+      });
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        error: "extension_validation_failed",
+        diagnostics: [
+          'schedule "with-assets-daily" already exists and does not belong to this extension',
+        ],
+      });
+      expect(await getExtensionByName("with-assets")).toMatchObject({
+        enabled: true,
+        status: "enabled",
+        activeVersion: 1,
+      });
+      expect((await getScheduledTaskByName("with-assets-hourly"))?.enabled).toBe(true);
+    } finally {
+      await dispatch(`${path}/disable`, { method: "POST" });
+      await dispatch(path, { method: "DELETE" });
+      await getDbClient().run("DELETE FROM scheduled_tasks WHERE name = 'with-assets-daily'");
+    }
   });
 });

@@ -8,9 +8,11 @@ import {
   initDb,
   updateScheduledTask,
 } from "../be/db";
-import { getExtensionByName } from "../be/extensions/db";
+import { ExtensionAssetConflictError } from "../be/extensions/assets";
+import { getExtensionById, getExtensionByName } from "../be/extensions/db";
 import { getScript, upsertScriptByName } from "../be/scripts/db";
 import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
+import { dispatchPre, listRegistered } from "../extensions/dispatcher";
 import {
   activateVersion,
   disableExtension,
@@ -29,13 +31,29 @@ const HOOKS = `import type { SwarmExtension } from "swarm-extension";
 const extension: SwarmExtension = () => {};
 export default extension;
 `;
+const THROWING_HOOKS = `import type { SwarmExtension } from "swarm-extension";
+const extension: SwarmExtension = (api) => {
+  api.on("pre.task.create", () => {
+    throw new Error("digest hook failure");
+  });
+};
+export default extension;
+`;
 const SCRIPT =
   "export default async function collect(args: any) {\n  return { ok: true, args };\n}\n";
 const EDITED_SCRIPT = "export default async function collect() {\n  return { edited: true };\n}\n";
 
 type Bundle = { manifest: ExtensionManifest; files: Record<string, string> };
 
-function bundle(opts: { schedule?: boolean; script?: string; version?: string } = {}): Bundle {
+function bundle(
+  opts: {
+    schedule?: boolean;
+    weekly?: boolean;
+    hooks?: string;
+    script?: string;
+    version?: string;
+  } = {},
+): Bundle {
   return {
     manifest: {
       name: "digest",
@@ -55,11 +73,20 @@ function bundle(opts: { schedule?: boolean; script?: string; version?: string } 
                   cronExpression: "0 9 * * *",
                   args: { hours: 24 },
                 },
+                ...(opts.weekly
+                  ? [
+                      {
+                        name: "digest-weekly",
+                        script: "digest-collect",
+                        cronExpression: "0 9 * * 1",
+                      },
+                    ]
+                  : []),
               ],
             }),
       },
     },
-    files: { "hooks.ts": HOOKS, "scripts/collect.ts": opts.script ?? SCRIPT },
+    files: { "hooks.ts": opts.hooks ?? HOOKS, "scripts/collect.ts": opts.script ?? SCRIPT },
   };
 }
 
@@ -288,5 +315,76 @@ describe("extension assets", () => {
     expect(await assetRows()).toEqual([
       { kind: "script", name: "digest-collect", enabledBefore: null },
     ]);
+  });
+  test("a failed version activation keeps an enabled extension on its old version", async () => {
+    const { extension } = await install();
+    await enableExtension(extension.id);
+    await install(bundle({ weekly: true, version: "2.0.0" }));
+    const foreign = await createScheduledTask({
+      name: "digest-weekly",
+      intervalMs: 60_000,
+      taskTemplate: "someone else's",
+    });
+    const daily = await getScheduledTaskByName("digest-daily");
+    expect(daily?.enabled).toBe(true);
+
+    await expect(activateVersion(extension.id, 2)).rejects.toBeInstanceOf(
+      ExtensionAssetConflictError,
+    );
+
+    expect(await getExtensionById(extension.id)).toMatchObject({
+      enabled: true,
+      status: "enabled",
+      activeVersion: 1,
+    });
+    expect(listRegistered().map((loaded) => loaded.record.id)).toEqual([extension.id]);
+    expect(await getScheduledTaskByName("digest-daily")).toMatchObject({
+      id: daily!.id,
+      enabled: true,
+      nextRunAt: daily!.nextRunAt,
+    });
+    expect(await getScheduledTaskByName("digest-weekly")).toMatchObject({
+      id: foreign.id,
+      enabled: foreign.enabled,
+      taskTemplate: "someone else's",
+    });
+    expect(await assetRows()).toEqual([
+      { kind: "schedule", name: "digest-daily", enabledBefore: null },
+      { kind: "script", name: "digest-collect", enabledBefore: null },
+    ]);
+  });
+
+  test("auto-disable pauses the schedule and a later enable restores it", async () => {
+    const saved = process.env.EXTENSION_MAX_CONSECUTIVE_FAILURES;
+    process.env.EXTENSION_MAX_CONSECUTIVE_FAILURES = "3";
+    try {
+      const { extension } = await install(bundle({ hooks: THROWING_HOOKS }));
+      await enableExtension(extension.id);
+      expect((await getScheduledTaskByName("digest-daily"))?.enabled).toBe(true);
+
+      for (let attempt = 0; attempt < 3; attempt++) {
+        await dispatchPre("pre.task.create", {
+          options: {},
+          description: "start",
+          origin: "rest",
+        });
+      }
+
+      expect(await getExtensionById(extension.id)).toMatchObject({
+        enabled: false,
+        status: "auto-disabled",
+      });
+      const paused = await getScheduledTaskByName("digest-daily");
+      expect(paused?.enabled).toBe(false);
+      expect(paused?.nextRunAt).toBeUndefined();
+
+      await enableExtension(extension.id);
+      const restored = await getScheduledTaskByName("digest-daily");
+      expect(restored?.enabled).toBe(true);
+      expect(restored?.nextRunAt).toBeString();
+    } finally {
+      if (saved === undefined) delete process.env.EXTENSION_MAX_CONSECUTIVE_FAILURES;
+      else process.env.EXTENSION_MAX_CONSECUTIVE_FAILURES = saved;
+    }
   });
 });

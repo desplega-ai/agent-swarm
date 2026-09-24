@@ -204,16 +204,37 @@ export async function activateVersion(
   await recordLifecycleRequest(current, "activate-version", opts.agentId, version);
   const wasEnabled = current.enabled;
   if (wasEnabled) await disableExtension(id, opts);
-  const activated = await getDbClient().transaction(async () => {
-    const agentId = await ensureExtensionAgent(current.name);
-    const row = await activateExtensionVersionSnapshot(id, version, opts.by);
-    if (!row) return null;
-    await reconcileAssets({ extensionId: id, agentId, plan, actor: opts.by });
-    return row;
-  });
-  if (!activated)
-    throw new ExtensionLifecycleError(`Extension version ${version} was not found`, 404);
+  let activated: Extension | null;
+  try {
+    activated = await getDbClient().transaction(async () => {
+      const agentId = await ensureExtensionAgent(current.name);
+      const row = await activateExtensionVersionSnapshot(id, version, opts.by);
+      if (!row) return null;
+      await reconcileAssets({ extensionId: id, agentId, plan, actor: opts.by });
+      return row;
+    });
+    if (!activated)
+      throw new ExtensionLifecycleError(`Extension version ${version} was not found`, 404);
+  } catch (error) {
+    // The transaction rolled back to the old version: bring it and its paused assets back.
+    if (wasEnabled) await restoreEnabled(id, opts);
+    throw error;
+  }
   return wasEnabled ? await enableExtension(id, opts) : activated;
+}
+
+async function restoreEnabled(
+  id: string,
+  opts: { by?: string | null; agentId?: string },
+): Promise<void> {
+  try {
+    await enableExtension(id, opts);
+  } catch (error) {
+    console.error(
+      "[extensions] Failed to re-enable after a failed version activation:",
+      scrubSecrets(error instanceof Error ? error.message : String(error)),
+    );
+  }
 }
 
 async function planAssets(
