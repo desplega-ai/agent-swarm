@@ -218,7 +218,7 @@ and integers only. Rows in `docs-site/content/docs/(documentation)/reference/tel
 - [x] API review fix round (70e22ee94) + memory rejection fix (99c7232db) + readiness signal (a208d65ed) + footprint test (ead92e761)
 - [x] UI round 2 (dffe8bacc)
 - [ ] UI fix round 3 (round-2 reviews, 19 items) + Taras QA round 3 items 20-25 (step icons, hide Skip when done, no footer check, Enter/S/Escape shortcuts, step 6 full width, step 3 title)
-- [ ] Per-agent model step with a cheap/optimal/max dial per harness (research running; Taras picks the dial values)
+- [ ] Per-agent model dial inside step 3 (values approved by Taras; implementation running)
 - [ ] Adopt the new UI primitives in existing dashboard components (survey running; Taras confirms the list)
 - [ ] Dev skill for UI work in `.claude/internal-skills/` (symlinked in `.claude/skills/` + `.agents/skills/`)
 - [ ] Phase 6: integration pass, gates, code review, commit, push to #1604, PR body
@@ -227,6 +227,19 @@ and integers only. Rows in `docs-site/content/docs/(documentation)/reference/tel
 ## QA feedback round 2 (Taras, 2026-09-24)
 
 Decisions: blessed tools = Hybrid (Gmail + Microsoft inline via existing OAuth presets; Figma, Stripe, Salesforce, Shopify, Granola open /connections in a new tab, presets in a follow-up PR). Slack HTTP mode removed from the step (not implemented). Taras overrides the no-step-transition motion rule for /setup. Memory re-probe failure keeps a done step done.
+
+## Model dial (Taras, 2026-09-24)
+
+Lives inside step 3; every agent defaults to optimal; writes concrete `MODEL_OVERRIDE` + `REASONING_EFFORT_OVERRIDE` per agent (prod uses concrete ids, 12/12 agents).
+
+| Harness | Cheap | Optimal | Max |
+|---|---|---|---|
+| claude | claude-sonnet-5, medium | claude-opus-5-5, high | claude-fable-5-1, high |
+| codex | gpt-6-luna, medium | gpt-6-sol, high | gpt-6-astra, xhigh |
+| pi, opencode | openrouter/deepseek/deepseek-v4.1-flash, low | openrouter/z-ai/glm-5.3, medium | openrouter/anthropic/claude-opus-5.5, high |
+| dsh | deepseek v4.1-flash | deepseek v4-pro | deepseek v4-pro |
+
+Follow-ups found by research (not in this PR): `runbooks/model-tiers.md` is stale vs `DEFAULT_MODEL_TIER_MAP`; `src/be/modelsdev-cache.json` lacks `deepseek-v4.1-flash`, `anthropic/claude-opus-5.5`, `z-ai/glm-5.3` (live catalog has them; refresh the snapshot). Prod: the Lead is 72% of 30-day spend ($19.1k of $26.5k).
 
 ## Verification
 
