@@ -15,6 +15,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { isTruthyConfigValue, useSwarmConfig } from "@/hooks/use-swarm-config";
+import { AVATAR_COLOR_INPUT_FALLBACK } from "@/lib/agent-color";
 import type { ConfigCatalogEntry } from "@/lib/configuration-catalog";
 import { formatDuration, isJsonObject } from "@/lib/configuration-values";
 import { cn } from "@/lib/utils";
@@ -374,7 +375,7 @@ export function ConfigurationRow({ entry, inEnv }: ConfigurationRowProps) {
                   <Input
                     type="color"
                     aria-label={`${entry.label} picker`}
-                    value={/^#[0-9a-f]{6}$/i.test(draft) ? draft : "#000000"}
+                    value={/^#[0-9a-f]{6}$/i.test(draft) ? draft : AVATAR_COLOR_INPUT_FALLBACK}
                     disabled={isPending}
                     onChange={(event) => setDraft(event.target.value)}
                     className="w-10 shrink-0 p-1"
