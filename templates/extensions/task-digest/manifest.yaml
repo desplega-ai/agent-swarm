@@ -18,3 +18,7 @@ assets:
       timezone: UTC
       args:
         hours: 24
+  workflows:
+    - file: workflows/report.yaml
+  skills:
+    - dir: skills/task-digest-guide

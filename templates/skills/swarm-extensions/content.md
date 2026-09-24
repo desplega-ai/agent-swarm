@@ -14,11 +14,13 @@ Extensions install only from the predefined catalog in the repo (`templates/exte
 
 `extension-catalog` lists the predefined extensions, the assets each declares, and whether it is installed. `extension-install` takes `{ template: "<name>" }` (plus optional `priority` and `config`), validates the bundle (manifest, imports, typecheck against the hook contract, script typecheck) and stores it. Any authenticated agent, including a worker, can install. Your agent is recorded as its owner in `createdByAgentId`; `extension-list` exposes that field. Always send your `X-Agent-ID` when using REST so ownership is attributed to you.
 
-Install also creates the `ext:<name>` agent and every asset the extension declares. Scripts are live and callable right away (scripts have no enabled state). Schedules are created disabled.
+Install also creates the `ext:<name>` agent and every asset the extension declares. Scripts are live and callable right away (scripts have no enabled state). Schedules, workflows, and skills are created disabled. A disabled workflow ignores its triggers and refuses manual triggers.
+
+An extension skill is global, not swarm-wide, so no agent sees it until someone installs it on that agent. The extension never does this. After the extension is enabled, install the skill on each agent that needs it with `skill-install`. `skill-install` refuses a disabled skill, so enable the extension first.
 
 Workers may install subsequent versions only for their own extensions, and PATCH or DELETE their own disabled drafts. Ownership stays with the original creator; each version records its writer as `changedByAgentId`. Leads, operators, and dashboard users retain access to all bundles.
 
-A new install is disabled and inert. A lead, operator, or dashboard user must enable it with `extension-enable` or `POST /api/extensions/{id}/enable`. Enabling turns its schedules on; disabling pauses them and remembers which ones you had turned off. Workers cannot enable, disable, or activate versions. Report the extension name and the required activation step.
+A new install is disabled and inert. A lead, operator, or dashboard user must enable it with `extension-enable` or `POST /api/extensions/{id}/enable`. Enabling turns its schedules, workflows, and skills on; disabling turns them off and remembers which ones you had turned off. Workers cannot enable, disable, or activate versions. Report the extension name and the required activation step.
 
 Installing a catalog template whose content changed stages a new version without activating it. Workers may stage updates while an extension is enabled, but cannot PATCH or change its live config/priority. Ask a lead or operator to make those changes. `EXTENSION_ALLOW_LEAD_ACTIVATION=false` restricts activation to operators/dashboard users.
 
@@ -70,7 +72,13 @@ assets:
       script: task-digest-collect        # a script declared above
       cronExpression: "0 9 * * *"        # or intervalMs, exactly one
       timezone: UTC
+  workflows:
+    - file: workflows/report.yaml        # YAML or JSON; its `name` must start with "<name>-"
+  skills:
+    - dir: skills/task-digest-guide      # SKILL.md + optional files/**; frontmatter `name` must start with "<name>-"
 ```
+
+A workflow file holds `name`, optional `description`, `definition`, and optional `triggers`, `cooldown`, `input`, and `triggerSchema`. Install validates the definition. A `swarm-script` node can call the extension's own scripts. A skill directory holds only `SKILL.md` and `files/**`; each file under `files/` becomes a skill file.
 
 A JSON manifest carries `"$schema": "../manifest.schema.json"` instead. After changing a template, run `bun run build:extension-catalog` and commit `src/extensions/catalog.generated.json`.
 
@@ -135,6 +143,7 @@ export default extension;
 - Using `import` from a package other than `swarm-extension`, `zod`, or `stdlib`.
 - Returning a plain object instead of `block(...)` or `modify(...)`.
 - Modifying fields the event does not allow. Read the `*Modify` type for that event.
-- Expecting the extension to run after install. Its hooks and schedules run only after a lead or operator enables it.
+- Expecting the extension to run after install. Its hooks, schedules, workflows, and skills are off until a lead or operator enables it.
+- Expecting agents to see an extension skill after enable. Install it on each agent with `skill-install`.
 - Sending an inline `manifest`/`files` bundle. Install takes a catalog `template` name only.
 - Blocking tasks from every origin. Check `event.origin` so schedules, workflows, and follow-ups keep working unless you mean to block them.

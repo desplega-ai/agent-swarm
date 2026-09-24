@@ -21167,8 +21167,14 @@ export interface components {
                         [key: string]: unknown;
                     };
                 }[];
-                skills?: string[];
-                workflows?: string[];
+                workflows?: {
+                    /** @description Bundle path of a YAML or JSON workflow file. Its `name` must start with `<extension name>-`. */
+                    file: string;
+                }[];
+                skills?: {
+                    /** @description Bundle directory holding SKILL.md and optional files/**. The SKILL.md frontmatter `name` must start with `<extension name>-`. */
+                    dir: string;
+                }[];
             };
             /** Format: uri */
             homepage?: string;

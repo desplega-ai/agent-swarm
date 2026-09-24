@@ -7146,13 +7146,15 @@ export async function createWorkflow(
     vcsRepo?: string;
     createdByAgentId?: string;
     createdBy?: string;
+    /** Defaults to true. Extensions create their workflows disabled. */
+    enabled?: boolean;
   },
   source?: "api" | "mcp",
 ): Promise<Workflow> {
   const id = crypto.randomUUID();
   const row = await getDbClient().get<WorkflowRow>(
-    `INSERT INTO workflows (id, "key", name, description, definition, triggers, cooldown, input, triggerSchema, params, requiredParams, requires, dir, vcs_repo, createdByAgentId, created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    `INSERT INTO workflows (id, "key", name, description, definition, triggers, cooldown, input, triggerSchema, params, requiredParams, requires, dir, vcs_repo, createdByAgentId, created_by, updated_by, enabled)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     [
       id,
       normalizeAssetKey(data.key ?? defaultAssetKey("workflow", id)),
@@ -7171,6 +7173,7 @@ export async function createWorkflow(
       data.createdByAgentId ?? null,
       data.createdBy ?? null,
       data.createdBy ?? null,
+      data.enabled === false ? 0 : 1,
     ],
   );
   if (!row) throw new Error("Failed to create workflow");
@@ -10077,6 +10080,8 @@ export interface SkillInsert {
   disableModelInvocation?: boolean;
   userInvocable?: boolean;
   systemDefault?: boolean;
+  /** Defaults to true. Extensions create their skills disabled. */
+  isEnabled?: boolean;
 }
 
 /**
@@ -10094,7 +10099,7 @@ export async function createSkill(data: SkillInsert): Promise<Skill> {
         sourceUrl, sourceRepo, sourcePath, sourceBranch, sourceHash, isComplex,
         allowedTools, model, effort, context, agent, disableModelInvocation, userInvocable,
         version, isEnabled, systemDefault, createdAt, lastUpdatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?) RETURNING *`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?) RETURNING *`,
     [
       id,
       data.name,
@@ -10116,6 +10121,7 @@ export async function createSkill(data: SkillInsert): Promise<Skill> {
       data.agent ?? null,
       data.disableModelInvocation ? 1 : 0,
       data.userInvocable === false ? 0 : 1,
+      data.isEnabled === false ? 0 : 1,
       data.systemDefault ? 1 : 0,
       now,
       now,

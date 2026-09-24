@@ -1768,16 +1768,38 @@
                   "additionalProperties": false
                 }
               },
-              "skills": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
               "workflows": {
                 "type": "array",
                 "items": {
-                  "type": "string"
+                  "type": "object",
+                  "properties": {
+                    "file": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Bundle path of a YAML or JSON workflow file. Its `name` must start with `<extension name>-`."
+                    }
+                  },
+                  "required": [
+                    "file"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "skills": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "dir": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Bundle directory holding SKILL.md and optional files/**. The SKILL.md frontmatter `name` must start with `<extension name>-`."
+                    }
+                  },
+                  "required": [
+                    "dir"
+                  ],
+                  "additionalProperties": false
                 }
               }
             },

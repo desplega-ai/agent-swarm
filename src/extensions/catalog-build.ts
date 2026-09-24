@@ -5,8 +5,15 @@
  */
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { parseSkillContent } from "../be/skill-parser";
 import type { ExtensionCatalogEntry } from "./catalog";
-import { MANIFEST_FILENAMES, parseManifestText, referencedBundlePaths } from "./manifest-format";
+import {
+  MANIFEST_FILENAMES,
+  parseManifestText,
+  parseWorkflowText,
+  referencedBundlePaths,
+  skillDirs,
+} from "./manifest-format";
 
 /** Read every `<templatesDir>/<name>/` into a catalog entry. Throws on the first invalid template. */
 export async function buildExtensionCatalog(
@@ -46,6 +53,34 @@ export async function buildExtensionCatalog(
         );
       }
       files[path] = await file.text();
+    }
+    for (const workflow of manifest.assets.workflows ?? []) {
+      parseWorkflowText(
+        `${directory}/${workflow.file}`,
+        files[workflow.file] as string,
+        manifest.name,
+      );
+    }
+    for (const dir of skillDirs(manifest)) {
+      const skillMd = Bun.file(join(root, dir, "SKILL.md"));
+      if (!(await skillMd.exists())) {
+        throw new Error(`templates/extensions/${directory}: skill "${dir}" has no SKILL.md`);
+      }
+      files[`${dir}/SKILL.md`] = await skillMd.text();
+      const skillName = parseSkillContent(files[`${dir}/SKILL.md`] as string).name;
+      if (!skillName.startsWith(`${manifest.name}-`)) {
+        throw new Error(
+          `templates/extensions/${directory}: skill name "${skillName}" must start with "${manifest.name}-"`,
+        );
+      }
+      const filesRoot = join(root, dir, "files");
+      const bundled = await Array.fromAsync(
+        new Bun.Glob("**/*").scan({ cwd: filesRoot, onlyFiles: true }),
+      ).catch(() => [] as string[]);
+      for (const relative of bundled.sort()) {
+        const path = relative.split("\\").join("/");
+        files[`${dir}/files/${path}`] = await Bun.file(join(filesRoot, relative)).text();
+      }
     }
     const readme = Bun.file(join(root, "README.md"));
     catalog[manifest.name] = {

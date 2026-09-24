@@ -1492,8 +1492,10 @@ export interface ExtensionManifest {
     hooks: string;
     scripts?: ExtensionScriptAsset[];
     schedules?: ExtensionScheduleAsset[];
-    skills?: string[];
-    workflows?: string[];
+    /** Each skill ships as a directory holding SKILL.md and optional files/. */
+    skills?: Array<{ dir: string }>;
+    /** Each workflow ships as a YAML or JSON file. */
+    workflows?: Array<{ file: string }>;
   };
   homepage?: string;
   author?: string;

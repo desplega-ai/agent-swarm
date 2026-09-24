@@ -276,6 +276,12 @@ declare module "swarm-extension" {
     timezone?: string;
     args?: Record<string, unknown>;
   }
+  export interface ExtensionWorkflowAsset {
+    file: string;
+  }
+  export interface ExtensionSkillAsset {
+    dir: string;
+  }
   export interface ExtensionManifest {
     $schema?: string;
     name: string;
@@ -286,8 +292,8 @@ declare module "swarm-extension" {
       hooks: string;
       scripts?: readonly ExtensionScriptAsset[];
       schedules?: readonly ExtensionScheduleAsset[];
-      skills?: readonly string[];
-      workflows?: readonly string[];
+      workflows?: readonly ExtensionWorkflowAsset[];
+      skills?: readonly ExtensionSkillAsset[];
     };
     homepage?: string;
     author?: string;
