@@ -252,6 +252,16 @@ describe("onboarding state", () => {
     expect((await getState()).steps.connect.status).toBe("done");
   });
 
+  test("agent signals count idle or busy agents as ready", async () => {
+    await createAgent({ name: "ready-lead", isLead: true, status: "idle" });
+    await createAgent({ name: "busy-worker", isLead: false, status: "busy" });
+    await createAgent({ name: "gone-worker", isLead: false, status: "offline" });
+    const body = (await (await request("/api/onboarding")).json()) as {
+      signals: { agents: { leadsOnline: number; workersOnline: number } };
+    };
+    expect(body.signals.agents).toEqual({ leadsOnline: 1, workersOnline: 1 });
+  });
+
   test("GET derives verified AI from agent reports, leads included", async () => {
     const lead = await createAgent({ name: "claude-lead", isLead: true, status: "idle" });
     const worker = await createAgent({ name: "claude-worker", isLead: false, status: "idle" });

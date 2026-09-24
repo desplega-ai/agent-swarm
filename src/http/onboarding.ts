@@ -1,7 +1,12 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import OpenAI from "openai";
 import { getAutomationSetupStates } from "../be/automation-preflight";
-import { getAgentHarnessProviders, getLiveAgentCounts, getTaskById } from "../be/db";
+import {
+  getAgentHarnessProviders,
+  getDbClient,
+  getTaskById,
+  NOT_EXTENSION_AGENT_SQL,
+} from "../be/db";
 import { getEmbeddingProvider } from "../be/memory";
 import { EMBEDDING_DIMENSIONS } from "../be/memory/constants";
 import {
@@ -44,7 +49,14 @@ async function buildSignals(state: OnboardingState): Promise<OnboardingSignals> 
   }
 
   const integrations = await getAutomationSetupStates();
-  const agentCounts = await getLiveAgentCounts(5);
+  // Ready = idle or busy, the same rule as the step 6 agents readout. The
+  // /status heartbeat window (lastActivityAt) lags for idle agents.
+  const agentCounts = await getDbClient().get<{ leads: number | null; workers: number | null }>(
+    `SELECT SUM(CASE WHEN isLead = 1 THEN 1 ELSE 0 END) AS leads,
+            SUM(CASE WHEN isLead = 0 THEN 1 ELSE 0 END) AS workers
+       FROM agents
+      WHERE status IN ('idle', 'busy') AND ${NOT_EXTENSION_AGENT_SQL}`,
+  );
   const firstTask = state.firstTaskId ? await getTaskById(state.firstTaskId) : null;
 
   return {
@@ -61,8 +73,8 @@ async function buildSignals(state: OnboardingState): Promise<OnboardingSignals> 
       jira: integrations.jira === "verified",
     },
     agents: {
-      leadsOnline: agentCounts.leads_alive,
-      workersOnline: agentCounts.workers_alive,
+      leadsOnline: agentCounts?.leads ?? 0,
+      workersOnline: agentCounts?.workers ?? 0,
     },
     firstTask: firstTask ? { id: firstTask.id, status: firstTask.status } : null,
   };
