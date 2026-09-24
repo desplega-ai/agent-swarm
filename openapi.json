@@ -36067,7 +36067,8 @@
                                     ]
                                   },
                                   "ref": {
-                                    "type": "string"
+                                    "type": "string",
+                                    "maxLength": 2048
                                   },
                                   "label": {
                                     "type": [
@@ -36160,7 +36161,8 @@
                                       ]
                                     },
                                     "ref": {
-                                      "type": "string"
+                                      "type": "string",
+                                      "maxLength": 2048
                                     },
                                     "label": {
                                       "type": [
@@ -42529,7 +42531,8 @@
                                 ]
                               },
                               "ref": {
-                                "type": "string"
+                                "type": "string",
+                                "maxLength": 2048
                               },
                               "label": {
                                 "type": [

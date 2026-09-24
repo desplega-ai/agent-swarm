@@ -12,7 +12,12 @@ import {
   updateAgentStatusFromCapacity,
   updateTaskProgress,
 } from "@/be/db";
-import { CitationInputSchema, getTaskCitations, upsertTaskCitations } from "@/be/task-citations";
+import {
+  CitationInputSchema,
+  getTaskCitations,
+  MAX_TASK_CITATIONS,
+  upsertTaskCitations,
+} from "@/be/task-citations";
 import { AgentFsProvider } from "@/fs/agent-fs-provider";
 import { runTaskTerminalEffects } from "@/tasks/task-terminal-effects";
 import {
@@ -119,9 +124,12 @@ export const registerStoreProgressTool = (server: McpServer) => {
           ),
         citations: z
           .array(CitationInputSchema)
+          .max(MAX_TASK_CITATIONS)
+          // Keep invalid or oversized citation batches from rejecting task updates.
+          .catch([])
           .optional()
           .describe(
-            "Claim sources, upserted by index across calls. Reference in output with [citation:N]. Verification failures only disable links; they never block completion.",
+            "Claim sources, upserted by index across calls. Reference in output with [citation:N]. Verification failures only disable links; they never block completion. At most 50 citations per call/task, refs up to 2048 characters, labels up to 200. Invalid or oversized batches are ignored; existing indices can still be updated at capacity.",
           ),
         persistMemory: z
           .boolean()

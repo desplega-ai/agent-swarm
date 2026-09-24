@@ -16,6 +16,7 @@ import {
   buildCitationUrl,
   CitationInputSchema,
   getTaskCitations,
+  MAX_TASK_CITATIONS,
   memoryQuoteMatches,
   upsertTaskCitations,
 } from "../be/task-citations";
@@ -150,6 +151,57 @@ describe("citation persistence and completion warnings", () => {
       "true",
       "true",
     ]);
+  });
+
+  test("bounds batches, strings, and accumulated rows without blocking completion", async () => {
+    const task = await createTaskExtended("Bounded citations", { agentId, source: "system" });
+    await startTask(task.id);
+    const server = new McpServer({ name: "citation-limits", version: "1" });
+    registerStoreProgressTool(server);
+    const tool = (
+      server as unknown as {
+        _registeredTools: Record<
+          string,
+          {
+            inputSchema: { parse: (args: unknown) => unknown };
+            handler: (
+              args: unknown,
+              meta: unknown,
+            ) => Promise<{ structuredContent: { success: boolean } }>;
+          }
+        >;
+      }
+    )._registeredTools["store-progress"]!;
+    const entries = Array.from({ length: MAX_TASK_CITATIONS }, (_, i) => ({
+      index: i + 1,
+      kind: "url" as const,
+      ref: "https://example.com/",
+    }));
+    await upsertTaskCitations(task.id, entries);
+    await upsertTaskCitations(task.id, [
+      { index: 51, kind: "url", ref: "https://example.com/" },
+      { ...entries[0]!, label: "Updated at capacity" },
+    ]);
+    expect(await getTaskCitations(task.id)).toHaveLength(MAX_TASK_CITATIONS);
+    expect((await getTaskCitations(task.id))[0]?.label).toBe("Updated at capacity");
+    for (const citations of [
+      [...entries, { ...entries[0]!, index: 51 }],
+      [{ ...entries[0]!, ref: "x".repeat(2049) }],
+      [{ ...entries[0]!, label: "x".repeat(201) }],
+    ]) {
+      const args = tool.inputSchema.parse({
+        taskId: task.id,
+        status: "completed",
+        output: "Done",
+        citations,
+      });
+      const result = await tool.handler(args, {
+        requestInfo: { headers: { "x-agent-id": agentId } },
+      });
+      expect(result.structuredContent.success).toBe(true);
+      expect(await getTaskCitations(task.id)).toHaveLength(MAX_TASK_CITATIONS);
+    }
+    expect((await getTaskById(task.id))?.status).toBe("completed");
   });
 
   test("accumulates, upserts by index, verifies memory quotes, and completes despite bad citations", async () => {

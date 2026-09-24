@@ -5,11 +5,13 @@ import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
 import { citationHttpUrl, type TaskCitation } from "../utils/task-citations";
 import { getDbClient } from "./db";
 
+export const MAX_TASK_CITATIONS = 50;
+
 export const CitationInputSchema = z.object({
   index: z.number().int().min(1),
   kind: z.enum(["task", "memory", "github", "slack", "agent-fs", "page", "script-run", "url"]),
-  ref: z.string(),
-  label: z.string().optional(),
+  ref: z.string().max(2048),
+  label: z.string().max(200).optional(),
   quote: z.string().max(300).optional(),
 });
 export const TaskCitationSchema = CitationInputSchema.extend({
@@ -58,7 +60,11 @@ export async function upsertTaskCitations(
   citations: CitationInput[],
 ): Promise<void> {
   const db = getDbClient();
-  for (const citation of citations) {
+  const indices = new Set((await getTaskCitations(taskId)).map((entry) => entry.index));
+  for (const citation of citations.slice(0, MAX_TASK_CITATIONS)) {
+    if (!CitationInputSchema.safeParse(citation).success) continue;
+    if (!indices.has(citation.index) && indices.size >= MAX_TASK_CITATIONS) continue;
+    indices.add(citation.index);
     let verified: TaskCitation["verified"] = "unchecked";
     const tables = {
       task: "agent_tasks",
