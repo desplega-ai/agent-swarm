@@ -130,17 +130,10 @@ export function SetupCard({
 /**
  * Monochrome brand mark from a file in `public/` (harness-logos,
  * provider-logos, integration-logos). A CSS mask tints the mark with
- * `currentColor`, so it follows the theme like a lucide icon.
+ * `currentColor`, so it follows the theme like a lucide icon. Decorative:
+ * every call site renders the brand name as visible text next to it.
  */
-export function BrandLogo({
-  src,
-  label,
-  className,
-}: {
-  src: string;
-  label: string;
-  className?: string;
-}) {
+export function BrandLogo({ src, className }: { src: string; className?: string }) {
   const mask: CSSProperties = {
     maskImage: `url(${src})`,
     WebkitMaskImage: `url(${src})`,
@@ -153,8 +146,7 @@ export function BrandLogo({
   };
   return (
     <span
-      role="img"
-      aria-label={label}
+      aria-hidden
       className={cn("inline-block size-5 shrink-0 bg-current", className)}
       style={mask}
     />

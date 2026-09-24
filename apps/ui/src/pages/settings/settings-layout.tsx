@@ -4,6 +4,7 @@ import {
   Cable,
   Key,
   KeyRound,
+  ListChecks,
   type LucideIcon,
   Palette,
   PanelLeftClose,
@@ -14,6 +15,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { useOnboarding } from "@/api/hooks/use-onboarding";
 import { AnimatedReveal } from "@/components/shared/animated-reveal";
 import { Button } from "@/components/ui/button";
 import {
@@ -33,8 +35,13 @@ interface SettingsNavItem {
   icon: LucideIcon;
 }
 
+// The first-run stepper lives outside the settings shell; the rail links to
+// it only when the API serves `/api/onboarding`.
+const SETUP_PATH = "/setup";
+
 const SETTINGS_NAV: SettingsNavItem[] = [
   { title: "Connections", path: "/settings/connections", icon: Cable },
+  { title: "Setup", path: SETUP_PATH, icon: ListChecks },
   { title: "Appearance", path: "/settings/appearance", icon: Palette },
   { title: "Secrets", path: "/settings/secrets", icon: KeyRound },
   { title: "API Keys", path: "/settings/api-keys", icon: Key },
@@ -83,10 +90,16 @@ export function SettingsLayout() {
     }
   }, [collapsed]);
 
+  // `OnboardingRedirect` polls this query for the whole shell.
+  const onboarding = useOnboarding({ pollIntervalMs: 0 });
+  const navItems = onboarding.data
+    ? SETTINGS_NAV
+    : SETTINGS_NAV.filter((item) => item.path !== SETUP_PATH);
+
   // Match the active rail item by path prefix so deep links (e.g.
   // /settings/integrations/slack) keep "Integrations" highlighted.
   const activeItem =
-    SETTINGS_NAV.find((item) => location.pathname.startsWith(item.path)) ?? SETTINGS_NAV[0];
+    navItems.find((item) => location.pathname.startsWith(item.path)) ?? navItems[0];
 
   return (
     <div className="flex flex-col flex-1 min-h-0 md:flex-row md:gap-6">
@@ -97,7 +110,7 @@ export function SettingsLayout() {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {SETTINGS_NAV.map((item) => (
+            {navItems.map((item) => (
               <SelectItem key={item.path} value={item.path}>
                 {item.title}
               </SelectItem>
@@ -129,7 +142,7 @@ export function SettingsLayout() {
               <TooltipContent side="right">Collapse rail</TooltipContent>
             </Tooltip>
           </div>
-          {SETTINGS_NAV.map((item) => (
+          {navItems.map((item) => (
             <NavLink
               key={item.path}
               to={item.path}

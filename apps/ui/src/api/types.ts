@@ -147,6 +147,8 @@ export interface Agent {
    * necessarily the last one that ran.
    */
   claudeTransport?: ClaudeTransport;
+  /** Last heartbeat or activity (ISO). "Alive" in `/status` = within 5 min and not offline. */
+  lastActivityAt?: string;
   createdAt: string;
   lastUpdatedAt: string;
 }
@@ -300,7 +302,8 @@ export type ProviderName =
   | "devin"
   | "claude-managed"
   | "opencode"
-  | "acp";
+  | "acp"
+  | "dsh";
 export type DevinProviderMeta = {
   sessionUrl: string;
   maxAcuLimit?: number;
@@ -3081,13 +3084,7 @@ export type AppRow = Record<string, unknown> & {
 // ─── Onboarding (GET/PUT /api/onboarding) ────────────────────────────────────
 // Contract: thoughts/taras/plans-yolo/2026-09-24-ui-onboarding.md § API contract.
 
-export type OnboardingStepId =
-  | "connect"
-  | "name"
-  | "ai"
-  | "memory"
-  | "integrations"
-  | "first_task";
+export type OnboardingStepId = "connect" | "name" | "ai" | "memory" | "integrations" | "first_task";
 
 export type OnboardingStepStatus = "todo" | "done" | "skipped" | "failed";
 
@@ -3149,7 +3146,13 @@ export interface OnboardingProviderSignal {
 export interface OnboardingSignals {
   providers: OnboardingProviderSignal[];
   embeddings: { configured: boolean; dimensions: number };
-  integrations: { slack: boolean; github: boolean; gitlab: boolean; linear: boolean; jira: boolean };
+  integrations: {
+    slack: boolean;
+    github: boolean;
+    gitlab: boolean;
+    linear: boolean;
+    jira: boolean;
+  };
   agents: { leadsOnline: number; workersOnline: number };
   firstTask: { id: string; status: string } | null;
 }
