@@ -1,0 +1,52 @@
+name: PR Body
+
+on:
+  pull_request:
+    branches:
+      - main
+    # edited: re-check when the author fixes the description or the title
+    # (a fix: title requires more sections). No push needed.
+    # synchronize: attach the check to every new head SHA.
+    # labeled/unlabeled: honor the skip-pr-body-check label.
+    types: [opened, edited, reopened, synchronize, labeled, unlabeled]
+  # A required check must also report on merge-queue entries, or queued PRs
+  # stall. The job is skipped there, and a skipped job reports success.
+  merge_group:
+
+concurrency:
+  group: pr-body-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pr-body:
+    name: PR Body
+    # The body was already checked on the pull_request event before queueing.
+    # Dependabot and the release schedule (`release: vX.Y.Z ...` titles) write
+    # their own bodies. The label is the manual escape hatch.
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.user.login != 'dependabot[bot]' &&
+      !startsWith(github.event.pull_request.title, 'release:') &&
+      !contains(github.event.pull_request.labels.*.name, 'skip-pr-body-check')
+    runs-on: ubuntu-latest
+    # Checkout only; GITHUB_TOKEN needs nothing else.
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      - name: Check PR body against the template
+        env:
+          # Pass title and body through env, never inline ${{ }} in the script.
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: bun scripts/check-pr-body.ts

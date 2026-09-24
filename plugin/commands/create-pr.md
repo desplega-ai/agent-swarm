@@ -25,10 +25,10 @@ You should be working in a repository cloned to `/workspace/personal/<repo-name>
 2. **Run PR checks (MANDATORY)** — Run ALL checks listed in the "PR Checks" section of your Repository Guidelines. Run each command/task sequentially. If ANY check fails, fix the issue and re-run until all pass. If no guidelines are defined, check the project's CLAUDE.md for a pre-PR checklist and run those. Do NOT proceed until all checks pass.
 3. **Push the branch** — `git push -u origin HEAD`
 4. **Gather context** — review commit messages and changed files since diverging from base.
-5. **Generate title and description:**
+5. **Generate title and description.** Follow the conventions of the repository you are working in, not a fixed format:
    - **Title**: Concise summary (conventional commit style if the repo uses it)
-   - **Description**: Summary of changes, notable items, testing done, related issues
-6. **Create the PR/MR** using `gh pr create` or `glab mr create`.
+   - **Description**: If the repo has a PR/MR template, use its headings as the structure and fill every section. GitHub looks for `pull_request_template.md` in `.github/`, `docs/`, or the repo root (plus an optional `PULL_REQUEST_TEMPLATE/` directory). GitLab uses `.gitlab/merge_request_templates/`. Also follow any PR rules in the repo's `CLAUDE.md`, `AGENTS.md`, or `CONTRIBUTING.md`. If the repo defines none, include: summary of changes, notable items, testing done, related issues.
+6. **Create the PR/MR** using `gh pr create` or `glab mr create`. `gh pr create --body` does not apply the repo template, so write the filled description to a file and pass it with `--body-file <file>`.
 7. **Check CI status** — After creating the PR, wait ~30 seconds, then check CI with `gh pr checks <pr-number>` (GitHub) or `glab mr view --json pipelines` (GitLab). If any check is failing, investigate the failure, fix it, push the fix, and re-check. Repeat until CI is green.
 8. **Report** the PR/MR URL and CI status.
 

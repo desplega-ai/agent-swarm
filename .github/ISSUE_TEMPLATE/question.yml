@@ -1,0 +1,44 @@
+name: Question
+description: Ask a question that needs a tracked answer
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For quick chat, use [Discord](https://discord.gg/KZgfyyDVZa). Use this form when the answer should stay findable. Write short, direct sentences.
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+    validations:
+      required: true
+
+  - type: textarea
+    id: intent
+    attributes:
+      label: Intent
+      description: What you are trying to achieve. This helps us answer the real question.
+    validations:
+      required: true
+
+  - type: textarea
+    id: setup
+    attributes:
+      label: Setup
+      description: Only if it matters for the answer.
+      placeholder: |
+        - Version or commit: v1.154.0
+        - Deployment: local / Docker Compose / Helm / cloud
+        - Agent roster: 1 lead, 2 workers
+        - Harness providers: claude, codex
+    validations:
+      required: false
+
+  - type: textarea
+    id: tried
+    attributes:
+      label: What you tried
+      description: Docs you read, commands you ran, and what happened.
+    validations:
+      required: false

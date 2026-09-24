@@ -45,7 +45,7 @@ Keep changes focused on what the issue requests. Avoid scope creep.
 
 ### 5. Create the PR
 
-Create the PR with a descriptive title and body including: summary of changes, key changes list, testing done, and `Fixes #<issue-number>` to auto-close the issue on merge.
+Create the PR with a descriptive title and a body that follows the repository's PR template and conventions (see `/create-pr`, steps 5 and 6). If the repo defines none, include: summary of changes, key changes list, and testing done. Always include `Fixes #<issue-number>` to auto-close the issue on merge.
 
 After creating the PR, check CI status with `gh pr checks` (GitHub) or `glab mr view --json pipelines` (GitLab). If CI fails, fix the issues, push, and re-check until green.
 

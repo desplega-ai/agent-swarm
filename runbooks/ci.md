@@ -4,11 +4,12 @@
 
 ## What CI runs
 
-Three workflows live in `.github/workflows/`:
+The main workflows in `.github/workflows/`:
 
 | Workflow | When | Purpose |
 |---|---|---|
 | `merge-gate.yml` | PR → `main` | **The gate.** All jobs below must pass for merge. |
+| `pr-body.yml` | PR → `main` (opened, edited, reopened, synchronize, labeled, unlabeled). Merge queue. | **PR Body** check: the description must fill every required section of `.github/pull_request_template.md` (a `fix:` title adds Repro and Setup; Urgency needs exactly one checked box). Local equivalent: `bun scripts/check-pr-body.ts --title "<title>" --body-file <file>`. Fix by editing the title or description (no push needed). Skipped (reports success) for Dependabot, `release:` titles, the `skip-pr-body-check` label, and merge-queue entries. No path filter, so the check always reports. |
 | `ci.yml` | Push → `main` | Lint + tsc + test (subset of merge-gate). |
 | `ui-e2e.yml` | PR touching `apps/ui/`, `packages/ui-e2e/`, `scripts/e2e/`, `src/http/`, `src/be/`, `bun.lock`, `package.json`, `bunfig.toml`. Push → `main`. Nightly cron `0 3 * * *` UTC. Manual dispatch. | Playwright UI suite (`bun run e2e:ui`) in 2 shards against a seeded API per worker. Uploads artifacts to agent-fs and ingests into the UI E2E tracker for every same-repo event. **Informational**, not a required check: merged HTML report artifact (`ui-e2e-html-report`) plus one sticky PR comment (`<!-- ui-e2e -->`). See [LOCAL_TESTING.md § UI E2E](../LOCAL_TESTING.md#ui-e2e-bun-run-e2eui). |
 | `docker-and-deploy.yml` | Push → `main` | Build images (API + worker-full + worker-slim, each amd64+arm64 with multi-arch manifest merges; slim publishes as `:slim` / `:{VERSION}-slim` / `:sha-*-slim`), publish release E2B templates, deploy, and publish npm/GitHub releases (only when `package.json` `version` changed). Not part of PR gate — see [release.md](./release.md). |

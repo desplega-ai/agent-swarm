@@ -1,8 +1,8 @@
-blank_issues_enabled: true
+blank_issues_enabled: false
 contact_links:
-  - name: Questions & Discussion
+  - name: Chat on Discord
     url: https://discord.gg/KZgfyyDVZa
-    about: Ask questions and discuss ideas on Discord
+    about: Quick questions and discussion. Use the Question form when the answer should stay findable.
   - name: Documentation
     url: https://docs.agent-swarm.dev
     about: Check the docs for setup guides and reference
