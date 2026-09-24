@@ -37,6 +37,7 @@ import {
   _resetTestConnectionCache,
   buildStatusPayload,
   computeHealth,
+  rollupCredStatusForProvider,
   type SetupMilestone,
 } from "../http/status";
 import type { AgentCredStatus } from "../types";
@@ -280,6 +281,41 @@ describe("setup milestones", () => {
 
     const payload = await buildStatusPayload();
     expect(getMilestone(payload, "harness").state).toBe("verified");
+  });
+
+  test("provider rollup counts every agent with a fresh passing report in verifiedWorkers", async () => {
+    const verified = await createAgent({
+      name: "w-verified",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+    const configured = await createAgent({
+      name: "w-configured",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+    const lead = await createAgent({
+      name: "lead-verified",
+      isLead: true,
+      status: "idle",
+      capabilities: [],
+    });
+    await seedCredStatus(verified.id, "claude", {
+      liveTest: { ok: true, error: null, latency_ms: 10, testedAt: Date.now() },
+    });
+    await seedCredStatus(configured.id, "claude", { liveTest: null });
+    await seedCredStatus(lead.id, "claude", {
+      liveTest: { ok: true, error: null, latency_ms: 10, testedAt: Date.now() },
+    });
+
+    expect(await rollupCredStatusForProvider("claude")).toMatchObject({
+      state: "verified",
+      workers: 3,
+      verifiedWorkers: 2,
+      reports: 3,
+    });
   });
 
   test("harness stays `unverified` on an empty fleet (no agents registered)", async () => {

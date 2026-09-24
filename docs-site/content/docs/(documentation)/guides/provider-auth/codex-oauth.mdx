@@ -82,6 +82,45 @@ For a default local setup:
 
 After the login completes, restart any local Codex worker containers so they restore the stored credential on boot.
 
+## Dashboard Device Login
+
+The dashboard can start a Codex device login without a local callback server.
+
+First enable **ChatGPT Settings > Security > Allow device code login**.
+
+Use the `agent-swarm codex-login` CLI command when device login is disabled or unavailable.
+
+1. Start the login from the dashboard setup flow.
+2. Open the displayed OpenAI verification URL.
+3. Enter the displayed user code and approve access.
+4. Keep the dashboard open while it checks the login status.
+
+The device code expires after 15 minutes. The API limits checks to OpenAI's requested polling interval.
+
+After approval, the API exchanges the code and stores the credential in the first free `codex_oauth_N` slot.
+
+You can also call the same authenticated API directly:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{}' \
+  "http://localhost:3013/api/codex-oauth/device"
+```
+
+Open `verificationUrl` and enter `userCode`. Then poll the returned `flowId`:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{}' \
+  "http://localhost:3013/api/codex-oauth/device/FLOW_ID/poll"
+```
+
+The poll result is `pending`, `complete`, `failed`, or `expired`. A complete result includes the saved slot number.
+
 ## Remote Docker Compose Setup
 
 For a remote swarm, keep two URLs in mind:

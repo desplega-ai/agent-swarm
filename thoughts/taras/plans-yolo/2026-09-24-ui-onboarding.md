@@ -37,6 +37,11 @@ The Slack step shows a manifest pre-filled with the swarm name. Older APIs (404 
 - Linear/Jira `finalRedirect`: `/api/trackers/{p}/authorize?redirect=<url>` accepted only when the
   URL origin passes `isOriginAllowedForCredentials`. Otherwise ignored (static "close this tab"
   page, today's behavior). Onboarding navigates in the same tab. (assumed: closes the open-redirect)
+- Step 6 minimizes onboarding before it opens the session page, so a reload there does not bounce to `/setup`. (assumed)
+- `OnboardingRedirect` is a landing rule: `/setup` marks itself visited, so in-app links out of setup do not bounce. (shell agent)
+- `BrandLogo` is decorative (`aria-hidden`); every call site shows the name as text. (assumed)
+- UI `ProviderName` gains `dsh`; `Agent` gains `lastActivityAt`. (contract gap found by agents)
+- Pre-existing `check:tokens` failure on main (`configuration-row.tsx` `#000000`, from #1587) fixed in its own commit so the PR's ui-lint passes. (assumed)
 - Slack manifest: API route builds it from the root `slack-manifest.json` (single source), injects
   the name, drops the dead `oauth_config.redirect_urls`. (assumed)
 - `IdentityGate` moves from `Providers` into the `RootLayout` shell, so it never pops on `/setup`
@@ -202,9 +207,11 @@ and integers only. Rows in `docs-site/content/docs/(documentation)/reference/tel
 - [x] Phase 0: contract (this file) + shared UI contract files (types, client, hooks, step contract, route entry)
 - [ ] Phase 1 (Codex): API slice 1: internal keys, onboarding state + routes + derivation + telemetry, memory probe, tracker finalRedirect, openapi, docs, tests
 - [ ] Phase 2 (Codex): API slices 2+3: Codex device flow + Slack manifest route, docs, tests
-- [ ] Phase 3 (Opus): UI shell, routing, pill, home card, settings entry, steps 1 + 2
-- [ ] Phase 4 (Opus): UI step 3 (Claude, Codex device, open harnesses + gateway R7, Devin, per-worker switch R2)
-- [ ] Phase 5 (Opus): UI steps 4, 5 (split view, Slack manifest, Linear/Jira, brand SVGs), 6
+- [x] Phase 3 (Opus): UI shell, routing, pill, home card, settings entry, steps 1 + 2
+- [x] Phase 4 (Opus): UI step 3 (Claude, Codex device, open harnesses + gateway R7, Devin, per-worker switch R2)
+- [x] Phase 5 (Opus): UI steps 4, 5 (split view, Slack manifest, Linear/Jira, brand SVGs), 6
+- [ ] API follow-ups from the UI spec review: `verifiedWorkers` counts leads too (label "agents"); derivation also runs when `autoCompleted` but emits no telemetry (so "Run setup again" shows the true state)
+- [x] UI fix round 1 (18 review items) delegated
 - [ ] Phase 6: integration pass, gates, code review, commit, push to #1604, PR body
 - [ ] Phase 7: local QA + design feedback loop with Taras
 

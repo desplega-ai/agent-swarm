@@ -26,6 +26,13 @@ const RESERVED_KEYS = new Set([
   "EXTENSION_ALLOW_LEAD_ACTIVATION",
 ]);
 
+/** Config rows owned by dedicated API surfaces, not the generic config API. */
+export const INTERNAL_CONFIG_KEYS = new Set(["onboarding_state"]);
+
+export function isInternalConfigKey(key: string): boolean {
+  return INTERNAL_CONFIG_KEYS.has(key.toLowerCase());
+}
+
 export function isReservedConfigKey(key: string): boolean {
   return RESERVED_KEYS.has(key.toUpperCase());
 }

@@ -70,6 +70,17 @@ export function isOriginAllowedForCredentials(origin: string): boolean {
   return allowed;
 }
 
+/** Return an absolute redirect only when its origin may receive credentials. */
+export function allowedCredentialRedirect(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  try {
+    const redirect = new URL(raw);
+    return isOriginAllowedForCredentials(redirect.origin) ? redirect.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function setCorsHeaders(req: IncomingMessage, res: ServerResponse) {
   // Echo the request Origin (rather than emitting `*`) so credentialed fetches
   // — e.g. the SPA's `credentials: 'include'` calls to `/p/:id.json` and the

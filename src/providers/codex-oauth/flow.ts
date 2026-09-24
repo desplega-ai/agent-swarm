@@ -8,11 +8,12 @@
 
 import { randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { scrubSecrets } from "../../utils/secret-scrubber.js";
 import { generatePKCE } from "./pkce.js";
 import type { CodexOAuthCallbacks, CodexOAuthCredentials, TokenResult } from "./types.js";
 
 /** Custom fetch for testing. Override via setFetchForTesting(). */
-const _fetchHolder: { current: typeof fetch } = { current: globalThis.fetch };
+export const _fetchHolder: { current: typeof fetch } = { current: globalThis.fetch };
 
 /** Replace fetch for unit tests. Call resetFetchForTesting() in afterEach. */
 export function setFetchForTesting(customFetch: typeof fetch): void {
@@ -101,6 +102,7 @@ export async function exchangeAuthorizationCode(
   code: string,
   verifier: string,
   redirectUri: string = REDIRECT_URI,
+  signal?: AbortSignal,
 ): Promise<TokenResult> {
   const response = await _fetchHolder.current(TOKEN_URL, {
     method: "POST",
@@ -112,17 +114,18 @@ export async function exchangeAuthorizationCode(
       code_verifier: verifier,
       redirect_uri: redirectUri,
     }),
+    signal,
   });
 
   if (!response.ok) {
     const text = await response.text().catch(() => "");
-    console.error("[codex-oauth] code->token failed:", response.status, text);
+    console.error("[codex-oauth] code->token failed:", response.status, scrubSecrets(text));
     return { type: "failed" };
   }
 
   const json = (await response.json()) as Record<string, unknown>;
   if (!json.access_token || !json.refresh_token || typeof json.expires_in !== "number") {
-    console.error("[codex-oauth] token response missing fields:", json);
+    console.error("[codex-oauth] token response missing fields:", Object.keys(json));
     return { type: "failed" };
   }
 

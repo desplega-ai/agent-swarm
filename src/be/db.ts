@@ -170,7 +170,7 @@ import {
 } from "./db/tasks/read";
 import { configureTaskWriteDependencies, failTask } from "./db/tasks/write";
 import { promotePendingSteeringForTask } from "./steering";
-import { isReservedConfigKey, reservedKeyError } from "./swarm-config-guard";
+import { isInternalConfigKey, isReservedConfigKey, reservedKeyError } from "./swarm-config-guard";
 import { emitTaskStarted } from "./task-lifecycle-events";
 
 export {
@@ -6278,7 +6278,7 @@ export async function getInjectableGlobalConfigs(): Promise<SwarmConfig[]> {
          AND UPPER(key) NOT IN ('API_KEY', 'SECRETS_ENCRYPTION_KEY', 'CORS_ALLOW_ANY_ORIGIN', 'EXTENSION_ALLOW_LEAD_ACTIVATION')
        ORDER BY key ASC`,
   );
-  return rows.map(rowToSwarmConfig);
+  return rows.filter((row) => !isInternalConfigKey(row.key)).map(rowToSwarmConfig);
 }
 
 /**

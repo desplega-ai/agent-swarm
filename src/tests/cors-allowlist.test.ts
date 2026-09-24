@@ -17,6 +17,7 @@ import { handlePageProxy } from "../http/page-proxy";
 import { handlePages } from "../http/pages";
 import { handlePagesPublic } from "../http/pages-public";
 import {
+  allowedCredentialRedirect,
   isOriginAllowedForCredentials,
   setCorsHeaders,
   warnIfCorsAllowsAnyOrigin,
@@ -118,6 +119,15 @@ describe("isOriginAllowedForCredentials", () => {
     process.env[ENV_KEY] = "https://app.example.com";
     expect(isOriginAllowedForCredentials("https://evil.app.example.com")).toBe(false);
     expect(isOriginAllowedForCredentials("https://app.example.com.evil.example")).toBe(false);
+  });
+
+  test("keeps the full redirect only for an allowed absolute origin", () => {
+    process.env[ENV_KEY] = "https://app.example.com";
+    expect(allowedCredentialRedirect("https://app.example.com/setup?step=5")).toBe(
+      "https://app.example.com/setup?step=5",
+    );
+    expect(allowedCredentialRedirect("https://evil.example/setup")).toBeUndefined();
+    expect(allowedCredentialRedirect("/setup?step=5")).toBeUndefined();
   });
 });
 

@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { getResolvedConfig } from "../be/db";
+import { buildSlackManifest } from "../slack/manifest";
 import { route } from "./route-def";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -45,6 +46,8 @@ const McpUserConfigSchema = z.object({
   mcpUserUrl: z.string(),
 });
 
+const SlackManifestSchema = z.record(z.string(), z.unknown());
+
 // ─── Route Definition ────────────────────────────────────────────────────────
 
 const claudeManagedTestRoute = route({
@@ -76,6 +79,18 @@ const mcpUserConfigRoute = route({
         "Server-derived MCP user config. `mcpBaseUrl` is the API server base URL and `mcpUserUrl` appends `/mcp-user`.",
       schema: McpUserConfigSchema,
     },
+  },
+});
+
+const slackManifestRoute = route({
+  method: "get",
+  path: "/api/integrations/slack/manifest",
+  pattern: ["api", "integrations", "slack", "manifest"],
+  summary: "Build a Slack app manifest for this swarm",
+  tags: ["Integrations"],
+  query: z.object({ name: z.string().optional() }),
+  responses: {
+    200: { description: "Slack app manifest", schema: SlackManifestSchema },
   },
 });
 
@@ -133,7 +148,15 @@ export function createIntegrationsHandler(deps: TestConnectionDeps = {}) {
     req: IncomingMessage,
     res: ServerResponse,
     pathSegments: string[],
+    queryParams = new URLSearchParams(),
   ): Promise<boolean> {
+    if (slackManifestRoute.match(req.method, pathSegments)) {
+      const parsed = await slackManifestRoute.parse(req, res, pathSegments, queryParams);
+      if (!parsed) return true;
+      slackManifestRoute.respond(res, 200, buildSlackManifest(parsed.query.name));
+      return true;
+    }
+
     if (mcpUserConfigRoute.match(req.method, pathSegments)) {
       const mcpBaseUrl = await resolveMcpBaseUrl();
       mcpUserConfigRoute.respond(res, 200, { mcpBaseUrl, mcpUserUrl: `${mcpBaseUrl}/mcp-user` });

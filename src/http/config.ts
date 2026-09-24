@@ -16,6 +16,7 @@ import {
 } from "../be/multi-runtime";
 import { getUserGrant } from "../be/rbac-roles";
 import {
+  isInternalConfigKey,
   isReservedConfigKey,
   reservedKeyError,
   validateConfigValue,
@@ -40,7 +41,9 @@ const SECRETS_FORCE_MASK_NOTE =
 const API_ONLY_CONFIG_KEYS = new Set(["API_AGENT_FS_API_KEY", "SLACK_SIGNING_SECRET"]);
 
 function stripApiOnlyKeys<T extends { key: string }>(configs: T[]): T[] {
-  return configs.filter((config) => !API_ONLY_CONFIG_KEYS.has(config.key));
+  return configs.filter(
+    (config) => !API_ONLY_CONFIG_KEYS.has(config.key) && !isInternalConfigKey(config.key),
+  );
 }
 
 function singleHeader(req: IncomingMessage, name: string): string | undefined {
@@ -91,7 +94,7 @@ async function resolveSecretsRead(req: IncomingMessage, includeSecrets: boolean)
  * Returns true when the request may proceed; on denial it writes a 403 and
  * returns false.
  */
-async function ensureConfigAdmin(
+export async function ensureConfigAdmin(
   req: IncomingMessage,
   res: ServerResponse,
   verb: Extract<PermissionVerb, "config.write.any" | "config.delete.any">,
@@ -399,6 +402,11 @@ export async function handleConfig(
 
     if (isReservedConfigKey(key)) {
       jsonError(res, reservedKeyError(key).message, 400);
+      return true;
+    }
+
+    if (isInternalConfigKey(key)) {
+      jsonError(res, `Key '${key}' is managed by /api/onboarding`, 400);
       return true;
     }
 
