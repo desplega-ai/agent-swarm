@@ -622,6 +622,13 @@ export function isAgentEligibleForTask(
 
   if (affinity.sourceAgentId && affinity.sourceAgentId === agent.id) return true; // Own work.
 
+  // A caller-declared capability requirement (`send-task`/`task-action`
+  // `requiredCapabilities`) carries neither `role` nor `sourceAgentId` — those
+  // are only stamped by `buildRoutingAffinityFromAgent` snapshots. Match it on
+  // capabilities alone; requiring a role here made every such task unclaimable
+  // and every direct assignment inheriting it rejected (issue #1601).
+  if (!affinity.role && !affinity.sourceAgentId) return hasRequiredCapabilities();
+
   if (!agent.role || !affinity.role) return false; // Missing role data — no fail-open.
   if (agent.role !== affinity.role) return false;
 

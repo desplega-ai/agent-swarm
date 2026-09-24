@@ -242,6 +242,7 @@ flowchart TD
   gate -->|"enforcement off"| yes1["eligible"]
   gate -->|"task.routingAffinity is null"| yes2["eligible — untagged task"]
   gate -->|"affinity.sourceAgentId == agent.id"| yes3["eligible — own work"]
+  gate -->|"no affinity.role and no sourceAgentId (declared requirement)"| cap["eligible iff capabilities ⊆ agent.capabilities"]
   gate -->|"agent.role or affinity.role missing"| no1["INELIGIBLE — no fail-open"]
   gate -->|"agent.role != affinity.role"| no2["INELIGIBLE"]
   gate -->|"affinity.capabilities ⊄ agent.capabilities"| no3["INELIGIBLE"]
@@ -299,6 +300,8 @@ isAgentEligibleForTask(agent, task):
     if a.leadOnly: return agent.isLead and capabilities match # authorization ignores kill-switch
     if not POOL_AFFINITY_ENFORCEMENT: return true
     if a.sourceAgentId == agent.id: return true            # own work always eligible
+    if not a.role and not a.sourceAgentId:                 # caller-declared requirement (send-task/task-action)
+        return a.capabilities ⊆ agent.capabilities          # capability match only (#1601)
     if not agent.role or not a.role: return false           # missing role data — no fail-open
     if agent.role != a.role: return false                   # exact match, v1 (no roleClass taxonomy)
     if a.capabilities not ⊆ agent.capabilities: return false
