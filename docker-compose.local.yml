@@ -46,7 +46,7 @@ services:
 
   agent-fs:
     container_name: swarm-agent-fs
-    image: ghcr.io/desplega-ai/agent-fs:0.13.7
+    image: ghcr.io/desplega-ai/agent-fs:0.13.9
     platform: linux/amd64
     depends_on:
       minio-init:

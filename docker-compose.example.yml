@@ -101,7 +101,7 @@ services:
       "
 
   agent-fs:
-    image: ghcr.io/desplega-ai/agent-fs:0.13.7
+    image: ghcr.io/desplega-ai/agent-fs:0.13.9
     platform: linux/amd64
     pull_policy: always
     depends_on:

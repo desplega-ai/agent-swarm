@@ -305,7 +305,7 @@ agentFs:
     registry: ghcr.io
     repository: desplega-ai/agent-fs
     pullPolicy: IfNotPresent
-    tag: 0.13.7
+    tag: 0.13.9
   port: 7433
   # -- Blob storage backend for agent-fs. `s3` (default) stores objects in
   # the bucket configured below. `local` stores objects on the agent-fs PVC
