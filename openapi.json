@@ -37887,7 +37887,7 @@
     },
     "/api/slack/inbound/diagnostics": {
       "get": {
-        "summary": "Slack inbound delivery diagnostics: transport mode, durable receipt counts by state, uncertain receipts awaiting review, and per-transport outcome counters. Never includes payloads or credentials.",
+        "summary": "Operator-only. Slack inbound delivery diagnostics: transport mode, durable receipt counts by state, uncertain receipts awaiting review, and per-transport outcome counters. Never includes payloads or credentials.",
         "tags": [
           "Slack"
         ],
@@ -38210,6 +38210,16 @@
           },
           "401": {
             "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operator access required",
             "content": {
               "application/json": {
                 "schema": {

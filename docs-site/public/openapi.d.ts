@@ -14697,7 +14697,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Slack inbound delivery diagnostics: transport mode, durable receipt counts by state, uncertain receipts awaiting review, and per-transport outcome counters. Never includes payloads or credentials. */
+        /** Operator-only. Slack inbound delivery diagnostics: transport mode, durable receipt counts by state, uncertain receipts awaiting review, and per-transport outcome counters. Never includes payloads or credentials. */
         get: {
             parameters: {
                 query?: never;
@@ -14783,6 +14783,15 @@ export interface paths {
                 };
                 /** @description Unauthorized */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Operator access required */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };

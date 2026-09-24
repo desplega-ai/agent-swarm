@@ -1,7 +1,9 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { getSlackInboundDiagnostics } from "../slack/inbound-dispatch";
+import { getRequestAuth } from "../utils/request-auth-context";
 import { route } from "./route-def";
+import { jsonError } from "./utils";
 
 // ─── Response schemas ────────────────────────────────────────────────────────
 
@@ -66,11 +68,12 @@ const slackInboundDiagnosticsRoute = route({
   path: "/api/slack/inbound/diagnostics",
   pattern: ["api", "slack", "inbound", "diagnostics"],
   summary:
-    "Slack inbound delivery diagnostics: transport mode, durable receipt counts by state, uncertain receipts awaiting review, and per-transport outcome counters. Never includes payloads or credentials.",
+    "Operator-only. Slack inbound delivery diagnostics: transport mode, durable receipt counts by state, uncertain receipts awaiting review, and per-transport outcome counters. Never includes payloads or credentials.",
   tags: ["Slack"],
   responses: {
     200: { description: "Slack inbound diagnostics", schema: SlackInboundDiagnosticsSchema },
     401: { description: "Unauthorized" },
+    403: { description: "Operator access required" },
   },
   auth: { apiKey: true },
 });
@@ -90,6 +93,13 @@ export async function handleSlackInbound(
       new URLSearchParams(),
     );
     if (!parsed) return true;
+    // Receipt ids, Slack event ids and failure codes are operator telemetry.
+    // `auth.apiKey` also admits user `aswt_` tokens, and verb-less GETs pass
+    // RBAC admission, so gate on the principal kind here.
+    if (getRequestAuth(req)?.kind !== "operator") {
+      jsonError(res, "Operator access required", 403);
+      return true;
+    }
     slackInboundDiagnosticsRoute.respond(res, 200, await getSlackInboundDiagnostics());
     return true;
   }
