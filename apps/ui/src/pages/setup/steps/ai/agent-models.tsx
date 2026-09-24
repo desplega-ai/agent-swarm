@@ -9,10 +9,10 @@ import type {
   SwarmConfig,
   SwarmConfigsResponse,
 } from "@/api/types";
-import { StatusIcon } from "@/components/onboarding/save-indicator";
 import { SetupCard, SetupChip } from "@/components/onboarding/setup-card";
 import { useAutosave, useContinueAction } from "@/components/onboarding/use-autosave";
 import { REASONING_EFFORT_LABEL } from "@/components/shared/reasoning-effort-icon";
+import { StatusIcon } from "@/components/shared/status-icon";
 import { InfoTip } from "@/components/ui/info-tip";
 import { SegmentedControl, type SegmentedControlOption } from "@/components/ui/segmented-control";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";

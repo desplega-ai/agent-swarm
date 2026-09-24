@@ -11,7 +11,7 @@ import {
   useStartMcpOAuthConnect,
 } from "@/api/hooks";
 import type { McpOAuthStatus, McpServer } from "@/api/types";
-import { SecretInput } from "@/components/onboarding/secret-field";
+import { SecretInput } from "@/components/shared/secret-field";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import {
   AlertDialog,

@@ -1,16 +1,16 @@
 import { AlertCircle, AlertTriangle, Check, CircleCheck } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { type ReactNode, useState } from "react";
+import type { AutosavePhase } from "@/components/onboarding/use-autosave";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import type { AutosavePhase } from "./use-autosave";
 
 /**
- * One status vocabulary for `/setup`: a small icon with its meaning in a
- * tooltip, instead of a sentence.
+ * One status vocabulary (`/setup`, credentials panels, ...): a small icon
+ * with its meaning in a tooltip, instead of a sentence.
  *
- * - `done`: verified or connected. Amber like the stepper: Taras asked for no
- *   green checks next to the amber progress.
+ * - `done`: verified or connected. Amber like the `/setup` stepper: no green
+ *   checks next to amber progress.
  * - `busy`: something is running now: a save, a probe, a worker check (amber ring).
  * - `saved`: stored, nothing to verify yet (quiet check).
  * - `dirty`: an edit waits for the debounce (hollow ring).

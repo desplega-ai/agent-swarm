@@ -2,7 +2,6 @@ import { Bot, House, ListTodo } from "lucide-react";
 import { useState } from "react";
 import { useConfigs } from "@/api/hooks/use-config-api";
 import { useStatus } from "@/api/hooks/use-status";
-import { SaveIndicator, StatusIcon, WithIndicator } from "@/components/onboarding/save-indicator";
 import { SetupCard } from "@/components/onboarding/setup-card";
 import {
   AutosaveScopeContext,
@@ -11,6 +10,7 @@ import {
   useContinueAction,
 } from "@/components/onboarding/use-autosave";
 import { useSetupSave } from "@/components/onboarding/use-setup-save";
+import { SaveIndicator, StatusIcon, WithIndicator } from "@/components/shared/status-icon";
 import { InfoTip } from "@/components/ui/info-tip";
 import { Input } from "@/components/ui/input";
 import { SettingsRow } from "@/components/ui/settings-row";

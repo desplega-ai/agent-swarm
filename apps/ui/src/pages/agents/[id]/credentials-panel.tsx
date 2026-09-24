@@ -1,6 +1,6 @@
 import type { Agent, AgentBedrockStatus, AgentCredStatus } from "@/api/types";
-import { StatusIcon, type StatusTone } from "@/components/onboarding/save-indicator";
 import { HarnessCell } from "@/components/shared/harness-cell";
+import { StatusIcon, type StatusTone } from "@/components/shared/status-icon";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { DefinitionList, InfoRow } from "@/components/ui/info-row";

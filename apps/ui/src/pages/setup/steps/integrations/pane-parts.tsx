@@ -1,7 +1,7 @@
 import { ExternalLink } from "lucide-react";
 import type { ReactNode } from "react";
-import { StatusLine } from "@/components/onboarding/save-indicator";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
+import { StatusLine } from "@/components/shared/status-icon";
 
 /** Inline external link in helper copy. Always a new tab. */
 export function ExternalTextLink({ href, children }: { href: string; children: ReactNode }) {

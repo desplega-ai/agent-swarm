@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import { StatusIcon } from "@/components/onboarding/save-indicator";
 import { SetupCard } from "@/components/onboarding/setup-card";
+import { StatusIcon } from "@/components/shared/status-icon";
 import { HARNESS_LABEL } from "@/lib/agent-runtime-models";
 import { HarnessSwitch } from "./harness-switch";
 import { type AiCardId, type AiCardProps, CARD_HARNESSES } from "./model";

@@ -7,6 +7,7 @@ import {
   useUpsertOAuthApp,
 } from "@/api/hooks/use-script-connections";
 import type { OAuthAppSummary, OAuthAuthorizationSummary } from "@/api/types";
+import { SecretInput } from "@/components/shared/secret-field";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -297,12 +298,12 @@ export function OAuthInlineConnect({
             </div>
             <div className="space-y-2">
               <Label className="text-xs">Client Secret</Label>
-              <Input
-                type="password"
+              <SecretInput
                 value={clientSecret}
-                onChange={(event) => setClientSecret(event.target.value)}
+                onChange={setClientSecret}
                 placeholder="Stored write-only"
                 autoComplete="new-password"
+                aria-label="Client Secret"
               />
             </div>
           </div>

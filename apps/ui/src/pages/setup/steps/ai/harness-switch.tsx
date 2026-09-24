@@ -5,9 +5,10 @@ import { toast } from "sonner";
 import { api } from "@/api/client";
 import { ONBOARDING_QUERY_KEY } from "@/api/hooks/use-onboarding";
 import type { AgentWithTasks, ProviderName } from "@/api/types";
-import { StatusLine } from "@/components/onboarding/save-indicator";
-import { BrandLogo, SetupChip } from "@/components/onboarding/setup-card";
+import { SetupChip } from "@/components/onboarding/setup-card";
+import { BrandLogo } from "@/components/shared/brand-logo";
 import { HarnessIcon } from "@/components/shared/harness-icon";
+import { StatusLine } from "@/components/shared/status-icon";
 import { Button } from "@/components/ui/button";
 import {
   Select,

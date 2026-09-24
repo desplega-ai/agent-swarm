@@ -1,69 +1,57 @@
 import { Eye, EyeOff } from "lucide-react";
-import {
-  type ClipboardEvent,
-  type ReactNode,
-  type Ref,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from "react";
+import { type ComponentProps, type ReactNode, useLayoutEffect, useRef, useState } from "react";
+import { useAutosave } from "@/components/onboarding/use-autosave";
+import { SaveIndicator, WithIndicator } from "@/components/shared/status-icon";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { SaveIndicator, WithIndicator } from "./save-indicator";
-import { useAutosave } from "./use-autosave";
 
-interface SecretInputProps {
-  id: string;
+/**
+ * Every `Input` prop passes through to the `<input>` (`id`, `ref`, `name`,
+ * `required`, `placeholder`, `disabled`, `aria-*`, focus and paste handlers),
+ * except the ones this component owns: `type` (the eye toggle), `className`,
+ * and `onChange`, which takes the new value.
+ */
+interface SecretInputProps
+  extends Omit<ComponentProps<typeof Input>, "type" | "value" | "onChange" | "className"> {
   value: string;
   onChange: (value: string) => void;
-  ref?: Ref<HTMLInputElement>;
-  placeholder?: string;
-  disabled?: boolean;
-  /** Id of the helper line under the field. */
+  /** Id of the helper line under the field. Wins over `aria-describedby`. */
   describedBy?: string;
   invalid?: boolean;
-  onFocus?: () => void;
-  onBlur?: () => void;
-  onPaste?: (event: ClipboardEvent<HTMLInputElement>) => void;
   /** Status icon inside the field, left of the eye toggle. */
   indicator?: ReactNode;
 }
 
-/** Password input with an eye toggle inside the field. */
+/**
+ * Password input with an eye toggle inside the field. `autoComplete` defaults
+ * to `"off"`. Pass `"new-password"` on forms that store a credential, so the
+ * browser does not fill a saved login.
+ */
 export function SecretInput({
-  id,
   value,
   onChange,
-  ref,
-  placeholder,
   disabled,
   describedBy,
   invalid,
-  onFocus,
-  onBlur,
-  onPaste,
   indicator,
+  autoComplete = "off",
+  ...inputProps
 }: SecretInputProps) {
   const [shown, setShown] = useState(false);
   return (
     <div className="relative">
       <Input
-        id={id}
-        ref={ref}
+        spellCheck={false}
+        {...inputProps}
         type={shown ? "text" : "password"}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        onFocus={onFocus}
-        onBlur={onBlur}
-        onPaste={onPaste}
-        placeholder={placeholder}
         disabled={disabled}
-        autoComplete="off"
-        spellCheck={false}
-        aria-describedby={describedBy}
-        aria-invalid={invalid || undefined}
+        autoComplete={autoComplete}
+        aria-describedby={describedBy ?? inputProps["aria-describedby"]}
+        aria-invalid={invalid || inputProps["aria-invalid"] || undefined}
         className={cn("font-mono", indicator ? "pr-16" : "pr-10")}
       />
       <span className="absolute top-1/2 right-1.5 flex -translate-y-1/2 items-center gap-1.5">
@@ -222,9 +210,9 @@ interface SecretFieldProps {
 }
 
 /**
- * Write-only secret field for `/setup` that saves itself. A saved secret shows
- * as masked dots with a Replace action, and its value never comes back from
- * the API. A new value stores on a paste or a blur, once it passes `rule`
+ * Write-only secret field that saves itself (autosave, no Save button). A
+ * saved secret shows as masked dots with a Replace action, and its value
+ * never comes back from the API. A new value stores on a paste or a blur, once it passes `rule`
  * (see `SecretRule`), never while typing. The masked view comes back on blur,
  * never under a focused field.
  */

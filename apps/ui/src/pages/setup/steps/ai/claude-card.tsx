@@ -1,7 +1,8 @@
 import { type ReactNode, useState } from "react";
-import { KEY_RULES, type SecretRule } from "@/components/onboarding/secret-field";
-import { BrandLogo, SetupChip } from "@/components/onboarding/setup-card";
+import { SetupChip } from "@/components/onboarding/setup-card";
 import { useSetupSave } from "@/components/onboarding/use-setup-save";
+import { BrandLogo } from "@/components/shared/brand-logo";
+import { KEY_RULES, type SecretRule } from "@/components/shared/secret-field";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SecretKeyField } from "./fields";
 import type { AiCardProps } from "./model";

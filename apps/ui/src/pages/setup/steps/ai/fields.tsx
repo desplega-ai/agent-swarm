@@ -1,8 +1,8 @@
 import { Check, Copy } from "lucide-react";
 import { type ComponentProps, type ReactNode, useState } from "react";
-import { SaveIndicator, WithIndicator } from "@/components/onboarding/save-indicator";
-import { SecretField } from "@/components/onboarding/secret-field";
 import { useAutosave } from "@/components/onboarding/use-autosave";
+import { SecretField } from "@/components/shared/secret-field";
+import { SaveIndicator, WithIndicator } from "@/components/shared/status-icon";
 import { Button } from "@/components/ui/button";
 import { InfoTip } from "@/components/ui/info-tip";
 import { Input } from "@/components/ui/input";

@@ -9,20 +9,21 @@ import type {
   OnboardingMemoryTestResponse,
 } from "@/api/types";
 import { FadeIn } from "@/components/onboarding/fade-in";
-import { StatusIcon, StatusLine, type StatusTone } from "@/components/onboarding/save-indicator";
+import { SetupCard } from "@/components/onboarding/setup-card";
+import {
+  AutosaveScopeContext,
+  useAutosave,
+  useAutosaveScope,
+} from "@/components/onboarding/use-autosave";
+import { BrandLogo } from "@/components/shared/brand-logo";
 import {
   checkSecret,
   KEY_RULES,
   SecretInput,
   type SecretRule,
   usePasteCommit,
-} from "@/components/onboarding/secret-field";
-import { BrandLogo, SetupCard } from "@/components/onboarding/setup-card";
-import {
-  AutosaveScopeContext,
-  useAutosave,
-  useAutosaveScope,
-} from "@/components/onboarding/use-autosave";
+} from "@/components/shared/secret-field";
+import { StatusIcon, StatusLine, type StatusTone } from "@/components/shared/status-icon";
 import { Button } from "@/components/ui/button";
 import { InfoTip } from "@/components/ui/info-tip";
 import { Input } from "@/components/ui/input";

@@ -1,4 +1,4 @@
-import { StatusLine } from "@/components/onboarding/save-indicator";
+import { StatusLine } from "@/components/shared/status-icon";
 import { InfoTip } from "@/components/ui/info-tip";
 import type { CardRollup } from "./model";
 

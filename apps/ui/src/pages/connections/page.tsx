@@ -55,9 +55,9 @@ import type {
   ScriptCredentialBinding,
   SwarmConfigScope,
 } from "@/api/types";
-import { SecretInput } from "@/components/onboarding/secret-field";
 import { DataGrid } from "@/components/shared/data-grid";
 import { MarkdownView } from "@/components/shared/markdown-view";
+import { SecretInput } from "@/components/shared/secret-field";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import {
   AlertDialog,
@@ -1706,11 +1706,11 @@ export function AddConnectionDialog({
                         <FieldLabel tip="Secret value stored write-only under connection.<slug>.secret. Never shown again.">
                           Secret
                         </FieldLabel>
-                        <Input
-                          type="password"
+                        <SecretInput
                           value={authSecret}
-                          onChange={(event) => setAuthSecret(event.target.value)}
+                          onChange={setAuthSecret}
                           autoComplete="new-password"
+                          aria-label="Secret"
                           placeholder={
                             canPreserveSecret
                               ? "Leave blank to keep current secret"

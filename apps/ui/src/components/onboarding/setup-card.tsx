@@ -1,5 +1,5 @@
 import { ChevronDown } from "lucide-react";
-import type { CSSProperties, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { AnimatedReveal } from "@/components/shared/animated-reveal";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -129,31 +129,5 @@ export function SetupCard({
         )
       ) : null}
     </section>
-  );
-}
-
-/**
- * Monochrome brand mark from a file in `public/` (harness-logos,
- * provider-logos, integration-logos). A CSS mask tints the mark with
- * `currentColor`, so it follows the theme like a lucide icon. Decorative:
- * every call site renders the brand name as visible text next to it.
- */
-export function BrandLogo({ src, className }: { src: string; className?: string }) {
-  const mask: CSSProperties = {
-    maskImage: `url(${src})`,
-    WebkitMaskImage: `url(${src})`,
-    maskSize: "contain",
-    WebkitMaskSize: "contain",
-    maskRepeat: "no-repeat",
-    WebkitMaskRepeat: "no-repeat",
-    maskPosition: "center",
-    WebkitMaskPosition: "center",
-  };
-  return (
-    <span
-      aria-hidden
-      className={cn("inline-block size-5 shrink-0 bg-current", className)}
-      style={mask}
-    />
   );
 }

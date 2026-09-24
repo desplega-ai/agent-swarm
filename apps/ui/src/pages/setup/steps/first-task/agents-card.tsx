@@ -1,9 +1,9 @@
 import { ChevronDown, ExternalLink } from "lucide-react";
 import { Link } from "react-router-dom";
 import type { Agent } from "@/api/types";
-import { StatusLine } from "@/components/onboarding/save-indicator";
 import { HarnessIcon } from "@/components/shared/harness-icon";
 import { StatusBadge } from "@/components/shared/status-badge";
+import { StatusLine } from "@/components/shared/status-icon";
 import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";

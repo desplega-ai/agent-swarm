@@ -44,7 +44,7 @@ import { IntegrationStatusBadge } from "@/components/integrations/integration-st
 import { JiraOAuthSection } from "@/components/integrations/jira-oauth-section";
 import { LinearOAuthSection } from "@/components/integrations/linear-oauth-section";
 import { RecommendedSkillsSection } from "@/components/integrations/required-skills-section";
-import { BrandLogo } from "@/components/onboarding/setup-card";
+import { BrandLogo } from "@/components/shared/brand-logo";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageSkeleton } from "@/components/shared/page-skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";

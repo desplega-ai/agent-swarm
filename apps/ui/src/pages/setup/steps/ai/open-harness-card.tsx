@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { KEY_RULES, type SecretRule } from "@/components/onboarding/secret-field";
-import { BrandLogo } from "@/components/onboarding/setup-card";
 import { useSetupSave } from "@/components/onboarding/use-setup-save";
+import { BrandLogo } from "@/components/shared/brand-logo";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
+import { KEY_RULES, type SecretRule } from "@/components/shared/secret-field";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SecretKeyField, TextField } from "./fields";
 import { type AiCardProps, baseUrlError, globalConfigValue } from "./model";

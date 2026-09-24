@@ -21,7 +21,7 @@ import {
   SquareCheckBig,
 } from "lucide-react";
 import { Link } from "react-router-dom";
-import { BrandLogo } from "@/components/onboarding/setup-card";
+import { BrandLogo } from "@/components/shared/brand-logo";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import type { IntegrationDef } from "@/lib/integrations-catalog";
