@@ -1,7 +1,7 @@
 ---
 date: 2026-09-24T21:30:00Z
 topic: "First-run UI onboarding (/setup stepper, onboarding_state, Codex device login, Slack manifest)"
-status: in-progress
+status: done
 ---
 
 # First-run UI onboarding
@@ -205,24 +205,24 @@ and integers only. Rows in `docs-site/content/docs/(documentation)/reference/tel
 ## Todo
 
 - [x] Phase 0: contract (this file) + shared UI contract files (types, client, hooks, step contract, route entry)
-- [ ] Phase 1 (Codex): API slice 1: internal keys, onboarding state + routes + derivation + telemetry, memory probe, tracker finalRedirect, openapi, docs, tests
-- [ ] Phase 2 (Codex): API slices 2+3: Codex device flow + Slack manifest route, docs, tests
+- [x] Phase 1 (Codex): API slice 1: internal keys, onboarding state + routes + derivation + telemetry, memory probe, tracker finalRedirect, openapi, docs, tests
+- [x] Phase 2 (Codex): API slices 2+3: Codex device flow + Slack manifest route, docs, tests
 - [x] Phase 3 (Opus): UI shell, routing, pill, home card, settings entry, steps 1 + 2
 - [x] Phase 4 (Opus): UI step 3 (Claude, Codex device, open harnesses + gateway R7, Devin, per-worker switch R2)
 - [x] Phase 5 (Opus): UI steps 4, 5 (split view, Slack manifest, Linear/Jira, brand SVGs), 6
 - [x] API follow-ups from the UI spec review: `verifiedWorkers` counts leads too (label "agents"); derivation also runs when `autoCompleted` but emits no telemetry (so "Run setup again" shows the true state)
 - [x] UI fix round 1 (18 review items) delegated
 - [x] UI fix round 1 committed (384e58f0f); API commits 2412423a3 + 785a7bbe3 (codex_oauth_<N> live test) + 0d85ababf (Dockerfile slack-manifest COPY)
-- [ ] API review fix round (Codex, 14 items: SSRF, internal-key surfaces, telemetry-once, GET w/o write lock, ...)
-- [ ] UI round 2 from Taras QA (14 items + Slack HTTP removal + blessed tools Hybrid + Slack setup prompt), agents A (shell) + B (steps)
+- [x] API review fix round (Codex, 14 items: SSRF, internal-key surfaces, telemetry-once, GET w/o write lock, ...)
+- [x] UI round 2 from Taras QA (14 items + Slack HTTP removal + blessed tools Hybrid + Slack setup prompt), agents A (shell) + B (steps)
 - [x] API review fix round (70e22ee94) + memory rejection fix (99c7232db) + readiness signal (a208d65ed) + footprint test (ead92e761)
 - [x] UI round 2 (dffe8bacc)
 - [x] UI fix round 3 (round-2 reviews, 19 items) + Taras QA round 3 items 20-25 (step icons, hide Skip when done, no footer check, Enter/S/Escape shortcuts, step 6 full width, step 3 title)
 - [x] Per-agent model dial inside step 3 (values approved by Taras; implemented in c82b5913f)
 - [x] Adopt the new UI primitives in existing dashboard components (survey done, adopted in 85748cbf5 and 70c6b0311; Taras confirms the list)
 - [x] Dev skill for UI work in `.claude/internal-skills/` (symlinked in `.claude/skills/` + `.agents/skills/`)
-- [ ] Phase 6: integration pass, gates, code review, commit, push to #1604, PR body
-- [ ] Phase 7: local QA + design feedback loop with Taras
+- [x] Phase 6: integration pass, gates, code review, commit, push to #1604, PR body
+- [x] Phase 7: local QA + design feedback loop with Taras (rounds 1-3 applied; continues on the PR)
 
 ## QA feedback round 2 (Taras, 2026-09-24)
 
