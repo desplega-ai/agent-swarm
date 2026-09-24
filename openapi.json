@@ -37885,6 +37885,342 @@
         }
       }
     },
+    "/api/slack/inbound/diagnostics": {
+      "get": {
+        "summary": "Slack inbound delivery diagnostics: transport mode, durable receipt counts by state, uncertain receipts awaiting review, and per-transport outcome counters. Never includes payloads or credentials.",
+        "tags": [
+          "Slack"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Slack inbound diagnostics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "mode": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "socket",
+                        "http",
+                        null
+                      ]
+                    },
+                    "disabled": {
+                      "type": "boolean"
+                    },
+                    "receipts": {
+                      "type": "object",
+                      "properties": {
+                        "counts": {
+                          "type": "object",
+                          "properties": {
+                            "pending": {
+                              "type": "number"
+                            },
+                            "processing": {
+                              "type": "number"
+                            },
+                            "processed": {
+                              "type": "number"
+                            },
+                            "ignored": {
+                              "type": "number"
+                            },
+                            "failed": {
+                              "type": "number"
+                            },
+                            "uncertain": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "pending",
+                            "processing",
+                            "processed",
+                            "ignored",
+                            "failed",
+                            "uncertain"
+                          ]
+                        },
+                        "backlogBytes": {
+                          "type": "number"
+                        },
+                        "duplicateDeliveries": {
+                          "type": "number"
+                        },
+                        "oldestPendingReceivedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "oldestUncertainReceivedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "lastReceivedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "lastFailure": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "errorCode": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "at": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "errorCode",
+                            "at"
+                          ]
+                        },
+                        "uncertain": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "event",
+                                  "interaction",
+                                  "command"
+                                ]
+                              },
+                              "payloadType": {
+                                "type": "string"
+                              },
+                              "eventId": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "errorCode": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "receivedAt": {
+                                "type": "string"
+                              },
+                              "attempts": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "kind",
+                              "payloadType",
+                              "eventId",
+                              "errorCode",
+                              "receivedAt",
+                              "attempts"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "counts",
+                        "backlogBytes",
+                        "duplicateDeliveries",
+                        "oldestPendingReceivedAt",
+                        "oldestUncertainReceivedAt",
+                        "lastReceivedAt",
+                        "lastFailure",
+                        "uncertain"
+                      ]
+                    },
+                    "outcomes": {
+                      "type": "object",
+                      "properties": {
+                        "socket": {
+                          "type": "object",
+                          "properties": {
+                            "processed": {
+                              "type": "number"
+                            },
+                            "ignored": {
+                              "type": "number"
+                            },
+                            "failed": {
+                              "type": "number"
+                            },
+                            "uncertain": {
+                              "type": "number"
+                            },
+                            "lastOutcomeAt": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "lastFailure": {
+                              "type": [
+                                "object",
+                                "null"
+                              ],
+                              "properties": {
+                                "code": {
+                                  "type": "string"
+                                },
+                                "at": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "code",
+                                "at"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "processed",
+                            "ignored",
+                            "failed",
+                            "uncertain",
+                            "lastOutcomeAt",
+                            "lastFailure"
+                          ]
+                        },
+                        "http": {
+                          "type": "object",
+                          "properties": {
+                            "processed": {
+                              "type": "number"
+                            },
+                            "ignored": {
+                              "type": "number"
+                            },
+                            "failed": {
+                              "type": "number"
+                            },
+                            "uncertain": {
+                              "type": "number"
+                            },
+                            "lastOutcomeAt": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "lastFailure": {
+                              "type": [
+                                "object",
+                                "null"
+                              ],
+                              "properties": {
+                                "code": {
+                                  "type": "string"
+                                },
+                                "at": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "code",
+                                "at"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "processed",
+                            "ignored",
+                            "failed",
+                            "uncertain",
+                            "lastOutcomeAt",
+                            "lastFailure"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "socket",
+                        "http"
+                      ]
+                    },
+                    "limits": {
+                      "type": "object",
+                      "properties": {
+                        "maxBacklogReceipts": {
+                          "type": "number"
+                        },
+                        "maxBacklogBytes": {
+                          "type": "number"
+                        },
+                        "maxPayloadBytes": {
+                          "type": "number"
+                        },
+                        "completedRetentionMs": {
+                          "type": "number"
+                        },
+                        "maxAttempts": {
+                          "type": "number"
+                        },
+                        "retryBackoffMs": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "maxBacklogReceipts",
+                        "maxBacklogBytes",
+                        "maxPayloadBytes",
+                        "completedRetentionMs",
+                        "maxAttempts",
+                        "retryBackoffMs"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "mode",
+                    "disabled",
+                    "receipts",
+                    "outcomes",
+                    "limits"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/scripts/upsert": {
       "post": {
         "operationId": "scripts_upsert",

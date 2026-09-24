@@ -7,6 +7,12 @@ import { resolveSlackUserId, rewriteSlackMentions } from "./enrich";
 import { wasEventSeen } from "./event-dedup";
 import type { SlackFile } from "./files";
 import {
+  ignoreSlackInbound,
+  isAdmittedSlackDelivery,
+  noteSlackInboundSideEffect,
+  reportSlackInboundFailure,
+} from "./inbound-dispatch";
+import {
   buildEffectiveText,
   createSlackTaskWithFiles,
   fetchSlackFiles,
@@ -46,6 +52,7 @@ export function createAssistant(): Assistant {
         });
       } catch (error) {
         console.error("[Slack] Assistant threadStarted error:", error);
+        reportSlackInboundFailure("assistant_thread_started_error");
       }
     },
 
@@ -55,11 +62,12 @@ export function createAssistant(): Assistant {
 
     userMessage: async ({ message, body, say, setStatus, setTitle, getThreadContext, client }) => {
       // Slack retries deliveries on 3s timeout / 5xx. Drop duplicates before
-      // any task-creation work runs (DES-293).
+      // any task-creation work runs (DES-293). A delivery admitted from a
+      // durable receipt was already deduplicated by its unique key.
       const eventId = body?.event_id;
-      if (wasEventSeen(eventId)) {
+      if (!isAdmittedSlackDelivery() && wasEventSeen(eventId)) {
         console.log(`[Slack] dropping Slack retry: event_id=${eventId}`);
-        return;
+        return ignoreSlackInbound("duplicate_event");
       }
 
       // Wrap setStatus/setTitle to swallow all errors gracefully.
@@ -110,7 +118,7 @@ export function createAssistant(): Assistant {
             console.log(
               `[Slack] assistant: skipping message in ${channelId}/${threadTs} — mentions another user, not us`,
             );
-            return;
+            return ignoreSlackInbound("other_user_mention");
           }
         }
 
@@ -129,6 +137,7 @@ export function createAssistant(): Assistant {
 
         // Follow-up message → buffer text and file metadata until the flush.
         if (workingAgent && workingAgent.status !== "offline" && isAdditiveSlack()) {
+          noteSlackInboundSideEffect("thread_buffer");
           bufferThreadMessage(
             channelId,
             threadTs,
@@ -266,6 +275,7 @@ export function createAssistant(): Assistant {
         // setStatus shows typing indicator — watcher will post final result when done
       } catch (error) {
         console.error("[Slack] Assistant userMessage error:", error);
+        reportSlackInboundFailure("assistant_user_message_error");
       }
     },
   });

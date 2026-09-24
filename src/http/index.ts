@@ -112,6 +112,7 @@ import { handleScripts } from "./scripts";
 import { handleSessionData } from "./session-data";
 import { handleSessions } from "./sessions";
 import { handleSkills } from "./skills";
+import { handleSlackInbound } from "./slack-inbound";
 import { handleStats } from "./stats";
 import { handleStatus } from "./status";
 import { handleTaskTemplates } from "./task-templates";
@@ -346,6 +347,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleRooms(req, res, pathSegments, queryParams),
         () => handleRealtimeAsset(req, res),
         () => handleIntegrations(req, res, pathSegments),
+        () => handleSlackInbound(req, res, pathSegments),
         () => handlePromptTemplates(req, res, pathSegments, queryParams),
         () => handleDbQuery(req, res, pathSegments, queryParams),
         () => handleMetrics(req, res, pathSegments, queryParams, myAgentId),

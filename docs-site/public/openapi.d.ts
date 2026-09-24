@@ -14690,6 +14690,116 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/slack/inbound/diagnostics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Slack inbound delivery diagnostics: transport mode, durable receipt counts by state, uncertain receipts awaiting review, and per-transport outcome counters. Never includes payloads or credentials. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Slack inbound diagnostics */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {string|null} */
+                            mode: "socket" | "http" | null;
+                            disabled: boolean;
+                            receipts: {
+                                counts: {
+                                    pending: number;
+                                    processing: number;
+                                    processed: number;
+                                    ignored: number;
+                                    failed: number;
+                                    uncertain: number;
+                                };
+                                backlogBytes: number;
+                                duplicateDeliveries: number;
+                                oldestPendingReceivedAt: string | null;
+                                oldestUncertainReceivedAt: string | null;
+                                lastReceivedAt: string | null;
+                                lastFailure: {
+                                    errorCode: string | null;
+                                    at: string;
+                                } | null;
+                                uncertain: {
+                                    id: string;
+                                    /** @enum {string} */
+                                    kind: "event" | "interaction" | "command";
+                                    payloadType: string;
+                                    eventId: string | null;
+                                    errorCode: string | null;
+                                    receivedAt: string;
+                                    attempts: number;
+                                }[];
+                            };
+                            outcomes: {
+                                socket: {
+                                    processed: number;
+                                    ignored: number;
+                                    failed: number;
+                                    uncertain: number;
+                                    lastOutcomeAt: string | null;
+                                    lastFailure: {
+                                        code: string;
+                                        at: string;
+                                    } | null;
+                                };
+                                http: {
+                                    processed: number;
+                                    ignored: number;
+                                    failed: number;
+                                    uncertain: number;
+                                    lastOutcomeAt: string | null;
+                                    lastFailure: {
+                                        code: string;
+                                        at: string;
+                                    } | null;
+                                };
+                            };
+                            limits: {
+                                maxBacklogReceipts: number;
+                                maxBacklogBytes: number;
+                                maxPayloadBytes: number;
+                                completedRetentionMs: number;
+                                maxAttempts: number;
+                                retryBackoffMs: number;
+                            };
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/scripts/upsert": {
         parameters: {
             query?: never;

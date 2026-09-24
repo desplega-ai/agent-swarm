@@ -28,6 +28,7 @@ import type { AgentTask, CreateTaskOptions, TaskAttachment } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { taskAttachmentFetchCommand } from "../utils/task-attachment-links";
 import { getFileInfo, type SlackFile } from "./files";
+import { noteSlackInboundSideEffect } from "./inbound-dispatch";
 // Side-effect import: registers all Slack event templates in the in-memory registry
 import "./templates";
 
@@ -287,6 +288,7 @@ export async function createSlackTaskWithFiles(
   options: CreateTaskOptions,
   inbound: InboundSlackFiles,
 ): Promise<{ task: AgentTask; unattached: SlackFileFailure[] }> {
+  noteSlackInboundSideEffect("task_created");
   if (inbound.fetched.length === 0) {
     const task = await createTaskWithSiblingAwareness(description, options, { origin: "slack" });
     return { task, unattached: inbound.failed };

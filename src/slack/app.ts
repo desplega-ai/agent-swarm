@@ -1,6 +1,7 @@
 import { App, LogLevel } from "@slack/bolt";
 import { emitBuiltInIntegrationConnectedOnce, ensureSlackRenderV2Activation } from "../be/db";
 import { getSlackConfiguration } from "./config";
+import { slackInboundOutcomeMiddleware } from "./inbound-dispatch";
 import { getSlackSocketModeBlockReason, SLACK_DEV_SOCKET_MODE_OPT_IN } from "./socket-mode-guard";
 import { startTaskWatcher, stopTaskWatcher } from "./watcher";
 
@@ -69,6 +70,10 @@ export async function initSlackApp(): Promise<App | null> {
 
   // Failed validation must remain retryable without requiring stopSlackApp().
   initialized = true;
+
+  // First global middleware: every handler below runs inside it, so each
+  // delivery resolves to an explicit processed/ignored/failed/uncertain outcome.
+  app.use(slackInboundOutcomeMiddleware());
 
   // Register handlers
   const { registerMessageHandler } = await import("./handlers");
