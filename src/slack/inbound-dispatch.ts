@@ -6,6 +6,7 @@ import {
   admitSlackInboundReceipt,
   claimSlackInboundReceipt,
   completeSlackInboundReceipt,
+  getNextSlackInboundAvailableAt,
   getSlackInboundReceiptStats,
   markInterruptedSlackInboundReceiptsUncertain,
   releaseSlackInboundReceipt,
@@ -407,31 +408,73 @@ export async function processNextSlackInboundReceipt(
   return { receiptId: receipt.id, outcome, state: outcome.state };
 }
 
+/** Arms a one-shot timer and returns its cancel function. */
+export type SlackInboundTimer = (fn: () => void, delayMs: number) => () => void;
+
+const defaultTimer: SlackInboundTimer = (fn, delayMs) => {
+  const handle = setTimeout(fn, delayMs);
+  handle.unref?.();
+  return () => clearTimeout(handle);
+};
+
+/** Floor for the retry wake-up, so a clock skew never spins the drain. */
+const MIN_REARM_MS = 250;
+
 /**
  * One bounded, single-flight drain. `wake()` starts a pass (or schedules one
  * more pass if a drain is already running) and resolves when the drain goes
  * idle. At most `maxPerPass` receipts are processed per pass.
+ *
+ * On going idle the drain arms a timer for the earliest pending receipt, so a
+ * receipt released for a backoff retry is retried even when no new delivery
+ * calls `wake()`. `stop()` cancels that timer.
  */
 export function createSlackInboundDrain(
   processor: SlackInboundProcessor,
-  options: { maxPerPass?: number; requireBoltDispatch?: boolean } = {},
-): { wake(): Promise<void> } {
+  options: {
+    maxPerPass?: number;
+    requireBoltDispatch?: boolean;
+    now?: () => Date;
+    setTimer?: SlackInboundTimer;
+  } = {},
+): { wake(): Promise<void>; stop(): void } {
   const maxPerPass = options.maxPerPass ?? 50;
+  const now = options.now ?? (() => new Date());
+  const setTimer = options.setTimer ?? defaultTimer;
   let running: Promise<void> | null = null;
   let again = false;
+  let stopped = false;
+  let cancelTimer: (() => void) | null = null;
+
+  const clearTimer = () => {
+    cancelTimer?.();
+    cancelTimer = null;
+  };
 
   const pass = async () => {
     for (let i = 0; i < maxPerPass; i++) {
       const result = await processNextSlackInboundReceipt(processor, {
+        now,
         requireBoltDispatch: options.requireBoltDispatch,
       });
       if (!result) return;
     }
   };
 
+  const armRetryTimer = async () => {
+    const next = await getNextSlackInboundAvailableAt();
+    if (!next || stopped) return;
+    const delayMs = Math.max(next.getTime() - now().getTime(), MIN_REARM_MS);
+    cancelTimer = setTimer(() => {
+      cancelTimer = null;
+      void drain.wake();
+    }, delayMs);
+  };
+
   const loop = async () => {
     do {
       again = false;
+      clearTimer();
       try {
         await pass();
       } catch (error) {
@@ -440,11 +483,18 @@ export function createSlackInboundDrain(
         console.error("[Slack] inbound drain pass failed:", scrubSecrets(String(error)));
         return;
       }
+      if (again) continue;
+      try {
+        await armRetryTimer();
+      } catch (error) {
+        console.error("[Slack] inbound drain could not arm retry:", scrubSecrets(String(error)));
+      }
     } while (again);
   };
 
-  return {
+  const drain = {
     wake() {
+      if (stopped) return Promise.resolve();
       if (running) {
         again = true;
         return running;
@@ -454,7 +504,12 @@ export function createSlackInboundDrain(
       });
       return running;
     },
+    stop() {
+      stopped = true;
+      clearTimer();
+    },
   };
+  return drain;
 }
 
 /** Boot recovery; call once before the drain starts. */

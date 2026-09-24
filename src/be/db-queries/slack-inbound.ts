@@ -329,6 +329,14 @@ export async function releaseSlackInboundReceipt(
   return changes > 0;
 }
 
+/** Earliest `available_at` among pending receipts, or null when none wait. */
+export async function getNextSlackInboundAvailableAt(): Promise<Date | null> {
+  const row = await getDbClient().get<{ next: string | null }>(
+    `SELECT MIN(available_at) AS next FROM slack_inbound_receipts WHERE state = 'pending'`,
+  );
+  return row?.next ? new Date(row.next) : null;
+}
+
 /**
  * Boot recovery: a receipt still `processing` belonged to a process that died
  * mid-handler. Its side effects are unknown, so it becomes `uncertain` and is

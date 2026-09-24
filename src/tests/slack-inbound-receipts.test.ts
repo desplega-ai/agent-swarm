@@ -456,6 +456,85 @@ describe("dispatch and recovery", () => {
     expect(receipt?.errorCode).toBe("slack_webapi_platform_error");
   });
 
+  test("an admitted retry after a pre-side-effect failure is not dropped by the message cache", async () => {
+    await createAgent({ name: "ReceiptLead", isLead: true, status: "idle" });
+    const ts = nextTs();
+    const body = messageEnvelope("Ev_RETRY_MESSAGE_CACHE", ts);
+    await admitSlackInbound({
+      transport: "http",
+      kind: "event",
+      rawBody: JSON.stringify(body),
+      body,
+    });
+
+    let clock = Date.now();
+    const now = () => new Date(clock);
+    // Fails after the channel:ts message cache, before any side effect.
+    resolveSlackUserIdSpy.mockImplementationOnce(async () => {
+      throw new Error("identity lookup failed");
+    });
+
+    const first = await processNextSlackInboundReceipt(messageProcessor(), { now });
+    expect(first).toMatchObject({ state: "pending", outcome: { state: "failed" } });
+    expect(await tasksForTs(ts)).toHaveLength(0);
+
+    clock += SLACK_INBOUND_LIMITS.retryBackoffMs;
+    const retry = await processNextSlackInboundReceipt(messageProcessor(), { now });
+    expect(retry?.outcome.code).not.toBe("duplicate_message");
+    expect(retry?.state).toBe("processed");
+    expect(await tasksForTs(ts)).toHaveLength(1);
+  });
+
+  test("the drain wakes itself at a released receipt's retry time", async () => {
+    await createAgent({ name: "ReceiptLead", isLead: true, status: "idle" });
+    const ts = nextTs();
+    const body = messageEnvelope("Ev_DRAIN_REARM", ts);
+    await admitSlackInbound({
+      transport: "http",
+      kind: "event",
+      rawBody: JSON.stringify(body),
+      body,
+    });
+
+    let clock = Date.now();
+    const now = () => new Date(clock);
+    const timers: Array<{ fn: () => void; delayMs: number }> = [];
+    const setTimer = (fn: () => void, delayMs: number) => {
+      const timer = { fn, delayMs };
+      timers.push(timer);
+      return () => {
+        const index = timers.indexOf(timer);
+        if (index >= 0) timers.splice(index, 1);
+      };
+    };
+    const deliver = messageProcessor();
+    let calls = 0;
+    const processor = async (delivery: { rawBody: string }) => {
+      calls += 1;
+      if (calls === 1) throw Object.assign(new Error("transient"), { code: "transient" });
+      await deliver(delivery);
+    };
+
+    const drain = createSlackInboundDrain(processor, { now, setTimer });
+    try {
+      // A lone delivery: nothing else will call wake().
+      await drain.wake();
+      expect(calls).toBe(1);
+      expect(timers).toHaveLength(1);
+      expect(timers[0]?.delayMs).toBe(SLACK_INBOUND_LIMITS.retryBackoffMs);
+
+      clock += SLACK_INBOUND_LIMITS.retryBackoffMs;
+      timers.shift()?.fn();
+      await drain.wake();
+
+      expect(calls).toBe(2);
+      expect(await tasksForTs(ts)).toHaveLength(1);
+      expect(timers).toHaveLength(0);
+    } finally {
+      drain.stop();
+    }
+  });
+
   test("a delivery Bolt never dispatched is a failure, not a success", async () => {
     const body = messageEnvelope("Ev_NOT_DISPATCHED", nextTs());
     await admitSlackInbound({

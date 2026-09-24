@@ -453,9 +453,11 @@ export function registerMessageHandler(app: App): void {
     // Require either text or files, and always require a user
     if ((!hasText && !hasFiles) || !msg.user) return ignoreSlackInbound("empty_message");
 
-    // Deduplicate events (Slack can send same event twice)
+    // Deduplicate events (Slack can send same event twice). An admitted
+    // delivery skips this cache too: a retry of a receipt released after a
+    // pre-side-effect failure must not be dropped as its own duplicate.
     const messageKey = `${msg.channel}:${msg.ts}`;
-    if (isMessageProcessed(messageKey)) {
+    if (!isAdmittedSlackDelivery() && isMessageProcessed(messageKey)) {
       return ignoreSlackInbound("duplicate_message");
     }
 
