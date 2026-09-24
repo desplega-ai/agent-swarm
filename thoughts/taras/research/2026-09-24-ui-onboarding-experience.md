@@ -426,12 +426,17 @@ Upstream Codex: [`device_code_auth.rs`](https://github.com/openai/codex/blob/rus
 - **History.** PR #1010 (`cb6c4556a`, gateway routing), PR #1383 (`0e5c28f8e`, docs + Settings control), PR #1570 (`20f02bdbf`, dsh wiring).
 - **Cloud mismatch.** `agent-swarm-internal` pushes `OPENROUTER_BASE_URL` + `OPENROUTER_API_KEY` in gateway mode (`packages/backend/convex/wallet/openrouterEnvPlan.ts:49-86`). Its pi "OpenAI-compatible" onboarding option also sends `PI_API_KEY`, `PI_BASE_URL`, `PI_MODEL` (`buildDeployConfig.ts:15-22`). No code in agent-swarm reads those three names.
 
-## Open Questions
+## Open Questions (closed in review, 2026-09-24)
 
-- Do OpenRouter and Vercel AI Gateway honor the `dimensions` parameter at 512 for `openai/text-embedding-3-small`? The step-4 probe detects a mismatch (`embed()` returns `null`), so the manual E2E settles it.
-- Is OpenRouter embeddings GA or beta? Only the TypeScript SDK docs say "beta".
-- R7 gateway option: `OPENROUTER_BASE_URL` is global and also reroutes API-side LLM calls. Should the card also collect a gateway model id and write `MODEL_OVERRIDE`, and at which scope (global or per worker, like R2)?
-- The cloud repo's `PI_API_KEY` / `PI_BASE_URL` / `PI_MODEL` path has no reader in agent-swarm. Is it dead code or an unshipped feature?
+- **Embedding dimensions: verified live.** OpenAI, OpenRouter, and Vercel AI Gateway all return 512-length vectors for `text-embedding-3-small` with `dimensions: 512`, and 1536 without it (one call each, 2026-09-24, HTTP 200, 0.5 to 1.3 s). The OpenAI, OpenRouter, and Vercel presets therefore work with the default `EMBEDDING_DIMENSIONS=512`.
+- **OpenRouter embeddings GA status:** accepted as fine for the API (Taras).
+- **R7 gateway model id and `MODEL_OVERRIDE` scope:** not a priority now. Deferred.
+- **Cloud `PI_API_KEY` / `PI_BASE_URL` / `PI_MODEL`:** unshipped cloud feature. Disregard.
+
+## Next steps (Taras, 2026-09-24)
+
+1. One-shot the code changes into draft PR #1604 (branch `docs/ui-onboarding-research`), guided by this research and the three delivery slices.
+2. Run a local QA and design feedback loop: Taras reviews the UI and the flow, and each round of feedback is applied on the same PR.
 
 ## Appendix
 
