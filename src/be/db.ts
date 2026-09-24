@@ -12668,6 +12668,21 @@ export async function getLiveAgentCounts(minutes: number = 5): Promise<{
 }
 
 /**
+ * Leads and workers that can take work right now (status idle or busy). Used
+ * by the onboarding signals: the step 6 agents readout uses the same rule,
+ * while the `/status` heartbeat window (`lastActivityAt`) lags for idle agents.
+ */
+export async function getReadyAgentCounts(): Promise<{ leads: number; workers: number }> {
+  const row = await getDbClient().get<{ leads: number | null; workers: number | null }>(
+    `SELECT SUM(CASE WHEN isLead = 1 THEN 1 ELSE 0 END) AS leads,
+            SUM(CASE WHEN isLead = 0 THEN 1 ELSE 0 END) AS workers
+       FROM agents
+      WHERE status IN ('idle', 'busy') AND ${NOT_EXTENSION_AGENT_SQL}`,
+  );
+  return { leads: row?.leads ?? 0, workers: row?.workers ?? 0 };
+}
+
+/**
  * Aggregate activity numbers for `GET /status`'s `activity` block.
  * - `agents_online` / `leads_online`: heartbeated within the last 5 minutes.
  * - `recent_tasks_count`: agent_tasks rows created in the last 24 hours.
