@@ -1,4 +1,5 @@
 import { isInTransaction } from "../be/db-client";
+import { setAssetsEnabled } from "../be/extensions/assets";
 import { insertExtensionRun, recordExtensionFailure, setExtensionState } from "../be/extensions/db";
 import { grantLeadEquivalence, revokeLeadEquivalence } from "../rbac/elevated-agents";
 import { scrubSecrets } from "../utils/secret-scrubber";
@@ -240,6 +241,8 @@ async function markFailure(
     if (next.status === "auto-disabled") {
       unregister(next.id);
       await loaded.dispose();
+      // Same rule as an explicit disable: its assets pause, and enable restores them.
+      await setAssetsEnabled(next.id, false);
     }
   } catch (persistError) {
     console.error(

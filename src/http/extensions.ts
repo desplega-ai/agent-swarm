@@ -423,6 +423,13 @@ async function requirePermission(
 }
 
 function respondLifecycleError(res: ServerResponse, error: unknown): void {
+  if (
+    error instanceof ExtensionAssetsInvalidError ||
+    error instanceof ExtensionAssetConflictError
+  ) {
+    json(res, { error: "extension_validation_failed", diagnostics: error.diagnostics }, 400);
+    return;
+  }
   const status =
     error instanceof ExtensionOwnershipError
       ? 403
