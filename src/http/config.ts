@@ -16,6 +16,7 @@ import {
 } from "../be/multi-runtime";
 import { getUserGrant } from "../be/rbac-roles";
 import {
+  internalConfigKeyError,
   isInternalConfigKey,
   isReservedConfigKey,
   reservedKeyError,
@@ -342,7 +343,7 @@ export async function handleConfig(
     if (!parsed) return true;
     const includeSecrets = parsed.query.includeSecrets === "true";
     const config = await getSwarmConfigById(parsed.params.id);
-    if (!config) {
+    if (!config || isInternalConfigKey(config.key)) {
       jsonError(res, "Config not found", 404);
       return true;
     }
@@ -406,7 +407,7 @@ export async function handleConfig(
     }
 
     if (isInternalConfigKey(key)) {
-      jsonError(res, `Key '${key}' is managed by /api/onboarding`, 400);
+      jsonError(res, internalConfigKeyError(key).message, 400);
       return true;
     }
 
@@ -449,6 +450,10 @@ export async function handleConfig(
     const existing = await getSwarmConfigLookupById(parsed.params.id);
     if (!existing) {
       jsonError(res, "Config not found", 404);
+      return true;
+    }
+    if (isInternalConfigKey(existing.key)) {
+      jsonError(res, internalConfigKeyError(existing.key).message, 400);
       return true;
     }
     const deleted = await deleteSwarmConfig(parsed.params.id);

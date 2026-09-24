@@ -11,7 +11,11 @@ import {
   updateAgentCredStatus,
 } from "../be/db";
 import { resetEmbeddingProvider } from "../be/memory";
-import type { OnboardingState } from "../be/onboarding";
+import {
+  type OnboardingState,
+  OnboardingStateSchema,
+  updateOnboardingAiFromCodexDevice,
+} from "../be/onboarding";
 import { _resetAutoReloadForTests, handleCore } from "../http/core";
 import { handleOnboarding } from "../http/onboarding";
 import { getPathSegments, parseQueryParams } from "../http/utils";
@@ -179,6 +183,37 @@ describe("onboarding state", () => {
     expect(body.state.version).toBe(1);
   });
 
+  test("concurrent first GETs create state and started telemetry once", async () => {
+    const responses = await Promise.all(
+      Array.from({ length: 8 }, () => request("/api/onboarding")),
+    );
+    expect(responses.every((response) => response.status === 200)).toBe(true);
+    await Bun.sleep(10);
+    expect(capturedTelemetry.filter((entry) => entry.event === "started")).toHaveLength(1);
+  });
+
+  test("stored unknown methods parse as null for their step", async () => {
+    const state = (await (await request("/api/onboarding")).json()) as {
+      state: OnboardingState;
+    };
+    const stored = structuredClone(state.state) as unknown as {
+      steps: Record<string, { method: unknown }>;
+    };
+    for (const step of Object.values(stored.steps)) step.method = "retired_method";
+
+    const parsed = OnboardingStateSchema.safeParse(stored);
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    expect(Object.values(parsed.data.steps).map((step) => step.method)).toEqual([
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+    ]);
+  });
+
   test("a user row marks the install as existing", async () => {
     await createUser({ name: "Existing operator" });
     await expectExistingInstall();
@@ -281,6 +316,23 @@ describe("onboarding state", () => {
     expect(completed.state.completedAt).not.toBeNull();
   });
 
+  test("first_task PUT derives an already completed task before responding", async () => {
+    await request("/api/onboarding");
+    await insertTask({ id: "already-completed", status: "completed" });
+
+    const response = await put({
+      action: "first_task",
+      taskId: "already-completed",
+      method: "free_form",
+    });
+    const body = (await response.json()) as { state: OnboardingState };
+    expect(body.state.steps.first_task).toMatchObject({
+      status: "done",
+      method: "free_form",
+    });
+    expect(body.state.completedAt).not.toBeNull();
+  });
+
   test("PUT applies all onboarding transitions without duplicate completion telemetry", async () => {
     await request("/api/onboarding");
     capturedTelemetry.length = 0;
@@ -371,6 +423,55 @@ describe("onboarding state", () => {
     );
     expect((await put({ action: "skip", step: "connect" })).status).toBe(400);
   });
+
+  test("skip, dismiss, and fail transitions emit telemetry once", async () => {
+    await request("/api/onboarding");
+    capturedTelemetry.length = 0;
+
+    await put({ action: "skip", step: "name" });
+    await put({ action: "skip", step: "name" });
+    await put({ action: "dismiss" });
+    await put({ action: "dismiss" });
+    await put({ action: "fail", step: "memory", errorClass: "network" });
+    await put({ action: "fail", step: "memory", errorClass: "auth" });
+    await Bun.sleep(10);
+
+    expect(capturedTelemetry.filter((entry) => entry.event === "step_skipped")).toHaveLength(1);
+    expect(capturedTelemetry.filter((entry) => entry.event === "dismissed")).toHaveLength(1);
+    expect(capturedTelemetry.filter((entry) => entry.event === "step_failed")).toHaveLength(1);
+    expect((await getState()).steps.memory.errorClass).toBe("network");
+  });
+
+  test("a failed action does not overwrite a completed step", async () => {
+    await request("/api/onboarding");
+    await put({ action: "complete", step: "name", method: "custom_name" });
+    capturedTelemetry.length = 0;
+
+    const response = await put({ action: "fail", step: "name", errorClass: "unknown" });
+    expect(((await response.json()) as { state: OnboardingState }).state.steps.name).toMatchObject({
+      status: "done",
+      method: "custom_name",
+      errorClass: null,
+    });
+    await Bun.sleep(10);
+    expect(capturedTelemetry).toEqual([]);
+  });
+
+  test("auto-completed installs emit no telemetry after started", async () => {
+    await createUser({ name: "Existing operator" });
+    await request("/api/onboarding");
+    capturedTelemetry.length = 0;
+
+    await put({ action: "view", step: "name" });
+    await request("/api/onboarding/memory", {
+      method: "POST",
+      body: { preset: "custom", baseUrl: "https://embeddings.example.com/v1" },
+    });
+    await updateOnboardingAiFromCodexDevice({ status: "failed", errorClass: "unknown" });
+    await Bun.sleep(10);
+
+    expect(capturedTelemetry).toEqual([]);
+  });
 });
 
 describe("onboarding memory probe", () => {
@@ -408,7 +509,7 @@ describe("onboarding memory probe", () => {
   test("classifies a local 401 embeddings response as auth", async () => {
     const fake = startEmbeddingServer(() =>
       Response.json(
-        { error: { message: "Invalid API key", type: "invalid_request_error" } },
+        { error: { message: "secret upstream diagnostic", type: "invalid_request_error" } },
         { status: 401 },
       ),
     );
@@ -423,7 +524,11 @@ describe("onboarding memory probe", () => {
         },
       });
       expect(response.status).toBe(200);
-      expect(await response.json()).toMatchObject({ ok: false, errorClass: "auth" });
+      expect(await response.json()).toMatchObject({
+        ok: false,
+        errorClass: "auth",
+        error: "The endpoint rejected the key (401).",
+      });
     } finally {
       fake.server.stop(true);
     }
@@ -434,7 +539,7 @@ describe("onboarding memory probe", () => {
     });
   });
 
-  test("a wrong dimension marks memory failed even after a successful probe", async () => {
+  test("a wrong dimension keeps memory done after a successful probe", async () => {
     let dimensions = 512;
     const fake = startEmbeddingServer(() => embeddingResponse(dimensions));
     try {
@@ -459,13 +564,108 @@ describe("onboarding memory probe", () => {
     }
 
     expect((await getState()).steps.memory).toMatchObject({
-      status: "failed",
-      errorClass: "dimension",
+      status: "done",
+      method: "custom",
+      errorClass: null,
     });
-    expect(capturedTelemetry).toContainEqual({
-      event: "step_failed",
-      properties: expect.objectContaining({ step: "memory", error_class: "dimension" }),
+    expect(capturedTelemetry).toEqual([]);
+  });
+
+  test("rejects malformed URLs with 400 instead of throwing", async () => {
+    const response = await request("/api/onboarding/memory", {
+      method: "POST",
+      body: {
+        preset: "custom",
+        baseUrl: "not a URL",
+        model: "test-embedding-model",
+        apiKey: "example-openai-key",
+      },
     });
+    expect(response.status).toBe(400);
+  });
+
+  test("does not send a reused OpenAI key to another host", async () => {
+    let hits = 0;
+    const fake = startEmbeddingServer(() => {
+      hits += 1;
+      return embeddingResponse(512);
+    });
+    process.env.OPENAI_API_KEY = "server-held-openai-key";
+    try {
+      const response = await request("/api/onboarding/memory", {
+        method: "POST",
+        body: {
+          preset: "custom",
+          baseUrl: fake.baseUrl,
+          model: "test-embedding-model",
+          reuseKey: "OPENAI_API_KEY",
+        },
+      });
+      expect(await response.json()).toMatchObject({
+        ok: false,
+        errorClass: "auth",
+        error: "Enter an API key for this endpoint.",
+      });
+      expect(hits).toBe(0);
+    } finally {
+      fake.server.stop(true);
+    }
+  });
+
+  test("only existing preset uses the implicit embedding key", async () => {
+    let hits = 0;
+    const fake = startEmbeddingServer(() => {
+      hits += 1;
+      return embeddingResponse(512);
+    });
+    process.env.EMBEDDING_API_BASE_URL = fake.baseUrl;
+    process.env.EMBEDDING_MODEL = "test-embedding-model";
+    process.env.EMBEDDING_API_KEY = "existing-endpoint-key";
+    try {
+      const custom = await request("/api/onboarding/memory", {
+        method: "POST",
+        body: {
+          preset: "custom",
+          baseUrl: fake.baseUrl,
+          model: "test-embedding-model",
+        },
+      });
+      expect(await custom.json()).toMatchObject({ ok: false, errorClass: "auth" });
+      expect(hits).toBe(0);
+
+      const existing = await request("/api/onboarding/memory", {
+        method: "POST",
+        body: { preset: "existing" },
+      });
+      expect(await existing.json()).toMatchObject({ ok: true, dimensions: 512 });
+      expect(hits).toBe(1);
+    } finally {
+      fake.server.stop(true);
+    }
+  });
+
+  test("blocks private embedding endpoints outside local development", async () => {
+    const originalNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    try {
+      const response = await request("/api/onboarding/memory", {
+        method: "POST",
+        body: {
+          preset: "custom",
+          baseUrl: "http://127.0.0.1:9/v1",
+          model: "test-embedding-model",
+          apiKey: "example-openai-key",
+        },
+      });
+      expect(await response.json()).toMatchObject({
+        ok: false,
+        errorClass: "network",
+        error: "The endpoint URL is not allowed.",
+      });
+    } finally {
+      if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = originalNodeEnv;
+    }
   });
 
   test("successful memory retry records the successful preset after a failure", async () => {

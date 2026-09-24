@@ -33,6 +33,10 @@ export function isInternalConfigKey(key: string): boolean {
   return INTERNAL_CONFIG_KEYS.has(key.toLowerCase());
 }
 
+export function internalConfigKeyError(key: string): Error {
+  return new Error(`Key '${key}' is managed by /api/onboarding`);
+}
+
 export function isReservedConfigKey(key: string): boolean {
   return RESERVED_KEYS.has(key.toUpperCase());
 }

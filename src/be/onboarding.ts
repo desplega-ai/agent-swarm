@@ -1,7 +1,8 @@
-import { z } from "zod";
 import { telemetry } from "../telemetry";
-import type { ProviderName } from "../types";
+import { ProviderNameSchema } from "../types";
+import { z } from "../utils/zod-openapi";
 import { getDbClient, getSwarmConfigs, getTaskById, upsertSwarmConfig } from "./db";
+import { validateConfigValue } from "./swarm-config-guard";
 
 const ONBOARDING_CONFIG_KEY = "onboarding_state";
 
@@ -27,12 +28,70 @@ export const OnboardingErrorClassSchema = z.enum([
 ]);
 export type OnboardingErrorClass = z.infer<typeof OnboardingErrorClassSchema>;
 
-const OnboardingStepStateSchema = z.object({
-  status: z.enum(["todo", "done", "skipped", "failed"]),
-  at: z.string().datetime().nullable(),
-  method: z.string().nullable(),
-  errorClass: OnboardingErrorClassSchema.nullable(),
-});
+export const OnboardingStepStatusSchema = z.enum(["todo", "done", "skipped", "failed"]);
+export const OnboardingConnectMethodSchema = z.enum(["api_key"]);
+export const OnboardingNameMethodSchema = z.enum(["custom_name", "default_name"]);
+export const OnboardingAiMethodSchema = z.enum([
+  "claude_setup_token",
+  "claude_api_key",
+  "codex_device",
+  "codex_cli",
+  "openrouter",
+  "openai_gateway",
+  "deepseek",
+  "devin",
+]);
+export const OnboardingMemoryPresetSchema = z.enum([
+  "openai",
+  "openrouter",
+  "vercel",
+  "custom",
+  "existing",
+]);
+export const OnboardingIntegrationMethodSchema = z.enum([
+  "slack",
+  "github",
+  "gitlab",
+  "linear_oauth",
+  "jira_oauth",
+]);
+export const OnboardingFirstTaskMethodSchema = z.enum(["suggestion", "free_form"]);
+export const OnboardingStepMethodSchema = z.union([
+  OnboardingConnectMethodSchema,
+  OnboardingNameMethodSchema,
+  OnboardingAiMethodSchema,
+  OnboardingMemoryPresetSchema,
+  OnboardingIntegrationMethodSchema,
+  OnboardingFirstTaskMethodSchema,
+]);
+export type OnboardingStepMethod = z.infer<typeof OnboardingStepMethodSchema>;
+
+function onboardingStepStateSchema<T extends z.ZodEnum>(method: T) {
+  const tolerantMethod = z
+    .preprocess((value) => {
+      if (value === undefined || method.safeParse(value).success) return value;
+      return null;
+    }, method.nullable())
+    .openapi({ type: ["string", "null"], enum: [...method.options, null] });
+
+  return z.object({
+    status: OnboardingStepStatusSchema,
+    at: z.string().datetime().nullable(),
+    method: tolerantMethod,
+    errorClass: OnboardingErrorClassSchema.nullable(),
+  });
+}
+
+const OnboardingConnectStepStateSchema = onboardingStepStateSchema(OnboardingConnectMethodSchema);
+const OnboardingNameStepStateSchema = onboardingStepStateSchema(OnboardingNameMethodSchema);
+const OnboardingAiStepStateSchema = onboardingStepStateSchema(OnboardingAiMethodSchema);
+const OnboardingMemoryStepStateSchema = onboardingStepStateSchema(OnboardingMemoryPresetSchema);
+const OnboardingIntegrationStepStateSchema = onboardingStepStateSchema(
+  OnboardingIntegrationMethodSchema,
+);
+const OnboardingFirstTaskStepStateSchema = onboardingStepStateSchema(
+  OnboardingFirstTaskMethodSchema,
+);
 
 export const OnboardingStateSchema = z.object({
   version: z.literal(1),
@@ -44,65 +103,137 @@ export const OnboardingStateSchema = z.object({
   autoCompleted: z.boolean(),
   firstTaskId: z.string().nullable(),
   steps: z.object({
-    connect: OnboardingStepStateSchema,
-    name: OnboardingStepStateSchema,
-    ai: OnboardingStepStateSchema,
-    memory: OnboardingStepStateSchema,
-    integrations: OnboardingStepStateSchema,
-    first_task: OnboardingStepStateSchema,
+    connect: OnboardingConnectStepStateSchema,
+    name: OnboardingNameStepStateSchema,
+    ai: OnboardingAiStepStateSchema,
+    memory: OnboardingMemoryStepStateSchema,
+    integrations: OnboardingIntegrationStepStateSchema,
+    first_task: OnboardingFirstTaskStepStateSchema,
   }),
 });
 export type OnboardingState = z.infer<typeof OnboardingStateSchema>;
 
-export interface OnboardingSignals {
-  providers: Array<{
-    provider: ProviderName;
-    state: "unverified" | "configured" | "verified";
-    workers: number;
-    verifiedWorkers: number;
-  }>;
-  embeddings: { configured: boolean; dimensions: number };
-  integrations: {
-    slack: boolean;
-    github: boolean;
-    gitlab: boolean;
-    linear: boolean;
-    jira: boolean;
-  };
-  agents: { leadsOnline: number; workersOnline: number };
-  firstTask: { id: string; status: string } | null;
-}
+export const OnboardingSignalsSchema = z.object({
+  providers: z.array(
+    z.object({
+      provider: ProviderNameSchema,
+      state: z.enum(["unverified", "configured", "verified"]),
+      workers: z.number().int().nonnegative(),
+      verifiedWorkers: z.number().int().nonnegative(),
+    }),
+  ),
+  embeddings: z.object({
+    configured: z.boolean(),
+    dimensions: z.number().int().positive(),
+  }),
+  integrations: z.object({
+    slack: z.boolean(),
+    github: z.boolean(),
+    gitlab: z.boolean(),
+    linear: z.boolean(),
+    jira: z.boolean(),
+  }),
+  agents: z.object({
+    leadsOnline: z.number().int().nonnegative(),
+    workersOnline: z.number().int().nonnegative(),
+  }),
+  firstTask: z.object({ id: z.string(), status: z.string() }).nullable(),
+});
+export type OnboardingSignals = z.infer<typeof OnboardingSignalsSchema>;
 
-export type OnboardingAction =
-  | { action: "view"; step: OnboardingStepId }
-  | { action: "complete"; step: "connect"; method: "api_key" }
-  | { action: "complete"; step: "name"; method: "custom_name" | "default_name" }
-  | {
-      action: "complete";
-      step: "ai";
-      method:
-        | "claude_setup_token"
-        | "claude_api_key"
-        | "codex_device"
-        | "codex_cli"
-        | "openrouter"
-        | "openai_gateway"
-        | "deepseek"
-        | "devin";
-    }
-  | {
-      action: "complete";
-      step: "integrations";
-      method: "slack" | "github" | "gitlab" | "linear_oauth" | "jira_oauth";
-    }
-  | { action: "skip"; step: Exclude<OnboardingStepId, "connect"> }
-  | { action: "fail"; step: OnboardingStepId; errorClass: OnboardingErrorClass }
-  | { action: "first_task"; taskId: string; method: "suggestion" | "free_form" }
-  | { action: "minimize" }
-  | { action: "resume" }
-  | { action: "dismiss" };
+export const OnboardingResponseSchema = z.object({
+  state: OnboardingStateSchema,
+  signals: OnboardingSignalsSchema,
+});
 
-export type OnboardingMemoryPreset = "openai" | "openrouter" | "vercel" | "custom" | "existing";
+export const OnboardingActionSchema = z.union([
+  z.object({ action: z.literal("view"), step: OnboardingStepIdSchema }).strict(),
+  z
+    .object({
+      action: z.literal("complete"),
+      step: z.literal("connect"),
+      method: OnboardingConnectMethodSchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("complete"),
+      step: z.literal("name"),
+      method: OnboardingNameMethodSchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("complete"),
+      step: z.literal("ai"),
+      method: OnboardingAiMethodSchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("complete"),
+      step: z.literal("integrations"),
+      method: OnboardingIntegrationMethodSchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("skip"),
+      step: z.enum(["name", "ai", "memory", "integrations", "first_task"]),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("fail"),
+      step: OnboardingStepIdSchema,
+      errorClass: OnboardingErrorClassSchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("first_task"),
+      taskId: z.string().min(1),
+      method: OnboardingFirstTaskMethodSchema,
+    })
+    .strict(),
+  z.object({ action: z.literal("minimize") }).strict(),
+  z.object({ action: z.literal("resume") }).strict(),
+  z.object({ action: z.literal("dismiss") }).strict(),
+]);
+export type OnboardingAction = z.infer<typeof OnboardingActionSchema>;
+
+export const OnboardingHttpUrlSchema = z
+  .string()
+  .url()
+  .refine((value) => {
+    try {
+      const protocol = new URL(value).protocol;
+      return protocol === "http:" || protocol === "https:";
+    } catch {
+      return false;
+    }
+  }, "Must be an HTTP or HTTPS URL");
+
+export const OnboardingMemoryRequestSchema = z
+  .object({
+    preset: OnboardingMemoryPresetSchema,
+    baseUrl: OnboardingHttpUrlSchema.optional(),
+    model: z.string().trim().min(1).optional(),
+    apiKey: z.string().min(1).optional(),
+    reuseKey: z.enum(["OPENAI_API_KEY", "OPENROUTER_API_KEY"]).optional(),
+  })
+  .strict();
+export type OnboardingMemoryRequest = z.infer<typeof OnboardingMemoryRequestSchema>;
+
+export const OnboardingMemoryResponseSchema = z.object({
+  ok: z.boolean(),
+  dimensions: z.number().int().positive().optional(),
+  latencyMs: z.number().int().nonnegative(),
+  error: z.string().optional(),
+  errorClass: OnboardingErrorClassSchema.optional(),
+});
+export type OnboardingMemoryResponse = z.infer<typeof OnboardingMemoryResponseSchema>;
+export type OnboardingMemoryPreset = z.infer<typeof OnboardingMemoryPresetSchema>;
 
 type OnboardingTelemetryEvent =
   | "started"
@@ -114,14 +245,39 @@ type OnboardingTelemetryEvent =
   | "completed"
   | "first_task_completed";
 
-type PendingTelemetry = {
-  event: OnboardingTelemetryEvent;
-  properties: Record<string, string | boolean | number>;
+type OnboardingTelemetryProperties = {
+  started: { existing_install: boolean; seconds_since_start: number };
+  step_viewed: { step: OnboardingStepId; seconds_since_start: number };
+  step_completed: {
+    step: OnboardingStepId;
+    method?: OnboardingStepMethod;
+    derived: boolean;
+    seconds_since_start: number;
+  };
+  step_skipped: { step: OnboardingStepId; seconds_since_start: number };
+  step_failed: {
+    step: OnboardingStepId;
+    error_class: OnboardingErrorClass;
+    seconds_since_start: number;
+  };
+  dismissed: { seconds_since_start: number };
+  completed: { seconds_since_start: number };
+  first_task_completed: {
+    method?: z.infer<typeof OnboardingFirstTaskMethodSchema>;
+    seconds_since_start: number;
+  };
 };
+
+type PendingTelemetry = {
+  [Event in OnboardingTelemetryEvent]: {
+    event: Event;
+    properties: OnboardingTelemetryProperties[Event];
+  };
+}[OnboardingTelemetryEvent];
 
 type SignalLoader = (state: OnboardingState) => Promise<OnboardingSignals>;
 
-function emptyStep(): OnboardingState["steps"][OnboardingStepId] {
+function emptyStep(): { status: "todo"; at: null; method: null; errorClass: null } {
   return { status: "todo", at: null, method: null, errorClass: null };
 }
 
@@ -150,16 +306,16 @@ function secondsSinceStart(state: OnboardingState): number {
   return Math.max(0, Math.floor((Date.now() - Date.parse(state.startedAt)) / 1_000));
 }
 
-function addTelemetry(
+function addTelemetry<Event extends OnboardingTelemetryEvent>(
   events: PendingTelemetry[],
   state: OnboardingState,
-  event: OnboardingTelemetryEvent,
-  properties: Record<string, string | boolean | number> = {},
+  event: Event,
+  properties: Omit<OnboardingTelemetryProperties[Event], "seconds_since_start">,
 ): void {
   events.push({
     event,
     properties: { ...properties, seconds_since_start: secondsSinceStart(state) },
-  });
+  } as PendingTelemetry);
 }
 
 function queueTelemetry(events: PendingTelemetry[]): void {
@@ -217,7 +373,7 @@ async function persistState(state: OnboardingState): Promise<void> {
 function completeStep(
   state: OnboardingState,
   step: OnboardingStepId,
-  method: string | null,
+  method: OnboardingStepMethod | null,
   derived: boolean,
   events: PendingTelemetry[],
 ): boolean {
@@ -240,7 +396,25 @@ function completeStep(
   return true;
 }
 
-function inferAiMethod(signals: OnboardingSignals): string | null {
+function markStepFailed(
+  state: OnboardingState,
+  step: OnboardingStepId,
+  errorClass: OnboardingErrorClass,
+  events: PendingTelemetry[],
+): boolean {
+  const current = state.steps[step];
+  if (current.status === "done" || current.status === "failed") return false;
+
+  current.status = "failed";
+  current.at = new Date().toISOString();
+  current.errorClass = errorClass;
+  addTelemetry(events, state, "step_failed", { step, error_class: errorClass });
+  return true;
+}
+
+function inferAiMethod(
+  signals: OnboardingSignals,
+): z.infer<typeof OnboardingAiMethodSchema> | null {
   const provider = signals.providers.find((entry) => entry.state === "verified")?.provider;
   if (provider === "claude") {
     return process.env.CLAUDE_CODE_OAUTH_TOKEN ? "claude_setup_token" : "claude_api_key";
@@ -254,7 +428,9 @@ function inferAiMethod(signals: OnboardingSignals): string | null {
   return null;
 }
 
-function inferIntegrationMethod(signals: OnboardingSignals): string | null {
+function inferIntegrationMethod(
+  signals: OnboardingSignals,
+): z.infer<typeof OnboardingIntegrationMethodSchema> | null {
   if (signals.integrations.slack) return "slack";
   if (signals.integrations.github) return "github";
   if (signals.integrations.gitlab) return "gitlab";
@@ -293,7 +469,7 @@ function deriveState(
     addTelemetry(events, state, "first_task_completed", {
       ...(state.steps.first_task.method ? { method: state.steps.first_task.method } : {}),
     });
-    addTelemetry(events, state, "completed");
+    addTelemetry(events, state, "completed", {});
     changed = true;
   }
 
@@ -308,35 +484,26 @@ async function applyAction(
   events: PendingTelemetry[],
 ): Promise<boolean> {
   const now = new Date().toISOString();
+  const funnelEvents = state.autoCompleted ? [] : events;
   switch (action.action) {
     case "view":
       if (state.currentStep === action.step) return false;
       state.currentStep = action.step;
-      addTelemetry(events, state, "step_viewed", { step: action.step });
+      addTelemetry(funnelEvents, state, "step_viewed", { step: action.step });
       return true;
     case "complete":
-      return completeStep(state, action.step, action.method, false, events);
+      return completeStep(state, action.step, action.method, false, funnelEvents);
     case "skip": {
       const step = state.steps[action.step];
-      if (step.status === "done") return false;
+      if (step.status === "done" || step.status === "skipped") return false;
       step.status = "skipped";
       step.at = now;
       step.errorClass = null;
-      addTelemetry(events, state, "step_skipped", { step: action.step });
+      addTelemetry(funnelEvents, state, "step_skipped", { step: action.step });
       return true;
     }
-    case "fail": {
-      const step = state.steps[action.step];
-      if (step.status === "done") return false;
-      step.status = "failed";
-      step.at = now;
-      step.errorClass = action.errorClass;
-      addTelemetry(events, state, "step_failed", {
-        step: action.step,
-        error_class: action.errorClass,
-      });
-      return true;
-    }
+    case "fail":
+      return markStepFailed(state, action.step, action.errorClass, funnelEvents);
     case "first_task": {
       if (!(await getTaskById(action.taskId))) throw new OnboardingTaskNotFoundError();
       if (state.firstTaskId === action.taskId && state.steps.first_task.method === action.method) {
@@ -356,25 +523,49 @@ async function applyAction(
       state.dismissedAt = null;
       return true;
     case "dismiss":
+      if (state.dismissedAt) return false;
       state.dismissedAt = now;
-      addTelemetry(events, state, "dismissed");
+      addTelemetry(funnelEvents, state, "dismissed", {});
       return true;
   }
+}
+
+async function loadAndDerive(
+  loadSignals: SignalLoader,
+  events: PendingTelemetry[],
+): Promise<{
+  state: OnboardingState;
+  signals: OnboardingSignals;
+  dirty: boolean;
+}> {
+  const loaded = await loadState(events);
+  const signals = await loadSignals(loaded.state);
+  const dirty = deriveState(loaded.state, signals, events) || loaded.dirty;
+  return { state: loaded.state, signals, dirty };
 }
 
 export async function readOrUpdateOnboarding(
   loadSignals: SignalLoader,
   action?: OnboardingAction,
 ): Promise<{ state: OnboardingState; signals: OnboardingSignals }> {
-  return await getDbClient().transaction(async () => {
+  const client = getDbClient();
+  if (!action) {
+    const read = await client.transaction(async () => await loadAndDerive(loadSignals, []), {
+      readOnly: true,
+    });
+    if (!read.dirty) return { state: read.state, signals: read.signals };
+  }
+
+  return await client.transaction(async () => {
     const events: PendingTelemetry[] = [];
-    const loaded = await loadState(events);
+    const loaded = await loadAndDerive(loadSignals, events);
     const state = loaded.state;
-    let dirty = loaded.dirty;
-    let signals = await loadSignals(state);
-    dirty = deriveState(state, signals, events) || dirty;
-    if (action) dirty = (await applyAction(state, action, events)) || dirty;
-    if (action?.action === "first_task") signals = await loadSignals(state);
+    let { dirty, signals } = loaded;
+    if (action) {
+      dirty = (await applyAction(state, action, events)) || dirty;
+      signals = await loadSignals(state);
+      dirty = deriveState(state, signals, events) || dirty;
+    }
     if (dirty) await persistState(state);
     queueTelemetry(events);
     return { state, signals };
@@ -390,8 +581,18 @@ export async function updateOnboardingMemory(
     const events: PendingTelemetry[] = [];
     const loaded = await loadState(events);
     let dirty = loaded.dirty;
+    const eventsForState = loaded.state.autoCompleted ? [] : events;
 
     if (saveConfig) {
+      const configValues = [
+        ["EMBEDDING_API_BASE_URL", saveConfig.baseUrl],
+        ["EMBEDDING_MODEL", saveConfig.model],
+        ...(saveConfig.apiKey ? [["EMBEDDING_API_KEY", saveConfig.apiKey]] : []),
+      ] as const;
+      for (const [key, value] of configValues) {
+        const validationError = validateConfigValue(key, value);
+        if (validationError) throw new Error(validationError);
+      }
       await upsertSwarmConfig({
         scope: "global",
         key: "EMBEDDING_API_BASE_URL",
@@ -409,20 +610,9 @@ export async function updateOnboardingMemory(
     }
 
     if (result.ok) {
-      const step = loaded.state.steps.memory;
-      const methodChanged = step.method !== preset;
-      step.method = preset;
-      dirty = completeStep(loaded.state, "memory", preset, false, events) || methodChanged || dirty;
+      dirty = completeStep(loaded.state, "memory", preset, false, eventsForState) || dirty;
     } else {
-      const step = loaded.state.steps.memory;
-      step.status = "failed";
-      step.at = new Date().toISOString();
-      step.errorClass = result.errorClass;
-      addTelemetry(events, loaded.state, "step_failed", {
-        step: "memory",
-        error_class: result.errorClass,
-      });
-      dirty = true;
+      dirty = markStepFailed(loaded.state, "memory", result.errorClass, eventsForState) || dirty;
     }
 
     if (dirty) await persistState(loaded.state);
@@ -445,22 +635,19 @@ export async function updateOnboardingAiFromCodexDevice(
     } catch {
       return false;
     }
-    if (!parsed.success || parsed.data.steps.ai.status === "done") return false;
+    if (!parsed.success) return false;
 
     const state = parsed.data;
     const events: PendingTelemetry[] = [];
+    const eventsForState = state.autoCompleted ? [] : events;
+    let changed: boolean;
     if (result.status === "complete") {
-      completeStep(state, "ai", "codex_device", false, events);
+      changed = completeStep(state, "ai", "codex_device", false, eventsForState);
     } else {
-      state.steps.ai.status = "failed";
-      state.steps.ai.at = new Date().toISOString();
-      state.steps.ai.errorClass = result.errorClass;
-      addTelemetry(events, state, "step_failed", {
-        step: "ai",
-        error_class: result.errorClass,
-      });
+      changed = markStepFailed(state, "ai", result.errorClass, eventsForState);
     }
 
+    if (!changed) return false;
     await persistState(state);
     queueTelemetry(events);
     return true;

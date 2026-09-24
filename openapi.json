@@ -14208,6 +14208,16 @@
               }
             }
           },
+          "500": {
+            "description": "Failed to store device login state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "502": {
             "description": "OpenAI device login request failed",
             "content": {
@@ -23680,6 +23690,10 @@
                                   "type": [
                                     "string",
                                     "null"
+                                  ],
+                                  "enum": [
+                                    "api_key",
+                                    null
                                   ]
                                 },
                                 "errorClass": {
@@ -23730,6 +23744,11 @@
                                   "type": [
                                     "string",
                                     "null"
+                                  ],
+                                  "enum": [
+                                    "custom_name",
+                                    "default_name",
+                                    null
                                   ]
                                 },
                                 "errorClass": {
@@ -23780,6 +23799,17 @@
                                   "type": [
                                     "string",
                                     "null"
+                                  ],
+                                  "enum": [
+                                    "claude_setup_token",
+                                    "claude_api_key",
+                                    "codex_device",
+                                    "codex_cli",
+                                    "openrouter",
+                                    "openai_gateway",
+                                    "deepseek",
+                                    "devin",
+                                    null
                                   ]
                                 },
                                 "errorClass": {
@@ -23830,6 +23860,14 @@
                                   "type": [
                                     "string",
                                     "null"
+                                  ],
+                                  "enum": [
+                                    "openai",
+                                    "openrouter",
+                                    "vercel",
+                                    "custom",
+                                    "existing",
+                                    null
                                   ]
                                 },
                                 "errorClass": {
@@ -23880,6 +23918,14 @@
                                   "type": [
                                     "string",
                                     "null"
+                                  ],
+                                  "enum": [
+                                    "slack",
+                                    "github",
+                                    "gitlab",
+                                    "linear_oauth",
+                                    "jira_oauth",
+                                    null
                                   ]
                                 },
                                 "errorClass": {
@@ -23930,6 +23976,11 @@
                                   "type": [
                                     "string",
                                     "null"
+                                  ],
+                                  "enum": [
+                                    "suggestion",
+                                    "free_form",
+                                    null
                                   ]
                                 },
                                 "errorClass": {
@@ -24527,6 +24578,10 @@
                                   "type": [
                                     "string",
                                     "null"
+                                  ],
+                                  "enum": [
+                                    "api_key",
+                                    null
                                   ]
                                 },
                                 "errorClass": {
@@ -24577,6 +24632,11 @@
                                   "type": [
                                     "string",
                                     "null"
+                                  ],
+                                  "enum": [
+                                    "custom_name",
+                                    "default_name",
+                                    null
                                   ]
                                 },
                                 "errorClass": {
@@ -24627,6 +24687,17 @@
                                   "type": [
                                     "string",
                                     "null"
+                                  ],
+                                  "enum": [
+                                    "claude_setup_token",
+                                    "claude_api_key",
+                                    "codex_device",
+                                    "codex_cli",
+                                    "openrouter",
+                                    "openai_gateway",
+                                    "deepseek",
+                                    "devin",
+                                    null
                                   ]
                                 },
                                 "errorClass": {
@@ -24677,6 +24748,14 @@
                                   "type": [
                                     "string",
                                     "null"
+                                  ],
+                                  "enum": [
+                                    "openai",
+                                    "openrouter",
+                                    "vercel",
+                                    "custom",
+                                    "existing",
+                                    null
                                   ]
                                 },
                                 "errorClass": {
@@ -24727,6 +24806,14 @@
                                   "type": [
                                     "string",
                                     "null"
+                                  ],
+                                  "enum": [
+                                    "slack",
+                                    "github",
+                                    "gitlab",
+                                    "linear_oauth",
+                                    "jira_oauth",
+                                    null
                                   ]
                                 },
                                 "errorClass": {
@@ -24777,6 +24864,11 @@
                                   "type": [
                                     "string",
                                     "null"
+                                  ],
+                                  "enum": [
+                                    "suggestion",
+                                    "free_form",
+                                    null
                                   ]
                                 },
                                 "errorClass": {

@@ -4538,6 +4538,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Failed to store device login state */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description OpenAI device login request failed */
                 502: {
                     headers: {
@@ -9650,7 +9659,8 @@ export interface paths {
                                         status: "todo" | "done" | "skipped" | "failed";
                                         /** Format: date-time */
                                         at: string | null;
-                                        method: string | null;
+                                        /** @enum {string|null} */
+                                        method: "api_key" | null;
                                         /** @enum {string|null} */
                                         errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
                                     };
@@ -9659,7 +9669,8 @@ export interface paths {
                                         status: "todo" | "done" | "skipped" | "failed";
                                         /** Format: date-time */
                                         at: string | null;
-                                        method: string | null;
+                                        /** @enum {string|null} */
+                                        method: "custom_name" | "default_name" | null;
                                         /** @enum {string|null} */
                                         errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
                                     };
@@ -9668,7 +9679,8 @@ export interface paths {
                                         status: "todo" | "done" | "skipped" | "failed";
                                         /** Format: date-time */
                                         at: string | null;
-                                        method: string | null;
+                                        /** @enum {string|null} */
+                                        method: "claude_setup_token" | "claude_api_key" | "codex_device" | "codex_cli" | "openrouter" | "openai_gateway" | "deepseek" | "devin" | null;
                                         /** @enum {string|null} */
                                         errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
                                     };
@@ -9677,7 +9689,8 @@ export interface paths {
                                         status: "todo" | "done" | "skipped" | "failed";
                                         /** Format: date-time */
                                         at: string | null;
-                                        method: string | null;
+                                        /** @enum {string|null} */
+                                        method: "openai" | "openrouter" | "vercel" | "custom" | "existing" | null;
                                         /** @enum {string|null} */
                                         errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
                                     };
@@ -9686,7 +9699,8 @@ export interface paths {
                                         status: "todo" | "done" | "skipped" | "failed";
                                         /** Format: date-time */
                                         at: string | null;
-                                        method: string | null;
+                                        /** @enum {string|null} */
+                                        method: "slack" | "github" | "gitlab" | "linear_oauth" | "jira_oauth" | null;
                                         /** @enum {string|null} */
                                         errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
                                     };
@@ -9695,7 +9709,8 @@ export interface paths {
                                         status: "todo" | "done" | "skipped" | "failed";
                                         /** Format: date-time */
                                         at: string | null;
-                                        method: string | null;
+                                        /** @enum {string|null} */
+                                        method: "suggestion" | "free_form" | null;
                                         /** @enum {string|null} */
                                         errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
                                     };
@@ -9837,7 +9852,8 @@ export interface paths {
                                         status: "todo" | "done" | "skipped" | "failed";
                                         /** Format: date-time */
                                         at: string | null;
-                                        method: string | null;
+                                        /** @enum {string|null} */
+                                        method: "api_key" | null;
                                         /** @enum {string|null} */
                                         errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
                                     };
@@ -9846,7 +9862,8 @@ export interface paths {
                                         status: "todo" | "done" | "skipped" | "failed";
                                         /** Format: date-time */
                                         at: string | null;
-                                        method: string | null;
+                                        /** @enum {string|null} */
+                                        method: "custom_name" | "default_name" | null;
                                         /** @enum {string|null} */
                                         errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
                                     };
@@ -9855,7 +9872,8 @@ export interface paths {
                                         status: "todo" | "done" | "skipped" | "failed";
                                         /** Format: date-time */
                                         at: string | null;
-                                        method: string | null;
+                                        /** @enum {string|null} */
+                                        method: "claude_setup_token" | "claude_api_key" | "codex_device" | "codex_cli" | "openrouter" | "openai_gateway" | "deepseek" | "devin" | null;
                                         /** @enum {string|null} */
                                         errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
                                     };
@@ -9864,7 +9882,8 @@ export interface paths {
                                         status: "todo" | "done" | "skipped" | "failed";
                                         /** Format: date-time */
                                         at: string | null;
-                                        method: string | null;
+                                        /** @enum {string|null} */
+                                        method: "openai" | "openrouter" | "vercel" | "custom" | "existing" | null;
                                         /** @enum {string|null} */
                                         errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
                                     };
@@ -9873,7 +9892,8 @@ export interface paths {
                                         status: "todo" | "done" | "skipped" | "failed";
                                         /** Format: date-time */
                                         at: string | null;
-                                        method: string | null;
+                                        /** @enum {string|null} */
+                                        method: "slack" | "github" | "gitlab" | "linear_oauth" | "jira_oauth" | null;
                                         /** @enum {string|null} */
                                         errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
                                     };
@@ -9882,7 +9902,8 @@ export interface paths {
                                         status: "todo" | "done" | "skipped" | "failed";
                                         /** Format: date-time */
                                         at: string | null;
-                                        method: string | null;
+                                        /** @enum {string|null} */
+                                        method: "suggestion" | "free_form" | null;
                                         /** @enum {string|null} */
                                         errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
                                     };

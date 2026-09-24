@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { decryptSecret, encryptSecret, getEncryptionKey } from "../be/crypto";
-import { getDbClient, getKv, getSwarmConfigs, upsertKv, upsertSwarmConfig } from "../be/db";
+import { getDbClient, getKv, upsertKv, upsertSwarmConfig } from "../be/db";
 import { updateOnboardingAiFromCodexDevice } from "../be/onboarding";
 import {
   CODEX_DEVICE_VERIFICATION_URL,
@@ -10,6 +10,7 @@ import {
   pollDeviceToken,
   requestDeviceCode,
 } from "../providers/codex-oauth/device";
+import { codexOAuthKeyForSlot, MAX_CODEX_OAUTH_SLOT } from "../providers/codex-oauth/storage";
 import type { CodexOAuthCredentials } from "../providers/codex-oauth/types";
 import { registerVolatileSecret, scrubSecrets } from "../utils/secret-scrubber";
 import { ensureConfigAdmin } from "./config";
@@ -29,7 +30,7 @@ const FlowStateSchema = z.object({
   pollLeaseId: z.string().uuid().nullable(),
   pollLeaseExpiresAt: z.number().int().nullable(),
   status: z.enum(["pending", "complete", "failed", "expired"]),
-  slot: z.number().int().min(0).max(100).nullable(),
+  slot: z.number().int().min(0).max(MAX_CODEX_OAUTH_SLOT).nullable(),
   error: z.string().nullable(),
 });
 type FlowState = z.infer<typeof FlowStateSchema>;
@@ -43,7 +44,7 @@ const StartResponseSchema = z.object({
 });
 const PollResponseSchema = z.object({
   status: z.enum(["pending", "complete", "failed", "expired"]),
-  slot: z.number().int().min(0).max(100).optional(),
+  slot: z.number().int().min(0).max(MAX_CODEX_OAUTH_SLOT).optional(),
   error: z.string().optional(),
 });
 type PollResponse = z.infer<typeof PollResponseSchema>;
@@ -59,6 +60,7 @@ const startDeviceFlow = route({
   responses: {
     200: { description: "Device login started", schema: StartResponseSchema },
     409: { description: "Device login is not enabled" },
+    500: { description: "Failed to store device login state" },
     502: { description: "OpenAI device login request failed" },
   },
 });
@@ -161,7 +163,6 @@ async function releasePendingLease(flowId: string, leaseId: string): Promise<Pol
   return await getDbClient().transaction(async () => {
     const state = await readFlow(flowId);
     if (!state || state.expiresAt <= Date.now()) {
-      await updateOnboardingAiFromCodexDevice({ status: "failed", errorClass: "expired" });
       return { status: "expired" };
     }
     if (state.status !== "pending" || !ownsActiveLease(state, leaseId)) {
@@ -176,37 +177,42 @@ async function releasePendingLease(flowId: string, leaseId: string): Promise<Pol
 }
 
 function firstFreeSlot(configKeys: Set<string>): number | null {
-  for (let slot = 0; slot <= 100; slot += 1) {
+  for (let slot = 0; slot <= MAX_CODEX_OAUTH_SLOT; slot += 1) {
     if (slot === 0 && configKeys.has("codex_oauth")) continue;
-    if (!configKeys.has(`codex_oauth_${slot}`)) return slot;
+    if (!configKeys.has(codexOAuthKeyForSlot(slot))) return slot;
   }
   return null;
 }
 
 async function completeFlow(
   flowId: string,
-  leaseId: string,
   credentials: CodexOAuthCredentials,
 ): Promise<PollResponse> {
   return await getDbClient().transaction(async () => {
     const state = await readFlow(flowId);
     if (!state || state.expiresAt <= Date.now()) {
-      await updateOnboardingAiFromCodexDevice({ status: "failed", errorClass: "expired" });
       return { status: "expired" };
     }
     if (state.status !== "pending") return responseForState(state);
-    if (!ownsActiveLease(state, leaseId)) return { status: "pending" };
 
-    const configs = await getSwarmConfigs({ scope: "global" });
-    const slot = firstFreeSlot(new Set(configs.map((config) => config.key)));
+    const configKeys = await getDbClient().query<{ key: string }>(
+      "SELECT key FROM swarm_config WHERE scope = 'global'",
+    );
+    const slot = firstFreeSlot(new Set(configKeys.map((config) => config.key)));
     if (slot === null) {
-      return await failFlow(flowId, leaseId, "No Codex OAuth slots are available");
+      return await failFlow(flowId, "", "No Codex OAuth slots are available", true);
     }
 
+    const storedCredentials: CodexOAuthCredentials = {
+      access: credentials.access,
+      refresh: credentials.refresh,
+      expires: credentials.expires,
+      accountId: credentials.accountId,
+    };
     await upsertSwarmConfig({
       scope: "global",
-      key: `codex_oauth_${slot}`,
-      value: JSON.stringify(credentials),
+      key: codexOAuthKeyForSlot(slot),
+      value: JSON.stringify(storedCredentials),
       isSecret: true,
       description: `Codex ChatGPT OAuth credentials slot ${slot} (stored by dashboard device login)`,
     });
@@ -221,15 +227,19 @@ async function completeFlow(
   });
 }
 
-async function failFlow(flowId: string, leaseId: string, error: string): Promise<PollResponse> {
+async function failFlow(
+  flowId: string,
+  leaseId: string,
+  error: string,
+  acceptPending = false,
+): Promise<PollResponse> {
   return await getDbClient().transaction(async () => {
     const state = await readFlow(flowId);
     if (!state || state.expiresAt <= Date.now()) {
-      await updateOnboardingAiFromCodexDevice({ status: "failed", errorClass: "expired" });
       return { status: "expired" };
     }
     if (state.status !== "pending") return responseForState(state);
-    if (!ownsActiveLease(state, leaseId)) return { status: "pending" };
+    if (!acceptPending && !ownsActiveLease(state, leaseId)) return { status: "pending" };
 
     const safeError = scrubSecrets(error).slice(0, 200) || "Device login failed";
     state.status = "failed";
@@ -253,31 +263,9 @@ export async function handleCodexOAuthDevice(
     if (!parsed) return true;
     if (!(await ensureConfigAdmin(req, res, "config.write.any"))) return true;
 
+    let device: Awaited<ReturnType<typeof requestDeviceCode>>;
     try {
-      const device = await requestDeviceCode();
-      const flowId = crypto.randomUUID();
-      const expiresAt = Date.now() + FLOW_TTL_MS;
-      const state: FlowState = {
-        deviceAuthId: device.deviceAuthId,
-        userCode: device.userCode,
-        intervalSeconds: device.intervalSeconds,
-        expiresAt,
-        lastPolledAt: null,
-        pollLeaseId: null,
-        pollLeaseExpiresAt: null,
-        status: "pending",
-        slot: null,
-        error: null,
-      };
-      registerFlowSecrets(state);
-      await writeFlow(flowId, state);
-      startDeviceFlow.respond(res, 200, {
-        flowId,
-        userCode: device.userCode,
-        verificationUrl: CODEX_DEVICE_VERIFICATION_URL,
-        intervalSeconds: device.intervalSeconds,
-        expiresAt: new Date(expiresAt).toISOString(),
-      });
+      device = await requestDeviceCode();
     } catch (error) {
       if (error instanceof DeviceCodeNotEnabledError) {
         await updateOnboardingAiFromCodexDevice({ status: "failed", errorClass: "not_enabled" });
@@ -290,6 +278,39 @@ export async function handleCodexOAuthDevice(
         );
         jsonError(res, "Failed to start Codex device login", 502);
       }
+      return true;
+    }
+
+    const flowId = crypto.randomUUID();
+    const expiresAt = Date.now() + FLOW_TTL_MS;
+    const state: FlowState = {
+      deviceAuthId: device.deviceAuthId,
+      userCode: device.userCode,
+      intervalSeconds: device.intervalSeconds,
+      expiresAt,
+      lastPolledAt: null,
+      pollLeaseId: null,
+      pollLeaseExpiresAt: null,
+      status: "pending",
+      slot: null,
+      error: null,
+    };
+    try {
+      registerFlowSecrets(state);
+      await writeFlow(flowId, state);
+      startDeviceFlow.respond(res, 200, {
+        flowId,
+        userCode: device.userCode,
+        verificationUrl: CODEX_DEVICE_VERIFICATION_URL,
+        intervalSeconds: device.intervalSeconds,
+        expiresAt: new Date(expiresAt).toISOString(),
+      });
+    } catch (error) {
+      console.error(
+        "[codex-device] Failed to store device login:",
+        scrubSecrets(error instanceof Error ? error.message : String(error)),
+      );
+      jsonError(res, "Failed to store Codex device login", 500);
     }
     return true;
   }
@@ -301,7 +322,6 @@ export async function handleCodexOAuthDevice(
 
     const claimed = await claimPoll(parsed.params.flowId);
     if (claimed.type === "expired") {
-      await updateOnboardingAiFromCodexDevice({ status: "failed", errorClass: "expired" });
       pollDeviceFlow.respond(res, 200, { status: "expired" });
       return true;
     }
@@ -342,11 +362,7 @@ export async function handleCodexOAuthDevice(
             await failFlow(parsed.params.flowId, claimed.leaseId, "Token exchange failed"),
           );
         } else {
-          pollDeviceFlow.respond(
-            res,
-            200,
-            await completeFlow(parsed.params.flowId, claimed.leaseId, credentials),
-          );
+          pollDeviceFlow.respond(res, 200, await completeFlow(parsed.params.flowId, credentials));
         }
       }
     } catch (error) {

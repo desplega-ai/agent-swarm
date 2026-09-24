@@ -129,6 +129,16 @@ describe("isOriginAllowedForCredentials", () => {
     expect(allowedCredentialRedirect("https://evil.example/setup")).toBeUndefined();
     expect(allowedCredentialRedirect("/setup?step=5")).toBeUndefined();
   });
+
+  test("credential redirects require HTTP or HTTPS without logging a CORS denial", () => {
+    process.env[ENV_KEY] = "null,https://app.example.com";
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    expect(allowedCredentialRedirect("javascript:alert(1)")).toBeUndefined();
+    expect(allowedCredentialRedirect("data:text/plain,hello")).toBeUndefined();
+    expect(allowedCredentialRedirect("https://evil.example/setup")).toBeUndefined();
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
 });
 
 describe("setCorsHeaders", () => {

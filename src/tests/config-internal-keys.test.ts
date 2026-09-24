@@ -1,9 +1,20 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createServer, type Server } from "node:http";
-import { closeDb, getInjectableGlobalConfigs, initDb, upsertSwarmConfig } from "../be/db";
+import {
+  closeDb,
+  createAgent,
+  getInjectableGlobalConfigs,
+  getSwarmConfigs,
+  initDb,
+  upsertSwarmConfig,
+} from "../be/db";
 import { handleConfig } from "../http/config";
 import { handleCore } from "../http/core";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { registerDeleteConfigTool } from "../tools/swarm-config/delete-config";
+import { registerGetConfigTool } from "../tools/swarm-config/get-config";
+import { registerListConfigTool } from "../tools/swarm-config/list-config";
+import { registerSetConfigTool } from "../tools/swarm-config/set-config";
 import { listenOnFreePort } from "./test-net";
 
 const API_KEY = "example-internal-config-test-key";
@@ -11,15 +22,50 @@ const INTERNAL_KEY = "onboarding_state";
 
 let server: Server;
 let baseUrl: string;
+let internalId: string;
+
+type ToolHandler = (args: unknown, meta: unknown) => Promise<unknown> | unknown;
+
+class MockMcpServer {
+  handlers = new Map<string, ToolHandler>();
+
+  registerTool(name: string, _config: unknown, handler: ToolHandler) {
+    this.handlers.set(name, handler);
+    return { name };
+  }
+}
+
+const mcpServer = new MockMcpServer();
+const LEAD_ID = "11111111-1111-1111-1111-111111111111";
+
+function requestInfo() {
+  return {
+    sessionId: "test-session",
+    requestInfo: { headers: { "x-agent-id": LEAD_ID } },
+  };
+}
 
 beforeAll(async () => {
   initDb(":memory:");
-  await upsertSwarmConfig({
-    scope: "global",
-    key: INTERNAL_KEY,
-    value: JSON.stringify({ version: 1 }),
-  });
+  internalId = (
+    await upsertSwarmConfig({
+      scope: "global",
+      key: INTERNAL_KEY,
+      value: JSON.stringify({ version: 1 }),
+    })
+  ).id;
   await upsertSwarmConfig({ scope: "global", key: "VISIBLE_CONFIG", value: "visible" });
+  await createAgent({
+    id: LEAD_ID,
+    name: "internal-config-test-lead",
+    isLead: true,
+    status: "idle",
+    capabilities: [],
+  });
+  registerSetConfigTool(mcpServer as unknown as Parameters<typeof registerSetConfigTool>[0]);
+  registerDeleteConfigTool(mcpServer as unknown as Parameters<typeof registerDeleteConfigTool>[0]);
+  registerGetConfigTool(mcpServer as unknown as Parameters<typeof registerGetConfigTool>[0]);
+  registerListConfigTool(mcpServer as unknown as Parameters<typeof registerListConfigTool>[0]);
 
   server = createServer(async (req, res) => {
     if (await handleCore(req, res, req.headers["x-agent-id"] as string | undefined, API_KEY)) {
@@ -66,5 +112,51 @@ describe("internal config keys", () => {
     });
     expect(response.status).toBe(400);
     expect(await response.text()).toContain("managed by /api/onboarding");
+  });
+
+  test("config by-id GET hides onboarding_state and DELETE rejects it", async () => {
+    const getResponse = await fetch(`${baseUrl}/api/config/${internalId}`, { headers: headers() });
+    expect(getResponse.status).toBe(404);
+
+    const deleteResponse = await fetch(`${baseUrl}/api/config/${internalId}`, {
+      method: "DELETE",
+      headers: headers(),
+    });
+    expect(deleteResponse.status).toBe(400);
+    expect(await deleteResponse.text()).toContain("managed by /api/onboarding");
+    expect(await getSwarmConfigs({ key: INTERNAL_KEY })).toHaveLength(1);
+  });
+
+  test("MCP config tools hide and protect onboarding_state", async () => {
+    const setResult = (await mcpServer.handlers.get("set-config")!(
+      { scope: "global", key: INTERNAL_KEY, value: "tampered" },
+      requestInfo(),
+    )) as { structuredContent: { success: boolean; message: string } };
+    expect(setResult.structuredContent).toMatchObject({
+      success: false,
+      message: "Key 'onboarding_state' is managed by /api/onboarding",
+    });
+
+    for (const tool of ["get-config", "list-config"] as const) {
+      const result = (await mcpServer.handlers.get(tool)!(
+        { key: INTERNAL_KEY },
+        requestInfo(),
+      )) as {
+        structuredContent: { success: boolean; configs?: Array<{ key: string }>; count: number };
+      };
+      expect(result.structuredContent.success).toBe(true);
+      expect(result.structuredContent.count).toBe(0);
+      expect(result.structuredContent.configs ?? []).toEqual([]);
+    }
+
+    const deleteResult = (await mcpServer.handlers.get("delete-config")!(
+      { id: internalId },
+      requestInfo(),
+    )) as { structuredContent: { success: boolean; message: string } };
+    expect(deleteResult.structuredContent).toMatchObject({
+      success: false,
+      message: "Key 'onboarding_state' is managed by /api/onboarding",
+    });
+    expect(await getSwarmConfigs({ key: INTERNAL_KEY })).toHaveLength(1);
   });
 });

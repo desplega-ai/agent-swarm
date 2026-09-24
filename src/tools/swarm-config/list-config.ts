@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById, getSwarmConfigs, maskSecrets } from "@/be/db";
+import { isInternalConfigKey } from "@/be/swarm-config-guard";
 import { can } from "@/rbac";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { SwarmConfigScopeSchema } from "@/types";
@@ -54,11 +55,13 @@ export const registerListConfigTool = (server: McpServer) => {
       }
 
       try {
-        const configs = await getSwarmConfigs({
-          scope,
-          scopeId,
-          key,
-        });
+        const configs = (
+          await getSwarmConfigs({
+            scope,
+            scopeId,
+            key,
+          })
+        ).filter((config) => !isInternalConfigKey(config.key));
 
         // Reading UNMASKED secret values is lead-gated (DES-445 follow-up).
         // Non-lead callers don't hard-fail: we force-mask and note it.

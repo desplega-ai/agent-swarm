@@ -3,6 +3,8 @@ import * as z from "zod";
 import { getAgentById, maskSecrets } from "@/be/db";
 import { upsertSwarmConfigWithPolicyMirror } from "@/be/multi-runtime";
 import {
+  internalConfigKeyError,
+  isInternalConfigKey,
   isReservedConfigKey,
   reservedKeyError,
   validateConfigValue,
@@ -83,6 +85,12 @@ export const registerSetConfigTool = (server: McpServer) => {
         if (isReservedConfigKey(key)) {
           const message = reservedKeyError(key).message;
           return toolErr(message, { data: { yourAgentId: requestInfo.agentId } });
+        }
+
+        if (isInternalConfigKey(key)) {
+          return toolErr(internalConfigKeyError(key).message, {
+            data: { yourAgentId: requestInfo.agentId },
+          });
         }
 
         // Every swarm-config write is lead-gated (DES-445 follow-up): previously

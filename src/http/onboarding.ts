@@ -1,23 +1,26 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import OpenAI from "openai";
-import { z } from "zod";
 import { getAutomationSetupStates } from "../be/automation-preflight";
 import { getAgentHarnessProviders, getLiveAgentCounts, getTaskById } from "../be/db";
 import { getEmbeddingProvider } from "../be/memory";
 import { EMBEDDING_DIMENSIONS } from "../be/memory/constants";
 import {
+  OnboardingActionSchema,
   type OnboardingErrorClass,
-  OnboardingErrorClassSchema,
+  type OnboardingMemoryPreset,
+  type OnboardingMemoryRequest,
+  OnboardingMemoryRequestSchema,
+  type OnboardingMemoryResponse,
+  OnboardingMemoryResponseSchema,
+  OnboardingResponseSchema,
   type OnboardingSignals,
   type OnboardingState,
-  OnboardingStateSchema,
-  OnboardingStepIdSchema,
   OnboardingTaskNotFoundError,
   readOrUpdateOnboarding,
   updateOnboardingMemory,
 } from "../be/onboarding";
+import { assertUrlSafe, publicEndpointSsrfOptions } from "../oauth/mcp-wrapper";
 import { ProviderNameSchema } from "../types";
-import { scrubSecrets } from "../utils/secret-scrubber";
 import { ensureConfigAdmin } from "./config";
 import { scheduleIntegrationsReload } from "./core";
 import { route } from "./route-def";
@@ -25,127 +28,6 @@ import { rollupCredStatusForProvider } from "./status";
 import { jsonError } from "./utils";
 
 export type { OnboardingState } from "../be/onboarding";
-
-const OnboardingSignalsSchema = z.object({
-  providers: z.array(
-    z.object({
-      provider: ProviderNameSchema,
-      state: z.enum(["unverified", "configured", "verified"]),
-      workers: z.number().int().nonnegative(),
-      verifiedWorkers: z.number().int().nonnegative(),
-    }),
-  ),
-  embeddings: z.object({
-    configured: z.boolean(),
-    dimensions: z.number().int().positive(),
-  }),
-  integrations: z.object({
-    slack: z.boolean(),
-    github: z.boolean(),
-    gitlab: z.boolean(),
-    linear: z.boolean(),
-    jira: z.boolean(),
-  }),
-  agents: z.object({
-    leadsOnline: z.number().int().nonnegative(),
-    workersOnline: z.number().int().nonnegative(),
-  }),
-  firstTask: z.object({ id: z.string(), status: z.string() }).nullable(),
-});
-const OnboardingResponseSchema = z.object({
-  state: OnboardingStateSchema,
-  signals: OnboardingSignalsSchema,
-});
-
-const AiMethodSchema = z.enum([
-  "claude_setup_token",
-  "claude_api_key",
-  "codex_device",
-  "codex_cli",
-  "openrouter",
-  "openai_gateway",
-  "deepseek",
-  "devin",
-]);
-const IntegrationMethodSchema = z.enum(["slack", "github", "gitlab", "linear_oauth", "jira_oauth"]);
-const MemoryPresetSchema = z.enum(["openai", "openrouter", "vercel", "custom", "existing"]);
-
-const OnboardingActionSchema = z.union([
-  z.object({ action: z.literal("view"), step: OnboardingStepIdSchema }).strict(),
-  z
-    .object({
-      action: z.literal("complete"),
-      step: z.literal("connect"),
-      method: z.literal("api_key"),
-    })
-    .strict(),
-  z
-    .object({
-      action: z.literal("complete"),
-      step: z.literal("name"),
-      method: z.enum(["custom_name", "default_name"]),
-    })
-    .strict(),
-  z
-    .object({ action: z.literal("complete"), step: z.literal("ai"), method: AiMethodSchema })
-    .strict(),
-  z
-    .object({
-      action: z.literal("complete"),
-      step: z.literal("integrations"),
-      method: IntegrationMethodSchema,
-    })
-    .strict(),
-  z
-    .object({
-      action: z.literal("skip"),
-      step: z.enum(["name", "ai", "memory", "integrations", "first_task"]),
-    })
-    .strict(),
-  z
-    .object({
-      action: z.literal("fail"),
-      step: OnboardingStepIdSchema,
-      errorClass: OnboardingErrorClassSchema,
-    })
-    .strict(),
-  z
-    .object({
-      action: z.literal("first_task"),
-      taskId: z.string().min(1),
-      method: z.enum(["suggestion", "free_form"]),
-    })
-    .strict(),
-  z.object({ action: z.literal("minimize") }).strict(),
-  z.object({ action: z.literal("resume") }).strict(),
-  z.object({ action: z.literal("dismiss") }).strict(),
-]);
-
-const HttpUrlSchema = z
-  .string()
-  .url()
-  .refine((value) => {
-    const protocol = new URL(value).protocol;
-    return protocol === "http:" || protocol === "https:";
-  }, "Must be an HTTP or HTTPS URL");
-
-const MemoryRequestSchema = z
-  .object({
-    preset: MemoryPresetSchema,
-    baseUrl: HttpUrlSchema.optional(),
-    model: z.string().trim().min(1).optional(),
-    apiKey: z.string().min(1).optional(),
-    reuseKey: z.enum(["OPENAI_API_KEY", "OPENROUTER_API_KEY"]).optional(),
-  })
-  .strict();
-
-const MemoryResponseSchema = z.object({
-  ok: z.boolean(),
-  dimensions: z.number().int().positive().optional(),
-  latencyMs: z.number().int().nonnegative(),
-  error: z.string().optional(),
-  errorClass: OnboardingErrorClassSchema.optional(),
-});
 
 async function buildSignals(state: OnboardingState): Promise<OnboardingSignals> {
   const providers: OnboardingSignals["providers"] = [];
@@ -219,9 +101,9 @@ const postOnboardingMemory = route({
   summary: "Test and save an embeddings configuration for onboarding",
   tags: ["Onboarding"],
   rbac: { permission: "config.write.any" },
-  body: MemoryRequestSchema,
+  body: OnboardingMemoryRequestSchema,
   responses: {
-    200: { description: "Embedding probe result", schema: MemoryResponseSchema },
+    200: { description: "Embedding probe result", schema: OnboardingMemoryResponseSchema },
     400: { description: "Invalid memory configuration" },
   },
 });
@@ -238,11 +120,16 @@ const MEMORY_PRESETS = {
   },
 } as const;
 
-function classifyMemoryError(error: unknown): OnboardingErrorClass {
+function memoryErrorStatus(error: unknown): number | undefined {
   const status =
     typeof error === "object" && error !== null && "status" in error
       ? Number((error as { status?: unknown }).status)
       : 0;
+  return Number.isInteger(status) && status >= 100 && status <= 599 ? status : undefined;
+}
+
+function classifyMemoryError(error: unknown): OnboardingErrorClass {
+  const status = memoryErrorStatus(error);
   if (status === 401 || status === 403) return "auth";
   if (status === 404) return "model";
   if (status === 408) return "timeout";
@@ -264,13 +151,24 @@ function classifyMemoryError(error: unknown): OnboardingErrorClass {
   return "unknown";
 }
 
-function memoryErrorMessage(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  return scrubSecrets(message).slice(0, 300) || "Embedding probe failed";
+function memoryErrorMessage(errorClass: OnboardingErrorClass, status?: number): string {
+  const statusSuffix = status ? ` (${status})` : "";
+  switch (errorClass) {
+    case "auth":
+      return `The endpoint rejected the key${statusSuffix}.`;
+    case "model":
+      return `The endpoint could not find the embedding model${statusSuffix}.`;
+    case "timeout":
+      return "The endpoint timed out.";
+    case "network":
+      return "The endpoint could not be reached.";
+    default:
+      return `The endpoint returned an error${statusSuffix}.`;
+  }
 }
 
 async function updateMemoryState(
-  preset: z.infer<typeof MemoryPresetSchema>,
+  preset: OnboardingMemoryPreset,
   result: { ok: true } | { ok: false; errorClass: OnboardingErrorClass },
   saveConfig?: { baseUrl: string; model: string; apiKey?: string },
 ): Promise<void> {
@@ -278,19 +176,8 @@ async function updateMemoryState(
   if (configSaved) scheduleIntegrationsReload();
 }
 
-async function handleMemoryProbe(
-  body: z.infer<typeof MemoryRequestSchema>,
-): Promise<z.infer<typeof MemoryResponseSchema>> {
+async function handleMemoryProbe(body: OnboardingMemoryRequest): Promise<OnboardingMemoryResponse> {
   const explicitKey = body.apiKey;
-  const reusedKey = !explicitKey && body.reuseKey ? process.env[body.reuseKey] : undefined;
-  const apiKey =
-    explicitKey ?? reusedKey ?? process.env.EMBEDDING_API_KEY ?? process.env.OPENAI_API_KEY;
-
-  if (!apiKey) {
-    await updateMemoryState(body.preset, { ok: false, errorClass: "auth" });
-    return { ok: false, latencyMs: 0, error: "No API key", errorClass: "auth" };
-  }
-
   const preset =
     body.preset === "openai" || body.preset === "openrouter" || body.preset === "vercel"
       ? MEMORY_PRESETS[body.preset]
@@ -307,9 +194,53 @@ async function handleMemoryProbe(
       ? (process.env.EMBEDDING_MODEL ?? "text-embedding-3-small")
       : (body.model ?? preset?.model ?? process.env.EMBEDDING_MODEL ?? "text-embedding-3-small");
 
+  let endpoint: URL;
+  try {
+    endpoint = assertUrlSafe(baseUrl ?? "", publicEndpointSsrfOptions());
+  } catch {
+    await updateMemoryState(body.preset, { ok: false, errorClass: "network" });
+    return {
+      ok: false,
+      latencyMs: 0,
+      error: "The endpoint URL is not allowed.",
+      errorClass: "network",
+    };
+  }
+
+  const reuseHost =
+    body.reuseKey === "OPENAI_API_KEY"
+      ? "api.openai.com"
+      : body.reuseKey === "OPENROUTER_API_KEY"
+        ? "openrouter.ai"
+        : undefined;
+  const canReuseKey = reuseHost === undefined || endpoint.hostname === reuseHost;
+  const reusedKey =
+    !explicitKey && body.reuseKey && canReuseKey ? process.env[body.reuseKey] : undefined;
+  const implicitKey =
+    body.preset === "existing"
+      ? (process.env.EMBEDDING_API_KEY ?? process.env.OPENAI_API_KEY)
+      : undefined;
+  const apiKey = explicitKey ?? reusedKey ?? implicitKey;
+
+  if (!apiKey) {
+    await updateMemoryState(body.preset, { ok: false, errorClass: "auth" });
+    return {
+      ok: false,
+      latencyMs: 0,
+      error: "Enter an API key for this endpoint.",
+      errorClass: "auth",
+    };
+  }
+
   const started = performance.now();
   try {
-    const client = new OpenAI({ baseURL: baseUrl, apiKey, timeout: 15_000, maxRetries: 0 });
+    const client = new OpenAI({
+      baseURL: endpoint.toString(),
+      apiKey,
+      timeout: 15_000,
+      maxRetries: 0,
+      fetchOptions: { redirect: "manual" },
+    });
     const response = await client.embeddings.create({
       model,
       input: "agent-swarm onboarding probe",
@@ -344,7 +275,7 @@ async function handleMemoryProbe(
   } catch (error) {
     const errorClass = classifyMemoryError(error);
     const latencyMs = Math.max(0, Math.round(performance.now() - started));
-    const message = memoryErrorMessage(error);
+    const message = memoryErrorMessage(errorClass, memoryErrorStatus(error));
     await updateMemoryState(body.preset, { ok: false, errorClass });
     return { ok: false, latencyMs, error: message, errorClass };
   }

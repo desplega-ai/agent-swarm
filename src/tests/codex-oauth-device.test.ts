@@ -184,6 +184,13 @@ describe("Codex device HTTP routes", () => {
       value: JSON.stringify({ occupied: true }),
       isSecret: true,
     });
+    await getDbClient().run(
+      `INSERT INTO swarm_config (
+         id, scope, scopeId, key, value, isSecret, envPath, description,
+         createdAt, lastUpdatedAt, encrypted
+       ) VALUES (?, 'global', NULL, 'UNRELATED_SECRET', 'invalid-ciphertext', 1, NULL, NULL, ?, ?, 1)`,
+      [crypto.randomUUID(), new Date().toISOString(), new Date().toISOString()],
+    );
 
     fetchImpl = (async (input, init) => {
       const url = String(input);
@@ -222,10 +229,12 @@ describe("Codex device HTTP routes", () => {
 
     const saved = await getSwarmConfigs({ scope: "global", key: "codex_oauth_1" });
     expect(saved).toHaveLength(1);
-    expect(JSON.parse(saved[0]!.value)).toMatchObject({
+    const credentials = JSON.parse(saved[0]!.value) as Record<string, unknown>;
+    expect(credentials).toMatchObject({
       accountId: "account-full",
       refresh: "refresh-full",
     });
+    expect(Object.keys(credentials).sort()).toEqual(["access", "accountId", "expires", "refresh"]);
     const onboarding = await getSwarmConfigs({ scope: "global", key: "onboarding_state" });
     const state = JSON.parse(onboarding[0]!.value) as OnboardingState;
     expect(state.steps.ai).toMatchObject({ status: "done", method: "codex_device" });
@@ -309,6 +318,19 @@ describe("Codex device HTTP routes", () => {
     const secondResponse = await request(path);
     const secondBody = await secondResponse.json();
     const callsBeforeRelease = { pollCalls, exchangeCalls };
+    const entry = await getKv("codex-oauth-device", started.flowId);
+    const state = JSON.parse(decryptSecret(String(entry!.value), getEncryptionKey())) as Record<
+      string,
+      unknown
+    >;
+    state.pollLeaseExpiresAt = Date.now() - 1;
+    await upsertKv({
+      namespace: "codex-oauth-device",
+      key: started.flowId,
+      value: encryptSecret(JSON.stringify(state), getEncryptionKey()),
+      valueType: "string",
+      expiresAt: Number(state.expiresAt),
+    });
     releaseExchange();
     const firstBody = await (await firstPoll).json();
 
@@ -368,6 +390,7 @@ describe("Codex device HTTP routes", () => {
 
   test("returns expired after the encrypted flow TTL passes", async () => {
     await request("/api/onboarding", "GET");
+    const onboardingBefore = await getSwarmConfigs({ scope: "global", key: "onboarding_state" });
     fetchImpl = (async (input) => {
       if (String(input) === DEVICE_CODE_URL) {
         return jsonResponse({
@@ -397,11 +420,21 @@ describe("Codex device HTTP routes", () => {
     const poll = await request(`/api/codex-oauth/device/${started.flowId}/poll`);
     expect(await poll.json()).toEqual({ status: "expired" });
     const onboarding = await getSwarmConfigs({ scope: "global", key: "onboarding_state" });
-    const onboardingState = JSON.parse(onboarding[0]!.value) as OnboardingState;
-    expect(onboardingState.steps.ai).toMatchObject({ status: "failed", errorClass: "expired" });
+    expect(onboarding[0]!.value).toBe(onboardingBefore[0]!.value);
+  });
+
+  test("unknown flow polling does not touch onboarding", async () => {
+    await request("/api/onboarding", "GET");
+    const onboardingBefore = await getSwarmConfigs({ scope: "global", key: "onboarding_state" });
+
+    const poll = await request(`/api/codex-oauth/device/${crypto.randomUUID()}/poll`);
+    expect(await poll.json()).toEqual({ status: "expired" });
+    const onboardingAfter = await getSwarmConfigs({ scope: "global", key: "onboarding_state" });
+    expect(onboardingAfter[0]!.value).toBe(onboardingBefore[0]!.value);
   });
 
   test("keeps a failed result sticky", async () => {
+    await request("/api/onboarding", "GET");
     let pollCalls = 0;
     fetchImpl = (async (input) => {
       if (String(input) === DEVICE_CODE_URL) {
@@ -420,11 +453,52 @@ describe("Codex device HTTP routes", () => {
       status: "failed",
       error: "Device authorization failed (HTTP 500)",
     });
+    const onboardingAfterFailure = await getSwarmConfigs({
+      scope: "global",
+      key: "onboarding_state",
+    });
     expect(await (await request(path)).json()).toEqual({
       status: "failed",
       error: "Device authorization failed (HTTP 500)",
     });
     expect(pollCalls).toBe(1);
+    const onboardingAfterRepeat = await getSwarmConfigs({
+      scope: "global",
+      key: "onboarding_state",
+    });
+    expect(onboardingAfterRepeat[0]!.value).toBe(onboardingAfterFailure[0]!.value);
+  });
+
+  test("returns 500 for local flow storage failure without touching onboarding", async () => {
+    await request("/api/onboarding", "GET");
+    const onboardingBefore = await getSwarmConfigs({ scope: "global", key: "onboarding_state" });
+    fetchImpl = (async (input) => {
+      expect(String(input)).toBe(DEVICE_CODE_URL);
+      return jsonResponse({
+        device_auth_id: "device-local-failure",
+        user_code: "LOCAL",
+        interval: 5,
+      });
+    }) as typeof fetch;
+    await getDbClient().run(
+      `CREATE TRIGGER fail_device_flow_write
+       BEFORE INSERT ON kv_entries
+       WHEN NEW.namespace = 'codex-oauth-device'
+       BEGIN
+         SELECT RAISE(ABORT, 'forced local write failure');
+       END`,
+    );
+
+    try {
+      const response = await request("/api/codex-oauth/device");
+      expect(response.status).toBe(500);
+      expect(await response.json()).toEqual({ error: "Failed to store Codex device login" });
+    } finally {
+      await getDbClient().run("DROP TRIGGER fail_device_flow_write");
+    }
+
+    const onboardingAfter = await getSwarmConfigs({ scope: "global", key: "onboarding_state" });
+    expect(onboardingAfter[0]!.value).toBe(onboardingBefore[0]!.value);
   });
 
   test("returns 409 when OpenAI disables device login", async () => {
