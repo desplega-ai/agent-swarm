@@ -150,7 +150,7 @@ export function CopyIconButton({ value, label }: { value: string; label: string 
       onClick={() => void copy(value)}
       aria-label={copied ? "Copied" : label}
     >
-      {copied ? <Check className="text-status-success-strong" /> : <Copy />}
+      {copied ? <Check /> : <Copy />}
     </Button>
   );
 }

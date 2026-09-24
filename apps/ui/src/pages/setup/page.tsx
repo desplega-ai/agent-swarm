@@ -1,6 +1,14 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, RotateCw } from "lucide-react";
-import { type ComponentType, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  type ComponentType,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { api } from "@/api/client";
@@ -28,7 +36,7 @@ import { SetupTopBar } from "./components/setup-top-bar";
 import { StepTransition } from "./components/step-transition";
 import type { StepProps } from "./step-contract";
 import { StepAi } from "./steps/step-ai";
-import { StepConnect } from "./steps/step-connect";
+import { StepConnect, useIdentityPick } from "./steps/step-connect";
 import { StepFirstTask } from "./steps/step-first-task";
 import { StepIntegrations } from "./steps/step-integrations";
 import { StepMemory } from "./steps/step-memory";
@@ -44,7 +52,7 @@ const STEP_COPY: Record<OnboardingStepId, { title: string; description: string }
     description: "The name, mark, and color your team sees in the sidebar, in Slack, and on pages.",
   },
   ai: {
-    title: "Pick an AI provider",
+    title: "Choose the AI providers you want to use",
     description: "One verified provider is enough to start.",
   },
   memory: {
@@ -99,14 +107,6 @@ function stepStatuses(
   ) as Record<OnboardingStepId, OnboardingStepStatus>;
 }
 
-/**
- * A blocker that ends with an ellipsis ("Saving…", "Testing…") reports work in
- * flight: the footer shows a spinner for it. Any other blocker asks for input.
- */
-function isInFlight(reason: string): boolean {
-  return reason.endsWith("…") || reason.endsWith("...");
-}
-
 /** Why Continue is disabled for a step that is neither done nor skipped. */
 function unsettledReason(step: OnboardingStepId, status: OnboardingStepStatus): string {
   if (step === "connect") return "Connect to your API first.";
@@ -114,41 +114,75 @@ function unsettledReason(step: OnboardingStepId, status: OnboardingStepStatus): 
   return "Finish this step or skip it.";
 }
 
-type BlockerSetter = StepProps["setContinueBlocker"];
+interface Blocker {
+  reason: string;
+  busy: boolean;
+}
+
+type ContinueAction = () => Promise<void>;
+
+interface StepSetters {
+  setContinueBlocker: StepProps["setContinueBlocker"];
+  setContinueAction: StepProps["setContinueAction"];
+}
+
+interface StepControls {
+  step: OnboardingStepId;
+  blockers: Partial<Record<OnboardingStepId, Blocker>>;
+  // Wrapped in an object: a bare function in state reads as an updater.
+  actions: Partial<Record<OnboardingStepId, { run: ContinueAction }>>;
+}
 
 /**
- * Continue blockers, one slot per step, cleared on every step change. A step
- * gets a stable setter bound to its own slot, so a step still animating out
- * can never block the step that replaced it.
+ * Continue blockers and Continue actions, one slot per step, cleared on
+ * every step change. A step gets stable setters bound to its own slot, so a
+ * step still animating out can never affect the step that replaced it.
  */
-function useContinueBlockers(stepId: OnboardingStepId) {
-  const [state, setState] = useState<{
-    step: OnboardingStepId;
-    reasons: Partial<Record<OnboardingStepId, string>>;
-  }>({ step: stepId, reasons: {} });
+function useStepControls(stepId: OnboardingStepId) {
+  const [state, setState] = useState<StepControls>({ step: stepId, blockers: {}, actions: {} });
   // Reset during render (not in an effect): child effects run before parent
   // effects, so an effect here would wipe what the new step just set.
-  if (state.step !== stepId) setState({ step: stepId, reasons: {} });
+  if (state.step !== stepId) setState({ step: stepId, blockers: {}, actions: {} });
 
   const setters = useMemo(
     () =>
       Object.fromEntries(
-        ONBOARDING_STEPS.map(({ id }) => [
+        ONBOARDING_STEPS.map(({ id }): [OnboardingStepId, StepSetters] => [
           id,
-          (reason: string | null) =>
-            setState((prev) => {
-              if ((prev.reasons[id] ?? null) === reason) return prev;
-              const reasons = { ...prev.reasons };
-              if (reason === null) delete reasons[id];
-              else reasons[id] = reason;
-              return { ...prev, reasons };
-            }),
+          {
+            setContinueBlocker: (reason, options) =>
+              setState((prev) => {
+                const current = prev.blockers[id];
+                const busy = options?.busy ?? false;
+                if (
+                  reason === null ? !current : current?.reason === reason && current.busy === busy
+                )
+                  return prev;
+                const blockers = { ...prev.blockers };
+                if (reason === null) delete blockers[id];
+                else blockers[id] = { reason, busy };
+                return { ...prev, blockers };
+              }),
+            setContinueAction: (action) =>
+              setState((prev) => {
+                if ((prev.actions[id]?.run ?? null) === action) return prev;
+                const actions = { ...prev.actions };
+                if (action === null) delete actions[id];
+                else actions[id] = { run: action };
+                return { ...prev, actions };
+              }),
+          },
         ]),
-      ) as Record<OnboardingStepId, BlockerSetter>,
+      ) as Record<OnboardingStepId, StepSetters>,
     [],
   );
 
-  return { blocker: state.step === stepId ? (state.reasons[stepId] ?? null) : null, setters };
+  const own = state.step === stepId;
+  return {
+    blocker: own ? (state.blockers[stepId] ?? null) : null,
+    action: own ? (state.actions[stepId]?.run ?? null) : null,
+    setters,
+  };
 }
 
 /** +1 when the step index grows (Next), -1 when it shrinks (Back). */
@@ -184,18 +218,23 @@ function SetupFlow() {
   const query = useOnboarding({ refetchInterval: 5000, enabled: isConfigured });
   const { mutateAsync: act } = useOnboardingAction();
   const [busy, setBusy] = useState(false);
+  // True from a successful connect until the shell knows whether step 1 must
+  // still ask "Who are you?". Step 1 stays on screen the whole time.
+  const [afterConnect, setAfterConnect] = useState(false);
+  const identityPick = useIdentityPick();
 
   // Before a connection exists only step 1 renders, whatever the cache holds.
   const data = isConfigured ? query.data : undefined;
   const fresh = query.dataUpdatedAt >= mountedAt;
   const paramStep = parseStepParam(searchParams.get("step"));
-  const stepId: OnboardingStepId = !isConfigured
-    ? "connect"
-    : (paramStep ?? (data ? onboardingResumeStep(data.state) : "connect"));
+  const stepId: OnboardingStepId =
+    !isConfigured || afterConnect
+      ? "connect"
+      : (paramStep ?? (data ? onboardingResumeStep(data.state) : "connect"));
   const index = stepNumber(stepId);
   const stepParam = String(index);
   const currentStep = data?.state.currentStep;
-  const { blocker, setters: blockerSetters } = useContinueBlockers(stepId);
+  const { blocker, action, setters } = useStepControls(stepId);
   const direction = useStepDirection(index);
 
   // Only the content region scrolls: a new step starts at its top.
@@ -241,16 +280,27 @@ function SetupFlow() {
     act({ action: "view", step: stepId }).catch(() => {});
   }, [currentStep, stepId, act]);
 
-  function goTo(step: OnboardingStepId) {
-    setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        next.set("step", String(stepNumber(step)));
-        return next;
-      },
-      { replace: true },
-    );
-  }
+  const goTo = useCallback(
+    (step: OnboardingStepId) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set("step", String(stepNumber(step)));
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+
+  // After a connect, stay on step 1 when the operator still has to pick who
+  // they are. Otherwise continue where setup left off, as before.
+  useEffect(() => {
+    if (!afterConnect || !data || identityPick.resolving) return;
+    setAfterConnect(false);
+    goTo(identityPick.needed ? "connect" : onboardingResumeStep(data.state));
+  }, [afterConnect, data, identityPick.resolving, identityPick.needed, goTo]);
 
   async function leave() {
     // Minimizing must not look like "opened while minimized" to the resume check.
@@ -284,7 +334,29 @@ function SetupFlow() {
     }
   }
 
+  /** Continue: run the step's Continue action first when it registered one. */
+  async function continueStep() {
+    if (!action) {
+      goNext();
+      return;
+    }
+    setBusy(true);
+    try {
+      await action();
+      goNext();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Could not finish this step.";
+      // Same id as the save toast (`useSetupSave`): one toast per error, not two.
+      toast.error(message, { id: message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleConnected() {
+    // Set before the first await: the shell must keep step 1 on screen (never
+    // the full-page loader) while the payload and the identity checks load.
+    setAfterConnect(true);
     let next: OnboardingResponse | null;
     try {
       next = await queryClient.fetchQuery({
@@ -296,10 +368,10 @@ function SetupFlow() {
       return; // The configured view shows the error and a way to fix the connection.
     }
     if (!next || isOnboardingFinished(next.state)) {
+      setAfterConnect(false);
       void navigate(from, { replace: true });
-      return;
     }
-    goTo(onboardingResumeStep(next.state));
+    // Otherwise the effect above picks the step once the identity checks settle.
   }
 
   if (isConfigured) {
@@ -307,7 +379,9 @@ function SetupFlow() {
       return <SetupError message={query.error.message} onRetry={() => void query.refetch()} />;
     }
     // A cached `null` (older API) must not bounce the operator: wait for a fresh answer.
-    if (data === undefined || (data === null && !fresh)) return <FullPageLoading />;
+    if (!afterConnect && (data === undefined || (data === null && !fresh))) {
+      return <FullPageLoading />;
+    }
     if (data === null) return <Navigate to={from} replace />;
   }
 
@@ -322,8 +396,10 @@ function SetupFlow() {
       ? { label: "Go to dashboard", blockedBy: null, onClick: () => void leave() }
       : {
           label: "Continue",
-          blockedBy: blocker ?? (settled ? null : unsettledReason(stepId, status)),
-          onClick: goNext,
+          blockedBy:
+            blocker?.reason ?? (settled || action ? null : unsettledReason(stepId, status)),
+          onClick: () => void continueStep(),
+          enterKey: true,
         };
 
   return (
@@ -331,7 +407,12 @@ function SetupFlow() {
       <SetupTopBar
         configured={isConfigured}
         stepper={
-          <SetupStepper statuses={statuses} current={stepId} onSelect={data ? goTo : undefined} />
+          <SetupStepper
+            statuses={statuses}
+            current={stepId}
+            // Right after a connect the shell picks the step; the stepper waits.
+            onSelect={data && !afterConnect ? goTo : undefined}
+          />
         }
         onMinimize={data ? () => void leave() : undefined}
         minimizing={busy}
@@ -355,17 +436,12 @@ function SetupFlow() {
                 onboarding={data ?? null}
                 onConnected={() => void handleConnected()}
                 act={data ? act : undefined}
-                setContinueBlocker={blockerSetters.connect}
+                setContinueBlocker={setters.connect.setContinueBlocker}
               />
             ) : data ? (
               // A failing step must not take the shell (navigation, Minimize) down with it.
               <ErrorBoundary key={stepId}>
-                <Body
-                  onboarding={data}
-                  act={act}
-                  goNext={goNext}
-                  setContinueBlocker={blockerSetters[stepId]}
-                />
+                <Body onboarding={data} act={act} {...setters[stepId]} />
               </ErrorBoundary>
             ) : null}
           </StepTransition>
@@ -373,15 +449,21 @@ function SetupFlow() {
       </main>
 
       <SetupFooter
-        status={data ? status : null}
-        pending={busy ? "Working…" : blocker && isInFlight(blocker) ? blocker : null}
+        pending={busy ? "Working…" : blocker?.busy ? blocker.reason : null}
         busy={busy}
         onBack={index > 1 && data ? () => goTo(ONBOARDING_STEPS[index - 2].id) : undefined}
         skip={
-          data && stepId !== "connect"
+          // A done step has nothing to skip.
+          data && stepId !== "connect" && status !== "done"
             ? {
                 label: status === "skipped" ? "Skipped" : "Skip",
-                disabled: status === "done" || status === "skipped",
+                // A pending save could fail after Skip and turn `skipped` into `failed`.
+                blockedBy:
+                  status === "skipped"
+                    ? "Already skipped."
+                    : blocker
+                      ? `${blocker.reason} Skip when it is done.`
+                      : null,
                 onSkip: () => void skip(stepId),
                 hint: SKIP_HINT[stepId],
               }

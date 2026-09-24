@@ -6,6 +6,7 @@ import type {
   ProviderName,
   SwarmConfig,
 } from "@/api/types";
+import { httpUrlError } from "../../components/http-url";
 
 /** The four provider cards on step 3. */
 export type AiCardId = "claude" | "codex" | "open" | "devin";
@@ -80,17 +81,7 @@ export function globalConfigValue(configs: SwarmConfig[], key: string): string |
   return configs.find((c) => c.key === key && c.scope === "global")?.value || undefined;
 }
 
-/** Same rule as the API validator: http(s), no query string, no fragment. */
+/** Same rule as the API validator: http(s), no query string, no fragment. Blank is not an error. */
 export function baseUrlError(value: string): string | null {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  try {
-    const url = new URL(trimmed);
-    if ((url.protocol === "https:" || url.protocol === "http:") && !url.search && !url.hash) {
-      return null;
-    }
-  } catch {
-    // Falls through to the message below.
-  }
-  return "Use an http or https URL without a query string or fragment.";
+  return value.trim() ? httpUrlError(value, { bare: true }) : null;
 }

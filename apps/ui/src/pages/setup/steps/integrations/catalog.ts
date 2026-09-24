@@ -1,6 +1,7 @@
 import type { OnboardingIntegrationMethod, OnboardingSignals } from "@/api/types";
-import type { SecretRule } from "@/components/onboarding/secret-field";
+import { KEY_RULES, type SecretRule } from "@/components/onboarding/secret-field";
 import { INTEGRATIONS } from "@/lib/integrations-catalog";
+import { httpUrlError } from "../../components/http-url";
 
 /**
  * What step 5 offers, in two groups:
@@ -38,6 +39,8 @@ export interface SetupFieldSpec {
   secretRule?: SecretRule;
   /** Non-secrets: an error message, or null when the value can be stored. */
   validate?: (value: string) => string | null;
+  /** Non-secret rows stored with this key on every save. */
+  alsoStores?: ReadonlyArray<{ key: string; value: string }>;
 }
 
 interface SetupItemBase {
@@ -60,6 +63,8 @@ export interface BusinessTool extends SetupItemBase {
   id: BusinessToolId;
   /** OAuth preset that connects it inline. Absent: set up in Connections. */
   oauthPresetId?: "google" | "microsoft";
+  /** Scopes for the app created from the preset, instead of the preset defaults. */
+  scopes?: string[];
 }
 
 export type SetupIntegration = CoreIntegration | BusinessTool;
@@ -126,7 +131,7 @@ export const CORE_INTEGRATIONS: CoreIntegration[] = [
   },
 ];
 
-export const BUSINESS_TOOLS: BusinessTool[] = [
+const BUSINESS_TOOLS: BusinessTool[] = [
   {
     group: "business",
     id: "gmail",
@@ -135,6 +140,8 @@ export const BUSINESS_TOOLS: BusinessTool[] = [
     logo: "/integration-logos/gmail.svg",
     docsUrl: CONNECTIONS_DOCS,
     oauthPresetId: "google",
+    // The Google preset covers identity only. Gmail needs its own scope.
+    scopes: ["openid", "email", "profile", "https://www.googleapis.com/auth/gmail.modify"],
   },
   {
     group: "business",
@@ -221,36 +228,33 @@ function spec(
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const validEmail = (value: string) => (EMAIL_RE.test(value) ? null : "Use an email address.");
 const validDigits = (value: string) => (/^\d+$/.test(value) ? null : "Use the numeric App ID.");
-function validUrl(value: string): string | null {
-  try {
-    const url = new URL(value);
-    if (url.protocol === "http:" || url.protocol === "https:") return null;
-  } catch {
-    // Falls through to the message below.
-  }
-  return "Start with http:// or https://.";
-}
 
-/** Socket mode only: HTTP mode is not implemented, so it is not offered here. */
+/**
+ * Socket mode only: HTTP mode is not implemented, so it is not offered here.
+ * Every token save also stores `SLACK_MODE=socket`, which repairs a stale `http`.
+ */
+const SLACK_SOCKET_MODE = [{ key: "SLACK_MODE", value: "socket" }];
+
 export const SLACK_TOKEN_FIELDS: SetupFieldSpec[] = [
   spec("slack", "SLACK_BOT_TOKEN", {
     required: true,
     hint: "OAuth & Permissions, Bot User OAuth Token.",
-    secretRule: { prefixes: ["xoxb-"], strict: true, hint: "Starts with xoxb-" },
+    secretRule: KEY_RULES.slackBot,
+    alsoStores: SLACK_SOCKET_MODE,
   }),
   spec("slack", "SLACK_APP_TOKEN", {
     label: "App-level token",
     required: true,
     hint: "Basic Information, App-Level Tokens, with the connections:write scope.",
-    secretRule: { prefixes: ["xapp-"], strict: true, hint: "Starts with xapp-" },
+    secretRule: KEY_RULES.slackApp,
+    alsoStores: SLACK_SOCKET_MODE,
   }),
 ];
 
 export const GITHUB_FIELDS: SetupFieldSpec[] = [
   spec("github", "GITHUB_TOKEN", {
     required: true,
-    // Classic tokens without a prefix still save on blur or paste.
-    secretRule: { prefixes: ["ghp_", "github_pat_", "gho_", "ghu_", "ghs_"], minLength: 30 },
+    secretRule: KEY_RULES.github,
   }),
   spec("github", "GITHUB_WEBHOOK_SECRET"),
   spec("github", "GITHUB_EMAIL", {
@@ -274,8 +278,7 @@ export const GITHUB_APP_FIELDS: SetupFieldSpec[] = [
 ];
 
 export const GITLAB_FIELDS: SetupFieldSpec[] = [
-  // Self-managed instances can change the token prefix: those save on blur or paste.
-  spec("gitlab", "GITLAB_TOKEN", { required: true, secretRule: { prefixes: ["glpat-"] } }),
+  spec("gitlab", "GITLAB_TOKEN", { required: true, secretRule: KEY_RULES.gitlab }),
   spec("gitlab", "GITLAB_WEBHOOK_SECRET"),
   spec("gitlab", "GITLAB_EMAIL", {
     hint: "The email and name sign every commit the agents push.",
@@ -285,7 +288,7 @@ export const GITLAB_FIELDS: SetupFieldSpec[] = [
   spec("gitlab", "GITLAB_URL", {
     defaultValue: "https://gitlab.com",
     hint: "Point this at your own host for self-managed GitLab.",
-    validate: validUrl,
+    validate: (value) => httpUrlError(value),
   }),
 ];
 

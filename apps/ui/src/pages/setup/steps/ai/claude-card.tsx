@@ -1,5 +1,5 @@
 import { type ReactNode, useState } from "react";
-import type { SecretRule } from "@/components/onboarding/secret-field";
+import { KEY_RULES, type SecretRule } from "@/components/onboarding/secret-field";
 import { BrandLogo, SetupChip } from "@/components/onboarding/setup-card";
 import { useSetupSave } from "@/components/onboarding/use-setup-save";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -15,8 +15,8 @@ const TAB_KEY: Record<ClaudeTab, string> = {
 };
 
 const RULES: Record<ClaudeTab, SecretRule> = {
-  token: { prefixes: ["sk-ant-oat"], strict: true, minLength: 40, hint: "Starts with sk-ant-oat" },
-  key: { prefixes: ["sk-ant-api"], strict: true, minLength: 40, hint: "Starts with sk-ant-api" },
+  token: KEY_RULES.claudeToken,
+  key: KEY_RULES.anthropicKey,
 };
 
 const TOKEN_TERMS =

@@ -17,6 +17,7 @@ import { SettingsRow } from "@/components/ui/settings-row";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useConfig } from "@/hooks/use-config";
 import { generateSlug } from "@/lib/slugs";
+import { httpUrlError } from "../components/http-url";
 import type { StepProps } from "../step-contract";
 
 export interface StepConnectProps {
@@ -92,6 +93,27 @@ function ConnectedSummary({
 }
 
 /**
+ * Whether step 1 must ask "Who are you?". Users ship in 1.76.0. A token or
+ * the deployment can fix the identity (`locked`), and then nobody picks.
+ */
+export function useIdentityPick() {
+  const { state, locked } = useCurrentUser();
+  const gate = useFeatureGate("1.76.0");
+  // No version yet and no error: the `/health` read is still in flight.
+  const checking = !gate.supported && gate.currentVersion === null && !gate.isError;
+  const needed = gate.supported && !locked && state !== "ready";
+  return {
+    supported: gate.supported,
+    /** The API version is not known yet. */
+    checking,
+    /** Not decided yet: the version or the user list is still loading. */
+    resolving: checking || (needed && state === "pending"),
+    /** The operator must pick or create a user. */
+    needed,
+  };
+}
+
+/**
  * "Who are you?" right after the connection: pick or create the user the
  * swarm attributes tasks to. Holds Continue until a user is ready. Skipped
  * when a token or the deployment fixes the identity, or the API is older than
@@ -99,14 +121,20 @@ function ConnectedSummary({
  */
 function WhoAreYou({ setContinueBlocker }: Pick<StepConnectProps, "setContinueBlocker">) {
   const { state, user, locked } = useCurrentUser();
-  // Users ship in 1.76.0.
-  const { supported } = useFeatureGate("1.76.0");
+  const { supported, checking, needed } = useIdentityPick();
   const [switching, setSwitching] = useState(false);
 
-  const needsPick = supported && !locked && state !== "ready";
+  const loadingUsers = needed && state === "pending";
   useContinueBlocker(
     setContinueBlocker,
-    !needsPick ? null : state === "pending" ? "Loading users…" : "Pick who you are",
+    checking
+      ? "Checking your server…"
+      : !needed
+        ? null
+        : loadingUsers
+          ? "Loading users…"
+          : "Pick who you are",
+    { busy: checking || loadingUsers },
   );
 
   if (!supported) return null;
@@ -174,8 +202,9 @@ function WhoAreYou({ setContinueBlocker }: Pick<StepConnectProps, "setContinueBl
       >
         <IdentityForm
           autoFocus={false}
+          instant
           onDone={() => setSwitching(false)}
-          submitLabels={{ select: "Use this user", create: "Create user" }}
+          submitLabels={{ create: "Create user" }}
         />
       </SetupCard>
     </FadeIn>
@@ -186,8 +215,6 @@ function WhoAreYou({ setContinueBlocker }: Pick<StepConnectProps, "setContinueBl
 // summary in the same render.
 type Probe = { phase: "idle" | "running" } | { phase: "error"; title: string; detail: string };
 
-const URL_RE = /^https?:\/\/\S+$/;
-
 function ConnectForm({ onConnected }: { onConnected: () => void }) {
   const { addConnection, switchConnection } = useConfig();
   const [placeholder] = useState(() => generateSlug());
@@ -197,7 +224,7 @@ function ConnectForm({ onConnected }: { onConnected: () => void }) {
   const [probe, setProbe] = useState<Probe>({ phase: "idle" });
 
   const url = apiUrl.trim().replace(/\/+$/, "");
-  const urlValid = URL_RE.test(url);
+  const urlValid = httpUrlError(url) === null;
   const running = probe.phase === "running";
 
   async function handleTest() {

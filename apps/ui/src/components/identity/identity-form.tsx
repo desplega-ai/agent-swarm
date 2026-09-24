@@ -23,10 +23,16 @@ import { useConfig } from "@/hooks/use-config";
  */
 export function IdentityForm({
   autoFocus = true,
+  instant = false,
   onDone,
   submitLabels,
 }: {
   autoFocus?: boolean;
+  /**
+   * Picking an existing user sets it at once (no submit button). Creating a
+   * user still needs the name, then Enter or the create button.
+   */
+  instant?: boolean;
   /** Called after a user is picked or created (also when the pick did not change). */
   onDone?: () => void;
   /** Button labels. Defaults: "Continue" and "Create & continue". */
@@ -53,12 +59,15 @@ export function IdentityForm({
     }
   }, [isLoading, users.length]);
 
-  function handleSelectSubmit(e: FormEvent) {
-    e.preventDefault();
-    if (!selected) return;
-    setUserId(selected);
+  function pick(id: string) {
+    setUserId(id);
     clearPendingIdentity();
     onDone?.();
+  }
+
+  function handleSelectSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (selected) pick(selected);
   }
 
   async function handleCreateSubmit(e: FormEvent) {
@@ -92,7 +101,13 @@ export function IdentityForm({
       <form className="flex flex-col gap-4" onSubmit={handleSelectSubmit}>
         <div className="flex flex-col gap-2">
           <Label htmlFor="identity-user">User</Label>
-          <Select value={selected} onValueChange={setSelected}>
+          <Select
+            value={selected}
+            onValueChange={(id) => {
+              setSelected(id);
+              if (instant) pick(id);
+            }}
+          >
             <SelectTrigger id="identity-user">
               <SelectValue placeholder="Pick a user…" />
             </SelectTrigger>
@@ -123,9 +138,11 @@ export function IdentityForm({
           >
             <Plus className="h-3.5 w-3.5 mr-1" /> Create new
           </Button>
-          <Button type="submit" disabled={!selected}>
-            {submitLabels?.select ?? "Continue"}
-          </Button>
+          {instant ? null : (
+            <Button type="submit" disabled={!selected}>
+              {submitLabels?.select ?? "Continue"}
+            </Button>
+          )}
         </div>
       </form>
     );

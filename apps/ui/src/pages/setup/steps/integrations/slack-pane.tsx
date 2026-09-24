@@ -18,7 +18,7 @@ const SLACK_APPS_URL = "https://api.slack.com/apps?new_app=1";
  * Slack app and reports the two tokens back. It embeds the manifest. It never
  * contains the swarm API key or any other secret.
  */
-export function buildSlackSetupPrompt(manifestJson: string): string {
+function buildSlackSetupPrompt(manifestJson: string): string {
   return `You have computer use. Please create a Slack app for my Agent Swarm and give me its two tokens. Use the browser. Do not ask me for a password or a secret, and do not paste the tokens anywhere except your final answer to me.
 
 1. Open https://api.slack.com/apps and sign in if Slack asks. Click "Create New App", choose "From a manifest", pick my workspace, then paste this manifest (JSON) and create the app:
@@ -71,9 +71,11 @@ function SlackAppActions() {
   const unavailable = manifestQ.isError;
 
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+    // The link sits on its own line, so nothing moves when a button shows its check.
+    <div className="flex flex-col items-start gap-2">
       {unavailable ? null : (
-        <>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Only the icon swaps on copy: the labels keep their width. */}
           <Button
             type="button"
             variant="outline"
@@ -82,7 +84,7 @@ function SlackAppActions() {
             onClick={() => manifest && void copy(manifest, "manifest")}
           >
             {copiedKey === "manifest" ? <Check /> : <Copy />}
-            {copiedKey === "manifest" ? "Copied" : "Copy manifest"}
+            Copy manifest
           </Button>
           <Button
             type="button"
@@ -92,10 +94,17 @@ function SlackAppActions() {
             onClick={() => manifest && void copy(buildSlackSetupPrompt(manifest), "prompt")}
           >
             {copiedKey === "prompt" ? <Check /> : <Bot />}
-            {copiedKey === "prompt" ? "Copied" : "Copy setup prompt"}
+            Copy setup prompt
           </Button>
           <InfoTip content='Pick "From a manifest" and paste the manifest. Or give the setup prompt to Codex or Claude Code with computer use: it creates the app and reports both tokens.' />
-        </>
+          <span aria-live="polite" className="sr-only">
+            {copiedKey === "manifest"
+              ? "Manifest copied"
+              : copiedKey === "prompt"
+                ? "Setup prompt copied"
+                : ""}
+          </span>
+        </div>
       )}
       <span className="text-sm">
         <ExternalTextLink href={SLACK_APPS_URL}>

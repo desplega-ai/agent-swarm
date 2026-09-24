@@ -15,8 +15,8 @@ function harnessPhrase(card: AiCardId): string {
 
 /**
  * Accordion card shared by the four providers: status icon, the card's form,
- * then the waiting line once a key is saved, then (also once a key is saved)
- * the R2 harness switch when no worker runs the card's harness.
+ * then the waiting line once a key is saved, then the R2 harness switch
+ * whenever no worker runs the card's harness.
  */
 export function ProviderCard({
   card,
@@ -53,15 +53,25 @@ export function ProviderCard({
         : "open harness";
 
   const noWorker = !runsHarness && agents.length > 0;
+  // The header is a button: its status icon must not take focus of its own.
   const status = rollup.verified ? (
     <StatusIcon
       tone="done"
+      focusable={false}
       label={`Verified by ${rollup.verifiedWorkers} of ${rollup.workers} agents`}
     />
   ) : saved && noWorker ? (
-    <StatusIcon tone="warning" label={`Saved. No worker runs ${harnessPhrase(card)} yet.`} />
+    <StatusIcon
+      tone="warning"
+      focusable={false}
+      label={`Saved. No worker runs ${harnessPhrase(card)} yet.`}
+    />
   ) : saved ? (
-    <StatusIcon tone="busy" label="Saved. Waiting for a worker to check this key." />
+    <StatusIcon
+      tone="busy"
+      focusable={false}
+      label="Saved. Waiting for a worker to check this key."
+    />
   ) : (
     <StatusIcon tone="none" />
   );
@@ -80,8 +90,8 @@ export function ProviderCard({
       {saved || rollup.verified ? (
         <WaitingPanel rollup={rollup} harnessLabel={waitingLabel} />
       ) : null}
-      {/* Offer the switch once there is a key a worker could check. */}
-      {saved && noWorker ? (
+      {/* A key only verifies on a worker that runs this harness. */}
+      {noWorker ? (
         <HarnessSwitch harnessPhrase={harnessPhrase(card)} targets={harnesses} agents={agents} />
       ) : null}
     </SetupCard>

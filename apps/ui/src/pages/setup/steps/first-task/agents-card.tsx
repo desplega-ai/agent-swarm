@@ -1,7 +1,7 @@
 import { ChevronDown, ExternalLink } from "lucide-react";
 import { Link } from "react-router-dom";
 import type { Agent } from "@/api/types";
-import { Spinner } from "@/components/onboarding/save-indicator";
+import { StatusLine } from "@/components/onboarding/save-indicator";
 import { HarnessIcon } from "@/components/shared/harness-icon";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Badge } from "@/components/ui/badge";
@@ -49,10 +49,7 @@ export function LeadStatusLine({
           <span className="font-medium">The lead is ready</span>
         </span>
       ) : (
-        <span className="flex items-center gap-2">
-          <Spinner />
-          <span className="shimmer-text font-medium">Waiting for the lead</span>
-        </span>
+        <StatusLine tone="busy">Waiting for the lead</StatusLine>
       )}
       <span aria-hidden className="text-muted-foreground/50">
         ·

@@ -2,6 +2,7 @@ import { ExternalLink } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useOAuthApps, useOAuthRedirectUri } from "@/api/hooks/use-script-connections";
+import type { OAuthAppSummary, OAuthAuthorizationSummary } from "@/api/types";
 import { StatusLine } from "@/components/onboarding/save-indicator";
 import { CopyableField } from "@/components/shared/copyable-fields";
 import { Button } from "@/components/ui/button";
@@ -10,13 +11,17 @@ import { OAuthInlineConnect } from "@/pages/connections/components/oauth-inline-
 import type { BusinessTool } from "./catalog";
 import { StepLine } from "./pane-parts";
 
-/** The first active OAuth authorization of a provider, or null. */
-export function useActiveAuthorization(provider: string | undefined) {
-  const appsQ = useOAuthApps();
-  const apps = provider ? (appsQ.data ?? []).filter((app) => app.provider === provider) : [];
-  const active =
-    apps.flatMap((app) => app.authorizations ?? []).find((z) => z.status === "active") ?? null;
-  return { appsQ, apps, active };
+/** The first active OAuth authorization of a provider across its apps, or null. */
+export function activeAuthorization(
+  apps: OAuthAppSummary[],
+  provider: string,
+): OAuthAuthorizationSummary | null {
+  return (
+    apps
+      .filter((app) => app.provider === provider)
+      .flatMap((app) => app.authorizations ?? [])
+      .find((z) => z.status === "active") ?? null
+  );
 }
 
 /**
@@ -24,7 +29,10 @@ export function useActiveAuthorization(provider: string | undefined) {
  * authorize an account, inline. Scripts and agents use it through Connections.
  */
 export function OAuthToolPane({ tool }: { tool: BusinessTool }) {
-  const { appsQ, apps, active } = useActiveAuthorization(tool.oauthPresetId);
+  const appsQ = useOAuthApps();
+  const provider = tool.oauthPresetId ?? "";
+  const apps = (appsQ.data ?? []).filter((app) => app.provider === provider);
+  const active = activeAuthorization(apps, provider);
   const redirectQ = useOAuthRedirectUri();
   const [authorizationId, setAuthorizationId] = useState("");
 
@@ -59,6 +67,7 @@ export function OAuthToolPane({ tool }: { tool: BusinessTool }) {
         value={authorizationId || active?.id || ""}
         onChange={setAuthorizationId}
         suggestedPresetId={tool.oauthPresetId}
+        scopes={tool.scopes}
       />
     </div>
   );

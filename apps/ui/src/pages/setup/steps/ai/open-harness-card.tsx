@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { SecretRule } from "@/components/onboarding/secret-field";
+import { KEY_RULES, type SecretRule } from "@/components/onboarding/secret-field";
 import { BrandLogo } from "@/components/onboarding/setup-card";
 import { useSetupSave } from "@/components/onboarding/use-setup-save";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
@@ -14,20 +14,8 @@ const OR_KEY = "OPENROUTER_API_KEY";
 const BASE_URL = "OPENROUTER_BASE_URL";
 const DS_KEY = "DEEPSEEK_API_KEY";
 
-const OPENROUTER_RULE: SecretRule = {
-  prefixes: ["sk-or-"],
-  strict: true,
-  minLength: 40,
-  hint: "Starts with sk-or-",
-};
-// Gateway keys have no fixed shape: they save on blur or paste.
+// Gateway keys have no fixed shape: any value of 16+ characters.
 const GATEWAY_RULE: SecretRule = {};
-const DEEPSEEK_RULE: SecretRule = {
-  prefixes: ["sk-"],
-  strict: true,
-  minLength: 30,
-  hint: "Starts with sk-",
-};
 
 const GATEWAY_INFO = (
   <>
@@ -96,7 +84,7 @@ export function OpenHarnessCard({ presence, configs, onSaved, ...card }: AiCardP
         </TabsList>
         <TabsContent value="openrouter">
           {keyField(
-            OPENROUTER_RULE,
+            KEY_RULES.openRouter,
             "sk-or-v1-...",
             gatewaySet ? "A new key here clears the gateway URL." : undefined,
           )}
@@ -125,7 +113,7 @@ export function OpenHarnessCard({ presence, configs, onSaved, ...card }: AiCardP
             envKey={DS_KEY}
             placeholder="sk-..."
             saved={isSaved(DS_KEY)}
-            rule={DEEPSEEK_RULE}
+            rule={KEY_RULES.deepSeek}
             info={
               <>
                 For DeepSeek (dsh) without OpenRouter. pi and opencode also reuse the Anthropic and

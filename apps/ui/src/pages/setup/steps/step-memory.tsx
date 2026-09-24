@@ -1,4 +1,4 @@
-import { Check, Loader2, SlidersHorizontal } from "lucide-react";
+import { Check, Loader2, RotateCw, SlidersHorizontal } from "lucide-react";
 import { useState } from "react";
 import { useEnvPresence } from "@/api/hooks/use-integrations-meta";
 import { useTestOnboardingMemory } from "@/api/hooks/use-onboarding";
@@ -12,6 +12,7 @@ import { FadeIn } from "@/components/onboarding/fade-in";
 import { StatusIcon, StatusLine, type StatusTone } from "@/components/onboarding/save-indicator";
 import {
   checkSecret,
+  KEY_RULES,
   SecretInput,
   type SecretRule,
   usePasteCommit,
@@ -26,6 +27,7 @@ import { Button } from "@/components/ui/button";
 import { InfoTip } from "@/components/ui/info-tip";
 import { Input } from "@/components/ui/input";
 import { SettingsRow } from "@/components/ui/settings-row";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { StepProps } from "../step-contract";
 import { baseUrlError } from "./ai/model";
@@ -55,7 +57,7 @@ const PRESETS: Preset[] = [
     model: "text-embedding-3-small",
     keyLabel: "OpenAI API key",
     placeholder: "sk-proj-...",
-    keyRule: { prefixes: ["sk-"], strict: true, minLength: 30, hint: "Starts with sk-" },
+    keyRule: KEY_RULES.openAi,
     reuseKey: "OPENAI_API_KEY",
   },
   {
@@ -66,7 +68,7 @@ const PRESETS: Preset[] = [
     model: "openai/text-embedding-3-small",
     keyLabel: "OpenRouter API key",
     placeholder: "sk-or-v1-...",
-    keyRule: { prefixes: ["sk-or-"], strict: true, minLength: 40, hint: "Starts with sk-or-" },
+    keyRule: KEY_RULES.openRouter,
     reuseKey: "OPENROUTER_API_KEY",
   },
   {
@@ -77,7 +79,7 @@ const PRESETS: Preset[] = [
     model: "openai/text-embedding-3-small",
     keyLabel: "AI Gateway API key",
     placeholder: "vck_...",
-    keyRule: { prefixes: ["vck_"], minLength: 20 },
+    keyRule: KEY_RULES.vercel,
   },
   {
     id: "custom",
@@ -86,7 +88,7 @@ const PRESETS: Preset[] = [
     model: "",
     keyLabel: "API key",
     placeholder: "••••",
-    // Unknown format: tests on blur or paste.
+    // Unknown format: 16+ characters.
     keyRule: {},
   },
 ];
@@ -107,14 +109,29 @@ function errorHint(errorClass: OnboardingErrorClass | undefined, dims: number): 
   }
 }
 
-type Outcome =
+/** An outcome belongs to the candidate it tested (the JSON of its request). */
+type Outcome = { candidate: string } & (
   | { kind: "result"; result: OnboardingMemoryTestResponse }
-  | { kind: "request-error"; message: string };
+  | { kind: "request-error"; message: string }
+);
+
+/** "Test current setup" tests the stored config, not the fields. */
+const EXISTING_CANDIDATE = JSON.stringify({ preset: "existing" });
+
+/** The endpoint could not be reached: the same setup can work on a second try. */
+const RETRYABLE_CLASSES: ReadonlySet<OnboardingErrorClass> = new Set(["network", "timeout"]);
+
+function isRetryable(outcome: Outcome): boolean {
+  if (outcome.kind === "request-error") return true;
+  const { errorClass } = outcome.result;
+  return !outcome.result.ok && errorClass !== undefined && RETRYABLE_CLASSES.has(errorClass);
+}
 
 /**
- * Step 4: embeddings. No Save button: once the fields are valid and stable,
- * the step runs the test-and-save probe by itself (one embedding call; the
- * API stores the config only when it works).
+ * Step 4: embeddings. No Save button: once the fields are valid, the step
+ * runs the test-and-save probe by itself (one embedding call; the API stores
+ * the config only when it works). A typed key tests on paste or blur only,
+ * never half-typed. A result shows only while the fields still match it.
  */
 export function StepMemory({ onboarding, setContinueBlocker }: StepProps) {
   const scope = useAutosaveScope(setContinueBlocker);
@@ -152,23 +169,40 @@ export function StepMemory({ onboarding, setContinueBlocker }: StepProps) {
   // Stable identity of the candidate: the probe runs once per distinct setup.
   const candidate = JSON.stringify(body);
 
+  /**
+   * Test one request and keep its outcome. Throws when the same setup can
+   * work on a retry (the request failed, or the endpoint was unreachable),
+   * so the autosave keeps it retryable.
+   */
   async function run(request: OnboardingMemoryTestRequest) {
-    setOutcome(null);
+    const tested = JSON.stringify(request);
+    let next: Outcome;
     try {
-      setOutcome({ kind: "result", result: await test.mutateAsync(request) });
+      next = { candidate: tested, kind: "result", result: await test.mutateAsync(request) };
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      setOutcome({ kind: "request-error", message });
-      throw err instanceof Error ? err : new Error(message);
+      next = {
+        candidate: tested,
+        kind: "request-error",
+        message: err instanceof Error ? err.message : String(err),
+      };
+    }
+    setOutcome(next);
+    if (isRetryable(next)) {
+      throw new Error(
+        next.kind === "request-error"
+          ? next.message
+          : errorHint(next.result.errorClass, dimensions),
+      );
     }
   }
 
   const probe = useAutosave({
     value: candidate,
     dirty: fieldsOk && (usingReuse || key.length > 0),
-    ready: fieldsOk && (usingReuse || keyCheck.ready),
-    readyOnCommit: fieldsOk && (usingReuse || keyCheck.readyOnCommit),
-    save: () => run(body),
+    // Without a typed key nothing is half-typed: test after the debounce.
+    ready: fieldsOk && usingReuse,
+    readyOnCommit: fieldsOk && (usingReuse || keyCheck.valid),
+    save: (value) => run(JSON.parse(value) as OnboardingMemoryTestRequest),
   });
 
   const paste = usePasteCommit(probe.commit);
@@ -183,9 +217,22 @@ export function StepMemory({ onboarding, setContinueBlocker }: StepProps) {
     setOutcome(null);
   }
 
-  const testingExisting = test.isPending && test.variables?.preset === "existing";
-  const probing = test.isPending && !testingExisting;
-  const result = outcome?.kind === "result" ? outcome.result : null;
+  // Only what belongs to the fields on screen: a probe still running for an
+  // old preset, or its late result, never shows here.
+  const running = test.isPending ? JSON.stringify(test.variables) : null;
+  const testingExisting = running === EXISTING_CANDIDATE;
+  const probing = running === candidate;
+  const shown =
+    outcome && (outcome.candidate === candidate || outcome.candidate === EXISTING_CANDIDATE)
+      ? outcome
+      : null;
+  const result = shown?.kind === "result" ? shown.result : null;
+
+  function retry() {
+    if (shown?.candidate === EXISTING_CANDIDATE)
+      void run({ preset: "existing" }).catch(() => undefined);
+    else probe.commit();
+  }
 
   const header: { tone: StatusTone; label: string } = probing
     ? { tone: "busy", label: "Testing the endpoint…" }
@@ -193,7 +240,7 @@ export function StepMemory({ onboarding, setContinueBlocker }: StepProps) {
       ? { tone: "dirty", label: "Tests when you stop typing" }
       : result && !result.ok
         ? { tone: "error", label: errorHint(result.errorClass, dimensions) }
-        : outcome?.kind === "request-error"
+        : shown?.kind === "request-error"
           ? { tone: "error", label: "Could not run the test." }
           : stepStatus === "done" || result?.ok
             ? { tone: "done", label: "Memory works" }
@@ -295,8 +342,8 @@ export function StepMemory({ onboarding, setContinueBlocker }: StepProps) {
           helper={
             keyProblem ? (
               <span className="text-status-error-strong">{keyProblem}</span>
-            ) : outcome || probing ? undefined : (
-              "Tests and saves once the key is complete."
+            ) : shown || probing ? undefined : (
+              "Paste the key, or type it and leave the field, to test and save it."
             )
           }
         >
@@ -306,8 +353,8 @@ export function StepMemory({ onboarding, setContinueBlocker }: StepProps) {
                 id="memory-api-key"
                 value={usingReuse ? "" : apiKey}
                 onChange={(next) => {
+                  paste.afterChange(apiKey, next);
                   setApiKey(next);
-                  paste.afterChange();
                 }}
                 onBlur={() => {
                   setKeyBlurred(true);
@@ -338,9 +385,35 @@ export function StepMemory({ onboarding, setContinueBlocker }: StepProps) {
           </div>
         </SettingsRow>
 
-        <ProbeResult probing={probing} outcome={outcome} dimensions={dimensions} />
+        <ProbeResult
+          probing={probing}
+          outcome={shown}
+          dimensions={dimensions}
+          onRetry={shown && isRetryable(shown) && !test.isPending ? retry : undefined}
+        />
       </SetupCard>
     </AutosaveScopeContext.Provider>
+  );
+}
+
+/** Test again: for failures where the same setup can work on a second try. */
+function RetryButton({ onRetry }: { onRetry: () => void }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          onClick={onRetry}
+          aria-label="Test again"
+          className="text-muted-foreground"
+        >
+          <RotateCw />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>Test again</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -349,24 +422,29 @@ function ProbeResult({
   probing,
   outcome,
   dimensions,
+  onRetry,
 }: {
   probing: boolean;
   outcome: Outcome | null;
   dimensions: number;
+  /** Present when the failure can be retried as is. */
+  onRetry?: () => void;
 }) {
   if (probing) {
     return <StatusLine tone="busy">Testing the endpoint</StatusLine>;
   }
   if (!outcome) return null;
+  const retry = onRetry ? <RetryButton onRetry={onRetry} /> : null;
   if (outcome.kind === "request-error") {
     return (
-      <FadeIn key="request-error">
+      <FadeIn key="request-error" className="flex items-center gap-1">
         <StatusLine tone="error">
           Could not run the test.{" "}
           <span className="break-all font-mono text-xs text-muted-foreground">
             {outcome.message}
           </span>
         </StatusLine>
+        {retry}
       </FadeIn>
     );
   }
@@ -386,7 +464,10 @@ function ProbeResult({
   return (
     <FadeIn key="fail">
       <div className="space-y-1">
-        <StatusLine tone="error">{errorHint(result.errorClass, dimensions)}</StatusLine>
+        <span className="flex items-center gap-1">
+          <StatusLine tone="error">{errorHint(result.errorClass, dimensions)}</StatusLine>
+          {retry}
+        </span>
         {result.error ? (
           <p className="break-all pl-6 font-mono text-xs text-muted-foreground">{result.error}</p>
         ) : null}

@@ -14,7 +14,6 @@ import { useConfig } from "@/hooks/use-config";
 import { CopyIconButton } from "./fields";
 import type { AiCardProps } from "./model";
 import { ProviderCard } from "./provider-card";
-import { WaitingLine } from "./waiting";
 
 type CodexFlow =
   | { phase: "idle" }
@@ -222,7 +221,7 @@ function DeviceCodePanel({ flow }: { flow: CodexDeviceStartResponse }) {
         </Button>
       </div>
       <output className="block border-t border-dashed border-border pt-3">
-        <WaitingLine>Waiting for you to approve in ChatGPT…</WaitingLine>
+        <StatusLine tone="busy">Waiting for you to approve in ChatGPT…</StatusLine>
       </output>
     </div>
   );

@@ -10,13 +10,13 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { useTaskTemplates } from "@/api/hooks/use-task-templates";
-import { Badge } from "@/components/ui/badge";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import {
   formatComposeAttachmentUploadError,
   uploadComposeAttachments,
 } from "./compose-attachment-upload";
 import { ComposerDock } from "./composer-dock";
+import { SuggestionChips } from "./suggestion-chips";
 
 export const SUGGESTIONS = [
   "Investigate a flaky test in the auth suite",
@@ -134,24 +134,11 @@ export function NewSessionView() {
             Describe a goal. The lead agent picks it up, spawns the right crew, and chains the
             follow-ups under one session.
           </p>
-          <div className="flex flex-wrap items-center justify-center gap-2">
-            {SUGGESTIONS.map((s) => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => setDraft(s)}
-                disabled={!userId || create.isPending}
-                className="text-xs"
-              >
-                <Badge
-                  variant="outline"
-                  className="cursor-pointer hover:bg-muted/60 hover:border-primary/40 transition-colors px-3 py-1 font-normal text-xs normal-case"
-                >
-                  {s}
-                </Badge>
-              </button>
-            ))}
-          </div>
+          <SuggestionChips
+            suggestions={SUGGESTIONS}
+            onPick={setDraft}
+            disabled={!userId || create.isPending}
+          />
         </div>
       </div>
 

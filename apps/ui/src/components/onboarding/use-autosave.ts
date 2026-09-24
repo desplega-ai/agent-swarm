@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
+import type { StepProps } from "@/pages/setup/step-contract";
 
 /**
  * Autosave for `/setup` fields: no Save buttons. A field stores itself after
@@ -22,8 +23,8 @@ export type AutosavePhase = "idle" | "pending" | "saving" | "saved" | "error";
 
 const SAVING_REASON = "Saving…";
 
-/** Default debounce: store about 800 ms after typing stops. */
-export const AUTOSAVE_DELAY_MS = 800;
+/** Store about 800 ms after typing stops. */
+const AUTOSAVE_DELAY_MS = 800;
 
 interface AutosaveScopeValue {
   setBusy: (id: string, busy: boolean) => void;
@@ -46,19 +47,39 @@ function useLatest<T>(value: T) {
 
 /**
  * Hold the shell's Continue with `reason` (its tooltip) while it is not null.
- * Releases on unmount.
+ * `busy` marks work in flight (the footer shows a spinner). Releases on unmount.
  */
 export function useContinueBlocker(
-  setContinueBlocker: (reason: string | null) => void,
+  setContinueBlocker: StepProps["setContinueBlocker"],
   reason: string | null,
+  options?: { busy?: boolean },
 ) {
+  const busy = options?.busy ?? false;
   // The shell may pass a new function on each render. A ref keeps the effects
   // below from firing on identity changes (that would loop through its state).
   const blocker = useLatest(setContinueBlocker);
   useEffect(() => {
-    blocker.current(reason);
-  }, [reason, blocker]);
+    blocker.current(reason, { busy });
+  }, [reason, busy, blocker]);
   useEffect(() => () => blocker.current(null), [blocker]);
+}
+
+/**
+ * Offer `action` as the shell's Continue action while it is not null (see
+ * `StepProps.setContinueAction`). The shell always runs the newest `action`.
+ * Removes it on unmount.
+ */
+export function useContinueAction(
+  setContinueAction: StepProps["setContinueAction"],
+  action: (() => Promise<void>) | null,
+) {
+  const setter = useLatest(setContinueAction);
+  const latestAction = useLatest(action);
+  const enabled = action !== null;
+  useEffect(() => {
+    setter.current(enabled ? () => latestAction.current?.() ?? Promise.resolve() : null);
+  }, [enabled, setter, latestAction]);
+  useEffect(() => () => setter.current(null), [setter]);
 }
 
 /**
@@ -66,7 +87,7 @@ export function useContinueBlocker(
  * the step body. Holds Continue with "Saving…" while any field saves.
  */
 export function useAutosaveScope(
-  setContinueBlocker: (reason: string | null) => void,
+  setContinueBlocker: StepProps["setContinueBlocker"],
 ): AutosaveScopeValue {
   const [busyIds, setBusyIds] = useState<ReadonlySet<string>>(() => new Set());
 
@@ -80,7 +101,8 @@ export function useAutosaveScope(
     });
   }, []);
 
-  useContinueBlocker(setContinueBlocker, busyIds.size > 0 ? SAVING_REASON : null);
+  const saving = busyIds.size > 0;
+  useContinueBlocker(setContinueBlocker, saving ? SAVING_REASON : null, { busy: saving });
 
   return useMemo(() => ({ setBusy }), [setBusy]);
 }
@@ -94,11 +116,11 @@ export interface AutosaveOptions {
   ready: boolean;
   /**
    * Valid enough to store on a commit (blur, paste). Defaults to `ready`.
-   * Use it for values that must not store half-typed, such as a key with no
-   * known prefix.
+   * Pass `ready: false` with this for values that must never store while
+   * typing, such as secrets.
    */
   readyOnCommit?: boolean;
-  /** Store the value. Throw to show the error state. */
+  /** Store the value. Throw to show the error state (a commit retries it). */
   save: (value: string) => Promise<void>;
   delayMs?: number;
 }
@@ -106,7 +128,7 @@ export interface AutosaveOptions {
 export interface Autosave {
   phase: AutosavePhase;
   error: string | null;
-  /** Store now when the value is valid (blur, paste, a click on a swatch). */
+  /** Store now when the value is valid (blur, paste, a click on a swatch, a retry). */
   commit: () => void;
 }
 
@@ -131,16 +153,17 @@ export function useAutosave({
   const scheduled = useRef(false);
   const chain = useRef<Promise<void>>(Promise.resolve());
   const lastStored = useRef<string | null>(null);
+  const newest = useRef(0);
   const mounted = useRef(true);
 
-  // Saves run one after another and always store the newest value.
-  const run = useCallback(() => {
-    window.clearTimeout(timer.current);
-    scheduled.current = false;
-    setPending(false);
+  // Queue a save of `next`, validated by the caller when it enqueues (a later,
+  // invalid draft never reaches the server). Saves run one after another. A
+  // save that a newer one replaced before it started is dropped, and a value
+  // already stored is not stored again.
+  const enqueue = useCallback((next: string, store: (value: string) => Promise<void>) => {
+    const seq = ++newest.current;
     chain.current = chain.current.then(async () => {
-      const { value: next, dirty: isDirty, save: store } = latest.current;
-      if (!isDirty || next === lastStored.current) return;
+      if (seq !== newest.current || next === lastStored.current) return;
       if (mounted.current) {
         setPhase("saving");
         setError(null);
@@ -156,30 +179,49 @@ export function useAutosave({
         }
       }
     });
-  }, [latest]);
+  }, []);
 
-  // Debounce while typing.
+  const cancelScheduled = useCallback(() => {
+    window.clearTimeout(timer.current);
+    scheduled.current = false;
+    setPending(false);
+  }, []);
+
+  // Debounce while typing. The timer re-reads the newest value when it fires.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `value` restarts the debounce on every edit
   useEffect(() => {
-    if (!dirty || !ready || value === lastStored.current) {
+    if (!dirty || !ready) {
       scheduled.current = false;
       setPending(false);
       return;
     }
     scheduled.current = true;
     setPending(true);
-    timer.current = window.setTimeout(run, delayMs);
+    timer.current = window.setTimeout(() => {
+      cancelScheduled();
+      const { value: next, dirty: isDirty, ready: isReady, save: store } = latest.current;
+      if (isDirty && isReady) enqueue(next, store);
+    }, delayMs);
     return () => window.clearTimeout(timer.current);
-  }, [value, dirty, ready, delayMs, run]);
+  }, [value, dirty, ready, delayMs, latest, enqueue, cancelScheduled]);
 
   // A commit reads the value after the render that produced it.
   useEffect(() => {
     if (commitTick === 0) return;
-    const { value: next, dirty: isDirty, ready: r, readyOnCommit: rc } = latest.current;
-    if (!isDirty || !(r || rc) || next === lastStored.current) return;
-    run();
-  }, [commitTick, latest, run]);
+    const {
+      value: next,
+      dirty: isDirty,
+      ready: r,
+      readyOnCommit: rc,
+      save: store,
+    } = latest.current;
+    if (!isDirty || !(r || rc)) return;
+    cancelScheduled();
+    enqueue(next, store);
+  }, [commitTick, latest, enqueue, cancelScheduled]);
 
-  // Leaving the step with a scheduled save stores it instead of dropping it.
+  // Leaving the step with a scheduled save stores it instead of dropping it,
+  // through the same queue (so a remount, as in StrictMode, never saves twice).
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -188,9 +230,9 @@ export function useAutosave({
       scheduled.current = false;
       window.clearTimeout(timer.current);
       const { value: next, dirty: isDirty, ready: r, save: store } = latest.current;
-      if (isDirty && r && next !== lastStored.current) store(next).catch(() => undefined);
+      if (isDirty && r) enqueue(next, store);
     };
-  }, [latest]);
+  }, [latest, enqueue]);
 
   const busy = pending || phase === "saving";
   useEffect(() => {

@@ -2,9 +2,8 @@ import { Check, X } from "lucide-react";
 import type { CSSProperties } from "react";
 import { ONBOARDING_STEPS } from "@/api/hooks/use-onboarding";
 import type { OnboardingStepId, OnboardingStepStatus } from "@/api/types";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { SetupChip } from "./setup-card";
+import { SetupChip, type SetupChipTone } from "./setup-card";
 
 /**
  * Shared step-status vocabulary for the `/setup` header stepper, the header
@@ -35,19 +34,15 @@ export const STEP_TONE_CLASS: Record<OnboardingStepStatus, string> = {
   todo: "border-border text-muted-foreground",
 };
 
+const CHIP_TONE: Record<OnboardingStepStatus, SetupChipTone> = {
+  done: "done",
+  failed: "error",
+  skipped: "neutral",
+  todo: "neutral",
+};
+
 export function StepStatusChip({ status }: { status: OnboardingStepStatus }) {
-  if (status === "done") {
-    return (
-      <Badge variant="outline" size="tag" className="border-primary/30 text-primary">
-        {STEP_STATUS_WORD.done}
-      </Badge>
-    );
-  }
-  return (
-    <SetupChip tone={status === "failed" ? "error" : "neutral"}>
-      {STEP_STATUS_WORD[status]}
-    </SetupChip>
-  );
+  return <SetupChip tone={CHIP_TONE[status]}>{STEP_STATUS_WORD[status]}</SetupChip>;
 }
 
 /** 1-based position of a step, as used in `?step=N` and "Step N of 6". */

@@ -11,18 +11,17 @@ import { cn } from "@/lib/utils";
  * A card without children is a single header row.
  */
 
-export type SetupChipTone = "neutral" | "success" | "pending" | "error" | "info" | "active";
+/** `done` is amber like the stepper: progress never uses the green success tone. */
+export type SetupChipTone = "neutral" | "done" | "error" | "info";
 
 const CHIP_TONE: Record<SetupChipTone, string> = {
   neutral: "border-border text-muted-foreground",
-  success: "border-status-success/30 text-status-success-strong",
-  pending: "border-status-pending/30 text-status-pending-strong",
+  done: "border-primary/30 text-primary",
   error: "border-status-error/30 text-status-error-strong",
   info: "border-status-info/30 text-status-info-strong",
-  active: "border-status-active/30 text-status-active-strong",
 };
 
-/** The 9px uppercase status chip ("NOT SET UP", "VERIFIED", ...). */
+/** The 9px uppercase status chip ("DONE", "RECOMMENDED", ...). */
 export function SetupChip({
   tone = "neutral",
   children,

@@ -1,21 +1,21 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, Send } from "lucide-react";
-import { type ComponentProps, useState } from "react";
+import { type ComponentProps, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { IdentityForm } from "@/components/identity/identity-form";
 import { BorderBeam } from "@/components/onboarding/border-beam";
-import { FadeIn } from "@/components/onboarding/fade-in";
 import { StatusLine } from "@/components/onboarding/save-indicator";
 import { SetupCard } from "@/components/onboarding/setup-card";
 import { ComposerDock } from "@/components/sessions/composer-dock";
 import { SUGGESTIONS } from "@/components/sessions/new-session-view";
+import { SuggestionChips } from "@/components/sessions/suggestion-chips";
 import { StatusBadge } from "@/components/shared/status-badge";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useCurrentUser } from "@/contexts/current-user-context";
+import { cn } from "@/lib/utils";
 import type { StepProps } from "../../step-contract";
 
 type BadgeStatus = ComponentProps<typeof StatusBadge>["status"];
@@ -46,6 +46,12 @@ export function FirstTaskComposer({
   const needsIdentity = usersSupported && !locked && userState === "needs-pick";
   const identityReady = !usersSupported || locked || userState === "ready";
   const live = leadReady && identityReady;
+  // Focus the composer the first time it goes live, never again: a lead that
+  // drops and comes back must not steal focus from wherever the operator is.
+  const [wentLive, setWentLive] = useState(false);
+  useEffect(() => {
+    if (live) setWentLive(true);
+  }, [live]);
 
   async function send() {
     const task = draft.trim();
@@ -81,7 +87,7 @@ export function FirstTaskComposer({
     const firstTask = onboarding.signals.firstTask;
     const done = onboarding.state.steps.first_task.status === "done";
     return (
-      <FadeIn className="mx-auto w-full max-w-2xl space-y-3">
+      <div className="mx-auto w-full max-w-3xl space-y-3">
         <SetupCard
           icon={<Send className="size-4" />}
           title="First task sent"
@@ -97,63 +103,50 @@ export function FirstTaskComposer({
           }
         />
         {done ? <StatusLine tone="done">Setup is complete.</StatusLine> : null}
-      </FadeIn>
+      </div>
     );
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col items-center gap-4">
+    // Full column width: the composer centers itself at its own max width.
+    <div className="flex w-full flex-col items-center gap-4">
       {needsIdentity ? (
         <SetupCard
           title="Who is sending this?"
           description="The swarm attributes tasks to this user."
-          className="w-full"
+          className="w-full max-w-3xl"
         >
-          <IdentityForm
-            autoFocus={false}
-            submitLabels={{ select: "Use this user", create: "Create user" }}
-          />
+          <IdentityForm autoFocus={false} instant submitLabels={{ create: "Create user" }} />
         </SetupCard>
       ) : null}
 
-      <FadeIn className="w-full">
-        <ComposerDock
-          value={draft}
-          onChange={setDraft}
-          onSubmit={() => void send()}
-          isPending={sending}
-          isError={Boolean(error)}
-          errorMessage={error ?? undefined}
-          pendingLabel="Sending…"
-          placeholder={
-            leadReady ? "Describe a goal for the swarm" : "Waiting for the lead to come online…"
-          }
-          disabled={!live}
-          sendLabel="Send first task"
-          autoFocus={live}
-          className="bg-transparent p-0"
-          decoration={live ? <BorderBeam className="animate-in fade-in-0 duration-500" /> : null}
-        />
-      </FadeIn>
+      <ComposerDock
+        value={draft}
+        onChange={setDraft}
+        onSubmit={() => void send()}
+        isPending={sending}
+        isError={Boolean(error)}
+        errorMessage={error ?? undefined}
+        pendingLabel="Sending…"
+        placeholder={
+          leadReady ? "Describe a goal for the swarm" : "Waiting for the lead to come online…"
+        }
+        disabled={!live}
+        sendLabel="Send first task"
+        autoFocus={live && !wentLive}
+        className="bg-transparent p-0"
+        // Always mounted, so the agents poll never replays an entrance: only opacity changes.
+        decoration={
+          <BorderBeam
+            className={cn(
+              "transition-opacity duration-300 ease-snappy",
+              live ? "opacity-100" : "opacity-0",
+            )}
+          />
+        }
+      />
 
-      <FadeIn delay={0.06} className="flex flex-wrap items-center justify-center gap-2">
-        {SUGGESTIONS.map((suggestion) => (
-          <button
-            key={suggestion}
-            type="button"
-            onClick={() => setDraft(suggestion)}
-            disabled={!live || sending}
-            className="rounded-md text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:opacity-50"
-          >
-            <Badge
-              variant="outline"
-              className="px-3 py-1 font-normal normal-case text-xs hover:border-primary/40 hover:bg-muted/60 hover-linger transition-colors"
-            >
-              {suggestion}
-            </Badge>
-          </button>
-        ))}
-      </FadeIn>
+      <SuggestionChips suggestions={SUGGESTIONS} onPick={setDraft} disabled={!live || sending} />
     </div>
   );
 }

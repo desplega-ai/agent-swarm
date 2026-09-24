@@ -1,5 +1,5 @@
 import { AlertCircle } from "lucide-react";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { useJiraTrackerStatus } from "@/api/hooks/use-jira-status";
 import { useLinearTrackerStatus } from "@/api/hooks/use-linear-status";
 import { CopyableField } from "@/components/shared/copyable-fields";
@@ -107,6 +107,7 @@ function OAuthPane({
   const prefix = provider.toUpperCase();
   // Both fields save themselves; Connect opens once both are stored.
   const canConnect = form.isSaved(`${prefix}_CLIENT_ID`) && form.isSaved(`${prefix}_CLIENT_SECRET`);
+  const [hintOpen, setHintOpen] = useState(false);
 
   function connect() {
     const back = `${window.location.origin}/setup?step=5&integration=${provider}`;
@@ -115,8 +116,14 @@ function OAuthPane({
     );
   }
 
+  // `aria-disabled`, not `disabled`: the button stays focusable, so its tooltip can say why.
   const connectButton = (
-    <Button type="button" onClick={connect} disabled={!canConnect}>
+    <Button
+      type="button"
+      onClick={canConnect ? connect : undefined}
+      aria-disabled={canConnect ? undefined : true}
+      className="aria-disabled:opacity-50 aria-disabled:hover:bg-primary aria-disabled:active:scale-100"
+    >
       Connect {name}
     </Button>
   );
@@ -139,17 +146,13 @@ function OAuthPane({
         </div>
         <div className="space-y-3">
           <StepLine n={3}>Approve on the {name} consent screen.</StepLine>
-          {canConnect ? (
-            connectButton
-          ) : (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                {/* A disabled button gets no pointer events: the span carries the tooltip. */}
-                <span className="inline-flex">{connectButton}</span>
-              </TooltipTrigger>
+          {/* The tooltip stays mounted, so the button never remounts when it unlocks. */}
+          <Tooltip open={!canConnect && hintOpen} onOpenChange={setHintOpen}>
+            <TooltipTrigger asChild>{connectButton}</TooltipTrigger>
+            {canConnect ? null : (
               <TooltipContent>Add the client ID and secret first.</TooltipContent>
-            </Tooltip>
-          )}
+            )}
+          </Tooltip>
         </div>
       </ConnectedGate>
     </>

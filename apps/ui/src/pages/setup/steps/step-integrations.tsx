@@ -7,7 +7,6 @@ import { useConfigs } from "@/api/hooks/use-config-api";
 import { useEnvPresence } from "@/api/hooks/use-integrations-meta";
 import { ONBOARDING_QUERY_KEY } from "@/api/hooks/use-onboarding";
 import { useOAuthApps } from "@/api/hooks/use-script-connections";
-import type { OAuthAppSummary } from "@/api/types";
 import { FadeIn } from "@/components/onboarding/fade-in";
 import { StatusIcon } from "@/components/onboarding/save-indicator";
 import { BrandLogo, SetupCard, SetupChip } from "@/components/onboarding/setup-card";
@@ -15,7 +14,7 @@ import { AutosaveScopeContext, useAutosaveScope } from "@/components/onboarding/
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import type { StepProps } from "../step-contract";
-import { ComingSoonPane, OAuthToolPane } from "./integrations/business-panes";
+import { activeAuthorization, ComingSoonPane, OAuthToolPane } from "./integrations/business-panes";
 import {
   ALL_SETUP_KEYS,
   CORE_INTEGRATIONS,
@@ -34,13 +33,6 @@ import type { PaneProps } from "./integrations/use-config-form";
 const RETURN_PARAMS = ["integration", "oauth", "error", "error_description"];
 
 type ItemState = "connected" | "saved" | "soon" | "none";
-
-function hasActiveAuthorization(apps: OAuthAppSummary[], provider: string): boolean {
-  return apps.some(
-    (app) =>
-      app.provider === provider && (app.authorizations ?? []).some((z) => z.status === "active"),
-  );
-}
 
 export function StepIntegrations({ onboarding, act, setContinueBlocker }: StepProps) {
   const scope = useAutosaveScope(setContinueBlocker);
@@ -102,7 +94,7 @@ export function StepIntegrations({ onboarding, act, setContinueBlocker }: StepPr
   function itemState(item: SetupIntegration): ItemState {
     if (item.group === "business") {
       if (!item.oauthPresetId) return "soon";
-      return hasActiveAuthorization(oauthApps, item.oauthPresetId) ? "connected" : "none";
+      return activeAuthorization(oauthApps, item.oauthPresetId) ? "connected" : "none";
     }
     if (signals[item.id]) return "connected";
     const saved = item.chipKeys.some(
@@ -194,10 +186,16 @@ const STATE_LABEL: Record<Exclude<ItemState, "soon" | "none">, string> = {
   saved: "Saved, not connected yet",
 };
 
-function ItemStatus({ state }: { state: ItemState }) {
+function ItemStatus({ state, focusable }: { state: ItemState; focusable?: boolean }) {
   if (state === "soon") return <SetupChip>Soon</SetupChip>;
   if (state === "none") return <StatusIcon tone="none" />;
-  return <StatusIcon tone={state === "connected" ? "done" : "saved"} label={STATE_LABEL[state]} />;
+  return (
+    <StatusIcon
+      tone={state === "connected" ? "done" : "saved"}
+      label={STATE_LABEL[state]}
+      focusable={focusable}
+    />
+  );
 }
 
 function IntegrationItem({
@@ -225,7 +223,8 @@ function IntegrationItem({
       <BrandLogo src={item.logo} className="size-4" />
       <span className="flex-1 truncate text-left">{item.name}</span>
       <span className="hidden sm:inline-flex">
-        <ItemStatus state={state} />
+        {/* Inside the item button: no focus stop of its own. */}
+        <ItemStatus state={state} focusable={false} />
       </span>
     </button>
   );

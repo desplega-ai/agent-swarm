@@ -1,5 +1,12 @@
 import { Eye, EyeOff } from "lucide-react";
-import { type ClipboardEvent, type ReactNode, useRef, useState } from "react";
+import {
+  type ClipboardEvent,
+  type ReactNode,
+  type Ref,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -11,11 +18,13 @@ interface SecretInputProps {
   id: string;
   value: string;
   onChange: (value: string) => void;
+  ref?: Ref<HTMLInputElement>;
   placeholder?: string;
   disabled?: boolean;
   /** Id of the helper line under the field. */
   describedBy?: string;
   invalid?: boolean;
+  onFocus?: () => void;
   onBlur?: () => void;
   onPaste?: (event: ClipboardEvent<HTMLInputElement>) => void;
   /** Status icon inside the field, left of the eye toggle. */
@@ -27,10 +36,12 @@ export function SecretInput({
   id,
   value,
   onChange,
+  ref,
   placeholder,
   disabled,
   describedBy,
   invalid,
+  onFocus,
   onBlur,
   onPaste,
   indicator,
@@ -40,9 +51,11 @@ export function SecretInput({
     <div className="relative">
       <Input
         id={id}
+        ref={ref}
         type={shown ? "text" : "password"}
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        onFocus={onFocus}
         onBlur={onBlur}
         onPaste={onPaste}
         placeholder={placeholder}
@@ -59,6 +72,8 @@ export function SecretInput({
           type="button"
           variant="ghost"
           size="icon-xs"
+          // A pointer click keeps focus in the field: peeking is not a blur (no save).
+          onMouseDown={(e) => e.preventDefault()}
           onClick={() => setShown((s) => !s)}
           disabled={disabled}
           aria-label={shown ? "Hide value" : "Show value"}
@@ -72,29 +87,69 @@ export function SecretInput({
 }
 
 /**
- * How a secret proves it is complete before it autosaves. A half-typed key
- * must never be stored.
+ * How a secret proves it is complete before it is stored. A half-typed key
+ * must never be stored, so secrets store only on a paste or a blur, and only
+ * when they pass their rule:
  *
- * - With `prefixes`: a value with a known prefix and at least `minLength`
- *   characters saves while typing. `strict` rejects any other prefix.
- *   Without `strict`, another prefix saves on blur or paste only.
- * - With `pattern`: the full value must match (PEM keys).
- * - Neither: the format is unknown, so the value saves on blur or paste only.
+ * - `pattern`: the full value must match (PEM keys).
+ * - `prefixes`: a value with a known prefix needs `minLength` characters.
+ *   `strict` rejects every other prefix. Without `strict`, another format
+ *   needs 16 characters, and a value that is only the start of a known
+ *   prefix ("gh", "gl") is still being typed.
+ * - Neither: the format is unknown and needs 16 characters.
  */
 export interface SecretRule {
   prefixes?: readonly string[];
   strict?: boolean;
   pattern?: RegExp;
+  /** Minimum length of a value with a known prefix. */
   minLength?: number;
   /** Shown when the value cannot be right, e.g. "Starts with xoxb-". */
   hint?: string;
 }
 
+/** Minimum length of a secret in an unknown format. */
+const OTHER_FORMAT_MIN = 16;
+
+/**
+ * Realistic key shapes per provider: the prefix and the shortest real key.
+ * Shared by every field that stores one of these keys.
+ */
+export const KEY_RULES = {
+  claudeToken: {
+    prefixes: ["sk-ant-oat01-"],
+    strict: true,
+    minLength: 100,
+    hint: "Starts with sk-ant-oat01-",
+  },
+  anthropicKey: {
+    prefixes: ["sk-ant-api03-"],
+    strict: true,
+    minLength: 100,
+    hint: "Starts with sk-ant-api03-",
+  },
+  openRouter: {
+    prefixes: ["sk-or-v1-"],
+    strict: true,
+    minLength: 73,
+    hint: "Starts with sk-or-v1-",
+  },
+  openAi: { prefixes: ["sk-"], strict: true, minLength: 40, hint: "Starts with sk-" },
+  deepSeek: { prefixes: ["sk-"], strict: true, minLength: 30, hint: "Starts with sk-" },
+  slackBot: { prefixes: ["xoxb-"], strict: true, minLength: 50, hint: "Starts with xoxb-" },
+  slackApp: { prefixes: ["xapp-"], strict: true, minLength: 80, hint: "Starts with xapp-" },
+  // Classic tokens without a prefix are another format (16+ characters).
+  github: { prefixes: ["ghp_", "github_pat_", "gho_", "ghu_", "ghs_"], minLength: 40 },
+  // Self-managed GitLab can change the prefix.
+  gitlab: { prefixes: ["glpat-"], minLength: 26 },
+  // Service user keys and personal tokens use different prefixes.
+  devin: { prefixes: ["cog_", "apk_"], minLength: 30 },
+  vercel: { prefixes: ["vck_"], minLength: 30 },
+} satisfies Record<string, SecretRule>;
+
 export interface SecretCheck {
-  /** Complete: store after the debounce. */
-  ready: boolean;
-  /** Store on blur or paste. */
-  readyOnCommit: boolean;
+  /** Complete: a paste or a blur stores it. */
+  valid: boolean;
   /** Why the value cannot be stored. */
   problem: string | null;
   /** The problem is certain while typing (wrong prefix). Otherwise it shows after blur. */
@@ -103,58 +158,50 @@ export interface SecretCheck {
 
 export function checkSecret(raw: string, rule: SecretRule = {}): SecretCheck {
   const value = raw.trim();
-  if (!value) return { ready: false, readyOnCommit: false, problem: null, problemNow: false };
+  if (!value) return { valid: false, problem: null, problemNow: false };
   if (rule.pattern) {
     const ok = rule.pattern.test(value);
-    return {
-      ready: ok,
-      readyOnCommit: ok,
-      problem: ok ? null : (rule.hint ?? null),
-      problemNow: false,
-    };
+    return { valid: ok, problem: ok ? null : (rule.hint ?? null), problemNow: false };
   }
-  if (rule.prefixes?.length) {
-    const minLength = rule.minLength ?? 20;
-    const known = rule.prefixes.some((p) => value.startsWith(p));
-    if (known) {
-      const long = value.length >= minLength;
-      return {
-        ready: long,
-        readyOnCommit: long,
-        problem: long ? null : "Looks too short.",
-        problemNow: false,
-      };
-    }
-    if (!rule.strict)
-      return { ready: false, readyOnCommit: true, problem: null, problemNow: false };
-    // Report a wrong prefix only once the value is longer than every prefix.
-    const longest = Math.max(...rule.prefixes.map((p) => p.length));
-    const problem =
-      value.length >= longest ? (rule.hint ?? `Starts with ${rule.prefixes.join(" or ")}`) : null;
-    return { ready: false, readyOnCommit: false, problem, problemNow: true };
+  const prefixes = rule.prefixes ?? [];
+  if (prefixes.some((p) => value.startsWith(p))) {
+    const long = value.length >= (rule.minLength ?? OTHER_FORMAT_MIN);
+    return { valid: long, problem: long ? null : "Looks too short.", problemNow: false };
   }
+  // The start of a known prefix ("xo", "gh"): still typing it.
+  const typingPrefix = prefixes.some((p) => p.startsWith(value));
+  if (rule.strict) {
+    const problem = typingPrefix ? null : (rule.hint ?? `Starts with ${prefixes.join(" or ")}`);
+    return { valid: false, problem, problemNow: !typingPrefix };
+  }
+  const long = value.length >= OTHER_FORMAT_MIN;
   return {
-    ready: false,
-    readyOnCommit: value.length >= (rule.minLength ?? 1),
-    problem: null,
+    valid: long && !typingPrefix,
+    problem: long ? null : "Looks too short.",
     problemNow: false,
   };
 }
 
 /**
- * A paste is a whole value, so it saves without the debounce. `onPaste` fires
- * before the field changes, so the commit rides the change that follows.
+ * A paste is a whole value, so it stores without waiting for a blur. `onPaste`
+ * fires before the field changes, so the commit rides the change that
+ * follows, and only when the paste changed the value.
  */
 export function usePasteCommit(commit: () => void) {
   const pasted = useRef(false);
   return {
     onPaste: () => {
       pasted.current = true;
+      // A paste that inserts nothing fires no change: drop the flag after this task.
+      window.setTimeout(() => {
+        pasted.current = false;
+      }, 0);
     },
-    afterChange: () => {
+    /** Call from `onChange` with the value before and after. */
+    afterChange: (previous: string, next: string) => {
       if (!pasted.current) return;
       pasted.current = false;
-      commit();
+      if (next.trim() !== previous.trim()) commit();
     },
   };
 }
@@ -177,9 +224,9 @@ interface SecretFieldProps {
 /**
  * Write-only secret field for `/setup` that saves itself. A saved secret shows
  * as masked dots with a Replace action, and its value never comes back from
- * the API. A new value stores once it passes `rule` (after a short debounce),
- * or on blur or paste when its format is unknown. Then the field returns to
- * the masked view.
+ * the API. A new value stores on a paste or a blur, once it passes `rule`
+ * (see `SecretRule`), never while typing. The masked view comes back on blur,
+ * never under a focused field.
  */
 export function SecretField({
   id,
@@ -193,29 +240,45 @@ export function SecretField({
 }: SecretFieldProps) {
   const [draft, setDraft] = useState("");
   const [replacing, setReplacing] = useState(false);
+  const [focused, setFocused] = useState(false);
   const [blurred, setBlurred] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const replaceRef = useRef<HTMLButtonElement>(null);
+  // Where focus goes after the next render, so switching views never drops it.
+  const focusNext = useRef<"field" | "replace" | null>(null);
   const value = draft.trim();
   const check = checkSecret(value, rule);
 
   const autosave = useAutosave({
     value,
     dirty: value.length > 0,
-    ready: check.ready,
-    readyOnCommit: check.readyOnCommit,
+    // Never while typing: only a paste or a blur stores a secret.
+    ready: false,
+    readyOnCommit: check.valid,
     save: async (next) => {
       await onSave(next);
-      setDraft("");
+      // Typing that came after this value stays in the field.
+      setDraft((current) => (current.trim() === next ? "" : current));
       setReplacing(false);
       setBlurred(false);
     },
   });
-  // A paste is a whole value: store it without waiting for the debounce.
   const paste = usePasteCommit(autosave.commit);
+
+  useLayoutEffect(() => {
+    if (!focusNext.current) return;
+    if (focusNext.current === "replace") replaceRef.current?.focus();
+    else (multiline ? textareaRef.current : inputRef.current)?.focus();
+    focusNext.current = null;
+  });
+
   const onChange = (next: string) => {
+    paste.afterChange(draft, next);
     setDraft(next);
-    paste.afterChange();
   };
   const onBlur = () => {
+    setFocused(false);
     setBlurred(true);
     autosave.commit();
   };
@@ -227,7 +290,7 @@ export function SecretField({
   const described =
     [problem ? problemId : null, describedBy].filter(Boolean).join(" ") || undefined;
 
-  if (saved && !replacing && !draft) {
+  if (saved && !replacing && !draft && !focused) {
     return (
       <div className="flex items-center gap-2">
         <WithIndicator indicator={indicator} className="min-w-0 flex-1">
@@ -239,7 +302,16 @@ export function SecretField({
             className="bg-muted/40 pr-8 font-mono text-muted-foreground"
           />
         </WithIndicator>
-        <Button type="button" variant="outline" onClick={() => setReplacing(true)}>
+        <Button
+          ref={replaceRef}
+          type="button"
+          variant="outline"
+          disabled={disabled}
+          onClick={() => {
+            focusNext.current = "field";
+            setReplacing(true);
+          }}
+        >
           Replace
         </Button>
       </div>
@@ -250,8 +322,10 @@ export function SecretField({
     <WithIndicator indicator={indicator} multiline>
       <Textarea
         id={id}
+        ref={textareaRef}
         value={draft}
         onChange={(e) => onChange(e.target.value)}
+        onFocus={() => setFocused(true)}
         onBlur={onBlur}
         onPaste={paste.onPaste}
         placeholder={placeholder}
@@ -265,8 +339,10 @@ export function SecretField({
   ) : (
     <SecretInput
       id={id}
+      ref={inputRef}
       value={draft}
       onChange={onChange}
+      onFocus={() => setFocused(true)}
       onBlur={onBlur}
       onPaste={paste.onPaste}
       placeholder={placeholder}
@@ -290,9 +366,13 @@ export function SecretField({
           type="button"
           variant="link"
           size="xs"
+          // A pointer click must not blur the field first: that would store the draft.
+          onMouseDown={(e) => e.preventDefault()}
           onClick={() => {
-            setReplacing(false);
+            focusNext.current = "replace";
             setDraft("");
+            setReplacing(false);
+            setFocused(false);
             setBlurred(false);
           }}
           className="h-auto px-0 text-muted-foreground hover:text-foreground"

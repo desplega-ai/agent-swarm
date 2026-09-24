@@ -18,9 +18,12 @@ export function useConfigForm(configs: SwarmConfig[], presence: EnvPresenceMap) 
     isSaved: (key: string) => setupSave.isSaved(key) || Boolean(rowFor(key)),
     /** Stored on the server but not readable here (deployment env, no row). */
     isEnvOnly: (key: string) => Boolean(presence[key] && !rowFor(key)),
-    /** Store one field, apply it live, then refresh the onboarding signals. */
+    /** Store one field (and the rows it always brings along), then refresh the onboarding signals. */
     saveField: (s: SetupFieldSpec, value: string) =>
-      setupSave.save([{ key: s.key, value, isSecret: s.secret }]),
+      setupSave.save([
+        { key: s.key, value, isSecret: s.secret },
+        ...(s.alsoStores ?? []).map((row) => ({ ...row, isSecret: false })),
+      ]),
   };
 }
 

@@ -1,4 +1,4 @@
-import type { SecretRule } from "@/components/onboarding/secret-field";
+import { KEY_RULES } from "@/components/onboarding/secret-field";
 import { BrandLogo } from "@/components/onboarding/setup-card";
 import { useSetupSave } from "@/components/onboarding/use-setup-save";
 import { SecretKeyField, TextField } from "./fields";
@@ -7,9 +7,6 @@ import { ProviderCard } from "./provider-card";
 
 const API_KEY = "DEVIN_API_KEY";
 const ORG_ID = "DEVIN_ORG_ID";
-
-// Service user keys and personal tokens use different prefixes; others save on blur.
-const KEY_RULE: SecretRule = { prefixes: ["cog_", "apk_"], minLength: 20 };
 
 export function DevinCard({ presence, configs, onSaved, ...card }: AiCardProps) {
   const { save, isSaved } = useSetupSave(presence);
@@ -33,7 +30,7 @@ export function DevinCard({ presence, configs, onSaved, ...card }: AiCardProps) 
           envKey={API_KEY}
           placeholder="cog_..."
           saved={keySaved}
-          rule={KEY_RULE}
+          rule={KEY_RULES.devin}
           info="Service user key or personal access token from app.devin.ai."
           onSave={async (value) => {
             await save([{ key: API_KEY, value, isSecret: true }]);

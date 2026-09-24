@@ -1,4 +1,14 @@
-import { Check, X } from "lucide-react";
+import {
+  Blocks,
+  Brain,
+  Check,
+  Fingerprint,
+  type LucideIcon,
+  Plug,
+  Send,
+  Sparkles,
+  X,
+} from "lucide-react";
 import { LayoutGroup, motion, type Transition } from "motion/react";
 import { ONBOARDING_STEPS } from "@/api/hooks/use-onboarding";
 import type { OnboardingStepId, OnboardingStepStatus } from "@/api/types";
@@ -15,6 +25,16 @@ const SPRING: Transition = { type: "spring", stiffness: 520, damping: 42, mass: 
 /** Motion corrects radius under layout scale only when it is set as a style. */
 const ROUND = { borderRadius: 9999 };
 
+/** One icon per step, in the marker. The number stays in the tooltip. */
+const STEP_ICON: Record<OnboardingStepId, LucideIcon> = {
+  connect: Plug,
+  name: Fingerprint,
+  ai: Sparkles,
+  memory: Brain,
+  integrations: Blocks,
+  first_task: Send,
+};
+
 interface SetupStepperProps {
   statuses: Record<OnboardingStepId, OnboardingStepStatus>;
   current: OnboardingStepId;
@@ -23,9 +43,11 @@ interface SetupStepperProps {
 }
 
 /**
- * The header stepper: six round markers joined by connectors that fill amber
- * as steps settle. The current step is a solid amber pill with its label
- * (number only below 640px); the pill slides between steps on a spring.
+ * The header stepper: six round markers, each with its step icon, joined by
+ * connectors that fill amber as steps settle. Status reads at a glance: a
+ * done step is amber with a check badge, a failed one red with an x badge, a
+ * skipped one hatched. The current step is a solid amber pill with its label
+ * (icon only below 640px); the pill slides between steps on a spring.
  */
 export function SetupStepper({ statuses, current, onSelect }: SetupStepperProps) {
   return (
@@ -39,6 +61,7 @@ export function SetupStepper({ statuses, current, onSelect }: SetupStepperProps)
                 {previous ? <Connector status={previous} /> : null}
                 <StepMarker
                   number={index + 1}
+                  icon={STEP_ICON[id]}
                   label={label}
                   status={statuses[id]}
                   current={id === current}
@@ -78,12 +101,14 @@ function Connector({ status }: { status: OnboardingStepStatus }) {
 
 function StepMarker({
   number,
+  icon: Icon,
   label,
   status,
   current,
   onSelect,
 }: {
   number: number;
+  icon: LucideIcon;
   label: string;
   status: OnboardingStepStatus;
   current: boolean;
@@ -125,7 +150,7 @@ function StepMarker({
             />
           ) : null}
           <motion.span layout="position" transition={SPRING} className="flex items-center">
-            <MarkerGlyph number={number} status={status} current={current} />
+            <Icon className="size-3" strokeWidth={2.25} aria-hidden="true" />
           </motion.span>
           {current ? (
             <motion.span
@@ -138,6 +163,7 @@ function StepMarker({
               {label}
             </motion.span>
           ) : null}
+          <StatusBadge status={status} />
         </motion.button>
       </TooltipTrigger>
       <TooltipContent side="bottom" sideOffset={6}>
@@ -150,21 +176,23 @@ function StepMarker({
   );
 }
 
-/**
- * Check for done, x for failed, the number otherwise. A skipped step off
- * screen shows only its hatch.
- */
-function MarkerGlyph({
-  number,
-  status,
-  current,
-}: {
-  number: number;
-  status: OnboardingStepStatus;
-  current: boolean;
-}) {
-  if (status === "done") return <Check className="size-3" strokeWidth={3} aria-hidden="true" />;
-  if (status === "failed") return <X className="size-3" strokeWidth={3} aria-hidden="true" />;
-  if (status === "skipped" && !current) return null;
-  return <>{number}</>;
+/** Corner badge: a check for done, an x for failed. Other states have none. */
+function StatusBadge({ status }: { status: OnboardingStepStatus }) {
+  if (status !== "done" && status !== "failed") return null;
+  const Glyph = status === "done" ? Check : X;
+  return (
+    <motion.span
+      layout="position"
+      transition={SPRING}
+      aria-hidden="true"
+      className={cn(
+        "absolute -right-1 -bottom-1 grid size-3 place-items-center rounded-full ring-2 ring-background",
+        status === "done"
+          ? "bg-primary text-primary-foreground"
+          : "bg-status-error text-status-error-foreground",
+      )}
+    >
+      <Glyph className="size-2" strokeWidth={4} />
+    </motion.span>
+  );
 }

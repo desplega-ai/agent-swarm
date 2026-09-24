@@ -1,6 +1,6 @@
 import { AlertCircle, AlertTriangle, Check, CircleCheck } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { AutosavePhase } from "./use-autosave";
@@ -22,7 +22,7 @@ export type StatusTone = "done" | "busy" | "saved" | "dirty" | "warning" | "erro
 const SNAPPY = [0.2, 0, 0, 1] as const;
 
 /** Circular progress: the amber ring the dashboard uses for real waits. */
-export function Spinner({ className }: { className?: string }) {
+function Spinner({ className }: { className?: string }) {
   return (
     <span
       aria-hidden
@@ -58,44 +58,54 @@ function Glyph({ tone }: { tone: Exclude<StatusTone, "none"> }) {
 
 /**
  * Status icon with a tooltip. The label is also the accessible name, and it
- * sits in a polite live region, so screen readers hear state changes.
+ * sits in a polite live region, so screen readers hear state changes. One
+ * root for every tone: the tooltip stays mounted (only its content and
+ * `open` change), so the live region and the icon motion never remount. With
+ * a label the icon takes focus, so keyboard users can read the tooltip too.
  */
 export function StatusIcon({
   tone,
   label,
+  focusable = true,
   className,
 }: {
   tone: StatusTone;
   /** Short meaning, shown on hover and read by screen readers. */
   label?: ReactNode;
+  /** Pass `false` inside a button: a button must not contain a focusable element. */
+  focusable?: boolean;
   className?: string;
 }) {
-  const icon = (
-    <output
-      aria-live="polite"
-      className={cn("relative inline-flex size-4 shrink-0 items-center justify-center", className)}
-    >
-      <AnimatePresence initial={false}>
-        {tone === "none" ? null : (
-          <motion.span
-            key={tone}
-            className="absolute inset-0 flex items-center justify-center"
-            initial={{ opacity: 0, scale: 0.6 }}
-            animate={{ opacity: 1, scale: 1, transition: { duration: 0.18, ease: SNAPPY } }}
-            exit={{ opacity: 0, scale: 0.6, transition: { duration: 0.1, ease: SNAPPY } }}
-          >
-            <Glyph tone={tone} />
-          </motion.span>
-        )}
-      </AnimatePresence>
-      {label && tone !== "none" ? <span className="sr-only">{label}</span> : null}
-    </output>
-  );
-  if (!label || tone === "none") return icon;
+  const [open, setOpen] = useState(false);
+  const hasLabel = Boolean(label) && tone !== "none";
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>{icon}</TooltipTrigger>
-      <TooltipContent className="max-w-64">{label}</TooltipContent>
+    <Tooltip open={hasLabel && open} onOpenChange={setOpen}>
+      <TooltipTrigger asChild>
+        <output
+          aria-live="polite"
+          tabIndex={hasLabel && focusable ? 0 : undefined}
+          className={cn(
+            "relative inline-flex size-4 shrink-0 items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+            className,
+          )}
+        >
+          <AnimatePresence initial={false}>
+            {tone === "none" ? null : (
+              <motion.span
+                key={tone}
+                className="absolute inset-0 flex items-center justify-center"
+                initial={{ opacity: 0, scale: 0.6 }}
+                animate={{ opacity: 1, scale: 1, transition: { duration: 0.18, ease: SNAPPY } }}
+                exit={{ opacity: 0, scale: 0.6, transition: { duration: 0.1, ease: SNAPPY } }}
+              >
+                <Glyph tone={tone} />
+              </motion.span>
+            )}
+          </AnimatePresence>
+          {hasLabel ? <span className="sr-only">{label}</span> : null}
+        </output>
+      </TooltipTrigger>
+      {hasLabel ? <TooltipContent className="max-w-64">{label}</TooltipContent> : null}
     </Tooltip>
   );
 }
@@ -126,7 +136,7 @@ export function SaveIndicator({
         : phase === "saved"
           ? "Saved"
           : phase === "error"
-            ? `Not saved. ${error ?? ""}`.trim()
+            ? (error ?? "Not saved.")
             : undefined;
   return <StatusIcon tone={PHASE_TONE[phase]} label={label} className={className} />;
 }
@@ -162,7 +172,12 @@ export function WithIndicator({
   );
 }
 
-/** One short status line: icon plus a few words ("Verified by 2 agents"). */
+/**
+ * One short status line: icon plus a few words ("Verified by 2 agents").
+ * `busy` is the amber ring with shimmer text, only for real waits (a worker
+ * check, a device approval, the lead coming online); both go static under
+ * reduced motion. Phrasing content only, so it can sit in an `<output>`.
+ */
 export function StatusLine({
   tone,
   children,
@@ -173,13 +188,13 @@ export function StatusLine({
   className?: string;
 }) {
   return (
-    <p className={cn("flex items-center gap-2 text-sm", className)}>
+    <span className={cn("flex items-center gap-2 text-sm", className)}>
       <span className="inline-flex size-4 shrink-0 items-center justify-center">
         <Glyph tone={tone} />
       </span>
       <span className={cn("min-w-0", tone === "busy" && "shimmer-text font-medium")}>
         {children}
       </span>
-    </p>
+    </span>
   );
 }
