@@ -11,6 +11,7 @@
     "format": "biome format --write .",
     "check:tokens": "bash scripts/check-design-tokens.sh",
     "generate:catalog-schema": "bun run scripts/generate-catalog-schema.ts",
+    "og:render": "bun run og/render.tsx",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -50,11 +51,13 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.5",
+    "@resvg/resvg-js": "^2.6.2",
     "@types/dagre": "^0.7.54",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",
+    "satori": "^0.33.5",
     "typescript": "~5.9.3",
     "vite": "^7.3.5"
   }
