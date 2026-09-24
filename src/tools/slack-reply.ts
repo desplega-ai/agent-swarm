@@ -11,14 +11,14 @@ import {
 } from "@/be/db";
 import { getTaskCitations } from "@/be/task-citations";
 import { getSlackApp } from "@/slack/app";
-import { getTaskLink } from "@/slack/blocks";
+import { buildCaptionBlock, getTaskLink, getTaskUrl } from "@/slack/blocks";
 import { withAutoJoin } from "@/slack/channel-join";
 import { getAgentDisplayName, getAgentEmoji, markdownToSlack } from "@/slack/responses";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import {
-  renderTaskCitationSources,
   renderTaskCitations,
   stripInvalidTaskCitations,
+  taskCitationSourceGroups,
 } from "@/utils/task-citations";
 
 export const registerSlackReplyTool = (server: McpServer) => {
@@ -112,7 +112,14 @@ export const registerSlackReplyTool = (server: McpServer) => {
 
       try {
         const citations = taskId ? await getTaskCitations(taskId) : [];
-        const slackMessage = renderTaskCitations(markdownToSlack(message), citations);
+        // Sources go in a caption under the reply, never in the body or the
+        // notification text.
+        const slackMessage = renderTaskCitations(
+          markdownToSlack(message),
+          citations,
+          "slack",
+          false,
+        );
         const renderedBlocks = blocks?.map((block) =>
           JSON.parse(
             JSON.stringify(block, (key, value) =>
@@ -137,12 +144,15 @@ export const registerSlackReplyTool = (server: McpServer) => {
             },
           ]),
         ];
-        const sources = renderTaskCitationSources(JSON.stringify(blocks ?? []), citations);
-        if (renderedBlocks && sources) {
-          messageBlocks.push({
-            type: "context",
-            elements: [{ type: "mrkdwn", text: sources }],
+        for (const group of taskCitationSourceGroups(
+          blocks ? JSON.stringify(blocks) : message,
+          citations,
+        )) {
+          const caption = buildCaptionBlock(group.items, {
+            heading: group.heading,
+            ...(taskId ? { moreUrl: getTaskUrl(taskId) } : {}),
           });
+          if (caption) messageBlocks.push(caption);
         }
         if (messageBlocks.length > 50)
           return toolErr("At most 50 blocks are allowed including citation sources.");

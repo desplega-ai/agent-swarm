@@ -223,9 +223,20 @@ export class HumanInTheLoopExecutor extends BaseExecutor<
 
           const questionsSummary = config.questions.map((q) => `• ${q.label}`).join("\n");
 
-          const timeoutText = config.timeout
-            ? `\n⏱ _Timeout: ${formatTimeout(config.timeout.seconds)} — auto-rejects if not responded_`
-            : "";
+          // The deadline is a caption under the button, not part of the ask.
+          const timeoutCaption = config.timeout
+            ? [
+                {
+                  type: "context",
+                  elements: [
+                    {
+                      type: "mrkdwn",
+                      text: `⏱ Timeout: ${formatTimeout(config.timeout.seconds)} — auto-rejects if not responded`,
+                    },
+                  ],
+                },
+              ]
+            : [];
 
           const blocks = [
             {
@@ -239,7 +250,7 @@ export class HumanInTheLoopExecutor extends BaseExecutor<
               type: "section",
               text: {
                 type: "mrkdwn",
-                text: `*Questions:*\n${questionsSummary}${timeoutText}`,
+                text: `*Questions:*\n${questionsSummary}`,
               },
             },
             {
@@ -253,6 +264,7 @@ export class HumanInTheLoopExecutor extends BaseExecutor<
                 },
               ],
             },
+            ...timeoutCaption,
           ];
 
           const result = await slackApp.client.chat.postMessage({

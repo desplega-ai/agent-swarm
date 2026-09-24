@@ -29,7 +29,7 @@ import { slackContextKey } from "../tasks/context-key";
 import type { AgentTask, TaskAttachment } from "../types";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
-import { renderTaskCitations } from "../utils/task-citations";
+import { renderTaskCitations, taskCitationSourceGroups } from "../utils/task-citations";
 import {
   finalizeSlackMessageReaction,
   finalizeSlackSteerReactions,
@@ -38,6 +38,7 @@ import {
 } from "./ack";
 import { getSlackApp } from "./app";
 import {
+  buildCaptionBlock,
   getTaskLink,
   getTaskUrl,
   MAX_SECTION_LENGTH,
@@ -1009,7 +1010,7 @@ async function recordSlackDelivery(
   });
 }
 
-function attachmentLine(attachments: TaskAttachment[]): string | undefined {
+function attachmentCaption(attachments: TaskAttachment[]): string | undefined {
   const attachment = attachments.find((item) => item.isPrimary) ?? attachments[0];
   if (!attachment) return undefined;
   const url = taskAttachmentDisplayUrl(attachment);
@@ -1017,13 +1018,27 @@ function attachmentLine(attachments: TaskAttachment[]): string | undefined {
   const label = attachment.name
     .replace(/\s+/g, " ")
     .trim()
-    .replace(/[\\[\]()]/g, "\\$&");
-  // Keep the Markdown destination intact without changing existing URL escapes.
-  const destination = url
-    .replace(/[\s\\<>]/g, encodeURIComponent)
-    .replace(/\(/g, "%28")
-    .replace(/\)/g, "%29");
-  return `📎 [${label}](${destination})`;
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  // Keep the mrkdwn link destination intact without changing existing URL escapes.
+  const destination = url.replace(/[\s\\<>|]/g, encodeURIComponent);
+  return `📎 <${destination}|${label}>`;
+}
+
+/**
+ * Secondary metadata for an outcome card, as captions (`context` blocks)
+ * under the answer: cited sources, general sources, then the primary
+ * attachment. `content` is the unrendered answer, whose `[citation:N]`
+ * markers decide which sources count as cited.
+ */
+async function outcomeCaptionBlocks(task: AgentTask, content: string): Promise<unknown[]> {
+  const moreUrl = getTaskUrl(task.id);
+  const sources = taskCitationSourceGroups(content, await getTaskCitations(task.id)).map((group) =>
+    buildCaptionBlock(group.items, { heading: group.heading, moreUrl }),
+  );
+  const attachment = attachmentCaption(await getSlackOutputAttachments(task.id));
+  return [...sources, attachment ? buildCaptionBlock([attachment]) : undefined].filter(Boolean);
 }
 
 type MarkdownFence = { character: "`" | "~"; length: number };
@@ -1074,12 +1089,11 @@ function safeMarkdownBoundary(markdown: string, maxLength: number): number {
   return lastLineBoundary || lastWordBoundary;
 }
 
-function outcomePresentation(
-  task: AgentTask,
-  content: string,
-  attachment: string | undefined,
-): string {
-  const body = normalizeV2Text([content, attachment].filter(Boolean).join("\n\n"));
+/** The answer as Markdown, with citation markers resolved and no sources appended. */
+async function outcomePresentation(task: AgentTask, content: string): Promise<string> {
+  const body = normalizeV2Text(
+    renderTaskCitations(content, await getTaskCitations(task.id), "slack", false),
+  );
   if (body.length <= MAX_OUTCOME_MARKDOWN_LENGTH) return body;
 
   const suffix = `\n\n… [View full task output](${getTaskUrl(task.id)})`;
@@ -1154,19 +1168,20 @@ export async function streamOutcomeCard(
 
   const tasks = await getSlackTasksInThread(task.slackChannelId, task.slackThreadTs);
   const duration = formatV2Duration(new Date(task.createdAt), terminalEnd(task, new Date()));
-  const attachment = attachmentLine(await getSlackOutputAttachments(task.id));
   // Re-read slackReplySent rather than trusting the caller's snapshot: it can flip
   // (via the slack-reply tool) between processSlackRenderV2's task fetch and the
   // Slack round trips in the outer render loop that run before this function is
   // called for the task.
   const slackReplySent = (await getTaskById(task.id))?.slackReplySent ?? task.slackReplySent;
   const content = await (options?.buildContent ?? outcomeContent)(task, slackReplySent);
-  const presentation = outcomePresentation(
-    task,
-    renderTaskCitations(content, await getTaskCitations(task.id)),
-    attachment,
-  );
+  const presentation = await outcomePresentation(task, content);
   if (!presentation) throw new Error(`Outcome presentation is empty for task ${task.id}`);
+  // Sources, attachments, and the footer are captions under the answer, never
+  // part of the streamed text, so notifications carry the answer alone.
+  const captions = [
+    ...(await outcomeCaptionBlocks(task, content)),
+    ...(await outcomeFooter(task, tasks, duration)),
+  ];
 
   const startPayload: Record<string, unknown> = {
     channel: task.slackChannelId,
@@ -1223,6 +1238,7 @@ export async function streamOutcomeCard(
           channel: task.slackChannelId,
           thread_ts: task.slackThreadTs,
           text: presentation,
+          blocks: [{ type: "markdown", text: presentation }, ...captions],
           ...(startPayload.username ? { username: startPayload.username } : {}),
           ...(startPayload.icon_emoji ? { icon_emoji: startPayload.icon_emoji } : {}),
         });
@@ -1254,7 +1270,7 @@ export async function streamOutcomeCard(
       await callSlackWithRetry(app.client, "chat.stopStream", {
         channel: task.slackChannelId,
         ts: outcome.ts,
-        blocks: await outcomeFooter(task, tasks, duration),
+        blocks: captions,
       });
     } catch (error) {
       // A process may have stopped the stream before it persisted the final
@@ -1287,18 +1303,18 @@ export async function streamOutcomeCard(
  * A wake-up that deferred again does post its own card — the next ⏳ in the
  * chain, which its own wake-up resolves — so this card only points at it.
  */
-async function resolvedDeferralContent(wake: AgentTask): Promise<string> {
+async function resolvedDeferralContent(
+  wake: AgentTask,
+): Promise<{ text: string; blocks?: unknown[] }> {
   if (!isDeferredTask(wake)) {
     const content = await outcomeContent(wake, wake.slackReplySent);
-    return outcomePresentation(
-      wake,
-      renderTaskCitations(content, await getTaskCitations(wake.id)),
-      attachmentLine(await getSlackOutputAttachments(wake.id)),
-    );
+    const presentation = await outcomePresentation(wake, content);
+    const captions = await outcomeCaptionBlocks(wake, content);
+    return { text: presentation, blocks: [{ type: "markdown", text: presentation }, ...captions] };
   }
   const card = await getSlackOutcomeMessage(wake.id);
   const pointer = card?.permalink ? ` — ${card.permalink}` : ".";
-  return `↪️ Resumed by ${await agentDisplayNameFor(wake)} and deferred again${pointer}`;
+  return { text: `↪️ Resumed by ${await agentDisplayNameFor(wake)} and deferred again${pointer}` };
 }
 
 /**
@@ -1364,7 +1380,7 @@ export async function refreshResolvedDeferralCards(): Promise<void> {
       await callSlackWithRetry(app.client, "chat.update", {
         channel: card.channelId,
         ts: card.ts,
-        text: content,
+        ...content,
       });
       await markSlackDeferralResolved(card.id);
       deferralRefreshAttempts.delete(card.id);
