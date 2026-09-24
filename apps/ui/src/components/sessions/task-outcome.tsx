@@ -5,9 +5,9 @@
  * it without importing each other.
  */
 
-import { renderTaskCitations } from "../../../../../src/utils/task-citations";
 import { Check, Copy } from "lucide-react";
 import { Streamdown } from "streamdown";
+import { renderTaskCitations } from "../../../../../src/utils/task-citations";
 import "streamdown/styles.css";
 import type { AgentTask } from "@/api/types";
 import { Button } from "@/components/ui/button";
