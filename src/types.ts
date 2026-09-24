@@ -1426,6 +1426,8 @@ export const AgentLogEventTypeSchema = z.enum([
   "task_authorization_rejected",
   "task_recovery_authorization",
   "task_released",
+  // store-progress refused a completion once because its citations were inaccurate
+  "task_citation_check_refused",
   "channel_message",
   // Service registry events
   "service_registered",

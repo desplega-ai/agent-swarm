@@ -3,6 +3,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import {
   completeTask,
+  createLogEntry,
   failTask,
   getAgentById,
   getDbClient,
@@ -15,6 +16,7 @@ import {
 import {
   CitationInputSchema,
   getTaskCitations,
+  hasTaskCitationCheckRefusal,
   MAX_TASK_CITATIONS,
   upsertTaskCitations,
 } from "@/be/task-citations";
@@ -27,7 +29,7 @@ import {
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { AgentTaskStatusSchema, AttachmentInputSchema, isTerminalTaskStatus } from "@/types";
 import { scrubSecrets } from "@/utils/secret-scrubber";
-import { taskCitationWarnings } from "@/utils/task-citations";
+import { taskCitationIssues, taskCitationWarnings } from "@/utils/task-citations";
 
 // Phase 11: the `cost` / `costData` field was removed from this tool's input
 // schema. Adapters (claude/codex/pi/opencode/devin/claude-managed) are the
@@ -129,7 +131,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
           .catch([])
           .optional()
           .describe(
-            "Claim sources, upserted by index across calls. Reference in output with [citation:N]. Missing entries and verification failures remove citation markers and sources from rendered output; they never block completion. At most 50 citations per call/task, refs up to 2048 characters, labels up to 200. Invalid or oversized batches are ignored; existing indices can still be updated at capacity.",
+            'Claim sources, upserted by index across calls. Reference each one in output with [citation:N], or set general: true for a source that backs the whole answer (it renders under "General sources"). ref per kind: task = task UUID; memory = memory UUID (optional quote must appear verbatim in it); github = owner/repo#N, owner/repo@<sha>, or a github.com pull, issues, or commit URL; slack = permalink or channel/ts; agent-fs = file path; page = page id; script-run = script run id; url = http(s) URL. The first completing call is refused, and the task stays in progress, if a marker has no entry, a citation fails validation, or a non-general citation is unreferenced; the response lists each problem. After one refusal, completion proceeds and those markers and sources are dropped from rendered output. At most 50 citations per call/task, refs up to 2048 characters, labels up to 200. Invalid or oversized batches are ignored; existing indices can still be updated at capacity.',
           ),
         persistMemory: z
           .boolean()
@@ -429,6 +431,44 @@ export const registerStoreProgressTool = (server: McpServer) => {
           );
           if (outputValidationError) {
             return { success: false, message: outputValidationError };
+          }
+        }
+
+        // Citation accuracy: refuse the first inaccurate completion so the
+        // author fixes it while the context is fresh. Refuse at most once per
+        // task, so a citation the author cannot repair never strands the task.
+        // Progress, attachments, and citations from this call still commit.
+        if (status === "completed" && existingTask.agentId === agent.id) {
+          const taskCitations = await getTaskCitations(taskId);
+          const issues = taskCitations.length
+            ? taskCitationIssues(output ?? existingTask.output ?? "", taskCitations)
+            : undefined;
+          const problems = issues
+            ? [
+                ...issues.missingEntries.map(
+                  (index) => `[citation:${index}] is in the output but has no citation entry.`,
+                ),
+                ...issues.invalid.map(
+                  ({ index, reason }) => `Citation ${index} fails validation: ${reason}.`,
+                ),
+                ...issues.unreferenced.map(
+                  (index) =>
+                    `Citation ${index} is not referenced in the output; add [citation:${index}] where it supports a claim, or set general: true if it backs the whole answer.`,
+                ),
+              ]
+            : [];
+          if (problems.length && !(await hasTaskCitationCheckRefusal(taskId))) {
+            await createLogEntry({
+              eventType: "task_citation_check_refused",
+              agentId: agent.id,
+              taskId,
+              newValue: problems.join("\n"),
+            });
+            return {
+              success: false,
+              task: existingTask,
+              message: `Completion refused: citations do not match the output. The task stays ${existingTask.status}. Fix these, then call store-progress with status "completed" again (resend citations by index to correct them):\n- ${problems.join("\n- ")}\nThis check refuses once per task; the next completion is accepted and unfixed citations are dropped or listed under "General sources".`,
+            };
           }
         }
 

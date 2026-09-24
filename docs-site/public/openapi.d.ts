@@ -13822,6 +13822,7 @@ export interface paths {
                                     ref: string;
                                     label?: string | null;
                                     quote?: string | null;
+                                    general?: boolean;
                                     resolvedUrl: string | null;
                                     /** @enum {string} */
                                     verified: "true" | "false" | "unchecked";
@@ -13837,6 +13838,7 @@ export interface paths {
                                     ref: string;
                                     label?: string | null;
                                     quote?: string | null;
+                                    general?: boolean;
                                     resolvedUrl: string | null;
                                     /** @enum {string} */
                                     verified: "true" | "false" | "unchecked";
@@ -16757,6 +16759,7 @@ export interface paths {
                                 ref: string;
                                 label?: string | null;
                                 quote?: string | null;
+                                general?: boolean;
                                 resolvedUrl: string | null;
                                 /** @enum {string} */
                                 verified: "true" | "false" | "unchecked";
@@ -21784,7 +21787,7 @@ export interface components {
             /** Format: uuid */
             id: string;
             /** @enum {string} */
-            eventType: "agent_joined" | "agent_status_change" | "agent_left" | "task_created" | "task_status_change" | "task_progress" | "task_steering" | "task_offered" | "task_accepted" | "task_rejected" | "task_claimed" | "task_claim_rejected_affinity" | "task_dispatch_rejected_affinity" | "task_authorization_rejected" | "task_recovery_authorization" | "task_released" | "channel_message" | "service_registered" | "service_unregistered" | "service_status_change" | "budget.upserted" | "budget.deleted" | "pricing.inserted" | "pricing.deleted" | "pricing.refresh" | "pricing.refresh.failed" | "task_superseded" | "slack_delivery";
+            eventType: "agent_joined" | "agent_status_change" | "agent_left" | "task_created" | "task_status_change" | "task_progress" | "task_steering" | "task_offered" | "task_accepted" | "task_rejected" | "task_claimed" | "task_claim_rejected_affinity" | "task_dispatch_rejected_affinity" | "task_authorization_rejected" | "task_recovery_authorization" | "task_released" | "task_citation_check_refused" | "channel_message" | "service_registered" | "service_unregistered" | "service_status_change" | "budget.upserted" | "budget.deleted" | "pricing.inserted" | "pricing.deleted" | "pricing.refresh" | "pricing.refresh.failed" | "task_superseded" | "slack_delivery";
             agentId?: string;
             taskId?: string;
             oldValue?: string;

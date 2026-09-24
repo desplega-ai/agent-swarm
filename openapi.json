@@ -4150,6 +4150,7 @@
               "task_authorization_rejected",
               "task_recovery_authorization",
               "task_released",
+              "task_citation_check_refused",
               "channel_message",
               "service_registered",
               "service_unregistered",
@@ -36478,6 +36479,9 @@
                                       "null"
                                     ]
                                   },
+                                  "general": {
+                                    "type": "boolean"
+                                  },
                                   "resolvedUrl": {
                                     "type": [
                                       "string",
@@ -36571,6 +36575,9 @@
                                         "string",
                                         "null"
                                       ]
+                                    },
+                                    "general": {
+                                      "type": "boolean"
                                     },
                                     "resolvedUrl": {
                                       "type": [
@@ -42941,6 +42948,9 @@
                                   "string",
                                   "null"
                                 ]
+                              },
+                              "general": {
+                                "type": "boolean"
                               },
                               "resolvedUrl": {
                                 "type": [

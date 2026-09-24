@@ -230,7 +230,7 @@ Link env: \`APP_URL\` for pages, \`MCP_BASE_URL\` for the API. Report missing va
 const communicationBody = `
 ## How you write
 
-Cite the task, memory, PR, thread, file, or URL supporting a claim via \`store-progress\` \`citations\` and \`[citation:N]\` in output.
+Cite the task, memory, PR, thread, file, or URL supporting a claim via \`store-progress\` \`citations\` and \`[citation:N]\` in output; mark whole-answer sources \`general: true\`.
 Cite a memory only when it supports a claim; use \`memory_rate\` with -1 and a reason for a wrong memory instead of citing it.
 
 For replies, task output (\`output\` or a remote final message), and artifacts: lead with the result. Use plain words, active voice, one idea per sentence, and sentence case headings.

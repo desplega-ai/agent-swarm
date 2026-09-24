@@ -15,7 +15,11 @@ import { getTaskLink } from "@/slack/blocks";
 import { withAutoJoin } from "@/slack/channel-join";
 import { getAgentDisplayName, getAgentEmoji, markdownToSlack } from "@/slack/responses";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
-import { renderTaskCitations, stripInvalidTaskCitations } from "@/utils/task-citations";
+import {
+  renderTaskCitationSources,
+  renderTaskCitations,
+  stripInvalidTaskCitations,
+} from "@/utils/task-citations";
 
 export const registerSlackReplyTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -133,7 +137,7 @@ export const registerSlackReplyTool = (server: McpServer) => {
             },
           ]),
         ];
-        const sources = renderTaskCitations("", citations).trim();
+        const sources = renderTaskCitationSources(JSON.stringify(blocks ?? []), citations);
         if (renderedBlocks && sources) {
           messageBlocks.push({
             type: "context",
