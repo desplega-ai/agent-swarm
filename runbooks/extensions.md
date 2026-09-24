@@ -263,8 +263,8 @@ The dispatcher records an `error` or `timeout` run and continues the core operat
 Each failure increments the extension's consecutive failure count.
 Any successful handler resets the count.
 `EXTENSION_MAX_CONSECUTIVE_FAILURES` controls the limit and defaults to 5.
-The final failure sets `status` to `auto-disabled` and unregisters the extension.
-A lead or operator must enable the extension again.
+The final failure sets `status` to `auto-disabled`, unregisters the extension, and pauses its schedules through `setAssetsEnabled(id, false)`.
+A lead or operator must enable the extension again, which restores them.
 
 The run log keeps the newest 500 records per extension.
 The boot path and reload poll prune older records.
@@ -329,7 +329,6 @@ bun run e2e --only extensions
 - Worker runtime hooks do not run.
 - Extensions install only from the catalog. Inline bundles are rejected.
 - Scripts and schedules are the only asset kinds. Validation rejects non-empty `assets.skills` and `assets.workflows`.
-- Auto-disable after consecutive hook failures does not pause schedules. Only an explicit disable pauses them.
 - Scheduled script runs do not check extension hook state.
 - The loader supports only one hooks file and no relative imports.
 - Bun retains imported modules in its registry after source disposal.
