@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import * as db from "../be/db";
 import {
   closeDb,
   createAgent,
@@ -30,6 +31,7 @@ import {
 } from "../extensions/lifecycle";
 import { dispatchScheduleTarget } from "../scheduler/scheduler";
 import * as scriptLoader from "../scripts-runtime/loader";
+import { telemetry } from "../telemetry";
 import type { ExtensionManifest } from "../types";
 
 const TEST_DB_PATH = "./test-extensions-assets.sqlite";
@@ -467,6 +469,89 @@ describe("extension assets", () => {
       install(bundle({ skill: SKILL.replace("name: digest-guide", "name: guide") })),
     ).rejects.toThrow('name "guide" must start with "digest-"');
     expect(await getExtensionByName("digest")).toBeNull();
+  });
+
+  test("dropping a workflow description keeps the workflow pristine", async () => {
+    const { extension } = await install(bundle({ workflow: WORKFLOW }));
+    const bare = WORKFLOW.replace("description: Collect on demand\n", "");
+    await install(bundle({ workflow: bare, version: "2.0.0" }));
+    await activateVersion(extension.id, 2);
+    expect((await listWorkflows()).find((w) => w.name === "digest-report")?.description).toBe("");
+
+    // The update wrote "" for the missing description: still the extension's own write.
+    const again = await install(bundle({ workflow: bare, version: "3.0.0" }), true);
+    expect(again.assets).toMatchObject({ updated: [], skipped: [] });
+    expect(await uninstallExtension(extension.id)).toMatchObject({
+      deleted: expect.arrayContaining([{ kind: "workflow", name: "digest-report" }]),
+      detached: [],
+    });
+  });
+
+  test("a rolled-back install emits no workflow telemetry", async () => {
+    const events: string[] = [];
+    const workflowSpy = spyOn(telemetry, "workflow").mockImplementation((event) => {
+      events.push(event);
+    });
+    // The skill is written after the workflow, so this fails the install mid-transaction.
+    const filesSpy = spyOn(db, "upsertSkillFiles").mockRejectedValue(
+      new Error("skill write failed"),
+    );
+    try {
+      await expect(install(bundle({ workflow: WORKFLOW, skill: SKILL }))).rejects.toThrow(
+        "skill write failed",
+      );
+      expect((await listWorkflows()).map((w) => w.name)).not.toContain("digest-report");
+      for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(events).toEqual([]);
+
+      filesSpy.mockRestore();
+      await install(bundle({ workflow: WORKFLOW, skill: SKILL }));
+      for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(events).toEqual(["created"]);
+    } finally {
+      filesSpy.mockRestore();
+      workflowSpy.mockRestore();
+    }
+  });
+
+  test.each([
+    ["description", { description: "edited by a user" }],
+    ["scope", { scope: "swarm" as const }],
+    ["model", { model: "opus" }],
+    ["allowedTools", { allowedTools: "Read" }],
+    ["userInvocable", { userInvocable: false }],
+  ])("a skill whose %s a user edited is kept on upgrade and detached on uninstall", async (_field, edit) => {
+    const { extension } = await install(bundle({ skill: SKILL }));
+    const skill = await getDbClient().get<{ id: string }>(
+      "SELECT id FROM skills WHERE name = 'digest-guide'",
+    );
+    await updateSkill(skill!.id, edit);
+
+    const upgraded = await install(
+      bundle({ skill: SKILL.replace("# Digest guide", "# Digest guide v2"), version: "2.0.0" }),
+      true,
+    );
+    expect(upgraded.assets?.skipped).toEqual([{ kind: "skill", name: "digest-guide" }]);
+    expect(await uninstallExtension(extension.id)).toMatchObject({
+      detached: [{ kind: "skill", name: "digest-guide" }],
+    });
+    expect(
+      await getDbClient().get("SELECT content FROM skills WHERE name = 'digest-guide'"),
+    ).toEqual({ content: SKILL });
+  });
+
+  test("an upgrade clears skill metadata the new version drops", async () => {
+    const withModel = SKILL.replace("description:", "model: opus\ndescription:");
+    const { extension } = await install(bundle({ skill: withModel }));
+    await install(bundle({ skill: SKILL, version: "2.0.0" }));
+    await activateVersion(extension.id, 2);
+    expect(await getDbClient().get("SELECT model FROM skills WHERE name = 'digest-guide'")).toEqual(
+      {
+        model: null,
+      },
+    );
+    const again = await install(bundle({ skill: SKILL, version: "3.0.0" }), true);
+    expect(again.assets).toMatchObject({ updated: [], skipped: [] });
   });
 
   test("uninstall detaches an edited workflow and keeps it", async () => {

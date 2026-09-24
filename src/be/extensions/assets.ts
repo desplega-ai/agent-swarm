@@ -21,6 +21,7 @@ import type {
   ExtensionManifest,
   ExtensionWorkflowFile,
   ScheduledTask,
+  Skill,
   Workflow,
 } from "../../types";
 import { getExecutorRegistry } from "../../workflows";
@@ -87,11 +88,34 @@ type WorkflowSpec = {
 type WorkflowPlan = { kind: "workflow"; name: string; spec: WorkflowSpec; hash: string };
 
 type SkillFileSpec = { path: string; content: string };
+/**
+ * Every skill field `updateSkill` can change, except `isEnabled`. A user edit to any
+ * of them (description, scope, model settings, ...) must mark the skill as edited.
+ */
+type SkillSpec = {
+  name: string;
+  description: string;
+  content: string;
+  scope: Skill["scope"];
+  systemDefault: boolean;
+  allowedTools: string | null;
+  model: string | null;
+  effort: string | null;
+  context: string | null;
+  agent: string | null;
+  disableModelInvocation: boolean;
+  userInvocable: boolean;
+  sourceUrl: string | null;
+  sourceRepo: string | null;
+  sourcePath: string | null;
+  sourceBranch: string;
+  sourceHash: string | null;
+  isComplex: boolean;
+};
 type SkillPlan = {
   kind: "skill";
   name: string;
-  content: string;
-  parsed: ParsedSkill;
+  spec: SkillSpec;
   files: SkillFileSpec[];
   hash: string;
 };
@@ -190,7 +214,8 @@ function liveScheduleSpec(schedule: ScheduledTask): ScheduleSpec {
 function liveWorkflowSpec(workflow: Workflow): WorkflowSpec {
   return {
     name: workflow.name,
-    description: workflow.description ?? null,
+    // An update writes "" for a missing description; hash it as missing.
+    description: workflow.description || null,
     definition: workflow.definition,
     triggers: workflow.triggers ?? [],
     cooldown: workflow.cooldown ?? null,
@@ -199,9 +224,56 @@ function liveWorkflowSpec(workflow: Workflow): WorkflowSpec {
   };
 }
 
-function skillHash(content: string, files: SkillFileSpec[]): string {
-  return hashOf({
+function skillSpecOf(content: string, parsed: ParsedSkill): SkillSpec {
+  return {
+    name: parsed.name,
+    description: parsed.description,
     content,
+    // Global, not swarm: visible only to agents it is installed on.
+    scope: "global",
+    systemDefault: false,
+    allowedTools: parsed.allowedTools ?? null,
+    model: parsed.model ?? null,
+    effort: parsed.effort ?? null,
+    context: parsed.context ?? null,
+    agent: parsed.agent ?? null,
+    disableModelInvocation: parsed.disableModelInvocation === true,
+    userInvocable: parsed.userInvocable !== false,
+    sourceUrl: null,
+    sourceRepo: null,
+    sourcePath: null,
+    sourceBranch: "main",
+    sourceHash: null,
+    isComplex: false,
+  };
+}
+
+function liveSkillSpec(skill: Skill): SkillSpec {
+  return {
+    name: skill.name,
+    description: skill.description,
+    content: skill.content,
+    scope: skill.scope,
+    systemDefault: skill.systemDefault,
+    allowedTools: skill.allowedTools,
+    model: skill.model,
+    effort: skill.effort,
+    context: skill.context,
+    agent: skill.agent,
+    disableModelInvocation: skill.disableModelInvocation,
+    userInvocable: skill.userInvocable,
+    sourceUrl: skill.sourceUrl,
+    sourceRepo: skill.sourceRepo,
+    sourcePath: skill.sourcePath,
+    sourceBranch: skill.sourceBranch,
+    sourceHash: skill.sourceHash,
+    isComplex: skill.isComplex,
+  };
+}
+
+function skillHash(spec: SkillSpec, files: SkillFileSpec[]): string {
+  return hashOf({
+    ...spec,
     files: [...files].sort((a, b) => a.path.localeCompare(b.path)).map((f) => [f.path, f.content]),
   });
 }
@@ -287,7 +359,7 @@ export async function preflightAssets(
     }
     const spec: WorkflowSpec = {
       name: parsed.name,
-      description: parsed.description ?? null,
+      description: parsed.description || null,
       definition: parsed.definition,
       triggers: parsed.triggers ?? [],
       cooldown: parsed.cooldown ?? null,
@@ -323,13 +395,13 @@ export async function preflightAssets(
         content: fileContent,
       }))
       .sort((a, b) => a.path.localeCompare(b.path));
+    const spec = skillSpecOf(content, parsed);
     skills.push({
       kind: "skill",
       name: parsed.name,
-      content,
-      parsed,
+      spec,
       files: skillFiles,
-      hash: skillHash(content, skillFiles),
+      hash: skillHash(spec, skillFiles),
     });
   }
 
@@ -549,23 +621,31 @@ const skillAdapter: Adapter<SkillPlan> = {
       path: file.path,
       content: file.content,
     }));
-    return { id: skill.id, hash: skillHash(skill.content, files) };
+    return { id: skill.id, hash: skillHash(liveSkillSpec(skill), files) };
   },
   async create(plan, agentId) {
+    const { spec } = plan;
     const skill = await createSkill({
-      ...skillFields(plan),
+      ...spec,
+      allowedTools: spec.allowedTools ?? undefined,
+      model: spec.model ?? undefined,
+      effort: spec.effort ?? undefined,
+      context: spec.context ?? undefined,
+      agent: spec.agent ?? undefined,
+      sourceUrl: spec.sourceUrl ?? undefined,
+      sourceRepo: spec.sourceRepo ?? undefined,
+      sourcePath: spec.sourcePath ?? undefined,
+      sourceHash: spec.sourceHash ?? undefined,
       type: "personal",
-      // Global, not swarm: visible only to agents it is installed on.
-      scope: "global",
       ownerAgentId: agentId,
-      systemDefault: false,
       isEnabled: false,
     });
     await upsertSkillFiles(skill.id, plan.files);
     return skill.id;
   },
   async update(plan, id) {
-    await updateSkill(id, skillFields(plan));
+    // The full spec, so a field the new version drops is cleared, not kept.
+    await updateSkill(id, plan.spec);
     const wanted = new Set(plan.files.map((file) => file.path));
     for (const file of await getSkillFiles(id)) {
       if (!wanted.has(file.path)) await deleteSkillFile(id, file.path);
@@ -584,22 +664,6 @@ const skillAdapter: Adapter<SkillPlan> = {
     },
   },
 };
-
-function skillFields(plan: SkillPlan) {
-  const { parsed } = plan;
-  return {
-    name: parsed.name,
-    description: parsed.description,
-    content: plan.content,
-    allowedTools: parsed.allowedTools,
-    model: parsed.model,
-    effort: parsed.effort,
-    context: parsed.context,
-    agent: parsed.agent,
-    disableModelInvocation: parsed.disableModelInvocation,
-    userInvocable: parsed.userInvocable,
-  };
-}
 
 const ADAPTERS: { [K in ExtensionAssetKind]: Adapter<Extract<Plan, { kind: K }>> } = {
   script: scriptAdapter,

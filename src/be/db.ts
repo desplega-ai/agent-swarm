@@ -7178,11 +7178,14 @@ export async function createWorkflow(
   );
   if (!row) throw new Error("Failed to create workflow");
   const workflow = rowToWorkflow(row);
-  telemetry.workflow("created", {
-    workflowId: workflow.id,
-    nodeCount: workflow.definition.nodes.length,
-    ...(source ? { source } : {}),
-  });
+  // afterCommit: a caller's transaction that rolls back must not report the workflow.
+  getDbClient().afterCommit(() =>
+    telemetry.workflow("created", {
+      workflowId: workflow.id,
+      nodeCount: workflow.definition.nodes.length,
+      ...(source ? { source } : {}),
+    }),
+  );
   return workflow;
 }
 
@@ -7388,10 +7391,13 @@ export async function deleteWorkflow(id: string, source?: "api" | "mcp"): Promis
   const result = await client.run("DELETE FROM workflows WHERE id = ?", [id]);
   const deleted = result.changes > 0;
   if (deleted) {
-    telemetry.workflow("deleted", {
-      workflowId: id,
-      ...(source ? { source } : {}),
-    });
+    // afterCommit: a caller's transaction that rolls back must not report the delete.
+    getDbClient().afterCommit(() =>
+      telemetry.workflow("deleted", {
+        workflowId: id,
+        ...(source ? { source } : {}),
+      }),
+    );
   }
   return deleted;
 }
@@ -10132,9 +10138,23 @@ export async function createSkill(data: SkillInsert): Promise<Skill> {
   return rowToSkill(row);
 }
 
+/** Optional skill fields; `updateSkill` writes null to clear them. */
+type NullableSkillField =
+  | "allowedTools"
+  | "model"
+  | "effort"
+  | "context"
+  | "agent"
+  | "sourceUrl"
+  | "sourceRepo"
+  | "sourcePath"
+  | "sourceHash";
+
 export async function updateSkill(
   id: string,
-  updates: Partial<SkillInsert> & { isEnabled?: boolean; lastFetchedAt?: string },
+  updates: Partial<Omit<SkillInsert, NullableSkillField>> & {
+    [K in NullableSkillField]?: string | null;
+  } & { isEnabled?: boolean; lastFetchedAt?: string },
 ): Promise<Skill | null> {
   const existing = await getSkillById(id);
   if (!existing) return null;
