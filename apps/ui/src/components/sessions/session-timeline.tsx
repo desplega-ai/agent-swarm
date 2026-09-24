@@ -25,11 +25,11 @@ import { useAgent } from "@/api/hooks/use-agents";
 import type { AgentTask } from "@/api/types";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { EmptyState } from "@/components/shared/empty-state";
+import { TERMINAL_STATUSES } from "@/lib/task-activity";
 import { cn, formatRelativeTime } from "@/lib/utils";
-import { ParallelGroup, TaskCard, TaskOutcome } from "./task-card";
+import { ParallelGroup, TaskCard } from "./task-card";
+import { TaskOutcome } from "./task-outcome";
 import { UserPromptBubble } from "./user-prompt-bubble";
-
-const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled", "superseded"]);
 
 /**
  * `true` for the orchestrator's auto-spawned review follow-ups —

@@ -2,8 +2,10 @@
 
 Remotion project used to render the videos under `assets/`:
 
-- `DailyEvolution` → `../agent-swarm.mp4` (README hero) — the "compounding memory" pitch
+- `DailyEvolution` → `../agent-swarm.mp4` (the README hero until 2026-09): the "compounding memory" pitch
 - `SlackToPR` → `../agent-swarm-slack-to-pr.mp4` — dramatizes how a Slack thread became [PR #350](https://github.com/desplega-ai/agent-swarm/pull/350)
+
+The current README hero, `../agent-swarm-every-team.mp4` ("Every team, one swarm"), is not rendered here. It comes from the `readme` template in the Agent Swarm videos monorepo (desplega-ai/agent-swarm-videos).
 
 Both are low-fi wireframes with stubbed data. Design tokens mirror `apps/ui/` (Space Grotesk + Space Mono, shadcn Zinc dark palette, amber primary).
 

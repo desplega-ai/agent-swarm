@@ -10,6 +10,7 @@ import {
   resolveApprovalRequest,
   updateWorkflowRun,
 } from "../be/db";
+import { loadCompletedStepRouting } from "./completed-step-routing";
 import { FAILED_TASK_OUTPUT_PREFIX } from "./constants";
 import { findReadyNodes, isWorkflowRunActive, walkGraph } from "./engine";
 import type { ExecutorRegistry } from "./executors/registry";
@@ -74,8 +75,14 @@ async function recoverRunningRuns(registry: ExecutorRegistry): Promise<number> {
       const completedNodeIds = new Set(await getCompletedStepNodeIds(runId));
       const ctx = (run.context ?? {}) as Record<string, unknown>;
 
-      // Find the next nodes that are ready to execute
-      const readyNodes = findReadyNodes(workflow.definition, completedNodeIds);
+      // Rebuild the same selected-port edges as the live walker. Structural
+      // successors include untaken branches and can replay completed joins.
+      const { activeEdges } = await loadCompletedStepRouting(
+        workflow.definition,
+        runId,
+        completedNodeIds,
+      );
+      const readyNodes = findReadyNodes(workflow.definition, completedNodeIds, activeEdges);
       // DB reads above yield; a trigger/resume may have acquired the run meanwhile.
       if (isWorkflowRunActive(runId)) continue;
       if (readyNodes.length === 0) {

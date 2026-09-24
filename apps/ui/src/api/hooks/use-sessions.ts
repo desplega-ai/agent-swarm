@@ -13,6 +13,7 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { sessionRefetchInterval } from "@/lib/task-activity";
 import { api } from "../client";
 
 export interface UseSessionsOptions {
@@ -47,6 +48,9 @@ export function useSession(rootTaskId: string | undefined) {
     queryKey: ["session", rootTaskId],
     queryFn: () => api.getSession(rootTaskId!),
     enabled: !!rootTaskId,
+    // Replaces the app-wide 10s default: 4s while any task is active so live
+    // progress keeps up, back to 10s once the chain settles (never stops).
+    refetchInterval: (query) => sessionRefetchInterval(query.state.data),
   });
 }
 
