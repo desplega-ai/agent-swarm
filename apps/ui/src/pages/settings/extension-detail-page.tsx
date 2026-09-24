@@ -723,9 +723,9 @@ export default function ExtensionDetailPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete {extension.name}?</AlertDialogTitle>
             <AlertDialogDescription>
-              Removes the extension. Scripts and schedules it installed are deleted, except ones
-              edited since install, which are kept and detached. You can reinstall it from the
-              catalog.
+              Removes the extension. The scripts, schedules, workflows, and skills it installed are
+              deleted, except ones edited since install, which are kept and detached. You can
+              reinstall it from the catalog.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
