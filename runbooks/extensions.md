@@ -334,6 +334,7 @@ The boundary skips that extension during its own task creation.
 
 The database stores the raw `configJson` value.
 REST and MCP read paths call `scrubSecrets` before they return it.
+Bundled scripts and workflows have no `ctx.config`. They read the scrubbed `configJson` from `extension-list` (`ctx.swarm.extension_list`) and apply their own defaults, since the stored value is the raw input, not the parsed schema output.
 PATCH accepts previously returned `[REDACTED:name]` placeholders at any depth (objects and arrays).
 The route restores each matching stored value before it validates the configuration.
 
