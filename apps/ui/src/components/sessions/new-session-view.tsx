@@ -18,7 +18,7 @@ import {
 } from "./compose-attachment-upload";
 import { ComposerDock } from "./composer-dock";
 
-const SUGGESTIONS = [
+export const SUGGESTIONS = [
   "Investigate a flaky test in the auth suite",
   "Spawn a research crew on a new library",
   "Review the latest open PRs",
