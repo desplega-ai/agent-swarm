@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle } from "lucide-react";
-import { type ComponentType, Suspense, useEffect, useRef, useState } from "react";
+import { type ComponentType, useEffect, useRef, useState } from "react";
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { api } from "@/api/client";
@@ -9,6 +9,7 @@ import {
   ONBOARDING_QUERY_KEY,
   ONBOARDING_STEPS,
   onboardingResumeStep,
+  onboardingSettledCount,
   useOnboarding,
   useOnboardingAction,
 } from "@/api/hooks/use-onboarding";
@@ -102,17 +103,19 @@ function footerNote(step: OnboardingStepId, status: OnboardingStepStatus): strin
 
 /** First-run onboarding: a full page outside the app shell (no sidebar, no header). */
 export default function SetupPage() {
+  const { pendingConnection } = useConfig();
+  // A connection from URL params is not stored yet, and the API client only
+  // reads stored connections. The shell's `NameConnectionModal` stores it.
+  if (pendingConnection) return <Navigate to="/" replace />;
   return (
     <ErrorBoundary>
-      <Suspense fallback={<FullPageLoading />}>
-        <SetupFlow />
-      </Suspense>
+      <SetupFlow />
     </ErrorBoundary>
   );
 }
 
 function SetupFlow() {
-  const { isConfigured } = useConfig();
+  const { config, isConfigured } = useConfig();
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -120,7 +123,7 @@ function SetupFlow() {
   // Captured once: `?step=` syncs replace the history entry and drop its state.
   const [from] = useState(() => resolveFrom(location.state));
   const [mountedAt] = useState(Date.now);
-  const query = useOnboarding({ pollIntervalMs: 5000, enabled: isConfigured });
+  const query = useOnboarding({ refetchInterval: 5000, enabled: isConfigured });
   const { mutateAsync: act } = useOnboardingAction();
   const [busy, setBusy] = useState(false);
 
@@ -135,8 +138,8 @@ function SetupFlow() {
   const currentStep = data?.state.currentStep;
 
   useEffect(() => {
-    markSetupVisited();
-  }, []);
+    markSetupVisited(config.apiUrl);
+  }, [config.apiUrl]);
 
   // Keep `?step=N` in the URL once the payload decides the step.
   useEffect(() => {
@@ -257,7 +260,12 @@ function SetupFlow() {
         onMinimize={data ? () => void leave() : undefined}
         minimizing={busy}
       />
-      <SetupProgress statuses={statuses} current={stepId} onSelect={data ? goTo : undefined} />
+      <SetupProgress
+        statuses={statuses}
+        settled={data ? onboardingSettledCount(data.state) : 0}
+        current={stepId}
+        onSelect={data ? goTo : undefined}
+      />
 
       <main className="flex flex-1 flex-col px-3 pt-4 pb-8 sm:px-5">
         <div className="mx-auto my-auto w-full max-w-[800px]">

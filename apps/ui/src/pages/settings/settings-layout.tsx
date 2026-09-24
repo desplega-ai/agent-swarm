@@ -90,8 +90,7 @@ export function SettingsLayout() {
     }
   }, [collapsed]);
 
-  // `OnboardingRedirect` polls this query for the whole shell.
-  const onboarding = useOnboarding({ pollIntervalMs: 0 });
+  const onboarding = useOnboarding();
   const navItems = onboarding.data
     ? SETTINGS_NAV
     : SETTINGS_NAV.filter((item) => item.path !== SETUP_PATH);

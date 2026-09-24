@@ -1,9 +1,10 @@
 import { Info } from "lucide-react";
 import { type ReactNode, useState } from "react";
+import { BrandLogo, SetupChip } from "@/components/onboarding/setup-card";
+import { useSetupSave } from "@/components/onboarding/use-setup-save";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { BrandLogo } from "../../components/setup-card";
-import { SaveButton, SecretField, useSaveKeys } from "./fields";
+import { SaveButton, SecretKeyField } from "./fields";
 import type { AiCardProps } from "./model";
 import { ProviderCard } from "./provider-card";
 
@@ -17,7 +18,7 @@ const TAB_KEY: Record<ClaudeTab, string> = {
 export function ClaudeCard({ presence, onSaved, ...card }: AiCardProps) {
   const [tab, setTab] = useState<ClaudeTab>("token");
   const [values, setValues] = useState<Record<ClaudeTab, string>>({ token: "", key: "" });
-  const keys = useSaveKeys(presence);
+  const keys = useSetupSave(presence);
   const value = values[tab].trim();
 
   async function save() {
@@ -28,7 +29,7 @@ export function ClaudeCard({ presence, onSaved, ...card }: AiCardProps) {
   }
 
   const field = (t: ClaudeTab, placeholder: string, helper: ReactNode) => (
-    <SecretField
+    <SecretKeyField
       key={keys.version}
       id={`setup-ai-${TAB_KEY[t]}`}
       envKey={TAB_KEY[t]}
@@ -53,9 +54,7 @@ export function ClaudeCard({ presence, onSaved, ...card }: AiCardProps) {
         <TabsList>
           <TabsTrigger value="token">
             Setup token
-            <span className="text-[9px] font-semibold tracking-wider text-primary uppercase">
-              Recommended
-            </span>
+            <SetupChip tone="info">Recommended</SetupChip>
           </TabsTrigger>
           <TabsTrigger value="key">API key</TabsTrigger>
         </TabsList>

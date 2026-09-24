@@ -10,24 +10,12 @@ import type {
 /** The four provider cards on step 3. */
 export type AiCardId = "claude" | "codex" | "open" | "devin";
 
-/** Worker harness ids a step-3 card can verify through. */
-export type AiHarness = ProviderName;
-
 /** The rollup keys on the worker harness, so each card verifies through these. */
-export const CARD_HARNESSES: Record<AiCardId, readonly AiHarness[]> = {
+export const CARD_HARNESSES: Record<AiCardId, readonly ProviderName[]> = {
   claude: ["claude"],
   codex: ["codex"],
   open: ["pi", "opencode", "dsh"],
   devin: ["devin"],
-};
-
-export const HARNESS_NAME: Record<string, string> = {
-  claude: "Claude",
-  codex: "Codex",
-  pi: "pi",
-  opencode: "opencode",
-  dsh: "DeepSeek (dsh)",
-  devin: "Devin",
 };
 
 /** Which card a recorded method belongs to. */
@@ -40,18 +28,6 @@ export const METHOD_CARD: Record<OnboardingAiMethod, AiCardId> = {
   openai_gateway: "open",
   deepseek: "open",
   devin: "devin",
-};
-
-/** Provider name for the "<Provider> verified." line. */
-export const METHOD_PROVIDER: Record<OnboardingAiMethod, string> = {
-  claude_setup_token: "Claude",
-  claude_api_key: "Claude",
-  codex_device: "Codex",
-  codex_cli: "Codex",
-  openrouter: "OpenRouter",
-  openai_gateway: "Gateway",
-  deepseek: "DeepSeek",
-  devin: "Devin",
 };
 
 export function isAiMethod(method: string | null): method is OnboardingAiMethod {

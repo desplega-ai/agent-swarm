@@ -1,14 +1,15 @@
-import { CheckCircle2, Eye, EyeOff, Loader2, XCircle } from "lucide-react";
+import { CheckCircle2, Loader2, XCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { OnboardingResponse } from "@/api/types";
+import { SecretInput } from "@/components/onboarding/secret-field";
+import { SetupCard, SetupChip } from "@/components/onboarding/setup-card";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SettingsRow } from "@/components/ui/settings-row";
 import { useConfig } from "@/hooks/use-config";
 import { generateSlug } from "@/lib/slugs";
-import { SetupCard, SetupChip } from "../components/setup-card";
 import type { StepProps } from "../step-contract";
 
 export interface StepConnectProps {
@@ -63,10 +64,9 @@ function ConnectedSummary({
   );
 }
 
-type Probe =
-  | { phase: "idle" | "running" }
-  | { phase: "error"; title: string; detail: string }
-  | { phase: "ok"; detail: string };
+// No success phase: storing the connection swaps this form for the connected
+// summary in the same render.
+type Probe = { phase: "idle" | "running" } | { phase: "error"; title: string; detail: string };
 
 const URL_RE = /^https?:\/\/\S+$/;
 
@@ -76,7 +76,6 @@ function ConnectForm({ onConnected }: { onConnected: () => void }) {
   const [name, setName] = useState("");
   const [apiUrl, setApiUrl] = useState("http://localhost:3013");
   const [apiKey, setApiKey] = useState("");
-  const [showKey, setShowKey] = useState(false);
   const [probe, setProbe] = useState<Probe>({ phase: "idle" });
 
   const url = apiUrl.trim().replace(/\/+$/, "");
@@ -86,13 +85,13 @@ function ConnectForm({ onConnected }: { onConnected: () => void }) {
   async function handleTest() {
     if (!urlValid || !apiKey || running) return;
     setProbe({ phase: "running" });
-    const started = performance.now();
     const headers = { Authorization: `Bearer ${apiKey}` };
-    let version: string | undefined;
     try {
       const res = await fetch(`${url}/health`, { headers });
       if (!res.ok) throw new Error(`Server returned ${res.status}`);
-      version = ((await res.json()) as { version?: string }).version;
+      // A JSON body tells the API apart from a host that answers every path
+      // with HTML (this dashboard, for example).
+      await res.json();
     } catch (err) {
       setProbe({
         phase: "error",
@@ -124,19 +123,11 @@ function ConnectForm({ onConnected }: { onConnected: () => void }) {
       });
       return;
     }
-
-    const latency = Math.round(performance.now() - started);
-    setProbe({
-      phase: "ok",
-      detail: `200 OK${version ? ` · agent-swarm v${version}` : ""} · ${latency} ms`,
-    });
     onConnected();
   }
 
   const chip =
-    probe.phase === "ok" ? (
-      <SetupChip tone="success">Connected</SetupChip>
-    ) : probe.phase === "error" ? (
+    probe.phase === "error" ? (
       <SetupChip tone="error">Failed</SetupChip>
     ) : (
       <SetupChip>Not tested</SetupChip>
@@ -203,28 +194,7 @@ function ConnectForm({ onConnected }: { onConnected: () => void }) {
             </>
           }
         >
-          <div className="relative">
-            <Input
-              id="setup-api-key"
-              type={showKey ? "text" : "password"}
-              autoComplete="off"
-              spellCheck={false}
-              value={apiKey}
-              onChange={(event) => setApiKey(event.target.value)}
-              disabled={running}
-              className="pr-10 font-mono"
-            />
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              onClick={() => setShowKey((shown) => !shown)}
-              aria-label={showKey ? "Hide API key" : "Show API key"}
-              className="absolute top-1/2 right-1.5 -translate-y-1/2 text-muted-foreground"
-            >
-              {showKey ? <EyeOff /> : <Eye />}
-            </Button>
-          </div>
+          <SecretInput id="setup-api-key" value={apiKey} onChange={setApiKey} disabled={running} />
         </SettingsRow>
 
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -240,15 +210,6 @@ function ConnectForm({ onConnected }: { onConnected: () => void }) {
         {probe.phase === "error" ? (
           <AlertCallout tone="error" icon={XCircle} title={probe.title}>
             <span className="font-mono break-all">{probe.detail}</span>
-          </AlertCallout>
-        ) : null}
-        {probe.phase === "ok" ? (
-          <AlertCallout
-            tone="success"
-            icon={CheckCircle2}
-            title="Server answered. Connection saved."
-          >
-            <span className="font-mono">{probe.detail}</span>
           </AlertCallout>
         ) : null}
       </form>

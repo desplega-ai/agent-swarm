@@ -103,7 +103,7 @@ export function SetupCard({
           type="button"
           aria-expanded={open}
           onClick={() => collapsible.onOpenChange(!open)}
-          className="flex w-full items-center gap-3 rounded-xl px-4 py-3 hover:bg-accent/50 hover-linger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+          className="flex w-full items-center gap-3 rounded-xl px-4 py-3 hover:bg-accent/50 hover-linger transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
         >
           {header}
         </button>

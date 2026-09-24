@@ -192,6 +192,7 @@ export const HARNESS_LABEL: Record<ProviderName | string, string> = {
   opencode: "Opencode",
   pi: "Pi-Mono",
   acp: "ACP",
+  dsh: "DeepSeek (dsh)",
 };
 
 export function harnessSupportsModelSelection(harness: LocalHarnessProvider): boolean {

@@ -8,14 +8,19 @@ import type {
   OnboardingMemoryTestRequest,
   OnboardingMemoryTestResponse,
 } from "@/api/types";
+import { SecretInput } from "@/components/onboarding/secret-field";
+import {
+  BrandLogo,
+  SetupCard,
+  SetupChip,
+  type SetupChipTone,
+} from "@/components/onboarding/setup-card";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SettingsRow } from "@/components/ui/settings-row";
 import { cn } from "@/lib/utils";
-import { BrandLogo, SetupCard, SetupChip, type SetupChipTone } from "../components/setup-card";
 import type { StepProps } from "../step-contract";
-import { SecretInput } from "./integrations/setup-field";
 
 type ReuseKey = NonNullable<OnboardingMemoryTestRequest["reuseKey"]>;
 

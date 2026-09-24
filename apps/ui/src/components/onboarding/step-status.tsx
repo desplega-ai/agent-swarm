@@ -3,7 +3,7 @@ import type { CSSProperties } from "react";
 import { ONBOARDING_STEPS } from "@/api/hooks/use-onboarding";
 import type { OnboardingStepId, OnboardingStepStatus } from "@/api/types";
 import { cn } from "@/lib/utils";
-import { SetupChip, type SetupChipTone } from "@/pages/setup/components/setup-card";
+import { SetupChip, type SetupChipTone } from "./setup-card";
 
 /**
  * Shared step-status vocabulary for the `/setup` overview, the header Setup
@@ -16,24 +16,23 @@ export const SKIPPED_HATCH: CSSProperties = {
     "repeating-linear-gradient(115deg, color-mix(in oklch, var(--color-status-neutral) 55%, transparent) 0 1.5px, transparent 1.5px 4px)",
 };
 
-/** Right-side status word in lists ("Verified", "Skipped", ...). */
+/** The one word per status, in lists, chips, and labels. */
 export const STEP_STATUS_WORD: Record<OnboardingStepStatus, string> = {
-  done: "Verified",
+  done: "Done",
   skipped: "Skipped",
   failed: "Failed",
   todo: "To do",
 };
 
-const STEP_CHIP: Record<OnboardingStepStatus, { tone: SetupChipTone; label: string }> = {
-  done: { tone: "success", label: "Done" },
-  skipped: { tone: "neutral", label: "Skipped" },
-  failed: { tone: "error", label: "Failed" },
-  todo: { tone: "neutral", label: "To do" },
+const STEP_CHIP_TONE: Record<OnboardingStepStatus, SetupChipTone> = {
+  done: "success",
+  skipped: "neutral",
+  failed: "error",
+  todo: "neutral",
 };
 
 export function StepStatusChip({ status }: { status: OnboardingStepStatus }) {
-  const chip = STEP_CHIP[status];
-  return <SetupChip tone={chip.tone}>{chip.label}</SetupChip>;
+  return <SetupChip tone={STEP_CHIP_TONE[status]}>{STEP_STATUS_WORD[status]}</SetupChip>;
 }
 
 /** 1-based position of a step, as used in `?step=N` and "Step N of 6". */

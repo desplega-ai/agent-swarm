@@ -1,12 +1,12 @@
 import { Link } from "react-router-dom";
 import type { Agent } from "@/api/types";
+import { SetupCard } from "@/components/onboarding/setup-card";
 import { HarnessIcon } from "@/components/shared/harness-icon";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatRelative } from "@/lib/relative-time";
 import { cn, parseUTCDate } from "@/lib/utils";
-import { SetupCard } from "../../components/setup-card";
 import { ExternalTextLink } from "../integrations/pane-parts";
 
 const MAX_ROWS = 8;
@@ -95,7 +95,7 @@ export function AgentsCard({
         {hidden > 0 ? (
           <Link
             to="/agents"
-            className="block border-t border-border-subtle px-4 py-2 text-xs text-muted-foreground hover:text-foreground hover-linger"
+            className="block border-t border-border-subtle px-4 py-2 text-xs text-muted-foreground hover:text-foreground hover-linger transition-colors"
           >
             +{hidden} more
           </Link>

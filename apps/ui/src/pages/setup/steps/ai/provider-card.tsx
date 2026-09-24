@@ -1,12 +1,13 @@
 import type { ReactNode } from "react";
-import { SetupCard, SetupChip } from "../../components/setup-card";
+import { SetupCard, SetupChip } from "@/components/onboarding/setup-card";
+import { HARNESS_LABEL } from "@/lib/agent-runtime-models";
 import { HarnessSwitch } from "./harness-switch";
-import { type AiCardId, type AiCardProps, CARD_HARNESSES, HARNESS_NAME } from "./model";
+import { type AiCardId, type AiCardProps, CARD_HARNESSES } from "./model";
 import { WaitingPanel } from "./waiting";
 
-/** "Codex" for one harness, "opencode, pi, or DeepSeek (dsh)" for several. */
+/** "Codex" for one harness, "Pi-Mono, Opencode, or DeepSeek (dsh)" for several. */
 function harnessPhrase(card: AiCardId): string {
-  const names = CARD_HARNESSES[card].map((h) => HARNESS_NAME[h] ?? h);
+  const names = CARD_HARNESSES[card].map((h) => HARNESS_LABEL[h] ?? h);
   if (names.length === 1) return names[0];
   return `${names.slice(0, -1).join(", ")}, or ${names[names.length - 1]}`;
 }
@@ -45,9 +46,9 @@ export function ProviderCard({
   );
   const waitingLabel =
     harnesses.length === 1
-      ? (HARNESS_NAME[harnesses[0]] ?? harnesses[0])
+      ? (HARNESS_LABEL[harnesses[0]] ?? harnesses[0])
       : withWorkers.length === 1
-        ? (HARNESS_NAME[withWorkers[0]] ?? withWorkers[0])
+        ? (HARNESS_LABEL[withWorkers[0]] ?? withWorkers[0])
         : "open harness";
 
   const chip = rollup.verified ? (
@@ -67,7 +68,7 @@ export function ProviderCard({
           {subtitle}
           {rollup.verified ? (
             <span className="block tabular-nums text-status-success-strong">
-              {Math.max(rollup.verifiedWorkers, 1)}/{Math.max(rollup.workers, 1)} workers verified
+              {rollup.verifiedWorkers} of {rollup.workers} agents verified
             </span>
           ) : null}
         </>

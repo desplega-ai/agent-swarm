@@ -14,23 +14,15 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { useConfig } from "@/hooks/use-config";
 import { HARNESS_LABEL } from "@/lib/agent-runtime-models";
+import { INTEGRATIONS } from "@/lib/integrations-catalog";
 import { cn } from "@/lib/utils";
-import { SetupCard } from "@/pages/setup/components/setup-card";
+import { SetupCard } from "./setup-card";
 import { StepStatusChip, stepNumber } from "./step-status";
 import { useResumeSetup } from "./use-resume-setup";
 
-const INTEGRATION_LABEL: Record<keyof OnboardingResponse["signals"]["integrations"], string> = {
-  slack: "Slack",
-  github: "GitHub",
-  gitlab: "GitLab",
-  linear: "Linear",
-  jira: "Jira",
-};
-
 /** Home dashboard card while onboarding is open. Wrapper `id="setup"` is the `/#setup` anchor. */
 export function SetupChecklistCard() {
-  // `OnboardingRedirect` polls this query for the whole shell.
-  const { data } = useOnboarding({ pollIntervalMs: 0 });
+  const { data } = useOnboarding();
   const { data: status } = useStatusContext();
   const { config } = useConfig();
   const { resume, isPending: resuming } = useResumeSetup();
@@ -70,7 +62,7 @@ export function SetupChecklistCard() {
                   type="button"
                   disabled={busy}
                   onClick={() => void resume(id)}
-                  className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-accent hover-linger transition-colors focus-visible:bg-accent focus-visible:outline-none"
+                  className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-accent hover-linger transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-inset"
                 >
                   <StepTile id={id} status={stepStatus} />
                   <span className="min-w-0 flex-1">
@@ -136,9 +128,9 @@ function stepSubtitle(
       if (signals.embeddings.configured) return `${signals.embeddings.dimensions} dims`;
       return stepStatus === "skipped" ? "Skipped" : "Off";
     case "integrations": {
-      const connected = (Object.keys(INTEGRATION_LABEL) as Array<keyof typeof INTEGRATION_LABEL>)
-        .filter((key) => signals.integrations[key])
-        .map((key) => INTEGRATION_LABEL[key]);
+      const connected = Object.entries(signals.integrations)
+        .filter(([, on]) => on)
+        .map(([id]) => INTEGRATIONS.find((def) => def.id === id)?.name ?? id);
       return connected.length > 0 ? connected.join(", ") : "Nothing connected";
     }
     case "first_task":

@@ -4,7 +4,8 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { ONBOARDING_QUERY_KEY } from "@/api/hooks/use-onboarding";
-import type { AgentWithTasks } from "@/api/types";
+import type { AgentWithTasks, ProviderName } from "@/api/types";
+import { BrandLogo, SetupChip } from "@/components/onboarding/setup-card";
 import { HarnessIcon } from "@/components/shared/harness-icon";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
@@ -15,8 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { BrandLogo, SetupChip } from "../../components/setup-card";
-import { type AiHarness, HARNESS_NAME } from "./model";
+import { HARNESS_LABEL } from "@/lib/agent-runtime-models";
 
 /** `HarnessIcon` has no dsh mark; the DeepSeek logo stands in. */
 export function AiHarnessIcon({ harness }: { harness: string | null | undefined }) {
@@ -35,19 +35,19 @@ export function HarnessSwitch({
   targets,
   agents,
 }: {
-  /** "Codex", or "opencode, pi, or dsh" for the open harnesses card. */
+  /** "Codex", or "Pi-Mono, Opencode, or DeepSeek (dsh)" for the open harnesses card. */
   harnessPhrase: string;
   /** Harnesses the user can switch to. More than one renders a picker. */
-  targets: readonly AiHarness[];
+  targets: readonly ProviderName[];
   agents: AgentWithTasks[];
 }) {
   const queryClient = useQueryClient();
-  const [target, setTarget] = useState<AiHarness>(targets[0]);
+  const [target, setTarget] = useState<ProviderName>(targets[0]);
   const [checked, setChecked] = useState<ReadonlySet<string>>(() => new Set());
   const [busy, setBusy] = useState(false);
 
   const count = checked.size;
-  const targetName = HARNESS_NAME[target] ?? target;
+  const targetName = HARNESS_LABEL[target] ?? target;
 
   function toggle(id: string) {
     setChecked((prev) => {
@@ -90,7 +90,7 @@ export function HarnessSwitch({
       <ul className="max-h-48 divide-y divide-border-subtle overflow-y-auto rounded-lg border border-border">
         {agents.map((agent) => (
           <li key={agent.id}>
-            <label className="flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-accent/50 hover-linger">
+            <label className="flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-accent/50 hover-linger transition-colors">
               <input
                 type="checkbox"
                 checked={checked.has(agent.id)}
@@ -102,7 +102,7 @@ export function HarnessSwitch({
               <span className="ml-auto flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
                 <AiHarnessIcon harness={agent.harnessProvider} />
                 {agent.harnessProvider
-                  ? (HARNESS_NAME[agent.harnessProvider] ?? agent.harnessProvider)
+                  ? (HARNESS_LABEL[agent.harnessProvider] ?? agent.harnessProvider)
                   : "unknown"}
               </span>
             </label>
@@ -111,7 +111,7 @@ export function HarnessSwitch({
       </ul>
       <div className="flex flex-wrap items-center gap-2">
         {targets.length > 1 ? (
-          <Select value={target} onValueChange={(v) => setTarget(v as AiHarness)}>
+          <Select value={target} onValueChange={(v) => setTarget(v as ProviderName)}>
             <SelectTrigger className="w-44" aria-label="Target harness">
               <SelectValue />
             </SelectTrigger>
@@ -119,7 +119,7 @@ export function HarnessSwitch({
               {targets.map((h) => (
                 <SelectItem key={h} value={h}>
                   <AiHarnessIcon harness={h} />
-                  {HARNESS_NAME[h] ?? h}
+                  {HARNESS_LABEL[h] ?? h}
                 </SelectItem>
               ))}
             </SelectContent>

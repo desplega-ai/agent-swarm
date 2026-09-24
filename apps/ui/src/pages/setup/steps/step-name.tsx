@@ -1,31 +1,29 @@
-import { useQueryClient } from "@tanstack/react-query";
 import { Bot, House, ListTodo, Loader2, XCircle } from "lucide-react";
 import { useState } from "react";
-import { invalidateStatusQuery } from "@/api/hooks/status-query";
-import { type UpsertConfigEntry, useUpsertConfigsBatch } from "@/api/hooks/use-config-api";
+import { type UpsertConfigEntry, useConfigs } from "@/api/hooks/use-config-api";
 import { useStatus } from "@/api/hooks/use-status";
+import { SetupCard, SetupChip } from "@/components/onboarding/setup-card";
+import { useSetupSave } from "@/components/onboarding/use-setup-save";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SettingsRow } from "@/components/ui/settings-row";
 import { AVATAR_COLOR_INPUT_FALLBACK, AVATAR_SUGGESTED_SWATCHES } from "@/lib/agent-color";
 import { cn } from "@/lib/utils";
-import { SetupCard, SetupChip } from "../components/setup-card";
-import { DEFAULT_SWARM_NAME, swarmDisplayName } from "../components/swarm-name";
+import { DEFAULT_SWARM_NAME, initialSwarmName } from "../components/swarm-name";
 import type { StepProps } from "../step-contract";
 
 const HEX_RE = /^#[0-9a-fA-F]{6}$/;
 const URL_RE = /^https?:\/\/\S+$/;
-// Global config writes reload the API env after a ~250 ms debounce
-// (`scheduleIntegrationsReload`). Read `/status` after that so the new name shows.
-const STATUS_REFRESH_DELAY_MS = 1000;
 
 export function StepName({ onboarding, act, goNext }: StepProps) {
-  const queryClient = useQueryClient();
   // The shell's top bar polls `/status`; this read shares its cache.
   const { data: status } = useStatus({ pollIntervalMs: 0 });
-  const upsert = useUpsertConfigsBatch();
+  const { data: configs } = useConfigs({ scope: "global" });
+  // Reloads the API after the write, which also refreshes `/status`.
+  const setupSave = useSetupSave();
   const identity = status?.identity;
+  const storedName = configs?.find((c) => c.key === "SWARM_ORG_NAME")?.value;
 
   // `null` = untouched: follow the server value until the operator types.
   const [nameDraft, setNameDraft] = useState<string | null>(null);
@@ -34,7 +32,7 @@ export function StepName({ onboarding, act, goNext }: StepProps) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const name = nameDraft ?? swarmDisplayName(identity?.name);
+  const name = nameDraft ?? initialSwarmName(storedName, identity?.name);
   const logoInput = logoDraft ?? identity?.logo_url ?? "";
   const colorInput = colorDraft ?? identity?.brand_color ?? "";
   const trimmedName = name.trim();
@@ -53,21 +51,18 @@ export function StepName({ onboarding, act, goNext }: StepProps) {
       { key: "SWARM_ORG_NAME", value: trimmedName },
       ...(logo ? [{ key: "SWARM_ORG_LOGO_URL", value: logo }] : []),
       ...(color ? [{ key: "SWARM_BRAND_COLOR", value: color }] : []),
-    ].map((entry) => ({ ...entry, scope: "global" as const, isSecret: false }));
+    ].map((entry) => ({ ...entry, isSecret: false }));
     try {
-      const result = await upsert.mutateAsync(entries);
-      if (result.failureCount > 0) {
-        throw new Error(result.errors[0]?.message ?? "Could not save the name.");
-      }
+      // A failed write is already reported by the save hook's toast.
+      if (!(await setupSave.save(entries))) return;
       await act({
         action: "complete",
         step: "name",
         method: trimmedName === DEFAULT_SWARM_NAME ? "default_name" : "custom_name",
       });
-      setTimeout(() => void invalidateStatusQuery(queryClient), STATUS_REFRESH_DELAY_MS);
       goNext();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save the name.");
+      setError(err instanceof Error ? err.message : "Could not record this step.");
     } finally {
       setSaving(false);
     }

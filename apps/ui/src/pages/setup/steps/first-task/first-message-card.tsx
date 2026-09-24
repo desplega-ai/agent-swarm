@@ -5,15 +5,15 @@ import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
+import { IdentityForm } from "@/components/identity/identity-form";
+import { SetupCard, SetupChip } from "@/components/onboarding/setup-card";
 import { SUGGESTIONS } from "@/components/sessions/new-session-view";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useCurrentUser } from "@/contexts/current-user-context";
-import { SetupCard, SetupChip } from "../../components/setup-card";
 import type { StepProps } from "../../step-contract";
-import { IdentityPicker } from "./identity-picker";
 
 type BadgeStatus = ComponentProps<typeof StatusBadge>["status"];
 
@@ -101,7 +101,11 @@ export function FirstMessageCard({ onboarding, act }: Pick<StepProps, "onboardin
             <Loader2 className="size-3.5 animate-spin" /> Loading users
           </p>
         ) : (
-          <IdentityPicker />
+          // The identity modal stays closed on `/setup`, so step 6 asks inline.
+          <div className="space-y-3 rounded-md border border-border-subtle bg-surface p-3">
+            <p className="text-sm">Who is sending this? The swarm attributes tasks to this user.</p>
+            <IdentityForm autoFocus={false} />
+          </div>
         )
       ) : user ? (
         <p className="text-xs text-muted-foreground">

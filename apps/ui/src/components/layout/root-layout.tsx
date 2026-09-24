@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
+import { useOnboardingOwnsFirstRun } from "@/api/hooks/use-onboarding";
 import { StatusProvider } from "@/app/status-context";
 import { FeedbackDialog } from "@/components/feedback/feedback-dialog";
 import { IdentityModal } from "@/components/identity/identity-modal";
@@ -18,7 +19,6 @@ import { cn } from "@/lib/utils";
 import { AppFooter } from "./app-footer";
 import { AppHeader } from "./app-header";
 import { AppSidebar } from "./app-sidebar";
-import { ConfigGuard } from "./config-guard";
 
 /**
  * Phase 3: auto-pop the identity modal whenever:
@@ -28,12 +28,16 @@ import { ConfigGuard } from "./config-guard";
  *     return 404 from `/api/users` and would render an empty modal).
  *
  * Mounted in the configured shell only, so it never pops on `/setup` (the
- * first-task step picks the user inline).
+ * first-task step picks the user inline). It also stays closed while the
+ * onboarding query is pending, or while onboarding is open and not minimized:
+ * the redirect to `/setup` is about to happen.
  */
 function IdentityGate() {
   const { state, locked } = useCurrentUser();
   const { supported } = useFeatureGate("1.76.0");
+  const onboardingOwnsIdentity = useOnboardingOwnsFirstRun({ whileMinimized: false });
   if (!supported) return null;
+  if (onboardingOwnsIdentity) return null;
   // Token-bound identity (DES-771) never needs picking. Belt-and-braces on
   // top of the provider never entering `needs-pick` while locked.
   if (locked) return null;
@@ -56,39 +60,37 @@ export function RootLayout() {
   }
 
   return (
-    <ConfigGuard>
-      <StatusProvider pollIntervalMs={30_000}>
-        <SidebarProvider className="h-svh max-w-full overflow-hidden">
-          <AppSidebar />
-          <SidebarInset className="min-w-0">
-            <AppHeader />
-            {/* Below lg the main column is the scroll container so pages that
-                flow naturally (detail pages, forms) can scroll; at lg+ it goes
-                back to overflow-hidden and pages own their scroll regions
-                (pinned headers, grid-internal scrolling). */}
-            <main
-              className={cn(
-                "flex flex-1 flex-col min-h-0 min-w-0 overflow-x-hidden overflow-y-auto lg:overflow-hidden",
-                mainPadding,
-              )}
-            >
-              <ErrorBoundary>
-                <Suspense fallback={<HiveLoadingScreen />}>
-                  <Outlet />
-                </Suspense>
-              </ErrorBoundary>
-            </main>
-            <AppFooter />
-          </SidebarInset>
-        </SidebarProvider>
-        <CommandMenu />
-        <OnboardingRedirect />
-        <IdentityGate />
-        <NameConnectionModal />
-        <OrganizationNameDialog key={`organization:${config.apiUrl}`} />
-        <LeadCredentialDialog key={config.apiUrl} />
-        <FeedbackDialog key={`feedback:${config.apiUrl}`} />
-      </StatusProvider>
-    </ConfigGuard>
+    <StatusProvider pollIntervalMs={30_000}>
+      <SidebarProvider className="h-svh max-w-full overflow-hidden">
+        <AppSidebar />
+        <SidebarInset className="min-w-0">
+          <AppHeader />
+          {/* Below lg the main column is the scroll container so pages that
+              flow naturally (detail pages, forms) can scroll; at lg+ it goes
+              back to overflow-hidden and pages own their scroll regions
+              (pinned headers, grid-internal scrolling). */}
+          <main
+            className={cn(
+              "flex flex-1 flex-col min-h-0 min-w-0 overflow-x-hidden overflow-y-auto lg:overflow-hidden",
+              mainPadding,
+            )}
+          >
+            <ErrorBoundary>
+              <Suspense fallback={<HiveLoadingScreen />}>
+                <Outlet />
+              </Suspense>
+            </ErrorBoundary>
+          </main>
+          <AppFooter />
+        </SidebarInset>
+      </SidebarProvider>
+      <CommandMenu />
+      <OnboardingRedirect />
+      <IdentityGate />
+      <NameConnectionModal />
+      <OrganizationNameDialog key={`organization:${config.apiUrl}`} />
+      <LeadCredentialDialog key={config.apiUrl} />
+      <FeedbackDialog key={`feedback:${config.apiUrl}`} />
+    </StatusProvider>
   );
 }

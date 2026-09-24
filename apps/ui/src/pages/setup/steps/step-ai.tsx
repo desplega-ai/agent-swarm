@@ -1,14 +1,13 @@
-import { useQueryClient } from "@tanstack/react-query";
 import { ArrowUpRight, CheckCircle2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useConfigs } from "@/api/hooks/use-config-api";
 import { useEnvPresence } from "@/api/hooks/use-integrations-meta";
-import { ONBOARDING_QUERY_KEY } from "@/api/hooks/use-onboarding";
 import type { OnboardingAiMethod } from "@/api/types";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
+import { HARNESS_LABEL } from "@/lib/agent-runtime-models";
 import type { StepProps } from "../step-contract";
 import { ClaudeCard } from "./ai/claude-card";
 import { CodexCard } from "./ai/codex-card";
@@ -16,24 +15,15 @@ import { DevinCard } from "./ai/devin-card";
 import {
   type AiCardId,
   type AiCardProps,
+  CARD_HARNESSES,
   cardRollup,
   isAiMethod,
   METHOD_CARD,
-  METHOD_PROVIDER,
   PRESENCE_KEYS,
 } from "./ai/model";
 import { OpenHarnessCard } from "./ai/open-harness-card";
 
-const CARD_NAME: Record<AiCardId, string> = {
-  claude: "Claude",
-  codex: "Codex",
-  open: "OpenRouter",
-  devin: "Devin",
-};
-
 export function StepAi({ onboarding, act }: StepProps) {
-  const queryClient = useQueryClient();
-  const navigate = useNavigate();
   const { data: agents = [] } = useAgents();
   const { data: presence = {} } = useEnvPresence(PRESENCE_KEYS);
   const { data: configs = [] } = useConfigs({ scope: "global" });
@@ -77,22 +67,15 @@ export function StepAi({ onboarding, act }: StepProps) {
   }, [rollups, deviceDone, recorded, act]);
 
   const aiDone = aiStep.status === "done";
+  // The card's save already refreshed env presence and the onboarding signals.
   const onSaved = useCallback(
     (method: OnboardingAiMethod) => {
       // A save after the step is done adds a provider. It never rewrites the method.
       pending.current = aiDone ? null : { card: METHOD_CARD[method], method };
-      void queryClient.invalidateQueries({ queryKey: ["config", "env-presence"] });
-      void queryClient.invalidateQueries({ queryKey: ONBOARDING_QUERY_KEY });
     },
-    [queryClient, aiDone],
+    [aiDone],
   );
   const onDeviceComplete = useCallback(() => setDeviceDone(true), []);
-
-  // Settings is outside /setup: minimize first so the shell does not send us back.
-  async function openSettings() {
-    await act({ action: "minimize" }).catch(() => null);
-    void navigate("/settings/integrations");
-  }
 
   const cardProps = (card: AiCardId): AiCardProps => ({
     open: openCard === card,
@@ -104,12 +87,18 @@ export function StepAi({ onboarding, act }: StepProps) {
     onSaved,
   });
 
-  const verifiedCard = (Object.keys(rollups) as AiCardId[]).find((c) => rollups[c].verified);
-  const doneProvider = isAiMethod(aiStep.method)
-    ? METHOD_PROVIDER[aiStep.method]
-    : verifiedCard
-      ? CARD_NAME[verifiedCard]
-      : "A provider";
+  // Name the verified harness, preferring the card the recorded method belongs to.
+  const methodCard = isAiMethod(aiStep.method) ? METHOD_CARD[aiStep.method] : null;
+  const verified =
+    providers.find(
+      (p) =>
+        p.state === "verified" &&
+        methodCard !== null &&
+        CARD_HARNESSES[methodCard].includes(p.provider),
+    ) ?? providers.find((p) => p.state === "verified");
+  const doneProvider = verified
+    ? (HARNESS_LABEL[verified.provider] ?? verified.provider)
+    : "A provider";
 
   return (
     <div className="space-y-2">
@@ -123,15 +112,11 @@ export function StepAi({ onboarding, act }: StepProps) {
       <OpenHarnessCard {...cardProps("open")} />
       <DevinCard {...cardProps("devin")} />
       <div className="space-y-1 pt-2">
-        <Button
-          type="button"
-          variant="link"
-          size="xs"
-          onClick={openSettings}
-          className="h-auto px-0 has-[>svg]:px-0"
-        >
-          More providers (OpenAI, Bedrock, Claude Managed) in Settings
-          <ArrowUpRight />
+        <Button asChild variant="link" size="xs" className="h-auto px-0 has-[>svg]:px-0">
+          <Link to="/settings/integrations">
+            More providers (OpenAI, Bedrock, Claude Managed) in Settings
+            <ArrowUpRight />
+          </Link>
         </Button>
         <p className="text-xs text-muted-foreground">One verified provider finishes this step.</p>
       </div>

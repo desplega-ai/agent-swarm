@@ -1,9 +1,8 @@
-import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { type UpsertConfigEntry, useUpsertConfigsBatch } from "@/api/hooks/use-config-api";
-import { type EnvPresenceMap, useReloadConfig } from "@/api/hooks/use-integrations-meta";
-import { ONBOARDING_QUERY_KEY } from "@/api/hooks/use-onboarding";
+import type { UpsertConfigEntry } from "@/api/hooks/use-config-api";
+import type { EnvPresenceMap } from "@/api/hooks/use-integrations-meta";
 import type { SwarmConfig } from "@/api/types";
+import { useSetupSave } from "@/components/onboarding/use-setup-save";
 import type { SetupFieldSpec } from "./catalog";
 
 /**
@@ -16,9 +15,7 @@ export function useConfigForm(
   configs: SwarmConfig[],
   presence: EnvPresenceMap,
 ) {
-  const queryClient = useQueryClient();
-  const upsert = useUpsertConfigsBatch();
-  const reload = useReloadConfig();
+  const setupSave = useSetupSave(presence);
 
   const rowFor = (key: string) => configs.find((c) => c.key === key && c.scope === "global");
   const baseline = (s: SetupFieldSpec) => rowFor(s.key)?.value ?? s.defaultValue ?? "";
@@ -26,16 +23,15 @@ export function useConfigForm(
   const [values, setValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(specs.map((s) => [s.key, s.secret ? "" : baseline(s)])),
   );
-  const [replacing, setReplacing] = useState<Record<string, boolean>>({});
 
-  const isSaved = (key: string) => Boolean(presence[key] || rowFor(key));
+  const isSaved = (key: string) => setupSave.isSaved(key) || Boolean(rowFor(key));
   const value = (key: string) => values[key] ?? "";
 
   const entries: UpsertConfigEntry[] = specs.flatMap((s) => {
     const next = value(s.key).trim();
     if (!next) return [];
     if (!s.secret && next === baseline(s)) return [];
-    return [{ key: s.key, value: next, isSecret: s.secret, scope: "global" as const }];
+    return [{ key: s.key, value: next, isSecret: s.secret }];
   });
 
   const requiredMet = specs
@@ -45,16 +41,12 @@ export function useConfigForm(
   /** Save the changed fields, apply them live, then refresh the onboarding signals. */
   async function save(): Promise<boolean> {
     if (entries.length === 0) return false;
-    const result = await upsert.mutateAsync(entries);
-    if (result.failureCount > 0) return false;
+    if (!(await setupSave.save(entries))) return false;
     setValues((prev) => {
       const next = { ...prev };
       for (const s of specs) if (s.secret) next[s.key] = "";
       return next;
     });
-    setReplacing({});
-    await reload.mutateAsync().catch(() => undefined);
-    await queryClient.invalidateQueries({ queryKey: ONBOARDING_QUERY_KEY });
     return true;
   }
 
@@ -64,15 +56,12 @@ export function useConfigForm(
     isSaved,
     /** Stored on the server but not readable here (deployment env, no row). */
     isEnvOnly: (key: string) => Boolean(presence[key] && !rowFor(key)),
-    isReplacing: (key: string) => replacing[key] === true,
-    setReplacing: (key: string, on: boolean) => {
-      setReplacing((prev) => ({ ...prev, [key]: on }));
-      if (!on) setValues((prev) => ({ ...prev, [key]: "" }));
-    },
     dirty: entries.length > 0,
     requiredMet,
-    saving: upsert.isPending || reload.isPending,
+    saving: setupSave.saving,
     save,
+    /** Changes after each full save; secret fields key on it to show their saved view. */
+    version: setupSave.version,
   };
 }
 

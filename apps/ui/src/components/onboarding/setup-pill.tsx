@@ -4,13 +4,12 @@ import {
   isOnboardingOpen,
   ONBOARDING_STEPS,
   onboardingResumeStep,
-  onboardingSettledCount,
   useOnboarding,
 } from "@/api/hooks/use-onboarding";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import { SetupChip } from "@/pages/setup/components/setup-card";
+import { SetupChip } from "./setup-card";
 import { STEP_STATUS_WORD, StepStatusGlyph, stepNumber } from "./step-status";
 import { useResumeSetup } from "./use-resume-setup";
 
@@ -18,15 +17,14 @@ const TOTAL = ONBOARDING_STEPS.length;
 
 /** Header entry point while onboarding is open (minimized or not yet resumed). */
 export function SetupPill() {
-  // `OnboardingRedirect` polls this query for the whole shell.
-  const { data } = useOnboarding({ pollIntervalMs: 0 });
+  const { data } = useOnboarding();
   const { resume, isPending } = useResumeSetup();
   const [open, setOpen] = useState(false);
 
   if (!data || !isOnboardingOpen(data)) return null;
   const { state } = data;
-  const settled = onboardingSettledCount(state);
-  const verified = ONBOARDING_STEPS.filter(({ id }) => state.steps[id].status === "done").length;
+  // Pill, ring, and popover all count done steps ("Setup 3/6", "3 / 6 verified").
+  const done = ONBOARDING_STEPS.filter(({ id }) => state.steps[id].status === "done").length;
   const resumeStep = onboardingResumeStep(state);
 
   return (
@@ -34,16 +32,16 @@ export function SetupPill() {
       <PopoverTrigger asChild>
         <button
           type="button"
-          aria-label={`Setup: ${settled} of ${TOTAL} steps settled`}
+          aria-label={`Setup: ${done} of ${TOTAL} steps done`}
           className={cn(
             "inline-flex h-8 shrink-0 items-center gap-2 rounded-full border border-primary/40 bg-card pr-3 pl-2 text-xs font-semibold whitespace-nowrap",
             "hover:bg-accent hover-linger transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
             "data-[state=open]:border-primary/60 data-[state=open]:bg-primary/10",
           )}
         >
-          <ProgressRing value={settled} total={TOTAL} />
+          <ProgressRing value={done} total={TOTAL} />
           <span>
-            Setup {settled}/{TOTAL}
+            Setup {done}/{TOTAL}
           </span>
         </button>
       </PopoverTrigger>
@@ -51,7 +49,7 @@ export function SetupPill() {
         <div className="flex items-center gap-2 border-b border-border-subtle bg-surface px-3.5 py-2.5">
           <p className="flex-1 text-sm font-semibold">Finish setting up</p>
           <SetupChip>
-            {verified} / {TOTAL} verified
+            {done} / {TOTAL} verified
           </SetupChip>
         </div>
         <ul className="divide-y divide-border-subtle">
@@ -63,7 +61,7 @@ export function SetupPill() {
                   type="button"
                   disabled={isPending}
                   onClick={() => void resume(id)}
-                  className="flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-[13px] hover:bg-accent hover-linger transition-colors focus-visible:bg-accent focus-visible:outline-none"
+                  className="flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-[13px] hover:bg-accent hover-linger transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-inset"
                 >
                   <StepStatusGlyph status={status} />
                   <span
@@ -96,7 +94,7 @@ export function SetupPill() {
   );
 }
 
-/** 17px ring: muted track, amber arc for the settled share. */
+/** 17px ring: muted track, amber arc for the done share. */
 function ProgressRing({ value, total }: { value: number; total: number }) {
   const radius = 7;
   const circumference = 2 * Math.PI * radius;

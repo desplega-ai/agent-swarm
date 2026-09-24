@@ -1,10 +1,11 @@
 import { useState } from "react";
 import type { UpsertConfigEntry } from "@/api/hooks/use-config-api";
 import type { OnboardingAiMethod } from "@/api/types";
+import { BrandLogo } from "@/components/onboarding/setup-card";
+import { useSetupSave } from "@/components/onboarding/use-setup-save";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { BrandLogo } from "../../components/setup-card";
-import { SaveButton, SecretField, TextField, useSaveKeys } from "./fields";
+import { SaveButton, SecretKeyField, TextField } from "./fields";
 import { type AiCardProps, baseUrlError, globalConfigValue } from "./model";
 import { ProviderCard } from "./provider-card";
 
@@ -25,7 +26,7 @@ function OpenHarnessIcon() {
 }
 
 export function OpenHarnessCard({ presence, configs, onSaved, ...card }: AiCardProps) {
-  const keys = useSaveKeys(presence);
+  const keys = useSetupSave(presence);
   const [mode, setMode] = useState<OpenMode | null>(null);
   const [orKey, setOrKey] = useState("");
   // null = untouched, so the field shows the stored base URL.
@@ -70,7 +71,7 @@ export function OpenHarnessCard({ presence, configs, onSaved, ...card }: AiCardP
   }
 
   const keyField = (placeholder: string, helper?: string) => (
-    <SecretField
+    <SecretKeyField
       key={keys.version}
       id="setup-ai-openrouter-key"
       envKey={OR_KEY}
@@ -127,7 +128,7 @@ export function OpenHarnessCard({ presence, configs, onSaved, ...card }: AiCardP
 
       <CollapsibleSection title="Direct keys instead">
         <div className="space-y-2 pt-1.5">
-          <SecretField
+          <SecretKeyField
             key={keys.version}
             id="setup-ai-deepseek-key"
             envKey={DS_KEY}

@@ -9,6 +9,8 @@ import { cn } from "@/lib/utils";
 
 interface SetupProgressProps {
   statuses: Record<OnboardingStepId, OnboardingStepStatus>;
+  /** Steps done or skipped (`onboardingSettledCount`). */
+  settled: number;
   current: OnboardingStepId;
   /** Omit to make the overview read-only (no connection yet). */
   onSelect?: (step: OnboardingStepId) => void;
@@ -19,11 +21,7 @@ interface SetupProgressProps {
  * failed = red, current = faint amber tint), and the clickable step overview
  * under it. Below 640px the overview shows step numbers only.
  */
-export function SetupProgress({ statuses, current, onSelect }: SetupProgressProps) {
-  const settled = ONBOARDING_STEPS.filter(
-    ({ id }) => statuses[id] === "done" || statuses[id] === "skipped",
-  ).length;
-
+export function SetupProgress({ statuses, settled, current, onSelect }: SetupProgressProps) {
   return (
     <div className="mx-auto w-full max-w-[840px] px-3 pt-3 sm:px-5">
       <div

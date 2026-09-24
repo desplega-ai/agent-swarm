@@ -29,10 +29,10 @@ export function WaitingPanel({
   harnessLabel: string;
 }) {
   if (rollup.verified) {
-    const n = Math.max(rollup.verifiedWorkers, 1);
+    const n = rollup.verifiedWorkers;
     return (
       <AlertCallout tone="success" icon={CheckCircle2}>
-        Verified by {n} worker{n === 1 ? "" : "s"}.
+        Verified by {n} agent{n === 1 ? "" : "s"}.
       </AlertCallout>
     );
   }
@@ -44,8 +44,8 @@ export function WaitingPanel({
       </span>
       <span className="block font-mono text-[11px] tabular-nums text-muted-foreground">
         {rollup.workers > 0
-          ? `${rollup.verifiedWorkers} of ${rollup.workers} ${harnessLabel} workers verified`
-          : `No ${harnessLabel} workers yet.`}
+          ? `${rollup.verifiedWorkers} of ${rollup.workers} ${harnessLabel} agents verified`
+          : `No ${harnessLabel} agents yet.`}
       </span>
     </output>
   );

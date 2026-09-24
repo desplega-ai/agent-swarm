@@ -9,3 +9,15 @@ export function swarmDisplayName(name: string | null | undefined): string {
   const trimmed = name?.trim();
   return trimmed && trimmed !== SERVER_FALLBACK_NAME ? trimmed : DEFAULT_SWARM_NAME;
 }
+
+/**
+ * Step 2's starting value: the stored `SWARM_ORG_NAME` row when one exists
+ * (even "Swarm"), else the `/status` name unless it is the server default,
+ * else "Your Swarm".
+ */
+export function initialSwarmName(
+  storedName: string | undefined,
+  statusName: string | null | undefined,
+): string {
+  return storedName?.trim() ? storedName : swarmDisplayName(statusName);
+}

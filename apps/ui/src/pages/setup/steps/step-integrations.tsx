@@ -6,9 +6,14 @@ import { toast } from "sonner";
 import { useConfigs } from "@/api/hooks/use-config-api";
 import { useEnvPresence } from "@/api/hooks/use-integrations-meta";
 import { ONBOARDING_QUERY_KEY } from "@/api/hooks/use-onboarding";
+import {
+  BrandLogo,
+  SetupCard,
+  SetupChip,
+  type SetupChipTone,
+} from "@/components/onboarding/setup-card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import { BrandLogo, SetupCard, SetupChip, type SetupChipTone } from "../components/setup-card";
 import type { StepProps } from "../step-contract";
 import {
   ALL_SETUP_KEYS,
@@ -110,7 +115,7 @@ export function StepIntegrations({ onboarding, act }: StepProps) {
                 aria-pressed={active}
                 onClick={() => setSelectedId(item.id)}
                 className={cn(
-                  "flex h-8 shrink-0 items-center gap-2 rounded-full border px-3 text-sm hover:bg-accent/50 hover-linger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+                  "flex h-8 shrink-0 items-center gap-2 rounded-full border px-3 text-sm hover:bg-accent/50 hover-linger transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
                   "sm:h-auto sm:rounded-none sm:border-0 sm:border-l-2 sm:border-l-transparent sm:py-2.5 sm:pr-3 sm:pl-2.5",
                   active && "border-primary/60 bg-primary/5 font-medium sm:border-l-primary",
                 )}
@@ -125,7 +130,7 @@ export function StepIntegrations({ onboarding, act }: StepProps) {
           })}
           <Link
             to="/settings/integrations"
-            className="flex h-8 shrink-0 items-center gap-2 rounded-full border px-3 text-sm text-muted-foreground hover:text-foreground hover-linger sm:h-auto sm:items-start sm:rounded-none sm:border-0 sm:px-3 sm:py-2.5"
+            className="flex h-8 shrink-0 items-center gap-2 rounded-full border px-3 text-sm text-muted-foreground hover:text-foreground hover-linger transition-colors sm:h-auto sm:items-start sm:rounded-none sm:border-0 sm:px-3 sm:py-2.5"
           >
             <ExternalLink className="size-4 shrink-0 sm:mt-0.5" />
             <span className="flex flex-col">

@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useConfigs } from "@/api/hooks/use-config-api";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
-import { isOnboardingOpen, useOnboarding } from "@/api/hooks/use-onboarding";
+import { useOnboardingOwnsFirstRun } from "@/api/hooks/use-onboarding";
 import { useStatusContext } from "@/app/status-context";
 import { Button } from "@/components/ui/button";
 import { useCurrentUser } from "@/contexts/current-user-context";
@@ -23,16 +23,14 @@ export function DashboardNudges() {
   const { data: configs } = useConfigs({ scope: "global" });
   const upgradeCard = useDismissibleCard(`dashboard-upgrade:${CURRENT_VERSION}`);
   const orgNameCard = useDismissibleCard("dashboard-org-name");
-  // `OnboardingRedirect` polls this query for the whole shell.
-  const onboarding = useOnboarding({ pollIntervalMs: 0 });
+  // Open onboarding owns naming (step 2), and the setup card sits right above.
+  const onboardingOwnsName = useOnboardingOwnsFirstRun();
 
   if (!isAdminLike(user)) return null;
 
   const orgName = configs?.find((config) => config.key === ORG_NAME_KEY)?.value.trim();
   const showUpgrade =
     upgradeGate.currentVersion !== null && !upgradeGate.supported && !upgradeCard.dismissed;
-  // Open onboarding owns naming (step 2), and the setup card sits right above.
-  const onboardingOwnsName = onboarding.isPending || isOnboardingOpen(onboarding.data);
   const showOrgName =
     configs !== undefined && !orgName && !orgNameCard.dismissed && !onboardingOwnsName;
   const waitingAutomations = status?.automations?.filter(

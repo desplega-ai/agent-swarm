@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { type UseQueryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../client";
 import type {
   OnboardingAction,
@@ -24,14 +24,41 @@ export const ONBOARDING_STEPS: ReadonlyArray<{ id: OnboardingStepId; label: stri
   { id: "first_task", label: "First task" },
 ];
 
-export function useOnboarding(options?: { enabled?: boolean; pollIntervalMs?: number }) {
+type OnboardingQueryOptions = Pick<
+  UseQueryOptions<
+    OnboardingResponse | null,
+    Error,
+    OnboardingResponse | null,
+    typeof ONBOARDING_QUERY_KEY
+  >,
+  "enabled" | "refetchInterval"
+>;
+
+/**
+ * No poll by default. `/setup` and the shell's `OnboardingRedirect` poll; every
+ * other reader shares their cache.
+ */
+export function useOnboarding(options?: OnboardingQueryOptions) {
   return useQuery({
     queryKey: ONBOARDING_QUERY_KEY,
     queryFn: () => api.fetchOnboarding(),
     enabled: options?.enabled ?? true,
-    refetchInterval: options?.pollIntervalMs ?? 10_000,
+    refetchInterval: options?.refetchInterval ?? 0,
     retry: 1,
   });
+}
+
+/**
+ * True while first-run onboarding owns a prompt the shell would otherwise show
+ * (identity, organization name): until the onboarding query answers, and while
+ * onboarding is open. With `whileMinimized: false` a minimized setup releases
+ * the prompt, because only an open, unminimized setup sends the operator to `/setup`.
+ */
+export function useOnboardingOwnsFirstRun(options?: { whileMinimized?: boolean }): boolean {
+  const { data, isPending } = useOnboarding();
+  if (isPending) return true;
+  if (!data || !isOnboardingOpen(data)) return false;
+  return (options?.whileMinimized ?? true) || !data.state.minimizedAt;
 }
 
 /** Apply a transition; the response is the fresh payload, so it replaces the cache. */
@@ -39,6 +66,8 @@ export function useOnboardingAction() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (action: OnboardingAction) => api.updateOnboarding(action),
+    // A GET that started before the PUT must not overwrite the PUT response.
+    onMutate: () => queryClient.cancelQueries({ queryKey: ONBOARDING_QUERY_KEY }),
     onSuccess: (data) => {
       queryClient.setQueryData<OnboardingResponse | null>(ONBOARDING_QUERY_KEY, data);
     },

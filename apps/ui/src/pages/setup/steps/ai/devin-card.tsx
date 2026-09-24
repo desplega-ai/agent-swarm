@@ -1,7 +1,8 @@
 import { useState } from "react";
 import type { UpsertConfigEntry } from "@/api/hooks/use-config-api";
-import { BrandLogo } from "../../components/setup-card";
-import { SaveButton, SecretField, TextField, useSaveKeys } from "./fields";
+import { BrandLogo } from "@/components/onboarding/setup-card";
+import { useSetupSave } from "@/components/onboarding/use-setup-save";
+import { SaveButton, SecretKeyField, TextField } from "./fields";
 import { type AiCardProps, globalConfigValue } from "./model";
 import { ProviderCard } from "./provider-card";
 
@@ -9,7 +10,7 @@ const API_KEY = "DEVIN_API_KEY";
 const ORG_ID = "DEVIN_ORG_ID";
 
 export function DevinCard({ presence, configs, onSaved, ...card }: AiCardProps) {
-  const keys = useSaveKeys(presence);
+  const keys = useSetupSave(presence);
   const [apiKey, setApiKey] = useState("");
   // null = untouched, so the field shows the stored org id.
   const [orgId, setOrgId] = useState<string | null>(null);
@@ -42,7 +43,7 @@ export function DevinCard({ presence, configs, onSaved, ...card }: AiCardProps) 
       saved={keys.isSaved(API_KEY)}
     >
       <div className="grid gap-3 sm:grid-cols-2">
-        <SecretField
+        <SecretKeyField
           key={keys.version}
           id="setup-ai-devin-key"
           envKey={API_KEY}

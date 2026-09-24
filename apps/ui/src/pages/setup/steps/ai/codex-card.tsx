@@ -4,11 +4,11 @@ import { useEffect, useState } from "react";
 import { api } from "@/api/client";
 import { ONBOARDING_QUERY_KEY } from "@/api/hooks/use-onboarding";
 import type { CodexDeviceStartResponse } from "@/api/types";
+import { BrandLogo } from "@/components/onboarding/setup-card";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
 import { useConfig } from "@/hooks/use-config";
-import { BrandLogo } from "../../components/setup-card";
 import { CopyIconButton } from "./fields";
 import type { AiCardProps } from "./model";
 import { ProviderCard } from "./provider-card";
@@ -24,6 +24,10 @@ type CodexFlow =
 
 /** Global rows the CLI and the device flow write (`codex_oauth` is the legacy slot 0). */
 const CODEX_SLOT_KEY = /^codex_oauth(_\d+)?$/i;
+
+const EXPIRED_MESSAGE = "The code expired. Start again to get a new one.";
+/** Consecutive failed poll requests before the card stops and offers "Try again". */
+const MAX_POLL_ERRORS = 3;
 
 export function CodexCard({
   configs,
@@ -57,19 +61,26 @@ export function CodexCard({
     }
   }
 
-  // Poll while the card is mounted. The API calls upstream at most once per
-  // interval, so a faster tick only returns `pending`.
+  // Poll while the card is mounted, until the code expires. The API calls
+  // upstream at most once per interval, so a faster tick only returns `pending`.
   useEffect(() => {
     if (flow.phase !== "polling") return;
-    const { flowId, intervalSeconds } = flow.flow;
+    const { flowId, intervalSeconds, expiresAt } = flow.flow;
     const delayMs = Math.max(2, intervalSeconds || 5) * 1000;
+    const expiresAtMs = Date.parse(expiresAt);
     let cancelled = false;
+    let errors = 0;
     let timer: number | undefined;
 
     const tick = async () => {
+      if (Date.now() >= expiresAtMs) {
+        setFlow({ phase: "failed", error: EXPIRED_MESSAGE });
+        return;
+      }
       try {
         const res = await api.pollCodexDevice(flowId);
         if (cancelled) return;
+        errors = 0;
         if (res.status === "complete") {
           setFlow({ phase: "complete", slot: res.slot });
           onDeviceComplete();
@@ -78,16 +89,20 @@ export function CodexCard({
           return;
         }
         if (res.status === "failed" || res.status === "expired") {
-          const fallback =
-            res.status === "expired"
-              ? "The code expired. Start again to get a new one."
-              : "Sign-in failed.";
+          const fallback = res.status === "expired" ? EXPIRED_MESSAGE : "Sign-in failed.";
           setFlow({ phase: "failed", error: res.error || fallback });
           void queryClient.invalidateQueries({ queryKey: ONBOARDING_QUERY_KEY });
           return;
         }
-      } catch {
-        // Transient error: keep polling. The API reports `expired` once the code times out.
+      } catch (err) {
+        if (cancelled) return;
+        // One failed request can be transient. Several in a row mean the API is gone.
+        errors += 1;
+        if (errors >= MAX_POLL_ERRORS) {
+          const detail = err instanceof Error ? ` ${err.message}` : "";
+          setFlow({ phase: "failed", error: `Could not check the sign-in.${detail}` });
+          return;
+        }
       }
       if (!cancelled) timer = window.setTimeout(tick, delayMs);
     };
@@ -189,6 +204,8 @@ export function CodexCard({
 
 function DeviceCodePanel({ flow }: { flow: CodexDeviceStartResponse }) {
   const urlLabel = flow.verificationUrl.replace(/^https?:\/\//, "");
+  // Re-read on every render; the step re-renders on each onboarding poll.
+  const minutes = Math.ceil((Date.parse(flow.expiresAt) - Date.now()) / 60_000);
   return (
     <div className="space-y-3 rounded-lg border border-primary/30 bg-primary/5 p-4">
       <div className="flex items-center justify-center gap-3">
@@ -198,7 +215,8 @@ function DeviceCodePanel({ flow }: { flow: CodexDeviceStartResponse }) {
         <CopyIconButton value={flow.userCode} label="Copy code" />
       </div>
       <p className="text-center text-sm text-muted-foreground">
-        Enter this one-time code. It expires in 15 minutes.
+        Enter this one-time code.
+        {minutes > 0 ? ` It expires in ${minutes} minute${minutes === 1 ? "" : "s"}.` : null}
       </p>
       <div className="flex justify-center">
         <Button asChild variant="outline" size="sm">
