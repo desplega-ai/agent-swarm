@@ -210,10 +210,17 @@ and integers only. Rows in `docs-site/content/docs/(documentation)/reference/tel
 - [x] Phase 3 (Opus): UI shell, routing, pill, home card, settings entry, steps 1 + 2
 - [x] Phase 4 (Opus): UI step 3 (Claude, Codex device, open harnesses + gateway R7, Devin, per-worker switch R2)
 - [x] Phase 5 (Opus): UI steps 4, 5 (split view, Slack manifest, Linear/Jira, brand SVGs), 6
-- [ ] API follow-ups from the UI spec review: `verifiedWorkers` counts leads too (label "agents"); derivation also runs when `autoCompleted` but emits no telemetry (so "Run setup again" shows the true state)
+- [x] API follow-ups from the UI spec review: `verifiedWorkers` counts leads too (label "agents"); derivation also runs when `autoCompleted` but emits no telemetry (so "Run setup again" shows the true state)
 - [x] UI fix round 1 (18 review items) delegated
+- [x] UI fix round 1 committed (384e58f0f); API commits 2412423a3 + 785a7bbe3 (codex_oauth_<N> live test) + 0d85ababf (Dockerfile slack-manifest COPY)
+- [ ] API review fix round (Codex, 14 items: SSRF, internal-key surfaces, telemetry-once, GET w/o write lock, ...)
+- [ ] UI round 2 from Taras QA (14 items + Slack HTTP removal + blessed tools Hybrid + Slack setup prompt), agents A (shell) + B (steps)
 - [ ] Phase 6: integration pass, gates, code review, commit, push to #1604, PR body
 - [ ] Phase 7: local QA + design feedback loop with Taras
+
+## QA feedback round 2 (Taras, 2026-09-24)
+
+Decisions: blessed tools = Hybrid (Gmail + Microsoft inline via existing OAuth presets; Figma, Stripe, Salesforce, Shopify, Granola open /connections in a new tab, presets in a follow-up PR). Slack HTTP mode removed from the step (not implemented). Taras overrides the no-step-transition motion rule for /setup. Memory re-probe failure keeps a done step done.
 
 ## Verification
 
