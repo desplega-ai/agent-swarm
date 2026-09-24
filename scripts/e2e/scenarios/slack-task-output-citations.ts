@@ -92,7 +92,7 @@ export const slackTaskOutputCitations: Scenario = {
           "Outcome omitted the labeled source list",
         );
       } else {
-        expect(rendered.includes("[1]"), "Ignored citation must leave a plain numeric marker");
+        expect(!rendered.includes("[1]"), "Ignored citation must not leave a numeric marker");
         expect(!rendered.includes("Sources:"), "Ignored batch rendered a source list");
         expect(!rendered.includes(ref), "Ignored batch rendered a citation URL");
       }

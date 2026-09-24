@@ -1284,9 +1284,16 @@ describe("Slack renderer v2", () => {
     await tool.handler(
       {
         taskId: task.id,
-        message: "Claim [citation:1]",
+        message: "Claim [citation:1] [citation:9] remains",
         ...(withBlocks
-          ? { blocks: [{ type: "section", text: { type: "mrkdwn", text: "Claim [citation:1]" } }] }
+          ? {
+              blocks: [
+                {
+                  type: "section",
+                  text: { type: "mrkdwn", text: "Claim [citation:1] [citation:9] remains" },
+                },
+              ],
+            }
           : {}),
       },
       { requestInfo: { headers: { "x-agent-id": agent.id } } },
@@ -1295,9 +1302,74 @@ describe("Slack renderer v2", () => {
     expect(payload?.text).toContain("<https://example.com/|[1]>");
     expect(JSON.stringify(payload?.blocks)).toContain("Sources:");
     expect(JSON.stringify(payload?.blocks)).not.toContain("[citation:");
+    expect(JSON.stringify(payload?.blocks)).not.toContain("[9]");
+    expect(payload?.text).toContain("|[1]> remains");
   });
 
-  test("outcome cards resolve stored citations and preserve unknown markers as plain numbers", async () => {
+  test("slack-reply drops invalid sources and markers from every custom text object", async () => {
+    const agent = await createAgent({
+      name: "Invalid citation reply",
+      isLead: false,
+      status: "idle",
+    });
+    const { channelId, threadTs } = uniqueSlackAddress("C_BAD_CITATION_REPLY");
+    const task = await createTaskExtended("Invalid cited reply", {
+      agentId: agent.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+    });
+    await upsertTaskCitations(task.id, [
+      { index: 1, kind: "page", ref: "missing-page", label: "Bad evidence" },
+    ]);
+    const server = new McpServer({ name: "invalid-citation-reply", version: "1" });
+    registerSlackReplyTool(server);
+    const tool = (
+      server as unknown as {
+        _registeredTools: Record<
+          string,
+          {
+            handler: (args: unknown, meta: unknown) => Promise<unknown>;
+          }
+        >;
+      }
+    )._registeredTools["slack-reply"]!;
+    await tool.handler(
+      {
+        taskId: task.id,
+        message: "Claim [citation:1] [citation:9] remains",
+        blocks: [
+          { type: "header", text: { type: "plain_text", text: "Heading [citation:1]" } },
+          {
+            type: "section",
+            text: { type: "mrkdwn", text: "Claim [citation:1] [citation:9] remains" },
+          },
+          {
+            type: "rich_text",
+            elements: [
+              {
+                type: "rich_text_section",
+                elements: [{ type: "text", text: "Rich [citation:9] text" }],
+              },
+            ],
+          },
+        ],
+      },
+      { requestInfo: { headers: { "x-agent-id": agent.id } } },
+    );
+    const payload = calls.find((call) => call.method === "chat.postMessage")?.payload;
+    expect(payload?.text).toBe("Claim remains");
+    const rendered = JSON.stringify(payload?.blocks);
+    expect(rendered).toContain('"text":"Heading"');
+    expect(rendered).toContain('"text":"Claim remains"');
+    expect(rendered).toContain('"text":"Rich text"');
+    expect(rendered).not.toContain("citation:");
+    expect(rendered).not.toContain("Bad evidence");
+    expect(rendered).not.toContain("Sources:");
+    expect(payload?.blocks).toHaveLength(3);
+  });
+
+  test("outcome cards resolve stored citations and strip unknown markers", async () => {
     const lead = await createAgent({ name: "Citation Lead", isLead: true, status: "idle" });
     const { channelId, threadTs } = uniqueSlackAddress("C_CITATIONS");
     const ask = await createTaskExtended("Cited outcome", {
@@ -1316,7 +1388,8 @@ describe("Slack renderer v2", () => {
     await processSlackRenderV2();
     const content = calls.find((call) => call.method === "chat.startStream")?.payload.markdown_text;
     expect(content).toContain("<https://example.com/|[1]>");
-    expect(content).toContain("unknown [9]");
+    expect(content).toContain("unknown.");
+    expect(content).not.toContain("[9]");
     expect(content).toContain("Sources: <https://example.com/|[1]> Evidence");
   });
 

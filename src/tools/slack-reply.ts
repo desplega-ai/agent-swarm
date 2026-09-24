@@ -15,7 +15,7 @@ import { getTaskLink } from "@/slack/blocks";
 import { withAutoJoin } from "@/slack/channel-join";
 import { getAgentDisplayName, getAgentEmoji, markdownToSlack } from "@/slack/responses";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
-import { renderTaskCitations } from "@/utils/task-citations";
+import { renderTaskCitations, stripInvalidTaskCitations } from "@/utils/task-citations";
 
 export const registerSlackReplyTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -105,10 +105,12 @@ export const registerSlackReplyTool = (server: McpServer) => {
         const slackMessage = renderTaskCitations(markdownToSlack(message), citations);
         const renderedBlocks = blocks?.map((block) =>
           JSON.parse(
-            JSON.stringify(block, (_key, value) =>
-              value?.type === "mrkdwn" && typeof value.text === "string"
-                ? { ...value, text: renderTaskCitations(value.text, citations, "slack", false) }
-                : value,
+            JSON.stringify(block, (key, value) =>
+              key === "text" && typeof value === "string"
+                ? stripInvalidTaskCitations(value, citations)
+                : value?.type === "mrkdwn" && typeof value.text === "string"
+                  ? { ...value, text: renderTaskCitations(value.text, citations, "slack", false) }
+                  : value,
             ),
           ),
         );
@@ -125,10 +127,11 @@ export const registerSlackReplyTool = (server: McpServer) => {
             },
           ]),
         ];
-        if (renderedBlocks && citations.length) {
+        const sources = renderTaskCitations("", citations).trim();
+        if (renderedBlocks && sources) {
           messageBlocks.push({
             type: "context",
-            elements: [{ type: "mrkdwn", text: renderTaskCitations("", citations).trim() }],
+            elements: [{ type: "mrkdwn", text: sources }],
           });
         }
         if (messageBlocks.length > 50)

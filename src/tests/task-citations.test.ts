@@ -74,7 +74,7 @@ describe("citation links and presentation", () => {
     }
   });
 
-  test("resolved and unchecked links render, false and unknown indices remain plain", () => {
+  test("resolved and unchecked links render, false and unknown indices disappear", () => {
     expect(renderTaskCitations("Claim [citation:1]", [citation])).toBe(
       "Claim <https://example.com/|[1]>\n\nSources: <https://example.com/|[1]> Evidence",
     );
@@ -83,7 +83,7 @@ describe("citation links and presentation", () => {
     );
     expect(
       renderTaskCitations("[citation:1] [citation:9]", [{ ...citation, verified: "false" }]),
-    ).toBe("[1] [9]\n\nSources: [1] Evidence");
+    ).toBe("");
     expect(renderTaskCitations("[citation:1]", [{ ...citation, resolvedUrl: null }])).not.toContain(
       "<",
     );
@@ -94,6 +94,44 @@ describe("citation links and presentation", () => {
       renderTaskCitations("[citation:1]", [{ ...citation, resolvedUrl: "javascript:alert(1)" }]),
     ).not.toContain("javascript:");
     expect(renderTaskCitations("Unchanged", [])).toBe("Unchanged");
+    expect(renderTaskCitations("Bad [citation:1]", [{ ...citation, resolvedUrl: null }])).toBe(
+      "Bad",
+    );
+    expect(
+      renderTaskCitations("Good [citation:1]", [
+        { ...citation, kind: "memory", resolvedUrl: null },
+      ]),
+    ).toBe("Good [1]\n\nSources: [1] Evidence");
+  });
+
+  test.each([
+    "slack",
+    "markdown",
+  ] as const)("strips invalid runs without disrupting layout in %s", (format) => {
+    const invalid = { ...citation, index: 2, verified: "false" as const, label: "Bad source" };
+    for (const [input, output] of [
+      ["A [citation:2] [citation:9] claim.", "A claim."],
+      ["Claim [citation:9].", "Claim."],
+      ["[citation:9] Claim", "Claim"],
+      ["Claim [citation:9]", "Claim"],
+      ["[citation:2] [citation:9]", ""],
+      ["A\n  [citation:9]\n  B", "A\n\n  B"],
+      ["  A  B\n\nC", "  A  B\n\nC"],
+    ]) {
+      expect(renderTaskCitations(input!, [invalid], format)).toBe(output!);
+      expect(renderTaskCitations(input!, [invalid], format, false)).toBe(output!);
+    }
+    const mixed = renderTaskCitations(
+      "Claim [citation:1] [citation:2] [citation:9] ends.",
+      [citation, invalid],
+      format,
+    );
+    expect(mixed).toContain("[1]");
+    expect(mixed).not.toContain("[2]");
+    expect(mixed).not.toContain("[9]");
+    expect(mixed).not.toContain("Bad source");
+    expect(mixed).not.toContain("  ");
+    expect(renderTaskCitations("Done [citation:51]", [], format)).toBe("Done");
   });
 
   test("quote comparison normalizes whitespace but preserves words and case", () => {
@@ -272,6 +310,54 @@ describe("citation persistence and completion warnings", () => {
     expect((await getTaskById(task.id))?.status).toBe("completed");
   });
 
+  test.each([
+    "oversized",
+    "invalid",
+  ])("ignored %s batches complete and render no markers", async (kind) => {
+    const task = await createTaskExtended("Ignored citation batch", { agentId, source: "system" });
+    await startTask(task.id);
+    const server = new McpServer({ name: "ignored-citations", version: "1" });
+    registerStoreProgressTool(server);
+    const tool = (
+      server as unknown as {
+        _registeredTools: Record<
+          string,
+          {
+            inputSchema: { parse: (args: unknown) => unknown };
+            handler: (
+              args: unknown,
+              meta: unknown,
+            ) => Promise<{ structuredContent: { success: boolean; details?: string } }>;
+          }
+        >;
+      }
+    )._registeredTools["store-progress"]!;
+    const citations =
+      kind === "oversized"
+        ? Array.from({ length: 51 }, (_, i) => ({
+            index: i + 1,
+            kind: "url",
+            ref: "https://example.com/",
+          }))
+        : [{ index: 1, kind: "url", ref: "x".repeat(2049) }];
+    const result = await tool.handler(
+      tool.inputSchema.parse({
+        taskId: task.id,
+        status: "completed",
+        output: "Done [citation:1] [citation:51] now",
+        citations,
+      }),
+      { requestInfo: { headers: { "x-agent-id": agentId } } },
+    );
+    expect(result.structuredContent.success).toBe(true);
+    expect(result.structuredContent.details).toContain("removed from rendered output");
+    const stored = await getTaskCitations(task.id);
+    expect(stored).toEqual([]);
+    const completed = await getTaskById(task.id);
+    expect(completed?.status).toBe("completed");
+    expect(renderTaskCitations(completed!.output!, stored)).toBe("Done now");
+  });
+
   test("accumulates, upserts by index, verifies memory quotes, and completes despite bad citations", async () => {
     const task = await createTaskExtended("Citation handler test", { agentId, source: "system" });
     await startTask(task.id);
@@ -329,7 +415,7 @@ describe("citation persistence and completion warnings", () => {
     );
     expect(result.structuredContent.success).toBe(true);
     expect(result.structuredContent.details).toContain(
-      "WARNING: [citation:9] has no citation entry.",
+      "WARNING: [citation:9] has no citation entry; its marker is removed from rendered output.",
     );
     expect(result.structuredContent.details).toContain(
       "WARNING: citation 2 is not referenced in output.",
@@ -340,6 +426,12 @@ describe("citation persistence and completion warnings", () => {
     expect(rows[1]?.verified).toBe("false");
     expect(rows[2]?.verified).toBe("false");
     expect(rows[3]?.resolvedUrl).toBeNull();
+    expect(result.structuredContent.details).toContain("citation 2 failed validation");
+    const rendered = renderTaskCitations("Done [citation:2] [citation:3] [citation:9]", rows);
+    expect(rendered).not.toContain("[2]");
+    expect(rendered).not.toContain("[3]");
+    expect(rendered).not.toContain("[4]");
+    expect(rendered).not.toContain("[9]");
     await upsertTaskCitations(task.id, [
       { index: 5, kind: "script-run", ref: "missing-run" },
       { index: 6, kind: "memory", ref: "missing-memory" },

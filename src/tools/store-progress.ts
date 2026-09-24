@@ -129,7 +129,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
           .catch([])
           .optional()
           .describe(
-            "Claim sources, upserted by index across calls. Reference in output with [citation:N]. Verification failures only disable links; they never block completion. At most 50 citations per call/task, refs up to 2048 characters, labels up to 200. Invalid or oversized batches are ignored; existing indices can still be updated at capacity.",
+            "Claim sources, upserted by index across calls. Reference in output with [citation:N]. Missing entries and verification failures remove citation markers and sources from rendered output; they never block completion. At most 50 citations per call/task, refs up to 2048 characters, labels up to 200. Invalid or oversized batches are ignored; existing indices can still be updated at capacity.",
           ),
         persistMemory: z
           .boolean()
