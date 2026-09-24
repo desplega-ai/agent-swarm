@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import { unlink } from "node:fs/promises";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
   cancelTask,
   closeDb,
@@ -27,6 +28,7 @@ import {
   supersedeTask,
   upsertSwarmConfig,
 } from "../be/db";
+import { upsertTaskCitations } from "../be/task-citations";
 import { createStandaloneScheduleTask } from "../scheduler/schedule-task";
 import { getTaskLink, MAX_SECTION_LENGTH } from "../slack/blocks";
 import {
@@ -43,6 +45,7 @@ import {
 } from "../slack/render-v2";
 import { getAgentDisplayName, getAgentEmoji } from "../slack/responses";
 import { slackContextKey } from "../tasks/context-key";
+import { registerSlackReplyTool } from "../tools/slack-reply";
 import type { AgentTask, TaskAttachment } from "../types";
 import { clearVolatileSecretsForTesting } from "../utils/secret-scrubber";
 
@@ -231,6 +234,9 @@ mock.module("../slack/app", () => ({
   getSlackApp: () => ({
     client: {
       apiCall: mockApiCall,
+      chat: {
+        postMessage: (payload: Record<string, unknown>) => mockApiCall("chat.postMessage", payload),
+      },
       reactions: {
         add: (payload: Record<string, unknown>) => mockApiCall("reactions.add", payload),
         remove: (payload: Record<string, unknown>) => mockApiCall("reactions.remove", payload),
@@ -1248,6 +1254,70 @@ describe("Slack renderer v2", () => {
     expect(outcome?.kind).toBe("outcome");
     expect(outcome?.finalizedAt).toBeDefined();
     expect(outcome?.permalink).toContain("outcome1");
+  });
+
+  test.each([
+    false,
+    true,
+  ])("slack-reply renders citations with custom blocks=%s", async (withBlocks) => {
+    const agent = await createAgent({ name: "Citation reply", isLead: false, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_CITATION_REPLY");
+    const task = await createTaskExtended("Cited reply", {
+      agentId: agent.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+    });
+    await upsertTaskCitations(task.id, [
+      { index: 1, kind: "url", ref: "https://example.com/", label: "Evidence" },
+    ]);
+    const server = new McpServer({ name: "citation-reply", version: "1" });
+    registerSlackReplyTool(server);
+    const tool = (
+      server as unknown as {
+        _registeredTools: Record<
+          string,
+          { handler: (args: unknown, meta: unknown) => Promise<unknown> }
+        >;
+      }
+    )._registeredTools["slack-reply"]!;
+    await tool.handler(
+      {
+        taskId: task.id,
+        message: "Claim [citation:1]",
+        ...(withBlocks
+          ? { blocks: [{ type: "section", text: { type: "mrkdwn", text: "Claim [citation:1]" } }] }
+          : {}),
+      },
+      { requestInfo: { headers: { "x-agent-id": agent.id } } },
+    );
+    const payload = calls.find((call) => call.method === "chat.postMessage")?.payload;
+    expect(payload?.text).toContain("<https://example.com/|[1]>");
+    expect(JSON.stringify(payload?.blocks)).toContain("Sources:");
+    expect(JSON.stringify(payload?.blocks)).not.toContain("[citation:");
+  });
+
+  test("outcome cards resolve stored citations and preserve unknown markers as plain numbers", async () => {
+    const lead = await createAgent({ name: "Citation Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_CITATIONS");
+    const ask = await createTaskExtended("Cited outcome", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    await startTask(ask.id);
+    await upsertTaskCitations(ask.id, [
+      { index: 1, kind: "url", ref: "https://example.com/", label: "Evidence" },
+    ]);
+    await completeTask(ask.id, "Supported [citation:1], unknown [citation:9].");
+    await backdateLastUpdated([ask.id], 20);
+    await processSlackRenderV2();
+    const content = calls.find((call) => call.method === "chat.startStream")?.payload.markdown_text;
+    expect(content).toContain("<https://example.com/|[1]>");
+    expect(content).toContain("unknown [9]");
+    expect(content).toContain("Sources: <https://example.com/|[1]> Evidence");
   });
 
   test("preserves complete native Markdown beyond the Block Kit text ceiling", async () => {

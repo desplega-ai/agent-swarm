@@ -20,6 +20,7 @@ const EM_DASH = "\u2014";
 /** The prompt v2 block set. Every entry is registered under category "system". */
 const SYSTEM_TEMPLATES = [
   "system.agent.communication",
+  "system.agent.communication.remote",
   "system.agent.lead",
   "system.agent.memory",
   "system.agent.memory.remote",
@@ -111,11 +112,11 @@ describe("Session templates: registration", () => {
     expect(sessionSystemEventTypes("session")).toEqual([...SESSION_TEMPLATES].sort());
   });
 
-  test("registers 25 system and session templates in total", () => {
+  test("registers 26 system and session templates in total", () => {
     const all = getAllTemplateDefinitions();
     const sessionSystem = all.filter((d) => d.category === "system" || d.category === "session");
-    // 20 system blocks + 5 session composites.
-    expect(sessionSystem.length).toBe(25);
+    // 21 system blocks + 5 session composites.
+    expect(sessionSystem.length).toBe(26);
   });
 
   test("drops the v1 blocks that prompt v2 deleted", () => {

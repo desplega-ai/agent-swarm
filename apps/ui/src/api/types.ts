@@ -1,3 +1,4 @@
+import type { TaskCitation } from "../../../../src/utils/task-citations";
 // Backend types (mirrored from agent-swarm backend)
 export type AgentStatus = "idle" | "busy" | "offline" | "waiting_for_credentials";
 export type AgentTaskStatus =
@@ -276,6 +277,7 @@ export interface AgentTask {
   contextKey?: string;
   /** Pointer-based artifacts attached to the task, when included by the API response. */
   attachments?: TaskAttachment[];
+  citations?: TaskCitation[];
   /**
    * Steering (≥1.122.1), derived server-side: true when the assigned agent is
    * the Lead. Only present on task *read* responses (`GET /api/tasks/:id`,

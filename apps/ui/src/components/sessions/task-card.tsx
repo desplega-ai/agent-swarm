@@ -1,3 +1,4 @@
+import { renderTaskCitations } from "../../../../../src/utils/task-citations";
 /**
  * Sessions surface — single agent turn rendered inside the session timeline.
  *
@@ -385,7 +386,9 @@ export function TaskOutcome({
     );
   }
   if (task.status === "completed" && task.output && task.output.trim().length > 0) {
-    return <OutcomeProse text={task.output} />;
+    return (
+      <OutcomeProse text={renderTaskCitations(task.output, task.citations ?? [], "markdown")} />
+    );
   }
   // The chain-of-thought above already covers active states — only fall
   // through to the cached summaryLines as a final fallback when nothing

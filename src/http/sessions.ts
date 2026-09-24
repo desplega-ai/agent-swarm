@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { countSessions, getRootTaskChain, getTaskById, listRecentSessions } from "../be/db";
 import { getTaskSteeringFields } from "../be/steering";
+import { getTaskCitations, TaskCitationSchema } from "../be/task-citations";
 import { mintSessionToken, revokeSessionToken } from "../be/users";
 import { AgentTaskSchema, AgentTaskStatusSchema, SteerModeSchema } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
@@ -64,6 +65,7 @@ const SessionListItemSchema = z.object({
  * `root` and each `chain` entry on `GET /api/sessions/{rootTaskId}`.
  */
 const TaskWithSteeringSchema = AgentTaskSchema.extend({
+  citations: z.array(TaskCitationSchema),
   isLeadTask: z.boolean(),
   supportedSteerModes: z.array(SteerModeSchema),
 });
@@ -265,9 +267,17 @@ export async function handleSessions(
     }
     const chain = await getRootTaskChain(parsed.params.rootTaskId);
     getSession.respond(res, 200, {
-      root: { ...root, ...(await getTaskSteeringFields(root)) },
+      root: {
+        ...root,
+        ...(await getTaskSteeringFields(root)),
+        citations: await getTaskCitations(root.id),
+      },
       chain: await Promise.all(
-        chain.map(async (task) => ({ ...task, ...(await getTaskSteeringFields(task)) })),
+        chain.map(async (task) => ({
+          ...task,
+          ...(await getTaskSteeringFields(task)),
+          citations: await getTaskCitations(task.id),
+        })),
       ),
     });
     return true;

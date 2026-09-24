@@ -986,21 +986,21 @@ describe("truncateRepoClaudeMd", () => {
 // ---------------------------------------------------------------------------
 
 describe("getBasePrompt: size budget", () => {
-  // Include the explicit task-output budget and exceptions in the static prompt.
+  // Include task-output budget, exceptions, and the two citation guidance lines.
   // Keep tight role-specific ceilings to catch unrelated prompt growth.
-  test("a fresh claude worker stays under 5,400 characters", async () => {
+  test("a fresh claude worker stays under 5,700 characters", async () => {
     const result = await getBasePrompt({ ...minimalArgs, name: "Ada", traits: localTraits });
-    expect(result.length).toBeLessThan(5_400);
+    expect(result.length).toBeLessThan(5_700);
   });
 
-  test("a fresh claude lead stays under 5,500 characters", async () => {
+  test("a fresh claude lead stays under 5,800 characters", async () => {
     const result = await getBasePrompt({
       ...minimalArgs,
       role: "lead",
       name: "Cora",
       traits: localTraits,
     });
-    expect(result.length).toBeLessThan(5_500);
+    expect(result.length).toBeLessThan(5_800);
   });
 
   test("Picateclas spawn-OOM hardening: the kitchen sink stays below MAX_ARG_STRLEN", async () => {

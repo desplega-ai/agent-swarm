@@ -32,6 +32,7 @@ import {
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { renderTaskCitations, type TaskCitation } from "../../../../../../src/utils/task-citations";
 import "streamdown/styles.css";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useSessionCosts } from "@/api/hooks/use-costs";
@@ -234,12 +235,20 @@ function parseStructuredOutput(raw: string): { output?: string; summary?: string
   return null;
 }
 
-function StructuredOutputContent({ raw, maxH }: { raw: string; maxH: string }) {
+function StructuredOutputContent({
+  raw,
+  maxH,
+  citations = [],
+}: {
+  raw: string;
+  maxH: string;
+  citations?: TaskCitation[];
+}) {
   const structured = parseStructuredOutput(raw);
   if (!structured) {
     return (
       <div className={`text-sm leading-relaxed overflow-auto text-foreground/80 ${maxH}`}>
-        <MarkdownView text={raw} />
+        <MarkdownView text={renderTaskCitations(raw, citations, "markdown")} />
       </div>
     );
   }
@@ -251,7 +260,9 @@ function StructuredOutputContent({ raw, maxH }: { raw: string; maxH: string }) {
             Summary
           </span>
           <div className="mt-1 text-sm leading-relaxed text-foreground/80">
-            <MarkdownView text={structured.summary} />
+            <MarkdownView
+              text={renderTaskCitations(structured.summary, citations, "markdown", false)}
+            />
           </div>
         </div>
       )}
@@ -261,9 +272,14 @@ function StructuredOutputContent({ raw, maxH }: { raw: string; maxH: string }) {
             Output
           </span>
           <div className="mt-1 text-sm leading-relaxed text-foreground/80">
-            <MarkdownView text={structured.output} />
+            <MarkdownView
+              text={renderTaskCitations(structured.output, citations, "markdown", false)}
+            />
           </div>
         </div>
+      )}
+      {citations.length > 0 && (
+        <MarkdownView text={renderTaskCitations("", citations, "markdown")} />
       )}
     </div>
   );
@@ -906,7 +922,11 @@ export default function TaskDetailPage() {
           bgColor={isCompleted ? "bg-status-success/5" : "bg-muted/20"}
           defaultOpen
         >
-          <StructuredOutputContent raw={task.output ?? ""} maxH="max-h-[60vh]" />
+          <StructuredOutputContent
+            citations={task.citations}
+            raw={task.output ?? ""}
+            maxH="max-h-[60vh]"
+          />
         </CollapsibleSection>
       )}
 
@@ -1238,7 +1258,11 @@ export default function TaskDetailPage() {
                 borderColor={isCompleted ? "border-status-success/30" : "border-border"}
                 bgColor={isCompleted ? "bg-status-success/5" : "bg-muted/20"}
               >
-                <StructuredOutputContent raw={task.output ?? ""} maxH="max-h-48" />
+                <StructuredOutputContent
+                  citations={task.citations}
+                  raw={task.output ?? ""}
+                  maxH="max-h-48"
+                />
               </CollapsibleSection>
             )}
 

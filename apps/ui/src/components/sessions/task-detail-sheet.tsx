@@ -1,3 +1,4 @@
+import { renderTaskCitations } from "../../../../../src/utils/task-citations";
 /**
  * Sessions surface (Phase 4 ≥1.76.0) — task-detail Sheet, opened from a
  * timeline `<TaskCard>` click.
@@ -141,7 +142,13 @@ export function TaskDetailSheet({ taskId, task, open, onOpenChange }: TaskDetail
                 Output
               </h4>
               <div className="text-sm leading-relaxed text-foreground/90 min-w-0 break-words [&_pre]:overflow-x-auto [&_pre]:max-w-full">
-                <Streamdown>{normalizeNewlines(task.output.trim())}</Streamdown>
+                <Streamdown>
+                  {renderTaskCitations(
+                    normalizeNewlines(task.output.trim()),
+                    task.citations ?? [],
+                    "markdown",
+                  )}
+                </Streamdown>
               </div>
             </section>
           ) : null}

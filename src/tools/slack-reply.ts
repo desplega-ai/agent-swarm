@@ -9,11 +9,13 @@ import {
   markTaskSlackReplySent,
   recordSlackMessage,
 } from "@/be/db";
+import { getTaskCitations } from "@/be/task-citations";
 import { getSlackApp } from "@/slack/app";
 import { getTaskLink } from "@/slack/blocks";
 import { withAutoJoin } from "@/slack/channel-join";
 import { getAgentDisplayName, getAgentEmoji, markdownToSlack } from "@/slack/responses";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
+import { renderTaskCitations } from "@/utils/task-citations";
 
 export const registerSlackReplyTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -99,11 +101,21 @@ export const registerSlackReplyTool = (server: McpServer) => {
       }
 
       try {
-        const slackMessage = markdownToSlack(message);
+        const citations = taskId ? await getTaskCitations(taskId) : [];
+        const slackMessage = renderTaskCitations(markdownToSlack(message), citations);
+        const renderedBlocks = blocks?.map((block) =>
+          JSON.parse(
+            JSON.stringify(block, (_key, value) =>
+              value?.type === "mrkdwn" && typeof value.text === "string"
+                ? { ...value, text: renderTaskCitations(value.text, citations, "slack", false) }
+                : value,
+            ),
+          ),
+        );
 
         const tree = await getSlackTreeMessageByThread(slackChannelId, slackThreadTs);
         const messageBlocks: Record<string, unknown>[] = [
-          ...(blocks ?? [
+          ...(renderedBlocks ?? [
             {
               type: "section",
               text: {
@@ -113,6 +125,14 @@ export const registerSlackReplyTool = (server: McpServer) => {
             },
           ]),
         ];
+        if (renderedBlocks && citations.length) {
+          messageBlocks.push({
+            type: "context",
+            elements: [{ type: "mrkdwn", text: renderTaskCitations("", citations).trim() }],
+          });
+        }
+        if (messageBlocks.length > 50)
+          return toolErr("At most 50 blocks are allowed including citation sources.");
         if (taskId && tree) {
           if (messageBlocks.length >= 50) {
             return toolErr("At most 49 blocks are allowed when a provenance footer is added.");
