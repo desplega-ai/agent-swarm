@@ -59,7 +59,12 @@ Controls match the value type:
 
 - **Toggles** (feature flags) persist immediately when switched.
 - **Selects** (enumerated values such as `SLACK_THREAD_STEERING_MODE`) persist on change.
+- **Duration inputs** offer units while preserving the setting's underlying unit.
+- **Multiple-choice controls** edit list settings such as memory raters.
+- **JSON inputs** require an object before saving.
 - **Text and number inputs** show a Save button once the value differs from what is stored.
+
+Values supplied only by the deployment environment show an environment marker. Select **Override**, edit the draft, and save explicitly to create a stored override; the dashboard does not display the hidden environment value as a catalog default.
 
 Every row shows its default, and rows with a stored value offer a **Reset** action that deletes the stored entry and returns the setting to its default (or to the environment value, if one is set). The **Reload config** button in the header forces an immediate config reload — useful after changing environment variables outside the dashboard.
 

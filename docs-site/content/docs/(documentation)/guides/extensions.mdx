@@ -10,6 +10,8 @@ Version 1 accepts one `hooks` asset.
 The `skills`, `workflows`, and `schedules` asset keys are reserved.
 The installer rejects bundles that use those keys.
 
+Extension identities are internal execution principals. They do not appear in normal agent listings, status counts, or Slack rosters, and cannot receive task or schedule assignments.
+
 ## Lead activation and trust
 
 Extensions are trusted in-process code with no host isolation. A lead that can

@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.154.0] - 2026-09-24
+
+### Added
+- Typed dashboard configuration controls for durations, JSON objects, and multiple choices, with explicit overrides for environment-provided values (#1587).
+- A Hive field Open Graph card for dashboard link previews (#1591).
+- Agent-fs display-name seeding for provisioned agents (#1589).
+
+### Changed
+- Unset `MEMORY_RATERS` enables citation ratings and explicit self-rating hints on new and existing deployments; an explicitly empty value disables all raters (#1588).
+- Bundled agent-fs advances to 0.13.7 (#1589).
+
+### Fixed
+- Apply memory preset defaults at runtime, including hybrid search, graph expansion, and a demotion floor of 1.0 (#1585).
+- Preserve steering sender names and kinds in agent messages and dashboard chips, including buffered Slack messages (#1590, #1592).
+- Show Slack task deferrals as waiting with a wake-up time, update the same card when the continuation finishes, and keep status icons beside outcome text (#1569, #1586).
+- Keep heartbeat recovery from reclaiming workflow runs with live graph walks (#1584).
+- Hide extension identities from normal agent listings and reject task and schedule assignments to them (#1583).
+
 ## [1.153.0] - 2026-09-23
 
 ### Added

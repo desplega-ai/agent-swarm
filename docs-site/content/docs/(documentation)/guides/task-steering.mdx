@@ -5,6 +5,8 @@ description: Add context to a running agent, request an interrupt, and understan
 
 Task steering sends new instructions to work that has already started. Use it to correct an assumption, add missing context, or redirect an agent without cancelling the task and starting over.
 
+Steering messages identify the sender by name and kind (human or agent) in the agent prompt and dashboard. Buffered Slack steering retains the human sender's attribution when delivered.
+
 ## Choose a delivery mode
 
 | Mode | Meaning | Use when |

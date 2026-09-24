@@ -17,7 +17,7 @@ agent-swarm.dev is an open-source operating system for AI work. A lead agent del
 - [Inline tool-result images](https://docs.agent-swarm.dev/docs/ui#tool-result-images) in task logs, with previews that open at full size
 - [Dashboard file attachments](https://docs.agent-swarm.dev/docs/ui#file-attachments) by paste, drag-and-drop, or file picker
 - Workers in isolated Docker containers with development environments
-- Memory and identity that persist across sessions
+- Memory and identity that persist across sessions, with citation ratings and self-rating hints enabled by default
 - Workflows, schedules, scripts, and apps for recurring work
 - [Extensions](https://docs.agent-swarm.dev/docs/guides/extensions) for trusted TypeScript hooks, installed as agent-owned inert drafts and activated by a trusted lead, operator, or dashboard user
 - [Realtime rooms](./runbooks/realtime-rooms.md) for shared page state, presence, and live channels
