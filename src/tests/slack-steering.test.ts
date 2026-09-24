@@ -1,10 +1,11 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { unlinkSync } from "node:fs";
 import {
   closeDb,
   completeTask,
   createAgent,
   createTaskExtended,
+  createUser,
   getChildTasks,
   getLatestActiveTaskInThread,
   getLogsByTaskId,
@@ -15,6 +16,8 @@ import {
 
 process.env.SLACK_RENDER_V2 = "false";
 
+import { linkIdentity } from "../be/users";
+import * as slackApp from "../slack/app";
 import { buildTreeBlocks } from "../slack/blocks";
 import { routeMessage } from "../slack/router";
 import { formatSlackSteeringAck, requestSlackThreadSteering } from "../slack/steering";
@@ -37,6 +40,7 @@ async function createRunningSlackTask(
   channelId: string,
   threadTs: string,
   task = "existing Slack task",
+  requestedByUserId?: string,
 ) {
   const created = await createTaskExtended(task, {
     agentId,
@@ -44,6 +48,7 @@ async function createRunningSlackTask(
     slackChannelId: channelId,
     slackThreadTs: threadTs,
     slackUserId: "U_REQUESTER",
+    requestedByUserId,
   });
   const started = await startTask(created.id);
   expect(started?.status).toBe("in_progress");
@@ -218,6 +223,69 @@ describe("Slack thread steering", () => {
       (await getLogsByTaskId(leadTask.id)).filter((log) => log.newValue === "slack_reaction"),
     ).toHaveLength(2);
     expect(await getChildTasks(leadTask.id)).toEqual([]);
+  });
+
+  test("buffered replies resolve registered senders and keep mixed authors separate", async () => {
+    process.env.SLACK_THREAD_STEERING = "lead";
+    process.env.SLACK_THREAD_STEERING_MODE = "queue";
+    const channelId = "C_STEER_SENDERS";
+    const threadTs = "5100.0001";
+    const taras = await createUser({ name: "Taras", email: "taras-steering@example.com" });
+    const other = await createUser({ name: "Other", email: "other-steering@example.com" });
+    const task = await createRunningSlackTask(leadId, channelId, threadTs, undefined, other.id);
+    await linkIdentity(other.id, "slack", "U_OTHER_STEER", { kind: "system", id: "test" });
+    // Taras has no Slack alias yet: exercise the same email cascade as task creation.
+    const infoUsers: string[] = [];
+    const appSpy = spyOn(slackApp, "getSlackApp").mockReturnValue({
+      client: {
+        users: {
+          info: async ({ user }: { user: string }) => {
+            infoUsers.push(user);
+            return {
+              user: { profile: user === "U_TARAS_STEER" ? { email: taras.email } : {} },
+            };
+          },
+        },
+        chat: { postMessage: async () => ({ ok: true }) },
+      },
+    } as unknown as NonNullable<ReturnType<typeof slackApp.getSlackApp>>);
+    try {
+      bufferThreadMessage(channelId, threadTs, "first", "U_TARAS_STEER", "5100.0002");
+      bufferThreadMessage(channelId, threadTs, "second", "U_TARAS_STEER", "5100.0003");
+      bufferThreadMessage(channelId, threadTs, "other correction", "U_OTHER_STEER", "5100.0004");
+      bufferThreadMessage(
+        channelId,
+        threadTs,
+        "unmapped correction",
+        "U_UNKNOWN_STEER",
+        "5100.0005",
+      );
+      bufferThreadMessage(channelId, threadTs, "last", "U_TARAS_STEER", "5100.0006");
+      await instantFlush(`${channelId}:${threadTs}`);
+
+      const messages = await getSteeringMessagesForTask(task.id);
+      expect(messages).toHaveLength(4);
+      for (const [body, userId, label] of [
+        ["first\n---\nsecond", taras.id, "Taras (user)"],
+        ["other correction", other.id, "Other (user)"],
+        ["unmapped correction", undefined, "Unknown (user)"],
+        ["last", taras.id, "Taras (user)"],
+      ]) {
+        expect(messages.find((message) => message.body === body)).toMatchObject({
+          source: "slack",
+          createdByKind: "user",
+          createdByUserId: userId,
+          senderLabel: label,
+        });
+      }
+      expect(infoUsers).toEqual(["U_TARAS_STEER", "U_UNKNOWN_STEER"]);
+      expect(
+        (await getLogsByTaskId(task.id)).filter((log) => log.newValue === "slack_reaction"),
+      ).toHaveLength(5);
+      expect(await getChildTasks(task.id)).toEqual([]);
+    } finally {
+      appSpy.mockRestore();
+    }
   });
 
   test("all mode targets the latest active task", async () => {

@@ -4,11 +4,12 @@ import {
   getLeadAgent,
   getMostRecentTaskInThread,
 } from "../be/db";
+import { findUserByExternalId } from "../be/users";
 import { createAdditiveBuffer } from "../tasks/additive-buffer";
 import { slackContextKey } from "../tasks/context-key";
 import { getSlackApp } from "./app";
 import { buildBufferFlushBlocks } from "./blocks";
-import { rewriteSlackMentions } from "./enrich";
+import { resolveSlackUserId, rewriteSlackMentions } from "./enrich";
 import type { SlackFile } from "./files";
 import {
   bufferedFileFailures,
@@ -204,6 +205,18 @@ async function slackFlush(
     );
   }
 
+  const requestedByUserId = app
+    ? await resolveSlackUserId(app.client, originalRequesterId, {
+        sampleEventType: "buffered_thread_reply",
+        sampleContext: items[0]!.text,
+      })
+    : (await findUserByExternalId("slack", originalRequesterId))?.id;
+
+  // A steering row has one sender. Keep consecutive messages from that sender
+  // together, then flush the remaining senders in order after successful delivery.
+  const nextSenderIndex = items.findIndex((item) => item.userId !== originalRequesterId);
+  const steeringItems = nextSenderIndex === -1 ? items : items.slice(0, nextSenderIndex);
+
   // Steering carries text only. As on the mention path, files need a follow-up
   // task so its attachments exist before a worker can claim it.
   const steering =
@@ -211,8 +224,15 @@ async function slackFlush(
       ? await requestSlackThreadSteering({
           channelId,
           threadTs,
-          message: combinedText,
-          messageTimestamps: items.map((item) => item.ts),
+          message:
+            nextSenderIndex === -1
+              ? combinedText
+              : await rewriteSlackMentions(
+                  steeringItems.map((item) => item.text).join("\n---\n"),
+                  botUserId,
+                ),
+          messageTimestamps: steeringItems.map((item) => item.ts),
+          requestedByUserId,
         })
       : null;
   if (steering) {
@@ -238,6 +258,9 @@ async function slackFlush(
           console.error("[Slack] Failed to post steering feedback:", error);
         }
       }
+    }
+    if (nextSenderIndex !== -1) {
+      await slackFlush(items.slice(nextSenderIndex), key, immediate);
     }
     return;
   }
@@ -267,6 +290,7 @@ async function slackFlush(
       slackThreadTs: threadTs,
       slackTriggerMessageTs: items.at(-1)!.ts,
       slackUserId: originalRequesterId,
+      requestedByUserId,
       dependsOn,
       parentTaskId: mostRecentTask?.id,
       contextKey: slackContextKey({ channelId, threadTs }),
