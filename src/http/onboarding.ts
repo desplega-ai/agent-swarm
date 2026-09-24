@@ -198,7 +198,7 @@ async function handleMemoryProbe(body: OnboardingMemoryRequest): Promise<Onboard
   try {
     endpoint = assertUrlSafe(baseUrl ?? "", publicEndpointSsrfOptions());
   } catch {
-    await updateMemoryState(body.preset, { ok: false, errorClass: "network" });
+    // Input rejections are not probe outcomes: the step state stays as is.
     return {
       ok: false,
       latencyMs: 0,
@@ -223,7 +223,6 @@ async function handleMemoryProbe(body: OnboardingMemoryRequest): Promise<Onboard
   const apiKey = explicitKey ?? reusedKey ?? implicitKey;
 
   if (!apiKey) {
-    await updateMemoryState(body.preset, { ok: false, errorClass: "auth" });
     return {
       ok: false,
       latencyMs: 0,

@@ -584,6 +584,16 @@ describe("onboarding memory probe", () => {
     expect(response.status).toBe(400);
   });
 
+  test("input rejections leave the memory step unchanged", async () => {
+    await request("/api/onboarding");
+    const response = await request("/api/onboarding/memory", {
+      method: "POST",
+      body: { preset: "custom", baseUrl: "https://example.com/v1", model: "test-embedding-model" },
+    });
+    expect(((await response.json()) as { errorClass?: string }).errorClass).toBe("auth");
+    expect((await getState()).steps.memory.status).toBe("todo");
+  });
+
   test("does not send a reused OpenAI key to another host", async () => {
     let hits = 0;
     const fake = startEmbeddingServer(() => {
