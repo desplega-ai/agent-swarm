@@ -836,6 +836,32 @@ describe("validateProviderCredentials — error scrubbing", () => {
     expect(fetchCalled).toBe(false);
   });
 
+  test("codex with a codex_oauth_<N> pool slot passes via presence check (no upstream call)", async () => {
+    // The dashboard device login stores slots, not CODEX_OAUTH. The presence
+    // check (`checkCodexCredentials`) already accepts them; the live test must
+    // too, or the provider stays `configured` and onboarding never verifies.
+    delete process.env.CODEX_OAUTH;
+    delete process.env.OPENAI_API_KEY;
+    process.env.codex_oauth_0 = JSON.stringify({
+      access: "oai-access-token-from-device-login",
+      refresh: "oai-refresh",
+      expires: Date.now() + 3600_000,
+      accountId: "acct_123",
+    });
+    let fetchCalled = false;
+    globalThis.fetch = (async () => {
+      fetchCalled = true;
+      return new Response("{}", { status: 200 });
+    }) as typeof fetch;
+    try {
+      const result = await validateProviderCredentials("codex");
+      expect(result.ok).toBe(true);
+      expect(fetchCalled).toBe(false);
+    } finally {
+      delete process.env.codex_oauth_0;
+    }
+  });
+
   test("codex with ~/.codex/auth.json on disk passes via presence check (no env creds)", async () => {
     // Reproduces the prod scenario: agent boots from a credential pool that
     // pre-materialised auth.json (or ran `codex login` in a prior boot), so
