@@ -1,0 +1,13 @@
+# A workflow file an extension ships. Its name must start with "task-digest-".
+name: task-digest-report
+description: Collect the task digest on demand. Trigger it manually.
+definition:
+  nodes:
+    - id: collect
+      type: swarm-script
+      label: Collect the digest
+      config:
+        scriptName: task-digest-collect
+        scope: global
+        args:
+          hours: 24

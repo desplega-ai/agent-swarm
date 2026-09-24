@@ -4,7 +4,7 @@ Operator guide: [docs-site guides/extensions.mdx](../docs-site/content/docs/(doc
 
 Extensions are trusted TypeScript hooks that run inside the API server.
 Each extension bundle contains a manifest and the files it references.
-A bundle has one API runtime hooks file (`assets.hooks`) and can also ship scripts and schedules.
+A bundle has one API runtime hooks file (`assets.hooks`) and can also ship scripts, schedules, workflows, and skills.
 Extensions install only from the predefined catalog in `templates/extensions/`.
 
 ## Lead activation and trust
@@ -56,7 +56,7 @@ name owned by another agent (or by an operator) does not transfer ownership.
 A new install has `enabled=false` and `status=disabled`. Its `ext:<name>` runtime
 agent exists but stays offline. Validation typechecks source without importing it,
 so the hooks stay inert until a lead, operator, or dashboard user enables them.
-Bundled scripts are live from install; see [Assets](#assets). An agent's subsequent version stays
+Bundled scripts are live from install. Bundled schedules, workflows, and skills stay off until enable; see [Assets](#assets). An agent's subsequent version stays
 inactive until explicitly activated. For enabled extensions, workers cannot PATCH
 or change config/priority through reinstall: those changes reload live code.
 They can stage code-only versions without replacing the active snapshot.
@@ -76,15 +76,16 @@ The install route performs these checks:
 
 1. Look up the template in the embedded catalog.
 2. Authorize the creator or owner.
-3. Parse the manifest with `ExtensionManifestSchema`. Reject unsafe bundle paths, missing referenced files, and unreferenced files.
-4. Reject the worker runtime and non-empty `assets.skills` or `assets.workflows`.
+3. Parse the manifest with `ExtensionManifestSchema`. Reject unsafe bundle paths, missing referenced files, and unreferenced files. A skill directory may hold only `SKILL.md` and `files/**`.
+4. Reject the worker runtime.
 5. Reject relative, unapproved, and computed imports in the hooks file.
 6. Typecheck the hooks file against `swarm-extension.d.ts`.
-7. Preflight every script outside any transaction: import allowlist, typecheck, signature, and args schema. Check every schedule's timing.
+7. Preflight every asset outside any transaction. Scripts: import allowlist, typecheck, signature, and args schema. Schedules: timing. Workflows: parse with `ExtensionWorkflowFileSchema`, check the name prefix, and run `validateDefinition` against the executor registry. Skills: parse the `SKILL.md` frontmatter and check the name prefix.
 8. In one transaction, create the `ext:<name>` agent, recheck worker ownership, and store the bundle and an immutable version snapshot. Write the assets in the same transaction when the installed version is active.
 
 Any failure writes nothing.
-An asset name that already belongs to a script or schedule outside this extension fails install with 400 `extension_validation_failed`.
+An asset name that already belongs to a script, schedule, workflow, or skill outside this extension fails install with 400 `extension_validation_failed`.
+The skill check covers every scope, so an extension skill never shadows an agent or swarm skill.
 The response adds `assets: { created, updated, skipped, deleted, detached }`.
 `assets` is `null` when the installed version is staged, not active.
 
@@ -106,10 +107,17 @@ The generator embeds the directory's `README.md`.
 A YAML manifest references it with `# yaml-language-server: $schema=../manifest.schema.json`.
 A JSON manifest references it with `"$schema": "../manifest.schema.json"`.
 
-The manifest can declare two asset lists besides `hooks`:
+The manifest can declare four asset lists besides `hooks`:
 
 - `assets.scripts[]`: `name`, `file`, `description`, and optional `intent` (defaults to `description`).
 - `assets.schedules[]`: `name`, optional `description`, `script`, exactly one of `cronExpression` or `intervalMs`, optional `timezone` (default `UTC`), and optional `args`.
+- `assets.workflows[]`: `file`, the bundle path of a YAML or JSON workflow file.
+- `assets.skills[]`: `dir`, a bundle directory that holds `SKILL.md` and optional `files/**`.
+
+A workflow file matches `ExtensionWorkflowFileSchema`: optional `$schema`, `name`, optional `description`, `definition`, and optional `triggers`, `cooldown`, `input`, and `triggerSchema`.
+The name comes from the file, not the manifest.
+A skill's name comes from the `SKILL.md` frontmatter.
+Each file under `<dir>/files/` becomes a skill file, with its path relative to `files/`.
 
 `ExtensionManifestSchema` adds refinements on top of the shape:
 
@@ -118,14 +126,17 @@ The manifest can declare two asset lists besides `hooks`:
 - A schedule sets exactly one of `cronExpression` or `intervalMs`.
 - Names do not repeat within a kind.
 
-The JSON Schema does not contain these refinements.
+The workflow `name` and the `SKILL.md` frontmatter `name` must also start with `<extension name>-`.
+Those names live in the asset files, so the manifest schema cannot check them.
+The catalog generator (`src/extensions/catalog-build.ts`) and install preflight check them instead.
+The JSON Schema does not contain any of these rules.
 The catalog generator and install enforce them.
 
 ### Add a predefined extension
 
-1. Create `templates/extensions/<name>/` with one manifest, the hooks file, any script files, and a `README.md`.
+1. Create `templates/extensions/<name>/` with one manifest, the hooks file, any script, workflow, and skill files, and a `README.md`.
 2. Add the `$schema` reference to the manifest.
-3. Start every script and schedule name with `<name>-`.
+3. Start every script, schedule, workflow, and skill name with `<name>-`.
 4. Run `bun scripts/extensions/install-template.ts <name> --validate-only` to check the working-tree template.
 5. Run `bun run build:extension-catalog` and commit `src/extensions/catalog.generated.json`.
 6. Add a row to `templates/extensions/README.md`.
@@ -133,6 +144,9 @@ The catalog generator and install enforce them.
 
 `templates/extensions/task-digest/` is the reference bundle with assets.
 It ships the `task-digest-collect` script and the `task-digest-daily` schedule (cron `0 9 * * *`, UTC).
+It also ships the `task-digest-report` workflow (`workflows/report.yaml`) and the `task-digest-guide` skill (`skills/task-digest-guide/`).
+The workflow has one `swarm-script` node that calls `task-digest-collect` and no triggers, so you trigger it by hand.
+The skill bundles `files/example-output.json`.
 
 ### Generated files
 
@@ -150,26 +164,51 @@ Never hand-edit either file.
 Migration `159_extension_assets.sql` adds the `extension_assets` provenance table: one row per asset the extension created.
 `seededHash` is the hash of what install wrote, without the enabled flag.
 A live asset whose hash still matches is pristine. Otherwise a user edited it.
-`enabledBefore` holds the schedule state to restore at the next enable.
+`enabledBefore` holds the schedule, workflow, or skill state to restore at the next enable.
+
+Each kind is an adapter in `assets.ts`. The hash covers these fields:
+
+| Kind | Hash covers |
+|---|---|
+| Script | Source |
+| Schedule | Name, description, script, timing, timezone, and args |
+| Workflow | Name, description, definition, triggers, cooldown, input, and `triggerSchema` |
+| Skill | `SKILL.md` content and every bundled file |
 
 Scripts are global and owned by the `ext:<name>` agent (`createdByAgentId`).
 Scripts have no enabled state.
 They are live and callable from install, and `script-run` does not check extension state.
 Schedules use `targetType: script` and run as the `ext:<name>` agent.
 
-| Action | Scripts | Schedules |
+Workflows are created with `enabled: false` (`createWorkflow` takes an optional `enabled`) and `createdByAgentId` set to the `ext:<name>` agent.
+A disabled workflow ignores its triggers, and a manual trigger returns 400 `Workflow is disabled`.
+A `swarm-script` node can call the extension's own scripts, because reconcile writes scripts first in the same transaction.
+
+Skills are created with `scope: "global"`, `type: "personal"`, `ownerAgentId` set to the `ext:<name>` agent, `systemDefault: false`, and `isEnabled: false` (`SkillInsert` takes an optional `isEnabled`).
+Bundled files are written with `upsertSkillFiles`.
+The scope is global, not swarm, on purpose.
+A swarm-scope skill resolves for every agent.
+A global skill resolves for an agent only when it is installed on that agent (`agent_skills`) and enabled (`getAgentSkills` in `src/be/db.ts`).
+So enabling an extension never changes which skills an agent sees.
+Extensions do not install their skills on agents.
+The operator enables the extension, then installs the skill on each agent with the existing skill tools (`skill-install`).
+`skill-install` refuses a disabled skill, so enable the extension first.
+
+| Action | Scripts | Schedules, workflows, and skills |
 |---|---|---|
 | Install (active version) | Created and callable at once | Created disabled |
 | Install (staged version) | No change until activation | No change until activation |
-| Enable | No change | First enable turns them on. Later enables restore the state recorded at disable, so a schedule a user turned off stays off. |
-| Disable | No change; still callable | Paused. The live state is recorded first. |
-| Upgrade | Pristine scripts update. Edited ones stay and report as `skipped`. | Same rule. A new schedule starts at the next enable. |
+| Enable | No change | First enable turns them on. Later enables restore the state recorded at disable, so an asset a user turned off stays off. |
+| Disable | No change; still callable | Turned off. The live state is recorded first. |
+| Upgrade | Pristine scripts update. Edited ones stay and report as `skipped`. | Same rule. A new asset turns on at the next enable. |
 | Upgrade, asset dropped from the manifest | Deleted if pristine, detached if edited | Same rule |
 | Uninstall (disabled only) | Deleted if pristine, detached if edited | Same rule |
 
 An upgrade is `activate-version` or an install that activates the new version.
 It applies the seed runner's three-way rule (`src/be/seed/runner.ts`).
 Detach keeps the live asset and drops its `extension_assets` row.
+Writes run in dependency order: scripts, schedules, workflows, skills.
+Removal runs in reverse: skills, workflows, schedules, scripts.
 `DELETE /api/extensions/{id}` returns `{ deleted: true, assets: { deleted, detached } }`.
 
 ### Extensions installed inline
@@ -189,7 +228,7 @@ The loader writes the active snapshot to a process-specific temporary directory.
 It creates runtime shims and imports the TypeScript module in process.
 It validates `configJson` against the optional exported Zod schema.
 It then registers the module's handlers.
-Enable turns the schedules on only after the hooks load, so a load error leaves them paused.
+Enable turns the schedules, workflows, and skills on only after the hooks load, so a load error leaves them off.
 
 Enable and disable update the local registry immediately.
 An operator install reloads an enabled extension immediately.
@@ -198,7 +237,7 @@ Version activation reloads the extension when it is enabled.
 A 30-second poll detects database changes from another API process.
 This poll does not provide coordinated multi-replica execution.
 
-Disable pauses the schedules, removes all registered handlers, and marks the system agent offline.
+Disable turns off the schedules, workflows, and skills, removes all registered handlers, and marks the system agent offline.
 Uninstall requires a disabled extension. It deletes its stored history, deletes pristine assets, and detaches edited ones.
 
 ```mermaid
@@ -206,10 +245,10 @@ flowchart TD
     A[Install catalog template] --> B[Validate manifest paths imports types and assets]
     B --> C[Store ext:name agent bundle version and assets]
     C --> D{Lead or operator enables it?}
-    D -- No --> E[Keep hooks off and schedules paused]
+    D -- No --> E[Keep hooks and assets off]
     D -- Yes --> G[Load active snapshot]
     G --> H[Register handlers]
-    H --> F[Turn schedules on]
+    H --> F[Turn schedules workflows and skills on]
     I[Boundary entry point] --> J{isInTransaction}
     J -- Yes --> K[Log violation and continue]
     J -- No --> L[Dispatch pre handlers]
@@ -263,7 +302,7 @@ The dispatcher records an `error` or `timeout` run and continues the core operat
 Each failure increments the extension's consecutive failure count.
 Any successful handler resets the count.
 `EXTENSION_MAX_CONSECUTIVE_FAILURES` controls the limit and defaults to 5.
-The final failure sets `status` to `auto-disabled`, unregisters the extension, and pauses its schedules through `setAssetsEnabled(id, false)`.
+The final failure sets `status` to `auto-disabled`, unregisters the extension, and pauses its schedules, workflows, and skills through `setAssetsEnabled(id, false)`.
 A lead or operator must enable the extension again, which restores them.
 
 The run log keeps the newest 500 records per extension.
@@ -328,7 +367,13 @@ bun run e2e --only extensions
 - Heartbeat events cover remediation after stall classification only.
 - Worker runtime hooks do not run.
 - Extensions install only from the catalog. Inline bundles are rejected.
-- Scripts and schedules are the only asset kinds. Validation rejects non-empty `assets.skills` and `assets.workflows`.
+- Asset kinds are scripts, schedules, workflows, and skills. `hooks` is still required.
+- No connections, config defaults, KV seeds, pages, apps, prompt templates, task templates, or `requires.repos`.
+- No `lifecycle.setup` or `lifecycle.teardown`, and no `permissions`.
+- No marketplace or remote install.
+- Schedules can target only a `script`.
+- Skills are never swarm-scope, and extensions do not install them on agents.
+- The dashboard has no upgrade drift view. Skipped assets appear only in the API response.
 - Scheduled script runs do not check extension hook state.
 - The loader supports only one hooks file and no relative imports.
 - Bun retains imported modules in its registry after source disposal.

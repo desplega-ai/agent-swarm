@@ -364,14 +364,14 @@ function ManifestAssets({ assets }: { assets: ExtensionManifest["assets"] }) {
             Skills &amp; workflows
           </h4>
           <div className="flex flex-wrap gap-1.5">
-            {skills.map((name) => (
-              <Badge key={`skill:${name}`} variant="outline" size="tag">
-                skill · {name}
+            {skills.map(({ dir }) => (
+              <Badge key={`skill:${dir}`} variant="outline" size="tag">
+                skill · {dir.split("/").pop()}
               </Badge>
             ))}
-            {workflows.map((name) => (
-              <Badge key={`workflow:${name}`} variant="outline" size="tag">
-                workflow · {name}
+            {workflows.map(({ file }) => (
+              <Badge key={`workflow:${file}`} variant="outline" size="tag">
+                workflow · {file}
               </Badge>
             ))}
           </div>
@@ -723,9 +723,9 @@ export default function ExtensionDetailPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete {extension.name}?</AlertDialogTitle>
             <AlertDialogDescription>
-              Removes the extension. Scripts and schedules it installed are deleted, except ones
-              edited since install, which are kept and detached. You can reinstall it from the
-              catalog.
+              Removes the extension. The scripts, schedules, workflows, and skills it installed are
+              deleted, except ones edited since install, which are kept and detached. You can
+              reinstall it from the catalog.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

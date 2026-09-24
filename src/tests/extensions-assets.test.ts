@@ -1,12 +1,20 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import * as db from "../be/db";
 import {
   closeDb,
+  createAgent,
   createScheduledTask,
+  createWorkflow,
+  getAgentSkills,
   getAllAgents,
   getDbClient,
   getScheduledTaskByName,
   initDb,
+  installSkill,
+  listWorkflows,
   updateScheduledTask,
+  updateSkill,
+  updateWorkflow,
 } from "../be/db";
 import { ExtensionAssetConflictError } from "../be/extensions/assets";
 import { getExtensionById, getExtensionByName } from "../be/extensions/db";
@@ -23,6 +31,7 @@ import {
 } from "../extensions/lifecycle";
 import { dispatchScheduleTarget } from "../scheduler/scheduler";
 import * as scriptLoader from "../scripts-runtime/loader";
+import { telemetry } from "../telemetry";
 import type { ExtensionManifest } from "../types";
 
 const TEST_DB_PATH = "./test-extensions-assets.sqlite";
@@ -45,6 +54,19 @@ const EDITED_SCRIPT = "export default async function collect() {\n  return { edi
 
 type Bundle = { manifest: ExtensionManifest; files: Record<string, string> };
 
+const WORKFLOW = `name: digest-report
+description: Collect on demand
+definition:
+  nodes:
+    - id: collect
+      type: swarm-script
+      config:
+        scriptName: digest-collect
+        scope: global
+`;
+const SKILL =
+  "---\nname: digest-guide\ndescription: How to read the digest\n---\n\n# Digest guide\n";
+
 function bundle(
   opts: {
     schedule?: boolean;
@@ -52,9 +74,20 @@ function bundle(
     hooks?: string;
     script?: string;
     version?: string;
+    workflow?: string | false;
+    skill?: string | false;
     scheduleDescription?: string;
   } = {},
 ): Bundle {
+  const files: Record<string, string> = {
+    "hooks.ts": opts.hooks ?? HOOKS,
+    "scripts/collect.ts": opts.script ?? SCRIPT,
+  };
+  if (opts.workflow) files["workflows/report.yaml"] = opts.workflow;
+  if (opts.skill) {
+    files["skills/digest-guide/SKILL.md"] = opts.skill;
+    files["skills/digest-guide/files/sample.json"] = '{"completed": 1}';
+  }
   return {
     manifest: {
       name: "digest",
@@ -86,9 +119,11 @@ function bundle(
                   : []),
               ],
             }),
+        ...(opts.workflow ? { workflows: [{ file: "workflows/report.yaml" }] } : {}),
+        ...(opts.skill ? { skills: [{ dir: "skills/digest-guide" }] } : {}),
       },
     },
-    files: { "hooks.ts": opts.hooks ?? HOOKS, "scripts/collect.ts": opts.script ?? SCRIPT },
+    files,
   };
 }
 
@@ -145,6 +180,8 @@ describe("extension assets", () => {
     await client.run("DELETE FROM extensions");
     await client.run("DELETE FROM scheduled_tasks");
     await client.run("DELETE FROM scripts");
+    await client.run("DELETE FROM workflows");
+    await client.run("DELETE FROM skills");
     await client.run("DELETE FROM agents WHERE name LIKE 'ext:%'");
   });
 
@@ -336,17 +373,268 @@ describe("extension assets", () => {
       { kind: "script", name: "digest-collect", enabledBefore: null },
     ]);
   });
-  test("a failed version activation keeps an enabled extension on its old version", async () => {
-    const { extension } = await install();
-    await enableExtension(extension.id);
-    await install(bundle({ weekly: true, version: "2.0.0" }));
-    const foreign = await createScheduledTask({
-      name: "digest-weekly",
-      intervalMs: 60_000,
-      taskTemplate: "someone else's",
+
+  test("workflows and skills are created disabled and follow the extension's enabled state", async () => {
+    const { extension, assets } = await install(bundle({ workflow: WORKFLOW, skill: SKILL }));
+    expect(assets?.created).toEqual([
+      { kind: "script", name: "digest-collect" },
+      { kind: "schedule", name: "digest-daily" },
+      { kind: "workflow", name: "digest-report" },
+      { kind: "skill", name: "digest-guide" },
+    ]);
+    const agentId = await extAgentId();
+
+    const workflow = (await listWorkflows()).find((w) => w.name === "digest-report");
+    expect(workflow).toMatchObject({ enabled: false, createdByAgentId: agentId });
+    expect((await listWorkflows({ enabled: true })).map((w) => w.name)).not.toContain(
+      "digest-report",
+    );
+
+    const skill = await getDbClient().get<{
+      id: string;
+      scope: string;
+      ownerAgentId: string;
+      isEnabled: number;
+      systemDefault: number;
+    }>("SELECT id, scope, ownerAgentId, isEnabled, systemDefault FROM skills WHERE name = ?", [
+      "digest-guide",
+    ]);
+    expect(skill).toMatchObject({
+      scope: "global",
+      ownerAgentId: agentId,
+      isEnabled: 0,
+      systemDefault: 0,
     });
-    const daily = await getScheduledTaskByName("digest-daily");
-    expect(daily?.enabled).toBe(true);
+    const files = await getDbClient().query<{ path: string }>(
+      "SELECT path FROM skill_files WHERE skillId = ?",
+      [skill!.id],
+    );
+    expect(files.map((file) => file.path)).toEqual(["sample.json"]);
+
+    // Installed on an agent, a disabled extension skill still does not resolve.
+    const reader = await createAgent({ name: "digest-reader", isLead: false, status: "idle" });
+    await installSkill(reader.id, skill!.id);
+    const names = async () => (await getAgentSkills(reader.id)).map((s) => s.name);
+    expect(await names()).not.toContain("digest-guide");
+
+    await enableExtension(extension.id);
+    expect((await listWorkflows({ enabled: true })).map((w) => w.name)).toContain("digest-report");
+    expect(await names()).toContain("digest-guide");
+
+    await disableExtension(extension.id);
+    expect((await listWorkflows({ enabled: true })).map((w) => w.name)).not.toContain(
+      "digest-report",
+    );
+    expect(await names()).not.toContain("digest-guide");
+
+    // All four kinds survive disable -> enable, and a user's choice sticks.
+    await enableExtension(extension.id);
+    await updateSkill(skill!.id, { isEnabled: false });
+    await disableExtension(extension.id);
+    await enableExtension(extension.id);
+    expect(await names()).not.toContain("digest-guide");
+    expect((await listWorkflows({ enabled: true })).map((w) => w.name)).toContain("digest-report");
+    expect((await getScheduledTaskByName("digest-daily"))?.enabled).toBe(true);
+    await disableExtension(extension.id);
+
+    // Reinstalling the same bundle leaves every asset alone.
+    const again = await install(bundle({ workflow: WORKFLOW, skill: SKILL }));
+    expect(again.assets).toMatchObject({ created: [], updated: [], skipped: [] });
+
+    expect(await uninstallExtension(extension.id)).toEqual({
+      deleted: [
+        { kind: "skill", name: "digest-guide" },
+        { kind: "workflow", name: "digest-report" },
+        { kind: "schedule", name: "digest-daily" },
+        { kind: "script", name: "digest-collect" },
+      ],
+      detached: [],
+    });
+    expect((await listWorkflows()).map((w) => w.name)).not.toContain("digest-report");
+    expect(await getDbClient().get("SELECT id FROM skills WHERE name = 'digest-guide'")).toBeNull();
+  });
+
+  test("an invalid workflow definition fails install and writes nothing", async () => {
+    const broken = WORKFLOW.replace("type: swarm-script", "type: not-a-node-type");
+    await expect(install(bundle({ workflow: broken }))).rejects.toThrow("workflow digest-report");
+    expect(await getExtensionByName("digest")).toBeNull();
+    expect(await getScript({ name: "digest-collect", scope: "global" })).toBeNull();
+  });
+
+  test("a workflow or skill without the name prefix fails install", async () => {
+    await expect(
+      install(bundle({ workflow: WORKFLOW.replace("name: digest-report", "name: report") })),
+    ).rejects.toThrow('workflow name must start with "digest-"');
+    await expect(
+      install(bundle({ skill: SKILL.replace("name: digest-guide", "name: guide") })),
+    ).rejects.toThrow('name "guide" must start with "digest-"');
+    expect(await getExtensionByName("digest")).toBeNull();
+  });
+
+  test("dropping a workflow description keeps the workflow pristine", async () => {
+    const { extension } = await install(bundle({ workflow: WORKFLOW }));
+    const bare = WORKFLOW.replace("description: Collect on demand\n", "");
+    await install(bundle({ workflow: bare, version: "2.0.0" }));
+    await activateVersion(extension.id, 2);
+    expect((await listWorkflows()).find((w) => w.name === "digest-report")?.description).toBe("");
+
+    // The update wrote "" for the missing description: still the extension's own write.
+    const again = await install(bundle({ workflow: bare, version: "3.0.0" }), true);
+    expect(again.assets).toMatchObject({ updated: [], skipped: [] });
+    expect(await uninstallExtension(extension.id)).toMatchObject({
+      deleted: expect.arrayContaining([{ kind: "workflow", name: "digest-report" }]),
+      detached: [],
+    });
+  });
+
+  test("a rolled-back install emits no workflow telemetry", async () => {
+    const events: string[] = [];
+    const workflowSpy = spyOn(telemetry, "workflow").mockImplementation((event) => {
+      events.push(event);
+    });
+    // The skill is written after the workflow, so this fails the install mid-transaction.
+    const filesSpy = spyOn(db, "upsertSkillFiles").mockRejectedValue(
+      new Error("skill write failed"),
+    );
+    try {
+      await expect(install(bundle({ workflow: WORKFLOW, skill: SKILL }))).rejects.toThrow(
+        "skill write failed",
+      );
+      expect((await listWorkflows()).map((w) => w.name)).not.toContain("digest-report");
+      for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(events).toEqual([]);
+
+      filesSpy.mockRestore();
+      await install(bundle({ workflow: WORKFLOW, skill: SKILL }));
+      for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(events).toEqual(["created"]);
+    } finally {
+      filesSpy.mockRestore();
+      workflowSpy.mockRestore();
+    }
+  });
+
+  test.each([
+    ["description", { description: "edited by a user" }],
+    ["scope", { scope: "swarm" as const }],
+    ["model", { model: "opus" }],
+    ["allowedTools", { allowedTools: "Read" }],
+    ["userInvocable", { userInvocable: false }],
+  ])("a skill whose %s a user edited is kept on upgrade and detached on uninstall", async (_field, edit) => {
+    const { extension } = await install(bundle({ skill: SKILL }));
+    const skill = await getDbClient().get<{ id: string }>(
+      "SELECT id FROM skills WHERE name = 'digest-guide'",
+    );
+    await updateSkill(skill!.id, edit);
+
+    const upgraded = await install(
+      bundle({ skill: SKILL.replace("# Digest guide", "# Digest guide v2"), version: "2.0.0" }),
+      true,
+    );
+    expect(upgraded.assets?.skipped).toEqual([{ kind: "skill", name: "digest-guide" }]);
+    expect(await uninstallExtension(extension.id)).toMatchObject({
+      detached: [{ kind: "skill", name: "digest-guide" }],
+    });
+    expect(
+      await getDbClient().get("SELECT content FROM skills WHERE name = 'digest-guide'"),
+    ).toEqual({ content: SKILL });
+  });
+
+  test("an upgrade clears skill metadata the new version drops", async () => {
+    const withModel = SKILL.replace("description:", "model: opus\ndescription:");
+    const { extension } = await install(bundle({ skill: withModel }));
+    await install(bundle({ skill: SKILL, version: "2.0.0" }));
+    await activateVersion(extension.id, 2);
+    expect(await getDbClient().get("SELECT model FROM skills WHERE name = 'digest-guide'")).toEqual(
+      {
+        model: null,
+      },
+    );
+    const again = await install(bundle({ skill: SKILL, version: "3.0.0" }), true);
+    expect(again.assets).toMatchObject({ updated: [], skipped: [] });
+  });
+
+  test("uninstall detaches an edited workflow and keeps it", async () => {
+    const { extension } = await install(bundle({ workflow: WORKFLOW }));
+    const workflow = (await listWorkflows()).find((w) => w.name === "digest-report")!;
+    await updateWorkflow(workflow.id, { description: "edited by a user" });
+    expect(await uninstallExtension(extension.id)).toMatchObject({
+      detached: [{ kind: "workflow", name: "digest-report" }],
+    });
+    expect((await listWorkflows()).find((w) => w.name === "digest-report")?.description).toBe(
+      "edited by a user",
+    );
+  });
+
+  test("a skill name used anywhere else is a collision", async () => {
+    await getDbClient().run(
+      `INSERT INTO skills (id, name, description, content, type, scope, createdAt, lastUpdatedAt)
+       VALUES (?, 'digest-guide', 'someone else', '---', 'personal', 'swarm', datetime('now'), datetime('now'))`,
+      [crypto.randomUUID()],
+    );
+    await expect(install(bundle({ skill: SKILL }))).rejects.toThrow(
+      'skill "digest-guide" already exists and does not belong to this extension',
+    );
+    expect(await getExtensionByName("digest")).toBeNull();
+  });
+
+  async function extensionAssetState() {
+    const agentId = await extAgentId();
+    const workflow = (await listWorkflows()).find(
+      (w) => w.name === "digest-report" && w.createdByAgentId === agentId,
+    );
+    const skill = await getDbClient().get<{ isEnabled: number }>(
+      "SELECT isEnabled FROM skills WHERE name = 'digest-guide' AND ownerAgentId = ?",
+      [agentId ?? ""],
+    );
+    const schedule = await getScheduledTaskByName("digest-daily");
+    return {
+      schedule: schedule ? { enabled: schedule.enabled, nextRunAt: schedule.nextRunAt } : null,
+      workflow: workflow ? workflow.enabled : null,
+      skill: skill ? skill.isEnabled === 1 : null,
+    };
+  }
+
+  test.each([
+    "schedule",
+    "workflow",
+    "skill",
+  ] as const)("a %s conflict on activation keeps an enabled extension on its old version", async (kind) => {
+    const { extension } = await install(
+      bundle({
+        workflow: kind === "workflow" ? false : WORKFLOW,
+        skill: kind === "skill" ? false : SKILL,
+      }),
+    );
+    await enableExtension(extension.id);
+    await install(
+      bundle({ weekly: kind === "schedule", workflow: WORKFLOW, skill: SKILL, version: "2.0.0" }),
+    );
+    if (kind === "schedule") {
+      await createScheduledTask({
+        name: "digest-weekly",
+        intervalMs: 60_000,
+        taskTemplate: "someone else's",
+      });
+    } else if (kind === "workflow") {
+      await createWorkflow({
+        name: "digest-report",
+        description: "someone else's",
+        definition: { nodes: [] },
+      });
+    } else {
+      await getDbClient().run(
+        `INSERT INTO skills (id, name, description, content, type, scope, createdAt, lastUpdatedAt)
+           VALUES (?, 'digest-guide', 'someone else', '---', 'personal', 'swarm', datetime('now'), datetime('now'))`,
+        [crypto.randomUUID()],
+      );
+    }
+    const before = await extensionAssetState();
+    expect(before).toEqual({
+      schedule: { enabled: true, nextRunAt: expect.any(String) },
+      workflow: kind === "workflow" ? null : true,
+      skill: kind === "skill" ? null : true,
+    });
 
     await expect(activateVersion(extension.id, 2)).rejects.toBeInstanceOf(
       ExtensionAssetConflictError,
@@ -358,29 +646,35 @@ describe("extension assets", () => {
       activeVersion: 1,
     });
     expect(listRegistered().map((loaded) => loaded.record.id)).toEqual([extension.id]);
-    expect(await getScheduledTaskByName("digest-daily")).toMatchObject({
-      id: daily!.id,
-      enabled: true,
-      nextRunAt: daily!.nextRunAt,
-    });
-    expect(await getScheduledTaskByName("digest-weekly")).toMatchObject({
-      id: foreign.id,
-      enabled: foreign.enabled,
-      taskTemplate: "someone else's",
-    });
-    expect(await assetRows()).toEqual([
-      { kind: "schedule", name: "digest-daily", enabledBefore: null },
-      { kind: "script", name: "digest-collect", enabledBefore: null },
-    ]);
+    expect(await extensionAssetState()).toEqual(before);
+    expect((await assetRows()).every((row) => row.enabledBefore === null)).toBe(true);
+    // The foreign asset is untouched.
+    if (kind === "schedule") {
+      expect((await getScheduledTaskByName("digest-weekly"))?.taskTemplate).toBe("someone else's");
+    } else if (kind === "workflow") {
+      expect(
+        (await listWorkflows()).filter((w) => w.name === "digest-report").map((w) => w.description),
+      ).toEqual(["someone else's"]);
+    } else {
+      expect(
+        await getDbClient().get("SELECT description FROM skills WHERE name = 'digest-guide'"),
+      ).toEqual({ description: "someone else" });
+    }
   });
 
-  test("auto-disable pauses the schedule and a later enable restores it", async () => {
+  test("auto-disable pauses schedules, workflows and skills and a later enable restores them", async () => {
     const saved = process.env.EXTENSION_MAX_CONSECUTIVE_FAILURES;
     process.env.EXTENSION_MAX_CONSECUTIVE_FAILURES = "3";
     try {
-      const { extension } = await install(bundle({ hooks: THROWING_HOOKS }));
+      const { extension } = await install(
+        bundle({ hooks: THROWING_HOOKS, workflow: WORKFLOW, skill: SKILL }),
+      );
       await enableExtension(extension.id);
-      expect((await getScheduledTaskByName("digest-daily"))?.enabled).toBe(true);
+      expect(await extensionAssetState()).toEqual({
+        schedule: { enabled: true, nextRunAt: expect.any(String) },
+        workflow: true,
+        skill: true,
+      });
 
       for (let attempt = 0; attempt < 3; attempt++) {
         await dispatchPre("pre.task.create", {
@@ -394,14 +688,18 @@ describe("extension assets", () => {
         enabled: false,
         status: "auto-disabled",
       });
-      const paused = await getScheduledTaskByName("digest-daily");
-      expect(paused?.enabled).toBe(false);
-      expect(paused?.nextRunAt).toBeUndefined();
+      expect(await extensionAssetState()).toEqual({
+        schedule: { enabled: false, nextRunAt: undefined },
+        workflow: false,
+        skill: false,
+      });
 
       await enableExtension(extension.id);
-      const restored = await getScheduledTaskByName("digest-daily");
-      expect(restored?.enabled).toBe(true);
-      expect(restored?.nextRunAt).toBeString();
+      expect(await extensionAssetState()).toEqual({
+        schedule: { enabled: true, nextRunAt: expect.any(String) },
+        workflow: true,
+        skill: true,
+      });
     } finally {
       if (saved === undefined) delete process.env.EXTENSION_MAX_CONSECUTIVE_FAILURES;
       else process.env.EXTENSION_MAX_CONSECUTIVE_FAILURES = saved;

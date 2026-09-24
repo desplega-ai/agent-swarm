@@ -144,16 +144,41 @@ export default extension;
     expect(worker.ok).toBe(false);
     if (!worker.ok) expect(worker.diagnostics).toContain('runtime "worker" is not supported in v1');
 
+    // Pre-catalog string-shaped asset lists are not the current schema.
     const reserved = await validateBundle(await loadBundleFixture("reserved-assets"));
     expect(reserved.ok).toBe(false);
-    if (!reserved.ok) expect(reserved.diagnostics).toContain("assets.skills is not supported yet");
+    if (!reserved.ok) expect(reserved.diagnostics.join("\n")).toContain("assets.skills.0");
+  });
 
-    const workflows = await loadBundleFixture("minimal");
-    workflows.manifest.assets.workflows = ["flow.json"];
-    const workflowsResult = await validateBundle(workflows);
-    expect(workflowsResult).toEqual({
+  test("workflow files and skill directories must ship with the bundle", async () => {
+    const bundle = await loadBundleFixture("minimal");
+    bundle.manifest = {
+      ...bundle.manifest,
+      assets: {
+        ...bundle.manifest.assets,
+        workflows: [{ file: "workflows/flow.yaml" }],
+        skills: [{ dir: "skills/minimal-guide" }],
+      },
+    };
+    expect(await validateBundle(bundle)).toEqual({
       ok: false,
-      diagnostics: ["assets.workflows is not supported yet"],
+      diagnostics: [
+        'Referenced file "workflows/flow.yaml" is missing from files',
+        'Referenced file "skills/minimal-guide/SKILL.md" is missing from files',
+      ],
+    });
+
+    bundle.files["workflows/flow.yaml"] = "name: minimal-flow";
+    bundle.files["skills/minimal-guide/SKILL.md"] = "---\nname: minimal-guide\n---";
+    bundle.files["skills/minimal-guide/files/notes.md"] = "notes";
+    expect((await validateBundle(bundle)).ok).toBe(true);
+
+    bundle.files["skills/minimal-guide/stray.md"] = "not under files/";
+    expect(await validateBundle(bundle)).toEqual({
+      ok: false,
+      diagnostics: [
+        "Files not referenced by the manifest are not allowed: skills/minimal-guide/stray.md",
+      ],
     });
   });
 

@@ -2873,6 +2873,39 @@ export const ExtensionScheduleAssetSchema = z
   .strict();
 export type ExtensionScheduleAsset = z.infer<typeof ExtensionScheduleAssetSchema>;
 
+export const ExtensionWorkflowAssetSchema = z
+  .object({
+    file: ExtensionBundlePathSchema.describe(
+      "Bundle path of a YAML or JSON workflow file. Its `name` must start with `<extension name>-`.",
+    ),
+  })
+  .strict();
+export type ExtensionWorkflowAsset = z.infer<typeof ExtensionWorkflowAssetSchema>;
+
+export const ExtensionSkillAssetSchema = z
+  .object({
+    dir: ExtensionBundlePathSchema.describe(
+      "Bundle directory holding SKILL.md and optional files/**. The SKILL.md frontmatter `name` must start with `<extension name>-`.",
+    ),
+  })
+  .strict();
+export type ExtensionSkillAsset = z.infer<typeof ExtensionSkillAssetSchema>;
+
+/** The content of a workflow file an extension ships (`assets.workflows[].file`). */
+export const ExtensionWorkflowFileSchema = z
+  .object({
+    $schema: z.string().optional(),
+    name: z.string().min(1),
+    description: z.string().optional(),
+    definition: WorkflowDefinitionSchema,
+    triggers: z.array(TriggerConfigSchema).optional(),
+    cooldown: CooldownConfigSchema.optional(),
+    input: z.record(z.string(), InputValueSchema).optional(),
+    triggerSchema: z.record(z.string(), z.unknown()).optional(),
+  })
+  .strict();
+export type ExtensionWorkflowFile = z.infer<typeof ExtensionWorkflowFileSchema>;
+
 export const ExtensionManifestSchema = z
   .object({
     $schema: z.string().optional(),
@@ -2886,8 +2919,8 @@ export const ExtensionManifestSchema = z
         // Readonly so a hooks file's `const manifest = {...} as const` satisfies the type.
         scripts: z.array(ExtensionScriptAssetSchema).readonly().optional(),
         schedules: z.array(ExtensionScheduleAssetSchema).readonly().optional(),
-        skills: z.array(z.string()).readonly().optional(),
-        workflows: z.array(z.string()).readonly().optional(),
+        workflows: z.array(ExtensionWorkflowAssetSchema).readonly().optional(),
+        skills: z.array(ExtensionSkillAssetSchema).readonly().optional(),
       })
       .strict(),
     homepage: z.string().url().optional(),

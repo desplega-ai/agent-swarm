@@ -1,5 +1,12 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { closeDb, getAllAgents, getScheduledTaskByName, initDb } from "../be/db";
+import {
+  closeDb,
+  getAllAgents,
+  getDbClient,
+  getScheduledTaskByName,
+  initDb,
+  listWorkflows,
+} from "../be/db";
 import { validateBundle } from "../be/extensions/validate";
 import { getScript } from "../be/scripts/db";
 import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
@@ -58,6 +65,8 @@ describe("task-digest example extension", () => {
     expect(assets?.created).toEqual([
       { kind: "script", name: "task-digest-collect" },
       { kind: "schedule", name: "task-digest-daily" },
+      { kind: "workflow", name: "task-digest-report" },
+      { kind: "skill", name: "task-digest-guide" },
     ]);
     const agent = (await getAllAgents({ includeExtensions: true })).find(
       (candidate) => candidate.name === "ext:task-digest",
@@ -66,17 +75,29 @@ describe("task-digest example extension", () => {
       (await getScript({ name: "task-digest-collect", scope: "global" }))?.createdByAgentId,
     ).toBe(agent?.id);
     expect((await getScheduledTaskByName("task-digest-daily"))?.enabled).toBe(false);
+    const workflowEnabled = async () =>
+      (await listWorkflows()).find((workflow) => workflow.name === "task-digest-report")?.enabled;
+    const skill = async () =>
+      await getDbClient().get<{ isEnabled: number; ownerAgentId: string }>(
+        "SELECT isEnabled, ownerAgentId FROM skills WHERE name = 'task-digest-guide'",
+      );
+    expect(await workflowEnabled()).toBe(false);
+    expect(await skill()).toEqual({ isEnabled: 0, ownerAgentId: agent!.id });
 
     await enableExtension(extension.id);
     const running = await getScheduledTaskByName("task-digest-daily");
     expect(running).toMatchObject({ enabled: true, cronExpression: "0 9 * * *", timezone: "UTC" });
     expect(new Date(running!.nextRunAt!).getUTCHours()).toBe(9);
+    expect(await workflowEnabled()).toBe(true);
+    expect((await skill())?.isEnabled).toBe(1);
 
     await disableExtension(extension.id);
     expect((await getScheduledTaskByName("task-digest-daily"))?.enabled).toBe(false);
 
     expect(await uninstallExtension(extension.id)).toEqual({
       deleted: [
+        { kind: "skill", name: "task-digest-guide" },
+        { kind: "workflow", name: "task-digest-report" },
         { kind: "schedule", name: "task-digest-daily" },
         { kind: "script", name: "task-digest-collect" },
       ],
@@ -84,5 +105,11 @@ describe("task-digest example extension", () => {
     });
     expect(await getScheduledTaskByName("task-digest-daily")).toBeNull();
     expect(await getScript({ name: "task-digest-collect", scope: "global" })).toBeNull();
+    expect(await workflowEnabled()).toBeUndefined();
+    expect(await skill()).toBeNull();
+    // The extension agent stays as a tombstone.
+    expect(
+      (await getAllAgents({ includeExtensions: true })).some((a) => a.name === "ext:task-digest"),
+    ).toBe(true);
   }, 60_000);
 });

@@ -7,9 +7,7 @@ Extensions let operators change swarm behavior without changing the API server s
 Each extension is a bundle with a YAML or JSON manifest and the files it references.
 You install extensions by name from a predefined catalog.
 
-A bundle has one `hooks` file and can also ship scripts and schedules.
-The `skills` and `workflows` asset keys are reserved.
-The installer rejects bundles that list anything under those keys.
+A bundle has one `hooks` file and can also ship scripts, schedules, workflows, and skills.
 
 Extension identities are internal execution principals. They do not appear in normal agent listings, status counts, or Slack rosters, and cannot receive task or schedule assignments.
 
@@ -61,7 +59,8 @@ disabled extensions. They cannot overwrite another owner's bundle. Leads,
 operators, and dashboard users retain access to all bundles.
 
 New installs are disabled: validation typechecks the bundle without importing it,
-so the hooks stay inert. Bundled scripts are callable from install; see
+so the hooks stay inert. Bundled scripts are callable from install. Bundled
+schedules, workflows, and skills stay off until you enable the extension; see
 [Bundled assets](#bundled-assets). Enabling and version activation require a lead, operator, or dashboard
 user. Workers may stage code-only versions of an enabled extension, but cannot
 PATCH it or change its live config/priority through reinstall.
@@ -78,7 +77,7 @@ Each predefined extension is a directory under `templates/extensions/`.
 The directory holds exactly one `manifest.yaml`, `manifest.yml`, or `manifest.json`, the files the manifest references, and a `README.md`.
 The directory name must equal the manifest `name`.
 
-This manifest from the `task-digest` template ships hooks, a script, and a schedule:
+This manifest from the `task-digest` template ships hooks, a script, a schedule, a workflow, and a skill:
 
 ```yaml
 # yaml-language-server: $schema=../manifest.schema.json
@@ -101,6 +100,10 @@ assets:
       timezone: UTC
       args:
         hours: 24
+  workflows:
+    - file: workflows/report.yaml
+  skills:
+    - dir: skills/task-digest-guide
 ```
 
 A JSON manifest sets `"$schema": "../manifest.schema.json"` instead of the comment.
@@ -108,16 +111,40 @@ A JSON manifest sets `"$schema": "../manifest.schema.json"` instead of the comme
 
 A script entry has `name`, `file`, `description`, and an optional `intent` that defaults to `description`.
 A schedule entry has `name`, an optional `description`, `script`, exactly one of `cronExpression` or `intervalMs`, an optional `timezone` (default `UTC`), and optional `args`.
+A workflow entry has `file`, the path of a YAML or JSON workflow file.
+A skill entry has `dir`, a directory that holds `SKILL.md` and optional `files/**`.
+
+A workflow file holds `name`, an optional `description`, `definition`, and optional `triggers`, `cooldown`, `input`, and `triggerSchema`.
+This is `workflows/report.yaml` from `task-digest`:
+
+```yaml
+name: task-digest-report
+description: Collect the task digest on demand. Trigger it manually.
+definition:
+  nodes:
+    - id: collect
+      type: swarm-script
+      label: Collect the digest
+      config:
+        scriptName: task-digest-collect
+        scope: global
+        args:
+          hours: 24
+```
+
+A skill takes its name from the `SKILL.md` frontmatter.
+Each file under the skill's `files/` directory becomes a skill file, with its path relative to `files/`.
+The skill directory can hold nothing else.
 
 Install also enforces rules that the JSON Schema does not contain:
 
-- Every script and schedule name starts with the extension name and a hyphen, such as `task-digest-`.
+- Every script, schedule, workflow, and skill name starts with the extension name and a hyphen, such as `task-digest-`.
 - A schedule's `script` names a script declared in `assets.scripts`.
 - A schedule sets exactly one of `cronExpression` or `intervalMs`.
 - Names do not repeat within a kind.
 
 The install path validates the manifest, bundle paths, imports, and TypeScript types.
-It also typechecks every script and checks every schedule's timing before it writes anything.
+It also typechecks every script, checks every schedule's timing, validates every workflow definition, and parses every `SKILL.md` before it writes anything.
 Each changed bundle creates an immutable version snapshot.
 A lead, operator, or dashboard user can activate any stored version.
 
@@ -225,7 +252,7 @@ The default timeout is five seconds.
 The dispatcher records the failure and continues the operation.
 A successful handler resets that extension's consecutive failure count.
 Five consecutive failures set the extension status to `auto-disabled`.
-Auto-disable also pauses the extension's schedules, the same way an explicit disable does.
+Auto-disable also pauses the extension's schedules, workflows, and skills, the same way an explicit disable does.
 A lead, operator, or dashboard user must enable it again, which restores them.
 
 ## Install and operate
@@ -263,7 +290,8 @@ A body with `manifest` or `files` returns 400 `inline_install_disabled`.
 An unknown template returns 404 `extension_template_not_found`.
 The install response includes `assets` with the `created`, `updated`, `skipped`, `deleted`, and `detached` assets.
 `assets` is `null` when the installed version is staged, not active.
-If a script or schedule with the same name already exists outside this extension, install fails and writes nothing.
+If a script, schedule, workflow, or skill with the same name already exists outside this extension, install fails and writes nothing.
+The skill check covers skills in every scope.
 
 The Settings page provides install, edit, activation, version, and run-log controls.
 Agents can use the `extension-catalog`, `extension-install`, `extension-list`, `extension-enable`, `extension-disable`, `extension-activate-version`, and `extension-delete` MCP tools.
@@ -278,16 +306,31 @@ Installing a catalog template with the same name adds a version to the existing 
 
 ## Bundled assets
 
-Install writes the scripts and schedules in the same transaction as the extension, when the installed version is active.
-Scripts are global and owned by the `ext:<name>` agent.
-Scripts have no enabled state: they are callable from install, whether or not the extension is enabled.
-Schedules run their script as the `ext:<name>` agent.
+Install writes the assets in the same transaction as the extension, when the installed version is active.
+It writes scripts first, so schedules and workflow `swarm-script` nodes can call them.
+Every asset belongs to the `ext:<name>` agent.
 
-| Action | Scripts | Schedules |
+- Scripts are global. They have no enabled state: they are callable from install, whether or not the extension is enabled.
+- Schedules run their script as the `ext:<name>` agent.
+- Workflows are created disabled. A disabled workflow ignores its triggers and refuses manual triggers.
+- Skills are created disabled with global scope.
+
+### Install extension skills on agents
+
+An extension skill is global, not swarm-wide.
+A swarm-scope skill reaches every agent.
+A global skill reaches an agent only when it is installed on that agent and enabled.
+The extension never installs its skills on agents.
+To use one, enable the extension, then install the skill on each agent with the `skill-install` tool.
+`skill-install` refuses a disabled skill, so enable the extension first.
+
+### Asset lifecycle
+
+| Action | Scripts | Schedules, workflows, and skills |
 | --- | --- | --- |
 | Install | Created and callable at once | Created disabled |
-| Enable | No change | The first enable turns them on. Later enables restore the state recorded at disable, so a schedule you turned off stays off. |
-| Disable | No change | Paused |
+| Enable | No change | The first enable turns them on. Later enables restore the state recorded at disable, so an asset you turned off stays off. |
+| Disable | No change | Turned off |
 | Upgrade | Unedited scripts update. Edited scripts stay and report as `skipped`. | Same rule |
 | Upgrade drops the asset | Deleted if unedited, detached if edited | Same rule |
 | Uninstall | Deleted if unedited, detached if edited | Same rule |
@@ -295,6 +338,7 @@ Schedules run their script as the `ext:<name>` agent.
 An upgrade is a version activation, or an install that activates the new version.
 A detached asset stays in place, but the extension no longer tracks it.
 Uninstall works only on a disabled extension.
+It removes skills first, then workflows, schedules, and scripts.
 `DELETE /api/extensions/{id}` returns `{ deleted: true, assets: { deleted, detached } }`.
 
 ## Example hooks
@@ -408,7 +452,13 @@ export default extension;
 
 - Only API runtime hooks can run.
 - Extensions install only from the catalog. Inline bundles are rejected.
-- Hooks, scripts, and schedules are the only assets. Skills and workflows are not supported yet.
+- Assets are hooks, scripts, schedules, workflows, and skills. Every bundle needs a `hooks` file.
+- Extensions cannot ship connections, config defaults, KV seeds, pages, apps, prompt templates, task templates, or `requires.repos`.
+- Manifests have no `lifecycle.setup`, `lifecycle.teardown`, or `permissions`.
+- There is no marketplace or remote install.
+- Schedules can target only a script.
+- Skills are never swarm-wide, and the extension does not install them on agents.
+- The dashboard does not show upgrade drift. Skipped assets appear only in the API response.
 - Scheduled script runs do not check the state of the extension's hooks.
 - Tool events cover agent-facing MCP calls only.
 - Slack route events cover the Slack message handler only.

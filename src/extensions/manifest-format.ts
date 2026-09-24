@@ -1,4 +1,9 @@
-import { type ExtensionManifest, ExtensionManifestSchema } from "../types";
+import {
+  type ExtensionManifest,
+  ExtensionManifestSchema,
+  type ExtensionWorkflowFile,
+  ExtensionWorkflowFileSchema,
+} from "../types";
 
 /** A predefined extension directory holds exactly one of these. */
 export const MANIFEST_FILENAMES = ["manifest.yaml", "manifest.yml", "manifest.json"] as const;
@@ -29,7 +34,35 @@ export function parseManifestText(filename: string, text: string): ExtensionMani
   return parsed.data;
 }
 
-/** Every bundle path the manifest points at: the hooks file, then each script file. */
+/** Every single-file bundle path the manifest points at: hooks, scripts, workflow files. */
 export function referencedBundlePaths(manifest: ExtensionManifest): string[] {
-  return [manifest.assets.hooks, ...(manifest.assets.scripts ?? []).map((script) => script.file)];
+  return [
+    manifest.assets.hooks,
+    ...(manifest.assets.scripts ?? []).map((script) => script.file),
+    ...(manifest.assets.workflows ?? []).map((workflow) => workflow.file),
+  ];
+}
+
+/** Skill directories: each holds `SKILL.md` plus optional `files/**`. */
+export function skillDirs(manifest: ExtensionManifest): string[] {
+  return (manifest.assets.skills ?? []).map((skill) => skill.dir);
+}
+
+/** Parse a YAML or JSON workflow file an extension ships and check its name prefix. */
+export function parseWorkflowText(
+  filename: string,
+  text: string,
+  extensionName: string,
+): ExtensionWorkflowFile {
+  const parsed = ExtensionWorkflowFileSchema.safeParse(parseStructuredText(filename, text));
+  if (!parsed.success) {
+    const issues = parsed.error.issues.map(
+      (issue) => `  ${issue.path.join(".") || "workflow"}: ${issue.message}`,
+    );
+    throw new Error(`${filename}: invalid workflow file\n${issues.join("\n")}`);
+  }
+  if (!parsed.data.name.startsWith(`${extensionName}-`)) {
+    throw new Error(`${filename}: workflow name must start with "${extensionName}-"`);
+  }
+  return parsed.data;
 }

@@ -642,7 +642,7 @@ export default extension;
     const expected = [
       ["bad-import", "node:fs"],
       ["worker-runtime", 'runtime "worker" is not supported in v1'],
-      ["reserved-assets", "assets.skills is not supported yet"],
+      ["reserved-assets", "assets.skills.0"],
     ];
     for (const [fixture, diagnostic] of expected) {
       const response = await install(fixture);

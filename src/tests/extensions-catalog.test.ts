@@ -103,4 +103,55 @@ describe("predefined extension catalog", () => {
       'referenced file "hooks.ts" does not exist',
     );
   });
+
+  test("the generator bundles workflow files and skill directories and checks their names", async () => {
+    const manifest = (extra: string) =>
+      [
+        "name: alpha",
+        "description: d",
+        "version: 1.0.0",
+        "runtime: api",
+        "assets:",
+        "  hooks: hooks.ts",
+        "  workflows:",
+        "    - file: workflows/flow.yaml",
+        "  skills:",
+        "    - dir: skills/guide",
+        extra,
+      ].join("\n");
+    const layout = {
+      "alpha/manifest.yaml": manifest(""),
+      "alpha/hooks.ts": "",
+      "alpha/workflows/flow.yaml":
+        "name: alpha-flow\ndefinition:\n  nodes:\n    - { id: a, type: script, config: {} }\n",
+      "alpha/skills/guide/SKILL.md": "---\nname: alpha-guide\ndescription: d\n---\nbody",
+      "alpha/skills/guide/files/nested/data.json": "{}",
+    };
+    const catalog = await buildExtensionCatalog(await templatesDir(layout));
+    expect(Object.keys(catalog.alpha?.files ?? {})).toEqual([
+      "hooks.ts",
+      "workflows/flow.yaml",
+      "skills/guide/SKILL.md",
+      "skills/guide/files/nested/data.json",
+    ]);
+
+    const badWorkflow = await templatesDir({
+      ...layout,
+      "alpha/workflows/flow.yaml": layout["alpha/workflows/flow.yaml"].replace(
+        "alpha-flow",
+        "flow",
+      ),
+    });
+    await expect(buildExtensionCatalog(badWorkflow)).rejects.toThrow(
+      'workflow name must start with "alpha-"',
+    );
+
+    const badSkill = await templatesDir({
+      ...layout,
+      "alpha/skills/guide/SKILL.md": "---\nname: guide\ndescription: d\n---\n",
+    });
+    await expect(buildExtensionCatalog(badSkill)).rejects.toThrow(
+      'skill name "guide" must start with "alpha-"',
+    );
+  });
 });

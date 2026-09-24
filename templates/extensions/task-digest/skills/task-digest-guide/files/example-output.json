@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "since": "2026-09-23T09:00:00.000Z",
+  "completed": 42,
+  "failed": 3,
+  "byAgent": {
+    "(unassigned)": { "completed": 2, "failed": 0 }
+  },
+  "summary": "42 completed, 3 failed in the last 24h"
+}

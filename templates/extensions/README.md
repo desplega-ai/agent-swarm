@@ -12,7 +12,9 @@ Each folder holds exactly one `manifest.yaml`, `manifest.yml`, or `manifest.json
 | `require-ticket-ref` | `pre.task.create` | Blocks REST, MCP, and Slack tasks that do not name a ticket |
 | `notify-on-complete` | `post.task.completed`, `post.task.failed` | Posts a summary to a Slack channel |
 | `require-verification-note` | `pre.tool.call` | Refuses completion without a `Verified:` line in the output |
-| `task-digest` | `post.task.completed`, `post.task.failed` | Ships the `task-digest-collect` script and the `task-digest-daily` schedule (09:00 UTC) |
+| `task-digest` | `post.task.completed`, `post.task.failed` | Ships the `task-digest-collect` script, the `task-digest-daily` schedule (09:00 UTC), the `task-digest-report` workflow, and the `task-digest-guide` skill |
+
+A template can ship scripts, schedules, workflows (`workflows/*.yaml` or `.json`), and skills (`skills/<dir>/SKILL.md` plus optional `files/**`). Every asset name starts with `<name>-`, including the workflow `name` and the `SKILL.md` frontmatter `name`. Schedules, workflows, and skills stay off until the extension is enabled. An extension skill is global: install it on each agent with `skill-install` after you enable the extension.
 
 Install one by name with `POST /api/extensions/install`, the `extension-install` MCP tool, or the catalog page at Settings, Extensions, Install extension. Then enable it:
 
