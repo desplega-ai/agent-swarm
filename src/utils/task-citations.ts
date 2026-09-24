@@ -129,36 +129,49 @@ function citationMarker(
   return format === "slack" ? `<${destination}|[${index}]>` : `[[${index}]](${destination})`;
 }
 
+export interface TaskCitationSourceGroup {
+  heading: "Sources" | "General sources";
+  /** One rendered `[N] label` entry per citation, in index order. */
+  items: string[];
+}
+
 /**
- * Source lines for renderable citations. Citations referenced in
- * `referenceText` go under "Sources:"; the rest (general, or never referenced)
- * go under "General sources:" so they never read as inline-cited.
+ * Renderable citations grouped for display. Citations referenced in
+ * `referenceText` go under "Sources"; the rest (general, or never referenced)
+ * go under "General sources" so they never read as inline-cited.
  */
+export function taskCitationSourceGroups(
+  referenceText: string,
+  citations: readonly TaskCitation[],
+  format: "slack" | "markdown" = "slack",
+): TaskCitationSourceGroup[] {
+  const valid = citations.filter(isRenderableCitation).sort((a, b) => a.index - b.index);
+  const used = citedIndices(referenceText);
+  const items = (group: TaskCitation[]) =>
+    group.map((citation) => {
+      const label = (citation.label || citation.kind).replace(/\s+/g, " ").trim();
+      const escaped =
+        format === "slack"
+          ? label.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+          : label.replace(/[\\`*_{}[\]()<>!#|]/g, "\\$&");
+      return `${citationMarker(citation.index, valid, format)} ${escaped}`;
+    });
+  const cited = valid.filter((citation) => used.has(citation.index));
+  const general = valid.filter((citation) => !used.has(citation.index));
+  return [
+    ...(cited.length ? [{ heading: "Sources" as const, items: items(cited) }] : []),
+    ...(general.length ? [{ heading: "General sources" as const, items: items(general) }] : []),
+  ];
+}
+
+/** Source lines for renderable citations; see `taskCitationSourceGroups`. */
 export function renderTaskCitationSources(
   referenceText: string,
   citations: readonly TaskCitation[],
   format: "slack" | "markdown" = "slack",
 ): string {
-  const valid = citations.filter(isRenderableCitation).sort((a, b) => a.index - b.index);
-  const used = citedIndices(referenceText);
-  const line = (group: TaskCitation[]) =>
-    group
-      .map((citation) => {
-        const label = (citation.label || citation.kind).replace(/\s+/g, " ").trim();
-        const escaped =
-          format === "slack"
-            ? label.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-            : label.replace(/[\\`*_{}[\]()<>!#|]/g, "\\$&");
-        return `${citationMarker(citation.index, valid, format)} ${escaped}`;
-      })
-      .join(" · ");
-  const cited = valid.filter((citation) => used.has(citation.index));
-  const general = valid.filter((citation) => !used.has(citation.index));
-  return [
-    cited.length ? `Sources: ${line(cited)}` : "",
-    general.length ? `General sources: ${line(general)}` : "",
-  ]
-    .filter(Boolean)
+  return taskCitationSourceGroups(referenceText, citations, format)
+    .map((group) => `${group.heading}: ${group.items.join(" · ")}`)
     .join(format === "slack" ? "\n" : "\n\n");
 }
 
