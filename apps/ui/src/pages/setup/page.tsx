@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle } from "lucide-react";
-import { type ComponentType, useEffect, useRef, useState } from "react";
+import { AlertTriangle, RotateCw } from "lucide-react";
+import { type ComponentType, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { api } from "@/api/client";
@@ -9,7 +9,6 @@ import {
   ONBOARDING_QUERY_KEY,
   ONBOARDING_STEPS,
   onboardingResumeStep,
-  onboardingSettledCount,
   useOnboarding,
   useOnboardingAction,
 } from "@/api/hooks/use-onboarding";
@@ -19,10 +18,14 @@ import { stepNumber } from "@/components/onboarding/step-status";
 import { ErrorBoundary } from "@/components/shared/error-boundary";
 import { HiveLoadingScreen } from "@/components/shared/hive-loading-screen";
 import { AlertCallout } from "@/components/ui/alert-callout";
+import { Button } from "@/components/ui/button";
 import { useConfig } from "@/hooks/use-config";
+import { cn } from "@/lib/utils";
 import { SetupFooter } from "./components/setup-footer";
-import { SetupProgress } from "./components/setup-progress";
+import { SETUP_COLUMN } from "./components/setup-layout";
+import { SetupStepper } from "./components/setup-stepper";
 import { SetupTopBar } from "./components/setup-top-bar";
+import { StepTransition } from "./components/step-transition";
 import type { StepProps } from "./step-contract";
 import { StepAi } from "./steps/step-ai";
 import { StepConnect } from "./steps/step-connect";
@@ -33,31 +36,34 @@ import { StepName } from "./steps/step-name";
 
 const STEP_COPY: Record<OnboardingStepId, { title: string; description: string }> = {
   connect: {
-    title: "Connect to your API server",
-    description:
-      "Point this dashboard at a running Agent Swarm API. The check probes /health, so a green result means the server really answered.",
+    title: "Connect your swarm",
+    description: "Point this dashboard at your Agent Swarm API, then pick who you are.",
   },
   name: {
-    title: "Name your swarm",
-    description: "The name and mark used in the sidebar, in Slack, and on shared pages.",
+    title: "Give your swarm an identity",
+    description: "The name, mark, and color your team sees in the sidebar, in Slack, and on pages.",
   },
   ai: {
     title: "Pick an AI provider",
-    description: "One verified provider is enough to start. Workers check each key you save.",
+    description: "One verified provider is enough to start.",
   },
   memory: {
     title: "Turn on memory",
-    description: "Embeddings let agents recall earlier work. Any OpenAI-compatible endpoint works.",
+    description: "Embeddings let agents recall earlier work.",
   },
   integrations: {
     title: "Connect your tools",
-    description: "All optional. Connect what your team already uses, or skip and do it later.",
+    description: "All optional. Connect what your team already uses.",
   },
   first_task: {
     title: "Run your first task",
-    description:
-      "Wait for the lead, then send your first message. Setup is done when that task completes.",
+    description: "Send your lead a first message. Setup is done when that task completes.",
   },
+};
+
+/** Skip tooltips that say what skipping costs. */
+const SKIP_HINT: Partial<Record<OnboardingStepId, string>> = {
+  memory: "Memory stays off until you set it up.",
 };
 
 const STEP_BODIES: Record<Exclude<OnboardingStepId, "connect">, ComponentType<StepProps>> = {
@@ -93,12 +99,64 @@ function stepStatuses(
   ) as Record<OnboardingStepId, OnboardingStepStatus>;
 }
 
-function footerNote(step: OnboardingStepId, status: OnboardingStepStatus): string {
-  if (status === "done") return "This step is verified.";
-  if (status === "skipped") return "Skipped. You can come back to it.";
-  if (status === "failed") return "The last check failed. Try again or skip.";
-  if (step === "memory") return "Skipping leaves memory off.";
-  return "Nothing is saved until a check passes.";
+/**
+ * A blocker that ends with an ellipsis ("Saving…", "Testing…") reports work in
+ * flight: the footer shows a spinner for it. Any other blocker asks for input.
+ */
+function isInFlight(reason: string): boolean {
+  return reason.endsWith("…") || reason.endsWith("...");
+}
+
+/** Why Continue is disabled for a step that is neither done nor skipped. */
+function unsettledReason(step: OnboardingStepId, status: OnboardingStepStatus): string {
+  if (step === "connect") return "Connect to your API first.";
+  if (status === "failed") return "Last check failed. Retry or skip.";
+  return "Finish this step or skip it.";
+}
+
+type BlockerSetter = StepProps["setContinueBlocker"];
+
+/**
+ * Continue blockers, one slot per step, cleared on every step change. A step
+ * gets a stable setter bound to its own slot, so a step still animating out
+ * can never block the step that replaced it.
+ */
+function useContinueBlockers(stepId: OnboardingStepId) {
+  const [state, setState] = useState<{
+    step: OnboardingStepId;
+    reasons: Partial<Record<OnboardingStepId, string>>;
+  }>({ step: stepId, reasons: {} });
+  // Reset during render (not in an effect): child effects run before parent
+  // effects, so an effect here would wipe what the new step just set.
+  if (state.step !== stepId) setState({ step: stepId, reasons: {} });
+
+  const setters = useMemo(
+    () =>
+      Object.fromEntries(
+        ONBOARDING_STEPS.map(({ id }) => [
+          id,
+          (reason: string | null) =>
+            setState((prev) => {
+              if ((prev.reasons[id] ?? null) === reason) return prev;
+              const reasons = { ...prev.reasons };
+              if (reason === null) delete reasons[id];
+              else reasons[id] = reason;
+              return { ...prev, reasons };
+            }),
+        ]),
+      ) as Record<OnboardingStepId, BlockerSetter>,
+    [],
+  );
+
+  return { blocker: state.step === stepId ? (state.reasons[stepId] ?? null) : null, setters };
+}
+
+/** +1 when the step index grows (Next), -1 when it shrinks (Back). */
+function useStepDirection(index: number): 1 | -1 {
+  const [nav, setNav] = useState<{ index: number; direction: 1 | -1 }>({ index, direction: 1 });
+  // Render-phase update: React re-renders with the new direction before it commits.
+  if (nav.index !== index) setNav({ index, direction: index > nav.index ? 1 : -1 });
+  return nav.direction;
 }
 
 /** First-run onboarding: a full page outside the app shell (no sidebar, no header). */
@@ -134,8 +192,18 @@ function SetupFlow() {
   const stepId: OnboardingStepId = !isConfigured
     ? "connect"
     : (paramStep ?? (data ? onboardingResumeStep(data.state) : "connect"));
-  const stepParam = String(stepNumber(stepId));
+  const index = stepNumber(stepId);
+  const stepParam = String(index);
   const currentStep = data?.state.currentStep;
+  const { blocker, setters: blockerSetters } = useContinueBlockers(stepId);
+  const direction = useStepDirection(index);
+
+  // Only the content region scrolls: a new step starts at its top.
+  const mainRef = useRef<HTMLElement>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs on step change only
+  useLayoutEffect(() => {
+    mainRef.current?.scrollTo({ top: 0 });
+  }, [stepId]);
 
   useEffect(() => {
     markSetupVisited(config.apiUrl);
@@ -182,7 +250,6 @@ function SetupFlow() {
       },
       { replace: true },
     );
-    window.scrollTo({ top: 0 });
   }
 
   async function leave() {
@@ -236,7 +303,9 @@ function SetupFlow() {
   }
 
   if (isConfigured) {
-    if (query.isError && !data) return <SetupError message={query.error.message} />;
+    if (query.isError && !data) {
+      return <SetupError message={query.error.message} onRetry={() => void query.refetch()} />;
+    }
     // A cached `null` (older API) must not bounce the operator: wait for a fresh answer.
     if (data === undefined || (data === null && !fresh)) return <FullPageLoading />;
     if (data === null) return <Navigate to={from} replace />;
@@ -244,55 +313,68 @@ function SetupFlow() {
 
   const statuses = stepStatuses(data);
   const status = statuses[stepId];
-  const index = stepNumber(stepId);
   const finished = data ? isOnboardingFinished(data.state) : false;
   const copy = STEP_COPY[stepId];
   const Body = stepId === "connect" ? null : STEP_BODIES[stepId];
+  const settled = status === "done" || status === "skipped";
   const primary =
     data && (stepId === "first_task" || finished)
-      ? { label: "Go to dashboard", disabled: false, onClick: () => void leave() }
-      : { label: "Continue", disabled: status !== "done" && status !== "skipped", onClick: goNext };
+      ? { label: "Go to dashboard", blockedBy: null, onClick: () => void leave() }
+      : {
+          label: "Continue",
+          blockedBy: blocker ?? (settled ? null : unsettledReason(stepId, status)),
+          onClick: goNext,
+        };
 
   return (
-    <div className="flex min-h-svh flex-col bg-background">
+    <div className="flex h-dvh flex-col overflow-hidden bg-background">
       <SetupTopBar
         configured={isConfigured}
+        stepper={
+          <SetupStepper statuses={statuses} current={stepId} onSelect={data ? goTo : undefined} />
+        }
         onMinimize={data ? () => void leave() : undefined}
         minimizing={busy}
       />
-      <SetupProgress
-        statuses={statuses}
-        settled={data ? onboardingSettledCount(data.state) : 0}
-        current={stepId}
-        onSelect={data ? goTo : undefined}
-      />
 
-      <main className="flex flex-1 flex-col px-3 pt-4 pb-8 sm:px-5">
-        <div className="mx-auto my-auto w-full max-w-[800px]">
-          <p className="mb-2 font-mono text-[10.5px] uppercase tracking-[0.16em] text-primary">
-            Step {index} <span className="text-muted-foreground">of {TOTAL}</span>
-          </p>
-          <h1 className="mb-1.5 text-xl font-semibold tracking-tight text-balance sm:text-2xl">
-            {copy.title}
-          </h1>
-          <p className="mb-4 max-w-[70ch] text-sm text-muted-foreground">{copy.description}</p>
-          {Body === null ? (
-            <StepConnect
-              onboarding={data ?? null}
-              onConnected={() => void handleConnected()}
-              act={data ? act : undefined}
-            />
-          ) : data ? (
-            // A failing step must not take the shell (navigation, Minimize) down with it.
-            <ErrorBoundary key={stepId}>
-              <Body onboarding={data} act={act} goNext={goNext} />
-            </ErrorBoundary>
-          ) : null}
+      <main
+        ref={mainRef}
+        className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable_both-edges]"
+      >
+        <div className={cn(SETUP_COLUMN, "pt-8 pb-12 sm:pt-10")}>
+          <StepTransition stepKey={stepId} direction={direction}>
+            <p className="mb-2 font-mono text-[10.5px] uppercase tracking-[0.16em] text-primary">
+              Step {index} <span className="text-muted-foreground">of {TOTAL}</span>
+            </p>
+            <h1 className="mb-1.5 text-xl font-semibold tracking-tight text-balance sm:text-2xl">
+              {copy.title}
+            </h1>
+            <p className="mb-6 max-w-[70ch] text-sm text-muted-foreground">{copy.description}</p>
+            {Body === null ? (
+              <StepConnect
+                onboarding={data ?? null}
+                onConnected={() => void handleConnected()}
+                act={data ? act : undefined}
+                setContinueBlocker={blockerSetters.connect}
+              />
+            ) : data ? (
+              // A failing step must not take the shell (navigation, Minimize) down with it.
+              <ErrorBoundary key={stepId}>
+                <Body
+                  onboarding={data}
+                  act={act}
+                  goNext={goNext}
+                  setContinueBlocker={blockerSetters[stepId]}
+                />
+              </ErrorBoundary>
+            ) : null}
+          </StepTransition>
         </div>
       </main>
 
       <SetupFooter
-        note={footerNote(stepId, status)}
+        status={data ? status : null}
+        pending={busy ? "Working…" : blocker && isInFlight(blocker) ? blocker : null}
         busy={busy}
         onBack={index > 1 && data ? () => goTo(ONBOARDING_STEPS[index - 2].id) : undefined}
         skip={
@@ -301,6 +383,7 @@ function SetupFlow() {
                 label: status === "skipped" ? "Skipped" : "Skip",
                 disabled: status === "done" || status === "skipped",
                 onSkip: () => void skip(stepId),
+                hint: SKIP_HINT[stepId],
               }
             : undefined
         }
@@ -318,7 +401,7 @@ function FullPageLoading() {
   );
 }
 
-function SetupError({ message }: { message: string }) {
+function SetupError({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
     <div className="flex min-h-svh items-center justify-center bg-background p-4">
       <AlertCallout
@@ -327,11 +410,23 @@ function SetupError({ message }: { message: string }) {
         title="Could not load setup"
         className="w-full max-w-md"
       >
-        {message}. Check the API URL and key in{" "}
-        <Link to="/settings/connections" className="underline underline-offset-2">
-          Settings, Connections
-        </Link>
-        .
+        <p>
+          {message}. Check the API URL and key in{" "}
+          {/* A new tab: this one keeps its place and retries once the connection is fixed. */}
+          <Link
+            to="/settings/connections"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline underline-offset-2"
+          >
+            Settings, Connections
+          </Link>
+          .
+        </p>
+        <Button variant="outline" size="sm" onClick={onRetry} className="mt-3">
+          <RotateCw />
+          Retry
+        </Button>
       </AlertCallout>
     </div>
   );

@@ -1,48 +1,55 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
+import { ExternalLink, Send } from "lucide-react";
 import { type ComponentProps, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { IdentityForm } from "@/components/identity/identity-form";
-import { SetupCard, SetupChip } from "@/components/onboarding/setup-card";
+import { BorderBeam } from "@/components/onboarding/border-beam";
+import { FadeIn } from "@/components/onboarding/fade-in";
+import { StatusLine } from "@/components/onboarding/save-indicator";
+import { SetupCard } from "@/components/onboarding/setup-card";
+import { ComposerDock } from "@/components/sessions/composer-dock";
 import { SUGGESTIONS } from "@/components/sessions/new-session-view";
 import { StatusBadge } from "@/components/shared/status-badge";
-import { AlertCallout } from "@/components/ui/alert-callout";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import type { StepProps } from "../../step-contract";
 
 type BadgeStatus = ComponentProps<typeof StatusBadge>["status"];
 
 /**
- * The composer for the first message. Sending creates a UI task for the
- * current user, records it as the onboarding first task, and opens the
+ * The first task: the sessions composer, centered, with the starter
+ * suggestions under it. Sending creates a UI task for the current user,
+ * records it as the onboarding first task, minimizes setup, and opens the
  * session. Step 6 completes when that task completes.
  */
-export function FirstMessageCard({ onboarding, act }: Pick<StepProps, "onboarding" | "act">) {
+export function FirstTaskComposer({
+  onboarding,
+  act,
+  leadReady,
+}: Pick<StepProps, "onboarding" | "act"> & { leadReady: boolean }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { state: userState, user, userId, locked } = useCurrentUser();
+  const { state: userState, userId, locked } = useCurrentUser();
   // Users and sessions both ship in 1.76.0.
   const { supported: usersSupported } = useFeatureGate("1.76.0");
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const firstTaskId = onboarding.state.firstTaskId;
-  const firstTask = onboarding.signals.firstTask;
-  const done = onboarding.state.steps.first_task.status === "done";
   const taskPath = (id: string) => (usersSupported ? `/sessions/${id}` : `/tasks/${id}`);
-  // A token-bound tab is attributed by the server, so it never picks a user here.
-  const needsIdentity = usersSupported && !locked && userState !== "ready";
-  const canSend = draft.trim().length > 0 && !sending && !needsIdentity;
+  // Step 1 picks the user. This is a fallback for a user that went missing
+  // since. A token-bound tab is attributed by the server and never picks.
+  const needsIdentity = usersSupported && !locked && userState === "needs-pick";
+  const identityReady = !usersSupported || locked || userState === "ready";
+  const live = leadReady && identityReady;
 
   async function send() {
     const task = draft.trim();
-    if (!canSend) return;
+    if (!task || sending || !live) return;
     setSending(true);
     setError(null);
     try {
@@ -69,96 +76,84 @@ export function FirstMessageCard({ onboarding, act }: Pick<StepProps, "onboardin
     }
   }
 
-  const status = firstTask ? (
-    <StatusBadge status={firstTask.status as BadgeStatus} />
-  ) : firstTaskId ? null : (
-    <SetupChip>Not sent</SetupChip>
-  );
-
+  const firstTaskId = onboarding.state.firstTaskId;
   if (firstTaskId) {
+    const firstTask = onboarding.signals.firstTask;
+    const done = onboarding.state.steps.first_task.status === "done";
     return (
-      <SetupCard title="Your first message" status={status} bodyClassName="space-y-3">
-        {done ? (
-          <AlertCallout tone="success" icon={CheckCircle2}>
-            Your swarm finished its first task. Setup is complete.
-          </AlertCallout>
-        ) : null}
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <span className="text-sm">First message sent.</span>
-          <Button asChild variant="outline" size="sm">
-            <Link to={taskPath(firstTaskId)}>{usersSupported ? "Open session" : "Open task"}</Link>
-          </Button>
-        </div>
-      </SetupCard>
+      <FadeIn className="mx-auto w-full max-w-2xl space-y-3">
+        <SetupCard
+          icon={<Send className="size-4" />}
+          title="First task sent"
+          status={firstTask ? <StatusBadge status={firstTask.status as BadgeStatus} /> : null}
+          actions={
+            <Button asChild variant="outline" size="sm">
+              {/* A new tab keeps setup open in this one. */}
+              <Link to={taskPath(firstTaskId)} target="_blank" rel="noopener noreferrer">
+                {usersSupported ? "Open session" : "Open task"}
+                <ExternalLink />
+              </Link>
+            </Button>
+          }
+        />
+        {done ? <StatusLine tone="done">Setup is complete.</StatusLine> : null}
+      </FadeIn>
     );
   }
 
   return (
-    <SetupCard title="Your first message" status={status} bodyClassName="space-y-4">
+    <div className="mx-auto flex w-full max-w-2xl flex-col items-center gap-4">
       {needsIdentity ? (
-        userState === "pending" ? (
-          <p className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Loader2 className="size-3.5 animate-spin" /> Loading users
-          </p>
-        ) : (
-          // The identity modal stays closed on `/setup`, so step 6 asks inline.
-          <div className="space-y-3 rounded-md border border-border-subtle bg-surface p-3">
-            <p className="text-sm">Who is sending this? The swarm attributes tasks to this user.</p>
-            <IdentityForm autoFocus={false} />
-          </div>
-        )
-      ) : user ? (
-        <p className="text-xs text-muted-foreground">
-          Sending as <span className="font-medium text-foreground">{user.name}</span>
-        </p>
+        <SetupCard
+          title="Who is sending this?"
+          description="The swarm attributes tasks to this user."
+          className="w-full"
+        >
+          <IdentityForm
+            autoFocus={false}
+            submitLabels={{ select: "Use this user", create: "Create user" }}
+          />
+        </SetupCard>
       ) : null}
 
-      <div className="flex flex-wrap gap-2">
+      <FadeIn className="w-full">
+        <ComposerDock
+          value={draft}
+          onChange={setDraft}
+          onSubmit={() => void send()}
+          isPending={sending}
+          isError={Boolean(error)}
+          errorMessage={error ?? undefined}
+          pendingLabel="Sending…"
+          placeholder={
+            leadReady ? "Describe a goal for the swarm" : "Waiting for the lead to come online…"
+          }
+          disabled={!live}
+          sendLabel="Send first task"
+          autoFocus={live}
+          className="bg-transparent p-0"
+          decoration={live ? <BorderBeam className="animate-in fade-in-0 duration-500" /> : null}
+        />
+      </FadeIn>
+
+      <FadeIn delay={0.06} className="flex flex-wrap items-center justify-center gap-2">
         {SUGGESTIONS.map((suggestion) => (
-          <Button
+          <button
             key={suggestion}
             type="button"
-            variant="outline"
-            size="xs"
-            className="font-normal"
             onClick={() => setDraft(suggestion)}
-            disabled={sending}
+            disabled={!live || sending}
+            className="rounded-md text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:opacity-50"
           >
-            {suggestion}
-          </Button>
+            <Badge
+              variant="outline"
+              className="px-3 py-1 font-normal normal-case text-xs hover:border-primary/40 hover:bg-muted/60 hover-linger transition-colors"
+            >
+              {suggestion}
+            </Badge>
+          </button>
         ))}
-      </div>
-
-      <Textarea
-        aria-label="First message"
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-            e.preventDefault();
-            void send();
-          }
-        }}
-        placeholder="Describe a goal for the swarm."
-        className="min-h-24"
-        disabled={sending}
-      />
-
-      <div className="flex flex-wrap items-center gap-3">
-        <Button type="button" onClick={() => void send()} disabled={!canSend}>
-          {sending ? <Loader2 className="size-4 animate-spin" /> : null}
-          Send
-        </Button>
-        <span className="text-xs text-muted-foreground">
-          The lead picks it up. Setup is done when the task completes.
-        </span>
-      </div>
-
-      {error ? (
-        <AlertCallout tone="error" icon={AlertCircle} title="Could not send the message.">
-          <span className="break-all font-mono text-muted-foreground">{error}</span>
-        </AlertCallout>
-      ) : null}
-    </SetupCard>
+      </FadeIn>
+    </div>
   );
 }

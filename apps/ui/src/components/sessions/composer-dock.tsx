@@ -112,6 +112,12 @@ export interface ComposerDockProps {
    * the composer sits under a full-width log viewer.
    */
   fullWidth?: boolean;
+  /**
+   * Optional layer inside the rounded card, drawn above its border (for
+   * example a `BorderBeam`). Must be absolutely positioned and ignore pointer
+   * events. The sessions surfaces pass nothing.
+   */
+  decoration?: React.ReactNode;
   className?: string;
 }
 
@@ -133,6 +139,7 @@ export function ComposerDock({
   attachmentErrorMessage,
   autoFocus,
   fullWidth,
+  decoration,
   className,
 }: ComposerDockProps) {
   const ref = useRef<HTMLTextAreaElement | null>(null);
@@ -231,6 +238,7 @@ export function ComposerDock({
         onDragLeave={onDragLeave}
         onDrop={onDrop}
       >
+        {decoration}
         {isDragActive ? (
           <div
             className={cn(

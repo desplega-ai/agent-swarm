@@ -1,14 +1,27 @@
 import type { OnboardingIntegrationMethod, OnboardingSignals } from "@/api/types";
+import type { SecretRule } from "@/components/onboarding/secret-field";
 import { INTEGRATIONS } from "@/lib/integrations-catalog";
 
 /**
- * The five integrations step 5 offers, plus the field specs each pane edits.
- * Labels, placeholders, and secret flags come from the Settings catalog
- * (`lib/integrations-catalog.ts`). Hints are written here, because the catalog
- * help text is longer than this step needs.
+ * What step 5 offers, in two groups:
+ * - "Chat and code": the five integrations the API derives the step from,
+ *   plus the field specs each pane edits. Labels, placeholders, and secret
+ *   flags come from the Settings catalog (`lib/integrations-catalog.ts`).
+ * - "Business tools": Gmail and Microsoft 365 connect inline over the OAuth
+ *   presets. The rest open Connections in a new tab until their presets
+ *   ship. Connecting one does not complete the step.
  */
 
-export type SetupIntegrationId = keyof OnboardingSignals["integrations"];
+export type CoreIntegrationId = keyof OnboardingSignals["integrations"];
+export type BusinessToolId =
+  | "gmail"
+  | "microsoft"
+  | "figma"
+  | "stripe"
+  | "salesforce"
+  | "shopify"
+  | "granola";
+export type SetupIntegrationId = CoreIntegrationId | BusinessToolId;
 
 export interface SetupFieldSpec {
   key: string;
@@ -17,40 +30,62 @@ export interface SetupFieldSpec {
   secret: boolean;
   multiline?: boolean;
   required?: boolean;
+  /** One sentence, shown in an info tooltip next to the label. */
   hint?: string;
   /** Pre-filled when the key has no stored row. Not saved while unchanged. */
   defaultValue?: string;
+  /** Secrets: when a value is complete enough to autosave. */
+  secretRule?: SecretRule;
+  /** Non-secrets: an error message, or null when the value can be stored. */
+  validate?: (value: string) => string | null;
 }
 
-export interface SetupIntegration {
-  id: SetupIntegrationId;
+interface SetupItemBase {
   name: string;
   purpose: string;
   logo: string;
   docsUrl: string;
+}
+
+export interface CoreIntegration extends SetupItemBase {
+  group: "core";
+  id: CoreIntegrationId;
   method: OnboardingIntegrationMethod;
-  /** Keys whose presence means "saved but not connected yet" (the SAVED chip). */
+  /** Keys whose presence means "saved but not connected yet". */
   chipKeys: string[];
 }
 
-function docsUrl(id: SetupIntegrationId): string {
+export interface BusinessTool extends SetupItemBase {
+  group: "business";
+  id: BusinessToolId;
+  /** OAuth preset that connects it inline. Absent: set up in Connections. */
+  oauthPresetId?: "google" | "microsoft";
+}
+
+export type SetupIntegration = CoreIntegration | BusinessTool;
+
+function docsUrl(id: CoreIntegrationId): string {
   return (
     INTEGRATIONS.find((def) => def.id === id)?.docsUrl ??
     `https://docs.agent-swarm.dev/docs/integrations/${id}`
   );
 }
 
-export const SETUP_INTEGRATIONS: SetupIntegration[] = [
+const CONNECTIONS_DOCS = "https://docs.agent-swarm.dev/docs/guides/script-connections";
+
+export const CORE_INTEGRATIONS: CoreIntegration[] = [
   {
+    group: "core",
     id: "slack",
     name: "Slack",
-    purpose: "Run the swarm from a channel. Tasks, replies, and approvals.",
+    purpose: "Run the swarm from a channel.",
     logo: "/integration-logos/slack.svg",
     docsUrl: docsUrl("slack"),
     method: "slack",
     chipKeys: ["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"],
   },
   {
+    group: "core",
     id: "github",
     name: "GitHub",
     purpose: "Issues, pull requests, and reviews.",
@@ -60,6 +95,7 @@ export const SETUP_INTEGRATIONS: SetupIntegration[] = [
     chipKeys: ["GITHUB_TOKEN", "GITHUB_APP_ID"],
   },
   {
+    group: "core",
     id: "gitlab",
     name: "GitLab",
     purpose: "Issues and merge requests.",
@@ -69,6 +105,7 @@ export const SETUP_INTEGRATIONS: SetupIntegration[] = [
     chipKeys: ["GITLAB_TOKEN"],
   },
   {
+    group: "core",
     id: "linear",
     name: "Linear",
     purpose: "Issues and status sync over OAuth.",
@@ -78,6 +115,7 @@ export const SETUP_INTEGRATIONS: SetupIntegration[] = [
     chipKeys: ["LINEAR_CLIENT_ID", "LINEAR_CLIENT_SECRET"],
   },
   {
+    group: "core",
     id: "jira",
     name: "Jira",
     purpose: "Issues and status sync over OAuth.",
@@ -88,13 +126,81 @@ export const SETUP_INTEGRATIONS: SetupIntegration[] = [
   },
 ];
 
+export const BUSINESS_TOOLS: BusinessTool[] = [
+  {
+    group: "business",
+    id: "gmail",
+    name: "Gmail",
+    purpose: "Your Google account over OAuth.",
+    logo: "/integration-logos/gmail.svg",
+    docsUrl: CONNECTIONS_DOCS,
+    oauthPresetId: "google",
+  },
+  {
+    group: "business",
+    id: "microsoft",
+    name: "Microsoft 365",
+    purpose: "Mail, Teams, and files over Microsoft Graph.",
+    logo: "/integration-logos/microsoft.svg",
+    docsUrl: CONNECTIONS_DOCS,
+    oauthPresetId: "microsoft",
+  },
+  {
+    group: "business",
+    id: "figma",
+    name: "Figma",
+    purpose: "Design files and comments.",
+    logo: "/integration-logos/figma.svg",
+    docsUrl: CONNECTIONS_DOCS,
+  },
+  {
+    group: "business",
+    id: "stripe",
+    name: "Stripe",
+    purpose: "Payments, customers, and subscriptions.",
+    logo: "/integration-logos/stripe.svg",
+    docsUrl: CONNECTIONS_DOCS,
+  },
+  {
+    group: "business",
+    id: "salesforce",
+    name: "Salesforce",
+    purpose: "Accounts, leads, and opportunities.",
+    logo: "/integration-logos/salesforce.svg",
+    docsUrl: CONNECTIONS_DOCS,
+  },
+  {
+    group: "business",
+    id: "shopify",
+    name: "Shopify",
+    purpose: "Orders, products, and customers.",
+    logo: "/integration-logos/shopify.svg",
+    docsUrl: CONNECTIONS_DOCS,
+  },
+  {
+    group: "business",
+    id: "granola",
+    name: "Granola",
+    purpose: "Meeting notes and transcripts.",
+    logo: "/integration-logos/granola.svg",
+    docsUrl: CONNECTIONS_DOCS,
+  },
+];
+
+export const SETUP_GROUPS: ReadonlyArray<{ label: string; items: SetupIntegration[] }> = [
+  { label: "Chat and code", items: CORE_INTEGRATIONS },
+  { label: "Business tools", items: BUSINESS_TOOLS },
+];
+
+export const SETUP_INTEGRATIONS: SetupIntegration[] = [...CORE_INTEGRATIONS, ...BUSINESS_TOOLS];
+
 export function findSetupIntegration(id: string | null): SetupIntegration | undefined {
   return SETUP_INTEGRATIONS.find((item) => item.id === id);
 }
 
 /** Build a spec from the catalog entry, with local overrides. */
 function spec(
-  integrationId: SetupIntegrationId,
+  integrationId: CoreIntegrationId,
   key: string,
   overrides: Partial<SetupFieldSpec> = {},
 ): SetupFieldSpec {
@@ -112,41 +218,74 @@ function spec(
   };
 }
 
-export const SLACK_MODE_FIELD: SetupFieldSpec = spec("slack", "SLACK_MODE", {
-  defaultValue: "socket",
-});
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const validEmail = (value: string) => (EMAIL_RE.test(value) ? null : "Use an email address.");
+const validDigits = (value: string) => (/^\d+$/.test(value) ? null : "Use the numeric App ID.");
+function validUrl(value: string): string | null {
+  try {
+    const url = new URL(value);
+    if (url.protocol === "http:" || url.protocol === "https:") return null;
+  } catch {
+    // Falls through to the message below.
+  }
+  return "Start with http:// or https://.";
+}
 
+/** Socket mode only: HTTP mode is not implemented, so it is not offered here. */
 export const SLACK_TOKEN_FIELDS: SetupFieldSpec[] = [
-  spec("slack", "SLACK_BOT_TOKEN", { required: true }),
-  spec("slack", "SLACK_APP_TOKEN", { label: "App-level token", hint: "Socket mode only." }),
-];
-
-export const SLACK_SIGNING_FIELDS: SetupFieldSpec[] = [
-  spec("slack", "SLACK_SIGNING_SECRET", {
-    hint: "Verifies request signatures when Slack posts events over HTTP.",
+  spec("slack", "SLACK_BOT_TOKEN", {
+    required: true,
+    hint: "OAuth & Permissions, Bot User OAuth Token.",
+    secretRule: { prefixes: ["xoxb-"], strict: true, hint: "Starts with xoxb-" },
+  }),
+  spec("slack", "SLACK_APP_TOKEN", {
+    label: "App-level token",
+    required: true,
+    hint: "Basic Information, App-Level Tokens, with the connections:write scope.",
+    secretRule: { prefixes: ["xapp-"], strict: true, hint: "Starts with xapp-" },
   }),
 ];
 
 export const GITHUB_FIELDS: SetupFieldSpec[] = [
-  spec("github", "GITHUB_TOKEN", { required: true }),
+  spec("github", "GITHUB_TOKEN", {
+    required: true,
+    // Classic tokens without a prefix still save on blur or paste.
+    secretRule: { prefixes: ["ghp_", "github_pat_", "gho_", "ghu_", "ghs_"], minLength: 30 },
+  }),
   spec("github", "GITHUB_WEBHOOK_SECRET"),
-  spec("github", "GITHUB_EMAIL"),
+  spec("github", "GITHUB_EMAIL", {
+    hint: "The email and name sign every commit the agents push.",
+    validate: validEmail,
+  }),
   spec("github", "GITHUB_NAME"),
 ];
 
 export const GITHUB_APP_FIELDS: SetupFieldSpec[] = [
-  spec("github", "GITHUB_APP_ID"),
-  spec("github", "GITHUB_APP_PRIVATE_KEY"),
+  spec("github", "GITHUB_APP_ID", {
+    hint: "Use an App instead of a token for per-repo installs and higher rate limits.",
+    validate: validDigits,
+  }),
+  spec("github", "GITHUB_APP_PRIVATE_KEY", {
+    secretRule: {
+      pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]+-----END [A-Z ]*PRIVATE KEY-----/,
+      hint: "Paste the whole PEM file, BEGIN and END lines included.",
+    },
+  }),
 ];
 
 export const GITLAB_FIELDS: SetupFieldSpec[] = [
-  spec("gitlab", "GITLAB_TOKEN", { required: true }),
+  // Self-managed instances can change the token prefix: those save on blur or paste.
+  spec("gitlab", "GITLAB_TOKEN", { required: true, secretRule: { prefixes: ["glpat-"] } }),
   spec("gitlab", "GITLAB_WEBHOOK_SECRET"),
-  spec("gitlab", "GITLAB_EMAIL"),
+  spec("gitlab", "GITLAB_EMAIL", {
+    hint: "The email and name sign every commit the agents push.",
+    validate: validEmail,
+  }),
   spec("gitlab", "GITLAB_NAME"),
   spec("gitlab", "GITLAB_URL", {
     defaultValue: "https://gitlab.com",
     hint: "Point this at your own host for self-managed GitLab.",
+    validate: validUrl,
   }),
 ];
 
@@ -164,9 +303,7 @@ export const JIRA_FIELDS: SetupFieldSpec[] = [
 
 /** Every key the step reads presence for, in one `env-presence` query. */
 export const ALL_SETUP_KEYS: string[] = [
-  SLACK_MODE_FIELD,
   ...SLACK_TOKEN_FIELDS,
-  ...SLACK_SIGNING_FIELDS,
   ...GITHUB_FIELDS,
   ...GITHUB_APP_FIELDS,
   ...GITLAB_FIELDS,
@@ -178,5 +315,5 @@ export const ALL_SETUP_KEYS: string[] = [
 export function connectedMethod(
   integrations: OnboardingSignals["integrations"],
 ): OnboardingIntegrationMethod | null {
-  return SETUP_INTEGRATIONS.find((item) => integrations[item.id])?.method ?? null;
+  return CORE_INTEGRATIONS.find((item) => integrations[item.id])?.method ?? null;
 }

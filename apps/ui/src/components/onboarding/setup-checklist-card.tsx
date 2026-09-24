@@ -17,7 +17,7 @@ import { HARNESS_LABEL } from "@/lib/agent-runtime-models";
 import { INTEGRATIONS } from "@/lib/integrations-catalog";
 import { cn } from "@/lib/utils";
 import { SetupCard } from "./setup-card";
-import { StepStatusChip, stepNumber } from "./step-status";
+import { SKIPPED_HATCH, STEP_TONE_CLASS, StepStatusChip, stepNumber } from "./step-status";
 import { useResumeSetup } from "./use-resume-setup";
 
 /** Home dashboard card while onboarding is open. Wrapper `id="setup"` is the `/#setup` anchor. */
@@ -140,16 +140,15 @@ function stepSubtitle(
   }
 }
 
-/** Check tile for a verified step, the step number otherwise. */
+/** Check tile for a verified step, the step number otherwise (same tones as the `/setup` stepper). */
 function StepTile({ id, status }: { id: OnboardingStepId; status: OnboardingStepStatus }) {
   return (
     <span
       aria-hidden="true"
+      style={status === "skipped" ? SKIPPED_HATCH : undefined}
       className={cn(
-        "grid size-[22px] shrink-0 place-items-center rounded-md border border-border bg-card font-mono text-[11px] text-muted-foreground",
-        status === "done" &&
-          "border-status-success/30 bg-status-success/15 text-status-success-strong",
-        status === "failed" && "border-status-error/30 text-status-error-strong",
+        "grid size-[22px] shrink-0 place-items-center rounded-md border bg-card font-mono text-[11px]",
+        STEP_TONE_CLASS[status],
       )}
     >
       {status === "done" ? <Check className="size-3" strokeWidth={3} /> : stepNumber(id)}

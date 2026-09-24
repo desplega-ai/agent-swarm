@@ -1,13 +1,20 @@
-import { CheckCircle2, Loader2, XCircle } from "lucide-react";
+import { ExternalLink, Loader2, Plug, UserRound, XCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import type { OnboardingResponse } from "@/api/types";
+import { IdentityForm } from "@/components/identity/identity-form";
+import { FadeIn } from "@/components/onboarding/fade-in";
+import { StatusIcon } from "@/components/onboarding/save-indicator";
 import { SecretInput } from "@/components/onboarding/secret-field";
-import { SetupCard, SetupChip } from "@/components/onboarding/setup-card";
+import { SetupCard } from "@/components/onboarding/setup-card";
+import { useContinueBlocker } from "@/components/onboarding/use-autosave";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
+import { InfoTip } from "@/components/ui/info-tip";
 import { Input } from "@/components/ui/input";
 import { SettingsRow } from "@/components/ui/settings-row";
+import { useCurrentUser } from "@/contexts/current-user-context";
 import { useConfig } from "@/hooks/use-config";
 import { generateSlug } from "@/lib/slugs";
 import type { StepProps } from "../step-contract";
@@ -19,12 +26,24 @@ export interface StepConnectProps {
   onConnected: () => void;
   /** Present once connected. Used to record the step when the API did not derive it. */
   act?: StepProps["act"];
+  /** Holds Continue until the operator picks who they are. */
+  setContinueBlocker: StepProps["setContinueBlocker"];
 }
 
-export function StepConnect({ onboarding, onConnected, act }: StepConnectProps) {
+export function StepConnect({
+  onboarding,
+  onConnected,
+  act,
+  setContinueBlocker,
+}: StepConnectProps) {
   const { isConfigured } = useConfig();
-  if (isConfigured) return <ConnectedSummary onboarding={onboarding} act={act} />;
-  return <ConnectForm onConnected={onConnected} />;
+  if (!isConfigured) return <ConnectForm onConnected={onConnected} />;
+  return (
+    <div className="space-y-3">
+      <ConnectedSummary onboarding={onboarding} act={act} />
+      <WhoAreYou setContinueBlocker={setContinueBlocker} />
+    </div>
+  );
 }
 
 function ConnectedSummary({
@@ -46,21 +65,120 @@ function ConnectedSummary({
     act({ action: "complete", step: "connect", method: "api_key" }).catch(() => {});
   }, [act, connectStatus]);
 
+  const name = activeConnection?.name ?? "your API";
   return (
-    <SetupCard title="API connection" status={<SetupChip tone="success">Connected</SetupChip>}>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <CheckCircle2 className="size-4 shrink-0 text-status-success-strong" aria-hidden="true" />
-        <p className="min-w-0 flex-1 text-sm">
-          Connected to <span className="font-medium">{activeConnection?.name ?? "your API"}</span>{" "}
-          at <span className="font-mono text-[13px] break-all">{config.apiUrl}</span>
-        </p>
-        {connectionLocked ? null : (
-          <Button asChild variant="outline" size="sm">
-            <Link to="/settings/connections">Manage connections</Link>
+    <SetupCard
+      icon={<Plug className="size-4" />}
+      title={name}
+      description={
+        <span className="block truncate font-mono text-[12px]" title={config.apiUrl}>
+          {config.apiUrl}
+        </span>
+      }
+      actions={
+        connectionLocked ? null : (
+          <Button asChild variant="ghost" size="sm" className="text-muted-foreground">
+            {/* A new tab keeps setup open in this one. */}
+            <Link to="/settings/connections" target="_blank" rel="noopener noreferrer">
+              Manage
+              <ExternalLink />
+            </Link>
           </Button>
-        )}
-      </div>
-    </SetupCard>
+        )
+      }
+      status={<StatusIcon tone="done" label={`Connected to ${name}`} />}
+    />
+  );
+}
+
+/**
+ * "Who are you?" right after the connection: pick or create the user the
+ * swarm attributes tasks to. Holds Continue until a user is ready. Skipped
+ * when a token or the deployment fixes the identity, or the API is older than
+ * 1.76.0 (no users).
+ */
+function WhoAreYou({ setContinueBlocker }: Pick<StepConnectProps, "setContinueBlocker">) {
+  const { state, user, locked } = useCurrentUser();
+  // Users ship in 1.76.0.
+  const { supported } = useFeatureGate("1.76.0");
+  const [switching, setSwitching] = useState(false);
+
+  const needsPick = supported && !locked && state !== "ready";
+  useContinueBlocker(
+    setContinueBlocker,
+    !needsPick ? null : state === "pending" ? "Loading users…" : "Pick who you are",
+  );
+
+  if (!supported) return null;
+
+  if (user && (locked || (state === "ready" && !switching))) {
+    return (
+      <FadeIn key="signed-in">
+        <SetupCard
+          icon={<UserRound className="size-4" />}
+          title={
+            <>
+              <span className="font-normal text-muted-foreground">Signed in as</span> {user.name}
+            </>
+          }
+          description={user.email ?? undefined}
+          actions={
+            locked ? null : (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="text-muted-foreground"
+                onClick={() => setSwitching(true)}
+              >
+                Switch
+              </Button>
+            )
+          }
+          status={
+            <StatusIcon
+              tone="done"
+              label={
+                locked
+                  ? "Your API key is bound to this user."
+                  : "The swarm attributes your tasks to this user."
+              }
+            />
+          }
+        />
+      </FadeIn>
+    );
+  }
+  if (locked) return null;
+
+  return (
+    <FadeIn key="pick">
+      <SetupCard
+        icon={<UserRound className="size-4" />}
+        title="Who are you?"
+        description="The swarm attributes your tasks to this user."
+        actions={
+          switching ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="text-muted-foreground"
+              onClick={() => setSwitching(false)}
+            >
+              Cancel
+            </Button>
+          ) : null
+        }
+        status={<StatusIcon tone={state === "pending" ? "busy" : "none"} label="Loading users…" />}
+      >
+        <IdentityForm
+          autoFocus={false}
+          onDone={() => setSwitching(false)}
+          submitLabels={{ select: "Use this user", create: "Create user" }}
+        />
+      </SetupCard>
+    </FadeIn>
   );
 }
 
@@ -126,15 +244,17 @@ function ConnectForm({ onConnected }: { onConnected: () => void }) {
     onConnected();
   }
 
-  const chip =
-    probe.phase === "error" ? (
-      <SetupChip tone="error">Failed</SetupChip>
-    ) : (
-      <SetupChip>Not tested</SetupChip>
-    );
-
   return (
-    <SetupCard title="API connection" status={chip}>
+    <SetupCard
+      icon={<Plug className="size-4" />}
+      title="API connection"
+      status={
+        <StatusIcon
+          tone={running ? "busy" : probe.phase === "error" ? "error" : "none"}
+          label={running ? "Checking the server…" : "The last check failed."}
+        />
+      }
+    >
       <form
         className="flex flex-col gap-4"
         onSubmit={(event) => {
@@ -144,9 +264,13 @@ function ConnectForm({ onConnected }: { onConnected: () => void }) {
       >
         <div className="grid gap-4 sm:grid-cols-2">
           <SettingsRow
-            label="Connection name"
+            label={
+              <>
+                Connection name
+                <InfoTip content="Optional. Shows in the connection switcher." />
+              </>
+            }
             htmlFor="setup-connection-name"
-            helper="Shows in the connection switcher. Optional."
           >
             <Input
               id="setup-connection-name"
@@ -157,17 +281,17 @@ function ConnectForm({ onConnected }: { onConnected: () => void }) {
             />
           </SettingsRow>
           <SettingsRow
-            label="API URL"
+            label={
+              <>
+                API URL
+                <InfoTip content="The dashboard checks GET /health on this address." />
+              </>
+            }
             htmlFor="setup-api-url"
             helper={
               apiUrl.trim() && !urlValid ? (
                 <span className="text-status-error-strong">Start with http:// or https://.</span>
-              ) : (
-                <>
-                  The dashboard probes <code className="font-mono">GET /health</code> on this
-                  address.
-                </>
-              )
+              ) : undefined
             }
           >
             <Input
@@ -185,26 +309,29 @@ function ConnectForm({ onConnected }: { onConnected: () => void }) {
         </div>
 
         <SettingsRow
-          label="API key"
-          htmlFor="setup-api-key"
-          helper={
+          label={
             <>
-              The value of <code className="font-mono">AGENT_SWARM_API_KEY</code> on the server.
-              Kept in this browser only.
+              API key
+              <InfoTip
+                content={
+                  <>
+                    The value of <code className="font-mono">AGENT_SWARM_API_KEY</code> on the
+                    server. Kept in this browser only.
+                  </>
+                }
+              />
             </>
           }
+          htmlFor="setup-api-key"
         >
           <SecretInput id="setup-api-key" value={apiKey} onChange={setApiKey} disabled={running} />
         </SettingsRow>
 
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <div>
           <Button type="submit" disabled={!urlValid || !apiKey || running}>
             {running ? <Loader2 className="animate-spin" /> : null}
-            Test connection
+            Connect
           </Button>
-          <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">
-            GET {urlValid ? url : "..."}/health
-          </span>
         </div>
 
         {probe.phase === "error" ? (

@@ -17,10 +17,21 @@ import { useConfig } from "@/hooks/use-config";
 /**
  * Pick the user this session belongs to from `useUsers()`, or create one
  * (`name` + optional `email`). On submit the user's id goes into
- * `CurrentUserContext` via `setUserId`. Shared by the identity modal and the
- * inline picker on `/setup` step 6.
+ * `CurrentUserContext` via `setUserId`, then `onDone` runs. Shared by the
+ * identity modal and the inline picker on `/setup` (step 1, and step 6 as a
+ * fallback).
  */
-export function IdentityForm({ autoFocus = true }: { autoFocus?: boolean }) {
+export function IdentityForm({
+  autoFocus = true,
+  onDone,
+  submitLabels,
+}: {
+  autoFocus?: boolean;
+  /** Called after a user is picked or created (also when the pick did not change). */
+  onDone?: () => void;
+  /** Button labels. Defaults: "Continue" and "Create & continue". */
+  submitLabels?: { select?: string; create?: string };
+}) {
   const { setUserId } = useCurrentUser();
   const { pendingIdentity, clearPendingIdentity } = useConfig();
   const usersQuery = useUsers();
@@ -47,6 +58,7 @@ export function IdentityForm({ autoFocus = true }: { autoFocus?: boolean }) {
     if (!selected) return;
     setUserId(selected);
     clearPendingIdentity();
+    onDone?.();
   }
 
   async function handleCreateSubmit(e: FormEvent) {
@@ -61,6 +73,7 @@ export function IdentityForm({ autoFocus = true }: { autoFocus?: boolean }) {
       });
       setUserId(user.id);
       clearPendingIdentity();
+      onDone?.();
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : "Failed to create user");
     }
@@ -111,7 +124,7 @@ export function IdentityForm({ autoFocus = true }: { autoFocus?: boolean }) {
             <Plus className="h-3.5 w-3.5 mr-1" /> Create new
           </Button>
           <Button type="submit" disabled={!selected}>
-            Continue
+            {submitLabels?.select ?? "Continue"}
           </Button>
         </div>
       </form>
@@ -165,7 +178,7 @@ export function IdentityForm({ autoFocus = true }: { autoFocus?: boolean }) {
               <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> Creating…
             </>
           ) : (
-            "Create & continue"
+            (submitLabels?.create ?? "Create & continue")
           )}
         </Button>
       </div>

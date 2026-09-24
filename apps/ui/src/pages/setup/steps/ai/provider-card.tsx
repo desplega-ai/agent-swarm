@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import { SetupCard, SetupChip } from "@/components/onboarding/setup-card";
+import { StatusIcon } from "@/components/onboarding/save-indicator";
+import { SetupCard } from "@/components/onboarding/setup-card";
 import { HARNESS_LABEL } from "@/lib/agent-runtime-models";
 import { HarnessSwitch } from "./harness-switch";
 import { type AiCardId, type AiCardProps, CARD_HARNESSES } from "./model";
@@ -13,9 +14,9 @@ function harnessPhrase(card: AiCardId): string {
 }
 
 /**
- * Accordion card shared by the four providers: status chip, the card's form,
- * then the waiting panel once a key is saved, then the R2 harness switch when
- * no worker runs the card's harness.
+ * Accordion card shared by the four providers: status icon, the card's form,
+ * then the waiting line once a key is saved, then (also once a key is saved)
+ * the R2 harness switch when no worker runs the card's harness.
  */
 export function ProviderCard({
   card,
@@ -51,29 +52,26 @@ export function ProviderCard({
         ? (HARNESS_LABEL[withWorkers[0]] ?? withWorkers[0])
         : "open harness";
 
-  const chip = rollup.verified ? (
-    <SetupChip tone="success">Verified</SetupChip>
+  const noWorker = !runsHarness && agents.length > 0;
+  const status = rollup.verified ? (
+    <StatusIcon
+      tone="done"
+      label={`Verified by ${rollup.verifiedWorkers} of ${rollup.workers} agents`}
+    />
+  ) : saved && noWorker ? (
+    <StatusIcon tone="warning" label={`Saved. No worker runs ${harnessPhrase(card)} yet.`} />
   ) : saved ? (
-    <SetupChip tone="pending">Waiting for a worker</SetupChip>
+    <StatusIcon tone="busy" label="Saved. Waiting for a worker to check this key." />
   ) : (
-    <SetupChip>Not set up</SetupChip>
+    <StatusIcon tone="none" />
   );
 
   return (
     <SetupCard
       icon={icon}
       title={title}
-      description={
-        <>
-          {subtitle}
-          {rollup.verified ? (
-            <span className="block tabular-nums text-status-success-strong">
-              {rollup.verifiedWorkers} of {rollup.workers} agents verified
-            </span>
-          ) : null}
-        </>
-      }
-      status={chip}
+      description={subtitle}
+      status={status}
       collapsible={{ open, onOpenChange }}
       active={open}
       bodyClassName="space-y-3 sm:pl-[60px]"
@@ -82,7 +80,8 @@ export function ProviderCard({
       {saved || rollup.verified ? (
         <WaitingPanel rollup={rollup} harnessLabel={waitingLabel} />
       ) : null}
-      {!runsHarness && agents.length > 0 ? (
+      {/* Offer the switch once there is a key a worker could check. */}
+      {saved && noWorker ? (
         <HarnessSwitch harnessPhrase={harnessPhrase(card)} targets={harnesses} agents={agents} />
       ) : null}
     </SetupCard>

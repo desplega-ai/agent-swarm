@@ -1,57 +1,59 @@
 import { useQuery } from "@tanstack/react-query";
-import { Check, Copy } from "lucide-react";
+import { Bot, Check, Copy } from "lucide-react";
 import { api } from "@/api/client";
 import { useStatus } from "@/api/hooks/use-status";
-import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { Button } from "@/components/ui/button";
-import { SettingsRow } from "@/components/ui/settings-row";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { InfoTip } from "@/components/ui/info-tip";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { swarmDisplayName } from "../../components/swarm-name";
-import { SLACK_MODE_FIELD, SLACK_SIGNING_FIELDS, SLACK_TOKEN_FIELDS } from "./catalog";
-import { ConnectedGate, ExternalTextLink, SaveRow } from "./pane-parts";
-import { FieldGrid, fieldLabel } from "./setup-field";
+import { SLACK_TOKEN_FIELDS } from "./catalog";
+import { ConnectedGate, ExternalTextLink } from "./pane-parts";
+import { FieldGrid } from "./setup-field";
 import { type PaneProps, useConfigForm } from "./use-config-form";
 
-const SLACK_FIELDS = [SLACK_MODE_FIELD, ...SLACK_TOKEN_FIELDS, ...SLACK_SIGNING_FIELDS];
+const SLACK_APPS_URL = "https://api.slack.com/apps?new_app=1";
+
+/**
+ * Prompt for an agent with computer use (Codex, Claude Code) that creates the
+ * Slack app and reports the two tokens back. It embeds the manifest. It never
+ * contains the swarm API key or any other secret.
+ */
+export function buildSlackSetupPrompt(manifestJson: string): string {
+  return `You have computer use. Please create a Slack app for my Agent Swarm and give me its two tokens. Use the browser. Do not ask me for a password or a secret, and do not paste the tokens anywhere except your final answer to me.
+
+1. Open https://api.slack.com/apps and sign in if Slack asks. Click "Create New App", choose "From a manifest", pick my workspace, then paste this manifest (JSON) and create the app:
+
+\`\`\`json
+${manifestJson}
+\`\`\`
+
+2. Socket Mode: open "Socket Mode" in the app settings and make sure it is on. Then open "Basic Information", find "App-Level Tokens", and generate a token named "agent-swarm" with the scope \`connections:write\`. Copy the token. It starts with \`xapp-\`.
+
+3. Install: open "Install App" and click "Install to Workspace". Approve the permissions. Copy the "Bot User OAuth Token". It starts with \`xoxb-\`.
+
+4. Report back only these two lines, so I can paste them into the Agent Swarm setup page:
+
+SLACK_BOT_TOKEN=xoxb-...
+SLACK_APP_TOKEN=xapp-...
+
+If a step fails, stop and tell me what you see on the screen.`;
+}
 
 export function SlackPane({ configs, presence, connected }: PaneProps) {
-  const form = useConfigForm(SLACK_FIELDS, configs, presence);
-  const mode = form.value("SLACK_MODE") === "http" ? "http" : "socket";
-
+  const form = useConfigForm(configs, presence);
   return (
     <ConnectedGate
       connected={connected}
-      title="Slack is connected."
-      detail="Mention the bot in any channel it joins to send a task."
+      summary="Connected. Mention the bot in a channel to send a task."
     >
-      <SlackManifest />
-      <SettingsRow
-        label={fieldLabel(SLACK_MODE_FIELD)}
-        helper="Socket mode needs no public URL. HTTP needs one and signs every request."
-      >
-        <Tabs value={mode} onValueChange={(v) => form.setValue("SLACK_MODE", v)}>
-          <TabsList>
-            <TabsTrigger value="socket">Socket mode</TabsTrigger>
-            <TabsTrigger value="http">HTTP</TabsTrigger>
-          </TabsList>
-        </Tabs>
-      </SettingsRow>
+      <SlackAppActions />
       <FieldGrid specs={SLACK_TOKEN_FIELDS} form={form} />
-      {/* Keyed on the mode so switching to HTTP opens the section. */}
-      <CollapsibleSection key={mode} title="HTTP mode only" defaultOpen={mode === "http"}>
-        <div className="pt-2">
-          <FieldGrid specs={SLACK_SIGNING_FIELDS} form={form} />
-        </div>
-      </CollapsibleSection>
-      <SaveRow form={form} label="Save Slack" missingHint="Add the bot token first." />
     </ConnectedGate>
   );
 }
 
-/** App manifest pre-filled with the swarm name. Hidden when the API has no manifest route. */
-function SlackManifest() {
+/** Copy the manifest (pre-filled with the swarm name) or a setup prompt for an agent. */
+function SlackAppActions() {
   const statusQ = useStatus();
   // Unset `SWARM_ORG_NAME` reads as "Swarm" on /status. Use the step 2 default instead.
   const name = swarmDisplayName(statusQ.data?.identity?.name);
@@ -63,47 +65,43 @@ function SlackManifest() {
     staleTime: Number.POSITIVE_INFINITY,
     refetchInterval: false,
   });
-  const { copied, copy } = useCopyToClipboard();
+  const { copiedKey, copy } = useCopyToClipboard<"manifest" | "prompt">();
   const manifest = manifestQ.data ? JSON.stringify(manifestQ.data, null, 2) : null;
-  const loading = statusQ.isPending || manifestQ.isPending;
-
-  const link = (
-    <ExternalTextLink href="https://api.slack.com/apps?new_app=1">
-      api.slack.com/apps
-    </ExternalTextLink>
-  );
-
-  if (!manifest && !loading) {
-    return <p className="text-xs text-muted-foreground">Create the app at {link}.</p>;
-  }
+  // An older API has no manifest route: only the link stays.
+  const unavailable = manifestQ.isError;
 
   return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          App manifest
-        </span>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={!manifest}
-          onClick={() => manifest && void copy(manifest)}
-        >
-          {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-          {copied ? "Copied" : "Copy manifest"}
-        </Button>
-      </div>
-      {manifest ? (
-        <pre className="max-h-56 overflow-auto rounded-md border border-border-subtle bg-surface p-3 font-mono text-xs leading-relaxed">
-          {manifest}
-        </pre>
-      ) : (
-        <Skeleton className="h-40 w-full" />
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+      {unavailable ? null : (
+        <>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={!manifest}
+            onClick={() => manifest && void copy(manifest, "manifest")}
+          >
+            {copiedKey === "manifest" ? <Check /> : <Copy />}
+            {copiedKey === "manifest" ? "Copied" : "Copy manifest"}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={!manifest}
+            onClick={() => manifest && void copy(buildSlackSetupPrompt(manifest), "prompt")}
+          >
+            {copiedKey === "prompt" ? <Check /> : <Bot />}
+            {copiedKey === "prompt" ? "Copied" : "Copy setup prompt"}
+          </Button>
+          <InfoTip content='Pick "From a manifest" and paste the manifest. Or give the setup prompt to Codex or Claude Code with computer use: it creates the app and reports both tokens.' />
+        </>
       )}
-      <p className="text-xs text-muted-foreground">
-        Create the app at {link} and pick "From a manifest", then paste this in.
-      </p>
+      <span className="text-sm">
+        <ExternalTextLink href={SLACK_APPS_URL}>
+          Create the app at api.slack.com/apps
+        </ExternalTextLink>
+      </span>
     </div>
   );
 }

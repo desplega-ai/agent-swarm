@@ -1,4 +1,4 @@
-import { AlertCircle, Check, CheckCircle2, Info, Loader2, SlidersHorizontal } from "lucide-react";
+import { Check, Loader2, SlidersHorizontal } from "lucide-react";
 import { useState } from "react";
 import { useEnvPresence } from "@/api/hooks/use-integrations-meta";
 import { useTestOnboardingMemory } from "@/api/hooks/use-onboarding";
@@ -8,19 +8,27 @@ import type {
   OnboardingMemoryTestRequest,
   OnboardingMemoryTestResponse,
 } from "@/api/types";
-import { SecretInput } from "@/components/onboarding/secret-field";
+import { FadeIn } from "@/components/onboarding/fade-in";
+import { StatusIcon, StatusLine, type StatusTone } from "@/components/onboarding/save-indicator";
 import {
-  BrandLogo,
-  SetupCard,
-  SetupChip,
-  type SetupChipTone,
-} from "@/components/onboarding/setup-card";
-import { AlertCallout } from "@/components/ui/alert-callout";
+  checkSecret,
+  SecretInput,
+  type SecretRule,
+  usePasteCommit,
+} from "@/components/onboarding/secret-field";
+import { BrandLogo, SetupCard } from "@/components/onboarding/setup-card";
+import {
+  AutosaveScopeContext,
+  useAutosave,
+  useAutosaveScope,
+} from "@/components/onboarding/use-autosave";
 import { Button } from "@/components/ui/button";
+import { InfoTip } from "@/components/ui/info-tip";
 import { Input } from "@/components/ui/input";
 import { SettingsRow } from "@/components/ui/settings-row";
 import { cn } from "@/lib/utils";
 import type { StepProps } from "../step-contract";
+import { baseUrlError } from "./ai/model";
 
 type ReuseKey = NonNullable<OnboardingMemoryTestRequest["reuseKey"]>;
 
@@ -32,6 +40,7 @@ interface Preset {
   model: string;
   keyLabel: string;
   placeholder: string;
+  keyRule: SecretRule;
   /** Step 3 key this preset can reuse, when the server has it. */
   reuseKey?: ReuseKey;
 }
@@ -46,6 +55,7 @@ const PRESETS: Preset[] = [
     model: "text-embedding-3-small",
     keyLabel: "OpenAI API key",
     placeholder: "sk-proj-...",
+    keyRule: { prefixes: ["sk-"], strict: true, minLength: 30, hint: "Starts with sk-" },
     reuseKey: "OPENAI_API_KEY",
   },
   {
@@ -56,6 +66,7 @@ const PRESETS: Preset[] = [
     model: "openai/text-embedding-3-small",
     keyLabel: "OpenRouter API key",
     placeholder: "sk-or-v1-...",
+    keyRule: { prefixes: ["sk-or-"], strict: true, minLength: 40, hint: "Starts with sk-or-" },
     reuseKey: "OPENROUTER_API_KEY",
   },
   {
@@ -66,6 +77,7 @@ const PRESETS: Preset[] = [
     model: "openai/text-embedding-3-small",
     keyLabel: "AI Gateway API key",
     placeholder: "vck_...",
+    keyRule: { prefixes: ["vck_"], minLength: 20 },
   },
   {
     id: "custom",
@@ -74,6 +86,8 @@ const PRESETS: Preset[] = [
     model: "",
     keyLabel: "API key",
     placeholder: "••••",
+    // Unknown format: tests on blur or paste.
+    keyRule: {},
   },
 ];
 
@@ -93,14 +107,24 @@ function errorHint(errorClass: OnboardingErrorClass | undefined, dims: number): 
   }
 }
 
-export function StepMemory({ onboarding }: StepProps) {
+type Outcome =
+  | { kind: "result"; result: OnboardingMemoryTestResponse }
+  | { kind: "request-error"; message: string };
+
+/**
+ * Step 4: embeddings. No Save button: once the fields are valid and stable,
+ * the step runs the test-and-save probe by itself (one embedding call; the
+ * API stores the config only when it works).
+ */
+export function StepMemory({ onboarding, setContinueBlocker }: StepProps) {
+  const scope = useAutosaveScope(setContinueBlocker);
   const [preset, setPreset] = useState<Preset>(PRESETS[0]);
   const [baseUrl, setBaseUrl] = useState(preset.baseUrl);
   const [model, setModel] = useState(preset.model);
   const [apiKey, setApiKey] = useState("");
   const [reuse, setReuse] = useState(false);
-  const [result, setResult] = useState<OnboardingMemoryTestResponse | null>(null);
-  const [requestError, setRequestError] = useState<string | null>(null);
+  const [keyBlurred, setKeyBlurred] = useState(false);
+  const [outcome, setOutcome] = useState<Outcome | null>(null);
   const test = useTestOnboardingMemory();
   const presenceQ = useEnvPresence(["OPENAI_API_KEY", "OPENROUTER_API_KEY"]);
 
@@ -109,13 +133,45 @@ export function StepMemory({ onboarding }: StepProps) {
   const reuseKey =
     preset.reuseKey && presenceQ.data?.[preset.reuseKey] ? preset.reuseKey : undefined;
   const usingReuse = reuse && reuseKey !== undefined;
-  const testingExisting = test.isPending && test.variables?.preset === "existing";
-  const testingCandidate = test.isPending && !testingExisting;
-  const canTest =
-    baseUrl.trim().length > 0 &&
-    model.trim().length > 0 &&
-    (usingReuse || apiKey.trim().length > 0) &&
-    !test.isPending;
+
+  const url = baseUrl.trim();
+  const modelId = model.trim();
+  const key = apiKey.trim();
+  const urlError = url ? baseUrlError(url) : null;
+  const keyCheck = checkSecret(key, preset.keyRule);
+  const keyProblem =
+    keyCheck.problem && (keyBlurred || keyCheck.problemNow) ? keyCheck.problem : null;
+  const fieldsOk = url.length > 0 && !urlError && modelId.length > 0;
+
+  const body: OnboardingMemoryTestRequest = {
+    preset: preset.id,
+    baseUrl: url,
+    model: modelId,
+    ...(usingReuse ? { reuseKey } : { apiKey: key }),
+  };
+  // Stable identity of the candidate: the probe runs once per distinct setup.
+  const candidate = JSON.stringify(body);
+
+  async function run(request: OnboardingMemoryTestRequest) {
+    setOutcome(null);
+    try {
+      setOutcome({ kind: "result", result: await test.mutateAsync(request) });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setOutcome({ kind: "request-error", message });
+      throw err instanceof Error ? err : new Error(message);
+    }
+  }
+
+  const probe = useAutosave({
+    value: candidate,
+    dirty: fieldsOk && (usingReuse || key.length > 0),
+    ready: fieldsOk && (usingReuse || keyCheck.ready),
+    readyOnCommit: fieldsOk && (usingReuse || keyCheck.readyOnCommit),
+    save: () => run(body),
+  });
+
+  const paste = usePasteCommit(probe.commit);
 
   function selectPreset(next: Preset) {
     setPreset(next);
@@ -123,107 +179,100 @@ export function StepMemory({ onboarding }: StepProps) {
     setModel(next.model);
     setApiKey("");
     setReuse(false);
-    setResult(null);
-    setRequestError(null);
+    setKeyBlurred(false);
+    setOutcome(null);
   }
 
-  async function run(body: OnboardingMemoryTestRequest) {
-    setResult(null);
-    setRequestError(null);
-    try {
-      setResult(await test.mutateAsync(body));
-    } catch (err) {
-      setRequestError(err instanceof Error ? err.message : String(err));
-    }
-  }
+  const testingExisting = test.isPending && test.variables?.preset === "existing";
+  const probing = test.isPending && !testingExisting;
+  const result = outcome?.kind === "result" ? outcome.result : null;
 
-  function testAndSave() {
-    void run({
-      preset: preset.id,
-      baseUrl: baseUrl.trim(),
-      model: model.trim(),
-      ...(usingReuse ? { reuseKey } : { apiKey: apiKey.trim() }),
-    });
-  }
-
-  const chip: { tone: SetupChipTone; label: string } =
-    stepStatus === "done"
-      ? { tone: "success", label: "Verified" }
-      : stepStatus === "failed"
-        ? { tone: "error", label: "Failed" }
-        : stepStatus === "skipped"
-          ? { tone: "neutral", label: "Skipped" }
-          : { tone: "neutral", label: "Not tested" };
+  const header: { tone: StatusTone; label: string } = probing
+    ? { tone: "busy", label: "Testing the endpoint…" }
+    : probe.phase === "pending"
+      ? { tone: "dirty", label: "Tests when you stop typing" }
+      : result && !result.ok
+        ? { tone: "error", label: errorHint(result.errorClass, dimensions) }
+        : outcome?.kind === "request-error"
+          ? { tone: "error", label: "Could not run the test." }
+          : stepStatus === "done" || result?.ok
+            ? { tone: "done", label: "Memory works" }
+            : { tone: "none", label: "" };
 
   return (
-    <div className="space-y-3">
+    <AutosaveScopeContext.Provider value={scope}>
       <SetupCard
-        title="Embeddings"
-        status={<SetupChip tone={chip.tone}>{chip.label}</SetupChip>}
+        title={
+          <span className="flex items-center gap-1.5">
+            Embeddings
+            <InfoTip
+              content={`Vectors are stored at ${dimensions} dimensions. The test sends one embedding, then discards it.`}
+            />
+          </span>
+        }
+        status={<StatusIcon tone={header.tone} label={header.label} />}
         bodyClassName="space-y-4"
       >
         {configured ? (
-          <AlertCallout tone="info" icon={Info}>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span>Memory is already configured on the server.</span>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={test.isPending}
-                onClick={() => void run({ preset: "existing" })}
-              >
-                {testingExisting ? <Loader2 className="size-3.5 animate-spin" /> : null}
-                Test current setup
-              </Button>
-            </div>
-          </AlertCallout>
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border-subtle bg-surface px-3 py-2">
+            <span className="text-sm">Memory is already set up on the server.</span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={test.isPending}
+              onClick={() => void run({ preset: "existing" }).catch(() => undefined)}
+            >
+              {testingExisting ? <Loader2 className="size-3.5 animate-spin" /> : null}
+              Test current setup
+            </Button>
+          </div>
         ) : null}
 
-        <div className="space-y-2">
-          <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Provider preset
-          </span>
-          <div role="radiogroup" aria-label="Provider preset" className="flex flex-wrap gap-2">
-            {PRESETS.map((p) => {
-              const active = p.id === preset.id;
-              return (
-                <Button
-                  key={p.id}
-                  type="button"
-                  role="radio"
-                  aria-checked={active}
-                  variant="outline"
-                  size="sm"
-                  onClick={() => selectPreset(p)}
-                  className={cn(
-                    active &&
-                      "border-primary/60 bg-primary/5 text-primary hover:bg-primary/10 hover:text-primary",
-                  )}
-                >
-                  {p.logo ? (
-                    <BrandLogo src={p.logo} className="size-4" />
-                  ) : (
-                    <SlidersHorizontal className="size-4" />
-                  )}
-                  {p.label}
-                </Button>
-              );
-            })}
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Any OpenAI-compatible embeddings endpoint works.
-          </p>
+        <div role="radiogroup" aria-label="Provider preset" className="flex flex-wrap gap-2">
+          {PRESETS.map((p) => {
+            const active = p.id === preset.id;
+            return (
+              <Button
+                key={p.id}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                variant="outline"
+                size="sm"
+                onClick={() => selectPreset(p)}
+                className={cn(
+                  active &&
+                    "border-primary/60 bg-primary/5 text-primary hover:bg-primary/10 hover:text-primary",
+                )}
+              >
+                {p.logo ? (
+                  <BrandLogo src={p.logo} className="size-4" />
+                ) : (
+                  <SlidersHorizontal className="size-4" />
+                )}
+                {p.label}
+              </Button>
+            );
+          })}
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2">
-          <SettingsRow label="Base URL" htmlFor="memory-base-url">
+          <SettingsRow
+            label="Base URL"
+            htmlFor="memory-base-url"
+            helper={
+              urlError ? <span className="text-status-error-strong">{urlError}</span> : undefined
+            }
+          >
             <Input
               id="memory-base-url"
               value={baseUrl}
               onChange={(e) => setBaseUrl(e.target.value)}
+              onBlur={probe.commit}
               placeholder="https://embeddings.example.com/v1"
               spellCheck={false}
+              aria-invalid={urlError ? true : undefined}
               className="font-mono"
             />
           </SettingsRow>
@@ -232,6 +281,7 @@ export function StepMemory({ onboarding }: StepProps) {
               id="memory-model"
               value={model}
               onChange={(e) => setModel(e.target.value)}
+              onBlur={probe.commit}
               placeholder="text-embedding-3-small"
               spellCheck={false}
               className="font-mono"
@@ -243,11 +293,37 @@ export function StepMemory({ onboarding }: StepProps) {
           label={preset.keyLabel}
           htmlFor="memory-api-key"
           helper={
-            reuseKey ? (
+            keyProblem ? (
+              <span className="text-status-error-strong">{keyProblem}</span>
+            ) : outcome || probing ? undefined : (
+              "Tests and saves once the key is complete."
+            )
+          }
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="min-w-0 flex-1 basis-60">
+              <SecretInput
+                id="memory-api-key"
+                value={usingReuse ? "" : apiKey}
+                onChange={(next) => {
+                  setApiKey(next);
+                  paste.afterChange();
+                }}
+                onBlur={() => {
+                  setKeyBlurred(true);
+                  probe.commit();
+                }}
+                onPaste={paste.onPaste}
+                placeholder={usingReuse ? "Using the key from step 3" : preset.placeholder}
+                disabled={usingReuse}
+                invalid={Boolean(keyProblem)}
+              />
+            </div>
+            {reuseKey ? (
               <Button
                 type="button"
                 variant="outline"
-                size="xs"
+                size="sm"
                 aria-pressed={usingReuse}
                 onClick={() => setReuse((v) => !v)}
                 className={cn(
@@ -258,55 +334,63 @@ export function StepMemory({ onboarding }: StepProps) {
                 {usingReuse ? <Check /> : null}
                 Reuse key from step 3
               </Button>
-            ) : undefined
-          }
-        >
-          <SecretInput
-            id="memory-api-key"
-            value={usingReuse ? "" : apiKey}
-            onChange={setApiKey}
-            placeholder={usingReuse ? "Using the key from step 3" : preset.placeholder}
-            disabled={usingReuse}
-          />
+            ) : null}
+          </div>
         </SettingsRow>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <Button type="button" onClick={testAndSave} disabled={!canTest}>
-            {testingCandidate ? <Loader2 className="size-4 animate-spin" /> : null}
-            Test and save
-          </Button>
-          <span className="text-xs text-muted-foreground">One vector, then it is discarded.</span>
-        </div>
-
-        {result?.ok ? (
-          <AlertCallout tone="success" icon={CheckCircle2}>
-            Embeddings work. {result.dimensions ?? dimensions} dims, {result.latencyMs} ms.
-          </AlertCallout>
-        ) : null}
-        {result && !result.ok ? (
-          <AlertCallout
-            tone="error"
-            icon={AlertCircle}
-            title={result.error ? errorHint(result.errorClass, dimensions) : undefined}
-          >
-            {result.error ? (
-              <span className="break-all font-mono text-muted-foreground">{result.error}</span>
-            ) : (
-              errorHint(result.errorClass, dimensions)
-            )}
-          </AlertCallout>
-        ) : null}
-        {requestError ? (
-          <AlertCallout tone="error" icon={AlertCircle} title="Could not run the test.">
-            <span className="break-all font-mono text-muted-foreground">{requestError}</span>
-          </AlertCallout>
-        ) : null}
+        <ProbeResult probing={probing} outcome={outcome} dimensions={dimensions} />
       </SetupCard>
+    </AutosaveScopeContext.Provider>
+  );
+}
 
-      <div className="space-y-1 px-0.5 text-xs text-muted-foreground">
-        <p>Vectors are stored at {dimensions} dimensions.</p>
-        <p>Memory stays off if you skip. Agents will not remember across tasks.</p>
+/** One line under the fields: the probe running, then its result. */
+function ProbeResult({
+  probing,
+  outcome,
+  dimensions,
+}: {
+  probing: boolean;
+  outcome: Outcome | null;
+  dimensions: number;
+}) {
+  if (probing) {
+    return <StatusLine tone="busy">Testing the endpoint</StatusLine>;
+  }
+  if (!outcome) return null;
+  if (outcome.kind === "request-error") {
+    return (
+      <FadeIn key="request-error">
+        <StatusLine tone="error">
+          Could not run the test.{" "}
+          <span className="break-all font-mono text-xs text-muted-foreground">
+            {outcome.message}
+          </span>
+        </StatusLine>
+      </FadeIn>
+    );
+  }
+  const { result } = outcome;
+  if (result.ok) {
+    return (
+      <FadeIn key="ok">
+        <StatusLine tone="done">
+          Memory works.{" "}
+          <span className="font-mono text-xs tabular-nums text-muted-foreground">
+            {result.dimensions ?? dimensions} dims, {result.latencyMs} ms
+          </span>
+        </StatusLine>
+      </FadeIn>
+    );
+  }
+  return (
+    <FadeIn key="fail">
+      <div className="space-y-1">
+        <StatusLine tone="error">{errorHint(result.errorClass, dimensions)}</StatusLine>
+        {result.error ? (
+          <p className="break-all pl-6 font-mono text-xs text-muted-foreground">{result.error}</p>
+        ) : null}
       </div>
-    </div>
+    </FadeIn>
   );
 }

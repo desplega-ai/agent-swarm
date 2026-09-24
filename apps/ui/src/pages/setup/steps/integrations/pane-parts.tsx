@@ -1,17 +1,15 @@
-import { CheckCircle2, ExternalLink, Loader2 } from "lucide-react";
+import { ExternalLink } from "lucide-react";
 import type { ReactNode } from "react";
+import { StatusLine } from "@/components/onboarding/save-indicator";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
-import { AlertCallout } from "@/components/ui/alert-callout";
-import { Button } from "@/components/ui/button";
-import type { ConfigForm } from "./use-config-form";
 
-/** Inline external link in helper copy. */
+/** Inline external link in helper copy. Always a new tab. */
 export function ExternalTextLink({ href, children }: { href: string; children: ReactNode }) {
   return (
     <a
       href={href}
       target="_blank"
-      rel="noreferrer noopener"
+      rel="noopener noreferrer"
       className="inline-flex items-center gap-1 font-medium text-primary underline-offset-4 hover:underline"
     >
       {children}
@@ -32,51 +30,21 @@ export function StepLine({ n, children }: { n: number; children: ReactNode }) {
   );
 }
 
-/** Primary save button for a pane, with a hint while a required field is empty. */
-export function SaveRow({
-  form,
-  label,
-  missingHint,
-}: {
-  form: ConfigForm;
-  label: string;
-  missingHint: string;
-}) {
-  return (
-    <div className="flex flex-wrap items-center gap-3">
-      <Button
-        type="button"
-        onClick={() => void form.save()}
-        disabled={!form.dirty || !form.requiredMet || form.saving}
-      >
-        {form.saving ? <Loader2 className="size-4 animate-spin" /> : null}
-        {label}
-      </Button>
-      {form.requiredMet ? null : (
-        <span className="text-xs text-muted-foreground">{missingHint}</span>
-      )}
-    </div>
-  );
-}
-
-/** Connected: a success row, with the form folded under "Edit settings". */
+/** Connected: one success line, with the fields folded under "Edit settings". */
 export function ConnectedGate({
   connected,
-  title,
-  detail,
+  summary,
   children,
 }: {
   connected: boolean;
-  title: string;
-  detail?: ReactNode;
+  /** A few words, e.g. "Connected. Mention the bot in a channel." */
+  summary: ReactNode;
   children: ReactNode;
 }) {
   if (!connected) return <>{children}</>;
   return (
     <>
-      <AlertCallout tone="success" icon={CheckCircle2} title={detail ? title : undefined}>
-        {detail ?? title}
-      </AlertCallout>
+      <StatusLine tone="done">{summary}</StatusLine>
       <CollapsibleSection title="Edit settings">
         <div className="space-y-4 pt-3">{children}</div>
       </CollapsibleSection>

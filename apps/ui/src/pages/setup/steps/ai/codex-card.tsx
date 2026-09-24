@@ -1,13 +1,15 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, CheckCircle2, ExternalLink, Info, Loader2 } from "lucide-react";
+import { AlertCircle, ExternalLink, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "@/api/client";
 import { ONBOARDING_QUERY_KEY } from "@/api/hooks/use-onboarding";
 import type { CodexDeviceStartResponse } from "@/api/types";
+import { StatusLine } from "@/components/onboarding/save-indicator";
 import { BrandLogo } from "@/components/onboarding/setup-card";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
+import { InfoTip } from "@/components/ui/info-tip";
 import { useConfig } from "@/hooks/use-config";
 import { CopyIconButton } from "./fields";
 import type { AiCardProps } from "./model";
@@ -129,21 +131,13 @@ export function CodexCard({
       subtitle="Device code login. No terminal needed."
       saved={saved}
     >
-      {flow.phase !== "complete" ? (
-        <AlertCallout tone="info" icon={Info}>
-          Turn on "Allow device code login" in ChatGPT Settings, Security (workspace admins control
-          it for team workspaces).
-        </AlertCallout>
-      ) : null}
-
       {flow.phase === "idle" ? (
-        <div className="space-y-2">
-          {saved ? (
-            <p className="text-sm text-muted-foreground">
-              A ChatGPT sign-in is already saved. Sign in again to add another account.
-            </p>
-          ) : null}
-          {startButton("Sign in with ChatGPT")}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          {startButton(saved ? "Add another ChatGPT account" : "Sign in with ChatGPT")}
+          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            Needs device code login in ChatGPT
+            <InfoTip content='Turn on "Allow device code login" in ChatGPT Settings, Security. Workspace admins control it for team workspaces.' />
+          </span>
         </div>
       ) : null}
 
@@ -166,9 +160,9 @@ export function CodexCard({
       {flow.phase === "polling" ? <DeviceCodePanel flow={flow.flow} /> : null}
 
       {flow.phase === "complete" ? (
-        <AlertCallout tone="success" icon={CheckCircle2}>
-          {flow.slot === undefined ? "Signed in." : `Signed in. Saved as Codex slot ${flow.slot}.`}
-        </AlertCallout>
+        <StatusLine tone="done">
+          {flow.slot === undefined ? "Signed in" : `Signed in (Codex slot ${flow.slot})`}
+        </StatusLine>
       ) : null}
 
       {flow.phase === "failed" ? (
@@ -193,8 +187,9 @@ export function CodexCard({
             </code>
             <CopyIconButton value={cli} label="Copy command" />
           </div>
-          <p className="text-xs text-muted-foreground">
-            Run it on a machine with a browser. It stores the token in this swarm.
+          <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            Run it on a machine with a browser.
+            <InfoTip content="The command signs in to ChatGPT and stores the token in this swarm." />
           </p>
         </div>
       </CollapsibleSection>

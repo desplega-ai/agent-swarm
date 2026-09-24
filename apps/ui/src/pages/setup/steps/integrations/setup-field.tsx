@@ -1,55 +1,94 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
+import { SaveIndicator, WithIndicator } from "@/components/onboarding/save-indicator";
 import { SecretField } from "@/components/onboarding/secret-field";
+import { useAutosave } from "@/components/onboarding/use-autosave";
+import { InfoTip } from "@/components/ui/info-tip";
 import { Input } from "@/components/ui/input";
 import { SettingsRow } from "@/components/ui/settings-row";
 import { cn } from "@/lib/utils";
 import type { SetupFieldSpec } from "./catalog";
 import type { ConfigForm } from "./use-config-form";
 
-/** Human label plus the config key in mono, so operators can match the docs. */
-export function fieldLabel(spec: Pick<SetupFieldSpec, "key" | "label">): ReactNode {
+/** Human label, the config key in mono (to match the docs), and the hint as a tooltip. */
+export function fieldLabel(spec: Pick<SetupFieldSpec, "key" | "label" | "hint">): ReactNode {
   return (
     <>
       <span>{spec.label}</span>
       <code className="font-mono text-[10px] font-normal text-muted-foreground">{spec.key}</code>
+      {spec.hint ? <InfoTip content={spec.hint} /> : null}
     </>
   );
 }
 
-/** One config key: catalog label + env key. Secrets use the shared write-only field. */
+/**
+ * One config key that saves itself. Secrets use the shared write-only field
+ * and store once complete (see `SecretRule`). Other values store about
+ * 800 ms after typing stops, or on blur, once they validate.
+ */
 export function SetupField({ spec, form }: { spec: SetupFieldSpec; form: ConfigForm }) {
   const id = `setup-${spec.key}`;
-  const placeholder =
-    form.isEnvOnly(spec.key) && !spec.secret ? "Set on the server" : spec.placeholder;
-
+  if (!spec.secret) return <TextSetupField id={id} spec={spec} form={form} />;
   return (
     <SettingsRow
       htmlFor={id}
       required={spec.required}
       className={cn(spec.multiline && "sm:col-span-2")}
       label={fieldLabel(spec)}
-      helper={spec.hint}
     >
-      {spec.secret ? (
-        <SecretField
-          key={form.version}
-          id={id}
-          saved={form.isSaved(spec.key)}
-          multiline={spec.multiline}
-          value={form.value(spec.key)}
-          onChange={(v) => form.setValue(spec.key, v)}
-          placeholder={placeholder}
-        />
-      ) : (
+      <SecretField
+        id={id}
+        saved={form.isSaved(spec.key)}
+        multiline={spec.multiline}
+        rule={spec.secretRule}
+        placeholder={spec.placeholder}
+        onSave={(value) => form.saveField(spec, value)}
+      />
+    </SettingsRow>
+  );
+}
+
+function TextSetupField({
+  id,
+  spec,
+  form,
+}: {
+  id: string;
+  spec: SetupFieldSpec;
+  form: ConfigForm;
+}) {
+  // `null` = untouched: follow the stored value.
+  const [draft, setDraft] = useState<string | null>(null);
+  const baseline = form.baseline(spec);
+  const value = (draft ?? baseline).trim();
+  const error = value ? (spec.validate?.(value) ?? null) : null;
+  const autosave = useAutosave({
+    value,
+    dirty: draft !== null && value !== baseline.trim(),
+    // Blank clears an optional value. A required one never saves blank.
+    ready: !error && (!spec.required || value.length > 0),
+    save: (next) => form.saveField(spec, next),
+  });
+  const placeholder = form.isEnvOnly(spec.key) ? "Set on the server" : spec.placeholder;
+
+  return (
+    <SettingsRow
+      htmlFor={id}
+      required={spec.required}
+      label={fieldLabel(spec)}
+      helper={error ? <span className="text-status-error-strong">{error}</span> : undefined}
+    >
+      <WithIndicator indicator={<SaveIndicator phase={autosave.phase} error={autosave.error} />}>
         <Input
           id={id}
-          value={form.value(spec.key)}
-          onChange={(e) => form.setValue(spec.key, e.target.value)}
+          value={draft ?? baseline}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={autosave.commit}
           placeholder={placeholder}
           spellCheck={false}
-          className="font-mono"
+          aria-invalid={error ? true : undefined}
+          className="pr-8 font-mono"
         />
-      )}
+      </WithIndicator>
     </SettingsRow>
   );
 }

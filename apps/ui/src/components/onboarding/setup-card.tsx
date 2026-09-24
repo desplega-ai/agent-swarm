@@ -7,7 +7,8 @@ import { cn } from "@/lib/utils";
 /**
  * Shared building blocks for the `/setup` steps, so every step renders the
  * same card anatomy as the round-2 mockup (option B): a bordered card with a
- * header row (icon, title, one-line description, status chip) and a body.
+ * header row (icon, title, one-line description, status icon) and a body.
+ * A card without children is a single header row.
  */
 
 export type SetupChipTone = "neutral" | "success" | "pending" | "error" | "info" | "active";
@@ -40,7 +41,7 @@ interface SetupCardProps {
   icon?: ReactNode;
   title: ReactNode;
   description?: ReactNode;
-  /** Right side of the header, usually a `SetupChip`. */
+  /** Right side of the header, usually a `StatusIcon`. */
   status?: ReactNode;
   /** Extra header actions (docs link, ...), rendered before `status`. */
   actions?: ReactNode;
@@ -103,12 +104,17 @@ export function SetupCard({
           type="button"
           aria-expanded={open}
           onClick={() => collapsible.onOpenChange(!open)}
-          className="flex w-full items-center gap-3 rounded-xl px-4 py-3 hover:bg-accent/50 hover-linger transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+          className="flex w-full shrink-0 items-center gap-3 rounded-xl px-4 py-3 hover:bg-accent/50 hover-linger transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
         >
           {header}
         </button>
       ) : (
-        <div className="flex items-center gap-3 border-b border-border-subtle px-4 py-3">
+        <div
+          className={cn(
+            "flex shrink-0 items-center gap-3 px-4 py-3",
+            children ? "border-b border-border-subtle" : null,
+          )}
+        >
           {header}
         </div>
       )}

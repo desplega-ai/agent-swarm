@@ -1,11 +1,10 @@
 import { useState } from "react";
-import type { UpsertConfigEntry } from "@/api/hooks/use-config-api";
-import type { OnboardingAiMethod } from "@/api/types";
+import type { SecretRule } from "@/components/onboarding/secret-field";
 import { BrandLogo } from "@/components/onboarding/setup-card";
 import { useSetupSave } from "@/components/onboarding/use-setup-save";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { SaveButton, SecretKeyField, TextField } from "./fields";
+import { SecretKeyField, TextField } from "./fields";
 import { type AiCardProps, baseUrlError, globalConfigValue } from "./model";
 import { ProviderCard } from "./provider-card";
 
@@ -14,6 +13,29 @@ type OpenMode = "openrouter" | "gateway";
 const OR_KEY = "OPENROUTER_API_KEY";
 const BASE_URL = "OPENROUTER_BASE_URL";
 const DS_KEY = "DEEPSEEK_API_KEY";
+
+const OPENROUTER_RULE: SecretRule = {
+  prefixes: ["sk-or-"],
+  strict: true,
+  minLength: 40,
+  hint: "Starts with sk-or-",
+};
+// Gateway keys have no fixed shape: they save on blur or paste.
+const GATEWAY_RULE: SecretRule = {};
+const DEEPSEEK_RULE: SecretRule = {
+  prefixes: ["sk-"],
+  strict: true,
+  minLength: 30,
+  hint: "Starts with sk-",
+};
+
+const GATEWAY_INFO = (
+  <>
+    The gateway must accept OpenRouter-style requests. Pick models with{" "}
+    <code className="font-mono">MODEL_OVERRIDE=openrouter/&lt;model&gt;</code>. The API's own LLM
+    calls (workflows, memory) also go through it.
+  </>
+);
 
 function OpenHarnessIcon() {
   return (
@@ -26,61 +48,35 @@ function OpenHarnessIcon() {
 }
 
 export function OpenHarnessCard({ presence, configs, onSaved, ...card }: AiCardProps) {
-  const keys = useSetupSave(presence);
+  const { save, isSaved } = useSetupSave(presence);
   const [mode, setMode] = useState<OpenMode | null>(null);
-  const [orKey, setOrKey] = useState("");
-  // null = untouched, so the field shows the stored base URL.
-  const [baseUrl, setBaseUrl] = useState<string | null>(null);
-  const [dsKey, setDsKey] = useState("");
 
   const gatewaySet = Boolean(presence[BASE_URL]);
   const currentUrl = globalConfigValue(configs, BASE_URL);
   const activeMode: OpenMode = mode ?? (gatewaySet ? "gateway" : "openrouter");
-  const urlValue = baseUrl ?? currentUrl ?? "";
-  const urlError = activeMode === "gateway" ? baseUrlError(urlValue) : null;
 
-  const orV = orKey.trim();
-  const dsV = dsKey.trim();
-  const urlV = urlValue.trim();
-
-  const entries: UpsertConfigEntry[] = [];
-  let method: OnboardingAiMethod = "deepseek";
-  let gatewayReady = true;
-  if (activeMode === "gateway") {
-    if (urlV && urlV !== currentUrl) entries.push({ key: BASE_URL, value: urlV, isSecret: false });
-    if (orV) entries.push({ key: OR_KEY, value: orV, isSecret: true });
-    if (entries.length > 0) {
-      method = "openai_gateway";
-      gatewayReady = Boolean(urlV || gatewaySet) && Boolean(orV || keys.isSaved(OR_KEY));
-    }
-  } else if (orV) {
-    entries.push({ key: OR_KEY, value: orV, isSecret: true });
-    // A stored gateway URL would send this key to the gateway. Blank reverts to openrouter.ai.
-    if (gatewaySet) entries.push({ key: BASE_URL, value: "", isSecret: false });
-    method = "openrouter";
-  }
-  if (dsV) entries.push({ key: DS_KEY, value: dsV, isSecret: true });
-
-  async function save() {
-    const ok = await keys.save(entries);
-    if (!ok) return;
-    setOrKey("");
-    setDsKey("");
-    setBaseUrl(null);
-    onSaved(method);
-  }
-
-  const keyField = (placeholder: string, helper?: string) => (
+  const keyField = (rule: SecretRule, placeholder: string, helper?: string) => (
     <SecretKeyField
-      key={keys.version}
-      id="setup-ai-openrouter-key"
+      id={`setup-ai-openrouter-key-${activeMode}`}
       envKey={OR_KEY}
       placeholder={placeholder}
-      saved={keys.isSaved(OR_KEY)}
-      value={orKey}
-      onChange={setOrKey}
+      saved={isSaved(OR_KEY)}
+      rule={rule}
       helper={helper}
       logo={<BrandLogo src="/provider-logos/openrouter.svg" className="size-3.5" />}
+      onSave={async (value) => {
+        if (activeMode === "gateway") {
+          await save([{ key: OR_KEY, value, isSecret: true }]);
+          if (currentUrl || gatewaySet) onSaved("openai_gateway");
+          return;
+        }
+        // A stored gateway URL would send this key to the gateway. Blank reverts to openrouter.ai.
+        await save([
+          { key: OR_KEY, value, isSecret: true },
+          ...(gatewaySet ? [{ key: BASE_URL, value: "", isSecret: false }] : []),
+        ]);
+        onSaved("openrouter");
+      }}
     />
   );
 
@@ -91,7 +87,7 @@ export function OpenHarnessCard({ presence, configs, onSaved, ...card }: AiCardP
       icon={<OpenHarnessIcon />}
       title="Open harnesses: opencode, pi, DeepSeek"
       subtitle="Model-agnostic harnesses. One OpenRouter key runs all three."
-      saved={keys.isSaved(OR_KEY) || keys.isSaved(DS_KEY)}
+      saved={isSaved(OR_KEY) || isSaved(DS_KEY)}
     >
       <Tabs value={activeMode} onValueChange={(v) => setMode(v as OpenMode)}>
         <TabsList>
@@ -100,10 +96,9 @@ export function OpenHarnessCard({ presence, configs, onSaved, ...card }: AiCardP
         </TabsList>
         <TabsContent value="openrouter">
           {keyField(
+            OPENROUTER_RULE,
             "sk-or-v1-...",
-            gatewaySet
-              ? "A gateway base URL is set. Saving a key here switches back to openrouter.ai."
-              : undefined,
+            gatewaySet ? "A new key here clears the gateway URL." : undefined,
           )}
         </TabsContent>
         <TabsContent value="gateway" className="space-y-3">
@@ -111,45 +106,40 @@ export function OpenHarnessCard({ presence, configs, onSaved, ...card }: AiCardP
             id="setup-ai-openrouter-base-url"
             envKey={BASE_URL}
             placeholder="https://gateway.example.com/v1"
-            value={urlValue}
-            onChange={setBaseUrl}
-            error={urlError}
+            baseline={currentUrl}
+            validate={baseUrlError}
+            info={GATEWAY_INFO}
+            onSave={async (value) => {
+              await save([{ key: BASE_URL, value, isSecret: false }]);
+              if (isSaved(OR_KEY)) onSaved("openai_gateway");
+            }}
           />
-          {keyField("sk-...")}
-          <p className="text-xs text-muted-foreground">
-            The gateway must accept OpenRouter-style requests. Pick models with{" "}
-            <code className="rounded border border-border bg-muted px-1 font-mono text-[11px]">
-              MODEL_OVERRIDE=openrouter/&lt;model&gt;
-            </code>
-            . The API's own LLM calls (workflows, memory) also go through it.
-          </p>
+          {keyField(GATEWAY_RULE, "sk-...")}
         </TabsContent>
       </Tabs>
 
       <CollapsibleSection title="Direct keys instead">
-        <div className="space-y-2 pt-1.5">
+        <div className="pt-1.5">
           <SecretKeyField
-            key={keys.version}
             id="setup-ai-deepseek-key"
             envKey={DS_KEY}
             placeholder="sk-..."
-            saved={keys.isSaved(DS_KEY)}
-            value={dsKey}
-            onChange={setDsKey}
-            helper="For DeepSeek (dsh) without OpenRouter."
+            saved={isSaved(DS_KEY)}
+            rule={DEEPSEEK_RULE}
+            info={
+              <>
+                For DeepSeek (dsh) without OpenRouter. pi and opencode also reuse the Anthropic and
+                OpenAI keys.
+              </>
+            }
             logo={<BrandLogo src="/provider-logos/deepseek.svg" className="size-3.5" />}
+            onSave={async (value) => {
+              await save([{ key: DS_KEY, value, isSecret: true }]);
+              onSaved("deepseek");
+            }}
           />
-          <p className="text-xs text-muted-foreground">
-            pi and opencode also reuse the Anthropic and OpenAI keys from above.
-          </p>
         </div>
       </CollapsibleSection>
-
-      <SaveButton
-        saving={keys.saving}
-        disabled={entries.length === 0 || Boolean(urlError) || !gatewayReady}
-        onClick={save}
-      />
     </ProviderCard>
   );
 }

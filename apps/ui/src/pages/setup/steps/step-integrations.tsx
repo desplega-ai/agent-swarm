@@ -1,25 +1,27 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useConfigs } from "@/api/hooks/use-config-api";
 import { useEnvPresence } from "@/api/hooks/use-integrations-meta";
 import { ONBOARDING_QUERY_KEY } from "@/api/hooks/use-onboarding";
-import {
-  BrandLogo,
-  SetupCard,
-  SetupChip,
-  type SetupChipTone,
-} from "@/components/onboarding/setup-card";
+import { useOAuthApps } from "@/api/hooks/use-script-connections";
+import type { OAuthAppSummary } from "@/api/types";
+import { FadeIn } from "@/components/onboarding/fade-in";
+import { StatusIcon } from "@/components/onboarding/save-indicator";
+import { BrandLogo, SetupCard, SetupChip } from "@/components/onboarding/setup-card";
+import { AutosaveScopeContext, useAutosaveScope } from "@/components/onboarding/use-autosave";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import type { StepProps } from "../step-contract";
+import { ComingSoonPane, OAuthToolPane } from "./integrations/business-panes";
 import {
   ALL_SETUP_KEYS,
+  CORE_INTEGRATIONS,
   connectedMethod,
   findSetupIntegration,
-  SETUP_INTEGRATIONS,
+  SETUP_GROUPS,
   type SetupIntegration,
   type SetupIntegrationId,
 } from "./integrations/catalog";
@@ -31,7 +33,17 @@ import type { PaneProps } from "./integrations/use-config-form";
 /** Query params the Linear/Jira OAuth return adds to `/setup?step=5`. */
 const RETURN_PARAMS = ["integration", "oauth", "error", "error_description"];
 
-export function StepIntegrations({ onboarding, act }: StepProps) {
+type ItemState = "connected" | "saved" | "soon" | "none";
+
+function hasActiveAuthorization(apps: OAuthAppSummary[], provider: string): boolean {
+  return apps.some(
+    (app) =>
+      app.provider === provider && (app.authorizations ?? []).some((z) => z.status === "active"),
+  );
+}
+
+export function StepIntegrations({ onboarding, act, setContinueBlocker }: StepProps) {
+  const scope = useAutosaveScope(setContinueBlocker);
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectedId, setSelectedId] = useState<SetupIntegrationId>(
@@ -42,6 +54,8 @@ export function StepIntegrations({ onboarding, act }: StepProps) {
   );
   const configsQ = useConfigs({ scope: "global" });
   const presenceQ = useEnvPresence(ALL_SETUP_KEYS);
+  // Older APIs have no OAuth apps: the business tools then show no status.
+  const oauthApps = useOAuthApps().data ?? [];
   const configs = configsQ.data ?? [];
   const presence = presenceQ.data ?? {};
   const signals = onboarding.signals.integrations;
@@ -85,60 +99,53 @@ export function StepIntegrations({ onboarding, act }: StepProps) {
     act({ action: "complete", step: "integrations", method }).catch(() => undefined);
   }, [method, stepStatus, act]);
 
-  function chip(item: SetupIntegration): { tone: SetupChipTone; label: string } {
-    if (signals[item.id]) return { tone: "success", label: "Connected" };
+  function itemState(item: SetupIntegration): ItemState {
+    if (item.group === "business") {
+      if (!item.oauthPresetId) return "soon";
+      return hasActiveAuthorization(oauthApps, item.oauthPresetId) ? "connected" : "none";
+    }
+    if (signals[item.id]) return "connected";
     const saved = item.chipKeys.some(
       (key) => presence[key] || configs.some((c) => c.key === key && c.scope === "global"),
     );
-    return saved ? { tone: "pending", label: "Saved" } : { tone: "neutral", label: "Not set" };
+    return saved ? "saved" : "none";
   }
 
-  const selected = findSetupIntegration(selectedId) ?? SETUP_INTEGRATIONS[0];
-  const selectedChip = chip(selected);
-  const paneProps = { configs, presence, connected: signals[selected.id] };
+  const selected = findSetupIntegration(selectedId) ?? CORE_INTEGRATIONS[0];
   const paneError = oauthError?.id === selected.id ? oauthError.message : null;
 
   return (
-    <div className="space-y-3">
-      <div className="grid gap-3 sm:grid-cols-[220px_minmax(0,1fr)] sm:items-start">
+    <AutosaveScopeContext.Provider value={scope}>
+      {/* Fixed height on sm+: the list and the pane scroll inside, so switching never moves the page. */}
+      <div className="grid gap-3 sm:h-[34rem] sm:grid-cols-[232px_minmax(0,1fr)]">
         <nav
           aria-label="Integrations"
-          className="flex gap-2 overflow-x-auto pb-1 sm:flex-col sm:gap-0 sm:divide-y sm:divide-border-subtle sm:overflow-hidden sm:rounded-xl sm:border sm:bg-card sm:pb-0 sm:shadow-sm"
+          className="flex gap-2 overflow-x-auto pb-1 sm:min-h-0 sm:flex-col sm:gap-0 sm:overflow-x-hidden sm:overflow-y-auto sm:rounded-xl sm:border sm:bg-card sm:py-1 sm:shadow-sm"
         >
-          {SETUP_INTEGRATIONS.map((item) => {
-            const active = item.id === selected.id;
-            const itemChip = chip(item);
-            return (
-              <button
-                key={item.id}
-                type="button"
-                aria-pressed={active}
-                onClick={() => setSelectedId(item.id)}
-                className={cn(
-                  "flex h-8 shrink-0 items-center gap-2 rounded-full border px-3 text-sm hover:bg-accent/50 hover-linger transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
-                  "sm:h-auto sm:rounded-none sm:border-0 sm:border-l-2 sm:border-l-transparent sm:py-2.5 sm:pr-3 sm:pl-2.5",
-                  active && "border-primary/60 bg-primary/5 font-medium sm:border-l-primary",
-                )}
-              >
-                <BrandLogo src={item.logo} className="size-4" />
-                <span className="flex-1 text-left">{item.name}</span>
-                <span className="hidden sm:inline-flex">
-                  <SetupChip tone={itemChip.tone}>{itemChip.label}</SetupChip>
-                </span>
-              </button>
-            );
-          })}
+          {SETUP_GROUPS.map((group) => (
+            <Fragment key={group.label}>
+              <p className="hidden px-3 pt-3 pb-1 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground sm:block">
+                {group.label}
+              </p>
+              {group.items.map((item) => (
+                <IntegrationItem
+                  key={item.id}
+                  item={item}
+                  state={itemState(item)}
+                  active={item.id === selected.id}
+                  onSelect={() => setSelectedId(item.id)}
+                />
+              ))}
+            </Fragment>
+          ))}
           <Link
             to="/settings/integrations"
-            className="flex h-8 shrink-0 items-center gap-2 rounded-full border px-3 text-sm text-muted-foreground hover:text-foreground hover-linger transition-colors sm:h-auto sm:items-start sm:rounded-none sm:border-0 sm:px-3 sm:py-2.5"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex h-8 shrink-0 items-center gap-2 rounded-full border px-3 text-sm text-muted-foreground hover:text-foreground hover-linger transition-colors sm:mt-1 sm:h-auto sm:rounded-none sm:border-0 sm:border-t sm:border-border-subtle sm:px-3 sm:py-2.5"
           >
-            <ExternalLink className="size-4 shrink-0 sm:mt-0.5" />
-            <span className="flex flex-col">
-              <span className="font-medium">More in Settings</span>
-              <span className="hidden text-xs sm:block">
-                Attio, Sentry, AgentMail, agent-fs, and the rest.
-              </span>
-            </span>
+            <ExternalLink className="size-4 shrink-0" />
+            <span className="font-medium">More in Settings</span>
           </Link>
         </nav>
 
@@ -150,47 +157,93 @@ export function StepIntegrations({ onboarding, act }: StepProps) {
             <a
               href={selected.docsUrl}
               target="_blank"
-              rel="noreferrer noopener"
+              rel="noopener noreferrer"
               className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-primary underline-offset-4 hover:underline"
             >
               Docs
               <ExternalLink className="size-3" />
             </a>
           }
-          status={<SetupChip tone={selectedChip.tone}>{selectedChip.label}</SetupChip>}
-          bodyClassName="space-y-4"
+          status={<ItemStatus state={itemState(selected)} />}
+          className="sm:flex sm:min-h-0 sm:flex-col"
+          bodyClassName="sm:min-h-0 sm:flex-1 sm:overflow-y-auto"
         >
-          {configsQ.isPending ? (
-            <div className="space-y-3">
-              <Skeleton className="h-9 w-full" />
-              <Skeleton className="h-9 w-full" />
-              <Skeleton className="h-9 w-2/3" />
-            </div>
-          ) : (
-            <IntegrationPane
-              key={selected.id}
-              id={selected.id}
-              paneProps={paneProps}
-              oauthError={paneError}
-            />
-          )}
+          <FadeIn key={selected.id} className="space-y-4">
+            {configsQ.isPending && selected.group === "core" ? (
+              <div className="space-y-3">
+                <Skeleton className="h-9 w-full" />
+                <Skeleton className="h-9 w-full" />
+                <Skeleton className="h-9 w-2/3" />
+              </div>
+            ) : (
+              <IntegrationPane
+                item={selected}
+                paneProps={{ configs, presence, connected: itemState(selected) === "connected" }}
+                oauthError={paneError}
+              />
+            )}
+          </FadeIn>
         </SetupCard>
       </div>
-      <p className="text-xs text-muted-foreground">One connected tool finishes this step.</p>
-    </div>
+    </AutosaveScopeContext.Provider>
+  );
+}
+
+const STATE_LABEL: Record<Exclude<ItemState, "soon" | "none">, string> = {
+  connected: "Connected",
+  saved: "Saved, not connected yet",
+};
+
+function ItemStatus({ state }: { state: ItemState }) {
+  if (state === "soon") return <SetupChip>Soon</SetupChip>;
+  if (state === "none") return <StatusIcon tone="none" />;
+  return <StatusIcon tone={state === "connected" ? "done" : "saved"} label={STATE_LABEL[state]} />;
+}
+
+function IntegrationItem({
+  item,
+  state,
+  active,
+  onSelect,
+}: {
+  item: SetupIntegration;
+  state: ItemState;
+  active: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onSelect}
+      className={cn(
+        "flex h-8 shrink-0 items-center gap-2 rounded-full border px-3 text-sm hover:bg-accent/50 hover-linger transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+        "sm:h-auto sm:rounded-none sm:border-0 sm:border-l-2 sm:border-l-transparent sm:py-2 sm:pr-3 sm:pl-2.5",
+        active && "border-primary/60 bg-primary/5 font-medium sm:border-l-primary",
+      )}
+    >
+      <BrandLogo src={item.logo} className="size-4" />
+      <span className="flex-1 truncate text-left">{item.name}</span>
+      <span className="hidden sm:inline-flex">
+        <ItemStatus state={state} />
+      </span>
+    </button>
   );
 }
 
 function IntegrationPane({
-  id,
+  item,
   paneProps,
   oauthError,
 }: {
-  id: SetupIntegrationId;
+  item: SetupIntegration;
   paneProps: PaneProps;
   oauthError: string | null;
 }) {
-  switch (id) {
+  if (item.group === "business") {
+    return item.oauthPresetId ? <OAuthToolPane tool={item} /> : <ComingSoonPane tool={item} />;
+  }
+  switch (item.id) {
     case "slack":
       return <SlackPane {...paneProps} />;
     case "github":

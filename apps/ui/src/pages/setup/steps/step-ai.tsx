@@ -1,13 +1,12 @@
-import { ArrowUpRight, CheckCircle2 } from "lucide-react";
+import { ArrowUpRight } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useConfigs } from "@/api/hooks/use-config-api";
 import { useEnvPresence } from "@/api/hooks/use-integrations-meta";
 import type { OnboardingAiMethod } from "@/api/types";
-import { AlertCallout } from "@/components/ui/alert-callout";
+import { AutosaveScopeContext, useAutosaveScope } from "@/components/onboarding/use-autosave";
 import { Button } from "@/components/ui/button";
-import { HARNESS_LABEL } from "@/lib/agent-runtime-models";
 import type { StepProps } from "../step-contract";
 import { ClaudeCard } from "./ai/claude-card";
 import { CodexCard } from "./ai/codex-card";
@@ -15,7 +14,6 @@ import { DevinCard } from "./ai/devin-card";
 import {
   type AiCardId,
   type AiCardProps,
-  CARD_HARNESSES,
   cardRollup,
   isAiMethod,
   METHOD_CARD,
@@ -23,7 +21,8 @@ import {
 } from "./ai/model";
 import { OpenHarnessCard } from "./ai/open-harness-card";
 
-export function StepAi({ onboarding, act }: StepProps) {
+export function StepAi({ onboarding, act, setContinueBlocker }: StepProps) {
+  const scope = useAutosaveScope(setContinueBlocker);
   const { data: agents = [] } = useAgents();
   const { data: presence = {} } = useEnvPresence(PRESENCE_KEYS);
   const { data: configs = [] } = useConfigs({ scope: "global" });
@@ -87,39 +86,23 @@ export function StepAi({ onboarding, act }: StepProps) {
     onSaved,
   });
 
-  // Name the verified harness, preferring the card the recorded method belongs to.
-  const methodCard = isAiMethod(aiStep.method) ? METHOD_CARD[aiStep.method] : null;
-  const verified =
-    providers.find(
-      (p) =>
-        p.state === "verified" &&
-        methodCard !== null &&
-        CARD_HARNESSES[methodCard].includes(p.provider),
-    ) ?? providers.find((p) => p.state === "verified");
-  const doneProvider = verified
-    ? (HARNESS_LABEL[verified.provider] ?? verified.provider)
-    : "A provider";
-
   return (
-    <div className="space-y-2">
-      {aiDone ? (
-        <AlertCallout tone="success" icon={CheckCircle2} className="mb-3">
-          {doneProvider} verified. You can continue or add more providers.
-        </AlertCallout>
-      ) : null}
-      <ClaudeCard {...cardProps("claude")} />
-      <CodexCard {...cardProps("codex")} onDeviceComplete={onDeviceComplete} />
-      <OpenHarnessCard {...cardProps("open")} />
-      <DevinCard {...cardProps("devin")} />
-      <div className="space-y-1 pt-2">
-        <Button asChild variant="link" size="xs" className="h-auto px-0 has-[>svg]:px-0">
-          <Link to="/settings/integrations">
-            More providers (OpenAI, Bedrock, Claude Managed) in Settings
-            <ArrowUpRight />
-          </Link>
-        </Button>
-        <p className="text-xs text-muted-foreground">One verified provider finishes this step.</p>
+    <AutosaveScopeContext.Provider value={scope}>
+      <div className="space-y-2">
+        <ClaudeCard {...cardProps("claude")} />
+        <CodexCard {...cardProps("codex")} onDeviceComplete={onDeviceComplete} />
+        <OpenHarnessCard {...cardProps("open")} />
+        <DevinCard {...cardProps("devin")} />
+        <div className="pt-2">
+          <Button asChild variant="link" size="xs" className="h-auto px-0 has-[>svg]:px-0">
+            {/* A new tab keeps setup open in this one. */}
+            <Link to="/settings/integrations" target="_blank" rel="noopener noreferrer">
+              More providers (OpenAI, Bedrock, Claude Managed) in Settings
+              <ArrowUpRight />
+            </Link>
+          </Button>
+        </div>
       </div>
-    </div>
+    </AutosaveScopeContext.Provider>
   );
 }

@@ -1,13 +1,13 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { Info, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { ONBOARDING_QUERY_KEY } from "@/api/hooks/use-onboarding";
 import type { AgentWithTasks, ProviderName } from "@/api/types";
+import { StatusLine } from "@/components/onboarding/save-indicator";
 import { BrandLogo, SetupChip } from "@/components/onboarding/setup-card";
 import { HarnessIcon } from "@/components/shared/harness-icon";
-import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -84,9 +84,9 @@ export function HarnessSwitch({
 
   return (
     <div className="space-y-2">
-      <AlertCallout tone="info" icon={Info}>
-        No worker runs {harnessPhrase} yet. Switch some workers to use this key.
-      </AlertCallout>
+      <StatusLine tone="warning">
+        No worker runs {harnessPhrase} yet. Switch some to use this key.
+      </StatusLine>
       <ul className="max-h-48 divide-y divide-border-subtle overflow-y-auto rounded-lg border border-border">
         {agents.map((agent) => (
           <li key={agent.id}>

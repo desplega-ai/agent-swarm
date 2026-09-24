@@ -1,6 +1,6 @@
-import { CheckCircle2 } from "lucide-react";
 import type { ReactNode } from "react";
-import { AlertCallout } from "@/components/ui/alert-callout";
+import { Spinner, StatusLine } from "@/components/onboarding/save-indicator";
+import { InfoTip } from "@/components/ui/info-tip";
 import type { CardRollup } from "./model";
 
 /**
@@ -11,10 +11,7 @@ import type { CardRollup } from "./model";
 export function WaitingLine({ children }: { children: ReactNode }) {
   return (
     <span className="flex items-center gap-2 text-sm">
-      <span
-        aria-hidden
-        className="size-3.5 shrink-0 animate-spin rounded-full border-2 border-primary/25 border-t-primary motion-reduce:animate-none"
-      />
+      <Spinner />
       <span className="shimmer-text font-medium">{children}</span>
     </span>
   );
@@ -31,21 +28,19 @@ export function WaitingPanel({
   if (rollup.verified) {
     const n = rollup.verifiedWorkers;
     return (
-      <AlertCallout tone="success" icon={CheckCircle2}>
-        Verified by {n} agent{n === 1 ? "" : "s"}.
-      </AlertCallout>
+      <StatusLine tone="done">
+        Verified by {n} agent{n === 1 ? "" : "s"}
+      </StatusLine>
     );
   }
   return (
-    <output className="block space-y-1 rounded-lg border border-border bg-surface px-3 py-2.5">
-      <WaitingLine>Saved. Waiting for a worker to check this key.</WaitingLine>
-      <span className="block text-xs text-muted-foreground">
-        Workers re-check new keys within about 30 seconds.
-      </span>
-      <span className="block font-mono text-[11px] tabular-nums text-muted-foreground">
+    <output className="flex flex-wrap items-center gap-x-2 gap-y-1">
+      <WaitingLine>Waiting for a worker to check this key</WaitingLine>
+      <InfoTip content="Workers re-check new keys within about 30 seconds." />
+      <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
         {rollup.workers > 0
-          ? `${rollup.verifiedWorkers} of ${rollup.workers} ${harnessLabel} agents verified`
-          : `No ${harnessLabel} agents yet.`}
+          ? `${rollup.verifiedWorkers}/${rollup.workers} ${harnessLabel} agents`
+          : `No ${harnessLabel} agents yet`}
       </span>
     </output>
   );

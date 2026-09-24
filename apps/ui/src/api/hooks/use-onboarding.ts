@@ -17,7 +17,7 @@ export const ONBOARDING_QUERY_KEY = ["onboarding"] as const;
 
 export const ONBOARDING_STEPS: ReadonlyArray<{ id: OnboardingStepId; label: string }> = [
   { id: "connect", label: "Connect" },
-  { id: "name", label: "Name your swarm" },
+  { id: "name", label: "Identity" },
   { id: "ai", label: "AI provider" },
   { id: "memory", label: "Memory" },
   { id: "integrations", label: "Integrations" },

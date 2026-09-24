@@ -5,9 +5,10 @@ import { useLinearTrackerStatus } from "@/api/hooks/use-linear-status";
 import { CopyableField } from "@/components/shared/copyable-fields";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useConfig } from "@/hooks/use-config";
 import { JIRA_FIELDS, LINEAR_FIELDS, type SetupFieldSpec } from "./catalog";
-import { ConnectedGate, ExternalTextLink, SaveRow, StepLine } from "./pane-parts";
+import { ConnectedGate, ExternalTextLink, StepLine } from "./pane-parts";
 import { FieldGrid } from "./setup-field";
 import { type PaneProps, useConfigForm } from "./use-config-form";
 
@@ -31,11 +32,11 @@ export function LinearPane(props: OAuthPaneProps) {
           Create an OAuth app at{" "}
           <ExternalTextLink href="https://linear.app/settings/api">
             linear.app/settings/api
-          </ExternalTextLink>
-          . Paste this callback URL into it.
+          </ExternalTextLink>{" "}
+          with this callback URL.
         </>
       }
-      connectedDetail="Issues and status sync are on."
+      connectedSummary="Connected. Issues and status sync are on."
     />
   );
 }
@@ -56,11 +57,13 @@ export function JiraPane(props: OAuthPaneProps) {
           Create a 3LO app at{" "}
           <ExternalTextLink href="https://developer.atlassian.com/console/myapps/">
             developer.atlassian.com
-          </ExternalTextLink>
-          . Paste this redirect URI into it.
+          </ExternalTextLink>{" "}
+          with this redirect URI.
         </>
       }
-      connectedDetail={site ? `Connected to ${site}.` : "Issues and status sync are on."}
+      connectedSummary={
+        site ? `Connected to ${site}.` : "Connected. Issues and status sync are on."
+      }
     />
   );
 }
@@ -85,7 +88,7 @@ function OAuthPane({
   serverRedirectUri,
   urlLabel,
   createLine,
-  connectedDetail,
+  connectedSummary,
 }: OAuthPaneProps & {
   provider: "linear" | "jira";
   name: string;
@@ -93,18 +96,17 @@ function OAuthPane({
   serverRedirectUri?: string;
   urlLabel: string;
   createLine: ReactNode;
-  connectedDetail: string;
+  connectedSummary: string;
 }) {
-  const form = useConfigForm(specs, configs, presence);
+  const form = useConfigForm(configs, presence);
   const { config } = useConfig();
   const apiUrl = config.apiUrl.replace(/\/+$/, "");
   // The server knows the public callback (`*_REDIRECT_URI` or the public MCP
   // URL). It only answers once the client ID is set, so fall back to apiUrl.
   const callbackUrl = serverRedirectUri || `${apiUrl}/api/trackers/${provider}/callback`;
   const prefix = provider.toUpperCase();
-  const canConnect = Boolean(
-    presence[`${prefix}_CLIENT_ID`] && presence[`${prefix}_CLIENT_SECRET`],
-  );
+  // Both fields save themselves; Connect opens once both are stored.
+  const canConnect = form.isSaved(`${prefix}_CLIENT_ID`) && form.isSaved(`${prefix}_CLIENT_SECRET`);
 
   function connect() {
     const back = `${window.location.origin}/setup?step=5&integration=${provider}`;
@@ -113,6 +115,12 @@ function OAuthPane({
     );
   }
 
+  const connectButton = (
+    <Button type="button" onClick={connect} disabled={!canConnect}>
+      Connect {name}
+    </Button>
+  );
+
   return (
     <>
       {oauthError ? (
@@ -120,28 +128,28 @@ function OAuthPane({
           <span className="font-mono text-xs">{oauthError}</span>
         </AlertCallout>
       ) : null}
-      <ConnectedGate connected={connected} title={`${name} is connected.`} detail={connectedDetail}>
+      <ConnectedGate connected={connected} summary={connectedSummary}>
         <div className="space-y-3">
           <StepLine n={1}>{createLine}</StepLine>
           <CopyableField label={urlLabel} value={callbackUrl} />
         </div>
         <div className="space-y-3">
-          <StepLine n={2}>Paste the credentials the app hands back.</StepLine>
+          <StepLine n={2}>Paste the client ID and secret.</StepLine>
           <FieldGrid specs={specs} form={form} />
-          <SaveRow form={form} label="Save" missingHint="Add the client ID and secret." />
         </div>
         <div className="space-y-3">
-          <StepLine n={3}>Finish the handshake on the {name} consent screen.</StepLine>
-          <div className="flex flex-wrap items-center gap-3">
-            <Button type="button" onClick={connect} disabled={!canConnect}>
-              Connect {name}
-            </Button>
-            {canConnect ? null : (
-              <span className="text-xs text-muted-foreground">
-                Save the client ID and secret first.
-              </span>
-            )}
-          </div>
+          <StepLine n={3}>Approve on the {name} consent screen.</StepLine>
+          {canConnect ? (
+            connectButton
+          ) : (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                {/* A disabled button gets no pointer events: the span carries the tooltip. */}
+                <span className="inline-flex">{connectButton}</span>
+              </TooltipTrigger>
+              <TooltipContent>Add the client ID and secret first.</TooltipContent>
+            </Tooltip>
+          )}
         </div>
       </ConnectedGate>
     </>
