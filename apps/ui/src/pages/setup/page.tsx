@@ -119,7 +119,11 @@ interface Blocker {
   busy: boolean;
 }
 
-type ContinueAction = () => Promise<void>;
+interface ContinueAction {
+  run: () => Promise<void>;
+  /** The action can finish a step that is not done: Continue is enabled while it is set. */
+  unlocks: boolean;
+}
 
 interface StepSetters {
   setContinueBlocker: StepProps["setContinueBlocker"];
@@ -129,8 +133,8 @@ interface StepSetters {
 interface StepControls {
   step: OnboardingStepId;
   blockers: Partial<Record<OnboardingStepId, Blocker>>;
-  // Wrapped in an object: a bare function in state reads as an updater.
-  actions: Partial<Record<OnboardingStepId, { run: ContinueAction }>>;
+  // An object, not a bare function: a bare function in state reads as an updater.
+  actions: Partial<Record<OnboardingStepId, ContinueAction>>;
 }
 
 /**
@@ -163,12 +167,19 @@ function useStepControls(stepId: OnboardingStepId) {
                 else blockers[id] = { reason, busy };
                 return { ...prev, blockers };
               }),
-            setContinueAction: (action) =>
+            setContinueAction: (action, options) =>
               setState((prev) => {
-                if ((prev.actions[id]?.run ?? null) === action) return prev;
+                const current = prev.actions[id];
+                const unlocks = options?.unlocks ?? false;
+                if (
+                  action === null
+                    ? !current
+                    : current?.run === action && current.unlocks === unlocks
+                )
+                  return prev;
                 const actions = { ...prev.actions };
                 if (action === null) delete actions[id];
-                else actions[id] = { run: action };
+                else actions[id] = { run: action, unlocks };
                 return { ...prev, actions };
               }),
           },
@@ -180,7 +191,7 @@ function useStepControls(stepId: OnboardingStepId) {
   const own = state.step === stepId;
   return {
     blocker: own ? (state.blockers[stepId] ?? null) : null,
-    action: own ? (state.actions[stepId]?.run ?? null) : null,
+    action: own ? (state.actions[stepId] ?? null) : null,
     setters,
   };
 }
@@ -342,7 +353,7 @@ function SetupFlow() {
     }
     setBusy(true);
     try {
-      await action();
+      await action.run();
       goNext();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Could not finish this step.";
@@ -397,7 +408,8 @@ function SetupFlow() {
       : {
           label: "Continue",
           blockedBy:
-            blocker?.reason ?? (settled || action ? null : unsettledReason(stepId, status)),
+            blocker?.reason ??
+            (settled || action?.unlocks ? null : unsettledReason(stepId, status)),
           onClick: () => void continueStep(),
           enterKey: true,
         };

@@ -8,6 +8,7 @@ import type { OnboardingAiMethod } from "@/api/types";
 import { AutosaveScopeContext, useAutosaveScope } from "@/components/onboarding/use-autosave";
 import { Button } from "@/components/ui/button";
 import type { StepProps } from "../step-contract";
+import { AgentModels } from "./ai/agent-models";
 import { ClaudeCard } from "./ai/claude-card";
 import { CodexCard } from "./ai/codex-card";
 import { DevinCard } from "./ai/devin-card";
@@ -21,7 +22,7 @@ import {
 } from "./ai/model";
 import { OpenHarnessCard } from "./ai/open-harness-card";
 
-export function StepAi({ onboarding, act, setContinueBlocker }: StepProps) {
+export function StepAi({ onboarding, act, setContinueBlocker, setContinueAction }: StepProps) {
   const scope = useAutosaveScope(setContinueBlocker);
   const { data: agents = [] } = useAgents();
   const { data: presence = {} } = useEnvPresence(PRESENCE_KEYS);
@@ -102,6 +103,13 @@ export function StepAi({ onboarding, act, setContinueBlocker }: StepProps) {
             </Link>
           </Button>
         </div>
+        <AgentModels
+          className="mt-4"
+          agents={agents}
+          configs={configs}
+          presence={presence}
+          setContinueAction={setContinueAction}
+        />
       </div>
     </AutosaveScopeContext.Provider>
   );

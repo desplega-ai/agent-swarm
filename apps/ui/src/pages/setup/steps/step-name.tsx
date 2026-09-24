@@ -108,7 +108,7 @@ export function StepName({ onboarding, act, setContinueBlocker, setContinueActio
   });
   // Untouched and not done: Continue stores the suggestion and completes the step.
   useContinueAction(
-    setContinueAction,
+    (action) => setContinueAction(action, { unlocks: true }),
     nameDraft === null && nameStep.status !== "done" && loaded && name.length > 0
       ? () => storeName(name)
       : null,

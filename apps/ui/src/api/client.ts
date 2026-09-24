@@ -360,7 +360,7 @@ class ApiClient {
   async updateAgentRuntime(data: {
     id: string;
     repoId?: string;
-    harnessProvider: "claude" | "codex" | "pi" | "opencode" | "acp";
+    harnessProvider: "claude" | "codex" | "pi" | "opencode" | "acp" | "dsh";
     model: string | null;
     allowCustomModel?: boolean;
     /** `null` clears `REASONING_EFFORT_OVERRIDE`; omitted leaves it unchanged; a level sets it. */
