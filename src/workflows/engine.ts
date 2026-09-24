@@ -950,6 +950,25 @@ export function interpolateNodeConfig(
     };
   }
 
+  if (node.type === "human-in-the-loop" && typeof node.config.questions === "string") {
+    // Dynamic questions: an exact `{{token}}` injects the upstream array as-is
+    // (string interpolation would JSON-stringify it). The resolved value is
+    // display data, never re-interpolated; the executor validates it before
+    // creating the approval card. Static question arrays keep the default path.
+    const { questions, ...configWithoutQuestions } = node.config;
+    const configResult = deepInterpolate(configWithoutQuestions, interpolationCtx);
+    const questionsResult = deepInterpolate(questions, interpolationCtx, {
+      preserveRawTokens: true,
+    });
+    return {
+      value: {
+        ...(configResult.value as Record<string, unknown>),
+        questions: questionsResult.value,
+      },
+      unresolved: [...configResult.unresolved, ...questionsResult.unresolved],
+    };
+  }
+
   if (node.type === "script" && typeof node.config.script === "string") {
     const { script, ...configWithoutScript } = node.config;
     const restResult = deepInterpolate(configWithoutScript, interpolationCtx);
