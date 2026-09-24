@@ -59,11 +59,17 @@ export function OAuthInlineConnect({
   value,
   onChange,
   suggestedPresetId,
+  scopes,
 }: {
   oauthApps: OAuthAppSummary[];
   value: string;
   onChange: (authorizationId: string) => void;
   suggestedPresetId?: string;
+  /**
+   * Scopes for an app created from `suggestedPresetId`, instead of that
+   * preset's defaults. Other presets keep their defaults.
+   */
+  scopes?: string[];
 }) {
   const queryClient = useQueryClient();
   const { data: presets = [] } = useOAuthPresets();
@@ -167,6 +173,7 @@ export function OAuthInlineConnect({
         presetId,
         clientId: clientId.trim(),
         ...(clientSecret.trim() ? { clientSecret: clientSecret.trim() } : {}),
+        ...(scopes && presetId === suggestedPresetId ? { scopes } : {}),
       })) as { oauthApp?: OAuthAppSummary };
       const created = result.oauthApp;
       if (created?.id) {
