@@ -40,6 +40,8 @@ RUN bun install --frozen-lockfile
 COPY src/ ./src/
 COPY plugin/opencode-plugins/lib/memory-raters.ts ./plugin/opencode-plugins/lib/memory-raters.ts
 COPY templates/ ./templates/
+# Bundled into the binary by src/slack/manifest.ts (onboarding Slack step).
+COPY slack-manifest.json ./
 COPY tsconfig.json ./
 # --bytecode --format=esm (Bun 1.4 lifted the CJS-only restriction): the binary
 # boots on every container start AND every hook invocation, so the ~4x faster
