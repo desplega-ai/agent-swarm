@@ -39,8 +39,12 @@ Its recovery count is logged only when nonzero; it does not mean the engine or
 container restarted. Running runs with a live graph walk in this API process are
 skipped, including while an executor is awaiting a long script or checkpointing
 its result. Ownership lasts until all overlapping walks settle and is released
-on errors too. Runs without a live walk resume from persisted completed steps;
-waiting runs reconcile finished tasks, approvals, and durable waits.
+on errors too. Runs without a live walk reconstruct active edges from each
+completed node's latest persisted step and selected `nextPort`, using the same
+routing helper as the live walker. Readiness follows those active edges, so
+untaken ports cannot start sibling branches or replay a completed downstream
+node. Steps without a selected port retain the live walker's default successor
+behavior. Waiting runs reconcile finished tasks, approvals, and durable waits.
 
 This ownership guard is process-local, not a distributed lease. It assumes one
 API workflow engine owns the database; multiple worker runtimes do not create
