@@ -215,6 +215,12 @@ and integers only. Rows in `docs-site/content/docs/(documentation)/reference/tel
 - [x] UI fix round 1 committed (384e58f0f); API commits 2412423a3 + 785a7bbe3 (codex_oauth_<N> live test) + 0d85ababf (Dockerfile slack-manifest COPY)
 - [ ] API review fix round (Codex, 14 items: SSRF, internal-key surfaces, telemetry-once, GET w/o write lock, ...)
 - [ ] UI round 2 from Taras QA (14 items + Slack HTTP removal + blessed tools Hybrid + Slack setup prompt), agents A (shell) + B (steps)
+- [x] API review fix round (70e22ee94) + memory rejection fix (99c7232db) + readiness signal (a208d65ed) + footprint test (ead92e761)
+- [x] UI round 2 (dffe8bacc)
+- [ ] UI fix round 3 (round-2 reviews, 19 items) + Taras QA round 3 items 20-25 (step icons, hide Skip when done, no footer check, Enter/S/Escape shortcuts, step 6 full width, step 3 title)
+- [ ] Per-agent model step with a cheap/optimal/max dial per harness (research running; Taras picks the dial values)
+- [ ] Adopt the new UI primitives in existing dashboard components (survey running; Taras confirms the list)
+- [ ] Dev skill for UI work in `.claude/internal-skills/` (symlinked in `.claude/skills/` + `.agents/skills/`)
 - [ ] Phase 6: integration pass, gates, code review, commit, push to #1604, PR body
 - [ ] Phase 7: local QA + design feedback loop with Taras
 
