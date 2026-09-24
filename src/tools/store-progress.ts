@@ -380,7 +380,13 @@ export const registerStoreProgressTool = (server: McpServer) => {
           }
         }
 
-        if (citations?.length) await upsertTaskCitations(taskId, citations);
+        // Explicit task IDs retain the existing progress-update policy, but
+        // only the assigned agent may author sources. Check under the same
+        // transaction as the upsert, including for terminal tasks. Ignore an
+        // unauthorized batch so citations never block the task update itself.
+        if (citations?.length && existingTask.agentId === agent.id) {
+          await upsertTaskCitations(taskId, citations);
+        }
 
         // Idempotency guard: short-circuit terminal-status writes (completed/failed)
         // BEFORE any side-effects fire (event emission, memory write, follow-up task,

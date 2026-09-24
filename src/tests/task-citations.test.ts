@@ -128,6 +128,74 @@ describe("citation persistence and completion warnings", () => {
     await Promise.all(["", "-wal", "-shm"].map((suffix) => rm(dbPath + suffix, { force: true })));
   });
 
+  test.each([
+    "in_progress",
+    "completed",
+    "failed",
+    "cancelled",
+  ] as const)("only the assigned agent can insert or replace citations on a %s task", async (taskStatus) => {
+    const otherAgent = await createAgent({
+      name: `Other citation agent ${taskStatus}`,
+      role: "worker",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+    const task = await createTaskExtended("Citation ownership", { agentId, source: "system" });
+    await startTask(task.id);
+    const server = new McpServer({ name: "citation-ownership", version: "1" });
+    registerStoreProgressTool(server);
+    const handler = (
+      server as unknown as {
+        _registeredTools: Record<
+          string,
+          {
+            handler: (
+              args: unknown,
+              meta: unknown,
+            ) => Promise<{ structuredContent: { success: boolean } }>;
+          }
+        >;
+      }
+    )._registeredTools["store-progress"]!.handler;
+    const ownerMeta = { requestInfo: { headers: { "x-agent-id": agentId } } };
+    const ownerCitation = { index: 1, kind: "url", ref: "https://example.com/owner" };
+    await handler({ taskId: task.id, citations: [ownerCitation] }, ownerMeta);
+    await getDbClient().run("UPDATE agent_tasks SET status = ? WHERE id = ?", [
+      taskStatus,
+      task.id,
+    ]);
+    const before = await getTaskCitations(task.id);
+    expect(before).toHaveLength(1);
+
+    const result = await handler(
+      {
+        taskId: task.id,
+        progress: "Progress still saves when citations are rejected",
+        citations: [
+          { ...ownerCitation, ref: "https://example.com/poisoned" },
+          { ...ownerCitation, index: 2, ref: "https://example.com/injected" },
+        ],
+      },
+      { requestInfo: { headers: { "x-agent-id": otherAgent.id } } },
+    );
+    expect(result.structuredContent.success).toBe(true);
+    expect(await getTaskCitations(task.id)).toEqual(before);
+    if (taskStatus === "in_progress") {
+      expect((await getTaskById(task.id))?.progress).toBe(
+        "Progress still saves when citations are rejected",
+      );
+    }
+
+    // Ownership applies even before the terminal-result guard, and owners
+    // retain the ability to add or correct citations after completion.
+    await handler(
+      { taskId: task.id, citations: [{ ...ownerCitation, label: "Owner correction" }] },
+      ownerMeta,
+    );
+    expect((await getTaskCitations(task.id))[0]?.label).toBe("Owner correction");
+  });
+
   test("existing pages and script runs verify by DB lookup", async () => {
     const task = await createTaskExtended("Existing source control", { agentId });
     const page = await createPage({
