@@ -21,6 +21,7 @@ import type {
   ExtensionManifest,
   ExtensionWorkflowFile,
   ScheduledTask,
+  ScriptRecord,
   Skill,
   Workflow,
 } from "../../types";
@@ -54,20 +55,28 @@ import { type ParsedSkill, parseSkillContent } from "../skill-parser";
 
 export type ExtensionAssetKind = "script" | "schedule" | "workflow" | "skill";
 
-type ScriptPlan = {
-  kind: "script";
-  name: string;
+/**
+ * Every script field the install writes. A user edit to any of them (the source, or
+ * only the description) must mark the script as edited.
+ */
+type ScriptSpec = {
   source: string;
   description: string;
   intent: string;
   signatureJson: string;
   argsJsonSchema: string | null;
-  hash: string;
+  fsMode: ScriptRecord["fsMode"];
 };
+
+type ScriptPlan = ScriptSpec & { kind: "script"; name: string; hash: string };
 
 type ScheduleSpec = {
   name: string;
   description: string | null;
+  /** The target: a user who points the schedule elsewhere has edited it. */
+  targetType: ScheduledTask["targetType"];
+  workflowId: string | null;
+  taskTemplate: string | null;
   scriptName: string;
   cronExpression: string | null;
   intervalMs: number | null;
@@ -183,19 +192,26 @@ function hashOf(value: unknown): string {
   return computeContentHash(JSON.stringify(canonicalJson(value)));
 }
 
-/** Kept byte-compatible with the first release: stored seededHash values depend on it. */
-function scheduleHash(spec: ScheduleSpec): string {
-  return computeContentHash(
-    JSON.stringify([
-      spec.name,
-      spec.description,
-      spec.scriptName,
-      spec.cronExpression,
-      spec.intervalMs,
-      spec.timezone,
-      canonicalJson(spec.scriptArgs),
-    ]),
-  );
+function scriptHash(spec: ScriptSpec): string {
+  return hashOf({
+    source: spec.source,
+    description: spec.description,
+    intent: spec.intent,
+    signatureJson: spec.signatureJson,
+    argsJsonSchema: spec.argsJsonSchema,
+    fsMode: spec.fsMode,
+  });
+}
+
+function liveScriptSpec(script: ScriptRecord): ScriptSpec {
+  return {
+    source: script.source,
+    description: script.description,
+    intent: script.intent,
+    signatureJson: script.signatureJson,
+    argsJsonSchema: script.argsJsonSchema,
+    fsMode: script.fsMode,
+  };
 }
 
 function liveScheduleSpec(schedule: ScheduledTask): ScheduleSpec {
@@ -203,6 +219,9 @@ function liveScheduleSpec(schedule: ScheduledTask): ScheduleSpec {
     name: schedule.name,
     // An update writes "" for a missing description; hash it as missing.
     description: schedule.description || null,
+    targetType: schedule.targetType,
+    workflowId: schedule.workflowId ?? null,
+    taskTemplate: schedule.taskTemplate ?? null,
     scriptName: schedule.scriptName ?? "",
     cronExpression: schedule.cronExpression ?? null,
     intervalMs: schedule.intervalMs ?? null,
@@ -306,16 +325,15 @@ export async function preflightAssets(
       );
       continue;
     }
-    scripts.push({
-      kind: "script",
-      name: script.name,
+    const spec: ScriptSpec = {
       source,
       description: script.description,
       intent: script.intent ?? script.description,
       signatureJson: JSON.stringify(extractScriptSignature(source)),
       argsJsonSchema: await extractArgsJsonSchema(source),
-      hash: computeContentHash(source),
-    });
+      fsMode: "none",
+    };
+    scripts.push({ kind: "script", name: script.name, ...spec, hash: scriptHash(spec) });
   }
 
   const schedules: SchedulePlan[] = [];
@@ -323,6 +341,9 @@ export async function preflightAssets(
     const spec: ScheduleSpec = {
       name: schedule.name,
       description: schedule.description || null,
+      targetType: "script",
+      workflowId: null,
+      taskTemplate: null,
       scriptName: schedule.script,
       cronExpression: schedule.cronExpression ?? null,
       intervalMs: schedule.intervalMs ?? null,
@@ -335,7 +356,7 @@ export async function preflightAssets(
       diagnostics.push(`schedule ${schedule.name}: ${errorText(error)}`);
       continue;
     }
-    schedules.push({ kind: "schedule", name: schedule.name, spec, hash: scheduleHash(spec) });
+    schedules.push({ kind: "schedule", name: schedule.name, spec, hash: hashOf(spec) });
   }
 
   const workflows: WorkflowPlan[] = [];
@@ -454,7 +475,7 @@ type Adapter<P extends Plan> = {
 const scriptAdapter: Adapter<ScriptPlan> = {
   async find(name) {
     const script = await getScript({ name, scope: "global" });
-    return script ? { id: script.id, hash: script.contentHash } : null;
+    return script ? { id: script.id, hash: scriptHash(liveScriptSpec(script)) } : null;
   },
   async create(plan, agentId, actor) {
     return await writeScript(plan, agentId, actor);
@@ -478,7 +499,7 @@ async function writeScript(plan: ScriptPlan, agentId: string, actor: Actor) {
     intent: plan.intent,
     signatureJson: plan.signatureJson,
     argsJsonSchema: plan.argsJsonSchema,
-    fsMode: "none",
+    fsMode: plan.fsMode,
     agentId,
     isScratch: false,
     typeChecked: true,
@@ -495,7 +516,7 @@ async function writeScript(plan: ScriptPlan, agentId: string, actor: Actor) {
 const scheduleAdapter: Adapter<SchedulePlan> = {
   async find(name) {
     const schedule = await getScheduledTaskByName(name);
-    return schedule ? { id: schedule.id, hash: scheduleHash(liveScheduleSpec(schedule)) } : null;
+    return schedule ? { id: schedule.id, hash: hashOf(liveScheduleSpec(schedule)) } : null;
   },
   async create(plan, agentId, actor) {
     const schedule = await createScheduledTask({
@@ -504,7 +525,7 @@ const scheduleAdapter: Adapter<SchedulePlan> = {
       cronExpression: plan.spec.cronExpression ?? undefined,
       intervalMs: plan.spec.intervalMs ?? undefined,
       timezone: plan.spec.timezone,
-      targetType: "script",
+      targetType: plan.spec.targetType,
       scriptName: plan.spec.scriptName,
       scriptArgs: plan.spec.scriptArgs,
       enabled: false,
@@ -767,8 +788,11 @@ export async function reconcileAssets(args: {
   ];
   const conflicts: string[] = [];
   for (const item of desired) {
-    if (tracked.has(`${item.kind}:${item.name}`)) continue;
-    if (await adapterFor(item.kind).find(item.name)) {
+    const row = tracked.get(`${item.kind}:${item.name}`);
+    const live = await adapterFor(item.kind).find(item.name);
+    // A tracked name whose live row has another id was deleted and recreated by
+    // someone else: that row is not ours, same as an untracked name.
+    if (live && (!row || live.id !== row.assetId)) {
       conflicts.push(
         `${item.kind} "${item.name}" already exists and does not belong to this extension`,
       );
@@ -834,6 +858,7 @@ function sortForRemoval(rows: ExtensionAssetRow[]): ExtensionAssetRow[] {
 async function removeTrackedAsset(row: ExtensionAssetRow): Promise<"deleted" | "detached" | null> {
   const live = await adapterFor(row.kind).find(row.name);
   await deleteAssetRow(row.id);
+  // Another row under the same name (the tracked one was deleted) is not ours to touch.
   if (!live || live.id !== row.assetId) return null;
   if (live.hash !== row.seededHash) return "detached";
   await adapterFor(row.kind).remove(row);

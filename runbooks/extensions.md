@@ -164,16 +164,17 @@ Never hand-edit either file.
 Migration `159_extension_assets.sql` adds the `extension_assets` provenance table: one row per asset the extension created.
 `seededHash` is the hash of what install wrote, without the enabled flag.
 A live asset whose hash still matches is pristine. Otherwise a user edited it.
+Assets are matched by name and then by `assetId`: a same-named asset with another id (the original was deleted and recreated) is not the extension's. An upgrade fails on it as a name collision, and uninstall leaves it alone.
 `enabledBefore` holds the schedule, workflow, or skill state to restore at the next enable.
 
 Each kind is an adapter in `assets.ts`. The hash covers these fields:
 
 | Kind | Hash covers |
 |---|---|
-| Script | Source |
-| Schedule | Name, description, script, timing, timezone, and args |
+| Script | Source, description, intent, signature, args schema, and `fsMode` |
+| Schedule | Name, description, target (`targetType`, workflow, task template, script), timing, timezone, and args |
 | Workflow | Name, description, definition, triggers, cooldown, input, and `triggerSchema` |
-| Skill | `SKILL.md` content and every bundled file |
+| Skill | Every field an update can change except the enabled flag, plus every bundled file |
 
 Scripts are global and owned by the `ext:<name>` agent (`createdByAgentId`).
 Scripts have no enabled state.

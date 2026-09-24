@@ -3,7 +3,6 @@
  * Used by `scripts/build-extension-catalog.ts` and tests only; the API reads the
  * generated `catalog.generated.json` because the compiled binary has no `templates/`.
  */
-import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { parseSkillContent } from "../be/skill-parser";
 import type { ExtensionCatalogEntry } from "./catalog";
@@ -19,14 +18,17 @@ import {
 export async function buildExtensionCatalog(
   templatesDir: string,
 ): Promise<Record<string, ExtensionCatalogEntry>> {
-  const entries = await readdir(templatesDir, { withFileTypes: true });
+  // `*/*` lists the files directly inside each template directory (not the
+  // catalog-level files next to them, like manifest.schema.json).
+  const filesByDirectory = new Map<string, string[]>();
+  for await (const path of new Bun.Glob("*/*").scan({ cwd: templatesDir, onlyFiles: true })) {
+    const [directory, file] = path.split("/") as [string, string];
+    filesByDirectory.set(directory, [...(filesByDirectory.get(directory) ?? []), file]);
+  }
   const catalog: Record<string, ExtensionCatalogEntry> = {};
-  for (const directory of entries
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .sort()) {
+  for (const directory of [...filesByDirectory.keys()].sort()) {
     const root = join(templatesDir, directory);
-    const present = (await readdir(root))
+    const present = (filesByDirectory.get(directory) ?? [])
       .sort()
       .filter((file) => (MANIFEST_FILENAMES as readonly string[]).includes(file));
     if (present.length !== 1) {

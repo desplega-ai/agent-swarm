@@ -18,7 +18,7 @@ import {
 } from "../be/db";
 import { ExtensionAssetConflictError } from "../be/extensions/assets";
 import { getExtensionById, getExtensionByName } from "../be/extensions/db";
-import { getScript, upsertScriptByName } from "../be/scripts/db";
+import { deleteScript, getScript, upsertScriptByName } from "../be/scripts/db";
 import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
 import { dispatchPre, listRegistered } from "../extensions/dispatcher";
 import {
@@ -342,6 +342,85 @@ describe("extension assets", () => {
     expect((await getScript({ name: "digest-collect", scope: "global" }))?.source).toBe(
       EDITED_SCRIPT,
     );
+  });
+
+  test("a script edited only in its metadata is kept on upgrade and uninstall", async () => {
+    const { extension } = await install();
+    const installed = (await getScript({ name: "digest-collect", scope: "global" }))!;
+    await upsertScriptByName({
+      name: "digest-collect",
+      scope: "global",
+      source: installed.source,
+      description: "My own description",
+      intent: installed.intent,
+      signatureJson: installed.signatureJson,
+      argsJsonSchema: installed.argsJsonSchema,
+      embeddingMode: "skip",
+    });
+
+    const upgrade = await install(bundle({ version: "2.0.0" }), true);
+    expect(upgrade.assets?.skipped).toEqual([{ kind: "script", name: "digest-collect" }]);
+    expect((await getScript({ name: "digest-collect", scope: "global" }))?.description).toBe(
+      "My own description",
+    );
+
+    expect(await uninstallExtension(extension.id)).toEqual({
+      deleted: [{ kind: "schedule", name: "digest-daily" }],
+      detached: [{ kind: "script", name: "digest-collect" }],
+    });
+    expect((await getScript({ name: "digest-collect", scope: "global" }))?.description).toBe(
+      "My own description",
+    );
+  });
+
+  test("a script deleted and recreated under the same name is not the extension's", async () => {
+    const { extension } = await install();
+    const installed = (await getScript({ name: "digest-collect", scope: "global" }))!;
+    await deleteScript({ name: "digest-collect", scope: "global" });
+    // Same name, source and metadata: only the id differs.
+    const { script: replacement } = await upsertScriptByName({
+      name: "digest-collect",
+      scope: "global",
+      source: installed.source,
+      description: installed.description,
+      intent: installed.intent,
+      signatureJson: installed.signatureJson,
+      argsJsonSchema: installed.argsJsonSchema,
+      embeddingMode: "skip",
+    });
+    expect(replacement.id).not.toBe(installed.id);
+
+    // An upgrade must not adopt it.
+    await expect(install(bundle({ version: "2.0.0" }), true)).rejects.toThrow(
+      'script "digest-collect" already exists and does not belong to this extension',
+    );
+
+    // Uninstall must not delete it.
+    expect(await uninstallExtension(extension.id)).toEqual({
+      deleted: [{ kind: "schedule", name: "digest-daily" }],
+      detached: [],
+    });
+    expect((await getScript({ name: "digest-collect", scope: "global" }))?.id).toBe(replacement.id);
+  });
+
+  test("a schedule pointed at another target is kept on uninstall", async () => {
+    const { extension } = await install();
+    const schedule = (await getScheduledTaskByName("digest-daily"))!;
+    // scriptName stays stored; only the target changes.
+    await updateScheduledTask(schedule.id, {
+      targetType: "agent-task",
+      taskTemplate: "Summarize yesterday",
+    });
+    expect((await getScheduledTaskByName("digest-daily"))?.scriptName).toBe("digest-collect");
+
+    expect(await uninstallExtension(extension.id)).toEqual({
+      deleted: [{ kind: "script", name: "digest-collect" }],
+      detached: [{ kind: "schedule", name: "digest-daily" }],
+    });
+    expect(await getScheduledTaskByName("digest-daily")).toMatchObject({
+      id: schedule.id,
+      targetType: "agent-task",
+    });
   });
 
   test("dropping a schedule description keeps the schedule pristine", async () => {

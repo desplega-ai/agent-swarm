@@ -87,6 +87,24 @@ describe("predefined extension catalog", () => {
     );
   });
 
+  test("catalog-level files are skipped and a directory without a manifest fails", async () => {
+    const withSchema = await templatesDir({
+      "manifest.schema.json": "{}",
+      "alpha/manifest.json": MANIFEST("alpha"),
+      "alpha/hooks.ts": "",
+    });
+    expect(Object.keys(await buildExtensionCatalog(withSchema))).toEqual(["alpha"]);
+
+    const noManifest = await templatesDir({
+      "alpha/manifest.json": MANIFEST("alpha"),
+      "alpha/hooks.ts": "",
+      "beta/hooks.ts": "",
+    });
+    await expect(buildExtensionCatalog(noManifest)).rejects.toThrow(
+      "beta: expected exactly one of manifest.yaml, manifest.yml, manifest.json, found none",
+    );
+  });
+
   test("a manifest name that differs from its directory fails", async () => {
     const dir = await templatesDir({
       "alpha/manifest.json": MANIFEST("beta"),
