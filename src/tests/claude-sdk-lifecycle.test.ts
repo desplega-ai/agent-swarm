@@ -2,11 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  CLAUDE_DISALLOWED_TOOLS_ARG,
-  ClaudeAdapter,
-  getTaskFilePath,
-} from "../providers/claude-adapter";
+import { ClaudeAdapter, getTaskFilePath } from "../providers/claude-adapter";
 import type { ProviderEvent, ProviderSessionConfig } from "../providers/types";
 import { CHILD_PROCESS_TEST_BUDGET_MS, runChild } from "./test-proc";
 
@@ -140,7 +136,6 @@ describe("Claude SDK production adapter lifecycle", () => {
             argument === "--system-prompt" && fixtureState.argv[index + 1] === "",
         ),
       ).toBeFalse();
-      expect(fixtureState.argv).toContain(CLAUDE_DISALLOWED_TOOLS_ARG);
     },
     { timeout: CHILD_PROCESS_TEST_BUDGET_MS },
   );

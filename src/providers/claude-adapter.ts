@@ -98,8 +98,6 @@ export function parseClaudeBinary(raw: string | undefined): string[] {
 const MIN_CLAUDE_QUEUE_STEERING_VERSION = [2, 1, 205] as const;
 const CLAUDE_VERSION_PROBE_TIMEOUT_MS = 1_000;
 const CLAUDE_VERSION_PROBE_MAX_BUFFER_BYTES = 64 * 1024;
-// Single-token form: the variadic `--disallowedTools` cannot swallow the next argument.
-export const CLAUDE_DISALLOWED_TOOLS_ARG = "--disallowedTools=ScheduleWakeup";
 
 /**
  * Operator kill-switch for the stream-json invocation path.
@@ -1015,16 +1013,7 @@ export class ClaudeAdapter implements ProviderAdapter {
     ) => Promise<void> = runStopHookSessionSummarySubprocess,
   ) {}
 
-  async createSession(inputConfig: ProviderSessionConfig): Promise<ProviderSession> {
-    // Both transports and both roles read `config.additionalArgs`, so the
-    // disallow lands once here. `ScheduleWakeup` is Claude Code's `/loop`
-    // self-pacing tool: calling it ends the turn, which the runner reads as a
-    // finished session, so the task completes on interim text and never resumes.
-    const additionalArgs = inputConfig.additionalArgs ?? [];
-    const config: ProviderSessionConfig = additionalArgs.includes(CLAUDE_DISALLOWED_TOOLS_ARG)
-      ? inputConfig
-      : { ...inputConfig, additionalArgs: [...additionalArgs, CLAUDE_DISALLOWED_TOOLS_ARG] };
-
+  async createSession(config: ProviderSessionConfig): Promise<ProviderSession> {
     // Native resume is deprecated. Follow-up continuity is delivered via the
     // context preamble (see src/commands/context-preamble.ts). Any stray
     // resumeSessionId is logged and ignored — we always spawn a fresh session.
