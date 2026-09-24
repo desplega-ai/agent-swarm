@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { checkPrBody, isFixTitle, templateSections } from "../../scripts/check-pr-body";
+import {
+  checkPrBody,
+  isFixTitle,
+  pickedChoices,
+  templateSections,
+} from "../../scripts/check-pr-body";
 
 const TEMPLATE = `<!-- top comment -->
 
@@ -60,6 +65,13 @@ describe("check-pr-body", () => {
     expect(checkPrBody(TEMPLATE, withUrgency("- [x] asap\n- [X] nice to have\n"))).toEqual(problem);
     expect(checkPrBody(TEMPLATE, withUrgency("- [x] tomorrow\n"))).toEqual(problem);
     expect(checkPrBody(TEMPLATE, withUrgency("- [X] ASAP\n"))).toEqual([]);
+  });
+
+  test("picked choices are keyed by heading slug, and only valid picks count", () => {
+    expect(pickedChoices(TEMPLATE, URGENT)).toEqual({ urgency: "nice to have" });
+    expect(pickedChoices(TEMPLATE, "## Urgency\n- [x] asap\n- [x] nice to have\n")).toEqual({});
+    expect(pickedChoices(TEMPLATE, "## Urgency\n- [x] tomorrow\n")).toEqual({});
+    expect(pickedChoices(TEMPLATE, "## Intent\nx\n")).toEqual({});
   });
 
   test("an unedited template and an empty body fail", () => {

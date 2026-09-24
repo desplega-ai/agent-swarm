@@ -32,6 +32,8 @@ jobs:
     # Checkout only; GITHUB_TOKEN needs nothing else.
     permissions:
       contents: read
+    outputs:
+      urgency: ${{ steps.check.outputs.urgency }}
 
     steps:
       - name: Checkout repository
@@ -45,8 +47,58 @@ jobs:
           bun-version-file: package.json
 
       - name: Check PR body against the template
+        id: check
         env:
           # Pass title and body through env, never inline ${{ }} in the script.
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
         run: bun scripts/check-pr-body.ts
+
+  route:
+    name: Route by urgency
+    needs: pr-body
+    # Runs only after the body passed. This job runs no PR code, so it can hold
+    # a write token. Fork PRs get a read-only token, so they are skipped.
+    if: >-
+      needs.pr-body.result == 'success' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      contains(fromJSON('["asap", "this week"]'), needs.pr-body.outputs.urgency)
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+
+    steps:
+      - name: Request a review, and flag asap PRs with a comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          URGENCY: ${{ needs.pr-body.outputs.urgency }}
+        run: |
+          set -euo pipefail
+          if [ "$URGENCY" = "asap" ]; then reviewer=tarasyarema; else reviewer=desplega-bot; fi
+
+          # Each step is a noop when it was already done, so edits can re-run this job.
+          requested=$(gh api "repos/$REPO/pulls/$PR/requested_reviewers" --jq "any(.users[]; .login == \"$reviewer\")")
+          reviewed=$(gh api --paginate "repos/$REPO/pulls/$PR/reviews" --jq "any(.[]; .user.login == \"$reviewer\")")
+          if [ "$reviewer" = "$AUTHOR" ]; then
+            echo "Skip the review request: $reviewer is the PR author, and GitHub rejects self-review."
+          elif [ "$requested" = "true" ] || [[ "$reviewed" == *true* ]]; then
+            echo "Skip the review request: $reviewer is already requested or has already reviewed."
+          else
+            gh api -X POST "repos/$REPO/pulls/$PR/requested_reviewers" -f "reviewers[]=$reviewer" --silent
+            echo "Requested a review from $reviewer."
+          fi
+
+          if [ "$URGENCY" = "asap" ]; then
+            marker="<!-- pr-body:urgency-asap -->"
+            comments=$(gh api --paginate "repos/$REPO/issues/$PR/comments" --jq '.[].body')
+            if [[ "$comments" == *"$marker"* ]]; then
+              echo "Skip the comment: the asap comment already exists."
+            else
+              gh pr comment "$PR" --repo "$REPO" --body "$marker
+          **Urgency: asap.** The author asks for a review as soon as possible. cc @tarasyarema"
+              echo "Posted the asap comment."
+            fi
+          fi

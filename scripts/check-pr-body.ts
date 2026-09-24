@@ -15,8 +15,11 @@
  *   bun scripts/check-pr-body.ts --title "fix(slack): ..." --body-file /tmp/pr-body.md
  *   PR_TITLE="..." PR_BODY="..." bun scripts/check-pr-body.ts
  *
- * CI: `.github/workflows/pr-body.yml` passes PR_TITLE and PR_BODY.
+ * CI: `.github/workflows/pr-body.yml` passes PR_TITLE and PR_BODY. On success,
+ * each picked choice is written to GITHUB_OUTPUT (for example `urgency=asap`).
  */
+
+import { appendFileSync } from "node:fs";
 
 const TEMPLATE_PATH = ".github/pull_request_template.md";
 
@@ -89,6 +92,27 @@ export function checkPrBody(template: string, body: string, title = ""): string[
   return problems;
 }
 
+/**
+ * The checked choice of each `pick one` section, keyed by heading slug (`## Urgency` -> `urgency`).
+ * Sections without exactly one valid checked choice are left out.
+ */
+export function pickedChoices(template: string, body: string): Record<string, string> {
+  const bodySections = parseSections(body);
+  const picked: Record<string, string> = {};
+  for (const section of templateSections(template)) {
+    if (section.choices.length === 0) continue;
+    const found = bodySections.find((s) => normalize(s.heading) === normalize(section.heading));
+    const checked = found ? checkboxes(found.content, true) : [];
+    if (checked.length === 1 && section.choices.includes(checked[0] ?? "")) {
+      const key = normalize(section.heading)
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "");
+      picked[key] = checked[0] ?? "";
+    }
+  }
+  return picked;
+}
+
 if (import.meta.main) {
   const arg = (name: string) => {
     const i = process.argv.indexOf(name);
@@ -105,6 +129,12 @@ if (import.meta.main) {
   const problems = checkPrBody(template, body, title ?? "");
   if (problems.length === 0) {
     console.log("PR body has every required section of the template.");
+    // Expose each picked choice (for example urgency=asap) to later workflow jobs.
+    const outputFile = process.env.GITHUB_OUTPUT;
+    if (outputFile) {
+      const lines = Object.entries(pickedChoices(template, body)).map(([k, v]) => `${k}=${v}\n`);
+      appendFileSync(outputFile, lines.join(""));
+    }
     process.exit(0);
   }
 
