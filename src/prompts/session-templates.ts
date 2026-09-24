@@ -227,11 +227,11 @@ Link env: \`APP_URL\` for pages, \`MCP_BASE_URL\` for the API. Report missing va
 // F. Communication
 // ============================================================================
 
-registerTemplate({
-  eventType: "system.agent.communication",
-  header: "",
-  defaultBody: `
+const communicationBody = `
 ## How you write
+
+Cite the task, memory, PR, thread, file, or URL supporting a claim via \`store-progress\` \`citations\` and \`[citation:N]\` in output.
+Cite a memory only when it supports a claim; use \`memory_rate\` with -1 and a reason for a wrong memory instead of citing it.
 
 For replies, task output (\`output\` or a remote final message), and artifacts: lead with the result. Use plain words, active voice, one idea per sentence, and sentence case headings.
 State blockers and reasons. Preserve meaningful uncertainty.
@@ -247,10 +247,19 @@ Use the \`comms\` skill when available for requested simplification or clarity r
 Use Visual mode only for explicit visual requests with delivery tools available in the active channel.
 Requests to show data are not visual requests. New facts, diagnosis, and actions still require work.
 Output schemas and channel delivery rules, including Slack's engine-owned delivery, override skill defaults.
-`,
-  variables: [],
-  category: "system",
-});
+`;
+for (const remote of [false, true]) {
+  registerTemplate({
+    eventType: remote ? "system.agent.communication.remote" : "system.agent.communication",
+    header: "",
+    // Remote workers have no swarm tools; keep their writing guidance tool-free.
+    defaultBody: remote
+      ? communicationBody.replace(/Cite the task,[\s\S]*?\n\n/, "")
+      : communicationBody,
+    variables: [],
+    category: "system",
+  });
+}
 
 // ============================================================================
 // G. Secrets
@@ -560,7 +569,7 @@ registerTemplate({
   defaultBody: `{{@template[system.agent.role]}}
 {{@template[system.agent.worker.remote]}}
 {{@template[system.agent.memory.remote]}}
-{{@template[system.agent.communication]}}`,
+{{@template[system.agent.communication.remote]}}`,
   variables: compositeVariables,
   category: "session",
 });

@@ -57,9 +57,13 @@ The runner discovers exported scenarios in `scripts/e2e/scenarios/*.ts` and sort
 
 Every run also boots an in-process `@desplega.ai/slack-mock` before the API and starts the server with `NODE_ENV=test`,
 so Bolt connects to the mock over Socket Mode (the socket-mode guard refuses `NODE_ENV=development`).
-Scenarios drive that Slack workspace through `ctx.slack`.
-The Slack scenarios are `slack-mention`, `slack-follow-up`, `slack-failed-task`, and
-`slack-relay-restart`. They cover a mention, a thread follow-up, a failed task outcome,
+Scenarios drive that Slack workspace through `ctx.slack`. The harness disables heartbeat
+checklists and boot triage so background tasks cannot consume a scenario's poll.
+The Slack scenarios include `slack-mention`, `slack-follow-up`, `slack-failed-task`,
+`slack-relay-restart`, and `slack-task-output-citations`. The citation scenario enables
+`SLACK_RENDER_V2` and checks MCP `store-progress` citations in the mock outcome card,
+including fail-open completion for invalid and oversized batches. The other scenarios
+cover a mention, a thread follow-up, a failed task outcome,
 and exactly-once terminal relay delivery across an API-process restart. The restart
 reuses the run's database, port, API key, secrets, agent-fs directory, and Slack mock.
 `ctx.db` is a read-only SQLite handle on the SUT database for assertions only; seed every fixture through the API.
@@ -71,6 +75,7 @@ bun run e2e --only health,auth
 bun run e2e --group visuals-v2
 bun run e2e --only slack-mention
 bun run e2e --only slack-relay-restart
+bun run e2e --only slack-task-output-citations
 bun run e2e --skip workflow-script-node
 bun run e2e --json /tmp/e2e.json --summary-md /tmp/e2e.md
 bun run e2e --min-route-coverage 4 --min-tool-coverage 3

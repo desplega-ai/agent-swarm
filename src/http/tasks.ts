@@ -40,6 +40,7 @@ import {
   requestSteering,
   SteeringRequestError,
 } from "../be/steering";
+import { getTaskCitations, TaskCitationSchema } from "../be/task-citations";
 import { findUserById } from "../be/users";
 import { can, type RbacPrincipal, type RbacResource } from "../rbac";
 import { TaskCreationBlockedError } from "../tasks/errors";
@@ -136,6 +137,7 @@ const GetTaskResponseSchema = AgentTaskSchema.extend({
   supportedSteerModes: z.array(SteerModeSchema),
   logs: z.array(AgentLogSchema),
   attachments: z.array(TaskAttachmentSchema),
+  citations: z.array(TaskCitationSchema),
 });
 
 const FinishTaskSuccessSchema = z.object({
@@ -1303,6 +1305,7 @@ export async function handleTasks(
       ...(await getTaskSteeringFields(task)),
       logs,
       attachments,
+      citations: await getTaskCitations(task.id),
     });
     return true;
   }

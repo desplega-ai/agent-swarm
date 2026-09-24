@@ -1,10 +1,12 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import { unlink } from "node:fs/promises";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
   cancelTask,
   closeDb,
   completeTask,
   createAgent,
+  createInboxMessage,
   createLogEntry,
   createScheduledTask,
   createTaskExtended,
@@ -12,6 +14,7 @@ import {
   ensureSlackRenderV2Activation,
   failTask,
   getDbClient,
+  getInboxMessageById,
   getLogsByEventType,
   getSlackOutcomeMessage,
   getSlackRenderV2ActivatedAt,
@@ -27,6 +30,7 @@ import {
   supersedeTask,
   upsertSwarmConfig,
 } from "../be/db";
+import { upsertTaskCitations } from "../be/task-citations";
 import { createStandaloneScheduleTask } from "../scheduler/schedule-task";
 import { getTaskLink, MAX_SECTION_LENGTH } from "../slack/blocks";
 import {
@@ -43,6 +47,7 @@ import {
 } from "../slack/render-v2";
 import { getAgentDisplayName, getAgentEmoji } from "../slack/responses";
 import { slackContextKey } from "../tasks/context-key";
+import { registerSlackReplyTool } from "../tools/slack-reply";
 import type { AgentTask, TaskAttachment } from "../types";
 import { clearVolatileSecretsForTesting } from "../utils/secret-scrubber";
 
@@ -231,6 +236,9 @@ mock.module("../slack/app", () => ({
   getSlackApp: () => ({
     client: {
       apiCall: mockApiCall,
+      chat: {
+        postMessage: (payload: Record<string, unknown>) => mockApiCall("chat.postMessage", payload),
+      },
       reactions: {
         add: (payload: Record<string, unknown>) => mockApiCall("reactions.add", payload),
         remove: (payload: Record<string, unknown>) => mockApiCall("reactions.remove", payload),
@@ -1250,6 +1258,196 @@ describe("Slack renderer v2", () => {
     expect(outcome?.permalink).toContain("outcome1");
   });
 
+  test.each([
+    false,
+    true,
+  ])("slack-reply renders citations with custom blocks=%s", async (withBlocks) => {
+    const agent = await createAgent({ name: "Citation reply", isLead: false, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_CITATION_REPLY");
+    const task = await createTaskExtended("Cited reply", {
+      agentId: agent.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+    });
+    await upsertTaskCitations(task.id, [
+      { index: 1, kind: "url", ref: "https://example.com/", label: "Evidence" },
+    ]);
+    const server = new McpServer({ name: "citation-reply", version: "1" });
+    registerSlackReplyTool(server);
+    const tool = (
+      server as unknown as {
+        _registeredTools: Record<
+          string,
+          { handler: (args: unknown, meta: unknown) => Promise<unknown> }
+        >;
+      }
+    )._registeredTools["slack-reply"]!;
+    await tool.handler(
+      {
+        taskId: task.id,
+        message: "Claim [citation:1] [citation:9] remains",
+        ...(withBlocks
+          ? {
+              blocks: [
+                {
+                  type: "section",
+                  text: { type: "mrkdwn", text: "Claim [citation:1] [citation:9] remains" },
+                },
+              ],
+            }
+          : {}),
+      },
+      { requestInfo: { headers: { "x-agent-id": agent.id } } },
+    );
+    const payload = calls.find((call) => call.method === "chat.postMessage")?.payload;
+    expect(payload?.text).toContain("<https://example.com/|[1]>");
+    expect(JSON.stringify(payload?.blocks)).toContain("Sources:");
+    expect(JSON.stringify(payload?.blocks)).not.toContain("[citation:");
+    expect(JSON.stringify(payload?.blocks)).not.toContain("[9]");
+    expect(payload?.text).toContain("|[1]> remains");
+  });
+
+  test("slack-reply rejects a mixed inbox/task context before reading or posting task citations", async () => {
+    const owner = await createAgent({ name: "Citation owner", isLead: false, status: "idle" });
+    const caller = await createAgent({ name: "Inbox caller", isLead: false, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_MIXED_CITATIONS");
+    const inbox = await createInboxMessage(caller.id, "Reply here", {
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+    });
+    const task = await createTaskExtended("Private source", {
+      agentId: owner.id,
+      source: "system",
+    });
+    await upsertTaskCitations(task.id, [
+      { index: 1, kind: "url", ref: "https://example.com/private", label: "Private evidence" },
+    ]);
+    const server = new McpServer({ name: "mixed-citation-reply", version: "1" });
+    registerSlackReplyTool(server);
+    const handler = (
+      server as unknown as {
+        _registeredTools: Record<
+          string,
+          {
+            handler: (
+              args: unknown,
+              meta: unknown,
+            ) => Promise<{ structuredContent: { success: boolean; message: string } }>;
+          }
+        >;
+      }
+    )._registeredTools["slack-reply"]!.handler;
+    const meta = { requestInfo: { headers: { "x-agent-id": caller.id } } };
+    const result = await handler(
+      { inboxMessageId: inbox.id, taskId: task.id, message: "Claim [citation:1]" },
+      meta,
+    );
+    expect(result.structuredContent.success).toBe(false);
+    expect(result.structuredContent.message).toContain("not both");
+    expect(calls.some((call) => call.method === "chat.postMessage")).toBe(false);
+    expect((await getInboxMessageById(inbox.id))?.status).toBe("unread");
+    expect((await getTaskById(task.id))?.slackReplySent).toBe(false);
+
+    // The authorized inbox path still works and never pulls another task's sources.
+    const authorized = await handler(
+      { inboxMessageId: inbox.id, message: "Reply [citation:1] here" },
+      meta,
+    );
+    expect(authorized.structuredContent.success).toBe(true);
+    const payload = calls.find((call) => call.method === "chat.postMessage")?.payload;
+    expect(payload?.text).toBe("Reply here");
+    expect(JSON.stringify(payload)).not.toContain("Private evidence");
+    expect((await getInboxMessageById(inbox.id))?.status).toBe("responded");
+  });
+
+  test("slack-reply drops invalid sources and markers from every custom text object", async () => {
+    const agent = await createAgent({
+      name: "Invalid citation reply",
+      isLead: false,
+      status: "idle",
+    });
+    const { channelId, threadTs } = uniqueSlackAddress("C_BAD_CITATION_REPLY");
+    const task = await createTaskExtended("Invalid cited reply", {
+      agentId: agent.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+    });
+    await upsertTaskCitations(task.id, [
+      { index: 1, kind: "page", ref: "missing-page", label: "Bad evidence" },
+    ]);
+    const server = new McpServer({ name: "invalid-citation-reply", version: "1" });
+    registerSlackReplyTool(server);
+    const tool = (
+      server as unknown as {
+        _registeredTools: Record<
+          string,
+          {
+            handler: (args: unknown, meta: unknown) => Promise<unknown>;
+          }
+        >;
+      }
+    )._registeredTools["slack-reply"]!;
+    await tool.handler(
+      {
+        taskId: task.id,
+        message: "Claim [citation:1] [citation:9] remains",
+        blocks: [
+          { type: "header", text: { type: "plain_text", text: "Heading [citation:1]" } },
+          {
+            type: "section",
+            text: { type: "mrkdwn", text: "Claim [citation:1] [citation:9] remains" },
+          },
+          {
+            type: "rich_text",
+            elements: [
+              {
+                type: "rich_text_section",
+                elements: [{ type: "text", text: "Rich [citation:9] text" }],
+              },
+            ],
+          },
+        ],
+      },
+      { requestInfo: { headers: { "x-agent-id": agent.id } } },
+    );
+    const payload = calls.find((call) => call.method === "chat.postMessage")?.payload;
+    expect(payload?.text).toBe("Claim remains");
+    const rendered = JSON.stringify(payload?.blocks);
+    expect(rendered).toContain('"text":"Heading"');
+    expect(rendered).toContain('"text":"Claim remains"');
+    expect(rendered).toContain('"text":"Rich text"');
+    expect(rendered).not.toContain("citation:");
+    expect(rendered).not.toContain("Bad evidence");
+    expect(rendered).not.toContain("Sources:");
+    expect(payload?.blocks).toHaveLength(3);
+  });
+
+  test("outcome cards resolve stored citations and strip unknown markers", async () => {
+    const lead = await createAgent({ name: "Citation Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_CITATIONS");
+    const ask = await createTaskExtended("Cited outcome", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    await startTask(ask.id);
+    await upsertTaskCitations(ask.id, [
+      { index: 1, kind: "url", ref: "https://example.com/", label: "Evidence" },
+    ]);
+    await completeTask(ask.id, "Supported [citation:1], unknown [citation:9].");
+    await backdateLastUpdated([ask.id], 20);
+    await processSlackRenderV2();
+    const content = calls.find((call) => call.method === "chat.startStream")?.payload.markdown_text;
+    expect(content).toContain("<https://example.com/|[1]>");
+    expect(content).toContain("unknown.");
+    expect(content).not.toContain("[9]");
+    expect(content).toContain("Sources: <https://example.com/|[1]> Evidence");
+  });
+
   test("preserves complete native Markdown beyond the Block Kit text ceiling", async () => {
     const lead = await createAgent({ name: "Markdown Lead", isLead: true, status: "idle" });
     const { channelId, threadTs } = uniqueSlackAddress("C_OUTCOME_MARKDOWN");
@@ -1363,6 +1561,16 @@ describe("Slack renderer v2", () => {
         slackThreadTs: threadTs,
         contextKey: slackContextKey({ channelId, threadTs }),
       });
+      for (const intent of ["user-upload", "slack-file"]) {
+        await insertTaskAttachment({
+          taskId: ask.id,
+          name: "input.png",
+          kind: "url",
+          url: "https://example.com/input.png",
+          intent,
+          isPrimary: true,
+        });
+      }
       await insertTaskAttachment({
         ...attachment,
         taskId: ask.id,

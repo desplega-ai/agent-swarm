@@ -108,6 +108,19 @@ describe("Pool Affinity", () => {
       expect(await claimTask(task.id, lead.id)).not.toBeNull();
     });
 
+    test("issue #1601: an unassigned caller-declared capability task is claimable by an idle worker holding it", async () => {
+      const worker = await createAgent({ name: "devops-worker", isLead: false, status: "idle" });
+      await updateAgentProfile(worker.id, { role: "devops", capabilities: ["devops"] });
+      const other = await createAgent({ name: "coder-worker", isLead: false, status: "idle" });
+      await updateAgentProfile(other.id, { role: "coder", capabilities: ["coding"] });
+      const task = await createTaskExtended("Rotate the EKS node group", {
+        routingAffinity: affinity({ leadOnly: false, capabilities: ["devops"] }),
+      });
+
+      expect(await claimTask(task.id, other.id)).toBeNull();
+      expect(await claimTask(task.id, worker.id)).not.toBeNull();
+    });
+
     test("malformed and schema-invalid persisted affinities are quarantined", async () => {
       const worker = await createAgent({
         name: "quarantine-worker",
@@ -397,13 +410,24 @@ describe("Pool Affinity", () => {
         routingAffinity: affinity({ leadOnly: false, capabilities: ["rare-capability"] }),
       });
 
-      // Even an agent that DOES hold the required capability is ineligible
-      // here: a capability-only affinity (no `role`) is — by the documented
-      // "no fail-open" contract above (`isAgentEligibleForTask`) — only ever
-      // claimable by its own `sourceAgentId`, which a caller-declared
-      // requirement never has. The point of this test is that the gate stays
-      // ACTIVE on the continuation (throws), not that this specific agent is
-      // the reason it's rejected.
+      // The gate stays ACTIVE on the continuation: a worker lacking the
+      // declared capability is rejected...
+      const incapableWorker = await createAgent({
+        name: "incapable-worker",
+        isLead: false,
+        status: "idle",
+      });
+      await updateAgentProfile(incapableWorker.id, { role: "coder", capabilities: [] });
+      await expect(
+        createTaskExtended("Continue the rare-capability work", {
+          parentTaskId: parent.id,
+          agentId: incapableWorker.id,
+        }),
+      ).rejects.toThrow("Task routing affinity does not authorize assignment or offer");
+
+      // ...while a worker that holds it is accepted. A caller-declared
+      // capability requirement matches on capabilities, not on a role it
+      // never declared (issue #1601).
       const capableWorker = await createAgent({
         name: "capable-but-not-source-worker",
         isLead: false,
@@ -413,18 +437,11 @@ describe("Pool Affinity", () => {
         role: "coder",
         capabilities: ["rare-capability"],
       });
-
-      // The child declares no routingAffinity of its own, so it falls back to
-      // inheriting the parent's caller-declared requirement. Before the fix,
-      // `routingAffinityIsInheritedProvenance` was derived from `!leadOnly`
-      // alone, so this collapsed to "provenance" and the direct-assignment
-      // gate below was skipped entirely — silently dropping the requirement.
-      await expect(
-        createTaskExtended("Continue the rare-capability work", {
-          parentTaskId: parent.id,
-          agentId: capableWorker.id,
-        }),
-      ).rejects.toThrow("Task routing affinity does not authorize assignment or offer");
+      const child = await createTaskExtended("Continue the rare-capability work", {
+        parentTaskId: parent.id,
+        agentId: capableWorker.id,
+      });
+      expect(child.agentId).toBe(capableWorker.id);
     });
   });
 

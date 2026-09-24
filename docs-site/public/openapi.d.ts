@@ -13815,10 +13815,32 @@ export interface paths {
                     content: {
                         "application/json": {
                             root: components["schemas"]["AgentTask"] & {
+                                citations: {
+                                    index: number;
+                                    /** @enum {string} */
+                                    kind: "task" | "memory" | "github" | "slack" | "agent-fs" | "page" | "script-run" | "url";
+                                    ref: string;
+                                    label?: string | null;
+                                    quote?: string | null;
+                                    resolvedUrl: string | null;
+                                    /** @enum {string} */
+                                    verified: "true" | "false" | "unchecked";
+                                }[];
                                 isLeadTask: boolean;
                                 supportedSteerModes: ("steer" | "queue")[];
                             };
                             chain: (components["schemas"]["AgentTask"] & {
+                                citations: {
+                                    index: number;
+                                    /** @enum {string} */
+                                    kind: "task" | "memory" | "github" | "slack" | "agent-fs" | "page" | "script-run" | "url";
+                                    ref: string;
+                                    label?: string | null;
+                                    quote?: string | null;
+                                    resolvedUrl: string | null;
+                                    /** @enum {string} */
+                                    verified: "true" | "false" | "unchecked";
+                                }[];
                                 isLeadTask: boolean;
                                 supportedSteerModes: ("steer" | "queue")[];
                             })[];
@@ -16728,6 +16750,17 @@ export interface paths {
                             supportedSteerModes: ("steer" | "queue")[];
                             logs: components["schemas"]["AgentLog"][];
                             attachments: components["schemas"]["TaskAttachment"][];
+                            citations: {
+                                index: number;
+                                /** @enum {string} */
+                                kind: "task" | "memory" | "github" | "slack" | "agent-fs" | "page" | "script-run" | "url";
+                                ref: string;
+                                label?: string | null;
+                                quote?: string | null;
+                                resolvedUrl: string | null;
+                                /** @enum {string} */
+                                verified: "true" | "false" | "unchecked";
+                            }[];
                         };
                     };
                 };

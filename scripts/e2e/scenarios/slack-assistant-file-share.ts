@@ -59,6 +59,34 @@ async function expectStoredScreenshot(ctx: ScenarioContext, taskId: string): Pro
   return String(attachment.id);
 }
 
+async function expectReplyAttachments(
+  ctx: ScenarioContext,
+  task: Record<string, unknown>,
+  output: string,
+  inputAttachmentId: string,
+  generatedUrl?: string,
+): Promise<void> {
+  const channel = String(task.slackChannelId);
+  const threadTs = String(task.slackThreadTs);
+  const outcome = await ctx.slack.waitForMessage(
+    (message) =>
+      message.channel === channel &&
+      message.thread_ts === threadTs &&
+      message.bot_id === ctx.slack.bot.botId &&
+      JSON.stringify(message).includes(output) &&
+      (!generatedUrl || JSON.stringify(message).includes(generatedUrl)),
+    { timeoutMs: 30_000 },
+  );
+  const replies = ctx.slack
+    .messages(channel)
+    .filter((message) => message.thread_ts === threadTs && message.bot_id === ctx.slack.bot.botId);
+  const rendered = JSON.stringify(replies);
+  // The tree may quote the file-only task title; an attachment URL must never be echoed.
+  expect(!rendered.includes(inputAttachmentId), "Bot re-attached the input screenshot URL");
+  expect(!JSON.stringify(outcome).includes("screenshot.png"), "Outcome included the input file");
+  if (generatedUrl) expect(rendered.includes(generatedUrl), "Bot omitted the generated attachment");
+}
+
 /**
  * An image sent to the Assistant with no
  * caption used to crash task creation, and with a caption the image was
@@ -96,6 +124,7 @@ export const slackAssistantFileShare: Scenario = {
       `Poll trigger carries attachments ${JSON.stringify(polledTask.attachments)}`,
     );
     await finish(ctx, assignee, imageOnlyId, { status: "completed", output: "Saw the image." });
+    await expectReplyAttachments(ctx, imageOnly, "Saw the image.", attachmentId);
 
     const captioned = await shareImageInAssistantDm(ctx, "aaa");
     const captionedId = String(captioned.id);
@@ -104,12 +133,31 @@ export const slackAssistantFileShare: Scenario = {
         String(captioned.task).includes("[File: screenshot.png"),
       `Captioned task text is ${JSON.stringify(captioned.task)}`,
     );
-    await expectStoredScreenshot(ctx, captionedId);
+    const captionedAttachmentId = await expectStoredScreenshot(ctx, captionedId);
     // Leave nothing pending for the scenarios that poll after this one.
     await claim(ctx, String(captioned.agentId), captionedId);
-    await finish(ctx, String(captioned.agentId), captionedId, {
-      status: "completed",
-      output: "Saw the image and the caption.",
-    });
+    const generatedUrl = "https://example.com/generated-image-report.pdf";
+    const mcp = await ctx.connectMcp(String(captioned.agentId));
+    try {
+      const result = await mcp.callTool("store-progress", {
+        taskId: captionedId,
+        status: "completed",
+        output: "Saw the image and the caption.",
+        attachments: [{ kind: "url", name: "Generated report", url: generatedUrl }],
+      });
+      expect(
+        !result.isError,
+        `store-progress with generated attachment: ${JSON.stringify(result)}`,
+      );
+    } finally {
+      await mcp.close();
+    }
+    await expectReplyAttachments(
+      ctx,
+      captioned,
+      "Saw the image and the caption.",
+      captionedAttachmentId,
+      generatedUrl,
+    );
   },
 };

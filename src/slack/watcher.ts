@@ -4,7 +4,6 @@ import {
   getInProgressSlackTasks,
   getPendingSlackRelayTasks,
   getSteeringMessagesForTask,
-  getTaskAttachments,
   getTaskById,
   markFinalizedSlackRelaysDelivered,
   markSlackRelayAttempted,
@@ -28,6 +27,7 @@ import {
   updateToFinal,
   updateTreeMessage,
 } from "./responses";
+import { getSlackOutputAttachments } from "./task-attachments";
 import { slackTaskOutput } from "./task-output";
 
 let watcherInterval: ReturnType<typeof setInterval> | null = null;
@@ -160,7 +160,7 @@ export async function buildTreeNodes(tree: TreeMessageState): Promise<TreeNode[]
         // completed task per tree render. Skipping non-completed avoids
         // hot-path queries for every in-progress poll tick.
         const childAttachments =
-          child.status === "completed" ? await getTaskAttachments(child.id) : undefined;
+          child.status === "completed" ? await getSlackOutputAttachments(child.id) : undefined;
         const childSteered = (await getSteeringMessagesForTask(child.id)).length > 0;
 
         childNodes.push({
@@ -183,7 +183,7 @@ export async function buildTreeNodes(tree: TreeMessageState): Promise<TreeNode[]
     }
 
     const rootAttachments =
-      task.status === "completed" ? await getTaskAttachments(task.id) : undefined;
+      task.status === "completed" ? await getSlackOutputAttachments(task.id) : undefined;
     const rootSteered = (await getSteeringMessagesForTask(task.id)).length > 0;
 
     nodes.push({

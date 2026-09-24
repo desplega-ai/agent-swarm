@@ -9,11 +9,13 @@ import {
   markTaskSlackReplySent,
   recordSlackMessage,
 } from "@/be/db";
+import { getTaskCitations } from "@/be/task-citations";
 import { getSlackApp } from "@/slack/app";
 import { getTaskLink } from "@/slack/blocks";
 import { withAutoJoin } from "@/slack/channel-join";
 import { getAgentDisplayName, getAgentEmoji, markdownToSlack } from "@/slack/responses";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
+import { renderTaskCitations, stripInvalidTaskCitations } from "@/utils/task-citations";
 
 export const registerSlackReplyTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -58,6 +60,12 @@ export const registerSlackReplyTool = (server: McpServer) => {
       let slackThreadTs: string | undefined;
       let contextKey: string | undefined;
 
+      // A reply must have one authorized context, never an inbox destination
+      // paired with an unrelated task's citations or reply state.
+      if (inboxMessageId && taskId) {
+        return toolErr("Provide either inboxMessageId or taskId, not both.");
+      }
+
       // Determine Slack context from inbox message or task
       if (inboxMessageId) {
         const inboxMsg = await getInboxMessageById(inboxMessageId);
@@ -99,11 +107,23 @@ export const registerSlackReplyTool = (server: McpServer) => {
       }
 
       try {
-        const slackMessage = markdownToSlack(message);
+        const citations = taskId ? await getTaskCitations(taskId) : [];
+        const slackMessage = renderTaskCitations(markdownToSlack(message), citations);
+        const renderedBlocks = blocks?.map((block) =>
+          JSON.parse(
+            JSON.stringify(block, (key, value) =>
+              key === "text" && typeof value === "string"
+                ? stripInvalidTaskCitations(value, citations)
+                : value?.type === "mrkdwn" && typeof value.text === "string"
+                  ? { ...value, text: renderTaskCitations(value.text, citations, "slack", false) }
+                  : value,
+            ),
+          ),
+        );
 
         const tree = await getSlackTreeMessageByThread(slackChannelId, slackThreadTs);
         const messageBlocks: Record<string, unknown>[] = [
-          ...(blocks ?? [
+          ...(renderedBlocks ?? [
             {
               type: "section",
               text: {
@@ -113,6 +133,15 @@ export const registerSlackReplyTool = (server: McpServer) => {
             },
           ]),
         ];
+        const sources = renderTaskCitations("", citations).trim();
+        if (renderedBlocks && sources) {
+          messageBlocks.push({
+            type: "context",
+            elements: [{ type: "mrkdwn", text: sources }],
+          });
+        }
+        if (messageBlocks.length > 50)
+          return toolErr("At most 50 blocks are allowed including citation sources.");
         if (taskId && tree) {
           if (messageBlocks.length >= 50) {
             return toolErr("At most 49 blocks are allowed when a provenance footer is added.");

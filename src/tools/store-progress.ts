@@ -12,6 +12,12 @@ import {
   updateAgentStatusFromCapacity,
   updateTaskProgress,
 } from "@/be/db";
+import {
+  CitationInputSchema,
+  getTaskCitations,
+  MAX_TASK_CITATIONS,
+  upsertTaskCitations,
+} from "@/be/task-citations";
 import { AgentFsProvider } from "@/fs/agent-fs-provider";
 import { runTaskTerminalEffects } from "@/tasks/task-terminal-effects";
 import {
@@ -21,6 +27,7 @@ import {
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { AgentTaskStatusSchema, AttachmentInputSchema, isTerminalTaskStatus } from "@/types";
 import { scrubSecrets } from "@/utils/secret-scrubber";
+import { taskCitationWarnings } from "@/utils/task-citations";
 
 // Phase 11: the `cost` / `costData` field was removed from this tool's input
 // schema. Adapters (claude/codex/pi/opencode/devin/claude-managed) are the
@@ -115,6 +122,15 @@ export const registerStoreProgressTool = (server: McpServer) => {
           .describe(
             "Pointer-based artifacts produced by this step — agent-fs path, URL, shared-fs path, or swarm Page. No inline file data; upload to agent-fs first and attach by path. Agent-fs pointers are verified before task state changes, using the explicit org/drive pair or the registering agent's configured defaults. May be sent on any call (progress or completion) and accumulates across calls; duplicates are de-duped by sha256 (when present) or by (kind, pointer, name).",
           ),
+        citations: z
+          .array(CitationInputSchema)
+          .max(MAX_TASK_CITATIONS)
+          // Keep invalid or oversized citation batches from rejecting task updates.
+          .catch([])
+          .optional()
+          .describe(
+            "Claim sources, upserted by index across calls. Reference in output with [citation:N]. Missing entries and verification failures remove citation markers and sources from rendered output; they never block completion. At most 50 citations per call/task, refs up to 2048 characters, labels up to 200. Invalid or oversized batches are ignored; existing indices can still be updated at capacity.",
+          ),
         persistMemory: z
           .boolean()
           .optional()
@@ -142,6 +158,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
         output,
         failureReason,
         attachments,
+        citations,
         persistMemory,
         force,
       },
@@ -363,6 +380,14 @@ export const registerStoreProgressTool = (server: McpServer) => {
           }
         }
 
+        // Explicit task IDs retain the existing progress-update policy, but
+        // only the assigned agent may author sources. Check under the same
+        // transaction as the upsert, including for terminal tasks. Ignore an
+        // unauthorized batch so citations never block the task update itself.
+        if (citations?.length && existingTask.agentId === agent.id) {
+          await upsertTaskCitations(taskId, citations);
+        }
+
         // Idempotency guard: short-circuit terminal-status writes (completed/failed)
         // BEFORE any side-effects fire (event emission, memory write, follow-up task,
         // business-use ensure). Without this, a multi-session race causes duplicate
@@ -537,7 +562,16 @@ export const registerStoreProgressTool = (server: McpServer) => {
           ? { blockedWaitingElapsedMs: result.blockedWaitingElapsedMs }
           : {}),
       };
-      return success ? toolOk(message, { data }) : toolErr(message, { data });
+      const warnings =
+        success && status === "completed"
+          ? taskCitationWarnings(
+              result.task?.output ?? output ?? "",
+              await getTaskCitations(taskId),
+            )
+          : [];
+      return success
+        ? toolOk(message, { data, details: warnings.length ? warnings.join("\n") : undefined })
+        : toolErr(message, { data });
     },
   );
 };

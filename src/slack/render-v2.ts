@@ -15,7 +15,6 @@ import {
   getSlackTreeMessage,
   getSlackTreeMessageByThread,
   getSlackTreeMessages,
-  getTaskAttachments,
   getTaskById,
   isPendingSlackMessage,
   markSlackDeferralResolved,
@@ -25,10 +24,12 @@ import {
   type SlackMessageRecord,
   updateSlackMessageRecord,
 } from "../be/db";
+import { getTaskCitations } from "../be/task-citations";
 import { slackContextKey } from "../tasks/context-key";
 import type { AgentTask, TaskAttachment } from "../types";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
+import { renderTaskCitations } from "../utils/task-citations";
 import {
   finalizeSlackMessageReaction,
   finalizeSlackSteerReactions,
@@ -46,6 +47,7 @@ import {
 import { buildAskClosure, type ClosureState, closureState } from "./closure";
 import { reactionName, type SlackReactionEvent } from "./reaction-shortcode";
 import { getAgentDisplayName, getAgentEmoji } from "./responses";
+import { getSlackOutputAttachments } from "./task-attachments";
 import { isAwaitingWake, isDeferredTask, slackTaskOutput } from "./task-output";
 
 const TREE_UPDATE_DEBOUNCE_MS = 500;
@@ -909,7 +911,14 @@ async function conclusionResultsLines(closure: AgentTask[]): Promise<string[]> {
       raw.length > CONCLUSION_DIGEST_LENGTH
         ? `${raw.slice(0, CONCLUSION_DIGEST_LENGTH).trimEnd()}…`
         : raw;
-    const label = digest ? `${agentName} — ${digest}` : agentName;
+    // Resolve member indices before combining outputs; never truncate a rendered link.
+    const citedDigest = renderTaskCitations(
+      digest,
+      await getTaskCitations(member.id),
+      "slack",
+      false,
+    );
+    const label = digest ? `${agentName} — ${citedDigest}` : agentName;
     lines.push(`↳ ${glyph} ${label} ${getTaskLink(member.id)}`);
   }
   return lines;
@@ -1145,14 +1154,18 @@ export async function streamOutcomeCard(
 
   const tasks = await getSlackTasksInThread(task.slackChannelId, task.slackThreadTs);
   const duration = formatV2Duration(new Date(task.createdAt), terminalEnd(task, new Date()));
-  const attachment = attachmentLine(await getTaskAttachments(task.id));
+  const attachment = attachmentLine(await getSlackOutputAttachments(task.id));
   // Re-read slackReplySent rather than trusting the caller's snapshot: it can flip
   // (via the slack-reply tool) between processSlackRenderV2's task fetch and the
   // Slack round trips in the outer render loop that run before this function is
   // called for the task.
   const slackReplySent = (await getTaskById(task.id))?.slackReplySent ?? task.slackReplySent;
   const content = await (options?.buildContent ?? outcomeContent)(task, slackReplySent);
-  const presentation = outcomePresentation(task, content, attachment);
+  const presentation = outcomePresentation(
+    task,
+    renderTaskCitations(content, await getTaskCitations(task.id)),
+    attachment,
+  );
   if (!presentation) throw new Error(`Outcome presentation is empty for task ${task.id}`);
 
   const startPayload: Record<string, unknown> = {
@@ -1277,7 +1290,11 @@ export async function streamOutcomeCard(
 async function resolvedDeferralContent(wake: AgentTask): Promise<string> {
   if (!isDeferredTask(wake)) {
     const content = await outcomeContent(wake, wake.slackReplySent);
-    return outcomePresentation(wake, content, attachmentLine(await getTaskAttachments(wake.id)));
+    return outcomePresentation(
+      wake,
+      renderTaskCitations(content, await getTaskCitations(wake.id)),
+      attachmentLine(await getSlackOutputAttachments(wake.id)),
+    );
   }
   const card = await getSlackOutcomeMessage(wake.id);
   const pointer = card?.permalink ? ` — ${card.permalink}` : ".";
