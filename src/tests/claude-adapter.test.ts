@@ -3,7 +3,12 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RunStopHookSessionSummaryOpts } from "../hooks/hook";
-import { ClaudeAdapter, createSessionMcpConfig, mergeMcpConfig } from "../providers/claude-adapter";
+import {
+  CLAUDE_DISALLOWED_TOOLS_ARG,
+  ClaudeAdapter,
+  createSessionMcpConfig,
+  mergeMcpConfig,
+} from "../providers/claude-adapter";
 import type { ProviderSessionConfig } from "../providers/types";
 
 /** Minimal config for testing — sessions won't actually spawn in these unit tests */
@@ -142,6 +147,49 @@ describe("ClaudeSession spawn env — reasoning_effort", () => {
     expect(spawnedEnvs).toHaveLength(1);
     expect(spawnedEnvs[0]?.CLAUDE_CODE_EFFORT_LEVEL).toBeUndefined();
     expect(spawnedEnvs[0]?.MAX_THINKING_TOKENS).toBeUndefined();
+  });
+});
+
+describe("ClaudeSession spawn argv — disallowed tools", () => {
+  let spawnSpy: ReturnType<typeof spyOn>;
+  let spawnedCmds: string[][];
+  const CLEAN_ENV: Record<string, string> = { CLAUDE_CODE_OAUTH_TOKEN: "example-test-oauth-token" };
+
+  beforeEach(() => {
+    spawnedCmds = [];
+    spawnSpy = spyOn(Bun, "spawn").mockImplementation(((cmd: readonly string[]) => {
+      if (cmd.at(-1) !== "--version") {
+        spawnedCmds.push([...cmd]);
+      }
+      return makeFakeProc();
+    }) as typeof Bun.spawn);
+  });
+
+  afterEach(() => {
+    spawnSpy.mockRestore();
+  });
+
+  for (const role of ["lead", "worker"] as const) {
+    test(`${role}: CLI argv disallows ScheduleWakeup exactly once, after caller args`, async () => {
+      const adapter = new ClaudeAdapter(async () => {});
+      const config = makeConfig({ role, additionalArgs: ["--max-turns", "10"], env: CLEAN_ENV });
+      await adapter.createSession(config);
+
+      expect(spawnedCmds).toHaveLength(1);
+      const argv = spawnedCmds[0]!;
+      expect(argv.filter((arg) => arg === CLAUDE_DISALLOWED_TOOLS_ARG)).toHaveLength(1);
+      expect(argv.indexOf(CLAUDE_DISALLOWED_TOOLS_ARG)).toBe(argv.indexOf("10") + 1);
+      expect(config.additionalArgs).toEqual(["--max-turns", "10"]);
+    });
+  }
+
+  test("an already-present disallow is not duplicated", async () => {
+    const adapter = new ClaudeAdapter(async () => {});
+    await adapter.createSession(
+      makeConfig({ additionalArgs: [CLAUDE_DISALLOWED_TOOLS_ARG], env: CLEAN_ENV }),
+    );
+
+    expect(spawnedCmds[0]!.filter((arg) => arg === CLAUDE_DISALLOWED_TOOLS_ARG)).toHaveLength(1);
   });
 });
 
