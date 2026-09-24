@@ -165,7 +165,7 @@ Related preset facts (web, 2026-09-24):
 | OpenAI | `https://api.openai.com/v1` | `text-embedding-3-small` | `sk-proj-` (also `sk-svcacct-`, legacy `sk-`) | 1536 native |
 | OpenRouter | `https://openrouter.ai/api/v1` (`/embeddings`) | `openai/text-embedding-3-small` | `sk-or-v1-` | Same model |
 | Vercel AI Gateway | `https://ai-gateway.vercel.sh/v1` (`/embeddings`) | `openai/text-embedding-3-small` | `vck_` | Same model |
-| Ollama | `http://localhost:11434/v1` (`/embeddings`) | `nomic-embed-text` | none | 768 native |
+| Ollama (dropped, see R6) | `http://localhost:11434/v1` (`/embeddings`) | `nomic-embed-text` | none | 768 native |
 
 OpenRouter embeddings GA vs beta status is unconfirmed (only the TypeScript SDK docs say "beta").
 
@@ -234,7 +234,7 @@ OpenRouter embeddings GA vs beta status is unconfirmed (only the TypeScript SDK 
 The header pill needs `done+skipped` over 6 and `currentStep`. The home card needs the six step statuses. `/setup` needs everything. All three render from this one read. `PUT /api/onboarding` takes a transition (`{ step, action: "view" | "complete" | "skip" | "fail", method?, errorClass? }` or `{ action: "minimize" | "resume" | "dismiss" }`), validates it, writes via `upsertSwarmConfig` (no reload), and emits telemetry.
 
 Plan inputs from these facts:
-- Keep `onboarding_state` out of env and out of the Secrets grid. The existing lever is the strip list pattern (`API_ONLY_CONFIG_KEYS`, `config.ts:40`) plus `getInjectableGlobalConfigs`. No general "internal key" mechanism exists.
+- Keep `onboarding_state` out of env and out of the Secrets grid. The existing lever is the strip list pattern (`API_ONLY_CONFIG_KEYS`, `config.ts:40`) plus `getInjectableGlobalConfigs`. No general "internal key" mechanism exists. Resolved as R3: one shared internal-keys set.
 - RBAC: no `onboarding.*` verb exists. `config.write.any` (`permissions.ts:144-147`, `leadOnly` for agents in `legacy-policy.ts:230`) is the nearest fit. GET routes need no `rbac`.
 - Register in both `src/http/all-routes.ts` (side-effect import) and the dispatcher array in `src/http/index.ts:322-349`. Then run `bun run docs:openapi`.
 
@@ -349,13 +349,13 @@ Plan inputs from these facts:
 
 These are factual conflicts or gaps between the spec and the code. They do not reopen decisions. They are inputs for the plan.
 
-1. **The "existing install" auto-complete rule matches fresh Compose installs.** Agents register before credentials exist (`runner.ts:5206-5217`), and Compose starts one lead and workers at boot. The heartbeat also creates a `boot-triage` task for the lead 90 s after API boot (`src/heartbeat/heartbeat.ts:1690`, `:1635-1672`) unless `HEARTBEAT_CHECKLIST_DISABLE` is set. So "any agents or tasks" is true on a new install before the first dashboard visit. The plan needs a different signal for "existing install" (for example, a completed task with a non-system source, or a missing `onboarding_state` row plus a `telemetry_installed_at` older than the new API version).
+1. **(Resolved: R1.) The "existing install" auto-complete rule matches fresh Compose installs.** Agents register before credentials exist (`runner.ts:5206-5217`), and Compose starts one lead and workers at boot. The heartbeat also creates a `boot-triage` task for the lead 90 s after API boot (`src/heartbeat/heartbeat.ts:1690`, `:1635-1672`) unless `HEARTBEAT_CHECKLIST_DISABLE` is set. So "any agents or tasks" is true on a new install before the first dashboard visit. R1 defines the replacement signal.
 2. **`first_task` can complete without the operator.** The lead completes `boot-triage` once credentials land, and `hasFirstCompletedTask()` then returns true. Step 6 completion should key on the stored `firstTaskId` from the composer, not on the global milestone.
-3. **`onboarding_state` in `swarm_config` leaks.** It lands in the API `process.env`, every worker task env, and the Secrets grid (Q4).
-4. **Step 3 verification depends on the worker harness.** A Codex, Devin, or OpenRouter key verifies only when a worker runs that harness. Compose defaults every agent to `claude` (Q2).
+3. **(Resolved: R3.) `onboarding_state` in `swarm_config` leaks.** It lands in the API `process.env`, every worker task env, and the Secrets grid (Q4).
+4. **(Resolved: R2.) Step 3 verification depends on the worker harness.** A Codex, Devin, or OpenRouter key verifies only when a worker runs that harness. Compose defaults every agent to `claude` (Q2).
 5. **Some "verified" states are presence-only.** The Claude setup token and Codex `auth.json` pass with `latency_ms: 0` and no upstream call (Q2).
 6. **A rotated key on a ready worker is never re-verified** until a provider change or restart (Q2).
-7. **Embedding probe pitfalls.** `embed()` returns `null` instead of throwing, has no timeout (600 s SDK default), and requires the stored dimension (default 512). The mockup copy "1536 dims" does not match the default. Ollama `nomic-embed-text` is natively 768 dims. `EMBEDDING_DIMENSIONS` changes need a restart and a matching `memory_vec` table.
+7. **(Partly resolved: R6.) Embedding probe pitfalls.** `embed()` returns `null` instead of throwing, has no timeout (600 s SDK default), and requires the stored dimension (default 512). The mockup copy "1536 dims" does not match the default. Ollama `nomic-embed-text` is natively 768 dims. `EMBEDDING_DIMENSIONS` changes need a restart and a matching `memory_vec` table.
 8. **Name default mismatch.** The spec default is `Your Swarm`. The catalog default for `SWARM_ORG_NAME` is `"Swarm"`. `OrganizationNameDialog` and the org-name nudge also prompt for this key.
 9. **Doc drift.** `/status/test-connection` description (`status.ts:721-723`) says it makes an upstream call. `codex-oauth.mdx:51-55`, `:137` cite the log line "Restored codex OAuth credentials", while the entrypoint logs "[entrypoint] Seeded codex OAuth credentials (slot 0)" (`docker-entrypoint.sh:273`).
 10. **`codex-oauth-section.tsx` status reads only the legacy `codex_oauth` key**, not `codex_oauth_<N>` slots.
@@ -368,7 +368,7 @@ These are factual conflicts or gaps between the spec and the code. They do not r
 |---|---|---|
 | 1 | `/setup` shell, `onboarding_state`, telemetry, steps 1 to 6 on today's flows (Codex via npx), header pill, home card, version gate | UI: `router.tsx`, `root-layout.tsx`, `config-guard.tsx`, `use-config.ts`, `welcome-card.tsx`, `connections-page.tsx`, `app-header.tsx`, `unified-home.tsx`, `dashboard-nudges.tsx`, `organization-name-dialog.tsx`, `settings-layout.tsx`, `providers.tsx`, `client.ts`, new `use-onboarding` hook, `integrations-catalog.ts`, `integrations-status.ts`, `use-config-api.ts`, `field-renderer.tsx`, `linear-oauth-section.tsx`, `jira-oauth-section.tsx`, `codex-oauth-section.tsx`, `new-session-view.tsx`, `composer-dock.tsx`, `identity-modal.tsx`, `current-user-context.tsx`, `agents/page.tsx`, `harness-icon.tsx`, `popover.tsx`, `progress.tsx`. API: new `src/http/onboarding.ts`, new embed-probe route, `all-routes.ts`, `index.ts`, `status.ts` (reuse builders), `config.ts` (strip list), `core.ts`, `db.ts`, `memory/index.ts`, `openai-embedding.ts`, `oauth/wrapper.ts`, `linear/oauth.ts`, `jira/oauth.ts`, `trackers/{linear,jira}.ts`, `telemetry.ts`, `rbac/permissions.ts` (if a new verb), `openapi.json`, `telemetry.mdx`. |
 | 2 | Codex device-code login | `src/providers/codex-oauth/flow.ts` (steps A and B), `types.ts`, `storage.ts`, new API route(s) for start and poll, `codex-oauth-section.tsx`, `codex-oauth.mdx`, tests next to `src/tests/codex-oauth*.test.ts` |
-| 3 | Slack manifest pre-fill and brand SVGs | `slack-manifest.json`, a manifest builder that injects the swarm name, new SVGs under `apps/ui/public/` (Slack, GitHub, GitLab, Linear, Jira, Vercel, Ollama) |
+| 3 | Slack manifest pre-fill and brand SVGs | `slack-manifest.json`, a manifest builder that injects the swarm name, new SVGs under `apps/ui/public/` (Slack, GitHub, GitLab, Linear, Jira, Vercel) |
 
 ## Code References
 
@@ -403,14 +403,35 @@ These are factual conflicts or gaps between the spec and the code. They do not r
 
 Upstream Codex: [`device_code_auth.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/login/src/device_code_auth.rs), [`server.rs#L695-L874`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/login/src/server.rs#L695-L874), [`auth/manager.rs#L1697-L1705`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/login/src/auth/manager.rs#L1697-L1705), [`auth/storage.rs#L39-L65`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/login/src/auth/storage.rs#L39-L65), [`auth/default_client.rs#L339-L349`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/login/src/auth/default_client.rs#L339-L349).
 
+## Resolved in review (Taras, 2026-09-24)
+
+| # | Question | Decision | Facts the plan uses |
+|---|---|---|---|
+| R1 | Existing-install signal (Flag 1) | An install is existing when real work exists: a completed task whose `taskType` is not `boot-triage` or `heartbeat-checklist`, OR a task with `requestedByUserId` set, OR any user row. Check once, when the `onboarding_state` row is first created. | Heartbeat tasks get the default `source: "mcp"` (`db.ts:2639`, `:2729`), so `source` cannot filter them. `taskType` can (`heartbeat.ts:1445`, `:1667`). `agent_tasks.requestedByUserId` has a partial index (`031_user_registry.sql:27-28`). No boot path creates users. |
+| R2 | Harness choice in step 3 (Flag 4) | Confirmed switch, **per worker, never global**. When no worker runs the chosen harness, the card says so and offers a switch for selected workers. | `PATCH /api/agents/{id}/harness-provider` exists (`src/http/agents.ts:167-184`). It writes an agent-scoped `HARNESS_PROVIDER` row, and the worker swaps within about 10 s. No UI calls it today. |
+| R3 | Keep `onboarding_state` internal (Flag 3) | One shared internal-keys set. Env injection skips it (API and workers), `/api/config/resolved` strips it, and the Secrets grid hides it. Writes go through `upsertSwarmConfig`, so no reload runs. | Levers: `getInjectableGlobalConfigs` (`db.ts:6274-6282`), `stripApiOnlyKeys` (`config.ts:40-44`), `useSwarmConfigTable` (`use-swarm-config.ts:178-197`). |
+| R4 | Device flow state location | Swarm KV with a 15-min TTL. The state survives API restarts and deploys. | `device_auth_id` and `user_code` stay server-side. The browser gets a flow id only. |
+| R5 | Device flow `originator` | Send `agent-swarm`, the same as the PKCE flow. The manual E2E checks that OpenAI accepts it. | Upstream default is `codex_cli_rs` (`auth/default_client.rs:40`). |
+| R6 | Memory presets vs dimensions (Flag 7) | Drop the Ollama preset. Ship OpenAI, OpenRouter, Vercel AI Gateway, and Custom. | Storage dimension is fixed at `EMBEDDING_DIMENSIONS` (default 512). The mockup copy "1536 dims" must show the stored dimension. Brand SVGs for slice 3 no longer need Ollama. |
+| R7 | Custom OpenAI-compatible endpoint in the "Open harnesses" card | Support it. The card gets an "OpenAI-compatible gateway" option: base URL + key, written to `OPENROUTER_BASE_URL` + `OPENROUTER_API_KEY`. This is the existing gateway mechanism (the cloud offering already uses it). | See "Custom OpenAI-compatible gateway" below. |
+
+### Custom OpenAI-compatible gateway (facts for R7)
+
+- **Mechanism.** `OPENROUTER_BASE_URL` reroutes every OpenRouter consumer. It is not a generic OpenAI base-URL switch: the key must be named `OPENROUTER_API_KEY`, and the target must accept OpenRouter-shaped requests. Resolver: `getOpenRouterBaseUrl()`, default `https://openrouter.ai/api/v1` (`src/utils/openrouter-base-url.ts:15`, `:22-28`). Validator: http(s), no query or fragment, blank reverts (`src/be/swarm-config-guard.ts:198-219`).
+- **Harnesses.** opencode writes `provider.openrouter.options.baseURL` into the per-task config (`opencode-adapter.ts:180-196`, env mirror `:867-883`). pi writes `providers.openrouter.baseUrl` into `models.json` with a revert marker (`pi-mono-adapter.ts:442`, called at `:1200`). dsh uses it only for `openrouter/<model>` models (`dsh-adapter.ts:171-218`). claude, claude-managed, codex, devin, and acp do not use it.
+- **API-side consumers too.** The same resolver feeds `src/utils/internal-ai/complete-structured.ts`, `src/workflows/executors/workflow-llm.ts`, and `src/be/memory/raters/llm-summarizer.ts`. Setting it globally reroutes those API-side LLM calls as well.
+- **Model id.** Gateway models are selected with `MODEL_OVERRIDE=openrouter/<gateway-model-id>` (`docs-site/content/docs/(documentation)/guides/provider-auth/model-gateways.mdx:32-193`).
+- **Verification.** The pi and opencode live test calls `${getOpenRouterBaseUrl()}/models` (`provider-credentials.ts:259-270`, dispatch `:389`), so step 3 verifies the custom endpoint. dsh is presence-only (`:423-430`). A key under any other name fails the presence check (`provider-credentials.ts:96-107`).
+- **UI today.** `OPENROUTER_BASE_URL` is on Settings → Configuration as "OpenAI-compatible model gateway" (`configuration-catalog.ts:359-368`). The `openrouter` integration card has only the key (`integrations-catalog.ts:805-825`).
+- **History.** PR #1010 (`cb6c4556a`, gateway routing), PR #1383 (`0e5c28f8e`, docs + Settings control), PR #1570 (`20f02bdbf`, dsh wiring).
+- **Cloud mismatch.** `agent-swarm-internal` pushes `OPENROUTER_BASE_URL` + `OPENROUTER_API_KEY` in gateway mode (`packages/backend/convex/wallet/openrouterEnvPlan.ts:49-86`). Its pi "OpenAI-compatible" onboarding option also sends `PI_API_KEY`, `PI_BASE_URL`, `PI_MODEL` (`buildDeployConfig.ts:15-22`). No code in agent-swarm reads those three names.
+
 ## Open Questions
 
-- **Existing-install detection signal** (Flag 1). The locked rule needs a signal that a fresh Compose install does not match.
-- **Harness choice in step 3** (Flag 4). Does step 3 write a global `HARNESS_PROVIDER` row, or does it only verify providers that some worker already runs?
-- **Keeping `onboarding_state` internal** (Flag 3). Extend the strip list and the injectable filter, or hide the key in the Secrets grid, or both.
-- **Device flow state location.** Steps A and B need `device_auth_id` and `user_code` for up to 15 min. Options: API memory, KV with TTL, or return both to the browser and poll through a stateless route.
-- **Which headers the API sends upstream** in the device flow. Upstream sends `originator: codex_cli_rs` and a Codex `User-Agent`. The existing PKCE flow sends `originator=agent-swarm` as an authorize query parameter only.
-- **OpenRouter embeddings** GA status, and whether OpenRouter and Vercel honor the `dimensions` parameter for `openai/text-embedding-3-small` at 512.
+- Do OpenRouter and Vercel AI Gateway honor the `dimensions` parameter at 512 for `openai/text-embedding-3-small`? The step-4 probe detects a mismatch (`embed()` returns `null`), so the manual E2E settles it.
+- Is OpenRouter embeddings GA or beta? Only the TypeScript SDK docs say "beta".
+- R7 gateway option: `OPENROUTER_BASE_URL` is global and also reroutes API-side LLM calls. Should the card also collect a gateway model id and write `MODEL_OVERRIDE`, and at which scope (global or per worker, like R2)?
+- The cloud repo's `PI_API_KEY` / `PI_BASE_URL` / `PI_MODEL` path has no reader in agent-swarm. Is it dead code or an unshipped feature?
 
 ## Appendix
 
