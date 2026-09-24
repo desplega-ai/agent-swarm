@@ -242,6 +242,7 @@ RUN mkdir -p /home/worker/.claude/commands /home/worker/.claude/agents \
   "disableClaudeAiConnectors": true, \
   "enableAllProjectMcpServers": true, \
   "enabledMcpjsonServers": ["agent-swarm", "context-mode"], \
+  "env": { "DISABLE_ERROR_REPORTING": "1" }, \
   "hooks": { \
     "SessionStart": [{"matcher": "*", "hooks": [{"type": "command", "command": "/usr/local/bin/agent-swarm hook"}]}], \
     "UserPromptSubmit": [{"matcher": "*", "hooks": [{"type": "command", "command": "/usr/local/bin/agent-swarm hook"}]}], \
