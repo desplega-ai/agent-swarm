@@ -10,6 +10,8 @@ import {
   recordKeyUsage,
   setApiKeyName,
 } from "../be/db";
+import { MAX_RATE_LIMIT_RESET_MS, type RateLimitWindowTelemetry } from "../utils/error-tracker";
+import { activeModelBlocks, MODEL_SCOPED_WINDOWS } from "../utils/model-rate-limit-windows";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
 
@@ -65,14 +67,44 @@ const reportRateLimit = route({
   auth: { apiKey: true },
 });
 
-const rateLimitWindowSchema = z.object({
+export const rateLimitWindowSchema = z.object({
   status: z.string(),
   utilization: z.number().optional(),
-  resetsAt: z.number().optional(),
+  // .finite() rejects NaN/Infinity at the report boundary; sanitizeReportedWindowResets
+  // below still has to guard a finite-but-out-of-range or implausibly far-future value.
+  resetsAt: z.number().finite().optional(),
   isUsingOverage: z.boolean().optional(),
   surpassedThreshold: z.number().optional(),
   lastSeenAt: z.string().datetime(),
 });
+
+/**
+ * Clamps a reported window's `resetsAt` (seconds) to `[now, now+7d]`, the
+ * same 7-day ceiling used for the key-wide cooldown (`MAX_RATE_LIMIT_RESET_MS`).
+ * Guards two failure modes at the report boundary, in either direction: a
+ * finite-but-out-of-Date-range value (e.g. 1e20 or -1e20) that would
+ * otherwise throw when rendered via `new Date(resetsAt * 1000).toISOString()`
+ * downstream in `computeModelLimits`, and a representable but implausible
+ * value (far-future, or negative/past — a freshly reported window can't
+ * reset in the past) that would otherwise read as bogus. NaN/Infinity are
+ * already rejected upstream by the route's `.finite()` schema. Applied
+ * before storage, so `computeModelLimits` never sees an out-of-range value
+ * from data reported through this endpoint.
+ */
+export function sanitizeReportedWindowResets(
+  windows: RateLimitWindowTelemetry,
+): RateLimitWindowTelemetry {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const maxResetsAtSec = Math.floor((Date.now() + MAX_RATE_LIMIT_RESET_MS) / 1000);
+  const sanitized: RateLimitWindowTelemetry = {};
+  for (const [key, window] of Object.entries(windows)) {
+    sanitized[key] =
+      window.resetsAt === undefined
+        ? window
+        : { ...window, resetsAt: Math.min(Math.max(window.resetsAt, nowSec), maxResetsAtSec) };
+  }
+  return sanitized;
+}
 
 const reportRateLimitWindows = route({
   method: "post",
@@ -110,6 +142,8 @@ const getAvailable = route({
     totalKeys: z.coerce.number().int().min(1),
     scope: z.string().optional(),
     scopeId: z.string().optional(),
+    /** Model family the caller is about to run. Filters out keys with an active weekly window block for that family. */
+    model: z.enum(["fable", "opus", "sonnet", "haiku"]).optional(),
   }),
   responses: {
     200: {
@@ -118,6 +152,10 @@ const getAvailable = route({
         success: z.literal(true),
         availableIndices: z.array(z.number().int()),
         totalKeys: z.number().int(),
+        /** Indices excluded only by an active model-scoped window block. Present only when `model` was passed. */
+        modelBlockedIndices: z.array(z.number().int()).optional(),
+        /** ISO of the earliest reset among modelBlockedIndices. Present only when `model` was passed. */
+        earliestModelResetAt: z.string().nullable().optional(),
       }),
     },
     400: { description: "Validation error" },
@@ -146,9 +184,58 @@ const ApiKeyStatusSchema = z.object({
   provider: z.string(),
   /** Latest provider-emitted rate-limit window snapshots, keyed by window type. */
   rateLimitWindows: z.record(z.string(), rateLimitWindowSchema),
+  /** Derived, readable view of any rejected model-scoped window (Fable/Opus/Sonnet) on this key. */
+  modelLimits: z.array(
+    z.object({
+      model: z.string(),
+      window: z.string(),
+      resetsAt: z.number(),
+      resetsAtIso: z.string(),
+      active: z.boolean(),
+    }),
+  ),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
+
+/**
+ * Derives the readable `modelLimits` view from a key's raw `rateLimitWindows`:
+ * every model-scoped window (Fable/Opus/Sonnet) with a rejected entry,
+ * `active` when its `resetsAt` is still in the future.
+ */
+export function computeModelLimits(
+  windows: Record<string, { status: string; resetsAt?: number }>,
+  nowMs: number,
+): Array<{
+  model: string;
+  window: string;
+  resetsAt: number;
+  resetsAtIso: string;
+  active: boolean;
+}> {
+  const active = activeModelBlocks(windows, nowMs);
+  const activeWindows = new Set(active.map((b) => b.window));
+  const limits = active.map((b) => ({
+    model: b.model,
+    window: b.window,
+    resetsAt: b.resetsAt,
+    resetsAtIso: new Date(b.resetsAt * 1000).toISOString(),
+    active: true,
+  }));
+  for (const window of Object.keys(MODEL_SCOPED_WINDOWS)) {
+    if (activeWindows.has(window)) continue;
+    const entry = windows[window];
+    if (!entry || entry.status !== "rejected" || typeof entry.resetsAt !== "number") continue;
+    limits.push({
+      model: MODEL_SCOPED_WINDOWS[window]!,
+      window,
+      resetsAt: entry.resetsAt,
+      resetsAtIso: new Date(entry.resetsAt * 1000).toISOString(),
+      active: false,
+    });
+  }
+  return limits;
+}
 
 const listStatuses = route({
   method: "get",
@@ -317,7 +404,7 @@ export async function handleApiKeys(
         keyType,
         keySuffix,
         keyIndex,
-        windows,
+        sanitizeReportedWindowResets(windows),
         scope,
         scopeId ?? null,
       );
@@ -340,10 +427,26 @@ export async function handleApiKeys(
     const parsed = await getAvailable.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const { keyType, totalKeys, scope, scopeId } = parsed.query;
+    const { keyType, totalKeys, scope, scopeId, model } = parsed.query;
     try {
-      const indices = await getAvailableKeyIndices(keyType, totalKeys, scope, scopeId ?? null);
-      getAvailable.respond(res, 200, { success: true, availableIndices: indices, totalKeys });
+      const result = await getAvailableKeyIndices(
+        keyType,
+        totalKeys,
+        scope,
+        scopeId ?? null,
+        model,
+      );
+      getAvailable.respond(res, 200, {
+        success: true,
+        availableIndices: result.availableIndices,
+        totalKeys,
+        ...(model !== undefined
+          ? {
+              modelBlockedIndices: result.modelBlockedIndices,
+              earliestModelResetAt: result.earliestModelResetAt,
+            }
+          : {}),
+      });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to get available keys", 500);
     }
@@ -373,7 +476,12 @@ export async function handleApiKeys(
     const { keyType, scope, scopeId } = parsed.query;
     try {
       const statuses = await getKeyStatuses(keyType, scope, scopeId ?? null);
-      listStatuses.respond(res, 200, { success: true, keys: statuses });
+      const nowMs = Date.now();
+      const keys = statuses.map((status) => ({
+        ...status,
+        modelLimits: computeModelLimits(status.rateLimitWindows, nowMs),
+      }));
+      listStatuses.respond(res, 200, { success: true, keys });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to get key statuses", 500);
     }

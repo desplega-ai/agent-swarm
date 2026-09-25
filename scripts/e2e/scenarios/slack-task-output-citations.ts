@@ -20,13 +20,53 @@ export const slackTaskOutputCitations: Scenario = {
     await registerLead(ctx, "e2e-lead-citations");
     const ref = "https://example.com/citation-evidence";
     const citation = { index: 1, kind: "url", ref, label: "Release evidence" };
-    const cases = [
-      { name: "valid", citations: [citation], count: 1 },
+    const pr = "https://github.com/desplega-ai/agent-swarm/pull/1595";
+    const background = { index: 2, kind: "url", ref, label: "Background", general: true };
+    const cases: {
+      name: string;
+      citations: Record<string, unknown>[];
+      count: number;
+      /** Rendered fragments the outcome must contain. */
+      expected?: string[];
+      /** The first completion is refused because citation 2 is unreferenced. */
+      refusedFirst?: boolean;
+    }[] = [
+      {
+        name: "valid",
+        citations: [citation],
+        count: 1,
+        expected: [`<${ref}|[1]>`, `Sources: <${ref}|[1]> Release evidence`],
+      },
       { name: "invalid", citations: [{ ...citation, index: 0 }], count: 0 },
       {
         name: "oversized",
         citations: Array.from({ length: 51 }, (_, index) => ({ ...citation, index: index + 1 })),
         count: 0,
+      },
+      {
+        name: "github-url",
+        citations: [{ index: 1, kind: "github", ref: pr, label: "Catalog install" }],
+        count: 1,
+        expected: [`<${pr}|[1]>`, `Sources: <${pr}|[1]> Catalog install`],
+      },
+      {
+        name: "general",
+        citations: [citation, background],
+        count: 2,
+        expected: [
+          `Sources: <${ref}|[1]> Release evidence`,
+          `General sources: <${ref}|[2]> Background`,
+        ],
+      },
+      {
+        name: "refused",
+        citations: [citation, { ...background, general: undefined }],
+        count: 2,
+        refusedFirst: true,
+        expected: [
+          `Sources: <${ref}|[1]> Release evidence`,
+          `General sources: <${ref}|[2]> Background`,
+        ],
       },
     ];
 
@@ -48,12 +88,21 @@ export const slackTaskOutputCitations: Scenario = {
       const output = `${summary} [citation:1]`;
       const mcp = await ctx.connectMcp(leadId);
       try {
-        const result = await mcp.callTool("store-progress", {
-          taskId,
-          status: "completed",
-          output,
-          citations: testCase.citations,
-        });
+        const completion = { taskId, status: "completed", output, citations: testCase.citations };
+        if (testCase.refusedFirst) {
+          const refused = await mcp.callTool("store-progress", completion);
+          expect(
+            refused.isError === true &&
+              JSON.stringify(refused).includes("Citation 2 is not referenced in the output"),
+            `store-progress ${testCase.name} was not refused: ${JSON.stringify(refused)}`,
+          );
+          const pending = await ctx.api("GET", `/api/tasks/${taskId}`);
+          expect(
+            asRecord(pending.json).status === "in_progress",
+            `${testCase.name} task left in_progress after the refusal`,
+          );
+        }
+        const result = await mcp.callTool("store-progress", completion);
         expect(!result.isError, `store-progress ${testCase.name}: ${JSON.stringify(result)}`);
       } finally {
         await mcp.close();
@@ -85,12 +134,13 @@ export const slackTaskOutputCitations: Scenario = {
         ctx.slack.messages("general").find((entry) => entry.ts === outcome.ts),
       );
       expect(!rendered.includes("[citation:1]"), "Outcome leaked a raw citation marker");
-      if (testCase.count > 0) {
-        expect(rendered.includes(`<${ref}|[1]>`), "Outcome omitted the linked citation marker");
-        expect(
-          rendered.includes(`Sources: <${ref}|[1]> Release evidence`),
-          "Outcome omitted the labeled source list",
-        );
+      if (testCase.expected) {
+        for (const fragment of testCase.expected) {
+          expect(
+            rendered.includes(fragment),
+            `${testCase.name} outcome omitted ${fragment}: ${rendered}`,
+          );
+        }
       } else {
         expect(!rendered.includes("[1]"), "Ignored citation must not leave a numeric marker");
         expect(!rendered.includes("Sources:"), "Ignored batch rendered a source list");

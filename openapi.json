@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "1.154.0",
+    "version": "1.155.0",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -4150,6 +4150,7 @@
               "task_authorization_rejected",
               "task_recovery_authorization",
               "task_released",
+              "task_citation_check_refused",
               "channel_message",
               "service_registered",
               "service_unregistered",
@@ -15140,6 +15141,20 @@
             "required": false,
             "name": "scopeId",
             "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "fable",
+                "opus",
+                "sonnet",
+                "haiku"
+              ]
+            },
+            "required": false,
+            "name": "model",
+            "in": "query"
           }
         ],
         "responses": {
@@ -15164,6 +15179,18 @@
                     },
                     "totalKeys": {
                       "type": "integer"
+                    },
+                    "modelBlockedIndices": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer"
+                      }
+                    },
+                    "earliestModelResetAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     }
                   },
                   "required": [
@@ -15342,6 +15369,36 @@
                               ]
                             }
                           },
+                          "modelLimits": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "model": {
+                                  "type": "string"
+                                },
+                                "window": {
+                                  "type": "string"
+                                },
+                                "resetsAt": {
+                                  "type": "number"
+                                },
+                                "resetsAtIso": {
+                                  "type": "string"
+                                },
+                                "active": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "model",
+                                "window",
+                                "resetsAt",
+                                "resetsAtIso",
+                                "active"
+                              ]
+                            }
+                          },
                           "createdAt": {
                             "type": "string"
                           },
@@ -15365,6 +15422,7 @@
                           "name",
                           "provider",
                           "rateLimitWindows",
+                          "modelLimits",
                           "createdAt",
                           "updatedAt"
                         ]
@@ -38899,6 +38957,9 @@
                                       "null"
                                     ]
                                   },
+                                  "general": {
+                                    "type": "boolean"
+                                  },
                                   "resolvedUrl": {
                                     "type": [
                                       "string",
@@ -38992,6 +39053,9 @@
                                         "string",
                                         "null"
                                       ]
+                                    },
+                                    "general": {
+                                      "type": "boolean"
                                     },
                                     "resolvedUrl": {
                                       "type": [
@@ -44896,6 +44960,9 @@
                                   "string",
                                   "null"
                                 ]
+                              },
+                              "general": {
+                                "type": "boolean"
                               },
                               "resolvedUrl": {
                                 "type": [

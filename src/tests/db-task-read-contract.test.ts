@@ -43,6 +43,7 @@ type:AppVersion
 type:ApprovalRequest
 type:AssetSummaryFilters
 type:AttributionByPersonRow
+type:AvailableKeyIndicesResult
 type:CascadeFailResult
 type:ChannelActivityCursor
 type:ConcurrentContext

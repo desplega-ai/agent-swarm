@@ -233,13 +233,18 @@ RUN mkdir -p /home/worker/.wts \
 RUN mkdir -p /home/worker/.claude/commands /home/worker/.claude/agents \
     && echo '{"hasCompletedOnboarding":true,"bypassPermissionsModeAccepted":true}' > /home/worker/.claude.json \
     && echo '{ \
-  "permissions": { "allow": ["mcp__agent-swarm__*", "mcp__context-mode__*"], "deny": ["AskUserQuestion", "NotebookEdit", "EnterPlanMode", "ExitPlanMode", "Artifact", "Workflow", "ReportFindings"] }, \
+  "permissions": { "allow": ["mcp__agent-swarm__*", "mcp__context-mode__*"], "deny": ["AskUserQuestion", "NotebookEdit", "EnterPlanMode", "ExitPlanMode", "Artifact", "Workflow", "ReportFindings", "ScheduleWakeup"] }, \
   "outputStyle": "Concise", \
+  "attribution": { "commit": "", "pr": "", "sessionUrl": false }, \
+  "autoMemoryEnabled": false, \
+  "enableArtifact": false, \
+  "pluginConfigs": { "agents-md@builtin": { "options": { "instructionFiles": "claude-md-or-agents-md" } } }, \
   "disableBundledSkills": true, \
   "disableRemoteControl": true, \
   "disableClaudeAiConnectors": true, \
   "enableAllProjectMcpServers": true, \
   "enabledMcpjsonServers": ["agent-swarm", "context-mode"], \
+  "env": { "DISABLE_ERROR_REPORTING": "1" }, \
   "hooks": { \
     "SessionStart": [{"matcher": "*", "hooks": [{"type": "command", "command": "/usr/local/bin/agent-swarm hook"}]}], \
     "UserPromptSubmit": [{"matcher": "*", "hooks": [{"type": "command", "command": "/usr/local/bin/agent-swarm hook"}]}], \

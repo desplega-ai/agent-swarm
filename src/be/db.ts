@@ -133,6 +133,7 @@ import {
   checkIdentityFieldBudget,
   IdentityFieldBudgetError,
 } from "../utils/identity-field-budget";
+import { activeModelBlock, type ModelFamily } from "../utils/model-rate-limit-windows";
 import { getCurrentRequestUserId } from "../utils/request-auth-context";
 import { registerVolatileSecret, scrubSecrets } from "../utils/secret-scrubber";
 import { auditAssetKeys } from "./asset-key-audit";
@@ -11159,17 +11160,32 @@ function rowToApiKeyStatus(row: ApiKeyStatusRow): ApiKeyStatus {
   return { ...row, rateLimitWindows: parseRateLimitWindowsJson(row.rateLimitWindows) };
 }
 
+export interface AvailableKeyIndicesResult {
+  availableIndices: number[];
+  /** Indices excluded only by an active model-scoped window block (not key-wide). */
+  modelBlockedIndices: number[];
+  /** ISO of the earliest resetsAt among modelBlockedIndices, or null when none. */
+  earliestModelResetAt: string | null;
+}
+
 /**
  * Get available (non-rate-limited) key indices for a credential type.
  * Automatically clears expired rate limits before returning.
+ *
+ * When `modelFamily` has a weekly window (fable/opus/sonnet), a key whose
+ * `rateLimitWindows` carries an active rejected window for that family is
+ * excluded from `availableIndices` and reported in `modelBlockedIndices`
+ * instead — the key itself stays `available` for every other model.
  */
 export async function getAvailableKeyIndices(
   keyType: string,
   totalKeys: number,
   scope = "global",
   scopeId: string | null = null,
-): Promise<number[]> {
+  modelFamily?: ModelFamily,
+): Promise<AvailableKeyIndicesResult> {
   const now = new Date().toISOString();
+  const nowMs = Date.now();
   const client = getDbClient();
   const effectiveScopeId = scopeId ?? "";
 
@@ -11182,20 +11198,56 @@ export async function getAvailableKeyIndices(
     [now, keyType, scope, effectiveScopeId, now],
   );
 
-  // Get currently rate-limited key indices
-  const rateLimited = await client.query<{ keyIndex: number }>(
-    `SELECT keyIndex FROM api_key_status
-       WHERE keyType = ? AND scope = ? AND scopeId = ?
-         AND status = 'rate_limited'`,
+  const rows = await client.query<{
+    keyIndex: number;
+    status: string;
+    rateLimitWindows: string | null;
+  }>(
+    `SELECT keyIndex, status, rateLimitWindows FROM api_key_status
+       WHERE keyType = ? AND scope = ? AND scopeId = ?`,
     [keyType, scope, effectiveScopeId],
   );
 
-  const blockedIndices = new Set(rateLimited.map((r) => r.keyIndex));
-  const available: number[] = [];
-  for (let i = 0; i < totalKeys; i++) {
-    if (!blockedIndices.has(i)) available.push(i);
+  const blockedIndices = new Set(
+    rows.filter((r) => r.status === "rate_limited").map((r) => r.keyIndex),
+  );
+
+  const modelBlockedIndices: number[] = [];
+  let earliestModelResetsAtSec: number | undefined;
+  if (modelFamily) {
+    for (const row of rows) {
+      // A key already blocked key-wide doesn't need a separate model-block
+      // entry — it's excluded from availableIndices either way, and
+      // modelBlockedIndices means "excluded only by a model-scoped block".
+      if (blockedIndices.has(row.keyIndex)) continue;
+      const block = activeModelBlock(
+        parseRateLimitWindowsJson(row.rateLimitWindows),
+        modelFamily,
+        nowMs,
+      );
+      if (!block) continue;
+      modelBlockedIndices.push(row.keyIndex);
+      if (earliestModelResetsAtSec === undefined || block.resetsAt < earliestModelResetsAtSec) {
+        earliestModelResetsAtSec = block.resetsAt;
+      }
+    }
   }
-  return available;
+  const modelBlockedSet = new Set(modelBlockedIndices);
+
+  const availableIndices: number[] = [];
+  for (let i = 0; i < totalKeys; i++) {
+    if (blockedIndices.has(i) || modelBlockedSet.has(i)) continue;
+    availableIndices.push(i);
+  }
+
+  return {
+    availableIndices,
+    modelBlockedIndices,
+    earliestModelResetAt:
+      earliestModelResetsAtSec !== undefined
+        ? new Date(earliestModelResetsAtSec * 1000).toISOString()
+        : null,
+  };
 }
 
 /**
@@ -11268,6 +11320,41 @@ export async function markKeyRateLimited(
   );
 }
 
+/**
+ * Merges reported window snapshots into the stored ones, one window type at a
+ * time. A reported entry replaces the stored entry unless the stored entry was
+ * observed strictly later (`lastSeenAt`), so an older `allowed` snapshot that
+ * arrives after a terminal rejection cannot reopen an exhausted window. An
+ * unparseable `lastSeenAt` on either side falls back to "reported wins".
+ */
+function mergeRateLimitWindowTelemetry(
+  stored: RateLimitWindowTelemetry,
+  reported: RateLimitWindowTelemetry,
+): RateLimitWindowTelemetry {
+  const merged: RateLimitWindowTelemetry = { ...stored };
+  for (const [type, entry] of Object.entries(reported)) {
+    const current = merged[type];
+    const currentSeenMs = current ? Date.parse(current.lastSeenAt) : Number.NaN;
+    const reportedSeenMs = Date.parse(entry.lastSeenAt);
+    if (
+      Number.isFinite(currentSeenMs) &&
+      Number.isFinite(reportedSeenMs) &&
+      currentSeenMs > reportedSeenMs
+    ) {
+      continue;
+    }
+    merged[type] = entry;
+  }
+  return merged;
+}
+
+/**
+ * Persists reported window snapshots for a key. Admission
+ * (`getAvailableKeyIndices`) reads these windows, so the read-merge-write
+ * runs in one `BEGIN IMMEDIATE` transaction: two concurrent reports for the
+ * same key (e.g. a Fable and an Opus rejection) both survive instead of the
+ * later write dropping the earlier one.
+ */
 export async function recordKeyRateLimitWindows(
   keyType: string,
   keySuffix: string,
@@ -11281,28 +11368,28 @@ export async function recordKeyRateLimitWindows(
   const now = new Date().toISOString();
   const effectiveScopeId = scopeId ?? "";
   const provider = deriveProviderFromKeyType(keyType);
-  const client = getDbClient();
-  const existing = await client.get<{ rateLimitWindows: string | null }>(
-    `SELECT rateLimitWindows FROM api_key_status
-       WHERE keyType = ? AND keySuffix = ? AND scope = ? AND scopeId = ?`,
-    [keyType, keySuffix, scope, effectiveScopeId],
-  );
-  const serialized = JSON.stringify({
-    ...parseRateLimitWindowsJson(existing?.rateLimitWindows),
-    ...windows,
-  });
+  await getDbClient().transaction(async (tx) => {
+    const existing = await tx.get<{ rateLimitWindows: string | null }>(
+      `SELECT rateLimitWindows FROM api_key_status
+         WHERE keyType = ? AND keySuffix = ? AND scope = ? AND scopeId = ?`,
+      [keyType, keySuffix, scope, effectiveScopeId],
+    );
+    const serialized = JSON.stringify(
+      mergeRateLimitWindowTelemetry(parseRateLimitWindowsJson(existing?.rateLimitWindows), windows),
+    );
 
-  await client.run(
-    `INSERT INTO api_key_status (keyType, keySuffix, keyIndex, scope, scopeId, rateLimitWindows, provider, updatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(keyType, keySuffix, scope, scopeId)
-       DO UPDATE SET
-         rateLimitWindows = excluded.rateLimitWindows,
-         keyIndex = excluded.keyIndex,
-         provider = excluded.provider,
-         updatedAt = excluded.updatedAt`,
-    [keyType, keySuffix, keyIndex, scope, effectiveScopeId, serialized, provider, now],
-  );
+    await tx.run(
+      `INSERT INTO api_key_status (keyType, keySuffix, keyIndex, scope, scopeId, rateLimitWindows, provider, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(keyType, keySuffix, scope, scopeId)
+         DO UPDATE SET
+           rateLimitWindows = excluded.rateLimitWindows,
+           keyIndex = excluded.keyIndex,
+           provider = excluded.provider,
+           updatedAt = excluded.updatedAt`,
+      [keyType, keySuffix, keyIndex, scope, effectiveScopeId, serialized, provider, now],
+    );
+  });
 }
 
 /**

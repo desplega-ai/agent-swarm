@@ -51,6 +51,7 @@ export interface CostData {
 
 import type { ProviderName, SteerMode } from "../types";
 import type { RateLimitWindowTelemetry } from "../utils/error-tracker";
+import type { ModelFamily } from "../utils/model-rate-limit-windows";
 import type { ReasoningEffort } from "./reasoning-effort";
 
 /** Normalized event emitted by any provider adapter. */
@@ -184,7 +185,8 @@ export interface ProviderResult {
    * `rate_limit_event` line in the Claude CLI stream. Only set by the Claude
    * adapter when a `status: "rejected"` event is present. Already clamped to
    * [now+60s, now+7d] at the source. The runner uses this as tier-1 of the
-   * three-tier cooldown resolver.
+   * three-tier cooldown resolver. A model-scoped rejection (Fable/Opus/Sonnet
+   * weekly window) never sets this field — see `modelRateLimit` below.
    */
   rateLimitResetAt?: string;
   /**
@@ -193,6 +195,14 @@ export interface ProviderResult {
    * Best-effort and informational; consumers must tolerate it being absent.
    */
   rateLimitWindows?: RateLimitWindowTelemetry;
+  /**
+   * A rejected model-scoped weekly window (`seven_day_opus`, `seven_day_sonnet`,
+   * `seven_day_overage_included` — the Fable window) observed in this session.
+   * Set instead of `rateLimitResetAt`: a model-scoped rejection blocks only that
+   * model family on this key, not the whole key. `observedAt` is when the
+   * rejection event arrived; it orders the report against other workers'.
+   */
+  modelRateLimit?: { window: string; model: ModelFamily; resetAt: string; observedAt?: string };
   /**
    * Reasoning/effort level the adapter actually applied (Phase 4). `null`
    * means `applyReasoningEffort()` returned `noop` (capability rejected the
