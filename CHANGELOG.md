@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.155.1] - 2026-09-25
+
+### Added
+- First-run onboarding at `/setup` for new installs: connect, swarm identity and theme, AI providers with worker-verified keys and Codex device login, a per-agent model level (Cheap, Optimal, Max), memory embeddings, integrations, and a first task. `GET/PUT /api/onboarding` stores progress in an internal config row and sends onboarding telemetry. Existing installs are marked done on first read and never see it; older APIs keep today's dashboard (#1604).
+- Approval-request pages redesigned: answers read as words, keyboard shortcuts for the whole answer and submit flow, and a mobile layout (#1604).
+
+### Changed
+- Memory embedding calls request `encoding_format: "float"`, so gateways that answer with floats decode correctly (#1604).
+
+### Fixed
+- Slack no longer shows when a deferred task wakes up (#1615).
+
 ## [1.155.0] - 2026-09-25
 
 ### Added

@@ -1,7 +1,18 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  spyOn,
+  test,
+} from "bun:test";
 import { unlink } from "node:fs/promises";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
+  abandonSlackOutcomeDelivery,
   cancelTask,
   closeDb,
   completeTask,
@@ -26,6 +37,7 @@ import {
   insertTaskAttachment,
   isPendingSlackMessage,
   markTaskSlackReplySent,
+  noteSlackOutcomeDeliveryFailure,
   startTask,
   supersedeTask,
   upsertSwarmConfig,
@@ -34,14 +46,17 @@ import { upsertTaskCitations } from "../be/task-citations";
 import { createStandaloneScheduleTask } from "../scheduler/schedule-task";
 import { getTaskLink, MAX_SECTION_LENGTH } from "../slack/blocks";
 import {
+  _noteOutcomeDeliveryFailureForTests,
   _resetSlackRenderV2ForTests,
   callSlackWithRetry,
   childOutcomeContent,
   ensureSlackThreadTree,
   formatV2Duration,
   isSlackRenderV2Enabled,
+  isTerminalSlackError,
   processSlackRenderV2,
   renderThreadTree,
+  slackErrorSummary,
   streamOutcomeCard,
   withStatusLead,
 } from "../slack/render-v2";
@@ -64,6 +79,14 @@ let startStreamFailuresRemaining = 0;
 // A `chat.update` that answers with a Slack verdict other than 404 — the
 // permanent, non-retryable class (`cant_update_message`, `channel_not_found`).
 let rejectedUpdateTs: string | undefined;
+let rejectedUpdateCode = "cant_update_message";
+let rejectedUpdateMessages: string[] = [];
+// A `chat.stopStream` that answers with a Slack API verdict (e.g. the
+// documented `rate_limited` spelling), distinct from `stopCallsUntilFailure`'s
+// bare, uncoded failure.
+let rejectedStopTs: string | undefined;
+let rejectedStopCode = "rate_limited";
+let postMessageErrorCode: string | undefined;
 let disableRenderAfterMethod: string | undefined;
 
 type RemoteMessage = {
@@ -151,6 +174,12 @@ const mockApiCall = mock(async (method: string, payload: Record<string, unknown>
     };
   }
   if (method === "chat.postMessage") {
+    if (
+      postMessageErrorCode &&
+      (payload.blocks as { type?: string }[] | undefined)?.[0]?.type === "markdown"
+    ) {
+      throw { data: { error: postMessageErrorCode } };
+    }
     const ts = `tree.${++treeCounter}`;
     remoteMessages.set(remoteKey(String(payload.channel), ts), {
       channel: String(payload.channel),
@@ -193,6 +222,7 @@ const mockApiCall = mock(async (method: string, payload: Record<string, unknown>
       }
       stopCallsUntilFailure--;
     }
+    if (rejectedStopTs === payload.ts) throw { data: { error: rejectedStopCode } };
     const message = remoteMessages.get(remoteKey(String(payload.channel), String(payload.ts)));
     if (!message) throw { data: { error: "message_not_found" } };
     if (!message.streaming) throw { data: { error: "message_not_in_streaming_state" } };
@@ -221,9 +251,16 @@ const mockApiCall = mock(async (method: string, payload: Record<string, unknown>
       throw new Error("temporary update failure");
     }
     if (missingMessageTs === payload.ts) throw { data: { error: "message_not_found" } };
-    if (rejectedUpdateTs === payload.ts) throw { data: { error: "cant_update_message" } };
+    if (rejectedUpdateTs === payload.ts)
+      throw {
+        data: {
+          error: rejectedUpdateCode,
+          response_metadata: { messages: rejectedUpdateMessages },
+        },
+      };
     const message = remoteMessages.get(remoteKey(String(payload.channel), String(payload.ts)));
     if (!message) throw { data: { error: "message_not_found" } };
+    if (message.streaming) throw { data: { error: "streaming_state_conflict" } };
     const barrier = nextUpdateBarrier;
     if (barrier) {
       nextUpdateBarrier = undefined;
@@ -282,6 +319,11 @@ beforeEach(async () => {
   missingMessageTs = undefined;
   updateFailuresRemaining = 0;
   rejectedUpdateTs = undefined;
+  rejectedUpdateCode = "cant_update_message";
+  rejectedUpdateMessages = [];
+  rejectedStopTs = undefined;
+  rejectedStopCode = "rate_limited";
+  postMessageErrorCode = undefined;
   disableRenderAfterMethod = undefined;
   nextUpdateBarrier = undefined;
   _resetSlackRenderV2ForTests();
@@ -291,6 +333,42 @@ afterAll(async () => {
   _resetSlackRenderV2ForTests();
   closeDb();
   await removeDbFiles();
+});
+
+describe("Slack error classification", () => {
+  test.each([
+    "msg_too_long",
+    "streaming_state_conflict",
+    "message_not_found",
+    "channel_not_found",
+    "cant_update_message",
+    "user_not_found",
+  ])("%s is terminal", (code) => {
+    expect(isTerminalSlackError({ data: { error: code } })).toBe(true);
+  });
+
+  test.each([
+    "ratelimited",
+    "rate_limited",
+    "internal_error",
+    "service_unavailable",
+    "fatal_error",
+    "request_timeout",
+  ])("%s is transient", (code) => {
+    expect(isTerminalSlackError({ data: { error: code } })).toBe(false);
+  });
+
+  test("an error with no Slack code is transient", () => {
+    expect(isTerminalSlackError(new Error("socket hang up"))).toBe(false);
+  });
+
+  test("slackErrorSummary joins the code and response messages", () => {
+    expect(
+      slackErrorSummary({
+        data: { error: "msg_too_long", response_metadata: { messages: ["[ERROR] text too long"] } },
+      }),
+    ).toBe("msg_too_long: [ERROR] text too long");
+  });
 });
 
 describe("Slack renderer v2", () => {
@@ -2597,6 +2675,401 @@ describe("Slack renderer v2", () => {
       "PRIVATE OUTPUT",
     );
     expect((await getSlackOutcomeMessage(ask.id))?.finalizedAt).toBeDefined();
+    expect(
+      calls
+        .filter((c) => c.payload.ts === interrupted!.ts || c.payload.message_ts === interrupted!.ts)
+        .map((c) => c.method),
+    ).toEqual(["chat.stopStream", "chat.update", "chat.getPermalink"]);
+  });
+
+  test("an outcome stream with empty text left open by an earlier process is stopped, then filled", async () => {
+    const lead = await createAgent({ name: "Empty Stream Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_RENDER_EMPTY_STREAM");
+    const ask = await createTaskExtended("ask whose stream was left open and empty", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    await startTask(ask.id);
+    await ensureSlackThreadTree([ask.id]);
+    await completeTask(ask.id, "The answer.");
+    calls.length = 0;
+    _resetSlackRenderV2ForTests();
+    stopCallsUntilFailure = 0;
+
+    await processSlackRenderV2();
+
+    const interrupted = await getSlackOutcomeMessage(ask.id);
+    remoteMessages.get(remoteKey(channelId, interrupted!.ts))!.text = "";
+    calls.length = 0;
+    _resetSlackRenderV2ForTests();
+
+    await processSlackRenderV2();
+
+    const remote = remoteMessages.get(remoteKey(channelId, interrupted!.ts));
+    expect(remote?.streaming).toBe(false);
+    expect(remote?.text).toBe("✅ The answer.");
+    expect((await getSlackOutcomeMessage(ask.id))?.finalizedAt).toBeDefined();
+  });
+});
+
+describe("Outcome delivery give-up", () => {
+  /** A completed ask whose stream was started, then orphaned before chat.stopStream. */
+  async function orphanedOutcomeStream(label: string) {
+    const lead = await createAgent({ name: `${label} Lead`, isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress(label);
+    const ask = await createTaskExtended("answer", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    await startTask(ask.id);
+    await ensureSlackThreadTree([ask.id]);
+    await completeTask(ask.id, "The answer.");
+    stopCallsUntilFailure = 0;
+    await processSlackRenderV2();
+    const card = (await getSlackOutcomeMessage(ask.id))!;
+    calls.length = 0;
+    _resetSlackRenderV2ForTests();
+    return { askId: ask.id, channelId, threadTs, ts: card.ts };
+  }
+
+  test.each([
+    "msg_too_long",
+    "streaming_state_conflict",
+  ])("a %s verdict on the outcome card ends delivery on the first attempt", async (code) => {
+    const { askId, ts } = await orphanedOutcomeStream(`C_GIVEUP_${code}`);
+    rejectedUpdateTs = ts;
+    rejectedUpdateCode = code;
+
+    await processSlackRenderV2();
+
+    expect(calls.filter((c) => c.method === "chat.update" && c.payload.ts === ts)).toHaveLength(1);
+    const card = await getSlackOutcomeMessage(askId);
+    expect(card?.deliveryAbandonedAt).toBeDefined();
+    // orphanedOutcomeStream's own setup tick already burns 1 attempt (the
+    // injected chat.stopStream failure it uses to leave the stream open),
+    // so the terminal verdict below lands on attempt 2, not attempt 1.
+    expect(card?.deliveryAttempts).toBe(2);
+    expect(card?.deliveryLastError?.startsWith(code)).toBe(true);
+    const warnings = calls.filter(
+      (c) =>
+        c.method === "chat.postMessage" &&
+        String(c.payload.text ?? "").startsWith(
+          `⚠️ Couldn't deliver this task's reply after 2 attempt(s) (${code}`,
+        ),
+    );
+    expect(warnings).toHaveLength(1);
+
+    _resetSlackRenderV2ForTests();
+    await processSlackRenderV2();
+    await processSlackRenderV2();
+
+    expect(calls.filter((c) => c.method === "chat.update" && c.payload.ts === ts)).toHaveLength(1);
+    expect(
+      calls.filter(
+        (c) => c.method === "chat.postMessage" && String(c.payload.text ?? "").startsWith("⚠️"),
+      ),
+    ).toHaveLength(1);
+  });
+
+  test("a rate_limited verdict on chat.stopStream stays retryable and succeeds once the limit clears", async () => {
+    const { askId, ts } = await orphanedOutcomeStream("C_GIVEUP_RATE_LIMITED");
+    rejectedStopTs = ts;
+
+    await processSlackRenderV2();
+
+    // orphanedOutcomeStream's own setup tick already burns 1 attempt, so the
+    // rate_limited verdict lands on attempt 2 — and, being transient, must
+    // not abandon delivery there.
+    let card = await getSlackOutcomeMessage(askId);
+    expect(card?.deliveryAbandonedAt).toBeUndefined();
+    expect(card?.deliveryAttempts).toBe(2);
+    expect(card?.deliveryLastError?.startsWith("rate_limited")).toBe(true);
+    expect(
+      calls.some(
+        (c) => c.method === "chat.postMessage" && String(c.payload.text ?? "").startsWith("⚠️"),
+      ),
+    ).toBe(false);
+
+    // The rate limit clears; the next attempt succeeds and finalizes the card.
+    rejectedStopTs = undefined;
+    _resetSlackRenderV2ForTests();
+    await processSlackRenderV2();
+
+    card = await getSlackOutcomeMessage(askId);
+    expect(card?.deliveryAbandonedAt).toBeUndefined();
+    expect(card?.finalizedAt).toBeDefined();
+    expect(calls.filter((c) => c.method === "chat.update" && c.payload.ts === ts)).toHaveLength(1);
+  });
+
+  test("an unclassifiable outcome failure is retried across restarts, bounded by the persisted count", async () => {
+    // orphanedOutcomeStream's own setup tick already burns 1 attempt, so 3
+    // more (not 4) reach attempt 4, and a 4th (not 5th) reaches the ceiling.
+    const { askId } = await orphanedOutcomeStream("C_GIVEUP_PERSIST");
+    updateFailuresRemaining = 100;
+
+    for (let tick = 1; tick <= 3; tick++) {
+      _resetSlackRenderV2ForTests();
+      await processSlackRenderV2();
+    }
+    let card = await getSlackOutcomeMessage(askId);
+    expect(card?.deliveryAttempts).toBe(4);
+    expect(card?.deliveryAbandonedAt).toBeUndefined();
+    expect(calls.filter((c) => c.method === "chat.postMessage")).toHaveLength(0);
+
+    _resetSlackRenderV2ForTests();
+    await processSlackRenderV2();
+    card = await getSlackOutcomeMessage(askId);
+    expect(card?.deliveryAttempts).toBe(5);
+    expect(card?.deliveryAbandonedAt).toBeDefined();
+    const warnings = calls.filter(
+      (c) =>
+        c.method === "chat.postMessage" &&
+        String(c.payload.text ?? "").includes("after 5 attempt(s)"),
+    );
+    expect(warnings).toHaveLength(1);
+
+    const cardTs = card?.ts;
+    calls.length = 0;
+    _resetSlackRenderV2ForTests();
+    await processSlackRenderV2();
+    await processSlackRenderV2();
+    // Scoped to the abandoned card's own ts: the tree message keeps updating
+    // independently and is not part of this card's delivery gate.
+    expect(calls.some((c) => c.method === "chat.update" && c.payload.ts === cardTs)).toBe(false);
+    expect(calls.some((c) => c.method === "chat.startStream")).toBe(false);
+    expect(
+      calls.some(
+        (c) => c.method === "chat.postMessage" && String(c.payload.text ?? "").startsWith("⚠️"),
+      ),
+    ).toBe(false);
+  });
+
+  test("the give-up transition is claimed by exactly one caller", async () => {
+    const { askId } = await orphanedOutcomeStream("C_GIVEUP_ONCE");
+    const first = await abandonSlackOutcomeDelivery(askId, "x");
+    const second = await abandonSlackOutcomeDelivery(askId, "x");
+    expect(first?.deliveryAbandonedAt).toBeDefined();
+    expect(second).toBeNull();
+  });
+
+  test("a delivery that fails before any stream exists still persists its give-up", async () => {
+    const lead = await createAgent({ name: "No Row Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_GIVEUP_NO_ROW");
+    const ask = await createTaskExtended("answer", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    await startTask(ask.id);
+    await ensureSlackThreadTree([ask.id]);
+    await completeTask(ask.id, "The answer.");
+    calls.length = 0;
+    startStreamFailuresRemaining = 1;
+    postMessageErrorCode = "channel_not_found";
+
+    await processSlackRenderV2();
+
+    const card = await getSlackOutcomeMessage(ask.id);
+    expect(card?.ts.startsWith("pending:")).toBe(true);
+    expect(card?.deliveryAbandonedAt).toBeDefined();
+    expect(
+      calls.filter(
+        (c) => c.method === "chat.postMessage" && String(c.payload.text ?? "").startsWith("⚠️"),
+      ),
+    ).toHaveLength(1);
+
+    calls.length = 0;
+    _resetSlackRenderV2ForTests();
+    await processSlackRenderV2();
+    expect(calls.some((c) => c.method === "chat.startStream")).toBe(false);
+  });
+
+  test("a delivery failure logs Slack's code and response messages, scrubbed", async () => {
+    const { ts } = await orphanedOutcomeStream("C_GIVEUP_LOG");
+    rejectedUpdateTs = ts;
+    rejectedUpdateCode = "msg_too_long";
+    rejectedUpdateMessages = ["[ERROR] text too long", "token xoxb-1234567890-abcdefghij"];
+    const logged = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await processSlackRenderV2();
+      const joined = logged.mock.calls.map((call) => call.map(String).join(" ")).join("\n");
+      expect(joined).toContain(`"code":"msg_too_long"`);
+      expect(joined).toContain("text too long");
+      expect(joined).not.toContain("xoxb-1234567890");
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  test("a non-terminal failure waits before the next attempt", async () => {
+    const { ts } = await orphanedOutcomeStream("C_GIVEUP_BACKOFF");
+    updateFailuresRemaining = 100;
+
+    await processSlackRenderV2();
+    await processSlackRenderV2();
+
+    expect(calls.filter((c) => c.method === "chat.update" && c.payload.ts === ts)).toHaveLength(1);
+  });
+
+  test("recovers a card crashed between the attempts ceiling and the abandon transition", async () => {
+    const { askId } = await orphanedOutcomeStream("C_GIVEUP_STUCK");
+    // Simulate a crash: delivery_attempts reached the ceiling via
+    // noteSlackOutcomeDeliveryFailure, but abandonSlackOutcomeDelivery never
+    // ran, leaving delivery_abandoned_at NULL. Without the fix,
+    // outcomeDeliveryGate's attempts check would block this card forever.
+    for (let i = 0; i < 4; i++) {
+      await noteSlackOutcomeDeliveryFailure(askId, "boom");
+    }
+    let card = await getSlackOutcomeMessage(askId);
+    expect(card?.deliveryAttempts).toBe(5);
+    expect(card?.deliveryAbandonedAt).toBeUndefined();
+
+    calls.length = 0;
+    await processSlackRenderV2();
+
+    card = await getSlackOutcomeMessage(askId);
+    expect(card?.deliveryAbandonedAt).toBeDefined();
+    expect(card?.deliveryAttempts).toBe(5);
+    expect(calls.some((c) => c.method === "chat.startStream")).toBe(false);
+    const warnings = calls.filter(
+      (c) => c.method === "chat.postMessage" && String(c.payload.text ?? "").startsWith("⚠️"),
+    );
+    expect(warnings).toHaveLength(1);
+
+    calls.length = 0;
+    await processSlackRenderV2();
+    await processSlackRenderV2();
+    expect(
+      calls.filter(
+        (c) => c.method === "chat.postMessage" && String(c.payload.text ?? "").startsWith("⚠️"),
+      ),
+    ).toHaveLength(0);
+  });
+
+  test("scrubs a secret-shaped error from the persisted give-up and its Slack warning", async () => {
+    const { askId, ts } = await orphanedOutcomeStream("C_GIVEUP_SCRUB_PERSIST");
+    rejectedUpdateTs = ts;
+    rejectedUpdateCode = "msg_too_long";
+    rejectedUpdateMessages = ["token xoxb-1234567890-abcdefghij"];
+
+    await processSlackRenderV2();
+
+    const card = await getSlackOutcomeMessage(askId);
+    expect(card?.deliveryAbandonedAt).toBeDefined();
+    expect(card?.deliveryLastError).not.toContain("xoxb-1234567890");
+    const warning = calls.find(
+      (c) => c.method === "chat.postMessage" && String(c.payload.text ?? "").startsWith("⚠️"),
+    );
+    expect(warning).toBeDefined();
+    expect(String(warning?.payload.text)).not.toContain("xoxb-1234567890");
+  });
+
+  test("a reservation from the failure path is not reconciled against an identical older message", async () => {
+    const lead = await createAgent({ name: "Recon Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_RECON");
+    const contextKey = slackContextKey({ channelId, threadTs });
+
+    // taskA posts first and settles normally; its outcome text will be
+    // identical to taskB's, since both complete with the same output.
+    const taskA = await createTaskExtended("answer", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey,
+    });
+    await startTask(taskA.id);
+    await ensureSlackThreadTree([taskA.id]);
+    await completeTask(taskA.id, "The answer.");
+    await processSlackRenderV2();
+    const cardA = await getSlackOutcomeMessage(taskA.id);
+    expect(cardA?.finalizedAt).toBeDefined();
+
+    const taskB0 = await createTaskExtended("answer", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey,
+    });
+    await startTask(taskB0.id);
+    await completeTask(taskB0.id, "The answer.");
+    const taskB = (await getTaskById(taskB0.id))!;
+
+    const tree = (await getSlackTreeMessageByThread(channelId, threadTs))!;
+    // Simulate a failure before streamOutcomeCard's own reservation (e.g. a
+    // DB read throwing while building content) — noteOutcomeDeliveryFailure
+    // eagerly reserves a row with no Slack call ever attempted.
+    await _noteOutcomeDeliveryFailureForTests(taskB, tree, new Error("content build blew up"));
+    const reservedB = await getSlackOutcomeMessage(taskB.id);
+    expect(reservedB?.ts.startsWith("pending:")).toBe(true);
+    expect(reservedB?.deliveryAttempts).toBe(1);
+
+    calls.length = 0;
+    const outcome = await streamOutcomeCard(taskB, tree);
+
+    // Without the fix, this reconciles by presentation text against taskA's
+    // identical, unrelated message instead of posting a fresh one.
+    expect(calls.some((c) => c.method === "conversations.replies")).toBe(false);
+    expect(calls.some((c) => c.method === "chat.startStream")).toBe(true);
+    expect(outcome?.finalizedAt).toBeDefined();
+    expect(outcome?.ts).not.toBe(cardA?.ts);
+  });
+
+  test("a restart-cleared reservation marker is still not reconciled against an identical older message", async () => {
+    const lead = await createAgent({ name: "Recon Restart Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_RECON_RESTART");
+    const contextKey = slackContextKey({ channelId, threadTs });
+
+    const taskA = await createTaskExtended("answer", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey,
+    });
+    await startTask(taskA.id);
+    await ensureSlackThreadTree([taskA.id]);
+    await completeTask(taskA.id, "The answer.");
+    await processSlackRenderV2();
+    const cardA = await getSlackOutcomeMessage(taskA.id);
+    expect(cardA?.finalizedAt).toBeDefined();
+
+    const taskB0 = await createTaskExtended("answer", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey,
+    });
+    await startTask(taskB0.id);
+    await completeTask(taskB0.id, "The answer.");
+    const taskB = (await getTaskById(taskB0.id))!;
+
+    const tree = (await getSlackTreeMessageByThread(channelId, threadTs))!;
+    await _noteOutcomeDeliveryFailureForTests(taskB, tree, new Error("content build blew up"));
+
+    calls.length = 0;
+    // A process restart clears the in-memory `outcomeReservedWithoutAttempt`
+    // marker, so the reconciliation search runs and finds taskA's identical
+    // message. The DB-truth ownership check must still reject binding onto
+    // it — without it, this throws `UNIQUE constraint failed:
+    // slack_messages.channel_id, slack_messages.ts` at bindSlackMessageTimestamp.
+    _resetSlackRenderV2ForTests();
+    const outcome = await streamOutcomeCard(taskB, tree);
+
+    expect(calls.some((c) => c.method === "conversations.replies")).toBe(true);
+    expect(calls.some((c) => c.method === "chat.startStream")).toBe(true);
+    expect(outcome?.finalizedAt).toBeDefined();
+    expect(outcome?.ts).not.toBe(cardA?.ts);
   });
 });
 
