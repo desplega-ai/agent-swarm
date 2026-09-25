@@ -9,10 +9,17 @@ import {
   recordKeyRateLimitWindows,
   recordKeyUsage,
   setApiKeyName,
+  setApiKeyPlan,
 } from "../be/db";
 import { MAX_RATE_LIMIT_RESET_MS, type RateLimitWindowTelemetry } from "../utils/error-tracker";
 import { activeModelBlocks, MODEL_SCOPED_WINDOWS } from "../utils/model-rate-limit-windows";
+import {
+  isSubscriptionPlanId,
+  SUBSCRIPTION_PLANS,
+  SUBSCRIPTION_PLANS_CHECKED_AT,
+} from "../utils/subscription-plans";
 import { route } from "./route-def";
+import { clearUsageCache } from "./usage-cache";
 import { jsonError } from "./utils";
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
@@ -36,6 +43,8 @@ const reportUsage = route({
     taskId: z.string().uuid().optional(),
     scope: z.string().optional(),
     scopeId: z.string().optional(),
+    /** Plan id the worker detected on the credential (`SUBSCRIPTION_PLANS`). Unknown ids are ignored. */
+    plan: z.string().max(40).optional(),
   }),
   responses: {
     200: { description: "Usage recorded", schema: successMessageSchema },
@@ -184,6 +193,9 @@ const ApiKeyStatusSchema = z.object({
   provider: z.string(),
   /** Latest provider-emitted rate-limit window snapshots, keyed by window type. */
   rateLimitWindows: z.record(z.string(), rateLimitWindowSchema),
+  /** Subscription plan id (see `GET /api/keys/plans`), when known. */
+  plan: z.string().nullable(),
+  planSource: z.enum(["manual", "detected", "estimated"]).nullable(),
   /** Derived, readable view of any rejected model-scoped window (Fable/Opus/Sonnet) on this key. */
   modelLimits: z.array(
     z.object({
@@ -345,6 +357,61 @@ const clearRateLimitRoute = route({
   auth: { apiKey: true },
 });
 
+const listPlans = route({
+  method: "get",
+  path: "/api/keys/plans",
+  pattern: ["api", "keys", "plans"],
+  summary: "List subscription plans and their monthly list prices",
+  tags: ["API Keys"],
+  responses: {
+    200: {
+      description: "Plan catalog",
+      schema: z.object({
+        checkedAt: z.string(),
+        plans: z.array(
+          z.object({
+            id: z.string(),
+            label: z.string(),
+            keyType: z.string(),
+            monthlyUsd: z.number(),
+          }),
+        ),
+      }),
+    },
+  },
+  auth: { apiKey: true },
+});
+
+const setKeyPlan = route({
+  method: "patch",
+  path: "/api/keys/plan",
+  pattern: ["api", "keys", "plan"],
+  summary: "Set or clear the subscription plan of a pooled credential",
+  tags: ["API Keys"],
+  body: z.object({
+    keyType: z.string().min(1),
+    keySuffix: z.string().min(1).max(10),
+    /** A plan id from `GET /api/keys/plans`, or null to go back to the detected plan. */
+    plan: z.string().max(40).nullable(),
+  }),
+  responses: {
+    200: {
+      description: "Plan updated",
+      schema: z.object({
+        success: z.literal(true),
+        keyType: z.string(),
+        keySuffix: z.string(),
+        plan: z.string().nullable(),
+      }),
+    },
+    400: { description: "Unknown plan, or a plan for another credential type" },
+    401: { description: "Unauthorized" },
+    404: { description: "Key not found" },
+  },
+  auth: { apiKey: true },
+  rbac: { ungated: "credential display metadata, same posture as PATCH /api/keys/name" },
+});
+
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
 export async function handleApiKeys(
@@ -358,9 +425,18 @@ export async function handleApiKeys(
     const parsed = await reportUsage.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const { keyType, keySuffix, keyIndex, taskId, scope, scopeId } = parsed.body;
+    const { keyType, keySuffix, keyIndex, taskId, scope, scopeId, plan } = parsed.body;
     try {
-      await recordKeyUsage(keyType, keySuffix, keyIndex, taskId ?? null, scope, scopeId ?? null);
+      const { planChanged } = await recordKeyUsage(
+        keyType,
+        keySuffix,
+        keyIndex,
+        taskId ?? null,
+        scope,
+        scopeId ?? null,
+        plan && isSubscriptionPlanId(plan) ? plan : null,
+      );
+      if (planChanged) clearUsageCache();
       reportUsage.respond(res, 200, { success: true, message: "Key usage recorded" });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to record usage", 500);
@@ -400,7 +476,7 @@ export async function handleApiKeys(
 
     const { keyType, keySuffix, keyIndex, windows, scope, scopeId } = parsed.body;
     try {
-      await recordKeyRateLimitWindows(
+      const { planChanged } = await recordKeyRateLimitWindows(
         keyType,
         keySuffix,
         keyIndex,
@@ -408,6 +484,7 @@ export async function handleApiKeys(
         scope,
         scopeId ?? null,
       );
+      if (planChanged) clearUsageCache();
       reportRateLimitWindows.respond(res, 200, {
         success: true,
         message: `Rate-limit windows recorded for ...${keySuffix}`,
@@ -488,6 +565,41 @@ export async function handleApiKeys(
     return true;
   }
 
+  // GET /api/keys/plans
+  if (listPlans.match(req.method, pathSegments)) {
+    const parsed = await listPlans.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    listPlans.respond(res, 200, {
+      checkedAt: SUBSCRIPTION_PLANS_CHECKED_AT,
+      plans: [...SUBSCRIPTION_PLANS],
+    });
+    return true;
+  }
+
+  // PATCH /api/keys/plan
+  if (setKeyPlan.match(req.method, pathSegments)) {
+    const parsed = await setKeyPlan.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+
+    const { keyType, keySuffix, plan } = parsed.body;
+    if (plan !== null && !SUBSCRIPTION_PLANS.some((p) => p.id === plan && p.keyType === keyType)) {
+      jsonError(res, `Plan '${plan}' does not apply to ${keyType}`, 400);
+      return true;
+    }
+    try {
+      const updated = await setApiKeyPlan(keyType, keySuffix, plan);
+      if (!updated) {
+        jsonError(res, `No key matching ${keyType} ...${keySuffix}`, 404);
+        return true;
+      }
+      clearUsageCache();
+      setKeyPlan.respond(res, 200, { success: true, keyType, keySuffix, plan });
+    } catch (err) {
+      jsonError(res, err instanceof Error ? err.message : "Failed to set key plan", 500);
+    }
+    return true;
+  }
+
   // PATCH /api/keys/name
   if (setKeyName.match(req.method, pathSegments)) {
     const parsed = await setKeyName.parse(req, res, pathSegments, queryParams);
@@ -503,6 +615,7 @@ export async function handleApiKeys(
         jsonError(res, `No key matching ${keyType} ...${keySuffix}`, 404);
         return true;
       }
+      clearUsageCache();
       setKeyName.respond(res, 200, { success: true, keyType, keySuffix, name: value });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to set key name", 500);

@@ -136,6 +136,7 @@ import {
 import { activeModelBlock, type ModelFamily } from "../utils/model-rate-limit-windows";
 import { getCurrentRequestUserId } from "../utils/request-auth-context";
 import { registerVolatileSecret, scrubSecrets } from "../utils/secret-scrubber";
+import { estimateClaudePlan, SUBSCRIPTION_KEY_TYPES } from "../utils/subscription-plans";
 import { auditAssetKeys } from "./asset-key-audit";
 import { decryptSecret, encryptSecret, getEncryptionKey } from "./crypto";
 import { normalizeDate, normalizeDateRequired } from "./date-utils";
@@ -4803,10 +4804,8 @@ export interface SessionCostSummaryTotals {
   excludedCostUsd: number;
   /** Distinct tasks behind `excludedCostUsd` — surfaced so the UI can name the exclusion count, not just wave at a percentage. */
   excludedTaskCount: number;
-  /** API-priced cost of sessions whose task ran on a Claude subscription (`CLAUDE_CODE_OAUTH_TOKEN`). */
+  /** API-priced cost of sessions whose task ran on a subscription credential (`SUBSCRIPTION_KEY_TYPES`). */
   subscriptionCostUsd: number;
-  /** Distinct subscription credentials (by key suffix) behind `subscriptionCostUsd`. */
-  subscriptionCredentialCount: number;
 }
 
 export interface SessionCostDailyRow {
@@ -4815,6 +4814,34 @@ export interface SessionCostDailyRow {
   inputTokens: number;
   outputTokens: number;
   sessions: number;
+  /** Part of `costUsd` that ran on a subscription credential. */
+  subscriptionCostUsd: number;
+}
+
+/**
+ * How a credential's plan is known, strongest first: picked on the dashboard,
+ * reported by a worker (Codex JWT), or estimated from rate-limit utilization.
+ */
+export type PlanSource = "manual" | "detected" | "estimated";
+
+/** Spend per credential, for the subscription vs API comparison. */
+export interface SessionCostByCredentialRow {
+  /** `null` when the task recorded no credential (or the session has no task). */
+  keyType: string | null;
+  keySuffix: string | null;
+  /** Label set on the API Keys page. */
+  name: string | null;
+  /** Billed as a flat subscription (`SUBSCRIPTION_KEY_TYPES`) rather than per token. */
+  subscription: boolean;
+  /** Plan id from `SUBSCRIPTION_PLANS`, or null when unknown. */
+  plan: string | null;
+  planSource: PlanSource | null;
+  costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  sessions: number;
+  firstSessionAt: string;
+  lastSessionAt: string;
 }
 
 export interface SessionCostByAgentRow {
@@ -4875,7 +4902,8 @@ const HUMAN_FREE_TASKS_CTE = `human_free_tasks(id) AS (
         WHERE child.requestedByUserId IS NULL
           OR child.requestedByUserIdInherited = 1
       )`;
-const HUMAN_FREE_SQL = "EXISTS (SELECT 1 FROM human_free_tasks WHERE id = t.id)";
+/** True on rows joined through `human_free_tasks hf` (see `getSessionCostSummary`). */
+const HUMAN_FREE_SQL = "hf.id IS NOT NULL";
 const ROOT_HUMAN_FREE_SQL = `(
         COALESCE(t.taskType, '') IN ('heartbeat', 'heartbeat-checklist', 'boot-triage')
         OR COALESCE(t.tags, '[]') LIKE '%"heartbeat"%'
@@ -4905,12 +4933,16 @@ export async function getSessionCostSummary(opts: {
   daily: SessionCostDailyRow[];
   byAgent: SessionCostByAgentRow[];
   byUser: SessionCostByUserRow[];
+  byCredential: SessionCostByCredentialRow[];
 }> {
   // `session_costs` deliberately carries no `userId` column — a task can be
   // re-attributed after the fact, so the human requester is resolved by joining
   // through the task (same shape as `getDailySpendForUser`). Every column is
   // `sc.`-qualified because `createdAt`/`agentId` exist on both sides.
   const from = "FROM session_costs sc LEFT JOIN agent_tasks t ON t.id = sc.taskId";
+  // One join marks the sessions of structurally-human-free tasks (`hf.id` set).
+  // The CTE holds each task id once, so the join never duplicates a session.
+  const fromHf = `${from} LEFT JOIN human_free_tasks hf ON hf.id = t.id`;
 
   // Structurally-human-free: the swarm maintaining itself, with no human
   // requester by construction — heartbeat/boot-triage tasks, scheduled runs
@@ -4943,6 +4975,12 @@ export async function getSessionCostSummary(opts: {
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  // Only a user filter makes the daily and per-agent breakdowns classify rows.
+  // Without one they skip the CTE, which scans every task.
+  const classify = opts.userId !== undefined;
+  const withHf = classify ? `WITH RECURSIVE ${HUMAN_FREE_TASKS_CTE}` : "";
+  const scopedFrom = classify ? fromHf : from;
+  const subscriptionSql = `t.credentialKeyType IN (${SUBSCRIPTION_KEY_TYPES.map((k) => `'${k}'`).join(", ")})`;
 
   // Totals
   type TotalsRow = {
@@ -4958,7 +4996,6 @@ export async function getSessionCostSummary(opts: {
     excludedCostUsd: number;
     excludedTaskCount: number;
     subscriptionCostUsd: number;
-    subscriptionCredentialCount: number;
   };
 
   const totalsRow = await getDbClient().get<TotalsRow>(
@@ -4978,11 +5015,9 @@ export async function getSessionCostSummary(opts: {
         COALESCE(SUM(CASE WHEN ${HUMAN_FREE_SQL}
           THEN sc.totalCostUsd ELSE 0 END), 0) as excludedCostUsd,
         COUNT(DISTINCT CASE WHEN ${HUMAN_FREE_SQL} THEN t.id END) as excludedTaskCount,
-        COALESCE(SUM(CASE WHEN t.credentialKeyType = 'CLAUDE_CODE_OAUTH_TOKEN'
-          THEN sc.totalCostUsd ELSE 0 END), 0) as subscriptionCostUsd,
-        COUNT(DISTINCT CASE WHEN t.credentialKeyType = 'CLAUDE_CODE_OAUTH_TOKEN'
-          THEN t.credentialKeySuffix END) as subscriptionCredentialCount
-      ${from} ${where}`,
+        COALESCE(SUM(CASE WHEN ${subscriptionSql}
+          THEN sc.totalCostUsd ELSE 0 END), 0) as subscriptionCostUsd
+      ${fromHf} ${where}`,
     params,
   );
 
@@ -5006,7 +5041,6 @@ export async function getSessionCostSummary(opts: {
         excludedCostUsd: 0,
         excludedTaskCount: 0,
         subscriptionCostUsd: 0,
-        subscriptionCredentialCount: 0,
       };
 
   // Daily breakdown
@@ -5019,15 +5053,18 @@ export async function getSessionCostSummary(opts: {
       inputTokens: number;
       outputTokens: number;
       sessions: number;
+      subscriptionCostUsd: number;
     }>(
-      `WITH RECURSIVE ${HUMAN_FREE_TASKS_CTE}
+      `${withHf}
         SELECT
           DATE(sc.createdAt) as date,
           COALESCE(SUM(sc.totalCostUsd), 0) as costUsd,
           COALESCE(SUM(sc.inputTokens), 0) as inputTokens,
           COALESCE(SUM(sc.outputTokens), 0) as outputTokens,
-          COUNT(*) as sessions
-        ${from} ${where}
+          COUNT(*) as sessions,
+          COALESCE(SUM(CASE WHEN ${subscriptionSql} THEN sc.totalCostUsd ELSE 0 END), 0)
+            as subscriptionCostUsd
+        ${scopedFrom} ${where}
         GROUP BY DATE(sc.createdAt)
         ORDER BY date ASC`,
       params,
@@ -5045,7 +5082,7 @@ export async function getSessionCostSummary(opts: {
       sessions: number;
       durationMs: number;
     }>(
-      `WITH RECURSIVE ${HUMAN_FREE_TASKS_CTE}
+      `${withHf}
         SELECT
           sc.agentId as agentId,
           COALESCE(SUM(sc.totalCostUsd), 0) as costUsd,
@@ -5053,7 +5090,7 @@ export async function getSessionCostSummary(opts: {
           COALESCE(SUM(sc.outputTokens), 0) as outputTokens,
           COUNT(*) as sessions,
           COALESCE(SUM(sc.durationMs), 0) as durationMs
-        ${from} ${where}
+        ${scopedFrom} ${where}
         GROUP BY sc.agentId
         ORDER BY costUsd DESC`,
       params,
@@ -5073,14 +5110,102 @@ export async function getSessionCostSummary(opts: {
           COALESCE(SUM(sc.outputTokens), 0) as outputTokens,
           COUNT(DISTINCT sc.taskId) as tasks,
           COALESCE(SUM(sc.durationMs), 0) as durationMs
-        ${from} ${where}
+        ${fromHf} ${where}
         GROUP BY CASE WHEN ${HUMAN_FREE_SQL} THEN NULL ELSE t.requestedByUserId END
         ORDER BY costUsd DESC`,
       params,
     );
   }
 
-  return { totals, daily, byAgent, byUser };
+  let byCredential: SessionCostByCredentialRow[] = [];
+  if (groupBy === "both") {
+    type CredentialRow = Omit<
+      SessionCostByCredentialRow,
+      "name" | "subscription" | "plan" | "planSource"
+    >;
+    const rows = await getDbClient().query<CredentialRow>(
+      `${withHf}
+        SELECT
+          t.credentialKeyType as keyType,
+          t.credentialKeySuffix as keySuffix,
+          COALESCE(SUM(sc.totalCostUsd), 0) as costUsd,
+          COALESCE(SUM(sc.inputTokens), 0) as inputTokens,
+          COALESCE(SUM(sc.outputTokens), 0) as outputTokens,
+          COUNT(*) as sessions,
+          MIN(sc.createdAt) as firstSessionAt,
+          MAX(sc.createdAt) as lastSessionAt
+        ${scopedFrom} ${where}
+        GROUP BY t.credentialKeyType, t.credentialKeySuffix
+        ORDER BY costUsd DESC`,
+      params,
+    );
+    const labels = await getCredentialLabels();
+    byCredential = rows.map((row) => {
+      const label =
+        row.keyType && row.keySuffix
+          ? labels.get(credentialKey(row.keyType, row.keySuffix))
+          : undefined;
+      return {
+        ...row,
+        name: label?.name ?? null,
+        subscription: row.keyType !== null && SUBSCRIPTION_KEY_TYPES.includes(row.keyType),
+        plan: label?.plan ?? null,
+        planSource: label?.planSource ?? null,
+      };
+    });
+  }
+
+  return { totals, daily, byAgent, byUser, byCredential };
+}
+
+function credentialKey(keyType: string, keySuffix: string): string {
+  return `${keyType}:${keySuffix}`;
+}
+
+/**
+ * Name and plan per credential (keyType + keySuffix), merged over its scope
+ * rows. A manual plan wins over a detected one.
+ */
+async function getCredentialLabels(): Promise<
+  Map<string, { name: string | null; plan: string | null; planSource: PlanSource | null }>
+> {
+  const rows = await getDbClient().query<{
+    keyType: string;
+    keySuffix: string;
+    name: string | null;
+    plan: string | null;
+    planSource: PlanSource | null;
+  }>(
+    `SELECT keyType, keySuffix, name, plan, planSource FROM api_key_status
+      ORDER BY CASE planSource WHEN 'manual' THEN 0 WHEN 'detected' THEN 1 WHEN 'estimated' THEN 2 ELSE 3 END,
+        updatedAt DESC`,
+  );
+  const labels = new Map<
+    string,
+    { name: string | null; plan: string | null; planSource: PlanSource | null }
+  >();
+  for (const row of rows) {
+    const key = credentialKey(row.keyType, row.keySuffix);
+    const seen = labels.get(key);
+    if (!seen) {
+      labels.set(key, { name: row.name, plan: row.plan, planSource: row.planSource });
+    } else if (!seen.name && row.name) {
+      seen.name = row.name;
+    }
+  }
+  return labels;
+}
+
+/**
+ * Changes when a session cost or a task is inserted. Part of the usage report
+ * cache key (`src/http/usage-cache.ts`). Reads two rowid maxima, so it is cheap.
+ */
+export async function getUsageDataVersion(): Promise<string> {
+  const row = await getDbClient().get<{ version: string }>(
+    `SELECT COALESCE((SELECT MAX(rowid) FROM session_costs), 0) || ':' ||
+            COALESCE((SELECT MAX(rowid) FROM agent_tasks), 0) as version`,
+  );
+  return row?.version ?? "0:0";
 }
 
 // --- Per-person attribution (four-metric view) ---
@@ -5222,7 +5347,9 @@ export async function getAttributionByPerson(opts: {
   };
   const reachRows = await getDbClient().query<ReachRow>(
     `WITH RECURSIVE report_tasks AS (
-        SELECT t.*
+        -- Only the columns read below: a task row carries its full prompt and output.
+        SELECT t.id, t.agentId, t.vcsRepo, t.source, t.parentTaskId, t.requestedByUserId,
+          t.requestedByUserIdInherited, t.taskType, t.tags, t.workflowRunId
         FROM agent_tasks t
         ${where}
       ),
@@ -11205,6 +11332,9 @@ export interface ApiKeyStatus {
   provider: string;
   /** Latest provider-emitted rate-limit window snapshots, keyed by window type. */
   rateLimitWindows: RateLimitWindowTelemetry;
+  /** Subscription plan id (`SUBSCRIPTION_PLANS`), when known. */
+  plan: string | null;
+  planSource: PlanSource | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -11328,7 +11458,9 @@ export async function recordKeyUsage(
   taskId: string | null,
   scope = "global",
   scopeId: string | null = null,
-): Promise<void> {
+  /** Plan id the worker detected on the credential (for example from the Codex JWT). */
+  plan: string | null = null,
+): Promise<{ planChanged: boolean }> {
   const now = new Date().toISOString();
   const client = getDbClient();
   const effectiveScopeId = scopeId ?? "";
@@ -11350,6 +11482,18 @@ export async function recordKeyUsage(
     [keyType, keySuffix, keyIndex, scope, effectiveScopeId, now, provider, now],
   );
 
+  // A detected plan replaces an estimate, never a plan the operator picked.
+  let planChanged = false;
+  if (plan) {
+    const result = await client.run(
+      `UPDATE api_key_status SET plan = ?, planSource = 'detected'
+         WHERE keyType = ? AND keySuffix = ? AND COALESCE(planSource, '') != 'manual'
+           AND (plan IS NOT ? OR planSource IS NOT 'detected')`,
+      [plan, keyType, keySuffix, plan],
+    );
+    planChanged = result.changes > 0;
+  }
+
   // Record which key was used on the task
   if (taskId) {
     await client.run(
@@ -11357,6 +11501,35 @@ export async function recordKeyUsage(
       [keySuffix, keyType, taskId],
     );
   }
+  return { planChanged };
+}
+
+/**
+ * Set the subscription plan of a credential on all its scope rows, as picked
+ * by the operator. `null` removes the manual choice, so the next detection
+ * applies again. Returns false when no row exists for the credential.
+ */
+export async function setApiKeyPlan(
+  keyType: string,
+  keySuffix: string,
+  plan: string | null,
+): Promise<boolean> {
+  const now = new Date().toISOString();
+  const result = plan
+    ? await getDbClient().run(
+        `UPDATE api_key_status SET plan = ?, planSource = 'manual', updatedAt = ?
+           WHERE keyType = ? AND keySuffix = ?`,
+        [plan, now, keyType, keySuffix],
+      )
+    : await getDbClient().run(
+        `UPDATE api_key_status
+           SET plan = CASE WHEN planSource = 'manual' THEN NULL ELSE plan END,
+               planSource = CASE WHEN planSource = 'manual' THEN NULL ELSE planSource END,
+               updatedAt = ?
+           WHERE keyType = ? AND keySuffix = ?`,
+        [now, keyType, keySuffix],
+      );
+  return result.changes > 0;
 }
 
 /**
@@ -11430,21 +11603,23 @@ export async function recordKeyRateLimitWindows(
   windows: RateLimitWindowTelemetry,
   scope = "global",
   scopeId: string | null = null,
-): Promise<void> {
-  if (Object.keys(windows).length === 0) return;
+): Promise<{ planChanged: boolean }> {
+  if (Object.keys(windows).length === 0) return { planChanged: false };
 
   const now = new Date().toISOString();
   const effectiveScopeId = scopeId ?? "";
   const provider = deriveProviderFromKeyType(keyType);
-  await getDbClient().transaction(async (tx) => {
+  const merged = await getDbClient().transaction(async (tx) => {
     const existing = await tx.get<{ rateLimitWindows: string | null }>(
       `SELECT rateLimitWindows FROM api_key_status
          WHERE keyType = ? AND keySuffix = ? AND scope = ? AND scopeId = ?`,
       [keyType, keySuffix, scope, effectiveScopeId],
     );
-    const serialized = JSON.stringify(
-      mergeRateLimitWindowTelemetry(parseRateLimitWindowsJson(existing?.rateLimitWindows), windows),
+    const mergedWindows = mergeRateLimitWindowTelemetry(
+      parseRateLimitWindowsJson(existing?.rateLimitWindows),
+      windows,
     );
+    const serialized = JSON.stringify(mergedWindows);
 
     await tx.run(
       `INSERT INTO api_key_status (keyType, keySuffix, keyIndex, scope, scopeId, rateLimitWindows, provider, updatedAt)
@@ -11457,7 +11632,52 @@ export async function recordKeyRateLimitWindows(
            updatedAt = excluded.updatedAt`,
       [keyType, keySuffix, keyIndex, scope, effectiveScopeId, serialized, provider, now],
     );
+    return mergedWindows;
   });
+
+  const planChanged =
+    keyType === "CLAUDE_CODE_OAUTH_TOKEN" && (await refreshEstimatedClaudePlan(keySuffix, merged));
+  return { planChanged };
+}
+
+const WEEK_SECONDS = 7 * 24 * 3600;
+
+/**
+ * Estimate the plan of a Claude credential from its 7-day window (see
+ * `estimateClaudePlan`), unless a stronger source already set it. Returns
+ * true when the stored plan changed.
+ */
+async function refreshEstimatedClaudePlan(
+  keySuffix: string,
+  windows: RateLimitWindowTelemetry,
+): Promise<boolean> {
+  const week = windows.seven_day;
+  if (!week?.utilization || !week.resetsAt) return false;
+  const client = getDbClient();
+  const stronger = await client.get<{ found: number }>(
+    `SELECT 1 as found FROM api_key_status
+       WHERE keyType = 'CLAUDE_CODE_OAUTH_TOKEN' AND keySuffix = ? AND planSource IN ('manual', 'detected')
+       LIMIT 1`,
+    [keySuffix],
+  );
+  if (stronger) return false;
+  const windowStart = new Date((week.resetsAt - WEEK_SECONDS) * 1000).toISOString();
+  const spend = await client.get<{ spendUsd: number }>(
+    `SELECT COALESCE(SUM(sc.totalCostUsd), 0) as spendUsd
+       FROM session_costs sc JOIN agent_tasks t ON t.id = sc.taskId
+       WHERE t.credentialKeyType = 'CLAUDE_CODE_OAUTH_TOKEN' AND t.credentialKeySuffix = ?
+         AND sc.createdAt >= ?`,
+    [keySuffix, windowStart],
+  );
+  const plan = estimateClaudePlan(week.utilization, spend?.spendUsd ?? 0);
+  if (!plan) return false;
+  const result = await client.run(
+    `UPDATE api_key_status SET plan = ?, planSource = 'estimated'
+       WHERE keyType = 'CLAUDE_CODE_OAUTH_TOKEN' AND keySuffix = ?
+         AND COALESCE(planSource, 'estimated') = 'estimated' AND plan IS NOT ?`,
+    [plan, keySuffix, plan],
+  );
+  return result.changes > 0;
 }
 
 /**

@@ -69,11 +69,13 @@ type:McpServerFilters
 type:McpServerInsert
 type:MentionPreview
 type:PageListOptions
+type:PlanSource
 type:RecordBudgetRefusalNotificationInput
 type:ScheduledTaskFilters
 type:ScriptRunPatch
 type:ServiceFilters
 type:SessionCostByAgentRow
+type:SessionCostByCredentialRow
 type:SessionCostByUserRow
 type:SessionCostDailyRow
 type:SessionCostSummaryTotals
@@ -400,6 +402,7 @@ value:getUnassignedTaskIdsForAgent
 value:getUnassignedTasksCount
 value:getUnreadInboxMessages
 value:getUnreadMessages
+value:getUsageDataVersion
 value:getUserById
 value:getWaitStateById
 value:getWaitStateByStepId
@@ -512,6 +515,7 @@ value:resumeTask
 value:searchSkills
 value:setAgentHarnessProvider
 value:setApiKeyName
+value:setApiKeyPlan
 value:setBudgetRefusalFollowUpTaskId
 value:setFavorite
 value:setSlackMessageTracking

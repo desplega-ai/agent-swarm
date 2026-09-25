@@ -13,6 +13,7 @@ import {
   getSessionCostsFiltered,
   getSessionLogsByTaskId,
   getTaskById,
+  getUsageDataVersion,
 } from "../be/db";
 import { recordSessionCost } from "../otel";
 import { incrementServerSessionsProcessed } from "../server-runtime-counters";
@@ -20,6 +21,7 @@ import type { SessionCost } from "../types";
 import { SessionCostModelBreakdownSchema, SessionCostSchema, SessionLogSchema } from "../types";
 import { route } from "./route-def";
 import { recomputeSessionCost } from "./session-cost-recompute";
+import { cachedUsageReport } from "./usage-cache";
 import { jsonError } from "./utils";
 
 // ─── Response Schemas ────────────────────────────────────────────────────────
@@ -39,7 +41,6 @@ const SessionCostSummaryTotalsSchema = z.object({
   excludedCostUsd: z.number(),
   excludedTaskCount: z.number().int(),
   subscriptionCostUsd: z.number(),
-  subscriptionCredentialCount: z.number().int(),
 });
 
 /** Mirrors `SessionCostDailyRow` in src/be/db.ts. */
@@ -49,6 +50,7 @@ const SessionCostDailyRowSchema = z.object({
   inputTokens: z.number().int(),
   outputTokens: z.number().int(),
   sessions: z.number().int(),
+  subscriptionCostUsd: z.number(),
 });
 
 /** Mirrors `SessionCostByAgentRow` in src/be/db.ts. */
@@ -71,12 +73,30 @@ const SessionCostByUserRowSchema = z.object({
   durationMs: z.number().int(),
 });
 
+/** Mirrors `SessionCostByCredentialRow` in src/be/db.ts. */
+const SessionCostByCredentialRowSchema = z.object({
+  keyType: z.string().nullable(),
+  keySuffix: z.string().nullable(),
+  name: z.string().nullable(),
+  subscription: z.boolean(),
+  plan: z.string().nullable(),
+  planSource: z.enum(["manual", "detected", "estimated"]).nullable(),
+  costUsd: z.number(),
+  inputTokens: z.number().int(),
+  outputTokens: z.number().int(),
+  sessions: z.number().int(),
+  firstSessionAt: z.string(),
+  lastSessionAt: z.string(),
+});
+
 /** Mirrors the return type of `getSessionCostSummary` in src/be/db.ts. */
 const SessionCostSummarySchema = z.object({
   totals: SessionCostSummaryTotalsSchema,
   daily: z.array(SessionCostDailyRowSchema),
   byAgent: z.array(SessionCostByAgentRowSchema),
   byUser: z.array(SessionCostByUserRowSchema),
+  /** Filled for `groupBy=both` only. */
+  byCredential: z.array(SessionCostByCredentialRowSchema),
 });
 
 /** Mirrors `DashboardCostSummary` in src/be/db.ts. */
@@ -425,13 +445,17 @@ export async function handleSessionData(
   if (getSessionCostSummaryRoute.match(req.method, pathSegments)) {
     const parsed = await getSessionCostSummaryRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const summary = await getSessionCostSummary({
+    const opts = {
       startDate: parsed.query.startDate || undefined,
       endDate: parsed.query.endDate || undefined,
       agentId: parsed.query.agentId || undefined,
       userId: parsed.query.userId || undefined,
       groupBy: parsed.query.groupBy || "both",
-    });
+    } as const;
+    const version = await getUsageDataVersion();
+    const summary = await cachedUsageReport(`summary:${version}:${JSON.stringify(opts)}`, () =>
+      getSessionCostSummary(opts),
+    );
     getSessionCostSummaryRoute.respond(res, 200, summary);
     return true;
   }
@@ -445,10 +469,14 @@ export async function handleSessionData(
   if (getAttributionByPersonRoute.match(req.method, pathSegments)) {
     const parsed = await getAttributionByPersonRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const rows = await getAttributionByPerson({
+    const opts = {
       startDate: parsed.query.startDate || undefined,
       endDate: parsed.query.endDate || undefined,
-    });
+    };
+    const version = await getUsageDataVersion();
+    const rows = await cachedUsageReport(`attribution:${version}:${JSON.stringify(opts)}`, () =>
+      getAttributionByPerson(opts),
+    );
     getAttributionByPersonRoute.respond(res, 200, { rows });
     return true;
   }

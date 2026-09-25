@@ -4881,6 +4881,7 @@ export interface paths {
                         taskId?: string;
                         scope?: string;
                         scopeId?: string;
+                        plan?: string;
                     };
                 };
             };
@@ -5196,6 +5197,9 @@ export interface paths {
                                         lastSeenAt: string;
                                     };
                                 };
+                                plan: string | null;
+                                /** @enum {string|null} */
+                                planSource: "manual" | "detected" | "estimated" | null;
                                 modelLimits: {
                                     model: string;
                                     window: string;
@@ -5431,6 +5435,127 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/keys/plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List subscription plans and their monthly list prices */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Plan catalog */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            checkedAt: string;
+                            plans: {
+                                id: string;
+                                label: string;
+                                keyType: string;
+                                monthlyUsd: number;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/keys/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Set or clear the subscription plan of a pooled credential */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        keyType: string;
+                        keySuffix: string;
+                        plan: string | null;
+                    };
+                };
+            };
+            responses: {
+                /** @description Plan updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                            keyType: string;
+                            keySuffix: string;
+                            plan: string | null;
+                        };
+                    };
+                };
+                /** @description Unknown plan, or a plan for another credential type */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Key not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
         trace?: never;
     };
     "/api/events": {
@@ -14231,7 +14356,6 @@ export interface paths {
                                 excludedCostUsd: number;
                                 excludedTaskCount: number;
                                 subscriptionCostUsd: number;
-                                subscriptionCredentialCount: number;
                             };
                             daily: {
                                 date: string;
@@ -14239,6 +14363,7 @@ export interface paths {
                                 inputTokens: number;
                                 outputTokens: number;
                                 sessions: number;
+                                subscriptionCostUsd: number;
                             }[];
                             byAgent: {
                                 agentId: string;
@@ -14255,6 +14380,21 @@ export interface paths {
                                 outputTokens: number;
                                 tasks: number;
                                 durationMs: number;
+                            }[];
+                            byCredential: {
+                                keyType: string | null;
+                                keySuffix: string | null;
+                                name: string | null;
+                                subscription: boolean;
+                                plan: string | null;
+                                /** @enum {string|null} */
+                                planSource: "manual" | "detected" | "estimated" | null;
+                                costUsd: number;
+                                inputTokens: number;
+                                outputTokens: number;
+                                sessions: number;
+                                firstSessionAt: string;
+                                lastSessionAt: string;
                             }[];
                         };
                     };
