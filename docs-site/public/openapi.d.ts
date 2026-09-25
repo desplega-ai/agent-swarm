@@ -4965,6 +4965,7 @@ export interface paths {
                     totalKeys: number;
                     scope?: string;
                     scopeId?: string;
+                    model?: "fable" | "opus" | "sonnet" | "haiku";
                 };
                 header?: never;
                 path?: never;
@@ -4983,6 +4984,8 @@ export interface paths {
                             success: true;
                             availableIndices: number[];
                             totalKeys: number;
+                            modelBlockedIndices?: number[];
+                            earliestModelResetAt?: string | null;
                         };
                     };
                 };
@@ -5070,6 +5073,13 @@ export interface paths {
                                         lastSeenAt: string;
                                     };
                                 };
+                                modelLimits: {
+                                    model: string;
+                                    window: string;
+                                    resetsAt: number;
+                                    resetsAtIso: string;
+                                    active: boolean;
+                                }[];
                                 createdAt: string;
                                 updatedAt: string;
                             }[];

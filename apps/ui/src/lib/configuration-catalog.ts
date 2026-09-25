@@ -389,6 +389,17 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         restartRequired: true,
         docsUrl: `${DOCS}ui/configuration`,
       },
+      {
+        key: "MODEL_WINDOW_EXHAUSTED_POLICY",
+        label: "Model window exhausted policy",
+        description:
+          "What a worker does when every Claude key has exhausted the weekly window of the task model. fail: fail the task with the reset time. fallback: pick a key at random, legacy behaviour.",
+        kind: "enum",
+        options: ["fail", "fallback"],
+        defaultValue: "fail",
+        restartRequired: false,
+        docsUrl: `${DOCS}ui/configuration`,
+      },
     ],
   },
   {

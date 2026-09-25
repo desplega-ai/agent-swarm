@@ -2374,6 +2374,14 @@ export interface ApiKeyStatus {
       lastSeenAt: string;
     }
   >;
+  /** Derived, readable view of any rejected model-scoped window (Fable/Opus/Sonnet) on this key. */
+  modelLimits: Array<{
+    model: string;
+    window: string;
+    resetsAt: number;
+    resetsAtIso: string;
+    active: boolean;
+  }>;
   createdAt: string;
   updatedAt: string;
 }

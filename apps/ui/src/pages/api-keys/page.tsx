@@ -1,5 +1,6 @@
 import type { ColDef } from "ag-grid-community";
 import {
+  AlertTriangle,
   BarChart3,
   DollarSign,
   Key,
@@ -127,6 +128,21 @@ function formatResetAt(resetsAt: number | undefined): string {
   });
 }
 
+/** Readable labels for provider-emitted rate-limit window types, keyed by the raw type name. */
+const WINDOW_LABELS: Record<string, string> = {
+  five_hour: "Session, 5 h",
+  seven_day: "Week, all models",
+  seven_day_overage_included: "Week, Fable",
+  seven_day_opus: "Week, Opus",
+  seven_day_sonnet: "Week, Sonnet",
+  overage: "Usage credits",
+};
+
+/** Capitalizes a model family name (`fable` -> `Fable`) for display. */
+function formatModelName(model: string): string {
+  return model.length > 0 ? model[0]!.toUpperCase() + model.slice(1) : model;
+}
+
 function RateLimitWindowsCell({
   windows,
 }: {
@@ -139,7 +155,9 @@ function RateLimitWindowsCell({
     <div className="flex flex-col gap-1 py-1">
       {entries.map(([type, info]) => (
         <div key={type} className="flex min-w-0 items-center gap-1.5 text-[11px] leading-tight">
-          <span className="font-mono text-muted-foreground">{type}</span>
+          <span className="font-mono text-muted-foreground" title={type}>
+            {WINDOW_LABELS[type] ?? type}
+          </span>
           <span
             className={cn("font-medium", info.status === "rejected" && "text-status-error-strong")}
           >
@@ -156,6 +174,29 @@ function RateLimitWindowsCell({
         </div>
       ))}
     </div>
+  );
+}
+
+/** Amber badge(s) for a key's active model-scoped weekly window blocks (e.g. `Fable exhausted`). */
+function ModelLimitBadges({ modelLimits }: { modelLimits: ApiKeyStatus["modelLimits"] }) {
+  const active = modelLimits.filter((l) => l.active);
+  if (active.length === 0) return null;
+  return (
+    <>
+      {active.map((limit) => (
+        <Badge
+          key={limit.window}
+          variant="outline"
+          className="gap-1.5 text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center border-status-warning-strong/30"
+          title={`Resets ${formatResetAt(limit.resetsAt)}`}
+        >
+          <span className="h-1.5 w-1.5 rounded-full shrink-0 bg-status-warning" />
+          <span className="text-status-warning-strong">
+            {formatModelName(limit.model)} exhausted
+          </span>
+        </Badge>
+      ))}
+    </>
   );
 }
 
@@ -234,7 +275,11 @@ export default function ApiKeysPage() {
   const filteredKeys = useMemo(() => {
     if (!keys) return [];
     return keys.filter((k) => {
-      if (statusFilter !== "all" && k.status !== statusFilter) return false;
+      if (statusFilter === "model_limited") {
+        if (!k.modelLimits.some((l) => l.active)) return false;
+      } else if (statusFilter !== "all" && k.status !== statusFilter) {
+        return false;
+      }
       if (typeFilter !== "all" && k.keyType !== typeFilter) return false;
       if (providerFilter !== "all" && k.provider !== providerFilter) return false;
       return true;
@@ -243,11 +288,13 @@ export default function ApiKeysPage() {
 
   const stats = useMemo(() => {
     const totalCost = costs ? costs.reduce((sum, c) => sum + c.totalCost, 0) : 0;
-    if (!keys) return { total: 0, available: 0, rateLimited: 0, totalUsage: 0, totalCost };
+    if (!keys)
+      return { total: 0, available: 0, rateLimited: 0, modelLimited: 0, totalUsage: 0, totalCost };
     return {
       total: keys.length,
       available: keys.filter((k) => k.status === "available").length,
       rateLimited: keys.filter((k) => k.status === "rate_limited").length,
+      modelLimited: keys.filter((k) => k.modelLimits.some((l) => l.active)).length,
       totalUsage: keys.reduce((sum, k) => sum + k.totalUsageCount, 0),
       totalCost,
     };
@@ -334,8 +381,13 @@ export default function ApiKeysPage() {
         field: "status",
         headerName: "Status",
         width: 140,
-        cellRenderer: (params: { value: ApiKeyStatusType }) => (
-          <KeyStatusBadge status={params.value} />
+        cellRenderer: (params: { value: ApiKeyStatusType; data: ApiKeyStatus | undefined }) => (
+          <div className="flex flex-col gap-1 py-1">
+            <KeyStatusBadge status={params.value} />
+            {params.data && params.value === "available" && (
+              <ModelLimitBadges modelLimits={params.data.modelLimits} />
+            )}
+          </div>
         ),
       },
       {
@@ -439,7 +491,7 @@ export default function ApiKeysPage() {
       <PageHeader title="API Keys" />
 
       {/* Summary cards */}
-      <div className="grid gap-3 grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-3 grid-cols-2 lg:grid-cols-6">
         <StatPanel icon={Key} label="Total Keys" value={stats.total} />
         <StatPanel
           icon={ShieldCheck}
@@ -453,6 +505,13 @@ export default function ApiKeysPage() {
           label="Rate Limited"
           value={stats.rateLimited}
           tone="error"
+          colorValue
+        />
+        <StatPanel
+          icon={AlertTriangle}
+          label="Model Limited"
+          value={stats.modelLimited}
+          tone="warning"
           colorValue
         />
         <StatPanel icon={BarChart3} label="Total Usage" value={stats.totalUsage.toLocaleString()} />
@@ -507,6 +566,7 @@ export default function ApiKeysPage() {
             <SelectItem value="all">All Statuses</SelectItem>
             <SelectItem value="available">Available</SelectItem>
             <SelectItem value="rate_limited">Rate Limited</SelectItem>
+            <SelectItem value="model_limited">Model Limited</SelectItem>
           </SelectContent>
         </Select>
         {keyTypes.length > 1 && (

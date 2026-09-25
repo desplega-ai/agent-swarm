@@ -580,6 +580,7 @@ class ClaudeSdkSession implements ProviderSession {
       failureReason,
       rateLimitResetAt: this.errorTracker.getRateLimitResetAt(),
       rateLimitWindows: this.errorTracker.getRateLimitWindows(),
+      modelRateLimit: this.errorTracker.getModelRateLimit(),
       appliedReasoningEffort: sessionEnvironment.appliedReasoningEffort,
     };
   }

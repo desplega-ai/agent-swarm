@@ -1,3 +1,10 @@
+import {
+  isModelScopedWindow,
+  MODEL_SCOPED_WINDOWS,
+  type ModelFamily,
+  parseModelLimitMessage,
+} from "./model-rate-limit-windows";
+
 /**
  * Tracks error signals from Claude CLI stream-json output to produce
  * meaningful failure reasons instead of generic "exited with code N".
@@ -21,10 +28,18 @@ export interface RateLimitWindowInfo {
 
 export type RateLimitWindowTelemetry = Record<string, RateLimitWindowInfo>;
 
+/**
+ * Parses a rate_limit_event into one window entry per key of `unifiedWindows`
+ * (when present) merged with the top-level entry when they share a key. The
+ * top-level fields win field-by-field (it's the freshest read for its own
+ * `rateLimitType`), but a unified field the top level does not carry — e.g.
+ * `utilization`, which the observed Fable event only carries on the unified
+ * entry — is kept rather than dropped.
+ */
 export function parseRateLimitWindowTelemetry(
   json: Record<string, unknown>,
   lastSeenAt = new Date().toISOString(),
-): { rateLimitType: string; info: RateLimitWindowInfo } | null {
+): Array<{ rateLimitType: string; info: RateLimitWindowInfo }> | null {
   try {
     if (json.type !== "rate_limit_event") return null;
     const rawInfo = json.rate_limit_info;
@@ -34,25 +49,47 @@ export function parseRateLimitWindowTelemetry(
     if (typeof info.status !== "string" || info.status.length === 0) return null;
     if (typeof info.rateLimitType !== "string" || info.rateLimitType.length === 0) return null;
 
-    const window: RateLimitWindowInfo = {
+    const byType = new Map<string, RateLimitWindowInfo>();
+
+    const unifiedWindows = info.unifiedWindows;
+    if (unifiedWindows && typeof unifiedWindows === "object") {
+      for (const [key, rawWindow] of Object.entries(unifiedWindows as Record<string, unknown>)) {
+        if (!rawWindow || typeof rawWindow !== "object") continue;
+        const rawWindowRecord = rawWindow as Record<string, unknown>;
+        const utilization = rawWindowRecord.utilization;
+        const resetsAt = rawWindowRecord.resetsAt;
+        if (typeof utilization !== "number" || !Number.isFinite(utilization)) continue;
+        if (typeof resetsAt !== "number" || !Number.isFinite(resetsAt) || resetsAt <= 0) continue;
+
+        const status =
+          key === info.rateLimitType ? info.status : utilization >= 1 ? "rejected" : "allowed";
+        byType.set(key, { status, utilization, resetsAt, lastSeenAt });
+      }
+    }
+
+    const topLevel: RateLimitWindowInfo = {
       status: info.status,
       lastSeenAt,
     };
-
     if (typeof info.utilization === "number" && Number.isFinite(info.utilization)) {
-      window.utilization = info.utilization;
+      topLevel.utilization = info.utilization;
     }
     if (typeof info.resetsAt === "number" && Number.isFinite(info.resetsAt) && info.resetsAt > 0) {
-      window.resetsAt = info.resetsAt;
+      topLevel.resetsAt = info.resetsAt;
     }
     if (typeof info.isUsingOverage === "boolean") {
-      window.isUsingOverage = info.isUsingOverage;
+      topLevel.isUsingOverage = info.isUsingOverage;
     }
     if (typeof info.surpassedThreshold === "number" && Number.isFinite(info.surpassedThreshold)) {
-      window.surpassedThreshold = info.surpassedThreshold;
+      topLevel.surpassedThreshold = info.surpassedThreshold;
     }
+    const existing = byType.get(info.rateLimitType);
+    byType.set(info.rateLimitType, existing ? { ...existing, ...topLevel } : topLevel);
 
-    return { rateLimitType: info.rateLimitType, info: window };
+    return Array.from(byType, ([rateLimitType, windowInfo]) => ({
+      rateLimitType,
+      info: windowInfo,
+    }));
   } catch {
     return null;
   }
@@ -129,10 +166,26 @@ function clampRateLimitResetMs(candidateMs: number): number {
   return Math.min(Math.max(candidateMs, minMs), maxMs);
 }
 
+/** Key for the Codex usage-limit message in the key-wide rejection map (it carries no window type). */
+const CODEX_USAGE_LIMIT_KEY = "codex_usage_limit";
+
 export class SessionErrorTracker {
   private errors: ErrorSignal[] = [];
-  /** Stashed reset time (ms) from the last rejected rate_limit_event in this session. */
-  private rateLimitResetAtMs: number | undefined;
+  /**
+   * Stashed key-wide rejections (ms reset time), one per window type. Windows
+   * are independent: a rejection of another window (key-wide or model-scoped)
+   * is not evidence that this one recovered, so an entry leaves only on an
+   * explicit non-rejected event for the same window type.
+   */
+  private keyWideRejections = new Map<string, number>();
+  /**
+   * Stashed model-scoped rejection (Fable/Opus/Sonnet window) from the last
+   * such event. `observedAt` is when the event arrived, so a later report
+   * never relabels an old rejection as fresh.
+   */
+  private modelRateLimit:
+    | { window: string; model: ModelFamily; resetAtMs: number; observedAt: string }
+    | undefined;
   private rateLimitWindows: RateLimitWindowTelemetry = {};
 
   /** Record an error from an assistant message with message.error field */
@@ -177,8 +230,11 @@ export class SessionErrorTracker {
 
   /**
    * Process a parsed rate_limit_event JSON object from the Claude CLI stream.
-   * Only stashes the reset time when status === "rejected"; ignores all others.
-   * Last call wins — if the CLI emits multiple events, the final rejected one is used.
+   * A rejected event stashes the reset time for its own window type; a later
+   * rejection of the same type replaces it. A non-rejected event for a window
+   * type is that window's explicit recovery and clears its stashed rejection.
+   * Key-wide and model-scoped rejections are independent and never clear each
+   * other.
    *
    * `resetsAt` is **seconds** since epoch (empirically verified; Linear description is wrong).
    * Conversion to ms happens here at this single well-named boundary.
@@ -188,12 +244,26 @@ export class SessionErrorTracker {
       const info = json.rate_limit_info as Record<string, unknown> | undefined;
       if (!info) return;
 
-      const telemetry = parseRateLimitWindowTelemetry(json);
-      if (telemetry) {
-        this.rateLimitWindows[telemetry.rateLimitType] = telemetry.info;
+      const observedAt = new Date().toISOString();
+      const telemetryEntries = parseRateLimitWindowTelemetry(json, observedAt);
+      if (telemetryEntries) {
+        for (const { rateLimitType, info: windowInfo } of telemetryEntries) {
+          this.rateLimitWindows[rateLimitType] = windowInfo;
+        }
       }
 
-      if (info.status !== "rejected") return;
+      const rateLimitType = typeof info.rateLimitType === "string" ? info.rateLimitType : undefined;
+      const isModelScoped = rateLimitType !== undefined && isModelScopedWindow(rateLimitType);
+
+      if (info.status !== "rejected") {
+        if (rateLimitType === undefined) return;
+        if (isModelScoped) {
+          if (this.modelRateLimit?.window === rateLimitType) this.modelRateLimit = undefined;
+        } else {
+          this.keyWideRejections.delete(rateLimitType);
+        }
+        return;
+      }
 
       const resetsAtSec = info.resetsAt;
       if (typeof resetsAtSec !== "number" || !Number.isFinite(resetsAtSec) || resetsAtSec <= 0) {
@@ -204,7 +274,17 @@ export class SessionErrorTracker {
       }
 
       const resetsAtMs = resetsAtSec * 1000;
-      this.rateLimitResetAtMs = clampRateLimitResetMs(resetsAtMs);
+      if (isModelScoped) {
+        this.modelRateLimit = {
+          window: rateLimitType,
+          model: MODEL_SCOPED_WINDOWS[rateLimitType]!,
+          resetAtMs: clampRateLimitResetMs(resetsAtMs),
+          observedAt,
+        };
+        return;
+      }
+
+      this.keyWideRejections.set(rateLimitType ?? "unknown", clampRateLimitResetMs(resetsAtMs));
     } catch (err) {
       console.warn(`[rate_limit_event] Failed to process event: ${err}`);
     }
@@ -227,21 +307,41 @@ export class SessionErrorTracker {
 
     const candidateMs = new Date(iso).getTime();
     if (!Number.isFinite(candidateMs)) return;
-    this.rateLimitResetAtMs = clampRateLimitResetMs(candidateMs);
+    this.keyWideRejections.set(CODEX_USAGE_LIMIT_KEY, clampRateLimitResetMs(candidateMs));
   }
 
   /**
-   * Returns the stashed rate limit reset time as an ISO string, or undefined
-   * if no rejected rate_limit_event was seen in this session.
+   * Returns the key-wide rate limit reset time as an ISO string, or undefined
+   * if no key-wide rejection is stashed for this session. With several
+   * rejected key-wide windows, the key stays blocked until the last of them
+   * resets, so the latest reset time wins.
    */
   getRateLimitResetAt(): string | undefined {
-    if (this.rateLimitResetAtMs === undefined) return undefined;
-    return new Date(this.rateLimitResetAtMs).toISOString();
+    if (this.keyWideRejections.size === 0) return undefined;
+    return new Date(Math.max(...this.keyWideRejections.values())).toISOString();
   }
 
   getRateLimitWindows(): RateLimitWindowTelemetry | undefined {
     if (Object.keys(this.rateLimitWindows).length === 0) return undefined;
     return { ...this.rateLimitWindows };
+  }
+
+  /**
+   * Returns the stashed model-scoped rejection (Fable/Opus/Sonnet weekly
+   * window), or undefined if no such rejected rate_limit_event was seen in
+   * this session. A model-scoped rejection never sets the key-wide reset
+   * time, and never clears it either.
+   */
+  getModelRateLimit():
+    | { window: string; model: ModelFamily; resetAt: string; observedAt: string }
+    | undefined {
+    if (!this.modelRateLimit) return undefined;
+    return {
+      window: this.modelRateLimit.window,
+      model: this.modelRateLimit.model,
+      resetAt: new Date(this.modelRateLimit.resetAtMs).toISOString(),
+      observedAt: this.modelRateLimit.observedAt,
+    };
   }
 
   hasErrors(): boolean {
@@ -547,6 +647,14 @@ export function parseRateLimitResetTime(errorMessage: string): string | undefine
 
 /**
  * Parse stderr text for known error patterns and add them to the tracker.
+ *
+ * `reached your Fable limit` (and its Opus/Sonnet siblings) is intentionally
+ * NOT matched by {@link isRateLimitMessage} — that matcher is shared with the
+ * runner's key-wide cooldown gate, and this text must never mark the whole
+ * key. {@link parseModelLimitMessage} is the dedicated model-limit signal: it
+ * still records the line as an error (so `buildFailureReason` carries the raw
+ * text forward for `classifyRateLimitOutcome` to parse) without widening
+ * `isRateLimitMessage` to recognize it.
  */
 export function parseStderrForErrors(stderr: string, tracker: SessionErrorTracker): void {
   if (!stderr.trim()) return;
@@ -554,7 +662,7 @@ export function parseStderrForErrors(stderr: string, tracker: SessionErrorTracke
   const lower = stderr.toLowerCase();
   const firstLine = stderr.trim().split("\n")[0] ?? stderr.trim();
 
-  if (isRateLimitMessage(stderr)) {
+  if (parseModelLimitMessage(stderr) || isRateLimitMessage(stderr)) {
     tracker.addStderrError(firstLine);
   } else if (
     lower.includes("authentication") ||
