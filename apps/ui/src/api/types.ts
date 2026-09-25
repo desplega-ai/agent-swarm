@@ -965,10 +965,8 @@ export interface UsageSummaryTotals {
   excludedCostUsd?: number;
   /** Distinct tasks behind `excludedCostUsd` — name the exclusion, don't just show a percentage. */
   excludedTaskCount?: number;
-  /** API-priced cost of Claude-subscription (OAuth) sessions. Older API servers omit it. */
+  /** API-priced cost of sessions on subscription credentials (Claude OAuth, Codex OAuth). Older API servers omit it. */
   subscriptionCostUsd?: number;
-  /** Distinct Claude subscription credentials used in the window. */
-  subscriptionCredentialCount?: number;
 }
 
 /**
@@ -996,6 +994,44 @@ export interface UsageSummaryDailyRow {
   inputTokens: number;
   outputTokens: number;
   sessions: number;
+  /** Part of `costUsd` on subscription credentials. Older API servers omit it. */
+  subscriptionCostUsd?: number;
+}
+
+/** Spend per credential in the window (`groupBy=both` only). */
+export interface UsageSummaryByCredentialRow {
+  /** `null` when the task recorded no credential. */
+  keyType: string | null;
+  keySuffix: string | null;
+  /** Label set on the API Keys page. */
+  name: string | null;
+  /** Billed as a flat subscription (Claude OAuth, Codex OAuth) rather than per token. */
+  subscription: boolean;
+  /** Plan id from `GET /api/keys/plans`, or null when unknown. */
+  plan: string | null;
+  /** `estimated` = Claude plan guessed from rate-limit utilization. The server applies the precedence. */
+  planSource: "detected" | "manual" | "estimated" | null;
+  /** API-priced cost of the sessions. */
+  costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  sessions: number;
+  firstSessionAt: string;
+  lastSessionAt: string;
+}
+
+export interface SubscriptionPlan {
+  id: string;
+  label: string;
+  keyType: string;
+  /** Monthly list price in USD. */
+  monthlyUsd: number;
+}
+
+export interface SubscriptionPlansResponse {
+  /** Date the list prices were checked. */
+  checkedAt: string;
+  plans: SubscriptionPlan[];
 }
 
 export interface UsageSummaryByAgentRow {
@@ -1022,6 +1058,8 @@ export interface UsageSummaryResponse {
   daily: UsageSummaryDailyRow[];
   byAgent: UsageSummaryByAgentRow[];
   byUser?: UsageSummaryByUserRow[];
+  /** Spend per credential (`groupBy=both` only). Older API servers omit it. */
+  byCredential?: UsageSummaryByCredentialRow[];
 }
 
 export interface DashboardCostResponse {
@@ -2370,6 +2408,9 @@ export interface ApiKeyStatus {
   provider: string;
   /** Optional human-friendly label set from the dashboard. */
   name: string | null;
+  /** Subscription plan id (see `GET /api/keys/plans`), when known. */
+  plan: string | null;
+  planSource: "manual" | "detected" | "estimated" | null;
   rateLimitWindows: Record<
     string,
     {

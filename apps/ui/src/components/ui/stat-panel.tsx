@@ -79,9 +79,12 @@ const TONE_CLASSES: Record<StatPanelTone, ToneClasses> = {
 };
 
 export interface StatPanelProps {
-  icon: LucideIcon;
+  /** Omit for a number-first tile (for example a KPI strip). */
+  icon?: LucideIcon;
   label: ReactNode;
   value: ReactNode;
+  /** A short line under the value (context for the number). */
+  detail?: ReactNode;
   // One-sentence plain-language explanation, shown in a hoverable InfoTip
   // next to the label.
   info?: ReactNode;
@@ -97,6 +100,7 @@ export function StatPanel({
   icon: Icon,
   label,
   value,
+  detail,
   info,
   tone = "neutral",
   colorValue = false,
@@ -106,9 +110,11 @@ export function StatPanel({
   return (
     <Card className={className}>
       <CardContent className="p-3 flex items-center gap-3">
-        <div className={cn("rounded-md p-2", t.iconBg)}>
-          <Icon className={cn("h-4 w-4", t.iconText)} />
-        </div>
+        {Icon ? (
+          <div className={cn("rounded-md p-2", t.iconBg)}>
+            <Icon className={cn("h-4 w-4", t.iconText)} />
+          </div>
+        ) : null}
         <div className="min-w-0">
           <p className="flex items-center gap-1 text-xs text-muted-foreground">
             <span className="truncate">{label}</span>
@@ -119,6 +125,7 @@ export function StatPanel({
           >
             {value}
           </p>
+          {detail ? <p className="text-xs text-muted-foreground">{detail}</p> : null}
         </div>
       </CardContent>
     </Card>

@@ -122,6 +122,7 @@ import type {
   SteeringMessagesResponse,
   SteerMode,
   SteerResult,
+  SubscriptionPlansResponse,
   SwarmConfig,
   SwarmConfigsResponse,
   SwarmRepo,
@@ -2330,6 +2331,32 @@ class ApiClient {
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: "Failed to set key name" }));
       throw new Error(err.error || `Failed to set key name: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async fetchSubscriptionPlans(): Promise<SubscriptionPlansResponse> {
+    const url = `${this.getBaseUrl()}/api/keys/plans`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch subscription plans: ${res.status}`);
+    return res.json();
+  }
+
+  /** Set a credential's subscription plan. `plan: null` goes back to the detected plan. */
+  async setApiKeyPlan(args: {
+    keyType: string;
+    keySuffix: string;
+    plan: string | null;
+  }): Promise<{ success: boolean; keyType: string; keySuffix: string; plan: string | null }> {
+    const url = `${this.getBaseUrl()}/api/keys/plan`;
+    const res = await fetch(url, {
+      method: "PATCH",
+      headers: this.getHeaders(),
+      body: JSON.stringify(args),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Failed to set key plan" }));
+      throw new Error(err.error || `Failed to set key plan: ${res.status}`);
     }
     return res.json();
   }

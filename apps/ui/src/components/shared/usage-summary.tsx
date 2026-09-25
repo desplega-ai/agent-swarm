@@ -1,5 +1,5 @@
-import { Activity, Clock, Coins, DollarSign, PiggyBank, TrendingUp, UserCheck } from "lucide-react";
-import { useMemo, useState } from "react";
+import { Activity, Clock, Coins, DollarSign, TrendingUp, UserCheck } from "lucide-react";
+import { useMemo } from "react";
 import {
   CartesianGrid,
   Line,
@@ -38,78 +38,11 @@ function StatCard({
   );
 }
 
-// Claude Max 20x list price (claude.com/pricing, checked 2026-09-25). Editable in the UI.
-const DEFAULT_PLAN_PRICE_USD = 200;
-const PLAN_PRICE_STORAGE_KEY = "usage.subscriptionPlanPriceUsd";
-const DAYS_PER_MONTH = 30.44;
-
-/**
- * Savings from running on Claude subscriptions instead of API keys:
- * API-priced cost of OAuth sessions minus plan price x credentials, prorated to the window.
- */
-function SubscriptionSavings({
-  totals,
-  windowDays,
-}: {
-  totals: UsageSummaryTotals;
-  windowDays: number;
-}) {
-  const [planPrice, setPlanPrice] = useState(() => {
-    const stored = Number(localStorage.getItem(PLAN_PRICE_STORAGE_KEY));
-    return stored > 0 ? stored : DEFAULT_PLAN_PRICE_USD;
-  });
-  const apiCost = totals.subscriptionCostUsd ?? 0;
-  const seats = totals.subscriptionCredentialCount ?? 0;
-  const subscriptionCost = planPrice * seats * (windowDays / DAYS_PER_MONTH);
-  const saved = apiCost - subscriptionCost;
-  return (
-    <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-lg border border-border px-4 py-3">
-      <div className="flex items-center gap-3">
-        <div className="flex h-8 w-8 items-center justify-center rounded-md bg-muted">
-          <PiggyBank className="h-4 w-4 text-muted-foreground" />
-        </div>
-        <div>
-          <p className="text-[11px] text-muted-foreground uppercase tracking-wider">
-            Saved vs API pricing
-          </p>
-          <p
-            className={`text-lg font-bold font-mono ${saved >= 0 ? "text-emerald-500" : "text-red-500"}`}
-          >
-            {saved < 0 ? "-" : ""}
-            {formatCost(Math.abs(saved))}
-          </p>
-        </div>
-      </div>
-      <p className="text-xs text-muted-foreground">
-        {formatCost(apiCost)} at API prices on subscription runs − {seats} subscription
-        {seats === 1 ? "" : "s"} × {formatCost(planPrice)}/mo × {windowDays.toFixed(0)}d ={" "}
-        {formatCost(subscriptionCost)}
-      </p>
-      <label className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
-        Plan price $/mo
-        <input
-          type="number"
-          min={0}
-          value={planPrice}
-          onChange={(e) => {
-            const v = Number(e.target.value);
-            setPlanPrice(v);
-            if (v > 0) localStorage.setItem(PLAN_PRICE_STORAGE_KEY, String(v));
-          }}
-          className="w-20 rounded-md border border-border bg-transparent px-2 py-1 font-mono"
-        />
-      </label>
-    </div>
-  );
-}
-
 // New interface: accepts pre-aggregated data from server
 interface UsageSummaryAggregatedProps {
   totals: UsageSummaryTotals;
   dailyData: UsageSummaryDailyRow[];
   daysBack?: number;
-  /** Length of the selected window in days, used to prorate the subscription price. */
-  windowDays?: number;
 }
 
 // Legacy interface: accepts raw costs (used by agent detail page)
@@ -236,13 +169,6 @@ export function UsageSummary(props: UsageSummaryProps) {
           />
         )}
       </div>
-
-      {totals?.subscriptionCostUsd !== undefined && isAggregatedProps(props) && (
-        <SubscriptionSavings
-          totals={totals}
-          windowDays={props.windowDays ?? props.daysBack ?? 30}
-        />
-      )}
 
       {/* Daily Cost Chart */}
       <div className="rounded-lg border border-border p-4">
