@@ -22,6 +22,8 @@ export interface ShortcutKeyEvent {
   altKey?: boolean;
   isComposing?: boolean;
   defaultPrevented?: boolean;
+  /** A held key: the browser repeats its keydown. */
+  repeat?: boolean;
   /** Anything with `closest(selector)` (an Element); other values count as "page". */
   target?: unknown;
 }
@@ -67,6 +69,16 @@ export function matchDetailShortcut(
   event: ShortcutKeyEvent,
   context: ShortcutContext = {},
 ): DetailShortcut | null {
+  const action = matchDetailKey(event, context);
+  // Only movement repeats while a key is held. A repeated decision would
+  // answer the question the auto-advance just focused, before anyone reads it.
+  if (action && event.repeat && !REPEATABLE_DETAIL.has(action.type)) return null;
+  return action;
+}
+
+const REPEATABLE_DETAIL: ReadonlySet<DetailShortcut["type"]> = new Set(["next", "prev", "cursor"]);
+
+function matchDetailKey(event: ShortcutKeyEvent, context: ShortcutContext): DetailShortcut | null {
   if (event.defaultPrevented || event.isComposing) return null;
   if (context.overlayOpen) return null;
   const mod = Boolean(event.metaKey || event.ctrlKey);
@@ -126,6 +138,8 @@ export function matchListShortcut(
 ): ListShortcut | null {
   if (event.defaultPrevented || event.isComposing || context.overlayOpen) return null;
   if (event.metaKey || event.ctrlKey || event.altKey) return null;
+  // A held Enter opens the row once.
+  if (event.repeat && event.key === "Enter") return null;
   const target = event.target;
   if (isTypingTarget(target)) return null;
   const onControl = closest(target, CONTROL_TARGET);

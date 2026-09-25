@@ -68,6 +68,25 @@ describe("matchDetailShortcut", () => {
     expect(matchDetailShortcut({ key: "j", target: button })).toEqual({ type: "next" });
     expect(matchDetailShortcut({ key: "a", target: button })).toEqual({ type: "approve" });
   });
+
+  test("a held key repeats movement only, never a decision or a submit", () => {
+    for (const key of ["a", "r", "1", " ", "o", "?", "Escape", "Enter"]) {
+      expect(matchDetailShortcut({ key, repeat: true, target: page })).toBeNull();
+    }
+    expect(
+      matchDetailShortcut({ key: "Enter", metaKey: true, repeat: true, target: page }),
+    ).toBeNull();
+    expect(matchDetailShortcut({ key: "j", repeat: true, target: page })).toEqual({
+      type: "next",
+    });
+    expect(matchDetailShortcut({ key: "ArrowUp", repeat: true, target: page })).toEqual({
+      type: "prev",
+    });
+    expect(matchDetailShortcut({ key: "ArrowRight", repeat: true, target: page })).toEqual({
+      type: "cursor",
+      delta: 1,
+    });
+  });
 });
 
 describe("matchListShortcut", () => {
@@ -85,5 +104,10 @@ describe("matchListShortcut", () => {
 
   test("a focused row link opens itself on Enter natively", () => {
     expect(matchListShortcut({ key: "Enter", target: el("a[href]") })).toBeNull();
+  });
+
+  test("a held Enter opens the row once; held j/k keep moving", () => {
+    expect(matchListShortcut({ key: "Enter", repeat: true, target: page })).toBeNull();
+    expect(matchListShortcut({ key: "j", repeat: true, target: page })).toEqual({ type: "next" });
   });
 });
