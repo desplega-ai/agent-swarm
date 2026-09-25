@@ -110,7 +110,8 @@ function OAuthPane({
   const [hintOpen, setHintOpen] = useState(false);
 
   function connect() {
-    const back = `${window.location.origin}/setup?step=5&integration=${provider}`;
+    // A step id, not a number: it survives steps being added before it.
+    const back = `${window.location.origin}/setup?step=integrations&integration=${provider}`;
     window.location.assign(
       `${apiUrl}/api/trackers/${provider}/authorize?redirect=${encodeURIComponent(back)}`,
     );

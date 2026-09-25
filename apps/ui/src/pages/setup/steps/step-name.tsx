@@ -28,6 +28,7 @@ import {
   parseEmojiLogo,
   useEmojiImage,
 } from "./name/emoji-logo";
+import { ThemeCard } from "./name/theme-card";
 
 const HEX_RE = /^#[0-9a-fA-F]{6}$/;
 
@@ -36,7 +37,8 @@ type LogoMode = "emoji" | "url";
 /**
  * Step 2: the swarm identity (name, logo, color). Every edit saves as you
  * type. Viewing the step saves nothing: an untouched suggested name is
- * stored by Continue, which also completes the step.
+ * stored by Continue, which also completes the step. The theme card is this
+ * browser's preference, not swarm state.
  */
 export function StepName({ onboarding, act, setContinueBlocker, setContinueAction }: StepProps) {
   const scope = useAutosaveScope(setContinueBlocker);
@@ -294,13 +296,16 @@ export function StepName({ onboarding, act, setContinueBlocker, setContinueActio
           </SettingsRow>
         </SetupCard>
 
-        <SetupCard title="Sidebar preview" bodyClassName="rounded-b-xl bg-surface">
-          <SidebarPreview
-            name={name || DEFAULT_SWARM_NAME}
-            logo={logo.valid && logo.value ? logo.value : null}
-            color={color && colorValid ? color : null}
-          />
-        </SetupCard>
+        <div className="flex flex-col gap-3">
+          <SetupCard title="Sidebar preview" bodyClassName="rounded-b-xl bg-surface">
+            <SidebarPreview
+              name={name || DEFAULT_SWARM_NAME}
+              logo={logo.valid && logo.value ? logo.value : null}
+              color={color && colorValid ? color : null}
+            />
+          </SetupCard>
+          <ThemeCard />
+        </div>
       </div>
     </AutosaveScopeContext.Provider>
   );

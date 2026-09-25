@@ -9,7 +9,7 @@ import {
 } from "./agent-runtime-models";
 
 /**
- * The per-agent model dial of `/setup` step 3: three levels per harness,
+ * The per-agent model dial of `/setup` step 4 (Agents): three levels per harness,
  * each a concrete `MODEL_OVERRIDE` plus a `REASONING_EFFORT_OVERRIDE`.
  * Values approved by Taras on 2026-09-24.
  */

@@ -10,6 +10,7 @@ export const OnboardingStepIdSchema = z.enum([
   "connect",
   "name",
   "ai",
+  "agents",
   "memory",
   "integrations",
   "first_task",
@@ -41,6 +42,8 @@ export const OnboardingAiMethodSchema = z.enum([
   "deepseek",
   "devin",
 ]);
+/** The dial level every agent got, or `mixed` (different levels or a custom model). */
+export const OnboardingAgentsMethodSchema = z.enum(["cheap", "optimal", "max", "mixed"]);
 export const OnboardingMemoryPresetSchema = z.enum([
   "openai",
   "openrouter",
@@ -60,6 +63,7 @@ export const OnboardingStepMethodSchema = z.union([
   OnboardingConnectMethodSchema,
   OnboardingNameMethodSchema,
   OnboardingAiMethodSchema,
+  OnboardingAgentsMethodSchema,
   OnboardingMemoryPresetSchema,
   OnboardingIntegrationMethodSchema,
   OnboardingFirstTaskMethodSchema,
@@ -85,6 +89,7 @@ function onboardingStepStateSchema<T extends z.ZodEnum>(method: T) {
 const OnboardingConnectStepStateSchema = onboardingStepStateSchema(OnboardingConnectMethodSchema);
 const OnboardingNameStepStateSchema = onboardingStepStateSchema(OnboardingNameMethodSchema);
 const OnboardingAiStepStateSchema = onboardingStepStateSchema(OnboardingAiMethodSchema);
+const OnboardingAgentsStepStateSchema = onboardingStepStateSchema(OnboardingAgentsMethodSchema);
 const OnboardingMemoryStepStateSchema = onboardingStepStateSchema(OnboardingMemoryPresetSchema);
 const OnboardingIntegrationStepStateSchema = onboardingStepStateSchema(
   OnboardingIntegrationMethodSchema,
@@ -106,6 +111,7 @@ export const OnboardingStateSchema = z.object({
     connect: OnboardingConnectStepStateSchema,
     name: OnboardingNameStepStateSchema,
     ai: OnboardingAiStepStateSchema,
+    agents: OnboardingAgentsStepStateSchema,
     memory: OnboardingMemoryStepStateSchema,
     integrations: OnboardingIntegrationStepStateSchema,
     first_task: OnboardingFirstTaskStepStateSchema,
@@ -172,6 +178,13 @@ export const OnboardingActionSchema = z.union([
   z
     .object({
       action: z.literal("complete"),
+      step: z.literal("agents"),
+      method: OnboardingAgentsMethodSchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("complete"),
       step: z.literal("integrations"),
       method: OnboardingIntegrationMethodSchema,
     })
@@ -179,7 +192,7 @@ export const OnboardingActionSchema = z.union([
   z
     .object({
       action: z.literal("skip"),
-      step: z.enum(["name", "ai", "memory", "integrations", "first_task"]),
+      step: z.enum(["name", "ai", "agents", "memory", "integrations", "first_task"]),
     })
     .strict(),
   z
@@ -295,11 +308,38 @@ function freshState(now: string, autoCompleted: boolean): OnboardingState {
       connect: emptyStep(),
       name: emptyStep(),
       ai: emptyStep(),
+      agents: emptyStep(),
       memory: emptyStep(),
       integrations: emptyStep(),
       first_task: emptyStep(),
     },
   };
+}
+
+/**
+ * Parse the stored row. A step added after the row was written (for example
+ * `agents`) starts as `todo`, so an older row keeps its progress.
+ */
+function parseStoredState(value: string): OnboardingState | null {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(value);
+  } catch {
+    return null;
+  }
+  if (raw && typeof raw === "object" && "steps" in raw) {
+    const steps = (raw as { steps: unknown }).steps;
+    if (steps && typeof steps === "object") {
+      const missing = Object.fromEntries(
+        OnboardingStepIdSchema.options
+          .filter((id) => !(id in steps))
+          .map((id) => [id, emptyStep()]),
+      );
+      raw = { ...raw, steps: { ...steps, ...missing } };
+    }
+  }
+  const parsed = OnboardingStateSchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
 }
 
 function secondsSinceStart(state: OnboardingState): number {
@@ -346,12 +386,9 @@ async function loadState(
   const rows = await getSwarmConfigs({ scope: "global", key: ONBOARDING_CONFIG_KEY });
   const stored = rows[0];
   if (stored) {
-    try {
-      const parsed = OnboardingStateSchema.safeParse(JSON.parse(stored.value));
-      if (parsed.success) return { state: parsed.data, dirty: false };
-    } catch {
-      // Replace malformed state below.
-    }
+    const state = parseStoredState(stored.value);
+    if (state) return { state, dirty: false };
+    // Replace malformed state below.
   }
 
   const now = new Date().toISOString();
@@ -629,15 +666,9 @@ export async function updateOnboardingAiFromCodexDevice(
     const stored = rows[0];
     if (!stored) return false;
 
-    let parsed: ReturnType<typeof OnboardingStateSchema.safeParse>;
-    try {
-      parsed = OnboardingStateSchema.safeParse(JSON.parse(stored.value));
-    } catch {
-      return false;
-    }
-    if (!parsed.success) return false;
+    const state = parseStoredState(stored.value);
+    if (!state) return false;
 
-    const state = parsed.data;
     const events: PendingTelemetry[] = [];
     const eventsForState = state.autoCompleted ? [] : events;
     let changed: boolean;

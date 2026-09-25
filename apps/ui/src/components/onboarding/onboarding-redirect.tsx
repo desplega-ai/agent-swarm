@@ -5,7 +5,7 @@ import { useConfig } from "@/hooks/use-config";
 
 // API URLs whose `/setup` was opened during this page load. The redirect is a
 // landing rule: once the operator has seen setup for a connection, in-app
-// links out of it (a step's Settings link, step 6 opening the new session)
+// links out of it (a step's Settings link, step 7 opening the new session)
 // must not bounce back to it. The header pill and the home card lead back
 // instead. Keyed per connection, so another swarm with open onboarding still
 // redirects.

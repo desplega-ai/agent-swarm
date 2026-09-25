@@ -37,17 +37,20 @@ export function UnifiedHome() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
-      <div className="flex flex-1 min-h-0 flex-col gap-4 px-4 pb-4 pt-4 md:px-6 md:pb-6">
-        {/* `flex-none`: the card must not take the timeline's `flex-1` share. */}
+      {/* A column below `xl`, a row from `xl`: the setup checklist (only while
+          onboarding is open) becomes a right sidebar next to the main column. */}
+      <div className="flex flex-1 min-h-0 flex-col gap-4 px-4 pb-4 pt-4 md:px-6 md:pb-6 xl:flex-row">
         <SetupChecklistCard />
-        <DashboardNudges />
-        <div className="flex-1 min-h-0">
-          <TimelineRegion
-            versionResolved={versionResolved}
-            supported={supported}
-            isError={isError}
-            error={error}
-          />
+        <div className="flex flex-1 min-h-0 min-w-0 flex-col gap-4">
+          <DashboardNudges />
+          <div className="flex-1 min-h-0">
+            <TimelineRegion
+              versionResolved={versionResolved}
+              supported={supported}
+              isError={isError}
+              error={error}
+            />
+          </div>
         </div>
       </div>
     </div>

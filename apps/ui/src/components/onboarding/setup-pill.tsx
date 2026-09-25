@@ -3,6 +3,7 @@ import { useState } from "react";
 import {
   isOnboardingOpen,
   ONBOARDING_STEPS,
+  onboardingDoneCount,
   onboardingResumeStep,
   useOnboarding,
 } from "@/api/hooks/use-onboarding";
@@ -23,8 +24,8 @@ export function SetupPill() {
 
   if (!data || !isOnboardingOpen(data)) return null;
   const { state } = data;
-  // Pill, ring, and popover all count done steps ("Setup 3/6", "3 / 6 verified").
-  const done = ONBOARDING_STEPS.filter(({ id }) => state.steps[id].status === "done").length;
+  // Pill, ring, and popover all count done steps ("Setup 3/7", "3 / 7 verified").
+  const done = onboardingDoneCount(state);
   const resumeStep = onboardingResumeStep(state);
 
   return (

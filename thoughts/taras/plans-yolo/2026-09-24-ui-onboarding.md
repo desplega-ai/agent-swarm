@@ -67,7 +67,9 @@ Writes go through `upsertSwarmConfig` directly, so no integrations reload runs.
 ### State row `onboarding_state` (global, not secret, JSON)
 
 ```ts
-type StepId = "connect" | "name" | "ai" | "memory" | "integrations" | "first_task";
+type StepId = "connect" | "name" | "ai" | "agents" | "memory" | "integrations" | "first_task";
+// `agents` (QA round 4): method "cheap" | "optimal" | "max" | "mixed", set by Continue in step 4.
+// A stored row without a step reads that step as todo (API parse + UI `useOnboarding` select).
 type StepStatus = "todo" | "done" | "skipped" | "failed";
 type ErrorClass = "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown";
 interface StepState { status: StepStatus; at: string | null; method: string | null; errorClass: ErrorClass | null }
@@ -223,14 +225,19 @@ and integers only. Rows in `docs-site/content/docs/(documentation)/reference/tel
 - [x] Dev skill for UI work in `.claude/internal-skills/` (symlinked in `.claude/skills/` + `.agents/skills/`)
 - [x] Phase 6: integration pass, gates, code review, commit, push to #1604, PR body
 - [x] Phase 7: local QA + design feedback loop with Taras (rounds 1-3 applied; continues on the PR)
+- [x] QA round 4 (9 items): stepper label "AI Providers"; agents dial moved to its own step 4 (API step `agents`); theme picker in Identity (browser-local, Taras's call); embedding model chips with Recommended; pretty model names + maker logos + tooltips in step 4; title top + content centered; integrations fill the height; wider first-task agents popover with model tooltips; home checklist as a right sidebar from `xl`, header-only bar below
 
 ## QA feedback round 2 (Taras, 2026-09-24)
 
 Decisions: blessed tools = Hybrid (Gmail + Microsoft inline via existing OAuth presets; Figma, Stripe, Salesforce, Shopify, Granola open /connections in a new tab, presets in a follow-up PR). Slack HTTP mode removed from the step (not implemented). Taras overrides the no-step-transition motion rule for /setup. Memory re-probe failure keeps a done step done.
 
+## QA feedback round 4 (Taras, 2026-09-25)
+
+Decisions: the theme picker in Identity is browser-local (same as Settings > Appearance), not a swarm default. The agents dial is step 4 ("Agents"); Continue applies Optimal where no model is set and completes the step with the level every agent got (`mixed` otherwise); no dial rows = skip. Step content centers vertically under a top-pinned title (reverses the round-2 top-align rule); split views fill the height. Header pill and home card both count done steps. "Recommended" chips use the info tone everywhere. The runtime embedding call now requests `encoding_format: "float"` like the probe, so a gateway that ignores base64 cannot pass the probe and then fail at runtime.
+
 ## Model dial (Taras, 2026-09-24)
 
-Lives inside step 3; every agent defaults to optimal; writes concrete `MODEL_OVERRIDE` + `REASONING_EFFORT_OVERRIDE` per agent (prod uses concrete ids, 12/12 agents).
+Lives in step 4 (was inside step 3 until QA round 4); every agent defaults to optimal; writes concrete `MODEL_OVERRIDE` + `REASONING_EFFORT_OVERRIDE` per agent (prod uses concrete ids, 12/12 agents).
 
 | Harness | Cheap | Optimal | Max |
 |---|---|---|---|

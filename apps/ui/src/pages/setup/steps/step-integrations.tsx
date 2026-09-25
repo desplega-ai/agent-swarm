@@ -31,7 +31,7 @@ import { JiraPane, LinearPane } from "./integrations/oauth-panes";
 import { SlackPane } from "./integrations/slack-pane";
 import type { PaneProps } from "./integrations/use-config-form";
 
-/** Query params the Linear/Jira OAuth return adds to `/setup?step=5`. */
+/** Query params the Linear/Jira OAuth return adds to `/setup?step=integrations`. */
 const RETURN_PARAMS = ["integration", "oauth", "error", "error_description"];
 
 type ItemState = "connected" | "saved" | "soon" | "none";
@@ -110,8 +110,11 @@ export function StepIntegrations({ onboarding, act, setContinueBlocker }: StepPr
 
   return (
     <AutosaveScopeContext.Provider value={scope}>
-      {/* Fixed height on sm+: the list and the pane scroll inside, so switching never moves the page. */}
-      <div className="grid gap-3 sm:h-[34rem] sm:grid-cols-[232px_minmax(0,1fr)]">
+      {/* On sm+ the list and the pane fill the height under the title and scroll
+          inside, so switching never moves the page. `h-0` + `flex-auto`: the
+          grid starts from zero and grows into the free height, never from its
+          (taller) content. */}
+      <div className="grid gap-3 sm:h-0 sm:min-h-[28rem] sm:flex-auto sm:grid-cols-[232px_minmax(0,1fr)] sm:grid-rows-[minmax(0,1fr)]">
         <nav
           aria-label="Integrations"
           className="flex gap-2 overflow-x-auto pb-1 sm:min-h-0 sm:flex-col sm:gap-0 sm:overflow-x-hidden sm:overflow-y-auto sm:rounded-xl sm:border sm:bg-card sm:py-1 sm:shadow-sm"

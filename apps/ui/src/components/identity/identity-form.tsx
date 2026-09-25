@@ -18,7 +18,7 @@ import { useConfig } from "@/hooks/use-config";
  * Pick the user this session belongs to from `useUsers()`, or create one
  * (`name` + optional `email`). On submit the user's id goes into
  * `CurrentUserContext` via `setUserId`, then `onDone` runs. Shared by the
- * identity modal and the inline picker on `/setup` (step 1, and step 6 as a
+ * identity modal and the inline picker on `/setup` (step 1, and step 7 as a
  * fallback).
  */
 export function IdentityForm({

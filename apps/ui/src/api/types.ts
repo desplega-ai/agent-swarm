@@ -3084,7 +3084,14 @@ export type AppRow = Record<string, unknown> & {
 // ─── Onboarding (GET/PUT /api/onboarding) ────────────────────────────────────
 // Contract: thoughts/taras/plans-yolo/2026-09-24-ui-onboarding.md § API contract.
 
-export type OnboardingStepId = "connect" | "name" | "ai" | "memory" | "integrations" | "first_task";
+export type OnboardingStepId =
+  | "connect"
+  | "name"
+  | "ai"
+  | "agents"
+  | "memory"
+  | "integrations"
+  | "first_task";
 
 export type OnboardingStepStatus = "todo" | "done" | "skipped" | "failed";
 
@@ -3107,6 +3114,9 @@ export type OnboardingAiMethod =
   | "openai_gateway"
   | "deepseek"
   | "devin";
+
+/** The dial level every agent got, or `mixed` (different levels or a custom model). */
+export type OnboardingAgentsMethod = "cheap" | "optimal" | "max" | "mixed";
 
 export type OnboardingMemoryPreset = "openai" | "openrouter" | "vercel" | "custom" | "existing";
 
@@ -3167,6 +3177,7 @@ export type OnboardingAction =
   | { action: "complete"; step: "connect"; method: "api_key" }
   | { action: "complete"; step: "name"; method: "custom_name" | "default_name" }
   | { action: "complete"; step: "ai"; method: OnboardingAiMethod }
+  | { action: "complete"; step: "agents"; method: OnboardingAgentsMethod }
   | { action: "complete"; step: "integrations"; method: OnboardingIntegrationMethod }
   | { action: "skip"; step: Exclude<OnboardingStepId, "connect"> }
   | { action: "fail"; step: OnboardingStepId; errorClass: OnboardingErrorClass }

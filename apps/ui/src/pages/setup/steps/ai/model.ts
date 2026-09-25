@@ -6,6 +6,7 @@ import type {
   ProviderName,
   SwarmConfig,
 } from "@/api/types";
+import type { DialContext } from "@/lib/model-dial";
 import { httpUrlError } from "../../components/http-url";
 
 /** The four provider cards on step 3. */
@@ -74,8 +75,8 @@ export interface AiCardProps {
   agents: AgentWithTasks[];
   /** Called after a save succeeds, with the method that save completes the step with. */
   onSaved: (method: OnboardingAiMethod) => void;
-  /** Called with the agents whose harness the R2 switch changed. */
-  onHarnessSwitched: (agentIds: string[]) => void;
+  /** How dsh routes, for the model level the R2 switch carries over. */
+  dialContext: DialContext;
 }
 
 /** Value of a non-secret global config row, for prefilling a field. */

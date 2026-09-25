@@ -4,7 +4,7 @@ import { INTEGRATIONS } from "@/lib/integrations-catalog";
 import { httpUrlError } from "../../components/http-url";
 
 /**
- * What step 5 offers, in two groups:
+ * What step 6 (integrations) offers, in two groups:
  * - "Chat and code": the five integrations the API derives the step from,
  *   plus the field specs each pane edits. Labels, placeholders, and secret
  *   flags come from the Settings catalog (`lib/integrations-catalog.ts`).

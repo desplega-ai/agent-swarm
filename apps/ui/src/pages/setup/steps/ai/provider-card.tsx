@@ -28,9 +28,9 @@ export function ProviderCard({
   onOpenChange,
   rollup,
   agents,
-  onHarnessSwitched,
+  dialContext,
   children,
-}: Pick<AiCardProps, "open" | "onOpenChange" | "rollup" | "agents" | "onHarnessSwitched"> & {
+}: Pick<AiCardProps, "open" | "onOpenChange" | "rollup" | "agents" | "dialContext"> & {
   card: AiCardId;
   icon: ReactNode;
   title: string;
@@ -97,7 +97,7 @@ export function ProviderCard({
           harnessPhrase={harnessPhrase(card)}
           targets={harnesses}
           agents={agents}
-          onSwitched={onHarnessSwitched}
+          dialContext={dialContext}
         />
       ) : null}
     </SetupCard>

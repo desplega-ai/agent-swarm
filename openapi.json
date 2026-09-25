@@ -23629,6 +23629,7 @@
                             "connect",
                             "name",
                             "ai",
+                            "agents",
                             "memory",
                             "integrations",
                             "first_task"
@@ -23837,6 +23838,63 @@
                                 "errorClass"
                               ]
                             },
+                            "agents": {
+                              "type": "object",
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "todo",
+                                    "done",
+                                    "skipped",
+                                    "failed"
+                                  ]
+                                },
+                                "at": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "format": "date-time"
+                                },
+                                "method": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "enum": [
+                                    "cheap",
+                                    "optimal",
+                                    "max",
+                                    "mixed",
+                                    null
+                                  ]
+                                },
+                                "errorClass": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "enum": [
+                                    "auth",
+                                    "network",
+                                    "timeout",
+                                    "dimension",
+                                    "model",
+                                    "not_enabled",
+                                    "expired",
+                                    "unknown",
+                                    null
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "status",
+                                "at",
+                                "method",
+                                "errorClass"
+                              ]
+                            },
                             "memory": {
                               "type": "object",
                               "properties": {
@@ -24013,6 +24071,7 @@
                             "connect",
                             "name",
                             "ai",
+                            "agents",
                             "memory",
                             "integrations",
                             "first_task"
@@ -24205,6 +24264,7 @@
                           "connect",
                           "name",
                           "ai",
+                          "agents",
                           "memory",
                           "integrations",
                           "first_task"
@@ -24324,6 +24384,38 @@
                       "step": {
                         "type": "string",
                         "enum": [
+                          "agents"
+                        ]
+                      },
+                      "method": {
+                        "type": "string",
+                        "enum": [
+                          "cheap",
+                          "optimal",
+                          "max",
+                          "mixed"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "action",
+                      "step",
+                      "method"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "enum": [
+                          "complete"
+                        ]
+                      },
+                      "step": {
+                        "type": "string",
+                        "enum": [
                           "integrations"
                         ]
                       },
@@ -24359,6 +24451,7 @@
                         "enum": [
                           "name",
                           "ai",
+                          "agents",
                           "memory",
                           "integrations",
                           "first_task"
@@ -24386,6 +24479,7 @@
                           "connect",
                           "name",
                           "ai",
+                          "agents",
                           "memory",
                           "integrations",
                           "first_task"
@@ -24517,6 +24611,7 @@
                             "connect",
                             "name",
                             "ai",
+                            "agents",
                             "memory",
                             "integrations",
                             "first_task"
@@ -24725,6 +24820,63 @@
                                 "errorClass"
                               ]
                             },
+                            "agents": {
+                              "type": "object",
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "todo",
+                                    "done",
+                                    "skipped",
+                                    "failed"
+                                  ]
+                                },
+                                "at": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "format": "date-time"
+                                },
+                                "method": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "enum": [
+                                    "cheap",
+                                    "optimal",
+                                    "max",
+                                    "mixed",
+                                    null
+                                  ]
+                                },
+                                "errorClass": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "enum": [
+                                    "auth",
+                                    "network",
+                                    "timeout",
+                                    "dimension",
+                                    "model",
+                                    "not_enabled",
+                                    "expired",
+                                    "unknown",
+                                    null
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "status",
+                                "at",
+                                "method",
+                                "errorClass"
+                              ]
+                            },
                             "memory": {
                               "type": "object",
                               "properties": {
@@ -24901,6 +25053,7 @@
                             "connect",
                             "name",
                             "ai",
+                            "agents",
                             "memory",
                             "integrations",
                             "first_task"

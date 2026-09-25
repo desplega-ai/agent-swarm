@@ -12,14 +12,14 @@ export interface ContinueActionOptions {
    * `true`: the action finishes a step that is not done yet, so the shell
    * enables Continue while the action is set (step 2 stores the suggested
    * name). `false` (default): the action only runs before the shell moves
-   * on when Continue is already enabled (step 3 applies default models).
+   * on when Continue is already enabled.
    */
   unlocks?: boolean;
 }
 
 /**
  * Props every `/setup` step component receives from the shell (`page.tsx`).
- * Steps 2-6 always get a payload. Step 1 (connect) has its own props because
+ * Steps 2-7 always get a payload. Step 1 (connect) has its own props because
  * it renders before a connection exists.
  */
 export interface StepProps {

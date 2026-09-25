@@ -1,5 +1,5 @@
-import { Check, Loader2, RotateCw, SlidersHorizontal } from "lucide-react";
-import { useState } from "react";
+import { Check, Loader2, RotateCw, SlidersHorizontal, TextCursorInput } from "lucide-react";
+import { type ReactNode, useState } from "react";
 import { useEnvPresence } from "@/api/hooks/use-integrations-meta";
 import { useTestOnboardingMemory } from "@/api/hooks/use-onboarding";
 import type {
@@ -15,8 +15,10 @@ import {
   usePasteCommit,
 } from "@/components/onboarding/autosave-secret-field";
 import { FadeIn } from "@/components/onboarding/fade-in";
-import { SetupCard } from "@/components/onboarding/setup-card";
+import { SetupCard, SetupChip } from "@/components/onboarding/setup-card";
+import { AnimatedReveal } from "@/components/shared/animated-reveal";
 import { BrandLogo } from "@/components/shared/brand-logo";
+import { ModelLogo } from "@/components/shared/model-logo";
 import { SecretInput } from "@/components/shared/secret-input";
 import { StatusIcon, StatusLine, type StatusTone } from "@/components/shared/status-icon";
 import { Button } from "@/components/ui/button";
@@ -25,18 +27,37 @@ import { Input } from "@/components/ui/input";
 import { SettingsRow } from "@/components/ui/settings-row";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { AutosaveScopeContext, useAutosave, useAutosaveScope } from "@/hooks/use-autosave";
+import { modelDisplayName } from "@/lib/model-vendor";
 import { cn } from "@/lib/utils";
 import type { StepProps } from "../step-contract";
 import { baseUrlError } from "./ai/model";
 
 type ReuseKey = NonNullable<OnboardingMemoryTestRequest["reuseKey"]>;
 
+/** A model chip. The first one of a preset is the recommended default. */
+interface ModelChoice {
+  /** The id the endpoint takes. */
+  id: string;
+  /** One line: what it trades against the recommended model. */
+  tradeoff: string;
+}
+
+// Price ratios use official list prices per 1M tokens: text-embedding-3-small
+// $0.02, text-embedding-3-large $0.13 (OpenAI), gemini-embedding-2 $0.20
+// (Google), gemini-embedding-001 $0.15 (Vercel AI Gateway catalog).
+const SMALL_TRADEOFF = "Cheapest, and faster than the large model.";
+const LARGE_TRADEOFF = "Higher quality, slower, 6.5x the price of the recommended model.";
+
 interface Preset {
   id: Exclude<OnboardingMemoryPreset, "existing">;
   label: string;
   logo?: string;
   baseUrl: string;
-  model: string;
+  /**
+   * Only models documented to honor the `dimensions` parameter on this
+   * endpoint. Empty: a free-text model field only.
+   */
+  models: ModelChoice[];
   keyLabel: string;
   placeholder: string;
   keyRule: SecretRule;
@@ -51,7 +72,10 @@ const PRESETS: Preset[] = [
     label: "OpenAI",
     logo: "/provider-logos/openai.svg",
     baseUrl: "https://api.openai.com/v1",
-    model: "text-embedding-3-small",
+    models: [
+      { id: "text-embedding-3-small", tradeoff: SMALL_TRADEOFF },
+      { id: "text-embedding-3-large", tradeoff: LARGE_TRADEOFF },
+    ],
     keyLabel: "OpenAI API key",
     placeholder: "sk-proj-...",
     keyRule: KEY_RULES.openAi,
@@ -62,7 +86,14 @@ const PRESETS: Preset[] = [
     label: "OpenRouter",
     logo: "/provider-logos/openrouter.svg",
     baseUrl: "https://openrouter.ai/api/v1",
-    model: "openai/text-embedding-3-small",
+    models: [
+      { id: "openai/text-embedding-3-small", tradeoff: SMALL_TRADEOFF },
+      { id: "openai/text-embedding-3-large", tradeoff: LARGE_TRADEOFF },
+      {
+        id: "google/gemini-embedding-2",
+        tradeoff: "Google's multimodal model, 10x the price of the recommended model.",
+      },
+    ],
     keyLabel: "OpenRouter API key",
     placeholder: "sk-or-v1-...",
     keyRule: KEY_RULES.openRouter,
@@ -73,7 +104,14 @@ const PRESETS: Preset[] = [
     label: "Vercel AI Gateway",
     logo: "/integration-logos/vercel.svg",
     baseUrl: "https://ai-gateway.vercel.sh/v1",
-    model: "openai/text-embedding-3-small",
+    models: [
+      { id: "openai/text-embedding-3-small", tradeoff: SMALL_TRADEOFF },
+      { id: "openai/text-embedding-3-large", tradeoff: LARGE_TRADEOFF },
+      {
+        id: "google/gemini-embedding-001",
+        tradeoff: "Strong on multilingual and code text, 7.5x the price of the recommended model.",
+      },
+    ],
     keyLabel: "AI Gateway API key",
     placeholder: "vck_...",
     keyRule: KEY_RULES.vercel,
@@ -82,13 +120,17 @@ const PRESETS: Preset[] = [
     id: "custom",
     label: "Custom",
     baseUrl: "",
-    model: "",
+    models: [],
     keyLabel: "API key",
     placeholder: "••••",
     // Unknown format: 16+ characters.
     keyRule: {},
   },
 ];
+
+/** The amber state of a selected outline button (preset, model, reuse). */
+const SELECTED =
+  "border-primary/60 bg-primary/5 text-primary hover:bg-primary/10 hover:text-primary";
 
 function errorHint(errorClass: OnboardingErrorClass | undefined, dims: number): string {
   switch (errorClass) {
@@ -125,7 +167,7 @@ function isRetryable(outcome: Outcome): boolean {
 }
 
 /**
- * Step 4: embeddings. No Save button: once the fields are valid, the step
+ * Step 5: embeddings. No Save button: once the fields are valid, the step
  * runs the test-and-save probe by itself (one embedding call; the API stores
  * the config only when it works). A typed key tests on paste or blur only,
  * never half-typed. A result shows only while the fields still match it.
@@ -134,7 +176,9 @@ export function StepMemory({ onboarding, setContinueBlocker }: StepProps) {
   const scope = useAutosaveScope(setContinueBlocker);
   const [preset, setPreset] = useState<Preset>(PRESETS[0]);
   const [baseUrl, setBaseUrl] = useState(preset.baseUrl);
-  const [model, setModel] = useState(preset.model);
+  const [model, setModel] = useState(preset.models[0]?.id ?? "");
+  // "Other": a model id outside the preset's chips, typed by hand.
+  const [other, setOther] = useState(false);
   const [apiKey, setApiKey] = useState("");
   const [reuse, setReuse] = useState(false);
   const [keyBlurred, setKeyBlurred] = useState(false);
@@ -147,6 +191,7 @@ export function StepMemory({ onboarding, setContinueBlocker }: StepProps) {
   const reuseKey =
     preset.reuseKey && presenceQ.data?.[preset.reuseKey] ? preset.reuseKey : undefined;
   const usingReuse = reuse && reuseKey !== undefined;
+  const freeText = other || preset.models.length === 0;
 
   const url = baseUrl.trim();
   const modelId = model.trim();
@@ -207,11 +252,25 @@ export function StepMemory({ onboarding, setContinueBlocker }: StepProps) {
   function selectPreset(next: Preset) {
     setPreset(next);
     setBaseUrl(next.baseUrl);
-    setModel(next.model);
+    setModel(next.models[0]?.id ?? "");
+    setOther(false);
     setApiKey("");
     setReuse(false);
     setKeyBlurred(false);
     setOutcome(null);
+  }
+
+  /** A chip pick commits like leaving a field: it tests at once when the key is ready. */
+  function pickModel(id: string) {
+    setModel(id);
+    setOther(false);
+    probe.commit();
+  }
+
+  function pickOther() {
+    if (other) return;
+    setOther(true);
+    setModel("");
   }
 
   // Only what belongs to the fields on screen: a probe still running for an
@@ -285,10 +344,7 @@ export function StepMemory({ onboarding, setContinueBlocker }: StepProps) {
                 variant="outline"
                 size="sm"
                 onClick={() => selectPreset(p)}
-                className={cn(
-                  active &&
-                    "border-primary/60 bg-primary/5 text-primary hover:bg-primary/10 hover:text-primary",
-                )}
+                className={cn(active && SELECTED)}
               >
                 {p.logo ? (
                   <BrandLogo src={p.logo} className="size-4" />
@@ -301,37 +357,69 @@ export function StepMemory({ onboarding, setContinueBlocker }: StepProps) {
           })}
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2">
-          <SettingsRow
-            label="Base URL"
-            htmlFor="memory-base-url"
-            helper={
-              urlError ? <span className="text-status-error-strong">{urlError}</span> : undefined
-            }
-          >
-            <Input
-              id="memory-base-url"
-              value={baseUrl}
-              onChange={(e) => setBaseUrl(e.target.value)}
-              onBlur={probe.commit}
-              placeholder="https://embeddings.example.com/v1"
-              spellCheck={false}
-              aria-invalid={urlError ? true : undefined}
-              className="font-mono"
-            />
-          </SettingsRow>
-          <SettingsRow label="Model" htmlFor="memory-model">
+        <SettingsRow label="Model" htmlFor={freeText ? "memory-model" : undefined}>
+          {preset.models.length > 0 ? (
+            <div role="radiogroup" aria-label="Model" className="flex flex-wrap gap-2">
+              {preset.models.map((m, i) => (
+                <ChoiceChip
+                  key={m.id}
+                  selected={!other && m.id === model}
+                  onClick={() => pickModel(m.id)}
+                  tip={
+                    <span className="flex flex-col gap-0.5">
+                      <span className="font-mono">{m.id}</span>
+                      <span>{m.tradeoff}</span>
+                    </span>
+                  }
+                >
+                  <ModelLogo model={m.id} className="size-4" />
+                  {modelDisplayName(m.id)}
+                  {i === 0 ? <SetupChip tone="info">Recommended</SetupChip> : null}
+                </ChoiceChip>
+              ))}
+              <ChoiceChip
+                selected={other}
+                onClick={pickOther}
+                tip={`Type any model id. It must support ${dimensions} dimensions.`}
+              >
+                <TextCursorInput className="size-4" />
+                Other
+              </ChoiceChip>
+            </div>
+          ) : null}
+          {/* The padding keeps the focus ring inside the reveal's clip. */}
+          <AnimatedReveal open={freeText} className="-m-1 p-1">
             <Input
               id="memory-model"
               value={model}
               onChange={(e) => setModel(e.target.value)}
               onBlur={probe.commit}
-              placeholder="text-embedding-3-small"
+              placeholder={preset.models[0]?.id ?? "text-embedding-3-small"}
               spellCheck={false}
+              autoFocus={other}
               className="font-mono"
             />
-          </SettingsRow>
-        </div>
+          </AnimatedReveal>
+        </SettingsRow>
+
+        <SettingsRow
+          label="Base URL"
+          htmlFor="memory-base-url"
+          helper={
+            urlError ? <span className="text-status-error-strong">{urlError}</span> : undefined
+          }
+        >
+          <Input
+            id="memory-base-url"
+            value={baseUrl}
+            onChange={(e) => setBaseUrl(e.target.value)}
+            onBlur={probe.commit}
+            placeholder="https://embeddings.example.com/v1"
+            spellCheck={false}
+            aria-invalid={urlError ? true : undefined}
+            className="font-mono"
+          />
+        </SettingsRow>
 
         <SettingsRow
           label={preset.keyLabel}
@@ -371,10 +459,7 @@ export function StepMemory({ onboarding, setContinueBlocker }: StepProps) {
                 size="sm"
                 aria-pressed={usingReuse}
                 onClick={() => setReuse((v) => !v)}
-                className={cn(
-                  usingReuse &&
-                    "border-primary/60 bg-primary/5 text-primary hover:bg-primary/10 hover:text-primary",
-                )}
+                className={cn(usingReuse && SELECTED)}
               >
                 {usingReuse ? <Check /> : null}
                 Reuse key from step 3
@@ -391,6 +476,38 @@ export function StepMemory({ onboarding, setContinueBlocker }: StepProps) {
         />
       </SetupCard>
     </AutosaveScopeContext.Provider>
+  );
+}
+
+/** One option of a radiogroup, styled like the preset buttons, with a tooltip. */
+function ChoiceChip({
+  selected,
+  onClick,
+  tip,
+  children,
+}: {
+  selected: boolean;
+  onClick: () => void;
+  tip: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          role="radio"
+          aria-checked={selected}
+          variant="outline"
+          size="sm"
+          onClick={onClick}
+          className={cn(selected && SELECTED)}
+        >
+          {children}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-72">{tip}</TooltipContent>
+    </Tooltip>
   );
 }
 

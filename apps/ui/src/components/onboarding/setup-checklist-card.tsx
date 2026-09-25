@@ -3,8 +3,8 @@ import { toast } from "sonner";
 import {
   isOnboardingOpen,
   ONBOARDING_STEPS,
+  onboardingDoneCount,
   onboardingResumeStep,
-  onboardingSettledCount,
   useOnboarding,
   useOnboardingAction,
 } from "@/api/hooks/use-onboarding";
@@ -15,12 +15,18 @@ import { Progress } from "@/components/ui/progress";
 import { useConfig } from "@/hooks/use-config";
 import { HARNESS_LABEL } from "@/lib/agent-runtime-models";
 import { INTEGRATIONS } from "@/lib/integrations-catalog";
+import { DIAL_LEVEL_LABEL, type DialLevel } from "@/lib/model-dial";
 import { cn } from "@/lib/utils";
 import { SetupCard } from "./setup-card";
 import { SKIPPED_HATCH, STEP_TONE_CLASS, StepStatusChip, stepNumber } from "./step-status";
 import { useResumeSetup } from "./use-resume-setup";
 
-/** Home dashboard card while onboarding is open. Wrapper `id="setup"` is the `/#setup` anchor. */
+/**
+ * Home dashboard checklist while onboarding is open. Below `xl` it is only the
+ * header (title, progress, Resume) as a bar above the timeline. From `xl` it is
+ * the full checklist in a right sidebar (`xl:order-last` in the home row).
+ * Wrapper `id="setup"` is the `/#setup` anchor.
+ */
 export function SetupChecklistCard() {
   const { data } = useOnboarding();
   const { data: status } = useStatusContext();
@@ -30,7 +36,7 @@ export function SetupChecklistCard() {
 
   if (!data || !isOnboardingOpen(data)) return null;
   const { state } = data;
-  const settled = onboardingSettledCount(state);
+  const done = onboardingDoneCount(state);
   const resumeStep = onboardingResumeStep(state);
   const busy = resuming || dismiss.isPending;
   const context = { apiUrl: config.apiUrl, swarmName: status?.identity.name ?? "your swarm" };
@@ -43,17 +49,49 @@ export function SetupChecklistCard() {
     }
   }
 
+  const title = "Finish setting up your swarm";
+  const progress = (
+    <span className="flex items-center gap-2 pt-1">
+      <Progress
+        value={(done / ONBOARDING_STEPS.length) * 100}
+        aria-label={`${done} of ${ONBOARDING_STEPS.length} steps done`}
+        className="h-1 bg-muted"
+      />
+      <span className="shrink-0 tabular-nums">
+        {done} of {ONBOARDING_STEPS.length}
+      </span>
+    </span>
+  );
+
   return (
-    <div id="setup" className="w-full max-w-3xl flex-none scroll-mt-4">
-      <SetupCard title="Finish setting up your swarm" bodyClassName="p-0">
-        <div className="px-4 pt-3 pb-1">
-          <Progress
-            value={(settled / ONBOARDING_STEPS.length) * 100}
-            aria-label={`${settled} of ${ONBOARDING_STEPS.length} steps settled`}
-            className="h-1 bg-muted"
-          />
-        </div>
-        <ul className="divide-y divide-border-subtle">
+    <div
+      id="setup"
+      // From `xl` a sidebar as tall as its content, capped at the region: the list scrolls inside.
+      className="flex-none scroll-mt-4 xl:order-last xl:flex xl:max-h-full xl:w-80 xl:flex-col xl:self-start"
+    >
+      <SetupCard
+        title={title}
+        description={progress}
+        className="xl:hidden"
+        actions={
+          <>
+            <Button size="sm" variant="ghost" disabled={busy} onClick={() => void handleDismiss()}>
+              Dismiss
+            </Button>
+            <Button size="sm" disabled={busy} onClick={() => void resume(resumeStep)}>
+              Resume
+              <ArrowRight />
+            </Button>
+          </>
+        }
+      />
+      <SetupCard
+        title={title}
+        description={progress}
+        className="hidden min-h-0 flex-col overflow-hidden xl:flex"
+        bodyClassName="flex min-h-0 flex-1 flex-col p-0"
+      >
+        <ul className="min-h-0 flex-1 divide-y divide-border-subtle overflow-y-auto">
           {ONBOARDING_STEPS.map(({ id, label }) => {
             const stepStatus = state.steps[id].status;
             return (
@@ -88,11 +126,16 @@ export function SetupChecklistCard() {
             );
           })}
         </ul>
-        <div className="flex flex-wrap items-center gap-2 border-t border-border-subtle bg-surface px-4 py-3">
-          <p className="min-w-0 flex-1 text-xs text-muted-foreground">
+        <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-border-subtle bg-surface px-4 py-3">
+          <p className="w-full text-xs text-muted-foreground">
             Progress is kept per step. Resume opens step {stepNumber(resumeStep)}.
           </p>
-          <Button variant="ghost" disabled={busy} onClick={() => void handleDismiss()}>
+          <Button
+            variant="ghost"
+            className="ml-auto"
+            disabled={busy}
+            onClick={() => void handleDismiss()}
+          >
             Dismiss
           </Button>
           <Button disabled={busy} onClick={() => void resume(resumeStep)}>
@@ -123,6 +166,14 @@ function stepSubtitle(
       if (verified) return `${HARNESS_LABEL[verified.provider] ?? verified.provider} verified`;
       if (signals.providers.some((p) => p.state === "configured")) return "Waiting for a worker";
       return "Not set up";
+    }
+    case "agents": {
+      if (stepStatus === "done") {
+        // `method` is the dial level every agent got, or `mixed`.
+        const level = DIAL_LEVEL_LABEL[state.steps.agents.method as DialLevel];
+        return level ? `All agents on ${level}` : "Mixed levels";
+      }
+      return stepStatus === "skipped" ? "Skipped" : "Not set yet";
     }
     case "memory":
       if (signals.embeddings.configured) return `${signals.embeddings.dimensions} dims`;

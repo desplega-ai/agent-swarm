@@ -1,5 +1,6 @@
 import { AnimatePresence, motion, useReducedMotion, type Variants } from "motion/react";
 import type { ReactNode } from "react";
+import { cn } from "@/lib/utils";
 
 const SNAPPY = [0.2, 0, 0, 1] as const;
 
@@ -28,19 +29,22 @@ const FADE: Variants = {
  * Crossfades step content keyed by `stepKey`. `popLayout` takes the leaving
  * step out of the flow at once, so the new step lays out immediately and the
  * two animate together (no blank gap, no height jump under the fixed footer).
+ * The step is a flex column that fills the height the parent gives it.
  */
 export function StepTransition({
   stepKey,
   direction,
+  className,
   children,
 }: {
   stepKey: string;
   direction: 1 | -1;
+  className?: string;
   children: ReactNode;
 }) {
   const variants = useReducedMotion() ? FADE : SLIDE;
   return (
-    <div className="relative">
+    <div className={cn("relative flex flex-col", className)}>
       <AnimatePresence mode="popLayout" initial={false} custom={direction}>
         <motion.div
           key={stepKey}
@@ -49,6 +53,7 @@ export function StepTransition({
           initial="enter"
           animate="center"
           exit="exit"
+          className="flex flex-1 flex-col"
         >
           {children}
         </motion.div>

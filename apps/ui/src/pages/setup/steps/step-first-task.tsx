@@ -4,7 +4,7 @@ import { isLeadReady, LeadStatusLine } from "./first-task/agents-card";
 import { FirstTaskComposer } from "./first-task/first-message-card";
 
 /**
- * Step 6: one secondary status line (the lead, the agent count), then a big
+ * Step 7: one secondary status line (the lead, the agent count), then a big
  * centered composer. The composer shows while the lead is still starting, but
  * stays disabled until it is ready.
  */

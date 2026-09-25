@@ -8,8 +8,9 @@ import type { OnboardingAiMethod } from "@/api/types";
 import { setupExitHref } from "@/components/onboarding/onboarding-redirect";
 import { Button } from "@/components/ui/button";
 import { AutosaveScopeContext, useAutosaveScope } from "@/hooks/use-autosave";
+import { hasRuntimeCredential } from "@/lib/agent-runtime-models";
+import type { DialContext } from "@/lib/model-dial";
 import type { StepProps } from "../step-contract";
-import { AgentModels } from "./ai/agent-models";
 import { ClaudeCard } from "./ai/claude-card";
 import { CodexCard } from "./ai/codex-card";
 import { DevinCard } from "./ai/devin-card";
@@ -23,7 +24,7 @@ import {
 } from "./ai/model";
 import { OpenHarnessCard } from "./ai/open-harness-card";
 
-export function StepAi({ onboarding, act, setContinueBlocker, setContinueAction }: StepProps) {
+export function StepAi({ onboarding, act, setContinueBlocker }: StepProps) {
   const scope = useAutosaveScope(setContinueBlocker);
   const { data: agents = [] } = useAgents();
   const { data: presence = {} } = useEnvPresence(PRESENCE_KEYS);
@@ -33,11 +34,8 @@ export function StepAi({ onboarding, act, setContinueBlocker, setContinueAction 
   // The card the user saved on, and the method that save completes the step with.
   const pending = useRef<{ card: AiCardId; method: OnboardingAiMethod } | null>(null);
   const cliRecorded = useRef(false);
-  // Agents whose harness the operator switched here: only their level carries over.
-  const [switchedAgentIds, setSwitchedAgentIds] = useState<ReadonlySet<string>>(() => new Set());
-  const onHarnessSwitched = useCallback((ids: string[]) => {
-    if (ids.length > 0) setSwitchedAgentIds((prev) => new Set([...prev, ...ids]));
-  }, []);
+  const openrouter = hasRuntimeCredential("OPENROUTER_API_KEY", configs, presence);
+  const dialContext = useMemo<DialContext>(() => ({ openrouter }), [openrouter]);
 
   const providers = onboarding.signals.providers;
   const rollups = useMemo(
@@ -91,7 +89,7 @@ export function StepAi({ onboarding, act, setContinueBlocker, setContinueAction 
     configs,
     agents,
     onSaved,
-    onHarnessSwitched,
+    dialContext,
   });
 
   return (
@@ -119,14 +117,6 @@ export function StepAi({ onboarding, act, setContinueBlocker, setContinueAction 
             </Link>
           </Button>
         </div>
-        <AgentModels
-          className="mt-4"
-          agents={agents}
-          configs={configs}
-          presence={presence}
-          switchedAgentIds={switchedAgentIds}
-          setContinueAction={setContinueAction}
-        />
       </div>
     </AutosaveScopeContext.Provider>
   );

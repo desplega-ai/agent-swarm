@@ -1,5 +1,6 @@
 import {
   Blocks,
+  Bot,
   Brain,
   Check,
   Fingerprint,
@@ -30,6 +31,7 @@ const STEP_ICON: Record<OnboardingStepId, LucideIcon> = {
   connect: Plug,
   name: Fingerprint,
   ai: Sparkles,
+  agents: Bot,
   memory: Brain,
   integrations: Blocks,
   first_task: Send,
@@ -43,7 +45,7 @@ interface SetupStepperProps {
 }
 
 /**
- * The header stepper: six round markers, each with its step icon, joined by
+ * The header stepper: seven round markers, each with its step icon, joined by
  * connectors that fill amber as steps settle. Status reads at a glance: a
  * done step is amber with a check badge, a failed one red with an x badge, a
  * skipped one hatched. The current step is a solid amber pill with its label

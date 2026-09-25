@@ -3,6 +3,7 @@ import { Loader2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
+import { resolvedConfigsQuery } from "@/api/hooks/use-config-api";
 import { ONBOARDING_QUERY_KEY } from "@/api/hooks/use-onboarding";
 import type { AgentWithTasks, ProviderName } from "@/api/types";
 import { SetupChip } from "@/components/onboarding/setup-card";
@@ -18,6 +19,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { HARNESS_LABEL } from "@/lib/agent-runtime-models";
+import {
+  type DialContext,
+  dialHarness,
+  dialLevelOfAnyHarness,
+  dialSetting,
+} from "@/lib/model-dial";
 
 /** `HarnessIcon` has no dsh mark; the DeepSeek logo stands in. */
 export function AiHarnessIcon({ harness }: { harness: string | null | undefined }) {
@@ -35,15 +42,15 @@ export function HarnessSwitch({
   harnessPhrase,
   targets,
   agents,
-  onSwitched,
+  dialContext,
 }: {
   /** "Codex", or "Pi-Mono, Opencode, or DeepSeek (dsh)" for the open harnesses card. */
   harnessPhrase: string;
   /** Harnesses the user can switch to. More than one renders a picker. */
   targets: readonly ProviderName[];
   agents: AgentWithTasks[];
-  /** The agents whose switch succeeded (their model level carries over). */
-  onSwitched: (agentIds: string[]) => void;
+  /** How dsh routes, for the carried model level. */
+  dialContext: DialContext;
 }) {
   const queryClient = useQueryClient();
   const [target, setTarget] = useState<ProviderName>(targets[0]);
@@ -62,15 +69,41 @@ export function HarnessSwitch({
     });
   }
 
+  /**
+   * Switch one agent. An agent-scope model on a dial level of its old harness
+   * moves to the same level of the new one in the same write, so the agent
+   * never runs its old harness's model id on the new harness.
+   */
+  async function switchOne(id: string) {
+    const harness = dialHarness(target);
+    if (harness) {
+      // `fetchQuery` skips the query's `select`: unwrap the response here.
+      const { configs } = await queryClient.fetchQuery(resolvedConfigsQuery({ agentId: id }));
+      const model = configs.find((c) => c.key === "MODEL_OVERRIDE");
+      const effort = configs.find((c) => c.key === "REASONING_EFFORT_OVERRIDE")?.value;
+      const level =
+        model?.scope === "agent" ? dialLevelOfAnyHarness(model.value, effort, dialContext) : null;
+      if (level) {
+        const setting = dialSetting(harness, level, dialContext);
+        await api.updateAgentRuntime({
+          id,
+          harnessProvider: harness,
+          model: setting.model,
+          allowCustomModel: setting.custom,
+          reasoningEffort: setting.effort,
+        });
+        return;
+      }
+    }
+    await api.setAgentHarnessProvider(id, target);
+  }
+
   async function switchAgents() {
     setBusy(true);
     const ids = [...checked];
-    const results = await Promise.allSettled(
-      ids.map((id) => api.setAgentHarnessProvider(id, target)),
-    );
+    const results = await Promise.allSettled(ids.map(switchOne));
     const failures = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
     const switched = ids.length - failures.length;
-    onSwitched(ids.filter((_, index) => results[index].status === "fulfilled"));
     if (failures.length === 0) {
       toast.success(
         `Switched ${switched} agent${switched === 1 ? "" : "s"} to ${targetName}. They pick it up within about 10 seconds.`,
@@ -83,6 +116,7 @@ export function HarnessSwitch({
     setBusy(false);
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["agents"] }),
+      queryClient.invalidateQueries({ queryKey: ["configs"] }),
       queryClient.invalidateQueries({ queryKey: ONBOARDING_QUERY_KEY }),
     ]);
   }

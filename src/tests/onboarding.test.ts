@@ -9,6 +9,7 @@ import {
   initDb,
   setAgentHarnessProvider,
   updateAgentCredStatus,
+  upsertSwarmConfig,
 } from "../be/db";
 import { resetEmbeddingProvider } from "../be/memory";
 import {
@@ -211,7 +212,43 @@ describe("onboarding state", () => {
       null,
       null,
       null,
+      null,
     ]);
+  });
+
+  test("a row stored before the agents step keeps its progress", async () => {
+    const state = (await (await request("/api/onboarding")).json()) as {
+      state: OnboardingState;
+    };
+    const stored = structuredClone(state.state) as unknown as {
+      startedAt: string;
+      steps: Record<string, unknown>;
+    };
+    stored.steps.name = {
+      status: "done",
+      at: stored.startedAt,
+      method: "custom_name",
+      errorClass: null,
+    };
+    delete stored.steps.agents;
+    await upsertSwarmConfig({
+      scope: "global",
+      key: "onboarding_state",
+      value: JSON.stringify(stored),
+    });
+    capturedTelemetry.length = 0;
+
+    const body = (await (await request("/api/onboarding")).json()) as { state: OnboardingState };
+    expect(body.state.startedAt).toBe(stored.startedAt);
+    expect(body.state.steps.name).toMatchObject({ status: "done", method: "custom_name" });
+    expect(body.state.steps.agents).toEqual({
+      status: "todo",
+      at: null,
+      method: null,
+      errorClass: null,
+    });
+    await Bun.sleep(10);
+    expect(capturedTelemetry.filter((entry) => entry.event === "started")).toHaveLength(0);
   });
 
   test("a user row marks the install as existing", async () => {
@@ -378,6 +415,10 @@ describe("onboarding state", () => {
     expect(((await response.json()) as { state: OnboardingState }).state.steps.ai.status).toBe(
       "done",
     );
+    response = await put({ action: "complete", step: "agents", method: "optimal" });
+    expect(
+      ((await response.json()) as { state: OnboardingState }).state.steps.agents,
+    ).toMatchObject({ status: "done", method: "optimal" });
     response = await put({ action: "complete", step: "integrations", method: "github" });
     expect(
       ((await response.json()) as { state: OnboardingState }).state.steps.integrations.status,
@@ -431,7 +472,9 @@ describe("onboarding state", () => {
     expect((await put({ action: "complete", step: "ai", method: "not-a-provider" })).status).toBe(
       400,
     );
+    expect((await put({ action: "complete", step: "agents", method: "turbo" })).status).toBe(400);
     expect((await put({ action: "skip", step: "connect" })).status).toBe(400);
+    expect((await put({ action: "skip", step: "agents" })).status).toBe(200);
   });
 
   test("skip, dismiss, and fail transitions emit telemetry once", async () => {

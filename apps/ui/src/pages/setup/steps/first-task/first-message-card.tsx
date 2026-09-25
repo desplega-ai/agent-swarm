@@ -25,7 +25,7 @@ type BadgeStatus = ComponentProps<typeof StatusBadge>["status"];
  * The first task: the sessions composer at the full setup column width
  * (`SETUP_COLUMN`), with the starter suggestions under it. Sending creates a
  * UI task for the current user, records it as the onboarding first task,
- * minimizes setup, and opens the session. Step 6 completes when that task
+ * minimizes setup, and opens the session. Step 7 completes when that task
  * completes.
  */
 export function FirstTaskComposer({

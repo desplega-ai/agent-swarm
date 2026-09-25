@@ -18,7 +18,8 @@ export const ONBOARDING_QUERY_KEY = ["onboarding"] as const;
 export const ONBOARDING_STEPS: ReadonlyArray<{ id: OnboardingStepId; label: string }> = [
   { id: "connect", label: "Connect" },
   { id: "name", label: "Identity" },
-  { id: "ai", label: "AI provider" },
+  { id: "ai", label: "AI Providers" },
+  { id: "agents", label: "Agents" },
   { id: "memory", label: "Memory" },
   { id: "integrations", label: "Integrations" },
   { id: "first_task", label: "First task" },
@@ -35,6 +36,19 @@ type OnboardingQueryOptions = Pick<
 >;
 
 /**
+ * A payload without some step (an API from before the step existed, or a
+ * cache persisted before it did) reads that step as `todo`.
+ */
+function withAllSteps(data: OnboardingResponse | null): OnboardingResponse | null {
+  if (!data || ONBOARDING_STEPS.every(({ id }) => data.state.steps[id])) return data;
+  const todo = { status: "todo", at: null, method: null, errorClass: null } as const;
+  const steps = Object.fromEntries(
+    ONBOARDING_STEPS.map(({ id }) => [id, data.state.steps[id] ?? todo]),
+  ) as OnboardingState["steps"];
+  return { ...data, state: { ...data.state, steps } };
+}
+
+/**
  * No poll by default. `/setup` and the shell's `OnboardingRedirect` poll; every
  * other reader shares their cache.
  */
@@ -42,6 +56,7 @@ export function useOnboarding(options?: OnboardingQueryOptions) {
   return useQuery({
     queryKey: ONBOARDING_QUERY_KEY,
     queryFn: () => api.fetchOnboarding(),
+    select: withAllSteps,
     enabled: options?.enabled ?? true,
     refetchInterval: options?.refetchInterval ?? 0,
     retry: 1,
@@ -97,12 +112,9 @@ export function isOnboardingOpen(data: OnboardingResponse | null | undefined): b
   return !isOnboardingFinished(data.state) && !data.state.dismissedAt;
 }
 
-/** Steps settled by the operator: done or skipped. */
-export function onboardingSettledCount(state: OnboardingState): number {
-  return ONBOARDING_STEPS.filter(({ id }) => {
-    const status = state.steps[id].status;
-    return status === "done" || status === "skipped";
-  }).length;
+/** Done steps: the one progress count of the header pill and the home card. */
+export function onboardingDoneCount(state: OnboardingState): number {
+  return ONBOARDING_STEPS.filter(({ id }) => state.steps[id].status === "done").length;
 }
 
 /** Where Resume lands: the current step, unless it is already settled. */

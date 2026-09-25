@@ -35,6 +35,7 @@ import { SetupStepper } from "./components/setup-stepper";
 import { SetupTopBar } from "./components/setup-top-bar";
 import { StepTransition } from "./components/step-transition";
 import type { StepProps } from "./step-contract";
+import { StepAgents } from "./steps/step-agents";
 import { StepAi } from "./steps/step-ai";
 import { StepConnect, useIdentityPick } from "./steps/step-connect";
 import { StepFirstTask } from "./steps/step-first-task";
@@ -54,6 +55,10 @@ const STEP_COPY: Record<OnboardingStepId, { title: string; description: string }
   ai: {
     title: "Choose the AI providers you want to use",
     description: "One verified provider is enough to start.",
+  },
+  agents: {
+    title: "Pick a model for each agent",
+    description: "Each agent runs its harness at one of three levels. Optimal fits most swarms.",
   },
   memory: {
     title: "Turn on memory",
@@ -77,6 +82,7 @@ const SKIP_HINT: Partial<Record<OnboardingStepId, string>> = {
 const STEP_BODIES: Record<Exclude<OnboardingStepId, "connect">, ComponentType<StepProps>> = {
   name: StepName,
   ai: StepAi,
+  agents: StepAgents,
   memory: StepMemory,
   integrations: StepIntegrations,
   first_task: StepFirstTask,
@@ -84,7 +90,7 @@ const STEP_BODIES: Record<Exclude<OnboardingStepId, "connect">, ComponentType<St
 
 const TOTAL = ONBOARDING_STEPS.length;
 
-/** `?step=` accepts a number (1-6) or a step id. */
+/** `?step=` accepts a number (1-7) or a step id. */
 function parseStepParam(value: string | null): OnboardingStepId | null {
   if (!value) return null;
   const n = Number(value);
@@ -434,8 +440,10 @@ function SetupFlow() {
         ref={mainRef}
         className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable_both-edges]"
       >
-        <div className={cn(SETUP_COLUMN, "pt-8 pb-12 sm:pt-10")}>
-          <StepTransition stepKey={stepId} direction={direction}>
+        {/* The title stays at the top. The step content centers in the height
+            left under it; a taller step grows the column and scrolls. */}
+        <div className={cn(SETUP_COLUMN, "flex min-h-full flex-col pt-8 pb-12 sm:pt-10")}>
+          <StepTransition stepKey={stepId} direction={direction} className="flex-1">
             <p className="mb-2 font-mono text-[10.5px] uppercase tracking-[0.16em] text-primary">
               Step {index} <span className="text-muted-foreground">of {TOTAL}</span>
             </p>
@@ -443,19 +451,21 @@ function SetupFlow() {
               {copy.title}
             </h1>
             <p className="mb-6 max-w-[70ch] text-sm text-muted-foreground">{copy.description}</p>
-            {Body === null ? (
-              <StepConnect
-                onboarding={data ?? null}
-                onConnected={() => void handleConnected()}
-                act={data ? act : undefined}
-                setContinueBlocker={setters.connect.setContinueBlocker}
-              />
-            ) : data ? (
-              // A failing step must not take the shell (navigation, Minimize) down with it.
-              <ErrorBoundary key={stepId}>
-                <Body onboarding={data} act={act} {...setters[stepId]} />
-              </ErrorBoundary>
-            ) : null}
+            <div className="flex flex-1 flex-col justify-center">
+              {Body === null ? (
+                <StepConnect
+                  onboarding={data ?? null}
+                  onConnected={() => void handleConnected()}
+                  act={data ? act : undefined}
+                  setContinueBlocker={setters.connect.setContinueBlocker}
+                />
+              ) : data ? (
+                // A failing step must not take the shell (navigation, Minimize) down with it.
+                <ErrorBoundary key={stepId}>
+                  <Body onboarding={data} act={act} {...setters[stepId]} />
+                </ErrorBoundary>
+              ) : null}
+            </div>
           </StepTransition>
         </div>
       </main>

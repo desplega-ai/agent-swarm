@@ -9644,7 +9644,7 @@ export interface paths {
                                 /** Format: date-time */
                                 startedAt: string;
                                 /** @enum {string} */
-                                currentStep: "connect" | "name" | "ai" | "memory" | "integrations" | "first_task";
+                                currentStep: "connect" | "name" | "ai" | "agents" | "memory" | "integrations" | "first_task";
                                 /** Format: date-time */
                                 minimizedAt: string | null;
                                 /** Format: date-time */
@@ -9681,6 +9681,16 @@ export interface paths {
                                         at: string | null;
                                         /** @enum {string|null} */
                                         method: "claude_setup_token" | "claude_api_key" | "codex_device" | "codex_cli" | "openrouter" | "openai_gateway" | "deepseek" | "devin" | null;
+                                        /** @enum {string|null} */
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                    };
+                                    agents: {
+                                        /** @enum {string} */
+                                        status: "todo" | "done" | "skipped" | "failed";
+                                        /** Format: date-time */
+                                        at: string | null;
+                                        /** @enum {string|null} */
+                                        method: "cheap" | "optimal" | "max" | "mixed" | null;
                                         /** @enum {string|null} */
                                         errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
                                     };
@@ -9764,7 +9774,7 @@ export interface paths {
                         /** @enum {string} */
                         action: "view";
                         /** @enum {string} */
-                        step: "connect" | "name" | "ai" | "memory" | "integrations" | "first_task";
+                        step: "connect" | "name" | "ai" | "agents" | "memory" | "integrations" | "first_task";
                     } | {
                         /** @enum {string} */
                         action: "complete";
@@ -9790,6 +9800,13 @@ export interface paths {
                         /** @enum {string} */
                         action: "complete";
                         /** @enum {string} */
+                        step: "agents";
+                        /** @enum {string} */
+                        method: "cheap" | "optimal" | "max" | "mixed";
+                    } | {
+                        /** @enum {string} */
+                        action: "complete";
+                        /** @enum {string} */
                         step: "integrations";
                         /** @enum {string} */
                         method: "slack" | "github" | "gitlab" | "linear_oauth" | "jira_oauth";
@@ -9797,12 +9814,12 @@ export interface paths {
                         /** @enum {string} */
                         action: "skip";
                         /** @enum {string} */
-                        step: "name" | "ai" | "memory" | "integrations" | "first_task";
+                        step: "name" | "ai" | "agents" | "memory" | "integrations" | "first_task";
                     } | {
                         /** @enum {string} */
                         action: "fail";
                         /** @enum {string} */
-                        step: "connect" | "name" | "ai" | "memory" | "integrations" | "first_task";
+                        step: "connect" | "name" | "ai" | "agents" | "memory" | "integrations" | "first_task";
                         /** @enum {string} */
                         errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown";
                     } | {
@@ -9837,7 +9854,7 @@ export interface paths {
                                 /** Format: date-time */
                                 startedAt: string;
                                 /** @enum {string} */
-                                currentStep: "connect" | "name" | "ai" | "memory" | "integrations" | "first_task";
+                                currentStep: "connect" | "name" | "ai" | "agents" | "memory" | "integrations" | "first_task";
                                 /** Format: date-time */
                                 minimizedAt: string | null;
                                 /** Format: date-time */
@@ -9874,6 +9891,16 @@ export interface paths {
                                         at: string | null;
                                         /** @enum {string|null} */
                                         method: "claude_setup_token" | "claude_api_key" | "codex_device" | "codex_cli" | "openrouter" | "openai_gateway" | "deepseek" | "devin" | null;
+                                        /** @enum {string|null} */
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                    };
+                                    agents: {
+                                        /** @enum {string} */
+                                        status: "todo" | "done" | "skipped" | "failed";
+                                        /** Format: date-time */
+                                        at: string | null;
+                                        /** @enum {string|null} */
+                                        method: "cheap" | "optimal" | "max" | "mixed" | null;
                                         /** @enum {string|null} */
                                         errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
                                     };
