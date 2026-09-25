@@ -1,6 +1,6 @@
 import type { ApprovalQuestion } from "../api/types";
 
-function hasRequiredResponse(question: ApprovalQuestion, response: unknown): boolean {
+export function hasRequiredResponse(question: ApprovalQuestion, response: unknown): boolean {
   switch (question.type) {
     case "approval":
       return (

@@ -1,14 +1,9 @@
-import type { ColDef, RowClickedEvent } from "ag-grid-community";
 import { ClipboardCheck } from "lucide-react";
 import { useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useApprovalRequests } from "@/api/hooks/use-approval-requests";
-import type { ApprovalRequest, ApprovalRequestStatus } from "@/api/types";
-import { DataGrid } from "@/components/shared/data-grid";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ListFilterBar } from "@/components/shared/list-filter-bar";
-import { StatusBadge } from "@/components/shared/status-badge";
-import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/ui/page-header";
 import {
   Select,
@@ -18,7 +13,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
-import { formatSmartTime } from "@/lib/utils";
+import { approvalRequestSource, sortApprovalRequests } from "@/lib/approval-format";
+import { RequestList } from "./components/request-list";
 
 const STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: "all", label: "All Statuses" },
@@ -40,12 +36,6 @@ const AGE_FILTER_MS: Record<Exclude<(typeof AGE_FILTERS)[number], "all">, number
 
 // The endpoint defaults to 100 rows; use a stable, explicit client-filter window.
 const APPROVAL_REQUESTS_LIST_LIMIT = 500;
-
-function approvalRequestSource(request: ApprovalRequest): "workflow" | "agent" | "manual" {
-  if (request.workflowRunId) return "workflow";
-  if (request.sourceTaskId) return "agent";
-  return "manual";
-}
 
 export default function ApprovalRequestsPage() {
   const { searchParams, setParam, setParams } = useUrlSearchState();
@@ -81,97 +71,25 @@ export default function ApprovalRequestsPage() {
     });
   }, [ageFilter, requests, sourceFilter, statusFilter]);
 
-  const columnDefs = useMemo<ColDef<ApprovalRequest>[]>(
-    () => [
-      {
-        field: "title",
-        headerName: "Request",
-        flex: 1,
-        minWidth: 250,
-        getQuickFilterText: (params) =>
-          params.data ? `${params.data.title} ${params.data.id}` : "",
-      },
-      {
-        field: "status",
-        headerName: "Status",
-        width: 130,
-        getQuickFilterText: () => "",
-        cellRenderer: (params: { value: ApprovalRequestStatus }) => (
-          <StatusBadge status={params.value} />
-        ),
-      },
-      {
-        field: "questions",
-        headerName: "Questions",
-        width: 110,
-        getQuickFilterText: () => "",
-        valueGetter: (params) => params.data?.questions?.length ?? 0,
-        cellRenderer: (params: { value: number }) => (
-          <Badge
-            variant="outline"
-            className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center"
-          >
-            {params.value} {params.value === 1 ? "question" : "questions"}
-          </Badge>
-        ),
-      },
-      {
-        field: "workflowRunId",
-        headerName: "Source",
-        width: 120,
-        getQuickFilterText: (params) => {
-          const request = params.data;
-          if (!request) return "";
-          return [request.workflowRunId, request.workflowRunStepId, request.sourceTaskId]
+  const rows = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    const matched = query
+      ? filteredRequests.filter((request) =>
+          [
+            request.title,
+            request.id,
+            request.resolvedBy,
+            request.workflowRunId,
+            request.workflowRunStepId,
+            request.sourceTaskId,
+          ]
             .filter(Boolean)
-            .join(" ");
-        },
-        cellRenderer: (params: { data: ApprovalRequest | undefined }) => {
-          if (params.data?.workflowRunId) {
-            return (
-              <Badge variant="outline" size="tag">
-                Workflow
-              </Badge>
-            );
-          }
-          if (params.data?.sourceTaskId) {
-            return (
-              <Badge variant="outline" size="tag">
-                Agent
-              </Badge>
-            );
-          }
-          return (
-            <Badge variant="outline" size="tag">
-              Manual
-            </Badge>
-          );
-        },
-      },
-      {
-        field: "resolvedBy",
-        headerName: "Resolved By",
-        width: 130,
-        valueFormatter: (params) => params.value || "—",
-      },
-      {
-        field: "createdAt",
-        headerName: "Created",
-        width: 150,
-        sort: "desc",
-        getQuickFilterText: () => "",
-        valueFormatter: (params) => formatSmartTime(params.value),
-      },
-    ],
-    [],
-  );
+            .some((value) => String(value).toLowerCase().includes(query)),
+        )
+      : filteredRequests;
+    return sortApprovalRequests(matched);
+  }, [filteredRequests, search]);
 
-  const onRowClicked = useCallback(
-    (event: RowClickedEvent<ApprovalRequest>) => {
-      if (event.data) void navigate(`/approval-requests/${event.data.id}`);
-    },
-    [navigate],
-  );
   const hasActiveFilters =
     search !== "" || statusFilter !== "all" || sourceFilter !== "all" || ageFilter !== "all";
   // First-run only: the status filter is applied SERVER-side, so an empty
@@ -218,7 +136,7 @@ export default function ApprovalRequestsPage() {
               })
             }
           >
-            <SelectTrigger className="w-[150px]">
+            <SelectTrigger className="min-w-[140px] flex-1 sm:w-[150px] sm:flex-none">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -239,7 +157,7 @@ export default function ApprovalRequestsPage() {
               })
             }
           >
-            <SelectTrigger className="w-[150px]">
+            <SelectTrigger className="min-w-[140px] flex-1 sm:w-[150px] sm:flex-none">
               <SelectValue placeholder="Source" />
             </SelectTrigger>
             <SelectContent>
@@ -259,7 +177,7 @@ export default function ApprovalRequestsPage() {
               })
             }
           >
-            <SelectTrigger className="w-[150px]">
+            <SelectTrigger className="min-w-[140px] flex-1 sm:w-[150px] sm:flex-none">
               <SelectValue placeholder="Age" />
             </SelectTrigger>
             <SelectContent>
@@ -281,14 +199,11 @@ export default function ApprovalRequestsPage() {
           fullPage
         />
       ) : (
-        <DataGrid
-          rowData={filteredRequests}
-          columnDefs={columnDefs}
-          quickFilterText={search}
-          onRowClicked={onRowClicked}
+        <RequestList
+          key={`${statusFilter}:${sourceFilter}:${ageFilter}:${search}`}
+          rows={rows}
           loading={isLoading}
-          emptyMessage="No approval requests match the current filters"
-          paginationQueryKey="approvalRequests"
+          onOpen={(request) => void navigate(`/approval-requests/${request.id}`)}
         />
       )}
     </div>
