@@ -251,6 +251,13 @@ describe("getBasePrompt: composite selection", () => {
     expect(result).not.toContain("## Secrets");
   });
 
+  test("citation guidance reaches local agents only", async () => {
+    const local = await getBasePrompt({ ...minimalArgs, traits: localTraits });
+    const remote = await getBasePrompt({ ...minimalArgs, traits: remoteTraits });
+    expect(local).toContain("Skip citations on delegation, routing, acks, and status replies.");
+    expect(remote).not.toContain("citation");
+  });
+
   test("a lead without MCP still gets the remote worker composite", async () => {
     const result = await getBasePrompt({ ...minimalArgs, role: "lead", traits: remoteTraits });
     expect(result).not.toContain("## How you lead");
