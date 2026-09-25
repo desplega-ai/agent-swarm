@@ -299,6 +299,7 @@ else
     fi
 fi
 
+# BEGIN verify_provider_binary
 # ---- Verify provider binary is reachable ----
 if [ "$HARNESS_PROVIDER" = "codex" ]; then
     CODEX_BIN="${CODEX_BINARY:-codex}"
@@ -328,6 +329,57 @@ elif [ "$HARNESS_PROVIDER" = "dsh" ]; then
         exit 1
     fi
     echo "dsh CLI: $(command -v "$DSH_BIN")"
+elif [ "$HARNESS_PROVIDER" = "acp" ]; then
+    # ACP spawns its own target, not the claude CLI, so resolve the same
+    # command ACPAdapter.createSession would spawn and check THAT binary.
+    # Mirrors resolveAcpTarget / customTargetProfile.command in
+    # src/providers/acp-targets.ts. Every fallback below is unset-only, because
+    # the resolver uses ?? : a set-but-empty value must fail here exactly the
+    # way it fails at task start, not quietly pick a different target.
+    ACP_TARGET_ID="${ACP_TARGET-custom}"
+    if [ "$ACP_TARGET_ID" = "opencode" ]; then
+        # Catalog command for the opencode target (acp-target-catalog.ts) is
+        # `opencode acp`; only "opencode" is the executable, "acp" is argv.
+        ACP_BIN="opencode"
+    elif [ "$ACP_TARGET_ID" = "custom" ]; then
+        if [ -n "${ACP_TARGET_COMMAND+set}" ]; then
+            ACP_BIN="$ACP_TARGET_COMMAND"
+        elif [ -n "${ACP_COMMAND+set}" ]; then
+            ACP_BIN="$ACP_COMMAND"
+        else
+            echo "FATAL: no ACP target configured. Set ACP_TARGET_COMMAND to an ACP-compatible executable before using HARNESS_PROVIDER=acp."
+            echo "  PATH=$PATH"
+            exit 1
+        fi
+        # Trim the ends only, the way String.trim does. Interior spacing stays.
+        ACP_BIN=$(printf '%s' "$ACP_BIN" | awk '{ sub(/^[[:space:]]+/, ""); sub(/[[:space:]]+$/, ""); print }')
+        if [ -z "$ACP_BIN" ]; then
+            echo "FATAL: ACP target command is empty. Set ACP_TARGET_COMMAND to an ACP-compatible executable."
+            echo "  PATH=$PATH"
+            exit 1
+        fi
+        # parseCommand keeps the whole trimmed command as argv[0] when
+        # ACP_TARGET_ARGS is set and non-blank, and only falls back to splitting
+        # on whitespace when those args are absent or blank. So a command with
+        # interior spaces stays one executable, and splitting it would check a
+        # binary the adapter never spawns.
+        #
+        # "Blank" strips all whitespace, because the guard there is
+        # args?.trim(): a whitespace-only value takes the split path.
+        if [ -z "${ACP_TARGET_ARGS:-}" ] || [ -z "${ACP_TARGET_ARGS//[[:space:]]/}" ]; then
+            ACP_BIN=$(printf '%s' "$ACP_BIN" | awk '{print $1}')
+        fi
+    else
+        echo "FATAL: unsupported ACP target '$ACP_TARGET_ID'. Supported targets: opencode, custom."
+        echo "  PATH=$PATH"
+        exit 1
+    fi
+    if ! command -v "$ACP_BIN" > /dev/null 2>&1; then
+        echo "FATAL: ACP target binary not found: '$ACP_BIN' (ACP_TARGET='$ACP_TARGET_ID')"
+        echo "  PATH=$PATH"
+        exit 1
+    fi
+    echo "ACP target: $(command -v "$ACP_BIN") (ACP_TARGET='$ACP_TARGET_ID')"
 elif [ "$HARNESS_PROVIDER" != "pi" ]; then
     CLAUDE_BIN="${CLAUDE_BINARY:-claude}"
     # CLAUDE_BINARY may be a whitespace-separated command string. Only
@@ -346,6 +398,8 @@ elif [ "$HARNESS_PROVIDER" != "pi" ]; then
     fi
     echo "Claude CLI: $(command -v "$CLAUDE_BIN_EXEC") (CLAUDE_BINARY='$CLAUDE_BIN')"
 fi
+
+# END verify_provider_binary
 
 # ---- Git safe.directory backstop ----
 # Avoid "dubious ownership" when /workspace dirs are owned by a different uid
