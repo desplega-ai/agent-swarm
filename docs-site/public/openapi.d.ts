@@ -14230,6 +14230,8 @@ export interface paths {
                                 attributableCostUsd: number;
                                 excludedCostUsd: number;
                                 excludedTaskCount: number;
+                                subscriptionCostUsd: number;
+                                subscriptionCredentialCount: number;
                             };
                             daily: {
                                 date: string;

@@ -38,6 +38,8 @@ const SessionCostSummaryTotalsSchema = z.object({
   attributableCostUsd: z.number(),
   excludedCostUsd: z.number(),
   excludedTaskCount: z.number().int(),
+  subscriptionCostUsd: z.number(),
+  subscriptionCredentialCount: z.number().int(),
 });
 
 /** Mirrors `SessionCostDailyRow` in src/be/db.ts. */

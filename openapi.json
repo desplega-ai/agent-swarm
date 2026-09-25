@@ -38158,6 +38158,12 @@
                         },
                         "excludedTaskCount": {
                           "type": "integer"
+                        },
+                        "subscriptionCostUsd": {
+                          "type": "number"
+                        },
+                        "subscriptionCredentialCount": {
+                          "type": "integer"
                         }
                       },
                       "required": [
@@ -38172,7 +38178,9 @@
                         "attributedCostUsd",
                         "attributableCostUsd",
                         "excludedCostUsd",
-                        "excludedTaskCount"
+                        "excludedTaskCount",
+                        "subscriptionCostUsd",
+                        "subscriptionCredentialCount"
                       ]
                     },
                     "daily": {

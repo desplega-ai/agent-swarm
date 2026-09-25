@@ -965,6 +965,10 @@ export interface UsageSummaryTotals {
   excludedCostUsd?: number;
   /** Distinct tasks behind `excludedCostUsd` — name the exclusion, don't just show a percentage. */
   excludedTaskCount?: number;
+  /** API-priced cost of Claude-subscription (OAuth) sessions. Older API servers omit it. */
+  subscriptionCostUsd?: number;
+  /** Distinct Claude subscription credentials used in the window. */
+  subscriptionCredentialCount?: number;
 }
 
 /**

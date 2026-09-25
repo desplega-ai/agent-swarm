@@ -49,6 +49,13 @@ function getStartDateISO(range: DateRange): string | undefined {
   return d.toISOString().slice(0, 10);
 }
 
+/** Inclusive day span covered by the daily rows (for the "all" range). */
+function spanDays(daily: { date: string }[]): number {
+  if (daily.length === 0) return 1;
+  const dates = daily.map((d) => Date.parse(d.date));
+  return Math.round((Math.max(...dates) - Math.min(...dates)) / 86_400_000) + 1;
+}
+
 export function UsageContent() {
   const { searchParams, setParam } = useUrlSearchState();
   const dateRange = coerceDateRange(readStringParam(searchParams, "range", "30d"));
@@ -266,6 +273,7 @@ export function UsageContent() {
           totals={summary.totals}
           dailyData={summary.daily}
           daysBack={DAYS_MAP[dateRange] ?? 90}
+          windowDays={DAYS_MAP[dateRange] ?? spanDays(summary.daily)}
         />
       )}
 

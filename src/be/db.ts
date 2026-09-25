@@ -4747,6 +4747,10 @@ export interface SessionCostSummaryTotals {
   excludedCostUsd: number;
   /** Distinct tasks behind `excludedCostUsd` — surfaced so the UI can name the exclusion count, not just wave at a percentage. */
   excludedTaskCount: number;
+  /** API-priced cost of sessions whose task ran on a Claude subscription (`CLAUDE_CODE_OAUTH_TOKEN`). */
+  subscriptionCostUsd: number;
+  /** Distinct subscription credentials (by key suffix) behind `subscriptionCostUsd`. */
+  subscriptionCredentialCount: number;
 }
 
 export interface SessionCostDailyRow {
@@ -4897,6 +4901,8 @@ export async function getSessionCostSummary(opts: {
     attributableCostUsd: number;
     excludedCostUsd: number;
     excludedTaskCount: number;
+    subscriptionCostUsd: number;
+    subscriptionCredentialCount: number;
   };
 
   const totalsRow = await getDbClient().get<TotalsRow>(
@@ -4915,7 +4921,11 @@ export async function getSessionCostSummary(opts: {
           THEN sc.totalCostUsd ELSE 0 END), 0) as attributableCostUsd,
         COALESCE(SUM(CASE WHEN ${HUMAN_FREE_SQL}
           THEN sc.totalCostUsd ELSE 0 END), 0) as excludedCostUsd,
-        COUNT(DISTINCT CASE WHEN ${HUMAN_FREE_SQL} THEN t.id END) as excludedTaskCount
+        COUNT(DISTINCT CASE WHEN ${HUMAN_FREE_SQL} THEN t.id END) as excludedTaskCount,
+        COALESCE(SUM(CASE WHEN t.credentialKeyType = 'CLAUDE_CODE_OAUTH_TOKEN'
+          THEN sc.totalCostUsd ELSE 0 END), 0) as subscriptionCostUsd,
+        COUNT(DISTINCT CASE WHEN t.credentialKeyType = 'CLAUDE_CODE_OAUTH_TOKEN'
+          THEN t.credentialKeySuffix END) as subscriptionCredentialCount
       ${from} ${where}`,
     params,
   );
@@ -4939,6 +4949,8 @@ export async function getSessionCostSummary(opts: {
         attributableCostUsd: 0,
         excludedCostUsd: 0,
         excludedTaskCount: 0,
+        subscriptionCostUsd: 0,
+        subscriptionCredentialCount: 0,
       };
 
   // Daily breakdown
