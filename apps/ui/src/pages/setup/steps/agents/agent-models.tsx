@@ -355,9 +355,19 @@ export function AgentModels({
         icon={<Gauge className="size-4" />}
         title="Per agent"
         description={
-          dialRows.length > 0
-            ? "Pick a level for one agent. Hover a level to see its model and price."
-            : "These agents pick their own models. Skip this step."
+          dialRows.length > 0 ? (
+            // Touch screens have no hover, so the price tooltip never opens there.
+            <>
+              <span className="[@media(hover:hover)_and_(pointer:fine)]:hidden">
+                Pick a level for one agent. Its row shows the model it runs.
+              </span>
+              <span className="hidden [@media(hover:hover)_and_(pointer:fine)]:inline">
+                Pick a level for one agent. Hover a level to see its model and price.
+              </span>
+            </>
+          ) : (
+            "These agents pick their own models. Skip this step."
+          )
         }
         bodyClassName="p-0"
       >
