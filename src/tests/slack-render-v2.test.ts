@@ -2168,9 +2168,10 @@ describe("Slack renderer v2", () => {
     await processSlackRenderV2();
 
     const started = calls.find((call) => call.method === "chat.startStream");
-    // ⏳ not ✅: the ask was parked, not answered. The ETA is what a human
-    // needs; the agent's internal note and the schedule link are dropped.
-    expect(started?.payload.markdown_text).toBe("⏳ Checking back today 17:30:19 UTC");
+    // ⏳ not ✅: the ask was parked, not answered. The ETA, the agent's
+    // internal note, and the schedule link are all dropped from Slack.
+    expect(started?.payload.markdown_text).toBe("⏳ Checking back later");
+    expect(JSON.stringify(calls)).not.toContain("17:30");
     expect(JSON.stringify(calls)).not.toContain("checking the new defer card");
     expect(JSON.stringify(calls)).not.toContain("715bf847-fe3e");
     expect(JSON.stringify(calls)).not.toContain("Deferred until");
@@ -2200,7 +2201,7 @@ describe("Slack renderer v2", () => {
     await processSlackRenderV2();
 
     const opening = calls.find((call) => call.method === "chat.startStream");
-    expect(opening?.payload.markdown_text).toBe("⏳ Checking back today at 18:38");
+    expect(opening?.payload.markdown_text).toBe("⏳ Checking back later");
     const card = await getSlackOutcomeMessage(ask.id);
     expect(card?.finalizedAt).toBeTruthy();
     expect(card?.deferralResolvedAt).toBeUndefined();
@@ -2334,7 +2335,7 @@ describe("Slack renderer v2", () => {
 
     // The chain continues on a new ⏳ card, which the next wake-up resolves.
     const next = calls.find((call) => call.method === "chat.startStream");
-    expect(next?.payload.markdown_text).toBe("⏳ Checking back today at 20:00");
+    expect(next?.payload.markdown_text).toBe("⏳ Checking back later");
     const nextCard = await getSlackOutcomeMessage(wake.id);
     expect(nextCard?.permalink).toBeTruthy();
     // The old card hands over to it rather than repeating the new ETA.
@@ -2362,8 +2363,13 @@ describe("Slack renderer v2", () => {
       deferredAt: new Date().toISOString(),
     });
     await backdateLastUpdated([ask.id], 20);
+    calls.length = 0;
     await processSlackRenderV2();
     const card = await getSlackOutcomeMessage(ask.id);
+    // The event-based card names who it waits on; the ceiling time stays out of Slack.
+    const opening = calls.find((call) => call.method === "chat.startStream");
+    expect(opening?.payload.markdown_text).toBe("⏳ Waiting on Researcher");
+    expect(JSON.stringify(calls)).not.toContain("at the latest");
 
     const schedule = await createScheduledTask({
       name: "deferred-resolve-fail",
@@ -2539,10 +2545,10 @@ describe("Slack renderer v2", () => {
     );
     calls.length = 0;
     await processSlackRenderV2();
-    // The ETA IS the message now, so there is no such thing as an "ETA-only"
-    // notice worth suppressing — a thread that says nothing is the bug.
+    // An empty legacy notice still posts a card — a thread that says nothing
+    // is the bug — but without its ETA.
     const started = calls.find((call) => call.method === "chat.startStream");
-    expect(started?.payload.markdown_text).toBe("⏳ Checking back today 17:30 UTC");
+    expect(started?.payload.markdown_text).toBe("⏳ Checking back later");
   });
 
   test("refreshes a stream started with stale content before finalizing it", async () => {

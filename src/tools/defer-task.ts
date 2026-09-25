@@ -125,9 +125,9 @@ function renderWhen(nextRunAt: string, tz: string, isFallbackTz: boolean): strin
 }
 
 /**
- * Human-facing deferral text for tasks without an outputSchema — this is what
- * lands verbatim in a human's Slack thread as the task's terminal output, and
- * in the UI's task-detail output row.
+ * Human-facing deferral text for tasks without an outputSchema — the task's
+ * terminal output, shown in the UI's task-detail output row. Slack reads it
+ * through `slackTaskOutput`, which drops the wake-up time.
  *
  * It answers one question — when does this come back — in the two shapes a
  * deferral actually has:

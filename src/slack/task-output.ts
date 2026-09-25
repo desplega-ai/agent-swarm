@@ -4,31 +4,50 @@ import type { AgentTask } from "../types";
  * Legacy deferral output, written before `defer-task` started storing the
  * human-facing card directly:
  *   `Deferred until {date} {time} ([shortId](url)) -> {note excerpt}`
- * Group 1 is the ETA; the schedule link and the note excerpt are dropped.
  */
-const LEGACY_DEFERRAL_NOTICE = /^Deferred until ([^\n(]+?) \([^\n]*?\) -> .*$/;
+const LEGACY_DEFERRAL_NOTICE = /^Deferred until [^\n(]+? \([^\n]*?\) -> .*$/;
+
+/** `renderWhen` in defer-task: `today at 18:38`, `tomorrow at …`, `on 09-24 at 18:38 UTC`. */
+const WHEN = String.raw`(?:today|tomorrow|on \S+) at [^\n]+?`;
+
+/** Time-based card `defer-task` stores: `Checking back today at 18:38`. */
+const TIME_DEFERRAL_CARD = new RegExp(`^Checking back ${WHEN}$`);
+
+/**
+ * Event-based card `defer-task` stores:
+ * `Waiting on Researcher — or today at 18:38 at the latest`. Group 1 is who
+ * the deferral waits on.
+ */
+const EVENT_DEFERRAL_CARD = new RegExp(`^Waiting on ([^\\n]+?) — or ${WHEN} at the latest$`);
 
 /**
  * The Slack-facing form of a task's stored output.
  *
- * For a deferral this is the stored text verbatim — `defer-task` already
- * writes the human card (`Checking back today at 18:38`, or
- * `Waiting on Researcher — or today at 18:38 at the latest`). Rows written
- * before that change carried the agent's internal handoff note plus a raw
- * schedule UUID link instead, so they are rewritten to the ETA alone.
+ * A deferral's card never shows its wake-up time in Slack: the stored card
+ * (`Checking back today at 18:38`, `Waiting on Researcher — or today at 18:38
+ * at the latest`) keeps it for the API and the UI, and Slack reads
+ * `Checking back later` / `Waiting on Researcher`. Rows written before
+ * `defer-task` stored the card carried the agent's internal handoff note and
+ * a raw schedule UUID link instead; they read `Checking back later` too.
  */
 export function slackTaskOutput(
   task: Pick<AgentTask, "output" | "tags" | "outputSchema" | "status">,
 ): string | undefined {
   const output = task.output ?? undefined;
-  if (task.status !== "completed" || task.outputSchema || !task.tags?.includes("deferred")) {
+  if (
+    !output ||
+    task.status !== "completed" ||
+    task.outputSchema ||
+    !task.tags?.includes("deferred")
+  ) {
     return output;
   }
-  // Only match the engine-authored line from defer-task, not continuation results.
-  const legacy = output?.match(LEGACY_DEFERRAL_NOTICE);
-  if (!legacy) return output;
-  const eta = legacy[1]?.trim();
-  return eta ? `Checking back ${eta}` : output;
+  // Only match the engine-authored card from defer-task, not continuation results.
+  if (LEGACY_DEFERRAL_NOTICE.test(output) || TIME_DEFERRAL_CARD.test(output)) {
+    return "Checking back later";
+  }
+  const waitingOn = output.match(EVENT_DEFERRAL_CARD)?.[1];
+  return waitingOn ? `Waiting on ${waitingOn}` : output;
 }
 
 /**
