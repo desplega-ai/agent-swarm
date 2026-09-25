@@ -137,22 +137,21 @@ interface StepSetters {
 }
 
 interface StepControls {
-  step: OnboardingStepId;
   blockers: Partial<Record<OnboardingStepId, Blocker>>;
   // An object, not a bare function: a bare function in state reads as an updater.
   actions: Partial<Record<OnboardingStepId, ContinueAction>>;
 }
 
 /**
- * Continue blockers and Continue actions, one slot per step, cleared on
- * every step change. A step gets stable setters bound to its own slot, so a
- * step still animating out can never affect the step that replaced it.
+ * Continue blockers and Continue actions, one slot per step. A step gets
+ * stable setters bound to its own slot, so a step still animating out can
+ * never affect the step that replaced it. A step's hooks clear its slot on
+ * unmount; a step change never clears it. A quick Back or Next brings an
+ * exiting step back without a remount, and its hooks do not set the slot
+ * again, so a slot wiped on the step change would stay empty.
  */
 function useStepControls(stepId: OnboardingStepId) {
-  const [state, setState] = useState<StepControls>({ step: stepId, blockers: {}, actions: {} });
-  // Reset during render (not in an effect): child effects run before parent
-  // effects, so an effect here would wipe what the new step just set.
-  if (state.step !== stepId) setState({ step: stepId, blockers: {}, actions: {} });
+  const [state, setState] = useState<StepControls>({ blockers: {}, actions: {} });
 
   const setters = useMemo(
     () =>
@@ -194,10 +193,9 @@ function useStepControls(stepId: OnboardingStepId) {
     [],
   );
 
-  const own = state.step === stepId;
   return {
-    blocker: own ? (state.blockers[stepId] ?? null) : null,
-    action: own ? (state.actions[stepId] ?? null) : null,
+    blocker: state.blockers[stepId] ?? null,
+    action: state.actions[stepId] ?? null,
     setters,
   };
 }

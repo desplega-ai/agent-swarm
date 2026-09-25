@@ -31,7 +31,8 @@ export interface StepProps {
    * Hold the shell's Continue with a short reason shown as its tooltip (for
    * example "Saving…" while an autosave is in flight, or "Pick who you are"
    * in step 1). Pass `busy` for work in flight, so the footer shows a
-   * spinner. Pass `null` to release it. The shell clears it on step change.
+   * spinner. Pass `null` to release it, at the latest on unmount (the hooks
+   * in `hooks/use-autosave.ts` do). A step change does not clear it.
    */
   setContinueBlocker: (reason: string | null, options?: ContinueBlockerOptions) => void;
   /**
@@ -41,7 +42,7 @@ export interface StepProps {
    * action can also finish a step that is not done yet (for example: store
    * the suggested default, then complete the step), so Continue is enabled
    * while it is set. Skip never runs the action. Pass `null` to remove it.
-   * The shell clears it on step change.
+   * Remove it on unmount (`useContinueAction` does). A step change does not.
    */
   setContinueAction: (
     action: (() => Promise<void>) | null,

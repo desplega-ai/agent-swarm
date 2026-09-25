@@ -50,7 +50,7 @@ Reference: `hooks/use-autosave.ts` and `components/onboarding/use-setup-save.ts`
 
 Timings and curves: DESIGN.md § Motion. Recipes:
 
-- Directional step change: `pages/setup/components/step-transition.tsx`. `AnimatePresence mode="popLayout"` with `custom={direction}`: 260 ms in, 140 ms out, 28px offset. Reduced motion: fade only (`useReducedMotion`). `popLayout` lays out the new step at once: no blank gap, no height jump.
+- Directional step change: `pages/setup/components/step-transition.tsx`. `AnimatePresence mode="popLayout"` with `custom={direction}`: 260 ms in, 140 ms out, 28px offset. Reduced motion: fade only (`useReducedMotion`). `popLayout` lays out the new step at once: no blank gap, no height jump. A quick Back or Next brings an exiting step back without a remount, so its effects do not run again: never clear step-owned shell state (Continue blockers and actions) on a step change. The step's hooks clear it on unmount.
 - Selection indicators: one `motion.span` with a `layoutId` from `useId()` (one per instance) and the spring `{ stiffness: 520, damping: 42, mass: 0.9 }`. Put the border radius in `style`, not in a class, so Motion corrects it under scale.
 - Animate `transform` and `opacity` only.
 - Never animate a change that a poll brings in. Keep decorations mounted and toggle their opacity. A remount on each poll replays the entrance.
