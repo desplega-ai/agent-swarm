@@ -4150,6 +4150,8 @@
               "task_authorization_rejected",
               "task_recovery_authorization",
               "task_released",
+              "task_deferred_wait_woke",
+              "task_follow_up_suppressed",
               "task_citation_check_refused",
               "channel_message",
               "service_registered",

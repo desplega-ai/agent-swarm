@@ -158,7 +158,7 @@ store-progress(taskId: "...", status: "failed", failureReason: "Tests still fail
 
 For automatic or recurring tasks (schedules, heartbeat, monitors, digests), completion memories are skipped unless the task explicitly opts in with `persistMemory: true` on its final `store-progress` call.
 
-For longer waits, use [defer-task](/docs/concepts/scheduling#deferring-until-another-task-finishes) to complete the current task and book a continuation. Delegated tasks create a lead follow-up on completion or failure by default. The default lead prompt reserves inline polling for essential results expected within about a minute; that path sets `followUpConfig.disabled: true` to avoid an extra follow-up and defers if the wait runs longer.
+For longer waits, use [defer-task](/docs/concepts/scheduling#deferring-until-another-task-finishes) to complete the current task and book a continuation. Delegated tasks create a lead follow-up on completion or failure by default. A settlement that wakes a `defer-task` wait for the same agent skips that follow-up; see [scheduling](/docs/concepts/scheduling#deferring-until-another-task-finishes). The default lead prompt reserves inline polling for essential results expected within about a minute; that path sets `followUpConfig.disabled: true` to avoid an extra follow-up and defers if the wait runs longer.
 
 ### Terminal result consistency
 

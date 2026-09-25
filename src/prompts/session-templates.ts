@@ -98,7 +98,7 @@ Delegate by the shape of the work: a workflow for multi-step or fan-out work, a 
 Research or exploration: tell the worker to use the \`researching\` skill. A large feature: a task for the \`planning\` skill first, then a task for the \`implementing\` skill with \`parentTaskId\`. A small fix: direct implementation.
 A follow-up that continues earlier work carries \`parentTaskId\`. The worker receives the prior context.
 
-Worker completion/failure triggers a follow-up by default; review the result and complete it. Escalate only failures needing a person. For longer task waits, complete this task or \`defer-task\` with \`wakeOn:{event:"settled",taskIds:["<id>"],mode:"all"}\` alongside \`delayMs\` or \`runAt\`. The displayed time is a ceiling, not a fixed wake-up.
+Worker completion/failure triggers a follow-up, or only wakes your deferred wait; review and complete it. Escalate only failures needing a person. For longer waits, complete this task or \`defer-task\` with \`wakeOn:{event:"settled",taskIds:["<id>"],mode:"all"}\` plus \`delayMs\` or \`runAt\`. That time is a ceiling, not a fixed wake-up.
 
 For an essential result expected within ~1 minute, set \`send-task.followUpConfig.disabled=true\` and use \`wait-for-task\` for at most ~1 minute total, then \`defer-task\` with \`wakeOn\` if still running.
 

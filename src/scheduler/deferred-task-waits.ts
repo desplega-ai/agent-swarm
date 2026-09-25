@@ -1,4 +1,10 @@
-import { getDbClient, getScheduledTaskById, getUserById, updateScheduledTask } from "@/be/db";
+import {
+  createLogEntry,
+  getDbClient,
+  getScheduledTaskById,
+  getUserById,
+  updateScheduledTask,
+} from "@/be/db";
 import type { PreparedTaskCreate } from "@/tasks/sibling-awareness";
 import type { AgentTask, ScheduledTask } from "@/types";
 import { workflowEventBus } from "@/workflows/event-bus";
@@ -29,7 +35,7 @@ type WakeReason = "ceiling" | "task.completed" | "task.failed" | "task.cancelled
 async function resolveWaitCause(
   scheduleId: string,
   reason: WakeReason,
-): Promise<{ wait: TaskWait; cause: string } | undefined> {
+): Promise<{ wait: TaskWait; cause: string; matchedTaskIds: string[] } | undefined> {
   const client = getDbClient();
   const wait = await client.get<TaskWait>(
     "SELECT * FROM deferred_task_waits WHERE scheduleId = ?",
@@ -38,7 +44,7 @@ async function resolveWaitCause(
   if (!wait || wait.status !== "pending") return undefined;
   if (reason !== "ceiling" && wait.eventName !== "settled" && wait.eventName !== reason)
     return undefined;
-  if (reason === "ceiling") return { wait, cause: "ceiling expired" };
+  if (reason === "ceiling") return { wait, cause: "ceiling expired", matchedTaskIds: [] };
   const members = await client.query<WaitMember>(
     `SELECT m.taskId, t.status AS taskStatus, EXISTS (
        SELECT 1 FROM scheduled_tasks d
@@ -62,7 +68,7 @@ async function resolveWaitCause(
     members.length === 1
       ? `task.${matched[0]!.taskStatus} for task ${matched[0]!.taskId}`
       : `${wait.mode} tasks matched ${wait.eventName}: ${matched.map((member) => `${member.taskId} (${member.taskStatus})`).join(", ")}`;
-  return { wait, cause };
+  return { wait, cause, matchedTaskIds: matched.map((member) => member.taskId) };
 }
 
 function wakeSchedule(schedule: ScheduledTask, cause: string): ScheduledTask {
@@ -85,11 +91,19 @@ async function prepareDeferredWakeTask(
   return await prepareStandaloneScheduleTask(wakeSchedule(schedule, resolved.cause), extraTags);
 }
 
+/**
+ * Log event written on a settled member task when its settlement is the one
+ * that fires a wait. `createWorkerTaskFollowUp` reads it to skip the lead
+ * follow-up the woken waiter would duplicate.
+ */
+export const DEFERRED_WAIT_WOKE_EVENT = "task_deferred_wait_woke";
+
 /** Undefined means a normal schedule; an empty result means another caller won. */
 export async function dispatchDeferredTaskWait(
   scheduleId: string,
   reason: WakeReason,
   extraTags: string[] = [],
+  triggerTaskId?: string,
 ): Promise<{ task?: AgentTask } | undefined> {
   const client = getDbClient();
   // Keep ordinary schedule dispatch off the write-lock path.
@@ -129,6 +143,24 @@ export async function dispatchDeferredTaskWait(
       task.id,
       scheduleId,
     ]);
+    // Attribute the wake to the settlement that triggered this claim, in the
+    // claim's own transaction. Only the trigger is attributed: an `all` sibling
+    // that settled earlier already got its follow-up, and a member that settles
+    // concurrently keeps its follow-up rather than risk a silent drop.
+    if (triggerTaskId && resolved.matchedTaskIds.includes(triggerTaskId)) {
+      await createLogEntry({
+        eventType: DEFERRED_WAIT_WOKE_EVENT,
+        taskId: triggerTaskId,
+        agentId: task.agentId ?? undefined,
+        metadata: {
+          scheduleId,
+          waiterTaskId: schedule.parentTaskId ?? null,
+          wakeTaskId: task.id,
+          wakeAgentId: task.agentId ?? null,
+          mode: resolved.wait.mode,
+        },
+      });
+    }
     await updateScheduledTask(scheduleId, {
       enabled: false,
       nextRunAt: null,
@@ -142,7 +174,10 @@ export async function dispatchDeferredTaskWait(
   });
 }
 
-/** Reconcile durable producer state, including terminal transitions missed by this process. */
+/**
+ * Reconcile durable producer state, including terminal transitions missed by this process.
+ * With `taskId`, the wakes it fires are attributed to that task's settlement.
+ */
 export async function reconcileDeferredTaskWaits(taskId?: string): Promise<void> {
   const client = getDbClient();
   const replacements = await client.query<{ taskId: string; resumeTaskId: string }>(
@@ -192,7 +227,7 @@ export async function reconcileDeferredTaskWaits(taskId?: string): Promise<void>
   );
   for (const row of rows) {
     try {
-      await dispatchDeferredTaskWait(row.scheduleId, `task.${row.taskStatus}`);
+      await dispatchDeferredTaskWait(row.scheduleId, `task.${row.taskStatus}`, [], taskId);
     } catch (err) {
       // A broken wait must not stop other event wakes or the ceiling poller.
       console.error(`[Scheduler] Deferred task wake failed for ${row.scheduleId}:`, err);

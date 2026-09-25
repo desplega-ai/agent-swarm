@@ -300,6 +300,7 @@ value:getLiveAgentCounts
 value:getLogsByAgentId
 value:getLogsByEventType
 value:getLogsByTaskId
+value:getLogsByTaskIdAndEventType
 value:getLogsByTaskIdChronological
 value:getMcpServerById
 value:getMcpServerByName

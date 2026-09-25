@@ -2116,6 +2116,17 @@ export async function getLogsByTaskId(taskId: string, limit = 200): Promise<Agen
   return rows.map(rowToAgentLog);
 }
 
+export async function getLogsByTaskIdAndEventType(
+  taskId: string,
+  eventType: AgentLogEventType,
+): Promise<AgentLog[]> {
+  const rows = await getDbClient().query<AgentLogRow>(
+    "SELECT * FROM agent_log WHERE taskId = ? AND eventType = ? ORDER BY createdAt ASC",
+    [taskId, eventType],
+  );
+  return rows.map(rowToAgentLog);
+}
+
 export async function getLogsByTaskIdChronological(taskId: string): Promise<AgentLog[]> {
   const rows = await getDbClient().query<AgentLogRow>(
     "SELECT * FROM agent_log WHERE taskId = ? ORDER BY createdAt ASC",
