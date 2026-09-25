@@ -168,6 +168,8 @@ The tree is rendered as footer-weight context blocks and contains status, elapse
 
 Each completed Slack ask gets one outcome card containing the full multi-paragraph Markdown result, bounded only by Slack's presentation limit with a link to the full task when truncation is required. If the agent already delivered the result with `slack-reply`, the outcome card collapses to a compact completion instead of repeating that message. The renderer re-reads this delivery marker before finalizing, so a retry cannot preserve stale duplicate content. Outcome cards do not link back to the tree, which avoids an otherwise redundant Slack permalink unfurl.
 
+If Slack refuses the card with a terminal error, or if 5 attempts fail, the renderer records the give-up on the card's database row. It posts one `⚠️ Couldn't deliver this task's reply` warning in the thread. It never retries that card, and a restart does not re-arm it.
+
 Slack shows a deferral as waiting, with the check-back time or the agents being watched and a latest wake-up time. Times use the requester's timezone, falling back to labeled UTC. The same card updates when the continuation reaches its final outcome. Internal notes, checks, and schedule details remain in the task log.
 
 A continuation normally resolves its parent's waiting card in place, without posting a duplicate outcome. If it defers again, it creates a new waiting card and the previous card points to it. A continuation posts its own outcome when the original waiting card is missing or cannot be updated. Ordinary scheduled tasks without Slack context remain silent.

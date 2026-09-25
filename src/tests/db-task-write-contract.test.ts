@@ -105,6 +105,7 @@ value:ReservedAgentRoleError
 value:SKILL_FILE_LIMITS
 value:UNATTRIBUTED_USER_ID
 value:__resetSqliteVecExtensionPathCacheForTests
+value:abandonSlackOutcomeDelivery
 value:acceptTask
 value:assignUnassignedTaskPending
 value:autoEncryptLegacyPlaintextSecrets
@@ -430,6 +431,7 @@ value:isAgentEligibleForTask
 value:isExtensionAgent
 value:isPendingSlackMessage
 value:isPoolAffinityEnforcementEnabled
+value:isSettledSlackMessage
 value:isSqliteVecAvailable
 value:listAgentsWithCredStatusByProvider
 value:listAllMetrics
@@ -473,6 +475,7 @@ value:moveAssetKey
 value:moveTaskFromBacklog
 value:moveTaskToBacklog
 value:normalizeSkillFilePath
+value:noteSlackOutcomeDeliveryFailure
 value:overwriteTerminalTaskResultText
 value:pauseTask
 value:postMessage

@@ -444,6 +444,12 @@ export interface SlackMessageRecord {
   deferralResolvedAt?: string;
   /** Set with `deferralResolvedAt` when the rewrite was given up on. */
   deferralAbandonedAt?: string;
+  /** Failed delivery attempts for this outcome card, across restarts. */
+  deliveryAttempts: number;
+  /** Set once the renderer gave up on delivering this outcome card. */
+  deliveryAbandonedAt?: string;
+  /** Last Slack verdict for the card, "<code>: <messages>", 500 chars max. */
+  deliveryLastError?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -452,6 +458,11 @@ const PENDING_SLACK_MESSAGE_TS_PREFIX = "pending:";
 
 export function isPendingSlackMessage(record: SlackMessageRecord): boolean {
   return record.ts.startsWith(PENDING_SLACK_MESSAGE_TS_PREFIX);
+}
+
+/** True when the renderer must not touch this card again: delivered, or given up on. */
+export function isSettledSlackMessage(record: SlackMessageRecord): boolean {
+  return !!record.finalizedAt || !!record.deliveryAbandonedAt;
 }
 
 type SlackMessageRow = {
@@ -468,6 +479,9 @@ type SlackMessageRow = {
   conclusion_kind: SlackConclusionKind | null;
   deferral_resolved_at: string | null;
   deferral_abandoned_at: string | null;
+  delivery_attempts: number;
+  delivery_abandoned_at: string | null;
+  delivery_last_error: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -487,6 +501,9 @@ function rowToSlackMessage(row: SlackMessageRow): SlackMessageRecord {
     conclusionKind: row.conclusion_kind ?? undefined,
     deferralResolvedAt: row.deferral_resolved_at ?? undefined,
     deferralAbandonedAt: row.deferral_abandoned_at ?? undefined,
+    deliveryAttempts: row.delivery_attempts,
+    deliveryAbandonedAt: row.delivery_abandoned_at ?? undefined,
+    deliveryLastError: row.delivery_last_error ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -747,6 +764,45 @@ export async function markSlackDeferralResolved(
   );
 }
 
+export async function noteSlackOutcomeDeliveryFailure(
+  taskId: string,
+  lastError: string,
+): Promise<SlackMessageRecord | null> {
+  const now = new Date().toISOString();
+  const row = await getDbClient().get<SlackMessageRow>(
+    `UPDATE slack_messages SET
+         delivery_attempts = delivery_attempts + 1,
+         delivery_last_error = ?,
+         updated_at = ?
+       WHERE task_id = ? AND kind = 'outcome' AND delivery_abandoned_at IS NULL
+       RETURNING *`,
+    [lastError.slice(0, 500), now, taskId],
+  );
+  return row ? rowToSlackMessage(row) : null;
+}
+
+/**
+ * Give up on the card. Returns the row only on the NULL -> set transition, so
+ * exactly one caller (one process, one tick) sees a non-null result and may
+ * post the "Couldn't deliver" warning.
+ */
+export async function abandonSlackOutcomeDelivery(
+  taskId: string,
+  lastError: string,
+): Promise<SlackMessageRecord | null> {
+  const now = new Date().toISOString();
+  const row = await getDbClient().get<SlackMessageRow>(
+    `UPDATE slack_messages SET
+         delivery_abandoned_at = ?,
+         delivery_last_error = ?,
+         updated_at = ?
+       WHERE task_id = ? AND kind = 'outcome' AND delivery_abandoned_at IS NULL
+       RETURNING *`,
+    [now, lastError.slice(0, 500), now, taskId],
+  );
+  return row ? rowToSlackMessage(row) : null;
+}
+
 export async function getSlackTreeMessages(): Promise<SlackMessageRecord[]> {
   const rows = await getDbClient().query<SlackMessageRow>(
     `SELECT tree.*
@@ -766,7 +822,7 @@ export async function getSlackTreeMessages(): Promise<SlackMessageRecord[]> {
              SELECT 1 FROM slack_messages outcome
              WHERE outcome.kind = 'outcome'
              AND outcome.task_id = task.id
-             AND outcome.finalized_at IS NOT NULL
+             AND (outcome.finalized_at IS NOT NULL OR outcome.delivery_abandoned_at IS NOT NULL)
            )
          )
          OR
@@ -792,7 +848,7 @@ export async function getSlackTreeMessages(): Promise<SlackMessageRecord[]> {
            AND outcome.thread_ts = tree.thread_ts
            AND task.createdAt >= state.activated_at
            AND (
-             outcome.finalized_at IS NULL
+             (outcome.finalized_at IS NULL AND outcome.delivery_abandoned_at IS NULL)
              OR outcome.updated_at > tree.updated_at
            )
          )
