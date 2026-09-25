@@ -1,6 +1,7 @@
-import { lazy } from "react";
+import { lazy, Suspense } from "react";
 import { createBrowserRouter, Navigate, type RouteObject } from "react-router-dom";
 import { RootLayout } from "@/components/layout/root-layout";
+import { HiveLoadingScreen } from "@/components/shared/hive-loading-screen";
 import { SettingsLayout } from "@/pages/settings/settings-layout";
 import { UsageLayout } from "@/pages/usage/usage-layout";
 import { RouteRedirect } from "./route-redirect";
@@ -62,6 +63,7 @@ const PagesListingPage = lazy(() => import("@/pages/pages/page"));
 const AppsListingPage = lazy(() => import("@/pages/apps/page"));
 const AppDetailPage = lazy(() => import("@/pages/apps/[id]/page"));
 const NotFoundPage = lazy(() => import("@/pages/not-found/page"));
+const SetupPage = lazy(() => import("@/pages/setup/page"));
 
 /**
  * Dev-only routes. `/dev/embed-test` mounts an `<AppSurface>` outside the
@@ -112,6 +114,15 @@ const redirectRoutes: RouteObject[] = [
 ];
 
 export const router = createBrowserRouter([
+  // First-run onboarding: full page, outside the app shell (no sidebar/header).
+  {
+    path: "/setup",
+    element: (
+      <Suspense fallback={<HiveLoadingScreen />}>
+        <SetupPage />
+      </Suspense>
+    ),
+  },
   {
     path: "/",
     element: <RootLayout />,

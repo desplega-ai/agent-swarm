@@ -43,8 +43,8 @@ function getAllowedOrigins(): string[] {
  * it separately). Wildcard schemes and explicit ports must match exactly.
  * Bare `*`, `https://*`, other wildcard positions, and non-origin URLs are ignored.
  */
-export function isOriginAllowedForCredentials(origin: string): boolean {
-  const allowed = getAllowedOrigins().some((entry) => {
+function originAllowedForCredentials(origin: string): boolean {
+  return getAllowedOrigins().some((entry) => {
     if (!entry.includes("*")) return entry === origin;
 
     // Fixed parsers, never a regex interpolated from operator-controlled text.
@@ -62,12 +62,28 @@ export function isOriginAllowedForCredentials(origin: string): boolean {
     }
     return hostname.endsWith(`.${suffix}`);
   });
+}
+
+export function isOriginAllowedForCredentials(origin: string): boolean {
+  const allowed = originAllowedForCredentials(origin);
   if (!allowed) {
     console.warn(
       `[CORS] Denied credentialed origin ${scrubSecrets(JSON.stringify(origin.slice(0, 512)))}; add the trusted SPA origin to CORS_ALLOWED_ORIGINS (custom values replace hosted/dev defaults).`,
     );
   }
   return allowed;
+}
+
+/** Return an absolute redirect only when its origin may receive credentials. */
+export function allowedCredentialRedirect(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  try {
+    const redirect = new URL(raw);
+    if (redirect.protocol !== "http:" && redirect.protocol !== "https:") return undefined;
+    return originAllowedForCredentials(redirect.origin) ? redirect.toString() : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function setCorsHeaders(req: IncomingMessage, res: ServerResponse) {

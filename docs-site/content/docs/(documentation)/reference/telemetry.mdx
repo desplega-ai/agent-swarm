@@ -31,6 +31,14 @@ Telemetry tracks high-level lifecycle and operational events — no task content
 | `workflow.deleted` | A workflow definition is deleted | workflowId, source (when known) |
 | `workflow.started` / `workflow.completed` / `workflow.failed` | Workflow lifecycle transitions | runId, workflowId, durationMs, executor metadata |
 | `compaction.triggered` | A harness emits a compaction event | compactTrigger, preCompactTokens, contextTotalTokens |
+| `onboarding.started` | The API creates or replaces onboarding state | existing_install, seconds_since_start, seconds_since_install? |
+| `onboarding.step_viewed` | The active setup step changes | step, seconds_since_start, seconds_since_install? |
+| `onboarding.step_completed` | A setup step completes from a live signal or explicit action | step, method?, derived, seconds_since_start, seconds_since_install? |
+| `onboarding.step_skipped` | The operator skips an optional setup step | step, seconds_since_start, seconds_since_install? |
+| `onboarding.step_failed` | A setup step records a classified failure | step, error_class, seconds_since_start, seconds_since_install? |
+| `onboarding.dismissed` | The operator dismisses onboarding | seconds_since_start, seconds_since_install? |
+| `onboarding.first_task_completed` | The task selected during setup completes | method?, seconds_since_start, seconds_since_install? |
+| `onboarding.completed` | The first setup task completes the onboarding funnel | seconds_since_start, seconds_since_install? |
 
 The exact shape can expand over time as new lifecycle milestones are instrumented, but the contract stays the same: anonymous operational metadata only.
 

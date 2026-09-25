@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, mkdtemp, rename, rm } from "node:fs/promises";
+import { chmod, mkdtemp, realpath, rename, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkProviderCredentials } from "../commands/provider-credentials";
@@ -104,7 +104,8 @@ describe("dsh harness", () => {
     });
     const invocation = await Bun.file(join(config.cwd, "invocation.json")).json();
     expect(invocation.prompt).toBe(config.prompt);
-    expect(invocation.cwd).toBe(config.cwd);
+    // macOS tmpdir is a /var -> /private/var symlink; the child reports the real path.
+    expect(await realpath(invocation.cwd)).toBe(await realpath(config.cwd));
     expect(invocation.args).toEqual([
       "--profile",
       "headless",

@@ -21,6 +21,7 @@ import { Link } from "react-router-dom";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { AgentActivityTimeline } from "@/components/dashboard/agent-activity-timeline";
 import { DashboardNudges } from "@/components/dashboard/dashboard-nudges";
+import { SetupChecklistCard } from "@/components/onboarding/setup-checklist-card";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -36,15 +37,20 @@ export function UnifiedHome() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
-      <div className="flex flex-1 min-h-0 flex-col gap-4 px-4 pb-4 pt-4 md:px-6 md:pb-6">
-        <DashboardNudges />
-        <div className="flex-1 min-h-0">
-          <TimelineRegion
-            versionResolved={versionResolved}
-            supported={supported}
-            isError={isError}
-            error={error}
-          />
+      {/* A column below `xl`, a row from `xl`: the setup checklist (only while
+          onboarding is open) becomes a right sidebar next to the main column. */}
+      <div className="flex flex-1 min-h-0 flex-col gap-4 px-4 pb-4 pt-4 md:px-6 md:pb-6 xl:flex-row">
+        <SetupChecklistCard />
+        <div className="flex flex-1 min-h-0 min-w-0 flex-col gap-4">
+          <DashboardNudges />
+          <div className="flex-1 min-h-0">
+            <TimelineRegion
+              versionResolved={versionResolved}
+              supported={supported}
+              isError={isError}
+              error={error}
+            />
+          </div>
         </div>
       </div>
     </div>

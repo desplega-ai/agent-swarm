@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.155.0] - 2026-09-25
+
+### Added
+- Task citations: `store-progress` accepts `citations` (task, memory, GitHub, Slack, agent-fs, page, script-run, URL) referenced as `[citation:N]` in output, rendered as sources in Slack outcome cards; Slack input attachments are no longer echoed in outcomes (#1594).
+- Extensions ship scripts and schedules, and install only from the predefined catalog by name (`extension-catalog`, `extension-install` with `template`); manifests may be YAML or JSON and are typed by a generated JSON Schema (#1595).
+- Workflow human-in-the-loop nodes can build `questions` at run time from one upstream `{{token}}`, validated before the card is created (#1611).
+- Structured PR and issue templates with a PR Body CI check (#1603).
+
+### Changed
+- Worker Claude settings deny `ScheduleWakeup` and `Artifact`, blank commit/PR attribution, and disable auto memory (#1608).
+- Bundled agent-fs advances to 0.13.9 (#1595).
+- README hero video switched to "Every team, one swarm" (#1599).
+
+### Removed
+- Inline manifest/files extension installs; they now return `400 inline_install_disabled` (#1595).
+
+### Fixed
+- `store-progress` refuses the first inaccurate citation completion, accepts GitHub pull, issue, and commit URLs, and shows only referenced citations inline (#1607).
+- Capability-only task affinity matches on capabilities instead of a role, so such tasks are claimable and assignable again (#1601).
+- Preserve selected workflow ports during interrupted-run recovery (#1600).
+- Show delegated progress and follow-up output in the session view (#1598).
+
 ## [1.154.0] - 2026-09-24
 
 ### Added

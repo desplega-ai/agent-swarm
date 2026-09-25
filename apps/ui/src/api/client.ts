@@ -360,7 +360,7 @@ class ApiClient {
   async updateAgentRuntime(data: {
     id: string;
     repoId?: string;
-    harnessProvider: "claude" | "codex" | "pi" | "opencode" | "acp";
+    harnessProvider: "claude" | "codex" | "pi" | "opencode" | "acp" | "dsh";
     model: string | null;
     allowCustomModel?: boolean;
     /** `null` clears `REASONING_EFFORT_OVERRIDE`; omitted leaves it unchanged; a level sets it. */
@@ -629,6 +629,96 @@ class ApiClient {
     // hide the home page + sidebar entry instead of erroring.
     if (res.status === 404) return null;
     if (!res.ok) throw new Error(`Failed to fetch status: ${res.status}`);
+    return res.json();
+  }
+
+  /**
+   * First-run onboarding state + live signals. `null` on 404: the API predates
+   * `/api/onboarding`, so the UI keeps today's behavior (no stepper, pill, or card).
+   */
+  async fetchOnboarding(): Promise<import("./types").OnboardingResponse | null> {
+    const url = `${this.getBaseUrl()}/api/onboarding`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`Failed to fetch onboarding: ${res.status}`);
+    return res.json();
+  }
+
+  async updateOnboarding(
+    action: import("./types").OnboardingAction,
+  ): Promise<import("./types").OnboardingResponse> {
+    const url = `${this.getBaseUrl()}/api/onboarding`;
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: this.getHeaders(),
+      body: JSON.stringify(action),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Failed to update onboarding" }));
+      throw new Error(err.error || `Failed to update onboarding: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  /** Test an embeddings endpoint; on success the API saves the EMBEDDING_* rows. */
+  async testOnboardingMemory(
+    body: import("./types").OnboardingMemoryTestRequest,
+  ): Promise<import("./types").OnboardingMemoryTestResponse> {
+    const url = `${this.getBaseUrl()}/api/onboarding/memory`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Failed to test embeddings" }));
+      throw new Error(err.error || `Failed to test embeddings: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async startCodexDevice(): Promise<import("./types").CodexDeviceStartResponse> {
+    const url = `${this.getBaseUrl()}/api/codex-oauth/device`;
+    const res = await fetch(url, { method: "POST", headers: this.getHeaders(), body: "{}" });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Failed to start Codex sign-in" }));
+      throw new Error(err.error || `Failed to start Codex sign-in: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async pollCodexDevice(flowId: string): Promise<import("./types").CodexDevicePollResponse> {
+    const url = `${this.getBaseUrl()}/api/codex-oauth/device/${encodeURIComponent(flowId)}/poll`;
+    const res = await fetch(url, { method: "POST", headers: this.getHeaders(), body: "{}" });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Failed to poll Codex sign-in" }));
+      throw new Error(err.error || `Failed to poll Codex sign-in: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  /** Live harness switch for one agent (worker reconciles within ~10s). */
+  async setAgentHarnessProvider(
+    id: string,
+    harnessProvider: import("./types").ProviderName,
+  ): Promise<void> {
+    const url = `${this.getBaseUrl()}/api/agents/${encodeURIComponent(id)}/harness-provider`;
+    const res = await fetch(url, {
+      method: "PATCH",
+      headers: this.getHeaders(),
+      body: JSON.stringify({ harness_provider: harnessProvider }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Failed to switch harness" }));
+      throw new Error(err.error || `Failed to switch harness: ${res.status}`);
+    }
+  }
+
+  /** Slack app manifest pre-filled with the swarm name. */
+  async fetchSlackManifest(name: string): Promise<Record<string, unknown>> {
+    const url = `${this.getBaseUrl()}/api/integrations/slack/manifest?name=${encodeURIComponent(name)}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch Slack manifest: ${res.status}`);
     return res.json();
   }
 

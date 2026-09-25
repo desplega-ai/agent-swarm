@@ -37,6 +37,7 @@ import {
   _resetTestConnectionCache,
   buildStatusPayload,
   computeHealth,
+  rollupCredStatusForProvider,
   type SetupMilestone,
 } from "../http/status";
 import type { AgentCredStatus } from "../types";
@@ -280,6 +281,41 @@ describe("setup milestones", () => {
 
     const payload = await buildStatusPayload();
     expect(getMilestone(payload, "harness").state).toBe("verified");
+  });
+
+  test("provider rollup counts every agent with a fresh passing report in verifiedWorkers", async () => {
+    const verified = await createAgent({
+      name: "w-verified",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+    const configured = await createAgent({
+      name: "w-configured",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+    const lead = await createAgent({
+      name: "lead-verified",
+      isLead: true,
+      status: "idle",
+      capabilities: [],
+    });
+    await seedCredStatus(verified.id, "claude", {
+      liveTest: { ok: true, error: null, latency_ms: 10, testedAt: Date.now() },
+    });
+    await seedCredStatus(configured.id, "claude", { liveTest: null });
+    await seedCredStatus(lead.id, "claude", {
+      liveTest: { ok: true, error: null, latency_ms: 10, testedAt: Date.now() },
+    });
+
+    expect(await rollupCredStatusForProvider("claude")).toMatchObject({
+      state: "verified",
+      workers: 3,
+      verifiedWorkers: 2,
+      reports: 3,
+    });
   });
 
   test("harness stays `unverified` on an empty fleet (no agents registered)", async () => {
@@ -798,6 +834,32 @@ describe("validateProviderCredentials — error scrubbing", () => {
     const result = await validateProviderCredentials("codex");
     expect(result.ok).toBe(true);
     expect(fetchCalled).toBe(false);
+  });
+
+  test("codex with a codex_oauth_<N> pool slot passes via presence check (no upstream call)", async () => {
+    // The dashboard device login stores slots, not CODEX_OAUTH. The presence
+    // check (`checkCodexCredentials`) already accepts them; the live test must
+    // too, or the provider stays `configured` and onboarding never verifies.
+    delete process.env.CODEX_OAUTH;
+    delete process.env.OPENAI_API_KEY;
+    process.env.codex_oauth_0 = JSON.stringify({
+      access: "oai-access-token-from-device-login",
+      refresh: "oai-refresh",
+      expires: Date.now() + 3600_000,
+      accountId: "acct_123",
+    });
+    let fetchCalled = false;
+    globalThis.fetch = (async () => {
+      fetchCalled = true;
+      return new Response("{}", { status: 200 });
+    }) as typeof fetch;
+    try {
+      const result = await validateProviderCredentials("codex");
+      expect(result.ok).toBe(true);
+      expect(fetchCalled).toBe(false);
+    } finally {
+      delete process.env.codex_oauth_0;
+    }
   });
 
   test("codex with ~/.codex/auth.json on disk passes via presence check (no env creds)", async () => {

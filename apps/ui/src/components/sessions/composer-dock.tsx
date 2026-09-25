@@ -109,9 +109,16 @@ export interface ComposerDockProps {
   /**
    * Let the card span the full available width instead of the chat-style
    * centered `max-w-3xl` column. Used by the task-detail steering dock, where
-   * the composer sits under a full-width log viewer.
+   * the composer sits under a full-width log viewer, and by the `/setup`
+   * first task, which spans the setup column.
    */
   fullWidth?: boolean;
+  /**
+   * Optional layer inside the rounded card, drawn above its border (for
+   * example a `BorderBeam`). Must be absolutely positioned and ignore pointer
+   * events. The sessions surfaces pass nothing.
+   */
+  decoration?: React.ReactNode;
   className?: string;
 }
 
@@ -133,6 +140,7 @@ export function ComposerDock({
   attachmentErrorMessage,
   autoFocus,
   fullWidth,
+  decoration,
   className,
 }: ComposerDockProps) {
   const ref = useRef<HTMLTextAreaElement | null>(null);
@@ -231,6 +239,7 @@ export function ComposerDock({
         onDragLeave={onDragLeave}
         onDrop={onDrop}
       >
+        {decoration}
         {isDragActive ? (
           <div
             className={cn(

@@ -57,6 +57,7 @@ import type {
 } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
 import { MarkdownView } from "@/components/shared/markdown-view";
+import { SecretInput } from "@/components/shared/secret-input";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import {
   AlertDialog,
@@ -1705,11 +1706,11 @@ export function AddConnectionDialog({
                         <FieldLabel tip="Secret value stored write-only under connection.<slug>.secret. Never shown again.">
                           Secret
                         </FieldLabel>
-                        <Input
-                          type="password"
+                        <SecretInput
                           value={authSecret}
-                          onChange={(event) => setAuthSecret(event.target.value)}
+                          onChange={setAuthSecret}
                           autoComplete="new-password"
+                          aria-label="Secret"
                           placeholder={
                             canPreserveSecret
                               ? "Leave blank to keep current secret"
@@ -2742,10 +2743,11 @@ export function OAuthAppDialog({
             <FieldLabel tip="From the provider's developer console. Stored write-only - never shown again.">
               Client Secret
             </FieldLabel>
-            <Input
-              type="password"
+            <SecretInput
               value={clientSecret}
-              onChange={(event) => setClientSecret(event.target.value)}
+              onChange={setClientSecret}
+              autoComplete="new-password"
+              aria-label="Client secret"
               placeholder={isEdit ? "unchanged" : "3c9d1f2e8ab74650cd1208d586cf1a2b34e5d6f7"}
             />
           </div>

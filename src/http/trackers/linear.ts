@@ -12,7 +12,7 @@ import { handleLinearWebhook } from "../../linear/webhook";
 import { forceRefreshAuthorizationOrThrow } from "../../oauth/ensure-token";
 import { completeGenericOAuthCallback } from "../oauth-callback";
 import { route } from "../route-def";
-import { deriveApiBaseUrl, parseQueryParams } from "../utils";
+import { allowedCredentialRedirect, deriveApiBaseUrl, parseQueryParams } from "../utils";
 
 // ─── Schemas ─────────────────────────────────────────────────────────────────
 
@@ -45,6 +45,7 @@ const linearAuthorize = route({
   summary: "Redirect to Linear OAuth consent screen",
   tags: ["Trackers"],
   auth: { apiKey: false },
+  query: z.object({ redirect: z.string().optional() }),
   responses: {
     302: { description: "Redirect to Linear OAuth" },
     500: { description: "Failed to generate authorization URL" },
@@ -160,6 +161,9 @@ export async function handleLinearTracker(
 ): Promise<boolean> {
   // GET /api/trackers/linear/authorize — redirect to Linear OAuth
   if (linearAuthorize.match(req.method, pathSegments)) {
+    const queryParams = parseQueryParams(req.url || "");
+    const parsed = await linearAuthorize.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
     if (!isLinearEnabled()) {
       res.writeHead(503, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Linear integration not configured" }));
@@ -167,7 +171,7 @@ export async function handleLinearTracker(
     }
 
     try {
-      const url = await getLinearAuthorizationUrl();
+      const url = await getLinearAuthorizationUrl(allowedCredentialRedirect(parsed.query.redirect));
       if (!url) {
         res.writeHead(500, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Failed to generate authorization URL" }));

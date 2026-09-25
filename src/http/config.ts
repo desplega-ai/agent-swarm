@@ -16,6 +16,8 @@ import {
 } from "../be/multi-runtime";
 import { getUserGrant } from "../be/rbac-roles";
 import {
+  internalConfigKeyError,
+  isInternalConfigKey,
   isReservedConfigKey,
   reservedKeyError,
   validateConfigValue,
@@ -40,7 +42,9 @@ const SECRETS_FORCE_MASK_NOTE =
 const API_ONLY_CONFIG_KEYS = new Set(["API_AGENT_FS_API_KEY", "SLACK_SIGNING_SECRET"]);
 
 function stripApiOnlyKeys<T extends { key: string }>(configs: T[]): T[] {
-  return configs.filter((config) => !API_ONLY_CONFIG_KEYS.has(config.key));
+  return configs.filter(
+    (config) => !API_ONLY_CONFIG_KEYS.has(config.key) && !isInternalConfigKey(config.key),
+  );
 }
 
 function singleHeader(req: IncomingMessage, name: string): string | undefined {
@@ -91,7 +95,7 @@ async function resolveSecretsRead(req: IncomingMessage, includeSecrets: boolean)
  * Returns true when the request may proceed; on denial it writes a 403 and
  * returns false.
  */
-async function ensureConfigAdmin(
+export async function ensureConfigAdmin(
   req: IncomingMessage,
   res: ServerResponse,
   verb: Extract<PermissionVerb, "config.write.any" | "config.delete.any">,
@@ -339,7 +343,7 @@ export async function handleConfig(
     if (!parsed) return true;
     const includeSecrets = parsed.query.includeSecrets === "true";
     const config = await getSwarmConfigById(parsed.params.id);
-    if (!config) {
+    if (!config || isInternalConfigKey(config.key)) {
       jsonError(res, "Config not found", 404);
       return true;
     }
@@ -402,6 +406,11 @@ export async function handleConfig(
       return true;
     }
 
+    if (isInternalConfigKey(key)) {
+      jsonError(res, internalConfigKeyError(key).message, 400);
+      return true;
+    }
+
     const validationError = validateConfigValue(key, value);
     if (validationError) {
       jsonError(res, validationError, 400);
@@ -441,6 +450,10 @@ export async function handleConfig(
     const existing = await getSwarmConfigLookupById(parsed.params.id);
     if (!existing) {
       jsonError(res, "Config not found", 404);
+      return true;
+    }
+    if (isInternalConfigKey(existing.key)) {
+      jsonError(res, internalConfigKeyError(existing.key).message, 400);
       return true;
     }
     const deleted = await deleteSwarmConfig(parsed.params.id);

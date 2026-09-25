@@ -14,7 +14,7 @@ import { deleteJiraWebhook, registerJiraWebhook } from "../../jira/webhook-lifec
 import { forceRefreshAuthorizationOrThrow } from "../../oauth/ensure-token";
 import { completeGenericOAuthCallback } from "../oauth-callback";
 import { route } from "../route-def";
-import { deriveApiBaseUrl, parseQueryParams } from "../utils";
+import { allowedCredentialRedirect, deriveApiBaseUrl, parseQueryParams } from "../utils";
 
 const MANUAL_WEBHOOK_INSTRUCTIONS =
   "See docs-site/.../integrations/jira.mdx for manual webhook registration steps.";
@@ -83,6 +83,7 @@ const jiraAuthorize = route({
   summary: "Redirect to Atlassian OAuth consent screen",
   tags: ["Trackers"],
   auth: { apiKey: false },
+  query: z.object({ redirect: z.string().optional() }),
   responses: {
     302: { description: "Redirect to Atlassian OAuth" },
     500: { description: "Failed to generate authorization URL" },
@@ -269,6 +270,9 @@ export async function handleJiraTracker(
 ): Promise<boolean> {
   // GET /api/trackers/jira/authorize — redirect to Atlassian OAuth consent
   if (jiraAuthorize.match(req.method, pathSegments)) {
+    const queryParams = parseQueryParams(req.url || "");
+    const parsed = await jiraAuthorize.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
     if (!isJiraEnabled()) {
       res.writeHead(503, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Jira integration not configured" }));
@@ -276,7 +280,7 @@ export async function handleJiraTracker(
     }
 
     try {
-      const url = await getJiraAuthorizationUrl();
+      const url = await getJiraAuthorizationUrl(allowedCredentialRedirect(parsed.query.redirect));
       if (!url) {
         res.writeHead(500, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Failed to generate authorization URL" }));

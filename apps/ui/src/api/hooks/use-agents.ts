@@ -115,7 +115,7 @@ export function useUpdateAgentRuntime() {
     mutationFn: (data: {
       id: string;
       repoId?: string;
-      harnessProvider: "claude" | "codex" | "pi" | "opencode" | "acp";
+      harnessProvider: "claude" | "codex" | "pi" | "opencode" | "acp" | "dsh";
       model: string | null;
       allowCustomModel?: boolean;
       reasoningEffort?: ReasoningEffortLevel | null;

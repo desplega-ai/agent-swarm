@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useConfigs } from "@/api/hooks/use-config-api";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
+import { useOnboardingOwnsFirstRun } from "@/api/hooks/use-onboarding";
 import { useStatusContext } from "@/app/status-context";
 import { Button } from "@/components/ui/button";
 import { useCurrentUser } from "@/contexts/current-user-context";
@@ -22,13 +23,16 @@ export function DashboardNudges() {
   const { data: configs } = useConfigs({ scope: "global" });
   const upgradeCard = useDismissibleCard(`dashboard-upgrade:${CURRENT_VERSION}`);
   const orgNameCard = useDismissibleCard("dashboard-org-name");
+  // Open onboarding owns naming (step 2), and the setup card sits right above.
+  const onboardingOwnsName = useOnboardingOwnsFirstRun();
 
   if (!isAdminLike(user)) return null;
 
   const orgName = configs?.find((config) => config.key === ORG_NAME_KEY)?.value.trim();
   const showUpgrade =
     upgradeGate.currentVersion !== null && !upgradeGate.supported && !upgradeCard.dismissed;
-  const showOrgName = configs !== undefined && !orgName && !orgNameCard.dismissed;
+  const showOrgName =
+    configs !== undefined && !orgName && !orgNameCard.dismissed && !onboardingOwnsName;
   const waitingAutomations = status?.automations?.filter(
     (automation) => automation.state === "needs_setup",
   );

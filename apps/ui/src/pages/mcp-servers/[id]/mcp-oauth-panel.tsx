@@ -11,6 +11,7 @@ import {
   useStartMcpOAuthConnect,
 } from "@/api/hooks";
 import type { McpOAuthStatus, McpServer } from "@/api/types";
+import { SecretInput } from "@/components/shared/secret-input";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import {
   AlertDialog,
@@ -142,11 +143,11 @@ function ManualClientDialog({ mcpServerId }: ManualClientDialogProps) {
               />
             </SettingsRow>
             <SettingsRow label="Client secret" htmlFor="oauth-client-secret" className="space-y-1">
-              <Input
+              <SecretInput
                 id="oauth-client-secret"
-                type="password"
                 value={clientSecret}
-                onChange={(e) => setClientSecret(e.target.value)}
+                onChange={setClientSecret}
+                autoComplete="new-password"
                 placeholder="(optional for public clients)"
               />
             </SettingsRow>

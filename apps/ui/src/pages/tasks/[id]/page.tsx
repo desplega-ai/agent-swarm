@@ -32,7 +32,11 @@ import {
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { renderTaskCitations, type TaskCitation } from "../../../../../../src/utils/task-citations";
+import {
+  renderTaskCitationSources,
+  renderTaskCitations,
+  type TaskCitation,
+} from "../../../../../../src/utils/task-citations";
 import "streamdown/styles.css";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useSessionCosts } from "@/api/hooks/use-costs";
@@ -65,6 +69,7 @@ import { SessionId } from "@/components/shared/session-id";
 import { SessionLogViewer } from "@/components/shared/session-log-viewer";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { TaskAttachmentsSection } from "@/components/shared/task-attachments-section";
+import { TaskCitationsSection } from "@/components/shared/task-citations-section";
 import { CollapsibleComposerDock } from "@/components/steering/collapsible-composer-dock";
 import { SteerComposer } from "@/components/steering/steer-composer";
 import { TaskFailureHelpDialog } from "@/components/support/task-failure-help-dialog";
@@ -279,7 +284,7 @@ function StructuredOutputContent({
         </div>
       )}
       {citations.length > 0 && (
-        <MarkdownView text={renderTaskCitations("", citations, "markdown")} />
+        <MarkdownView text={renderTaskCitationSources(raw, citations, "markdown")} />
       )}
     </div>
   );
@@ -931,6 +936,7 @@ export default function TaskDetailPage() {
       )}
 
       <TaskAttachmentsSection taskId={task.id} attachments={task.attachments} />
+      <TaskCitationsSection output={task.output ?? ""} citations={task.citations ?? []} />
 
       {!isFailed && !hasOutput && !hasAttachments && (
         <div className="flex items-center justify-center py-8 text-muted-foreground">
@@ -1267,6 +1273,7 @@ export default function TaskDetailPage() {
             )}
 
             <TaskAttachmentsSection taskId={task.id} attachments={task.attachments} />
+            <TaskCitationsSection output={task.output ?? ""} citations={task.citations ?? []} />
 
             {sessionLogsContent}
 

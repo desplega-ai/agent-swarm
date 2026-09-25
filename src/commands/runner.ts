@@ -46,12 +46,12 @@ import { getApiKey } from "../utils/api-key.ts";
 import { computeBudgetBackoffMs } from "../utils/budget-backoff.ts";
 import { getMcpBaseUrl } from "../utils/constants.ts";
 import { getContextWindowSize } from "../utils/context-window.ts";
-import { type CredentialSelection, resolveCredentialPools } from "../utils/credentials.ts";
 import {
-  isCodexCreditsExhaustedMessage,
-  isRateLimitMessage,
-  MAX_RATE_LIMIT_RESET_MS,
-  parseRateLimitResetTime,
+  type CredentialSelection,
+  ModelWindowExhaustedError,
+  resolveCredentialPools,
+} from "../utils/credentials.ts";
+import {
   type RateLimitWindowTelemetry,
   resolveCodexCreditsExhaustedCooldownMs,
 } from "../utils/error-tracker.ts";
@@ -95,6 +95,7 @@ import {
   reportLatestModel,
   sendCredStatusReport,
 } from "./provider-credentials.ts";
+import { buildFinalRateLimitWindows, classifyRateLimitOutcome } from "./rate-limit-outcome.ts";
 import {
   type ResumeSessionCandidate,
   type ResumeSessionResolution,
@@ -778,7 +779,25 @@ export async function fetchResolvedEnv(
   agentId: string,
   baseEnv: Record<string, string | undefined> = process.env,
   taskModel?: string,
-  sessionContext?: { repoId?: string; provider?: ProviderName },
+  sessionContext?: {
+    repoId?: string;
+    provider?: ProviderName;
+    modelTier?: string;
+    /**
+     * In-process guard (`RunnerState.modelWindowBlocks`) against re-drawing a
+     * key whose model-scoped window was just reported exhausted, before the
+     * server's write is visible to this worker's next poll. Forwarded to
+     * `resolveCredentialPools`.
+     */
+    localBlocks?: Map<string, number>;
+    /**
+     * Task admission only (`spawnProviderProcess`): fail fast with
+     * `ModelWindowExhaustedError` when the task's model has no capacity.
+     * Taskless calls (boot, credential recovery, reconciliation) leave it
+     * unset so an exhausted default model never blocks configuration loading.
+     */
+    enforceModelCapacity?: boolean;
+  },
 ): Promise<ResolvedEnvResult> {
   const env: Record<string, string | undefined> = { ...baseEnv };
   const repoId = sessionContext?.repoId;
@@ -851,11 +870,22 @@ export async function fetchResolvedEnv(
   const resolvedProvider = sessionContext?.provider ?? resolveHarnessProvider(env, baseEnv);
   if (sessionContext?.provider) env.HARNESS_PROVIDER = sessionContext.provider;
 
-  // Effective model: per-task model takes priority over the agent-level
-  // MODEL_OVERRIDE from swarm_config. Passed to resolveCredentialPools so
-  // the harness × model matrix can exclude incompatible credential vars
-  // (e.g. OPENAI_API_KEY when an OpenRouter model is selected on opencode).
-  const effectiveModel = taskModel || (env.MODEL_OVERRIDE as string | undefined) || "";
+  // Effective model: per-task model takes priority over modelTier, which
+  // takes priority over the agent-level MODEL_OVERRIDE from swarm_config.
+  // Resolved the same way spawnProviderProcess resolves the model it
+  // actually runs with (same inputs: model, modelTier, resolvedProvider,
+  // env) so the model used to pick a key never drifts from the model the
+  // CLI ends up using. Passed to resolveCredentialPools so both the
+  // harness × model matrix (exclude incompatible credential vars) and the
+  // model-scoped window filter (GET /api/keys/available?model=<family>)
+  // see the right model.
+  const modelSelection = resolveTaskModelSelection({
+    model: taskModel,
+    modelTier: sessionContext?.modelTier,
+    harnessProvider: resolvedProvider,
+    env,
+  });
+  const effectiveModel = modelSelection.model || (env.MODEL_OVERRIDE as string | undefined) || "";
 
   const credentialSelections = await resolveCredentialPools(env, {
     apiUrl,
@@ -869,6 +899,8 @@ export async function fetchResolvedEnv(
     // the worker's harness from the dashboard without restarting the container.
     provider: resolvedProvider,
     model: effectiveModel,
+    localBlocks: sessionContext?.localBlocks,
+    enforceModelCapacity: sessionContext?.enforceModelCapacity,
   });
 
   return { env, credentialSelections, resolvedProvider, scriptsOnlyConfigValue };
@@ -1861,32 +1893,52 @@ async function reportKeyRateLimit(
   }
 }
 
-async function reportKeyRateLimitWindows(
+/**
+ * Reports rate-limit window telemetry for a key. Returns the underlying
+ * fetch promise (does not swallow errors) so a caller that needs the post to
+ * complete before the task finishes (a model-scoped block) can await it and
+ * decide how to handle a failure; a caller that wants the legacy
+ * fire-and-forget behavior appends `.catch(() => {})`.
+ *
+ * Throws on a non-2xx response so a failed persistence surfaces to the
+ * caller instead of logging success while only the in-process guard took
+ * effect — otherwise other workers redraw the same exhausted key at once.
+ *
+ * `logKeySuffix` defaults to true for the legacy full-telemetry call site;
+ * the model-scoped call site passes false since it already logs the model
+ * family and key index itself (see the `[credential] model window ...`
+ * log above the call).
+ */
+export async function reportKeyRateLimitWindows(
   apiUrl: string,
   apiKey: string,
   keyType: string,
   keySuffix: string,
   keyIndex: number,
   windows: RateLimitWindowTelemetry,
+  logKeySuffix = true,
 ): Promise<void> {
   if (Object.keys(windows).length === 0) return;
-  try {
-    await fetch(`${apiUrl}/api/keys/report-rate-limit-windows`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        keyType,
-        keySuffix,
-        keyIndex,
-        windows,
-      }),
-    });
+  const response = await fetch(`${apiUrl}/api/keys/report-rate-limit-windows`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      keyType,
+      keySuffix,
+      keyIndex,
+      windows,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(
+      `Failed to report rate-limit windows for key #${keyIndex}: HTTP ${response.status}`,
+    );
+  }
+  if (logKeySuffix) {
     console.log(`[credentials] Reported rate-limit windows for key ...${keySuffix}`);
-  } catch {
-    // Non-blocking
   }
 }
 
@@ -2358,6 +2410,14 @@ interface RunnerState {
    * application site so a fresh value applies to the next credits-exhausted failure.
    */
   codexCreditsExhaustedCooldownMs: number;
+  /**
+   * In-process guard against re-drawing a key whose model-scoped window
+   * (Fable/Opus/Sonnet) was just reported as exhausted, before the server's
+   * `report-rate-limit-windows` write is visible to this worker's next
+   * `GET /api/keys/available` poll. Keyed by `${keyType}:${keyIndex}:${window}`,
+   * value is the reset time in ms. Read by `selectCredential` (T5).
+   */
+  modelWindowBlocks: Map<string, number>;
 }
 
 /** Buffer for session logs */
@@ -3465,6 +3525,8 @@ async function spawnProviderProcess(
     cwd?: string;
     vcsRepo?: string;
     contextKey?: string;
+    /** Forwarded to fetchResolvedEnv → resolveCredentialPools — see RunnerState.modelWindowBlocks. */
+    localBlocks?: Map<string, number>;
   },
   logDir: string,
   isYolo: boolean,
@@ -3479,16 +3541,45 @@ async function spawnProviderProcess(
     : null;
 
   // Resolve env first so we can use MODEL_OVERRIDE from config.
-  // Pass opts.model (per-task model) so the credential picker can apply
-  // the harness × model matrix (e.g. exclude OPENAI_API_KEY for OpenRouter models).
-  const { env: freshEnv, credentialSelections } = await fetchResolvedEnv(
-    opts.apiUrl,
-    opts.apiKey,
-    opts.agentId,
-    process.env,
-    opts.model,
-    { repoId: sessionRepo?.id, provider: adapter.name as ProviderName },
-  );
+  // Pass opts.model/opts.modelTier so the credential picker resolves the
+  // same effective model spawnProviderProcess resolves below (see
+  // fetchResolvedEnv's own resolveTaskModelSelection call) and can apply
+  // both the harness × model matrix (e.g. exclude OPENAI_API_KEY for
+  // OpenRouter models) and the model-scoped window filter.
+  let freshEnv: Record<string, string | undefined>;
+  let credentialSelections: CredentialSelection[];
+  try {
+    ({ env: freshEnv, credentialSelections } = await fetchResolvedEnv(
+      opts.apiUrl,
+      opts.apiKey,
+      opts.agentId,
+      process.env,
+      opts.model,
+      {
+        repoId: sessionRepo?.id,
+        provider: adapter.name as ProviderName,
+        modelTier: opts.modelTier,
+        localBlocks: opts.localBlocks,
+        enforceModelCapacity: true,
+      },
+    ));
+  } catch (err) {
+    if (err instanceof ModelWindowExhaustedError && realTaskId) {
+      const modelLabel = err.model.charAt(0).toUpperCase() + err.model.slice(1);
+      const reason = `No ${err.keyType} key has ${modelLabel} capacity until ${err.earliestResetAt ?? "unknown"}. Re-dispatch with another model or modelTier.`;
+      console.warn(`[${opts.role}] ${reason}`);
+      await ensureTaskFinished(
+        { apiUrl: opts.apiUrl, apiKey: opts.apiKey, agentId: opts.agentId },
+        opts.role,
+        realTaskId,
+        1,
+        reason,
+        undefined,
+        opts.harnessProvider,
+      );
+    }
+    throw err;
+  }
 
   // Report which key was selected for this task (fire-and-forget)
   if (credentialSelections.length > 0 && realTaskId) {
@@ -4423,71 +4514,72 @@ async function checkCompletedProcesses(
       // `[usage-limit]` (see codex-adapter.formatTerminalError); Claude
       // surfaces "rate limit" / "hit your limit" via SessionErrorTracker.
       //
-      // The gate must also fire on a bare structured rate_limit_event: a
-      // `status: "rejected"` event sets result.rateLimitResetAt but does NOT
-      // set hasErrors(), so failureReason can be empty even though the key is
-      // exhausted. Gating on rateLimitResetAt != null ensures the structured
-      // event alone still triggers the cooldown.
-      if (
-        credentialInfo &&
-        (result.rateLimitResetAt != null ||
-          (failureReason != null && isRateLimitMessage(failureReason)))
-      ) {
-        // Three-tier reset-time resolver (most to least precise):
-        // Tier 1: structured rate_limit_event from Claude CLI (resetsAt epoch sec)
-        // Tier 2: regex on the error message (e.g. "resets 3pm (UTC)")
-        // Tier 3: 5-min hard fallback — only when both structured and regex fail
-        // Tiers 1 & 2 are clamped to [now+60s, now+7d] (weekly limits reset ~2 days out).
-        const clampResetTime = (isoString: string): string => {
-          const nowMs = Date.now();
-          const minMs = nowMs + 60_000;
-          const maxMs = nowMs + MAX_RATE_LIMIT_RESET_MS;
-          const candidateMs = new Date(isoString).getTime();
-          return new Date(Math.min(Math.max(candidateMs, minMs), maxMs)).toISOString();
-        };
-
-        let rateLimitedUntil: string;
-        if (result.rateLimitResetAt) {
-          rateLimitedUntil = clampResetTime(result.rateLimitResetAt);
-          console.log(`[credentials] Rate limit reset from rate_limit_event: ${rateLimitedUntil}`);
-        } else if (failureReason != null) {
-          const parsedResetTime = parseRateLimitResetTime(failureReason);
-          if (parsedResetTime) {
-            rateLimitedUntil = clampResetTime(parsedResetTime);
-            console.log(
-              `[credentials] Parsed rate limit reset time from error: ${rateLimitedUntil}`,
-            );
-          } else if (isCodexCreditsExhaustedMessage(failureReason)) {
-            const cooldownMs = state.codexCreditsExhaustedCooldownMs;
-            rateLimitedUntil = new Date(Date.now() + cooldownMs).toISOString();
-            console.log(
-              `[credentials] Codex credits exhausted — applying cooldown (${cooldownMs}ms): ${rateLimitedUntil}`,
-            );
-          } else {
-            rateLimitedUntil = new Date(Date.now() + 5 * 60 * 1000).toISOString();
-          }
-        } else {
-          rateLimitedUntil = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+      // classifyRateLimitOutcome tests model-scoped windows (Fable/Opus/
+      // Sonnet weekly limits) before the legacy key-wide gate, so a
+      // model-scoped rejection blocks only that model family on this key —
+      // never the whole key — via report-rate-limit-windows instead of
+      // report-rate-limit. A key-wide rejection seen in the same session is
+      // still reported alongside it (windows are independent). The session's
+      // window telemetry and the classified model rejection go out as ONE
+      // payload, so an older `allowed` snapshot never overwrites the terminal
+      // rejection. The post is awaited so it completes before the task
+      // finishes.
+      if (credentialInfo) {
+        const outcome = classifyRateLimitOutcome(
+          result,
+          failureReason,
+          Date.now(),
+          state.codexCreditsExhaustedCooldownMs,
+        );
+        const keyRateLimitedUntil =
+          outcome.kind === "key"
+            ? outcome.rateLimitedUntil
+            : outcome.kind === "model"
+              ? outcome.keyRateLimitedUntil
+              : undefined;
+        if (keyRateLimitedUntil) {
+          console.log(`[credentials] Rate limit reset: ${keyRateLimitedUntil}`);
+          reportKeyRateLimit(
+            apiConfig.apiUrl,
+            apiConfig.apiKey,
+            credentialInfo.keyType,
+            credentialInfo.keySuffix,
+            credentialInfo.keyIndex,
+            keyRateLimitedUntil,
+          ).catch(() => {});
         }
-        reportKeyRateLimit(
-          apiConfig.apiUrl,
-          apiConfig.apiKey,
-          credentialInfo.keyType,
-          credentialInfo.keySuffix,
-          credentialInfo.keyIndex,
-          rateLimitedUntil,
-        ).catch(() => {});
-      }
+        if (outcome.kind === "model") {
+          const resetsAtIso = new Date(outcome.resetsAtSec * 1000).toISOString();
+          const blockKey = `${credentialInfo.keyType}:${credentialInfo.keyIndex}:${outcome.window}`;
+          state.modelWindowBlocks.set(blockKey, outcome.resetsAtSec * 1000);
+          console.log(
+            `[credential] ${outcome.model} weekly window exhausted (${outcome.window}) on key #${credentialInfo.keyIndex} until ${resetsAtIso}`,
+          );
+        }
 
-      if (credentialInfo && result.rateLimitWindows) {
-        reportKeyRateLimitWindows(
-          apiConfig.apiUrl,
-          apiConfig.apiKey,
-          credentialInfo.keyType,
-          credentialInfo.keySuffix,
-          credentialInfo.keyIndex,
+        const finalWindows = buildFinalRateLimitWindows(
           result.rateLimitWindows,
-        ).catch(() => {});
+          outcome,
+          new Date().toISOString(),
+        );
+        if (finalWindows) {
+          const report = reportKeyRateLimitWindows(
+            apiConfig.apiUrl,
+            apiConfig.apiKey,
+            credentialInfo.keyType,
+            credentialInfo.keySuffix,
+            credentialInfo.keyIndex,
+            finalWindows,
+            outcome.kind !== "model",
+          ).catch((err) => {
+            console.warn(
+              `[credential] Failed to report rate-limit windows: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          });
+          // A model rejection gates admission on other workers: land it before
+          // the task finishes. Plain telemetry stays fire-and-forget.
+          if (outcome.kind === "model") await report;
+        }
       }
       let bridgeDiagnostics: Awaited<ReturnType<typeof getBridgeFailureDiagnostics>> | undefined;
       if (result.exitCode !== 0 && harnessProvider === "claude" && workingDir) {
@@ -4981,6 +5073,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     tasksProcessed: 0,
     harnessProvider: bootProvider,
     codexCreditsExhaustedCooldownMs: bootCooldownMs,
+    modelWindowBlocks: new Map(),
   };
 
   // Track tasks already signaled for cancellation to avoid repeated SIGTERM
@@ -5815,6 +5908,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               cwd: resumeCwd,
               vcsRepo: task.vcsRepo,
               contextKey: (task as { contextKey?: string }).contextKey,
+              localBlocks: state.modelWindowBlocks,
             },
             logDir,
             isYolo,
@@ -6375,6 +6469,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               cwd: effectiveCwd,
               vcsRepo: taskVcsRepo,
               contextKey: taskContextKey,
+              localBlocks: state.modelWindowBlocks,
             },
             logDir,
             isYolo,

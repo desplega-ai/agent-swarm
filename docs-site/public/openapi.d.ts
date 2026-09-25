@@ -4169,72 +4169,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/oauth/keep-warm/codex": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Locked keep-warm refresh sweep across all Codex OAuth pool slots
-         * @description Enumerates codex_oauth_* slots and refreshes any older than ~7 days through the same locked getValidCodexOAuth path used at task time. Skips slots already benched by codex-auth-expiry-watch.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Per-slot keep-warm outcomes */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            results: ({
-                                slot: number;
-                                keySuffix: string;
-                                /** @enum {string} */
-                                outcome: "warm";
-                            } | {
-                                slot: number;
-                                keySuffix: string;
-                                /** @enum {string} */
-                                outcome: "refreshed";
-                            } | {
-                                slot: number;
-                                keySuffix: string;
-                                /** @enum {string} */
-                                outcome: "skipped-benched";
-                            } | {
-                                slot: number;
-                                /** @enum {string} */
-                                outcome: "no-credentials";
-                            } | {
-                                slot: number;
-                                keySuffix: string;
-                                /** @enum {string} */
-                                outcome: "failed";
-                                reason: string;
-                            })[];
-                        };
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/config/resolved": {
         parameters: {
             query?: never;
@@ -4548,6 +4482,195 @@ export interface paths {
             };
         };
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/codex-oauth/device": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start a Codex ChatGPT device login */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            responses: {
+                /** @description Device login started */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            flowId: string;
+                            userCode: string;
+                            /** Format: uri */
+                            verificationUrl: string;
+                            intervalSeconds: number;
+                            /** Format: date-time */
+                            expiresAt: string;
+                        };
+                    };
+                };
+                /** @description Device login is not enabled */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Failed to store device login state */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description OpenAI device login request failed */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/codex-oauth/device/{flowId}/poll": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Poll a Codex ChatGPT device login */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    flowId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            responses: {
+                /** @description Current device login status */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {string} */
+                            status: "pending" | "complete" | "failed" | "expired";
+                            slot?: number;
+                            error?: string;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/oauth/keep-warm/codex": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Locked keep-warm refresh sweep across all Codex OAuth pool slots
+         * @description Enumerates codex_oauth_* slots and refreshes any older than ~7 days through the same locked getValidCodexOAuth path used at task time. Skips slots already benched by codex-auth-expiry-watch.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Per-slot keep-warm outcomes */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            results: ({
+                                slot: number;
+                                keySuffix: string;
+                                /** @enum {string} */
+                                outcome: "warm";
+                            } | {
+                                slot: number;
+                                keySuffix: string;
+                                /** @enum {string} */
+                                outcome: "refreshed";
+                            } | {
+                                slot: number;
+                                keySuffix: string;
+                                /** @enum {string} */
+                                outcome: "skipped-benched";
+                            } | {
+                                slot: number;
+                                /** @enum {string} */
+                                outcome: "no-credentials";
+                            } | {
+                                slot: number;
+                                keySuffix: string;
+                                /** @enum {string} */
+                                outcome: "failed";
+                                reason: string;
+                            })[];
+                        };
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -4965,6 +5088,7 @@ export interface paths {
                     totalKeys: number;
                     scope?: string;
                     scopeId?: string;
+                    model?: "fable" | "opus" | "sonnet" | "haiku";
                 };
                 header?: never;
                 path?: never;
@@ -4983,6 +5107,8 @@ export interface paths {
                             success: true;
                             availableIndices: number[];
                             totalKeys: number;
+                            modelBlockedIndices?: number[];
+                            earliestModelResetAt?: string | null;
                         };
                     };
                 };
@@ -5070,6 +5196,13 @@ export interface paths {
                                         lastSeenAt: string;
                                     };
                                 };
+                                modelLimits: {
+                                    model: string;
+                                    window: string;
+                                    resetsAt: number;
+                                    resetsAtIso: string;
+                                    active: boolean;
+                                }[];
                                 createdAt: string;
                                 updatedAt: string;
                             }[];
@@ -6609,6 +6742,46 @@ export interface paths {
                         "application/json": {
                             mcpBaseUrl: string;
                             mcpUserUrl: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/integrations/slack/manifest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Build a Slack app manifest for this swarm */
+        get: {
+            parameters: {
+                query?: {
+                    name?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Slack app manifest */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: unknown;
                         };
                     };
                 };
@@ -9261,6 +9434,636 @@ export interface paths {
         get: operations["oauth_generic_callback"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Identity + setup readiness + live activity for the swarm dashboard
+         * @description Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Status payload */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            identity: {
+                                name: string;
+                                logo_url: string | null;
+                                brand_color: string | null;
+                                is_cloud: boolean;
+                                marketing_url: string | null;
+                                hide_cloud_promo: boolean;
+                                org_id: string | null;
+                            };
+                            setup: {
+                                /** @enum {string} */
+                                id: "harness" | "embeddings" | "slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs" | "workers" | "first_task";
+                                label: string;
+                                /** @enum {string} */
+                                state: "unverified" | "configured" | "verified";
+                                hint?: string;
+                                action_url?: string;
+                                /** @enum {string} */
+                                provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh";
+                                providers?: {
+                                    /** @enum {string} */
+                                    provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh";
+                                    /** @enum {string} */
+                                    state: "unverified" | "configured" | "verified";
+                                    workers: number;
+                                }[];
+                            }[];
+                            activity: {
+                                agents_online: number;
+                                leads_online: number;
+                                recent_tasks_count: number;
+                            };
+                            agent_fs: {
+                                configured: boolean;
+                                base_url: string | null;
+                                provider_id: string;
+                                capabilities: {
+                                    [key: string]: unknown;
+                                };
+                            };
+                            automations: {
+                                id: string;
+                                name: string;
+                                /** @enum {string} */
+                                kind: "schedule" | "workflow";
+                                /** @enum {string} */
+                                state: "running" | "needs_setup";
+                                missing: {
+                                    params: string[];
+                                    integrations: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
+                                };
+                                fixes: ({
+                                    /** @enum {string} */
+                                    type: "param";
+                                    key: string;
+                                    url: string;
+                                } | {
+                                    /** @enum {string} */
+                                    type: "integration";
+                                    /** @enum {string} */
+                                    key: "slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs";
+                                    url: string;
+                                })[];
+                                fixUrl: string;
+                            }[];
+                            /** @enum {string} */
+                            health: "ok" | "degraded" | "broken";
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/status/test-connection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Read worker-reported harness credential status
+         * @description Reads worker-reported credential checks from agent rows. This route makes no upstream request and returns a reported live-test result when one exists.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh";
+                    };
+                };
+            };
+            responses: {
+                /** @description Live-test result */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            ok: boolean;
+                            error?: string;
+                            latency_ms: number;
+                        };
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/onboarding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get first-run onboarding state and live setup signals */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Onboarding state and signals */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            state: {
+                                /** @enum {number} */
+                                version: 1;
+                                /** Format: date-time */
+                                startedAt: string;
+                                /** @enum {string} */
+                                currentStep: "connect" | "name" | "ai" | "agents" | "memory" | "integrations" | "first_task";
+                                /** Format: date-time */
+                                minimizedAt: string | null;
+                                /** Format: date-time */
+                                dismissedAt: string | null;
+                                /** Format: date-time */
+                                completedAt: string | null;
+                                autoCompleted: boolean;
+                                firstTaskId: string | null;
+                                steps: {
+                                    connect: {
+                                        /** @enum {string} */
+                                        status: "todo" | "done" | "skipped" | "failed";
+                                        /** Format: date-time */
+                                        at: string | null;
+                                        /** @enum {string|null} */
+                                        method: "api_key" | null;
+                                        /** @enum {string|null} */
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                    };
+                                    name: {
+                                        /** @enum {string} */
+                                        status: "todo" | "done" | "skipped" | "failed";
+                                        /** Format: date-time */
+                                        at: string | null;
+                                        /** @enum {string|null} */
+                                        method: "custom_name" | "default_name" | null;
+                                        /** @enum {string|null} */
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                    };
+                                    ai: {
+                                        /** @enum {string} */
+                                        status: "todo" | "done" | "skipped" | "failed";
+                                        /** Format: date-time */
+                                        at: string | null;
+                                        /** @enum {string|null} */
+                                        method: "claude_setup_token" | "claude_api_key" | "codex_device" | "codex_cli" | "openrouter" | "openai_gateway" | "deepseek" | "devin" | null;
+                                        /** @enum {string|null} */
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                    };
+                                    agents: {
+                                        /** @enum {string} */
+                                        status: "todo" | "done" | "skipped" | "failed";
+                                        /** Format: date-time */
+                                        at: string | null;
+                                        /** @enum {string|null} */
+                                        method: "cheap" | "optimal" | "max" | "mixed" | null;
+                                        /** @enum {string|null} */
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                    };
+                                    memory: {
+                                        /** @enum {string} */
+                                        status: "todo" | "done" | "skipped" | "failed";
+                                        /** Format: date-time */
+                                        at: string | null;
+                                        /** @enum {string|null} */
+                                        method: "openai" | "openrouter" | "vercel" | "custom" | "existing" | null;
+                                        /** @enum {string|null} */
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                    };
+                                    integrations: {
+                                        /** @enum {string} */
+                                        status: "todo" | "done" | "skipped" | "failed";
+                                        /** Format: date-time */
+                                        at: string | null;
+                                        /** @enum {string|null} */
+                                        method: "slack" | "github" | "gitlab" | "linear_oauth" | "jira_oauth" | null;
+                                        /** @enum {string|null} */
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                    };
+                                    first_task: {
+                                        /** @enum {string} */
+                                        status: "todo" | "done" | "skipped" | "failed";
+                                        /** Format: date-time */
+                                        at: string | null;
+                                        /** @enum {string|null} */
+                                        method: "suggestion" | "free_form" | null;
+                                        /** @enum {string|null} */
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                    };
+                                };
+                            };
+                            signals: {
+                                providers: {
+                                    /** @enum {string} */
+                                    provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh";
+                                    /** @enum {string} */
+                                    state: "unverified" | "configured" | "verified";
+                                    workers: number;
+                                    verifiedWorkers: number;
+                                }[];
+                                embeddings: {
+                                    configured: boolean;
+                                    dimensions: number;
+                                };
+                                integrations: {
+                                    slack: boolean;
+                                    github: boolean;
+                                    gitlab: boolean;
+                                    linear: boolean;
+                                    jira: boolean;
+                                };
+                                agents: {
+                                    leadsOnline: number;
+                                    workersOnline: number;
+                                };
+                                firstTask: {
+                                    id: string;
+                                    status: string;
+                                } | null;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        /** Apply a first-run onboarding state transition */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        action: "view";
+                        /** @enum {string} */
+                        step: "connect" | "name" | "ai" | "agents" | "memory" | "integrations" | "first_task";
+                    } | {
+                        /** @enum {string} */
+                        action: "complete";
+                        /** @enum {string} */
+                        step: "connect";
+                        /** @enum {string} */
+                        method: "api_key";
+                    } | {
+                        /** @enum {string} */
+                        action: "complete";
+                        /** @enum {string} */
+                        step: "name";
+                        /** @enum {string} */
+                        method: "custom_name" | "default_name";
+                    } | {
+                        /** @enum {string} */
+                        action: "complete";
+                        /** @enum {string} */
+                        step: "ai";
+                        /** @enum {string} */
+                        method: "claude_setup_token" | "claude_api_key" | "codex_device" | "codex_cli" | "openrouter" | "openai_gateway" | "deepseek" | "devin";
+                    } | {
+                        /** @enum {string} */
+                        action: "complete";
+                        /** @enum {string} */
+                        step: "agents";
+                        /** @enum {string} */
+                        method: "cheap" | "optimal" | "max" | "mixed";
+                    } | {
+                        /** @enum {string} */
+                        action: "complete";
+                        /** @enum {string} */
+                        step: "integrations";
+                        /** @enum {string} */
+                        method: "slack" | "github" | "gitlab" | "linear_oauth" | "jira_oauth";
+                    } | {
+                        /** @enum {string} */
+                        action: "skip";
+                        /** @enum {string} */
+                        step: "name" | "ai" | "agents" | "memory" | "integrations" | "first_task";
+                    } | {
+                        /** @enum {string} */
+                        action: "fail";
+                        /** @enum {string} */
+                        step: "connect" | "name" | "ai" | "agents" | "memory" | "integrations" | "first_task";
+                        /** @enum {string} */
+                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown";
+                    } | {
+                        /** @enum {string} */
+                        action: "first_task";
+                        taskId: string;
+                        /** @enum {string} */
+                        method: "suggestion" | "free_form";
+                    } | {
+                        /** @enum {string} */
+                        action: "minimize";
+                    } | {
+                        /** @enum {string} */
+                        action: "resume";
+                    } | {
+                        /** @enum {string} */
+                        action: "dismiss";
+                    };
+                };
+            };
+            responses: {
+                /** @description Updated onboarding state and signals */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            state: {
+                                /** @enum {number} */
+                                version: 1;
+                                /** Format: date-time */
+                                startedAt: string;
+                                /** @enum {string} */
+                                currentStep: "connect" | "name" | "ai" | "agents" | "memory" | "integrations" | "first_task";
+                                /** Format: date-time */
+                                minimizedAt: string | null;
+                                /** Format: date-time */
+                                dismissedAt: string | null;
+                                /** Format: date-time */
+                                completedAt: string | null;
+                                autoCompleted: boolean;
+                                firstTaskId: string | null;
+                                steps: {
+                                    connect: {
+                                        /** @enum {string} */
+                                        status: "todo" | "done" | "skipped" | "failed";
+                                        /** Format: date-time */
+                                        at: string | null;
+                                        /** @enum {string|null} */
+                                        method: "api_key" | null;
+                                        /** @enum {string|null} */
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                    };
+                                    name: {
+                                        /** @enum {string} */
+                                        status: "todo" | "done" | "skipped" | "failed";
+                                        /** Format: date-time */
+                                        at: string | null;
+                                        /** @enum {string|null} */
+                                        method: "custom_name" | "default_name" | null;
+                                        /** @enum {string|null} */
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                    };
+                                    ai: {
+                                        /** @enum {string} */
+                                        status: "todo" | "done" | "skipped" | "failed";
+                                        /** Format: date-time */
+                                        at: string | null;
+                                        /** @enum {string|null} */
+                                        method: "claude_setup_token" | "claude_api_key" | "codex_device" | "codex_cli" | "openrouter" | "openai_gateway" | "deepseek" | "devin" | null;
+                                        /** @enum {string|null} */
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                    };
+                                    agents: {
+                                        /** @enum {string} */
+                                        status: "todo" | "done" | "skipped" | "failed";
+                                        /** Format: date-time */
+                                        at: string | null;
+                                        /** @enum {string|null} */
+                                        method: "cheap" | "optimal" | "max" | "mixed" | null;
+                                        /** @enum {string|null} */
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                    };
+                                    memory: {
+                                        /** @enum {string} */
+                                        status: "todo" | "done" | "skipped" | "failed";
+                                        /** Format: date-time */
+                                        at: string | null;
+                                        /** @enum {string|null} */
+                                        method: "openai" | "openrouter" | "vercel" | "custom" | "existing" | null;
+                                        /** @enum {string|null} */
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                    };
+                                    integrations: {
+                                        /** @enum {string} */
+                                        status: "todo" | "done" | "skipped" | "failed";
+                                        /** Format: date-time */
+                                        at: string | null;
+                                        /** @enum {string|null} */
+                                        method: "slack" | "github" | "gitlab" | "linear_oauth" | "jira_oauth" | null;
+                                        /** @enum {string|null} */
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                    };
+                                    first_task: {
+                                        /** @enum {string} */
+                                        status: "todo" | "done" | "skipped" | "failed";
+                                        /** Format: date-time */
+                                        at: string | null;
+                                        /** @enum {string|null} */
+                                        method: "suggestion" | "free_form" | null;
+                                        /** @enum {string|null} */
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                    };
+                                };
+                            };
+                            signals: {
+                                providers: {
+                                    /** @enum {string} */
+                                    provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh";
+                                    /** @enum {string} */
+                                    state: "unverified" | "configured" | "verified";
+                                    workers: number;
+                                    verifiedWorkers: number;
+                                }[];
+                                embeddings: {
+                                    configured: boolean;
+                                    dimensions: number;
+                                };
+                                integrations: {
+                                    slack: boolean;
+                                    github: boolean;
+                                    gitlab: boolean;
+                                    linear: boolean;
+                                    jira: boolean;
+                                };
+                                agents: {
+                                    leadsOnline: number;
+                                    workersOnline: number;
+                                };
+                                firstTask: {
+                                    id: string;
+                                    status: string;
+                                } | null;
+                            };
+                        };
+                    };
+                };
+                /** @description Invalid transition */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description First task not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/onboarding/memory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Test and save an embeddings configuration for onboarding */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        preset: "openai" | "openrouter" | "vercel" | "custom" | "existing";
+                        /** Format: uri */
+                        baseUrl?: string;
+                        model?: string;
+                        apiKey?: string;
+                        /** @enum {string} */
+                        reuseKey?: "OPENAI_API_KEY" | "OPENROUTER_API_KEY";
+                    };
+                };
+            };
+            responses: {
+                /** @description Embedding probe result */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            ok: boolean;
+                            dimensions?: number;
+                            latencyMs: number;
+                            error?: string;
+                            /** @enum {string} */
+                            errorClass?: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown";
+                        };
+                    };
+                };
+                /** @description Invalid memory configuration */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -13822,6 +14625,7 @@ export interface paths {
                                     ref: string;
                                     label?: string | null;
                                     quote?: string | null;
+                                    general?: boolean;
                                     resolvedUrl: string | null;
                                     /** @enum {string} */
                                     verified: "true" | "false" | "unchecked";
@@ -13837,6 +14641,7 @@ export interface paths {
                                     ref: string;
                                     label?: string | null;
                                     quote?: string | null;
+                                    general?: boolean;
                                     resolvedUrl: string | null;
                                     /** @enum {string} */
                                     verified: "true" | "false" | "unchecked";
@@ -15849,190 +16654,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Identity + setup readiness + live activity for the swarm dashboard
-         * @description Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set.
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Status payload */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            identity: {
-                                name: string;
-                                logo_url: string | null;
-                                brand_color: string | null;
-                                is_cloud: boolean;
-                                marketing_url: string | null;
-                                hide_cloud_promo: boolean;
-                                org_id: string | null;
-                            };
-                            setup: {
-                                /** @enum {string} */
-                                id: "harness" | "embeddings" | "slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs" | "workers" | "first_task";
-                                label: string;
-                                /** @enum {string} */
-                                state: "unverified" | "configured" | "verified";
-                                hint?: string;
-                                action_url?: string;
-                                /** @enum {string} */
-                                provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh";
-                                providers?: {
-                                    /** @enum {string} */
-                                    provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh";
-                                    /** @enum {string} */
-                                    state: "unverified" | "configured" | "verified";
-                                    workers: number;
-                                }[];
-                            }[];
-                            activity: {
-                                agents_online: number;
-                                leads_online: number;
-                                recent_tasks_count: number;
-                            };
-                            agent_fs: {
-                                configured: boolean;
-                                base_url: string | null;
-                                provider_id: string;
-                                capabilities: {
-                                    [key: string]: unknown;
-                                };
-                            };
-                            automations: {
-                                id: string;
-                                name: string;
-                                /** @enum {string} */
-                                kind: "schedule" | "workflow";
-                                /** @enum {string} */
-                                state: "running" | "needs_setup";
-                                missing: {
-                                    params: string[];
-                                    integrations: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
-                                };
-                                fixes: ({
-                                    /** @enum {string} */
-                                    type: "param";
-                                    key: string;
-                                    url: string;
-                                } | {
-                                    /** @enum {string} */
-                                    type: "integration";
-                                    /** @enum {string} */
-                                    key: "slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs";
-                                    url: string;
-                                })[];
-                                fixUrl: string;
-                            }[];
-                            /** @enum {string} */
-                            health: "ok" | "degraded" | "broken";
-                        };
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/status/test-connection": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Live-test the harness provider's credentials
-         * @description Issues a real upstream call (Anthropic /v1/models, OpenAI /v1/models, etc.) for the given provider. Updates an in-memory cache so the next GET /status reports `harness.state = 'verified'` for SWARM_VERIFY_TTL_MS (default 1h).
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh";
-                    };
-                };
-            };
-            responses: {
-                /** @description Live-test result */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            ok: boolean;
-                            error?: string;
-                            latency_ms: number;
-                        };
-                    };
-                };
-                /** @description Validation error */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/tasks": {
         parameters: {
             query?: never;
@@ -16876,6 +17497,7 @@ export interface paths {
                                 ref: string;
                                 label?: string | null;
                                 quote?: string | null;
+                                general?: boolean;
                                 resolvedUrl: string | null;
                                 /** @enum {string} */
                                 verified: "true" | "false" | "unchecked";
@@ -17499,7 +18121,9 @@ export interface paths {
         /** Redirect to Atlassian OAuth consent screen */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    redirect?: string;
+                };
                 header?: never;
                 path?: never;
                 cookie?: never;
@@ -17996,7 +18620,9 @@ export interface paths {
         /** Redirect to Linear OAuth consent screen */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    redirect?: string;
+                };
                 header?: never;
                 path?: never;
                 cookie?: never;
@@ -21903,7 +22529,7 @@ export interface components {
             /** Format: uuid */
             id: string;
             /** @enum {string} */
-            eventType: "agent_joined" | "agent_status_change" | "agent_left" | "task_created" | "task_status_change" | "task_progress" | "task_steering" | "task_offered" | "task_accepted" | "task_rejected" | "task_claimed" | "task_claim_rejected_affinity" | "task_dispatch_rejected_affinity" | "task_authorization_rejected" | "task_recovery_authorization" | "task_released" | "channel_message" | "service_registered" | "service_unregistered" | "service_status_change" | "budget.upserted" | "budget.deleted" | "pricing.inserted" | "pricing.deleted" | "pricing.refresh" | "pricing.refresh.failed" | "task_superseded" | "slack_delivery";
+            eventType: "agent_joined" | "agent_status_change" | "agent_left" | "task_created" | "task_status_change" | "task_progress" | "task_steering" | "task_offered" | "task_accepted" | "task_rejected" | "task_claimed" | "task_claim_rejected_affinity" | "task_dispatch_rejected_affinity" | "task_authorization_rejected" | "task_recovery_authorization" | "task_released" | "task_citation_check_refused" | "channel_message" | "service_registered" | "service_unregistered" | "service_status_change" | "budget.upserted" | "budget.deleted" | "pricing.inserted" | "pricing.deleted" | "pricing.refresh" | "pricing.refresh.failed" | "task_superseded" | "slack_delivery";
             agentId?: string;
             taskId?: string;
             oldValue?: string;

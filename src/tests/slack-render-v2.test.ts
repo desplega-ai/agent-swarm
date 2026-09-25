@@ -60,6 +60,7 @@ let permalinkFailuresRemaining = 0;
 let slackAddressSequence = 0;
 let missingMessageTs: string | undefined;
 let updateFailuresRemaining = 0;
+let startStreamFailuresRemaining = 0;
 // A `chat.update` that answers with a Slack verdict other than 404 — the
 // permanent, non-retryable class (`cant_update_message`, `channel_not_found`).
 let rejectedUpdateTs: string | undefined;
@@ -161,6 +162,10 @@ const mockApiCall = mock(async (method: string, payload: Record<string, unknown>
     return { ok: true, ts };
   }
   if (method === "chat.startStream") {
+    if (startStreamFailuresRemaining > 0) {
+      startStreamFailuresRemaining--;
+      throw { data: { error: "user_not_found" } };
+    }
     if (String(payload.markdown_text ?? "").length > 12_000) {
       throw new Error("markdown_text exceeded Slack's streaming limit");
     }
@@ -1302,7 +1307,16 @@ describe("Slack renderer v2", () => {
     );
     const payload = calls.find((call) => call.method === "chat.postMessage")?.payload;
     expect(payload?.text).toContain("<https://example.com/|[1]>");
-    expect(JSON.stringify(payload?.blocks)).toContain("Sources:");
+    // Sources are a caption: never in the body or the notification text.
+    expect(payload?.text).not.toContain("Sources");
+    const blocks = payload?.blocks as { type: string; text?: { text: string } }[];
+    expect(JSON.stringify(blocks.filter((block) => block.type !== "context"))).not.toContain(
+      "Sources",
+    );
+    expect(blocks).toContainEqual({
+      type: "context",
+      elements: [{ type: "mrkdwn", text: "Sources: <https://example.com/|[1]> Evidence" }],
+    });
     expect(JSON.stringify(payload?.blocks)).not.toContain("[citation:");
     expect(JSON.stringify(payload?.blocks)).not.toContain("[9]");
     expect(payload?.text).toContain("|[1]> remains");
@@ -1442,10 +1456,95 @@ describe("Slack renderer v2", () => {
     await backdateLastUpdated([ask.id], 20);
     await processSlackRenderV2();
     const content = calls.find((call) => call.method === "chat.startStream")?.payload.markdown_text;
-    expect(content).toContain("<https://example.com/|[1]>");
-    expect(content).toContain("unknown.");
-    expect(content).not.toContain("[9]");
-    expect(content).toContain("Sources: <https://example.com/|[1]> Evidence");
+    expect(content).toBe("✅ Supported <https://example.com/|[1]>, unknown.");
+  });
+
+  test("outcome cards caption sources and attachments under the answer, footer last", async () => {
+    const originalHost = process.env.AGENT_FS_LIVE_URL;
+    process.env.AGENT_FS_LIVE_URL = "https://files.example.test";
+    try {
+      const lead = await createAgent({ name: "Caption Lead", isLead: true, status: "idle" });
+      const { channelId, threadTs } = uniqueSlackAddress("C_CAPTIONS");
+      const ask = await createTaskExtended("Captioned outcome", {
+        agentId: lead.id,
+        source: "slack",
+        slackChannelId: channelId,
+        slackThreadTs: threadTs,
+        contextKey: slackContextKey({ channelId, threadTs }),
+      });
+      await startTask(ask.id);
+      await upsertTaskCitations(ask.id, [
+        { index: 1, kind: "url", ref: "https://example.com/a", label: "Cited" },
+        { index: 2, kind: "url", ref: "https://example.com/b", label: "Whole answer" },
+      ]);
+      await insertTaskAttachment({
+        taskId: ask.id,
+        agentId: lead.id,
+        kind: "url",
+        name: "report.md",
+        url: "https://example.com/report.md",
+        isPrimary: true,
+      });
+      await completeTask(ask.id, "The answer [citation:1].");
+      await backdateLastUpdated([ask.id], 20);
+      await processSlackRenderV2();
+
+      const started = calls.find((call) => call.method === "chat.startStream");
+      expect(started?.payload.markdown_text).toBe("✅ The answer <https://example.com/a|[1]>.");
+      const stopped = calls.find((call) => call.method === "chat.stopStream");
+      const blocks = stopped?.payload.blocks as { type: string; elements: { text: string }[] }[];
+      expect(blocks.every((block) => block.type === "context")).toBe(true);
+      expect(blocks.map((block) => block.elements.map((element) => element.text))).toEqual([
+        ["Sources: <https://example.com/a|[1]> Cited"],
+        ["General sources: <https://example.com/b|[2]> Whole answer"],
+        ["📎 <https://example.com/report.md|report.md>"],
+        [expect.stringContaining(ask.id.slice(0, 8))],
+      ]);
+    } finally {
+      if (originalHost === undefined) delete process.env.AGENT_FS_LIVE_URL;
+      else process.env.AGENT_FS_LIVE_URL = originalHost;
+    }
+  });
+
+  test("the postMessage fallback keeps captions out of the notification text", async () => {
+    const lead = await createAgent({ name: "Fallback Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_CAPTION_FALLBACK");
+    const ask = await createTaskExtended("Fallback outcome", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    await startTask(ask.id);
+    await upsertTaskCitations(ask.id, [
+      { index: 1, kind: "url", ref: "https://example.com/", label: "Evidence" },
+    ]);
+    await completeTask(ask.id, "Supported [citation:1].");
+    await backdateLastUpdated([ask.id], 20);
+    await ensureSlackThreadTree([ask.id]);
+    calls.length = 0;
+    startStreamFailuresRemaining = 1;
+    try {
+      await processSlackRenderV2();
+    } finally {
+      startStreamFailuresRemaining = 0;
+    }
+
+    const posted = calls.find(
+      (call) =>
+        call.method === "chat.postMessage" &&
+        call.payload.text !== undefined &&
+        String(call.payload.text).startsWith("✅"),
+    );
+    const answer = "✅ Supported <https://example.com/|[1]>.";
+    expect(posted?.payload.text).toBe(answer);
+    const blocks = posted?.payload.blocks as { type: string; text?: string }[];
+    expect(blocks[0]).toEqual({ type: "markdown", text: answer });
+    expect(blocks.slice(1).every((block) => block.type === "context")).toBe(true);
+    expect(JSON.stringify(blocks.slice(1))).toContain(
+      "Sources: <https://example.com/|[1]> Evidence",
+    );
   });
 
   test("preserves complete native Markdown beyond the Block Kit text ceiling", async () => {
@@ -1505,50 +1604,50 @@ describe("Slack renderer v2", () => {
       label: "plain ASCII positive control",
       attachment: { kind: "agent-fs", name: "report.txt", path: "/reports/report.txt" },
       expected:
-        "📎 [report.txt](https://files.example.test/file/~/org-1/drive-1/reports/report.txt)",
+        "📎 <https://files.example.test/file/~/org-1/drive-1/reports/report.txt|report.txt>",
     },
     {
       label: "raw path spaces and parentheses",
       attachment: { kind: "agent-fs", name: "final report", path: "/shared reports/final (v1).md" },
       expected:
-        "📎 [final report](https://files.example.test/file/~/org-1/drive-1/shared%20reports/final%20%28v1%29.md)",
+        "📎 <https://files.example.test/file/~/org-1/drive-1/shared%20reports/final%20(v1).md|final report>",
     },
     {
       label: "already encoded positive control",
       attachment: { kind: "agent-fs", name: "report", path: "/reports/final%20%28v1%29.md" },
       expected:
-        "📎 [report](https://files.example.test/file/~/org-1/drive-1/reports/final%20%28v1%29.md)",
+        "📎 <https://files.example.test/file/~/org-1/drive-1/reports/final%20%28v1%29.md|report>",
     },
     {
       label: "label delimiters, backslashes, and whitespace",
       attachment: {
         kind: "url",
-        name: " \t[report] (final)\\\r\n\t copy  ",
+        name: " \t[report] <final> & (copy)\\\r\n\t two  ",
         url: "https://example.test/report",
       },
-      expected: "📎 [\\[report\\] \\(final\\)\\\\ copy](https://example.test/report)",
+      expected: "📎 <https://example.test/report|[report] &lt;final&gt; &amp; (copy)\\ two>",
     },
     {
       label: "URL positive control with an IPv6 host",
       attachment: { kind: "url", name: "report", url: "http://[::1]/report.txt?q=a%20b&x=1#part" },
-      expected: "📎 [report](http://[::1]/report.txt?q=a%20b&x=1#part)",
+      expected: "📎 <http://[::1]/report.txt?q=a%20b&x=1#part|report>",
     },
     {
       label: "URL delimiters with existing escapes and query parameters",
       attachment: {
         kind: "url",
         name: "report",
-        url: "https://example.test/a%20b) [c]<(d)>\\file?q=one two&x=1#part",
+        url: "https://example.test/a%20b) [c]<(d)>|\\file?q=one two&x=1#part",
       },
       expected:
-        "📎 [report](https://example.test/a%20b%29%20[c]%3C%28d%29%3E%5Cfile?q=one%20two&x=1#part)",
+        "📎 <https://example.test/a%20b)%20[c]%3C(d)%3E%7C%5Cfile?q=one%20two&x=1#part|report>",
     },
     {
       label: "non-HTTP fallback stays omitted",
       attachment: { kind: "url", name: "report", url: "agent-fs:/reports/report.md" },
       expected: "",
     },
-  ])("streams safe attachment Markdown: $label", async ({ attachment, expected }) => {
+  ])("captions safe attachment links: $label", async ({ attachment, expected }) => {
     const originalHost = process.env.AGENT_FS_LIVE_URL;
     process.env.AGENT_FS_LIVE_URL = "https://files.example.test";
     try {
@@ -1587,8 +1686,14 @@ describe("Slack renderer v2", () => {
 
       await processSlackRenderV2();
 
+      // The attachment is a caption under the answer, never part of the streamed text.
       const started = calls.find((call) => call.method === "chat.startStream");
-      expect(started?.payload.markdown_text).toBe(`✅ Done${expected ? `\n\n${expected}` : ""}`);
+      expect(started?.payload.markdown_text).toBe("✅ Done");
+      const stopped = calls.find((call) => call.method === "chat.stopStream");
+      const captions = (stopped?.payload.blocks as { type: string; elements: { text: string }[] }[])
+        .filter((block) => block.type === "context")
+        .map((block) => block.elements.map((element) => element.text).join(" "));
+      expect(captions.filter((text) => text.startsWith("📎"))).toEqual(expected ? [expected] : []);
     } finally {
       if (originalHost === undefined) delete process.env.AGENT_FS_LIVE_URL;
       else process.env.AGENT_FS_LIVE_URL = originalHost;
@@ -2063,9 +2168,10 @@ describe("Slack renderer v2", () => {
     await processSlackRenderV2();
 
     const started = calls.find((call) => call.method === "chat.startStream");
-    // ⏳ not ✅: the ask was parked, not answered. The ETA is what a human
-    // needs; the agent's internal note and the schedule link are dropped.
-    expect(started?.payload.markdown_text).toBe("⏳ Checking back today 17:30:19 UTC");
+    // ⏳ not ✅: the ask was parked, not answered. The ETA, the agent's
+    // internal note, and the schedule link are all dropped from Slack.
+    expect(started?.payload.markdown_text).toBe("⏳ Checking back later");
+    expect(JSON.stringify(calls)).not.toContain("17:30");
     expect(JSON.stringify(calls)).not.toContain("checking the new defer card");
     expect(JSON.stringify(calls)).not.toContain("715bf847-fe3e");
     expect(JSON.stringify(calls)).not.toContain("Deferred until");
@@ -2095,7 +2201,7 @@ describe("Slack renderer v2", () => {
     await processSlackRenderV2();
 
     const opening = calls.find((call) => call.method === "chat.startStream");
-    expect(opening?.payload.markdown_text).toBe("⏳ Checking back today at 18:38");
+    expect(opening?.payload.markdown_text).toBe("⏳ Checking back later");
     const card = await getSlackOutcomeMessage(ask.id);
     expect(card?.finalizedAt).toBeTruthy();
     expect(card?.deferralResolvedAt).toBeUndefined();
@@ -2124,6 +2230,7 @@ describe("Slack renderer v2", () => {
     );
     expect(rewrite).toBeDefined();
     expect(rewrite?.payload.text).toBe("✅ The build passed.");
+    expect(rewrite?.payload.blocks).toEqual([{ type: "markdown", text: "✅ The build passed." }]);
     expect(rewrite?.payload.text).not.toContain("Checking back");
     expect((await getSlackOutcomeMessage(ask.id))?.deferralResolvedAt).toBeTruthy();
     // The rewrite IS the wake-up's answer: no second card repeating it.
@@ -2228,7 +2335,7 @@ describe("Slack renderer v2", () => {
 
     // The chain continues on a new ⏳ card, which the next wake-up resolves.
     const next = calls.find((call) => call.method === "chat.startStream");
-    expect(next?.payload.markdown_text).toBe("⏳ Checking back today at 20:00");
+    expect(next?.payload.markdown_text).toBe("⏳ Checking back later");
     const nextCard = await getSlackOutcomeMessage(wake.id);
     expect(nextCard?.permalink).toBeTruthy();
     // The old card hands over to it rather than repeating the new ETA.
@@ -2256,8 +2363,13 @@ describe("Slack renderer v2", () => {
       deferredAt: new Date().toISOString(),
     });
     await backdateLastUpdated([ask.id], 20);
+    calls.length = 0;
     await processSlackRenderV2();
     const card = await getSlackOutcomeMessage(ask.id);
+    // The event-based card names who it waits on; the ceiling time stays out of Slack.
+    const opening = calls.find((call) => call.method === "chat.startStream");
+    expect(opening?.payload.markdown_text).toBe("⏳ Waiting on Researcher");
+    expect(JSON.stringify(calls)).not.toContain("at the latest");
 
     const schedule = await createScheduledTask({
       name: "deferred-resolve-fail",
@@ -2433,10 +2545,10 @@ describe("Slack renderer v2", () => {
     );
     calls.length = 0;
     await processSlackRenderV2();
-    // The ETA IS the message now, so there is no such thing as an "ETA-only"
-    // notice worth suppressing — a thread that says nothing is the bug.
+    // An empty legacy notice still posts a card — a thread that says nothing
+    // is the bug — but without its ETA.
     const started = calls.find((call) => call.method === "chat.startStream");
-    expect(started?.payload.markdown_text).toBe("⏳ Checking back today 17:30 UTC");
+    expect(started?.payload.markdown_text).toBe("⏳ Checking back later");
   });
 
   test("refreshes a stream started with stale content before finalizing it", async () => {

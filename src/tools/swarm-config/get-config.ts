@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById, getResolvedConfig, maskSecrets } from "@/be/db";
+import { isInternalConfigKey } from "@/be/swarm-config-guard";
 import { can } from "@/rbac";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { SwarmConfigScopeSchema } from "@/types";
@@ -63,6 +64,7 @@ export const registerGetConfigTool = (server: McpServer) => {
 
       try {
         let configs = await getResolvedConfig(agentId, repoId);
+        configs = configs.filter((config) => !isInternalConfigKey(config.key));
 
         if (key) {
           configs = configs.filter((c) => c.key === key);

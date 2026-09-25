@@ -355,7 +355,9 @@ export async function validateProviderCredentials(provider: string): Promise<Liv
         //      CODEX_OAUTH / OPENAI_API_KEY). This is the OAuth-equivalent path
         //      for codex — refresh logic lives in the adapter, so we only do a
         //      presence check (no upstream call).
-        //   2) `CODEX_OAUTH` env blob — same OAuth treatment.
+        //   2) `CODEX_OAUTH` env blob, or a `codex_oauth_<N>` pool slot (the
+        //      dashboard device login and `codex-login` store these; the runner
+        //      materialises auth.json per task) — same OAuth treatment.
         //   3) `OPENAI_API_KEY` env var — live-test against OpenAI `/v1/models`.
         //
         // Without (1), an agent that boots fresh from a credential pool whose
@@ -363,6 +365,13 @@ export async function validateProviderCredentials(provider: string): Promise<Liv
         // with "Set either CODEX_OAUTH or OPENAI_API_KEY" (observed in prod).
         if (codexAuthFileExists(env)) return presenceCheckOk();
         if (parseCodexOAuthAccess(env.CODEX_OAUTH)) return presenceCheckOk();
+        if (
+          Object.entries(env).some(
+            ([key, value]) => /^codex_oauth_\d+$/.test(key) && parseCodexOAuthAccess(value),
+          )
+        ) {
+          return presenceCheckOk();
+        }
         if (env.OPENAI_API_KEY) return checkOpenAiApiKey(env.OPENAI_API_KEY);
         return {
           ok: false,

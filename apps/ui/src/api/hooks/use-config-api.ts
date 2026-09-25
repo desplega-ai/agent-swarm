@@ -1,7 +1,7 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "../client";
-import type { SwarmConfig } from "../types";
+import type { SwarmConfig, SwarmConfigsResponse } from "../types";
 
 export interface ConfigFilters {
   scope?: string;
@@ -20,16 +20,26 @@ export function useConfigs(filters?: ConfigFilters) {
   });
 }
 
-export function useResolvedConfigs(filters?: {
+export interface ResolvedConfigFilters {
   agentId?: string;
   repoId?: string;
   includeSecrets?: boolean;
-}) {
-  return useQuery({
+}
+
+/**
+ * Query key, fetcher, and `select` of `useResolvedConfigs`. Spread it into
+ * `useQueries` to read several agents with the same cache entries.
+ */
+export function resolvedConfigsQuery(filters?: ResolvedConfigFilters) {
+  return queryOptions({
     queryKey: ["configs", "resolved", filters],
     queryFn: () => api.fetchResolvedConfig(filters),
-    select: (data) => data.configs,
+    select: (data: SwarmConfigsResponse) => data.configs,
   });
+}
+
+export function useResolvedConfigs(filters?: ResolvedConfigFilters) {
+  return useQuery(resolvedConfigsQuery(filters));
 }
 
 export function useUpsertConfig() {

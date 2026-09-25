@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useAgents } from "@/api/hooks/use-agents";
 import type { SwarmConfig, SwarmConfigScope } from "@/api/types";
+import { SecretInput } from "@/components/shared/secret-input";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -133,14 +134,25 @@ export function ConfigEntryDialog({
               />
             </div>
             <div className="space-y-2">
-              <Label>Value</Label>
-              <Input
-                type={form.isSecret ? "password" : "text"}
-                placeholder="config value"
-                value={form.value}
-                onChange={(e) => setForm({ ...form, value: e.target.value })}
-                required
-              />
+              <Label htmlFor="config-value">Value</Label>
+              {form.isSecret ? (
+                <SecretInput
+                  id="config-value"
+                  placeholder="config value"
+                  value={form.value}
+                  onChange={(value) => setForm({ ...form, value })}
+                  autoComplete="new-password"
+                  required
+                />
+              ) : (
+                <Input
+                  id="config-value"
+                  placeholder="config value"
+                  value={form.value}
+                  onChange={(e) => setForm({ ...form, value: e.target.value })}
+                  required
+                />
+              )}
             </div>
             <div className="space-y-2">
               <Label>Description (optional)</Label>

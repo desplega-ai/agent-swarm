@@ -15,6 +15,7 @@ import type { CodexOAuthCredentials } from "./types.js";
 
 /** Legacy single-credential key — kept for backwards-compat fallback reads. */
 const CODEX_OAUTH_KEY_LEGACY = "codex_oauth";
+export const MAX_CODEX_OAUTH_SLOT = 100;
 
 /**
  * How long a slot's refresh lock stays valid before another caller may steal

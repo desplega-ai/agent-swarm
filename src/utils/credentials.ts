@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { type ModelFamily, modelFamilyOf, windowForModelFamily } from "./model-rate-limit-windows";
 
 /** Env vars that may contain comma-separated credential pools */
 export const CREDENTIAL_POOL_VARS = [
@@ -108,6 +109,49 @@ export interface CredentialSelection {
   keyType: string;
   /** True when all indices for this keyType were rate-limited (best-effort pick) */
   isRateLimitFallback: boolean;
+  /** Indices excluded only by an active model-scoped window block for the requested model. */
+  modelBlockedIndices?: number[];
+  /** ISO of the earliest reset among modelBlockedIndices, or null/undefined when none. */
+  earliestModelResetAt?: string | null;
+}
+
+const MODEL_LABELS: Record<ModelFamily, string> = {
+  fable: "Fable",
+  opus: "Opus",
+  sonnet: "Sonnet",
+  haiku: "Haiku",
+};
+
+/**
+ * Thrown by `resolveCredentialPools` at task admission (`enforceModelCapacity`)
+ * when every key for a pool is either key-wide rate-limited or blocked by the
+ * requested model's weekly window, and `MODEL_WINDOW_EXHAUSTED_POLICY` is
+ * `fail` (the default). The caller must not spawn the CLI on this error — see
+ * `spawnProviderProcess` in `src/commands/runner.ts`. Taskless configuration
+ * loads never throw it.
+ */
+export class ModelWindowExhaustedError extends Error {
+  readonly model: ModelFamily;
+  readonly window: string;
+  readonly earliestResetAt: string | null;
+  readonly keyType: string;
+
+  constructor(opts: {
+    model: ModelFamily;
+    window: string;
+    earliestResetAt: string | null;
+    keyType: string;
+  }) {
+    const modelLabel = MODEL_LABELS[opts.model];
+    super(
+      `No ${opts.keyType} key has ${modelLabel} capacity until ${opts.earliestResetAt ?? "unknown"}. Re-dispatch with another model or modelTier.`,
+    );
+    this.name = "ModelWindowExhaustedError";
+    this.model = opts.model;
+    this.window = opts.window;
+    this.earliestResetAt = opts.earliestResetAt;
+    this.keyType = opts.keyType;
+  }
 }
 
 function isJsonObject(value: string): boolean {
@@ -232,29 +276,49 @@ export function validateOpencodeCredentials(
   );
 }
 
+/** Per-pool availability, including the model-scoped block breakdown when a model was requested. */
+export interface AvailabilityInfo {
+  availableIndices: number[];
+  modelBlockedIndices?: number[];
+  earliestModelResetAt?: string | null;
+}
+
 /**
  * Fetch available (non-rate-limited) key indices from the API for each credential pool.
- * Returns a map of envVar → available indices.
+ * Returns a map of envVar → availability info. When `modelFamily` has a weekly
+ * window (fable/opus/sonnet — haiku has none), the request also asks the
+ * server to exclude keys with an active block for that family.
  */
 async function fetchAvailableIndices(
   env: Record<string, string | undefined>,
   apiUrl: string,
   apiKey: string,
   poolVars: readonly string[] = CREDENTIAL_POOL_VARS,
-): Promise<Record<string, number[]>> {
-  const availableIndicesMap: Record<string, number[]> = {};
+  modelFamily?: ModelFamily,
+): Promise<Record<string, AvailabilityInfo>> {
+  const availableIndicesMap: Record<string, AvailabilityInfo> = {};
+  const window = modelFamily ? windowForModelFamily(modelFamily) : undefined;
+  const modelParam = window ? `&model=${encodeURIComponent(modelFamily as string)}` : "";
   for (const envVar of poolVars) {
     const val = env[envVar];
     if (val) {
       const totalKeys = val.includes(",") ? val.split(",").filter((s) => s.trim()).length : 1;
       try {
         const resp = await fetch(
-          `${apiUrl}/api/keys/available?keyType=${encodeURIComponent(envVar)}&totalKeys=${totalKeys}`,
+          `${apiUrl}/api/keys/available?keyType=${encodeURIComponent(envVar)}&totalKeys=${totalKeys}${modelParam}`,
           { headers: { Authorization: `Bearer ${apiKey}` } },
         );
         if (resp.ok) {
-          const data = (await resp.json()) as { availableIndices: number[] };
-          availableIndicesMap[envVar] = data.availableIndices;
+          const data = (await resp.json()) as {
+            availableIndices: number[];
+            modelBlockedIndices?: number[];
+            earliestModelResetAt?: string | null;
+          };
+          availableIndicesMap[envVar] = {
+            availableIndices: data.availableIndices,
+            modelBlockedIndices: data.modelBlockedIndices,
+            earliestModelResetAt: data.earliestModelResetAt,
+          };
           if (data.availableIndices.length < totalKeys) {
             console.log(
               `[credentials] ${envVar}: ${data.availableIndices.length}/${totalKeys} keys available (${totalKeys - data.availableIndices.length} rate-limited)`,
@@ -280,7 +344,7 @@ export async function resolveCredentialPools(
   opts?: {
     apiUrl?: string;
     apiKey?: string;
-    availableIndicesMap?: Record<string, number[]>;
+    availableIndicesMap?: Record<string, AvailabilityInfo>;
     /**
      * Optional `HARNESS_PROVIDER` value (claude, pi, codex). When provided,
      * only credential env vars relevant to that provider are pooled. This
@@ -293,33 +357,96 @@ export async function resolveCredentialPools(
      * Optional model string (e.g. "google/gemini-3-flash-preview", "gpt-4o").
      * Used together with `provider` to apply the harness × model matrix:
      * an OpenRouter-routed model (contains "/") on the opencode harness must
-     * not select OPENAI_API_KEY, while a direct OpenAI model may.
+     * not select OPENAI_API_KEY, while a direct OpenAI model may. Also used
+     * to derive the model family (fable/opus/sonnet/haiku) for the
+     * model-scoped window filter.
      */
     model?: string;
+    /**
+     * In-process guard (`RunnerState.modelWindowBlocks`) against re-drawing a
+     * key whose model-scoped window was just reported exhausted, before the
+     * server's write is visible to this worker's next `GET
+     * /api/keys/available` poll. Keyed by `${keyType}:${keyIndex}:${window}`,
+     * value is the reset time in ms.
+     */
+    localBlocks?: Map<string, number>;
+    /**
+     * Set only at task admission (`spawnProviderProcess`). When true, an
+     * exhausted model window fails fast with `ModelWindowExhaustedError`.
+     * Taskless configuration loads (worker boot, credential recovery,
+     * periodic reconciliation) leave it unset: they still pick a key, so an
+     * exhausted default model never blocks boot or config refresh, and the
+     * worker can still accept tasks for another model.
+     */
+    enforceModelCapacity?: boolean;
   },
 ): Promise<CredentialSelection[]> {
   const providerVars = opts?.provider
     ? getModelAwareCredentialVars(opts.provider, opts.model)
     : CREDENTIAL_POOL_VARS;
 
+  const modelFamily = modelFamilyOf(opts?.model);
+  const window = modelFamily ? windowForModelFamily(modelFamily) : undefined;
+
   const availableIndicesMap =
     opts?.availableIndicesMap ??
     (opts?.apiUrl && opts?.apiKey
-      ? await fetchAvailableIndices(env, opts.apiUrl, opts.apiKey, providerVars)
+      ? await fetchAvailableIndices(env, opts.apiUrl, opts.apiKey, providerVars, modelFamily)
       : undefined);
 
+  const nowMs = Date.now();
   const selections: CredentialSelection[] = [];
   for (const envVar of providerVars) {
     const val = env[envVar];
     if (val) {
-      const available = availableIndicesMap?.[envVar];
+      const info = availableIndicesMap?.[envVar];
+      let available = info?.availableIndices;
+      let modelBlockedCount = info?.modelBlockedIndices?.length ?? 0;
+      if (available && window && opts?.localBlocks) {
+        const beforeCount = available.length;
+        available = available.filter((i) => {
+          const blockedUntilMs = opts.localBlocks?.get(`${envVar}:${i}:${window}`);
+          return blockedUntilMs === undefined || blockedUntilMs <= nowMs;
+        });
+        modelBlockedCount += beforeCount - available.length;
+      }
+
+      // Every key is either key-wide rate-limited or blocked by this
+      // model's weekly window, and at least one is blocked specifically by
+      // the model (not just legacy key-wide rate limiting) — the picker
+      // can't make progress for this model on this pool. Default policy
+      // fails fast instead of looping the worker through the same
+      // exhausted key every few minutes.
+      if (
+        opts?.enforceModelCapacity &&
+        window &&
+        modelFamily &&
+        available &&
+        available.length === 0 &&
+        modelBlockedCount > 0
+      ) {
+        const policy = (env.MODEL_WINDOW_EXHAUSTED_POLICY ?? "fail").trim().toLowerCase();
+        if (policy !== "fallback") {
+          throw new ModelWindowExhaustedError({
+            model: modelFamily,
+            window,
+            earliestResetAt: info?.earliestModelResetAt ?? null,
+            keyType: envVar,
+          });
+        }
+      }
+
       const result = selectCredential(val, available, envVar);
       env[envVar] = result.selected;
       const availInfo = available ? ` (${available.length} available of ${result.total})` : "";
       console.log(
         `[credentials] Selected ${envVar} credential ${result.index + 1}/${result.total}${availInfo} [...${result.keySuffix}]`,
       );
-      selections.push({ ...result });
+      selections.push({
+        ...result,
+        modelBlockedIndices: info?.modelBlockedIndices,
+        earliestModelResetAt: info?.earliestModelResetAt,
+      });
     }
   }
   return selections;

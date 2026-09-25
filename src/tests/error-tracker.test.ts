@@ -632,6 +632,12 @@ describe("isRateLimitMessage — Codex credits-exhausted integration", () => {
     expect(isRateLimitMessage("Authentication failed")).toBe(false);
     expect(isRateLimitMessage("Server error 500")).toBe(false);
   });
+
+  test("returns false for a model-scoped Fable limit message — must not trigger a key-wide mark", () => {
+    expect(
+      isRateLimitMessage("You've reached your Fable limit. Switch to another model to continue."),
+    ).toBe(false);
+  });
 });
 
 describe("resolveCodexCreditsExhaustedCooldownMs", () => {

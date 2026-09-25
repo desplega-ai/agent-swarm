@@ -13,7 +13,11 @@ import { exec } from "node:child_process";
 import { emitKeypressEvents } from "node:readline";
 
 import { loginCodexOAuth } from "../providers/codex-oauth/flow.js";
-import { loadAllCodexOAuthSlots, storeCodexOAuth } from "../providers/codex-oauth/storage.js";
+import {
+  loadAllCodexOAuthSlots,
+  MAX_CODEX_OAUTH_SLOT,
+  storeCodexOAuth,
+} from "../providers/codex-oauth/storage.js";
 import { getApiKey } from "../utils/api-key";
 
 type PromptTextFn = (label: string, defaultValue: string) => Promise<string>;
@@ -198,8 +202,6 @@ Deployed Codex workers automatically restore these credentials at boot.
 `);
 }
 
-const MAX_SLOT = 100;
-
 export async function runCodexLogin(args: string[], deps: RunCodexLoginDeps = {}): Promise<void> {
   const resolveConfig = deps.resolveConfig ?? resolveCodexLoginConfig;
   const login = deps.login ?? loginCodexOAuth;
@@ -222,8 +224,8 @@ export async function runCodexLogin(args: string[], deps: RunCodexLoginDeps = {}
     // Resolve target slot: explicit --slot N, or auto-pick next free.
     let slot: number;
     if (parsedSlot !== undefined) {
-      if (!Number.isInteger(parsedSlot) || parsedSlot < 0 || parsedSlot > MAX_SLOT) {
-        error(`\nError: --slot must be an integer between 0 and ${MAX_SLOT}`);
+      if (!Number.isInteger(parsedSlot) || parsedSlot < 0 || parsedSlot > MAX_CODEX_OAUTH_SLOT) {
+        error(`\nError: --slot must be an integer between 0 and ${MAX_CODEX_OAUTH_SLOT}`);
         exit(1);
         return;
       }
@@ -231,9 +233,9 @@ export async function runCodexLogin(args: string[], deps: RunCodexLoginDeps = {}
     } else {
       const occupied = new Set((await loadAllSlots(apiUrl, apiKey)).map((s) => s.slot));
       let next = 0;
-      while (occupied.has(next) && next <= MAX_SLOT) next++;
-      if (next > MAX_SLOT) {
-        error(`\nError: All credential slots (0-${MAX_SLOT}) are already in use`);
+      while (occupied.has(next) && next <= MAX_CODEX_OAUTH_SLOT) next++;
+      if (next > MAX_CODEX_OAUTH_SLOT) {
+        error(`\nError: All credential slots (0-${MAX_CODEX_OAUTH_SLOT}) are already in use`);
         exit(1);
         return;
       }

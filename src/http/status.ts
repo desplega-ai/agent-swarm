@@ -199,9 +199,10 @@ export const TestConnectionResponseSchema = z.object({
  */
 type CredRollupState = "verified" | "configured" | "unverified";
 
-interface CredRollup {
+export interface CredRollup {
   state: CredRollupState;
   workers: number;
+  verifiedWorkers: number;
   reports: number;
   latestLiveTest: AgentCredStatus["liveTest"];
   latestMissing: string[];
@@ -225,7 +226,7 @@ export function _resetTestConnectionCache(): void {
   // intentionally empty
 }
 
-async function rollupCredStatusForProvider(provider: string): Promise<CredRollup> {
+export async function rollupCredStatusForProvider(provider: string): Promise<CredRollup> {
   const agents = await listAgentsWithCredStatusByProvider(provider);
   const reports = agents.map((a) => a.credStatus).filter((s): s is AgentCredStatus => s != null);
 
@@ -233,6 +234,7 @@ async function rollupCredStatusForProvider(provider: string): Promise<CredRollup
     return {
       state: "unverified",
       workers: agents.length,
+      verifiedWorkers: 0,
       reports: 0,
       latestLiveTest: null,
       latestMissing: [],
@@ -244,8 +246,10 @@ async function rollupCredStatusForProvider(provider: string): Promise<CredRollup
   // most-recent live test of any kind.
   const ttl = getCredVerifyTtlMs();
   const now = Date.now();
+  const isFreshPassingReport = (report: AgentCredStatus): boolean =>
+    report.liveTest?.ok === true && now - (report.liveTest?.testedAt ?? 0) < ttl;
   const passing = reports
-    .filter((r) => r.liveTest?.ok === true && now - (r.liveTest?.testedAt ?? 0) < ttl)
+    .filter(isFreshPassingReport)
     .sort((a, b) => (b.liveTest?.testedAt ?? 0) - (a.liveTest?.testedAt ?? 0));
   const anyLive = reports
     .filter((r) => r.liveTest != null)
@@ -268,6 +272,8 @@ async function rollupCredStatusForProvider(provider: string): Promise<CredRollup
   return {
     state,
     workers: agents.length,
+    // Every agent on the harness counts (leads too), same as `workers` and `state`.
+    verifiedWorkers: passing.length,
     reports: reports.length,
     latestLiveTest,
     latestMissing,
@@ -718,9 +724,9 @@ const postTestConnection = route({
   method: "post",
   path: "/status/test-connection",
   pattern: ["status", "test-connection"],
-  summary: "Live-test the harness provider's credentials",
+  summary: "Read worker-reported harness credential status",
   description:
-    "Issues a real upstream call (Anthropic /v1/models, OpenAI /v1/models, etc.) for the given provider. Updates an in-memory cache so the next GET /status reports `harness.state = 'verified'` for SWARM_VERIFY_TTL_MS (default 1h).",
+    "Reads worker-reported credential checks from agent rows. This route makes no upstream request and returns a reported live-test result when one exists.",
   tags: ["Status"],
   body: TestConnectionRequestSchema,
   responses: {
