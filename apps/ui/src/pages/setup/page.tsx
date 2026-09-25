@@ -263,9 +263,13 @@ function SetupFlow() {
     markSetupVisited(config.apiUrl);
   }, [config.apiUrl]);
 
+  // Set when a connect leaves for the dashboard: a step sync after that
+  // navigation would land there as a stray `?step=`.
+  const leaving = useRef(false);
+
   // Keep `?step=N` in the URL once the payload decides the step.
   useEffect(() => {
-    if (!data || searchParams.get("step") === stepParam) return;
+    if (!data || leaving.current || searchParams.get("step") === stepParam) return;
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev);
@@ -313,6 +317,8 @@ function SetupFlow() {
   // they are. Otherwise continue where setup left off, as before.
   useEffect(() => {
     if (!afterConnect || !data || identityPick.resolving) return;
+    // A finished setup leaves for the dashboard (`handleConnected`).
+    if (isOnboardingFinished(data.state)) return;
     setAfterConnect(false);
     goTo(identityPick.needed ? "connect" : onboardingResumeStep(data.state));
   }, [afterConnect, data, identityPick.resolving, identityPick.needed, goTo]);
@@ -383,6 +389,7 @@ function SetupFlow() {
       return; // The configured view shows the error and a way to fix the connection.
     }
     if (!next || isOnboardingFinished(next.state)) {
+      leaving.current = true;
       setAfterConnect(false);
       void navigate(from, { replace: true });
     }
@@ -525,10 +532,16 @@ function SetupError({ message, onRetry }: { message: string; onRetry: () => void
           </Link>
           .
         </p>
-        <Button variant="outline" size="sm" onClick={onRetry} className="mt-3">
-          <RotateCw />
-          Retry
-        </Button>
+        <div className="mt-3 flex gap-2">
+          <Button variant="outline" size="sm" onClick={onRetry}>
+            <RotateCw />
+            Retry
+          </Button>
+          {/* An API that fails here (a proxy, a 5xx) still serves the dashboard. */}
+          <Button asChild variant="ghost" size="sm">
+            <Link to="/">Go to dashboard</Link>
+          </Button>
+        </div>
       </AlertCallout>
     </div>
   );

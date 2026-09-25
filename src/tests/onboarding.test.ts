@@ -267,6 +267,25 @@ describe("onboarding state", () => {
     await expectExistingInstall();
   });
 
+  test("a failed or pending operator task marks the install as existing", async () => {
+    await insertTask({ id: "failed-real-task", status: "failed", taskType: null });
+    await expectExistingInstall();
+  });
+
+  test("system tasks alone do not mark the install as existing", async () => {
+    await insertTask({ id: "triage-running", status: "in_progress", taskType: "boot-triage" });
+    await insertTask({
+      id: "checklist-pending",
+      status: "pending",
+      taskType: "heartbeat-checklist",
+    });
+    const body = (await (await request("/api/onboarding")).json()) as {
+      state: OnboardingState;
+    };
+
+    expect(body.state.autoCompleted).toBe(false);
+  });
+
   test("a completed boot-triage task alone does not mark the install as existing", async () => {
     await insertTask({ id: "boot-only", status: "completed", taskType: "boot-triage" });
     const body = (await (await request("/api/onboarding")).json()) as {
@@ -341,6 +360,8 @@ describe("onboarding state", () => {
   });
 
   test("the selected first task completes onboarding after that task completes", async () => {
+    // Onboarding starts before the first task exists (the task alone would mark an existing install).
+    await request("/api/onboarding");
     await insertTask({ id: "first-task" });
     const selected = await put({
       action: "first_task",

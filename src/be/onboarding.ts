@@ -364,15 +364,18 @@ function queueTelemetry(events: PendingTelemetry[]): void {
   }
 }
 
+/**
+ * An install with a user, or with any task the swarm did not start on its own
+ * (boot triage, the heartbeat checklist), was in use before onboarding. The
+ * task status does not matter: failed or pending work is use too.
+ */
 async function isExistingInstall(): Promise<boolean> {
   const row = await getDbClient().get<{ existing: number }>(
     `SELECT CASE WHEN
        EXISTS (SELECT 1 FROM users LIMIT 1)
-       OR EXISTS (SELECT 1 FROM agent_tasks WHERE requestedByUserId IS NOT NULL LIMIT 1)
        OR EXISTS (
          SELECT 1 FROM agent_tasks
-         WHERE status = 'completed'
-           AND (taskType IS NULL OR taskType NOT IN ('boot-triage', 'heartbeat-checklist'))
+         WHERE taskType IS NULL OR taskType NOT IN ('boot-triage', 'heartbeat-checklist')
          LIMIT 1
        )
      THEN 1 ELSE 0 END AS existing`,
