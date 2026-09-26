@@ -9,7 +9,7 @@ import { useCreateTask, useTasks } from "@/api/hooks/use-tasks";
 import { useUsers } from "@/api/hooks/use-users";
 import { type AgentTask, REASONING_EFFORT_LEVELS } from "@/api/types";
 import { FilterField, FiltersPopover } from "@/components/shared/filters-popover";
-import { ListPager, resolveListPage } from "@/components/shared/list-pager";
+import { ListPager } from "@/components/shared/list-pager";
 import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
 import { StatusBadge } from "@/components/shared/status-badge";
 import {
@@ -46,6 +46,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { MODEL_TIER_OPTIONS } from "@/lib/model-tiers";
 import { taskListTitle } from "@/lib/task-title";
 import { formatRelativeTime } from "@/lib/utils";
+import { useStalePageCorrection } from "./use-stale-page-correction";
 
 interface TaskFormData {
   task: string;
@@ -492,22 +493,12 @@ export default function TasksPage() {
   }
 
   const total = tasksData?.total ?? 0;
-  // Once the total is known, move a stale ?page= to a real page and refetch it
-  // (replace, so Back does not return to the dead URL). Until then the grid
-  // shows loading and the pager shows the target page, never unfetched rows.
-  const { page: listPage, stale: pageStale } = resolveListPage(page, pageSize, tasksData?.total);
-  useEffect(() => {
-    if (!pageStale) return;
-    setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        if (listPage === 0) next.delete("page");
-        else next.set("page", String(listPage));
-        return next;
-      },
-      { replace: true },
-    );
-  }, [listPage, pageStale, setSearchParams]);
+  const { page: listPage, stale: pageStale } = useStalePageCorrection(
+    page,
+    pageSize,
+    tasksData?.total,
+    setSearchParams,
+  );
   const hasActiveFilters =
     statusFilter !== "all" ||
     agentFilter !== "all" ||
