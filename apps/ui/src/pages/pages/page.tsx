@@ -12,6 +12,7 @@ import { AgentLink } from "@/components/shared/agent-link";
 import { DataGrid } from "@/components/shared/data-grid";
 import { EmptyState } from "@/components/shared/empty-state";
 import { FavoriteButton } from "@/components/shared/favorite-button";
+import { FAVORITE_COLUMN } from "@/components/shared/favorite-column";
 import { ListFilterBar } from "@/components/shared/list-filter-bar";
 import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/ui/page-header";
@@ -96,10 +97,7 @@ export default function PagesListingPage() {
   const columnDefs = useMemo<ColDef<PageListItem>[]>(
     () => [
       {
-        headerName: "",
-        width: 52,
-        sortable: false,
-        filter: false,
+        ...FAVORITE_COLUMN,
         getQuickFilterText: () => "",
         cellRenderer: (params: { data: PageListItem | undefined }) => {
           const page = params.data;

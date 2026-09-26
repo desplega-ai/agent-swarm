@@ -17,6 +17,7 @@ import {
 import { DataGrid } from "@/components/shared/data-grid";
 import { EmptyState } from "@/components/shared/empty-state";
 import { FavoriteButton } from "@/components/shared/favorite-button";
+import { FAVORITE_COLUMN } from "@/components/shared/favorite-column";
 import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -390,10 +391,7 @@ export default function SchedulesPage() {
   const columnDefs = useMemo<ColDef<ScheduledTask>[]>(
     () => [
       {
-        headerName: "",
-        width: 52,
-        sortable: false,
-        filter: false,
+        ...FAVORITE_COLUMN,
         cellRenderer: (params: ICellRendererParams<ScheduledTask>) => {
           const schedule = params.data;
           if (!schedule) return null;
@@ -647,20 +645,11 @@ export default function SchedulesPage() {
             className="pl-9"
           />
         </div>
-        {/* Create lives in the toolbar as a bare "+" — no lone header action row. */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              size="icon"
-              className="size-8 ml-auto"
-              onClick={() => setDialogOpen(true)}
-              aria-label="Create schedule"
-            >
-              <Plus className="h-4 w-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Create schedule</TooltipContent>
-        </Tooltip>
+        {/* Labelled primary action in the toolbar row (DESIGN.md § List toolbar). */}
+        <Button size="sm" className="ml-auto" onClick={() => setDialogOpen(true)}>
+          <Plus className="h-4 w-4" />
+          New schedule
+        </Button>
       </div>
 
       {isMobile ? (

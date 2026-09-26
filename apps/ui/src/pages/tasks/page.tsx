@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Clock, Plus, Search, X } from "lucide-react";
+import { Clock, Plus, Search, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
@@ -8,6 +8,8 @@ import { useTaskTemplates } from "@/api/hooks/use-task-templates";
 import { useCreateTask, useTasks } from "@/api/hooks/use-tasks";
 import { useUsers } from "@/api/hooks/use-users";
 import { type AgentTask, REASONING_EFFORT_LEVELS } from "@/api/types";
+import { FilterField, FiltersPopover } from "@/components/shared/filters-popover";
+import { ListPager } from "@/components/shared/list-pager";
 import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
 import { StatusBadge } from "@/components/shared/status-badge";
 import {
@@ -39,7 +41,6 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { MODEL_TIER_OPTIONS } from "@/lib/model-tiers";
@@ -491,7 +492,6 @@ export default function TasksPage() {
   }
 
   const total = tasksData?.total ?? 0;
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const hasActiveFilters =
     statusFilter !== "all" ||
     agentFilter !== "all" ||
@@ -500,6 +500,15 @@ export default function TasksPage() {
     searchParam !== "" ||
     includeHeartbeat ||
     page !== 0;
+
+  // Facets inside the Filters popover; search and page are counted apart.
+  const activeFilterCount = [
+    statusFilter !== "all",
+    agentFilter !== "all",
+    scheduleFilter !== "all",
+    requesterFilter !== "all",
+    includeHeartbeat,
+  ].filter(Boolean).length;
 
   const clearFilters = useCallback(() => {
     setSearchParams(new URLSearchParams());
@@ -525,8 +534,10 @@ export default function TasksPage() {
     <div className="flex flex-col flex-1 min-h-0 gap-4">
       <PageHeader title="Tasks" />
 
-      <div className="flex items-center gap-3 flex-wrap">
-        <div className="relative flex-1 max-w-sm">
+      {/* One toolbar row at 1440px: search, Filters (n), then Columns and
+          New task. The four facet selects live in the Filters popover. */}
+      <div className="flex items-center gap-2">
+        <div className="relative min-w-0 flex-1 sm:max-w-sm">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             placeholder="Search by description or ID..."
@@ -535,113 +546,123 @@ export default function TasksPage() {
             className="pl-9"
           />
         </div>
-        {/* Below `md` the filters share one horizontally scrolling row, so
-            the list keeps the screen instead of four wrapped filter rows.
-            `md:contents` leaves the desktop toolbar exactly as it was. */}
-        <div className="-mx-1 flex w-full items-center gap-3 overflow-x-auto px-1 pb-1 [&>*]:shrink-0 md:contents">
-          <SearchableSelect
-            value={statusFilter}
-            onChange={(v) => setParam("status", v)}
-            triggerClassName="w-[160px]"
-            placeholder="Status"
-            options={[
-              { value: "all", label: "All Statuses" },
-              { value: "pending", label: "Pending" },
-              { value: "in_progress", label: "In Progress" },
-              { value: "completed", label: "Completed" },
-              { value: "failed", label: "Failed" },
-              { value: "cancelled", label: "Cancelled" },
-              { value: "superseded", label: "Superseded" },
-            ]}
-          />
-          <SearchableSelect
-            value={agentFilter}
-            onChange={(v) => setParam("agent", v)}
-            triggerClassName="w-[200px]"
-            placeholder="Agent"
-            searchPlaceholder="Search agents…"
-            options={[
-              { value: "all", label: "All Agents" },
-              ...(agents ?? []).map((a) => ({
-                value: a.id,
-                label: a.name,
-                hint: a.isLead ? "lead" : undefined,
-              })),
-            ]}
-          />
-          <SearchableSelect
-            value={scheduleFilter}
-            onChange={(v) => setParam("schedule", v)}
-            triggerClassName="w-[200px]"
-            placeholder="Schedule"
-            searchPlaceholder="Search schedules…"
-            options={[
-              { value: "all", label: "All Schedules" },
-              ...(schedules ?? []).map((s) => ({
-                value: s.id,
-                label: s.name,
-                icon: <Clock className="h-3 w-3 shrink-0 text-muted-foreground" />,
-              })),
-            ]}
-          />
-          {requesterFacetSupported && (
+        <FiltersPopover
+          activeCount={activeFilterCount}
+          footer={
+            <div className="flex items-center justify-between gap-2">
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
+                <Switch
+                  size="sm"
+                  checked={includeHeartbeat}
+                  onCheckedChange={(checked) => setParam("heartbeat", checked ? "true" : "")}
+                />
+                Show system
+              </label>
+              {hasActiveFilters ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-xs text-muted-foreground"
+                  onClick={clearFilters}
+                >
+                  Clear all
+                </Button>
+              ) : null}
+            </div>
+          }
+        >
+          <FilterField label="Status">
             <SearchableSelect
-              value={requesterFilter}
-              onChange={(v) => setParam("requester", v)}
-              triggerClassName="w-[200px]"
-              placeholder="Requested by"
-              searchPlaceholder="Search requesters…"
+              value={statusFilter}
+              onChange={(v) => setParam("status", v)}
+              triggerClassName="w-full"
+              placeholder="Status"
               options={[
-                { value: "all", label: "All requesters" },
-                ...(currentUserState === "ready" && currentUserId
-                  ? [{ value: "me", label: "Me" }]
-                  : []),
-                { value: "none", label: "Unattributed" },
-                ...(users ?? []).map((u) => ({
-                  value: u.id,
-                  label: u.name?.trim() || u.email?.trim() || u.id,
-                  hint: u.role,
+                { value: "all", label: "All Statuses" },
+                { value: "pending", label: "Pending" },
+                { value: "in_progress", label: "In Progress" },
+                { value: "completed", label: "Completed" },
+                { value: "failed", label: "Failed" },
+                { value: "cancelled", label: "Cancelled" },
+                { value: "superseded", label: "Superseded" },
+              ]}
+            />
+          </FilterField>
+          <FilterField label="Agent">
+            <SearchableSelect
+              value={agentFilter}
+              onChange={(v) => setParam("agent", v)}
+              triggerClassName="w-full"
+              placeholder="Agent"
+              searchPlaceholder="Search agents…"
+              options={[
+                { value: "all", label: "All Agents" },
+                ...(agents ?? []).map((a) => ({
+                  value: a.id,
+                  label: a.name,
+                  hint: a.isLead ? "lead" : undefined,
                 })),
               ]}
             />
-          )}
-          <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
-            <Switch
-              size="sm"
-              checked={includeHeartbeat}
-              onCheckedChange={(checked) => setParam("heartbeat", checked ? "true" : "")}
+          </FilterField>
+          <FilterField label="Schedule">
+            <SearchableSelect
+              value={scheduleFilter}
+              onChange={(v) => setParam("schedule", v)}
+              triggerClassName="w-full"
+              placeholder="Schedule"
+              searchPlaceholder="Search schedules…"
+              options={[
+                { value: "all", label: "All Schedules" },
+                ...(schedules ?? []).map((s) => ({
+                  value: s.id,
+                  label: s.name,
+                  icon: <Clock className="h-3 w-3 shrink-0 text-muted-foreground" />,
+                })),
+              ]}
             />
-            Show system
-          </label>
-        </div>
-        <div className="ml-auto flex items-center gap-2">
-          {hasActiveFilters && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-xs text-muted-foreground"
-              onClick={clearFilters}
-            >
-              <X className="h-3 w-3 mr-1" />
-              Clear filters
-            </Button>
+          </FilterField>
+          {requesterFacetSupported && (
+            <FilterField label="Requested by">
+              <SearchableSelect
+                value={requesterFilter}
+                onChange={(v) => setParam("requester", v)}
+                triggerClassName="w-full"
+                placeholder="Requested by"
+                searchPlaceholder="Search requesters…"
+                options={[
+                  { value: "all", label: "All requesters" },
+                  ...(currentUserState === "ready" && currentUserId
+                    ? [{ value: "me", label: "Me" }]
+                    : []),
+                  { value: "none", label: "Unattributed" },
+                  ...(users ?? []).map((u) => ({
+                    value: u.id,
+                    label: u.name?.trim() || u.email?.trim() || u.id,
+                    hint: u.role,
+                  })),
+                ]}
+              />
+            </FilterField>
           )}
-          <TasksColumnsMenu state={tasksColumns} />
-          {/* Create lives in the toolbar as a bare "+" — the lone header
-              action row it used to occupy wasted a full row of chrome. */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                size="icon"
-                className="size-8"
-                onClick={() => setDialogOpen(true)}
-                aria-label="Create task"
-              >
-                <Plus className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Create task</TooltipContent>
-          </Tooltip>
+        </FiltersPopover>
+        {hasActiveFilters && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="hidden text-xs text-muted-foreground sm:inline-flex"
+            onClick={clearFilters}
+          >
+            <X className="h-3 w-3 mr-1" />
+            Clear filters
+          </Button>
+        )}
+        <div className="ml-auto flex items-center gap-2">
+          {isMobile ? null : <TasksColumnsMenu state={tasksColumns} />}
+          <Button size="sm" onClick={() => setDialogOpen(true)}>
+            <Plus className="h-4 w-4" />
+            New task
+          </Button>
         </div>
       </div>
 
@@ -677,52 +698,15 @@ export default function TasksPage() {
         />
       )}
 
-      {/* Server-side pagination controls */}
-      <div className="flex items-center justify-between shrink-0 text-sm text-muted-foreground">
-        <span>
-          {total > 0
-            ? `${page * pageSize + 1}–${Math.min((page + 1) * pageSize, total)} of ${total}`
-            : "0 tasks"}
-        </span>
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs">Rows</span>
-            <Select value={String(pageSize)} onValueChange={(v) => setParam("pageSize", v)}>
-              <SelectTrigger className="h-8 w-[72px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {PAGE_SIZE_OPTIONS.map((size) => (
-                  <SelectItem key={size} value={String(size)}>
-                    {size}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <Button
-            variant="outline"
-            size="icon"
-            className="h-8 w-8"
-            disabled={page === 0}
-            onClick={() => setParam("page", String(page - 1), false)}
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <span className="px-2 text-xs">
-            Page {page + 1} of {totalPages}
-          </span>
-          <Button
-            variant="outline"
-            size="icon"
-            className="h-8 w-8"
-            disabled={page >= totalPages - 1}
-            onClick={() => setParam("page", String(page + 1), false)}
-          >
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-        </div>
-      </div>
+      <ListPager
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        pageSizeOptions={PAGE_SIZE_OPTIONS}
+        onPageChange={(next) => setParam("page", String(next), false)}
+        onPageSizeChange={(size) => setParam("pageSize", String(size))}
+        emptyLabel="0 tasks"
+      />
 
       <CreateTaskDialog
         open={dialogOpen}

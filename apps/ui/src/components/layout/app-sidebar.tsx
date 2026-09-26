@@ -1,4 +1,4 @@
-import type { ForwardRefExoticComponent, RefAttributes } from "react";
+import type { ForwardRefExoticComponent, ReactNode, RefAttributes } from "react";
 import { useRef, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useDashboardCosts } from "@/api/hooks/use-costs";
@@ -262,7 +262,7 @@ interface FooterNavItemProps {
    * when the live-counts feature (API ≥1.82) is enabled and the value is
    * resolved; `undefined` means render no badge.
    */
-  badge?: string;
+  badge?: ReactNode;
 }
 
 /**
@@ -377,7 +377,7 @@ export function AppSidebar() {
 
   // Map of `nav path -> resolved badge string`. An entry is present only when
   // the value is loaded and worth showing; absence means "no badge".
-  const badges: Record<string, string> = {};
+  const badges: Record<string, ReactNode> = {};
   if (countsEnabled) {
     const runningTasks = metrics?.tasks?.by_status?.in_progress;
     // Show running tasks only when there's at least one — skip a "0" chip.
@@ -389,7 +389,14 @@ export function AppSidebar() {
     }
     const costToday = dashboardCosts?.costToday;
     if (typeof costToday === "number") {
-      badges["/usage"] = formatCost(costToday, { precision: "compact" });
+      // Today's spend, labelled: next to a 30-day page total, a bare "$448"
+      // read as the same number.
+      badges["/usage"] = (
+        <>
+          {formatCost(costToday, { precision: "compact" })}
+          <span className="ml-1 font-normal text-muted-foreground">today</span>
+        </>
+      );
     }
   }
 

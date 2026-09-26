@@ -3,8 +3,6 @@ import {
   Activity,
   BarChart3,
   Brain,
-  ChevronLeft,
-  ChevronRight,
   FileText,
   Loader2,
   Quote,
@@ -22,6 +20,7 @@ import type { MemoryEntry, MemoryListRequest, MemoryScopeFilter, MemorySource } 
 import { SharedBarChart } from "@/components/shared/charts/nivo-charts";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { DataGrid } from "@/components/shared/data-grid";
+import { ListPager } from "@/components/shared/list-pager";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -338,9 +337,6 @@ export default function MemoryPage() {
 
   const results = data?.results ?? [];
   const total = data?.total ?? 0;
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  const firstRow = total > 0 ? page * pageSize + 1 : 0;
-  const lastRow = Math.min((page + 1) * pageSize, total);
 
   // Auto-select the memory referenced by ?memoryId= once it appears in results.
   const memoryIdParam = searchParams.get("memoryId");
@@ -483,65 +479,20 @@ export default function MemoryPage() {
         pagination={false}
       />
 
-      <div className="flex items-center justify-between shrink-0 text-sm text-muted-foreground">
-        <span>
-          {total > 0
-            ? `${firstRow}–${lastRow} of ${total}`
-            : data?.mode === "semantic"
-              ? "0 matches"
-              : "0 memories"}
-        </span>
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs">Rows</span>
-            <Select
-              value={String(pageSize)}
-              onValueChange={(value) =>
-                setParam("pageSize", value, {
-                  defaultValue: String(DEFAULT_PAGE_SIZE),
-                  reset: ["page"],
-                })
-              }
-            >
-              <SelectTrigger className="h-8 w-[72px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {PAGE_SIZE_OPTIONS.map((size) => (
-                  <SelectItem key={size} value={String(size)}>
-                    {size}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <Button
-            variant="outline"
-            size="icon"
-            className="h-8 w-8"
-            disabled={page === 0}
-            onClick={() => setParam("page", Math.max(0, page - 1), { defaultValue: "0" })}
-            aria-label="Previous page"
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <span className="px-2 text-xs">
-            Page {page + 1} of {totalPages}
-          </span>
-          <Button
-            variant="outline"
-            size="icon"
-            className="h-8 w-8"
-            disabled={page >= totalPages - 1}
-            onClick={() =>
-              setParam("page", Math.min(totalPages - 1, page + 1), { defaultValue: "0" })
-            }
-            aria-label="Next page"
-          >
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-        </div>
-      </div>
+      <ListPager
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        pageSizeOptions={PAGE_SIZE_OPTIONS}
+        onPageChange={(next) => setParam("page", next, { defaultValue: "0" })}
+        onPageSizeChange={(size) =>
+          setParam("pageSize", String(size), {
+            defaultValue: String(DEFAULT_PAGE_SIZE),
+            reset: ["page"],
+          })
+        }
+        emptyLabel={data?.mode === "semantic" ? "0 matches" : "0 memories"}
+      />
 
       <Sheet open={!!selected} onOpenChange={(open) => !open && closeSelectedMemory()}>
         <SheetContent className="w-[640px] sm:max-w-[640px] p-0">

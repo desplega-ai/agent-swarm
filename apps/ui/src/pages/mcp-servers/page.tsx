@@ -28,7 +28,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { formatRelativeTime } from "@/lib/utils";
 
@@ -373,20 +372,11 @@ export default function McpServersPage() {
             <SelectItem value="agent">Agent</SelectItem>
           </SelectContent>
         </Select>
-        {/* Add lives in the toolbar as a bare "+" — no lone header action row. */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              size="icon"
-              className="size-8 ml-auto"
-              onClick={() => setCreateOpen(true)}
-              aria-label="Add server"
-            >
-              <Plus className="h-4 w-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Add server</TooltipContent>
-        </Tooltip>
+        {/* Labelled primary action in the toolbar row (DESIGN.md § List toolbar). */}
+        <Button size="sm" className="ml-auto" onClick={() => setCreateOpen(true)}>
+          <Plus className="h-4 w-4" />
+          Add server
+        </Button>
       </div>
 
       <DataGrid

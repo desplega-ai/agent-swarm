@@ -1,15 +1,16 @@
 import { ArrowLeft, CircleCheck, CircleSlash, CircleX, Clock, Keyboard, Users } from "lucide-react";
 import { motion } from "motion/react";
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import type { ApprovalRequest } from "@/api/types";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { StatusLine } from "@/components/shared/status-icon";
+import { UserChip } from "@/components/shared/user-chip";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useUserName } from "@/hooks/use-user-name";
+import { useUserLookup } from "@/hooks/use-user-name";
 import {
   approvalRequestSource,
-  describeApprovers,
+  approverParts,
   formatRemaining,
   humanizeSeconds,
 } from "@/lib/approval-format";
@@ -43,7 +44,7 @@ export function RequestHeader({
   const expiresAt = request.expiresAt ? parseUTCDate(request.expiresAt).getTime() : null;
   const now = useNow(isPending && expiresAt !== null);
   const source = approvalRequestSource(request);
-  const userName = useUserName();
+  const lookupUser = useUserLookup();
   const sourceTo = request.workflowRunId
     ? `/workflow-runs/${request.workflowRunId}`
     : request.sourceTaskId
@@ -114,25 +115,56 @@ export function RequestHeader({
             Waiting for an answer
             {expiresAt !== null ? ` · ${formatRemaining(expiresAt - now)}` : null}
           </StatusLine>
-          <span className={cn("flex items-center gap-2 text-xs text-muted-foreground", WRAP)}>
-            <Users className="size-4 shrink-0" aria-hidden />
-            {describeApprovers(request.approvers, userName)}
-          </span>
+          <ApproversLine approvers={request.approvers} lookupUser={lookupUser} />
         </div>
       ) : (
-        <ResolutionBanner request={request} resolvedByName={resolvedByName(request, userName)} />
+        <ResolutionBanner
+          request={request}
+          resolvedBy={
+            request.resolvedBy ? (
+              <UserChip userRef={request.resolvedBy} user={lookupUser(request.resolvedBy)} />
+            ) : null
+          }
+        />
       )}
     </header>
   );
 }
 
-/** Who resolved the request, by name when the user directory knows them. */
-export function resolvedByName(
-  request: Pick<ApprovalRequest, "resolvedBy">,
-  userName: (idOrEmail: string) => string | undefined,
-): string | null {
-  if (!request.resolvedBy) return null;
-  return userName(request.resolvedBy) ?? request.resolvedBy;
+/** "Needs an answer from [TY Taras]": each approver is a chip, the ID in its tooltip. */
+function ApproversLine({
+  approvers,
+  lookupUser,
+}: {
+  approvers: ApprovalRequest["approvers"];
+  lookupUser: ReturnType<typeof useUserLookup>;
+}) {
+  const { lead, people, tail } = approverParts(approvers);
+  return (
+    <span
+      className={cn(
+        "flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted-foreground",
+        WRAP,
+      )}
+    >
+      <Users className="size-4 shrink-0" aria-hidden />
+      <span>{lead}</span>
+      {people.map((person, index) => (
+        <span
+          key={person.kind === "user" ? `u:${person.ref}` : `r:${person.role}`}
+          className="inline-flex min-w-0 items-center"
+        >
+          {person.kind === "user" ? (
+            <UserChip userRef={person.ref} user={lookupUser(person.ref)} />
+          ) : (
+            <span className="font-medium text-foreground">@{person.role}</span>
+          )}
+          {index < people.length - 1 ? <span aria-hidden>,</span> : null}
+        </span>
+      ))}
+      {tail ? <span>{tail}</span> : null}
+    </span>
+  );
 }
 
 const RESOLUTION = {
@@ -161,22 +193,23 @@ const RESOLUTION = {
 /** The outcome, first thing on a resolved request: who, when, and why. */
 function ResolutionBanner({
   request,
-  resolvedByName,
+  resolvedBy,
 }: {
   request: ApprovalRequest;
-  resolvedByName: string | null;
+  /** Who answered, as a `UserChip`; null when the request records nobody. */
+  resolvedBy: ReactNode;
 }) {
   if (request.status === "pending") return null;
   const config = RESOLUTION[request.status];
   const Icon = config.icon;
   const when = request.resolvedAt ? formatSmartTime(request.resolvedAt) : null;
-  let detail: string | null = null;
+  let detail: ReactNode = null;
   if (request.status === "timeout") {
     detail = request.timeoutSeconds
       ? `No answer within ${humanizeSeconds(request.timeoutSeconds)}`
       : "No answer before the deadline";
-  } else if (resolvedByName) {
-    detail = `by ${resolvedByName}`;
+  } else if (resolvedBy) {
+    detail = <>by {resolvedBy}</>;
   }
   return (
     <motion.div
@@ -196,8 +229,12 @@ function ResolutionBanner({
       </motion.span>
       <span className="flex min-w-0 flex-col gap-0.5">
         <span className="text-sm font-semibold">{config.title}</span>
-        <span className={cn("text-xs text-foreground/80", WRAP)}>
-          {[detail, when].filter(Boolean).join(" · ")}
+        <span
+          className={cn("flex flex-wrap items-center gap-x-1 text-xs text-foreground/80", WRAP)}
+        >
+          {detail}
+          {detail && when ? <span aria-hidden>·</span> : null}
+          {when}
         </span>
         {request.resolutionReason ? (
           <span className={cn("text-xs text-foreground/70", WRAP)}>{request.resolutionReason}</span>

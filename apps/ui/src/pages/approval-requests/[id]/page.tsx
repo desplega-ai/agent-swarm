@@ -7,6 +7,7 @@ import { useApprovalRequest, useRespondToApprovalRequest } from "@/api/hooks/use
 import type { ApprovalQuestion, ApprovalRequest } from "@/api/types";
 import { FadeIn } from "@/components/onboarding/fade-in";
 import type { StatusTone } from "@/components/shared/status-icon";
+import { UserChip } from "@/components/shared/user-chip";
 import {
   DetailPageBody,
   DetailPageRail,
@@ -17,7 +18,7 @@ import {
 } from "@/components/ui/detail-page-layout";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCurrentUser } from "@/contexts/current-user-context";
-import { useUserName } from "@/hooks/use-user-name";
+import { useUserLookup } from "@/hooks/use-user-name";
 import {
   answerHint,
   answerProgress,
@@ -37,7 +38,7 @@ import {
 } from "../components/keyboard";
 import { QuestionCard } from "../components/question-card";
 import { optionValues, QuestionField } from "../components/question-field";
-import { RequestHeader, resolvedByName } from "../components/request-header";
+import { RequestHeader } from "../components/request-header";
 import { SubmitBar } from "../components/submit-bar";
 
 /** Above this many questions, answered cards fold to one line. */
@@ -95,7 +96,7 @@ function ApprovalRequestView({ request }: { request: ApprovalRequest }) {
   const queryClient = useQueryClient();
   const respondMutation = useRespondToApprovalRequest();
   const { user } = useCurrentUser();
-  const userName = useUserName();
+  const lookupUser = useUserLookup();
   const reduceMotion = useReducedMotion();
   const finePointer = useFinePointer();
   const desktop = useMediaQuery("(min-width: 1024px)");
@@ -396,7 +397,10 @@ function ApprovalRequestView({ request }: { request: ApprovalRequest }) {
           <QuickStat label="Resolved" value={formatSmartTime(request.resolvedAt)} />
         ) : null}
         {request.resolvedBy ? (
-          <QuickStat label="Resolved by" value={resolvedByName(request, userName)} />
+          <QuickStat
+            label="Resolved by"
+            value={<UserChip userRef={request.resolvedBy} user={lookupUser(request.resolvedBy)} />}
+          />
         ) : null}
         {request.timeoutSeconds ? (
           <QuickStat label="Timeout" value={humanizeSeconds(request.timeoutSeconds)} />
