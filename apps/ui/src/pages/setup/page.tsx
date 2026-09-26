@@ -445,8 +445,9 @@ function SetupFlow() {
         ref={mainRef}
         className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable_both-edges]"
       >
-        {/* The title stays at the top. The step content centers in the height
-            left under it; a taller step grows the column and scrolls. */}
+        {/* Every step is top-aligned at the same offset, so the title and
+            content do not jump between steps. A taller step grows the column
+            and scrolls. */}
         <div className={cn(SETUP_COLUMN, "flex min-h-full flex-col pt-8 pb-12 sm:pt-10")}>
           <StepTransition stepKey={stepId} direction={direction} className="flex-1">
             <p className="mb-2 font-mono text-[10.5px] uppercase tracking-[0.16em] text-primary">
@@ -456,7 +457,7 @@ function SetupFlow() {
               {copy.title}
             </h1>
             <p className="mb-6 max-w-[70ch] text-sm text-muted-foreground">{copy.description}</p>
-            <div className="flex flex-1 flex-col justify-center">
+            <div className="flex flex-1 flex-col">
               {Body === null ? (
                 <StepConnect
                   onboarding={data ?? null}

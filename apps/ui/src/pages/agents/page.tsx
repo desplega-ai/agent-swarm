@@ -10,7 +10,8 @@ import type { AgentStatus, AgentWithTasks } from "@/api/types";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { AgentModelCell } from "@/components/shared/agent-model-cell";
 import { DataGrid } from "@/components/shared/data-grid";
-import { HarnessCell } from "@/components/shared/harness-cell";
+import { HarnessCell, harnessLabel } from "@/components/shared/harness-cell";
+import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
@@ -21,6 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { getAgentModelDisplay, getAgentModelPresentation } from "@/lib/agents-list-model-display";
 import { formatSmartTime } from "@/lib/utils";
@@ -35,6 +37,7 @@ export default function AgentsPage() {
   const statusFilter = readStringParam(searchParams, "status", "all");
 
   const modelColumnGate = useFeatureGate("1.77.2");
+  const isMobile = useIsMobile();
 
   const filteredAgents = useMemo(() => {
     if (!agents) return [];
@@ -174,6 +177,15 @@ export default function AgentsPage() {
     ];
   }, [configuredModelByAgentId, modelColumnGate.supported, modelsCatalog?.providers]);
 
+  // The grid's quick filter does this on desktop; the mobile rows filter here.
+  const matchesSearch = (agent: AgentWithTasks) => {
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return [agent.name, agent.role, agent.harnessProvider].some((v) =>
+      v?.toLowerCase().includes(q),
+    );
+  };
+
   const onRowClicked = useCallback(
     (event: RowClickedEvent<AgentWithTasks>) => {
       if (event.data) void navigate(`/agents/${event.data.id}`);
@@ -214,15 +226,44 @@ export default function AgentsPage() {
         </Select>
       </div>
 
-      <DataGrid
-        rowData={filteredAgents}
-        columnDefs={columnDefs}
-        quickFilterText={search}
-        onRowClicked={onRowClicked}
-        loading={isLoading}
-        emptyMessage="No agents found"
-        paginationQueryKey="agents"
-      />
+      {isMobile ? (
+        <MobileList label="Agents" loading={isLoading} emptyMessage="No agents found">
+          {filteredAgents.filter(matchesSearch).map((agent) => {
+            const model = getAgentModelPresentation(
+              getAgentModelDisplay(
+                configuredModelByAgentId.get(agent.id),
+                agent.credStatus?.latestModel?.model,
+              ).primary,
+              modelsCatalog?.providers,
+            );
+            return (
+              <MobileListRow
+                key={agent.id}
+                to={`/agents/${agent.id}`}
+                live={agent.status === "busy"}
+                leading={<AgentAvatar agentId={agent.id} agentName={agent.name} size="sm" />}
+                title={agent.name}
+                status={<StatusBadge status={agent.status} />}
+                meta={[
+                  agent.role,
+                  agent.harnessProvider ? harnessLabel(agent.harnessProvider) : null,
+                  model?.label,
+                ]}
+              />
+            );
+          })}
+        </MobileList>
+      ) : (
+        <DataGrid
+          rowData={filteredAgents}
+          columnDefs={columnDefs}
+          quickFilterText={search}
+          onRowClicked={onRowClicked}
+          loading={isLoading}
+          emptyMessage="No agents found"
+          paginationQueryKey="agents"
+        />
+      )}
     </div>
   );
 }

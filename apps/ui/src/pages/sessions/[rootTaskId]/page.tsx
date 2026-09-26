@@ -27,6 +27,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAutoScroll } from "@/hooks/use-auto-scroll";
 import { useLocalToggle } from "@/hooks/use-local-toggle";
+import { deriveSessionStatus } from "@/lib/session-status";
 import { sessionDisplayTitle } from "@/lib/utils";
 
 const usdFormatter = new Intl.NumberFormat("en-US", {
@@ -76,6 +77,13 @@ export default function SessionDetailPage() {
     if (!detail?.root.requestedByUserId || !users) return null;
     return users.find((u) => u.id === detail.root.requestedByUserId)?.name ?? null;
   }, [detail, users]);
+
+  // The root task alone can read FAILED while its retry and children are
+  // still running, so the header badge reflects the whole tree.
+  const sessionStatus = useMemo(
+    () => (detail ? deriveSessionStatus(detail.root, detail.chain) : null),
+    [detail],
+  );
 
   const totalCost = costs?.reduce((sum, c) => sum + c.totalCostUsd, 0) ?? 0;
 
@@ -171,11 +179,19 @@ export default function SessionDetailPage() {
           <p className="text-sm text-muted-foreground">Session not found.</p>
         )}
         {detail ? (
-          <div className="flex items-center gap-2.5 text-xs text-muted-foreground min-w-0 overflow-x-auto">
-            <StatusBadge status={detail.root.status} />
-            <span>
+          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-muted-foreground min-w-0 [&>span]:whitespace-nowrap">
+            {sessionStatus ? <StatusBadge status={sessionStatus.status} /> : null}
+            <span className="shrink-0">
               {detail.chain.length} task{detail.chain.length === 1 ? "" : "s"}
             </span>
+            {sessionStatus && sessionStatus.failedCount > 0 && sessionStatus.status !== "failed" ? (
+              <>
+                <span aria-hidden="true">·</span>
+                <span className="shrink-0 text-status-error-strong">
+                  {sessionStatus.failedCount} failed
+                </span>
+              </>
+            ) : null}
             {requestedByUserName ? (
               <>
                 <span aria-hidden="true">·</span>
@@ -247,7 +263,7 @@ export default function SessionDetailPage() {
             size="sm"
             variant="outline"
             onClick={scrollToBottom}
-            className="absolute bottom-3 right-4 h-8 rounded-full px-3 shadow-md bg-card/90 backdrop-blur-sm"
+            className="absolute bottom-3 left-1/2 -translate-x-1/2 h-8 rounded-full px-3 shadow-sm bg-card"
             aria-label="Jump to latest"
           >
             <ChevronDown className="h-3.5 w-3.5" />

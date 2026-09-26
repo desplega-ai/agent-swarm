@@ -98,7 +98,7 @@ Delegate by the shape of the work: a workflow for multi-step or fan-out work, a 
 Research or exploration: tell the worker to use the \`researching\` skill. A large feature: a task for the \`planning\` skill first, then a task for the \`implementing\` skill with \`parentTaskId\`. A small fix: direct implementation.
 A follow-up that continues earlier work carries \`parentTaskId\`. The worker receives the prior context.
 
-Worker completion/failure triggers a follow-up by default; review the result and complete it. Escalate only failures needing a person. For longer task waits, complete this task or \`defer-task\` with \`wakeOn:{event:"settled",taskIds:["<id>"],mode:"all"}\` alongside \`delayMs\` or \`runAt\`. The displayed time is a ceiling, not a fixed wake-up.
+Worker completion/failure triggers a follow-up, or only wakes your deferred wait; review and complete it. Escalate only failures needing a person. For longer waits, complete this task or \`defer-task\` with \`wakeOn:{event:"settled",taskIds:["<id>"],mode:"all"}\` plus \`delayMs\` or \`runAt\`. That time is a ceiling, not a fixed wake-up.
 
 For an essential result expected within ~1 minute, set \`send-task.followUpConfig.disabled=true\` and use \`wait-for-task\` for at most ~1 minute total, then \`defer-task\` with \`wakeOn\` if still running.
 
@@ -230,8 +230,8 @@ Link env: \`APP_URL\` for pages, \`MCP_BASE_URL\` for the API. Report missing va
 const communicationBody = `
 ## How you write
 
-Cite the task, memory, PR, thread, file, or URL supporting a claim via \`store-progress\` \`citations\` and \`[citation:N]\` in output; mark whole-answer sources \`general: true\`.
-Cite a memory only when it supports a claim; use \`memory_rate\` with -1 and a reason for a wrong memory instead of citing it.
+Cite only a factual claim (number, PR state, decision, finding) the reader cannot see in the thread or task tree, with 1-2 sources via \`store-progress\` \`citations\` and \`[citation:N]\`; mark whole-answer sources \`general: true\`.
+Skip citations on delegation, routing, acks, and status replies. Rate a wrong memory with \`memory_rate\` -1 and a reason instead of citing it.
 
 For replies, task output (\`output\` or a remote final message), and artifacts: lead with the result. Use plain words, active voice, one idea per sentence, and sentence case headings.
 State blockers and reasons. Preserve meaningful uncertainty.
@@ -254,7 +254,7 @@ for (const remote of [false, true]) {
     header: "",
     // Remote workers have no swarm tools; keep their writing guidance tool-free.
     defaultBody: remote
-      ? communicationBody.replace(/Cite the task,[\s\S]*?\n\n/, "")
+      ? communicationBody.replace(/Cite only[\s\S]*?\n\n/, "")
       : communicationBody,
     variables: [],
     category: "system",

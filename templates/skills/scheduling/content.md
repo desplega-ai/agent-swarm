@@ -45,7 +45,7 @@ Tasks created by a schedule are automatic tasks. Their completed output is not s
 
 A task whose answer needs time (a build, a deploy, a reply) calls `defer-task` with `delayMs` or `runAt`, a `summary` of what you did so far, and a `note` that says what is pending. The tool completes the task and creates the one-off schedule for you. The task reaches its final state (`completed`) on this call, and the `summary` becomes its output. The wake-up task carries the deferred task as its parent, so you receive that task's context. Add `checks` to list what to verify on wake-up. Do not hand-roll this with `create-schedule`.
 
-When waiting on tasks, include `wakeOn:{event:"settled",taskIds:["<id>"],mode:"all"}` alongside `delayMs` or `runAt`. The displayed time is a ceiling; matching task outcomes wake you sooner.
+When waiting on tasks, include `wakeOn:{event:"settled",taskIds:["<id>"],mode:"all"}` alongside `delayMs` or `runAt`. The displayed time is a ceiling; matching task outcomes wake you sooner. The task whose outcome wakes you creates no separate follow-up for you; the wake-up task is where you review it. In `mode:"all"`, a member that settles while others are pending still creates its follow-up.
 
 ## Secrets
 

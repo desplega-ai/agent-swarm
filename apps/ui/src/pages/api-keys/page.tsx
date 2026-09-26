@@ -21,6 +21,7 @@ import {
 import type { ApiKeyStatus, ApiKeyStatusType } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
 import { HarnessIcon } from "@/components/shared/harness-icon";
+import { isSubscriptionKeyType, PlanPicker } from "@/components/shared/plan-picker";
 import { ProviderIcon } from "@/components/shared/provider-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -355,6 +356,33 @@ export default function ApiKeysPage() {
               <ProviderIcon provider={meta.icon} className="h-3.5 w-3.5" />
               <span>{meta.label}</span>
             </span>
+          );
+        },
+      },
+      {
+        field: "plan",
+        headerName: "Plan",
+        width: 300,
+        sortable: false,
+        cellRenderer: (params: { data: ApiKeyStatus | undefined }) => {
+          const key = params.data;
+          if (!key) return null;
+          if (!isSubscriptionKeyType(key.keyType)) {
+            return <span className="text-xs text-muted-foreground">Pay-as-you-go</span>;
+          }
+          // Stop propagation so a pick never reaches AG Grid's row handlers.
+          return (
+            <div
+              className="flex h-full items-center"
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => e.stopPropagation()}
+            >
+              <PlanPicker
+                compact
+                credential={key}
+                label={`Plan for ${key.name ?? `${formatKeyType(key.keyType)} ...${key.keySuffix}`}`}
+              />
+            </div>
           );
         },
       },

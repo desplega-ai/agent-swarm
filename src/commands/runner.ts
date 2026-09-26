@@ -1732,6 +1732,7 @@ async function reportKeyUsage(
         keySuffix: selection.keySuffix,
         keyIndex: selection.index,
         taskId,
+        ...(selection.plan ? { plan: selection.plan } : {}),
       }),
     });
   } catch {

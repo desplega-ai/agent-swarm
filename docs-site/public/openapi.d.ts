@@ -4881,6 +4881,7 @@ export interface paths {
                         taskId?: string;
                         scope?: string;
                         scopeId?: string;
+                        plan?: string;
                     };
                 };
             };
@@ -5196,6 +5197,9 @@ export interface paths {
                                         lastSeenAt: string;
                                     };
                                 };
+                                plan: string | null;
+                                /** @enum {string|null} */
+                                planSource: "manual" | "detected" | "estimated" | null;
                                 modelLimits: {
                                     model: string;
                                     window: string;
@@ -5431,6 +5435,127 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/keys/plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List subscription plans and their monthly list prices */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Plan catalog */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            checkedAt: string;
+                            plans: {
+                                id: string;
+                                label: string;
+                                keyType: string;
+                                monthlyUsd: number;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/keys/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Set or clear the subscription plan of a pooled credential */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        keyType: string;
+                        keySuffix: string;
+                        plan: string | null;
+                    };
+                };
+            };
+            responses: {
+                /** @description Plan updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                            keyType: string;
+                            keySuffix: string;
+                            plan: string | null;
+                        };
+                    };
+                };
+                /** @description Unknown plan, or a plan for another credential type */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Key not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
         trace?: never;
     };
     "/api/events": {
@@ -14230,6 +14355,7 @@ export interface paths {
                                 attributableCostUsd: number;
                                 excludedCostUsd: number;
                                 excludedTaskCount: number;
+                                subscriptionCostUsd: number;
                             };
                             daily: {
                                 date: string;
@@ -14237,6 +14363,7 @@ export interface paths {
                                 inputTokens: number;
                                 outputTokens: number;
                                 sessions: number;
+                                subscriptionCostUsd: number;
                             }[];
                             byAgent: {
                                 agentId: string;
@@ -14253,6 +14380,21 @@ export interface paths {
                                 outputTokens: number;
                                 tasks: number;
                                 durationMs: number;
+                            }[];
+                            byCredential: {
+                                keyType: string | null;
+                                keySuffix: string | null;
+                                name: string | null;
+                                subscription: boolean;
+                                plan: string | null;
+                                /** @enum {string|null} */
+                                planSource: "manual" | "detected" | "estimated" | null;
+                                costUsd: number;
+                                inputTokens: number;
+                                outputTokens: number;
+                                sessions: number;
+                                firstSessionAt: string;
+                                lastSessionAt: string;
                             }[];
                         };
                     };
@@ -22529,7 +22671,7 @@ export interface components {
             /** Format: uuid */
             id: string;
             /** @enum {string} */
-            eventType: "agent_joined" | "agent_status_change" | "agent_left" | "task_created" | "task_status_change" | "task_progress" | "task_steering" | "task_offered" | "task_accepted" | "task_rejected" | "task_claimed" | "task_claim_rejected_affinity" | "task_dispatch_rejected_affinity" | "task_authorization_rejected" | "task_recovery_authorization" | "task_released" | "task_citation_check_refused" | "channel_message" | "service_registered" | "service_unregistered" | "service_status_change" | "budget.upserted" | "budget.deleted" | "pricing.inserted" | "pricing.deleted" | "pricing.refresh" | "pricing.refresh.failed" | "task_superseded" | "slack_delivery";
+            eventType: "agent_joined" | "agent_status_change" | "agent_left" | "task_created" | "task_status_change" | "task_progress" | "task_steering" | "task_offered" | "task_accepted" | "task_rejected" | "task_claimed" | "task_claim_rejected_affinity" | "task_dispatch_rejected_affinity" | "task_authorization_rejected" | "task_recovery_authorization" | "task_released" | "task_deferred_wait_woke" | "task_follow_up_suppressed" | "task_citation_check_refused" | "channel_message" | "service_registered" | "service_unregistered" | "service_status_change" | "budget.upserted" | "budget.deleted" | "pricing.inserted" | "pricing.deleted" | "pricing.refresh" | "pricing.refresh.failed" | "task_superseded" | "slack_delivery";
             agentId?: string;
             taskId?: string;
             oldValue?: string;

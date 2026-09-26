@@ -297,18 +297,30 @@ function MobileSessionPicker({
 }: MobileSessionPickerProps) {
   const navigate = useNavigate();
   const items = sessions ?? [];
+  // The list is filtered (yours, non-system), so the open session is not
+  // always in it. Radix renders an unmatched value as a blank trigger; fall
+  // back to the placeholder instead of an empty, unlabeled box.
+  const activeInList = items.some((s) => s.root.id === activeRootTaskId);
 
   return (
     <div className="flex items-center gap-2 border-b border-border bg-card px-3 py-2 lg:hidden">
       <Select
-        value={activeRootTaskId ?? ""}
+        value={activeInList ? activeRootTaskId : ""}
         onValueChange={(value) => {
           if (value) void navigate(`/sessions/${value}`);
         }}
         disabled={isLoading || items.length === 0}
       >
-        <SelectTrigger className="flex-1 h-9 text-xs">
-          <SelectValue placeholder={isLoading ? "Loading sessions…" : "Pick a session"} />
+        <SelectTrigger className="flex-1 h-9 text-xs" aria-label="Switch session">
+          <SelectValue
+            placeholder={
+              isLoading
+                ? "Loading sessions…"
+                : activeRootTaskId
+                  ? "Switch session…"
+                  : "Pick a session"
+            }
+          />
         </SelectTrigger>
         <SelectContent className="max-h-[60vh]">
           {items.map((s) => (

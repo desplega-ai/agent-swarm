@@ -1,21 +1,19 @@
 import type { ColDef } from "ag-grid-community";
-import { useCallback, useMemo } from "react";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { AlertCircle, BarChart3 } from "lucide-react";
+import { type ReactNode, useCallback, useMemo } from "react";
 import { useAgents } from "@/api/hooks/use-agents";
-import { useAttributionByPerson, useUsageSummary } from "@/api/hooks/use-costs";
+import {
+  type UsageQueryOptions,
+  useAttributionByPerson,
+  useUsageSummary,
+} from "@/api/hooks/use-costs";
 import { useUsers } from "@/api/hooks/use-users";
 import { DataGrid } from "@/components/shared/data-grid";
-import { UsageSummary } from "@/components/shared/usage-summary";
-import { PageHeader } from "@/components/ui/page-header";
+import { EmptyState } from "@/components/shared/empty-state";
+import { StatusLine } from "@/components/shared/status-icon";
+import { AlertCallout } from "@/components/ui/alert-callout";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { SegmentedControl, type SegmentedControlOption } from "@/components/ui/segmented-control";
 import {
   Select,
   SelectContent,
@@ -25,9 +23,12 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
-import { formatCost } from "@/lib/cost-format";
-import { rechartsTooltipStyle } from "@/lib/recharts-tooltip-style";
-import { formatCompactNumber } from "@/lib/utils";
+import { cn } from "@/lib/utils";
+import { DailySpendChart } from "./daily-spend-chart";
+import { RankedSpendCard, type RankedSpendRow } from "./ranked-spend-card";
+import { SubscriptionsCard } from "./subscriptions-card";
+import { formatDay, todayIso } from "./usage-format";
+import { UsageKpis } from "./usage-kpis";
 
 type DateRange = "7d" | "30d" | "90d" | "all";
 
@@ -36,6 +37,16 @@ const UNATTRIBUTED = "unattributed";
 
 const DAYS_MAP: Record<DateRange, number | null> = { "7d": 7, "30d": 30, "90d": 90, all: null };
 const DATE_RANGES = new Set<string>(["7d", "30d", "90d", "all"]);
+
+const RANGE_OPTIONS: readonly SegmentedControlOption<DateRange>[] = [
+  { value: "7d", label: "7d", tooltip: "Last 7 days" },
+  { value: "30d", label: "30d", tooltip: "Last 30 days" },
+  { value: "90d", label: "90d", tooltip: "Last 90 days" },
+  { value: "all", label: "All", tooltip: "All time" },
+];
+
+/** Spend changes slowly: poll once a minute and keep old numbers up while a filter loads. */
+const USAGE_QUERY: UsageQueryOptions = { refetchInterval: 60_000, keepPreviousData: true };
 
 function coerceDateRange(value: string): DateRange {
   return DATE_RANGES.has(value) ? (value as DateRange) : "30d";
@@ -75,18 +86,18 @@ export function UsageContent() {
   // global report under filters that visibly scope the rest of the page.
   const showAttributionByPerson = !agentId && !userId;
 
-  const { data: summary, isLoading } = useUsageSummary({
-    startDate,
-    agentId,
-    userId,
-    groupBy: "both",
-  });
+  const {
+    data: summary,
+    isLoading,
+    isPlaceholderData,
+    error,
+  } = useUsageSummary({ startDate, agentId, userId, groupBy: "both" }, USAGE_QUERY);
   const { data: agents } = useAgents();
   const { data: users } = useUsers();
-  const { data: attributionRows } = useAttributionByPerson({
-    startDate,
-    enabled: showAttributionByPerson,
-  });
+  const { data: attributionRows } = useAttributionByPerson(
+    { startDate, enabled: showAttributionByPerson },
+    USAGE_QUERY,
+  );
 
   const agentMap = useMemo(() => {
     const m = new Map<string, string>();
@@ -104,39 +115,54 @@ export function UsageContent() {
     return m;
   }, [users]);
 
-  const agentData = useMemo(() => {
-    if (!summary?.byAgent) return [];
-    return summary.byAgent.map((a) => ({
-      agentId: a.agentId,
-      name: agentMap.get(a.agentId) ?? `${a.agentId.slice(0, 8)}...`,
-      cost: Math.round(a.costUsd * 1000) / 1000,
-      sessions: a.sessions,
-      tokens: a.inputTokens + a.outputTokens,
-      avgCost: a.sessions > 0 ? a.costUsd / a.sessions : 0,
-    }));
-  }, [summary, agentMap]);
+  // The window runs from the range start (for "all", the first day with
+  // spend) to today. The chart and the plan proration both use it.
+  const today = todayIso();
+  const firstDay = summary?.daily.reduce<string | undefined>(
+    (min, row) => (min === undefined || row.date < min ? row.date : min),
+    undefined,
+  );
+  const lastDay = summary?.daily.reduce((max, row) => (row.date > max ? row.date : max), today);
+  const windowFrom = startDate ?? firstDay ?? today;
+  const windowTo = lastDay ?? today;
+  const windowLabel =
+    dateRange === "all" && !summary
+      ? "All time"
+      : `${formatDay(windowFrom, windowFrom.slice(0, 4) !== windowTo.slice(0, 4))} to ${formatDay(windowTo, true)}`;
 
-  // `userId: null` is autonomous spend (heartbeat, boot triage) — it gets its
+  const agentRows = useMemo<RankedSpendRow[]>(
+    () =>
+      (summary?.byAgent ?? []).map((a) => ({
+        key: a.agentId,
+        name: agentMap.get(a.agentId) ?? `${a.agentId.slice(0, 8)}...`,
+        href: `/agents/${a.agentId}`,
+        costUsd: a.costUsd,
+        count: a.sessions,
+      })),
+    [summary, agentMap],
+  );
+
+  // `userId: null` is autonomous spend (heartbeat, boot triage). It gets its
   // own labelled row instead of being dropped or folded into a person.
-  const userData = useMemo(() => {
-    if (!summary?.byUser) return [];
-    return summary.byUser.map((u) => ({
-      key: u.userId ?? UNATTRIBUTED,
-      name: u.userId
-        ? (userMap.get(u.userId) ?? `${u.userId.slice(0, 8)}...`)
-        : "Unattributed (autonomous)",
-      isUnattributed: u.userId === null,
-      cost: Math.round(u.costUsd * 1000) / 1000,
-      tasks: u.tasks,
-      tokens: u.inputTokens + u.outputTokens,
-      avgCost: u.tasks > 0 ? u.costUsd / u.tasks : 0,
-    }));
-  }, [summary, userMap]);
+  const userRows = useMemo<RankedSpendRow[]>(
+    () =>
+      (summary?.byUser ?? []).map((u) => ({
+        key: u.userId ?? UNATTRIBUTED,
+        name: u.userId
+          ? (userMap.get(u.userId) ?? `${u.userId.slice(0, 8)}...`)
+          : "Unattributed (autonomous)",
+        href: u.userId ? `/people/${u.userId}` : undefined,
+        costUsd: u.costUsd,
+        count: u.tasks,
+        muted: u.userId === null,
+      })),
+    [summary, userMap],
+  );
 
   // Four metrics, side by side, never summed into one score. Sorted
-  // alphabetically by name — NOT by any metric column, since a default sort
-  // on e.g. raw task count would silently endorse the most trivially gamed
-  // column as "the" ranking.
+  // alphabetically by name, NOT by any metric column: a default sort on raw
+  // task count would silently endorse the most easily gamed column as "the"
+  // ranking.
   const attributionData = useMemo(() => {
     if (!attributionRows) return [];
     return attributionRows
@@ -154,23 +180,18 @@ export function UsageContent() {
 
   const attributionColumns = useMemo<ColDef<(typeof attributionData)[number]>[]>(
     () => [
-      {
-        field: "name",
-        headerName: "Person",
-        flex: 1,
-        minWidth: 160,
-      },
+      { field: "name", headerName: "Person", flex: 1, minWidth: 110 },
       {
         field: "problemsInitiated",
-        headerName: "Problems Initiated",
-        flex: 1,
-        minWidth: 170,
+        headerName: "Problems initiated",
+        flex: 1.3,
+        minWidth: 150,
       },
       {
         field: "problemsShipped",
-        headerName: "Problems Shipped",
-        flex: 1,
-        minWidth: 170,
+        headerName: "Problems shipped",
+        flex: 1.3,
+        minWidth: 150,
         valueFormatter: ({ data, value }) => {
           if (!data || !data.problemsInitiated) return String(value ?? 0);
           return `${value ?? 0} (${(((value ?? 0) / data.problemsInitiated) * 100).toFixed(0)}%)`;
@@ -179,16 +200,16 @@ export function UsageContent() {
       {
         headerName: "Reach",
         flex: 2,
-        minWidth: 280,
+        minWidth: 210,
         valueGetter: ({ data }) =>
           data
             ? `${data.agentsReached} agents · ${data.reposReached} repos · ${data.surfacesReached} surfaces`
             : "",
       },
       {
-        headerName: "First-Pass Yield",
-        flex: 1,
-        minWidth: 180,
+        headerName: "First-pass yield",
+        flex: 1.3,
+        minWidth: 150,
         valueGetter: () => "not yet computed",
         sortable: false,
       },
@@ -196,240 +217,162 @@ export function UsageContent() {
     [],
   );
 
+  const toolbar = (
+    <div className="flex flex-wrap items-center gap-2">
+      <div className="mr-auto flex min-w-0 items-center gap-3 text-sm text-muted-foreground">
+        <span className="truncate">{windowLabel}</span>
+        {isPlaceholderData ? (
+          <StatusLine tone="busy" className="text-xs">
+            Updating
+          </StatusLine>
+        ) : null}
+      </div>
+      <SegmentedControl
+        aria-label="Date range"
+        value={dateRange}
+        onValueChange={setDateRange}
+        options={RANGE_OPTIONS}
+      />
+      <div className="flex w-full gap-2 sm:w-auto">
+        <Select value={agentFilter} onValueChange={setAgentFilter}>
+          <SelectTrigger aria-label="Agent" className="min-w-0 flex-1 sm:w-[180px] sm:flex-none">
+            <SelectValue placeholder="Agent" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All agents</SelectItem>
+            {agents?.map((a) => (
+              <SelectItem key={a.id} value={a.id}>
+                {a.name}
+                {a.isLead ? " (Lead)" : ""}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={userFilter} onValueChange={setUserFilter}>
+          <SelectTrigger aria-label="User" className="min-w-0 flex-1 sm:w-[220px] sm:flex-none">
+            <SelectValue placeholder="User" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All users</SelectItem>
+            <SelectItem value={UNATTRIBUTED}>Unattributed (autonomous)</SelectItem>
+            {users?.map((u) => (
+              <SelectItem key={u.id} value={u.id}>
+                {u.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
+  );
+
+  let body: ReactNode;
   if (isLoading) {
-    return (
-      <div className="space-y-4">
-        <PageHeader title="Usage" />
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <Skeleton key={i} className="h-20" />
-          ))}
-        </div>
-        <Skeleton className="h-64" />
+    body = <UsageSkeleton />;
+  } else if (!summary) {
+    body = (
+      <AlertCallout tone="error" icon={AlertCircle}>
+        Could not load usage. {error instanceof Error ? error.message : null}
+      </AlertCallout>
+    );
+  } else if (summary.totals.totalSessions === 0) {
+    body = (
+      <EmptyState
+        icon={BarChart3}
+        title="No usage in this window"
+        description="No sessions ran in this range. Pick a longer range or clear the filters."
+      />
+    );
+  } else {
+    // A container: the page sits beside two sidebars, so the viewport width
+    // says little about the room the cards get.
+    body = (
+      <div
+        className={cn(
+          "@container space-y-4 transition-opacity duration-150 ease-snappy",
+          isPlaceholderData && "opacity-60",
+        )}
+      >
+        <UsageKpis totals={summary.totals} />
+
+        {summary.byCredential && summary.byCredential.length > 0 ? (
+          <SubscriptionsCard
+            rows={summary.byCredential}
+            windowStartMs={Date.parse(`${windowFrom}T00:00:00Z`)}
+            filtered={Boolean(agentId || userId)}
+          />
+        ) : null}
+
+        <DailySpendChart daily={summary.daily} from={windowFrom} to={windowTo} />
+
+        {agentRows.length > 0 || userRows.length > 0 ? (
+          <div className="grid gap-4 @4xl:grid-cols-2">
+            {agentRows.length > 0 ? (
+              <RankedSpendCard
+                title="By agent"
+                nameLabel="Agent"
+                rows={agentRows}
+                countLabel="Sessions"
+              />
+            ) : null}
+            {userRows.length > 0 ? (
+              <RankedSpendCard
+                title="By user"
+                nameLabel="User"
+                rows={userRows}
+                countLabel="Tasks"
+              />
+            ) : null}
+          </div>
+        ) : null}
+
+        {showAttributionByPerson && attributionData.length > 0 ? (
+          <Card className="min-w-0 gap-4 py-5">
+            <CardHeader className="px-5">
+              <CardTitle>By person</CardTitle>
+              <CardDescription>
+                Shown side by side on purpose. Do not rank people by one column. Problems initiated
+                is the easiest number to game.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="px-5">
+              <DataGrid
+                rowData={attributionData}
+                columnDefs={attributionColumns}
+                domLayout="autoHeight"
+                columnSizing="flex"
+                pagination={false}
+              />
+            </CardContent>
+          </Card>
+        ) : null}
       </div>
     );
   }
 
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto space-y-5">
-      {/* Header + Filters */}
-      <PageHeader
-        title="Usage"
-        action={
-          <>
-            <Select value={dateRange} onValueChange={setDateRange}>
-              <SelectTrigger className="w-[130px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="7d">Last 7 days</SelectItem>
-                <SelectItem value="30d">Last 30 days</SelectItem>
-                <SelectItem value="90d">Last 90 days</SelectItem>
-                <SelectItem value="all">All time</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={agentFilter} onValueChange={setAgentFilter}>
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Agent" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Agents</SelectItem>
-                {agents?.map((a) => (
-                  <SelectItem key={a.id} value={a.id}>
-                    {a.name}
-                    {a.isLead ? " (Lead)" : ""}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={userFilter} onValueChange={setUserFilter}>
-              <SelectTrigger className="w-[250px]">
-                <SelectValue placeholder="User" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Users</SelectItem>
-                <SelectItem value={UNATTRIBUTED}>Unattributed (autonomous)</SelectItem>
-                {users?.map((u) => (
-                  <SelectItem key={u.id} value={u.id}>
-                    {u.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </>
-        }
-      />
+    <div className="flex-1 min-h-0 overflow-y-auto space-y-4 pb-6">
+      {toolbar}
+      {body}
+    </div>
+  );
+}
 
-      {/* Shared stats + daily chart — using pre-aggregated data */}
-      {summary && (
-        <UsageSummary
-          totals={summary.totals}
-          dailyData={summary.daily}
-          daysBack={DAYS_MAP[dateRange] ?? 90}
-        />
-      )}
-
-      {/* Cost by Agent — bar chart + table */}
-      {agentData.length > 0 && (
-        <div className="rounded-lg border border-border p-4">
-          <p className="text-xs text-muted-foreground uppercase tracking-wider mb-3">
-            Cost by Agent
-          </p>
-          <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
-            <ResponsiveContainer width="100%" height={Math.max(180, agentData.length * 36)}>
-              <BarChart data={agentData.slice(0, 10)} layout="vertical">
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  stroke="var(--color-border)"
-                  horizontal={false}
-                />
-                <XAxis
-                  type="number"
-                  tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }}
-                  tickFormatter={(v) => `$${v}`}
-                />
-                <YAxis
-                  type="category"
-                  dataKey="name"
-                  tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }}
-                  width={100}
-                />
-                <Tooltip
-                  contentStyle={rechartsTooltipStyle}
-                  formatter={(value) => [formatCost(Number(value), { precision: 3 }), "Cost"]}
-                />
-                <Bar
-                  dataKey="cost"
-                  fill="var(--color-primary)"
-                  radius={[0, 4, 4, 0]}
-                  barSize={20}
-                />
-              </BarChart>
-            </ResponsiveContainer>
-            <div className="overflow-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="text-muted-foreground border-b border-border">
-                    <th className="text-left py-2 font-medium">Agent</th>
-                    <th className="text-right py-2 font-medium">Cost</th>
-                    <th className="text-right py-2 font-medium">Sessions</th>
-                    <th className="text-right py-2 font-medium">Tokens</th>
-                    <th className="text-right py-2 font-medium">Avg/Sess</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {agentData.map((agent) => (
-                    <tr key={agent.agentId} className="border-b border-border/50">
-                      <td className="py-2 font-medium">{agent.name}</td>
-                      <td className="py-2 text-right font-mono">{formatCost(agent.cost)}</td>
-                      <td className="py-2 text-right font-mono">{agent.sessions}</td>
-                      <td className="py-2 text-right font-mono">
-                        {formatCompactNumber(agent.tokens)}
-                      </td>
-                      <td className="py-2 text-right font-mono">{formatCost(agent.avgCost)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Cost by User — who asked for the work. Unattributed spend is its own row. */}
-      {userData.length > 0 && (
-        <div className="rounded-lg border border-border p-4">
-          <p className="text-xs text-muted-foreground uppercase tracking-wider mb-3">
-            Cost by User
-          </p>
-          <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
-            <ResponsiveContainer width="100%" height={Math.max(180, userData.length * 36)}>
-              <BarChart data={userData.slice(0, 10)} layout="vertical">
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  stroke="var(--color-border)"
-                  horizontal={false}
-                />
-                <XAxis
-                  type="number"
-                  tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }}
-                  tickFormatter={(v) => `$${v}`}
-                />
-                <YAxis
-                  type="category"
-                  dataKey="name"
-                  tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }}
-                  width={140}
-                />
-                <Tooltip
-                  contentStyle={rechartsTooltipStyle}
-                  formatter={(value) => [formatCost(Number(value), { precision: 3 }), "Cost"]}
-                />
-                <Bar dataKey="cost" radius={[0, 4, 4, 0]} barSize={20}>
-                  {userData.slice(0, 10).map((u) => (
-                    <Cell
-                      key={u.key}
-                      fill={
-                        u.isUnattributed ? "var(--color-muted-foreground)" : "var(--color-primary)"
-                      }
-                    />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-            <div className="overflow-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="text-muted-foreground border-b border-border">
-                    <th className="text-left py-2 font-medium">User</th>
-                    <th className="text-right py-2 font-medium">Cost</th>
-                    <th className="text-right py-2 font-medium">Tasks</th>
-                    <th className="text-right py-2 font-medium">Tokens</th>
-                    <th className="text-right py-2 font-medium">Avg/Task</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {userData.map((user) => (
-                    <tr key={user.key} className="border-b border-border/50">
-                      <td
-                        className={`py-2 ${user.isUnattributed ? "italic text-muted-foreground" : "font-medium"}`}
-                      >
-                        {user.name}
-                      </td>
-                      <td className="py-2 text-right font-mono">{formatCost(user.cost)}</td>
-                      <td className="py-2 text-right font-mono">{user.tasks}</td>
-                      <td className="py-2 text-right font-mono">
-                        {formatCompactNumber(user.tokens)}
-                      </td>
-                      <td className="py-2 text-right font-mono">
-                        {user.tasks > 0 ? formatCost(user.avgCost) : "—"}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* By Person — four metrics, side by side, never summed into one score. */}
-      {showAttributionByPerson && attributionData.length > 0 && (
-        <div className="rounded-lg border border-border p-4">
-          <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">By Person</p>
-          <p className="text-xs text-muted-foreground mb-3">
-            Reported side by side on purpose — do not rank on any single column. Raw task count
-            (Problems Initiated) is the most trivially gamed number here.
-          </p>
-          <DataGrid
-            rowData={attributionData}
-            columnDefs={attributionColumns}
-            domLayout="autoHeight"
-            columnSizing="flex"
-            pagination={false}
-          />
-        </div>
-      )}
+/** First-load placeholder in the shape of the page. */
+function UsageSkeleton() {
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <Skeleton key={i} className="h-[88px] rounded-xl" />
+        ))}
+      </div>
+      <Skeleton className="h-72 rounded-xl" />
+      <Skeleton className="h-[290px] rounded-xl" />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Skeleton className="h-96 rounded-xl" />
+        <Skeleton className="h-96 rounded-xl" />
+      </div>
     </div>
   );
 }

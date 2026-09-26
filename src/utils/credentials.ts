@@ -113,6 +113,8 @@ export interface CredentialSelection {
   modelBlockedIndices?: number[];
   /** ISO of the earliest reset among modelBlockedIndices, or null/undefined when none. */
   earliestModelResetAt?: string | null;
+  /** Subscription plan id detected on the credential (`SUBSCRIPTION_PLANS`), reported with its usage. */
+  plan?: string | null;
 }
 
 const MODEL_LABELS: Record<ModelFamily, string> = {

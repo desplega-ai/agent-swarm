@@ -17,9 +17,8 @@ import {
 } from "./slack-helpers";
 
 /**
- * `/api/poll` hands out one task per call, in the pool's own order. After a
- * worker finishes, the lead has both the wake-up and the worker-completion
- * follow-up pending, so poll until the one we want is ours.
+ * `/api/poll` hands out one task per call, in the pool's own order, so poll
+ * until the one we want is ours.
  */
 async function claimTask(ctx: ScenarioContext, agentId: string, taskId: string): Promise<void> {
   let last: Record<string, unknown> = {};
@@ -181,34 +180,23 @@ async function deferOnChildAndWake(ctx: ScenarioContext): Promise<void> {
     `wake-up task for ${taskId}`,
   );
   const wakeId = String(wake.id);
-  // A worker finishing also books a review follow-up for the lead, and the
-  // lead holds one task at a time. Clear the review first so the wake-up
-  // can be claimed, whichever of the two the pool hands out first.
-  const followUp = await findTask(
-    ctx,
-    leadId,
-    (row) => row.parentTaskId === childId && row.taskType === "follow-up",
-    `worker follow-up for ${childId}`,
+  // The child's settlement woke the lead's wait, so the engine books no
+  // separate review follow-up: the wake-up task is where the lead reviews it.
+  const listed = await ctx.api("GET", `/api/tasks?agentId=${leadId}&fields=full&limit=50`);
+  expectStatus(listed, [200], `list tasks for ${leadId} while checking for a follow-up`);
+  const duplicate = (asRecord(listed.json).tasks as unknown[])
+    .map(asRecord)
+    .find((row) => row.parentTaskId === childId && row.taskType === "follow-up");
+  expect(
+    duplicate === undefined,
+    `A settlement that wakes the waiter must not also book a follow-up; got ${String(duplicate?.id)}`,
   );
-  const followUpId = String(followUp.id);
-  await claimTask(ctx, leadId, followUpId).catch(async () => {
-    // The pool handed out the wake-up first: answer the review after it.
-    await claimTask(ctx, leadId, wakeId);
-  });
-  const current = asRecord((await ctx.api("GET", `/api/tasks/${followUpId}`)).json);
-  if (current.status === "in_progress") {
-    await finish(ctx, leadId, followUpId, { status: "completed", output: "Reviewed." });
-    await claimTask(ctx, leadId, wakeId);
-  }
+  await claimTask(ctx, leadId, wakeId);
   await slackPace("wake-running");
 
   const answer = `Release notes published after staging checked out ${ctx.nonce}`;
   await finish(ctx, leadId, wakeId, { status: "completed", output: answer });
   await waitForOutcome(ctx, message.ts, answer);
-  if (asRecord((await ctx.api("GET", `/api/tasks/${followUpId}`)).json).status === "pending") {
-    await claimTask(ctx, leadId, followUpId);
-    await finish(ctx, leadId, followUpId, { status: "completed", output: "Reviewed." });
-  }
 
   // Same ts, new body: the ⏳ card is closed where it stands.
   const rewritten = await ctx.slack.waitForApiCall("chat.update", {

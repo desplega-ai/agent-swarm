@@ -4150,6 +4150,8 @@
               "task_authorization_rejected",
               "task_recovery_authorization",
               "task_released",
+              "task_deferred_wait_woke",
+              "task_follow_up_suppressed",
               "task_citation_check_refused",
               "channel_message",
               "service_registered",
@@ -14812,6 +14814,10 @@
                   },
                   "scopeId": {
                     "type": "string"
+                  },
+                  "plan": {
+                    "type": "string",
+                    "maxLength": 40
                   }
                 },
                 "required": [
@@ -15369,6 +15375,24 @@
                               ]
                             }
                           },
+                          "plan": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "planSource": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "enum": [
+                              "manual",
+                              "detected",
+                              "estimated",
+                              null
+                            ]
+                          },
                           "modelLimits": {
                             "type": "array",
                             "items": {
@@ -15422,6 +15446,8 @@
                           "name",
                           "provider",
                           "rateLimitWindows",
+                          "plan",
+                          "planSource",
                           "modelLimits",
                           "createdAt",
                           "updatedAt"
@@ -15746,6 +15772,179 @@
           },
           "401": {
             "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/keys/plans": {
+      "get": {
+        "summary": "List subscription plans and their monthly list prices",
+        "tags": [
+          "API Keys"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Plan catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "checkedAt": {
+                      "type": "string"
+                    },
+                    "plans": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "keyType": {
+                            "type": "string"
+                          },
+                          "monthlyUsd": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "label",
+                          "keyType",
+                          "monthlyUsd"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "checkedAt",
+                    "plans"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/keys/plan": {
+      "patch": {
+        "summary": "Set or clear the subscription plan of a pooled credential",
+        "tags": [
+          "API Keys"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "keyType": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "keySuffix": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 10
+                  },
+                  "plan": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 40
+                  }
+                },
+                "required": [
+                  "keyType",
+                  "keySuffix",
+                  "plan"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Plan updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "keyType": {
+                      "type": "string"
+                    },
+                    "keySuffix": {
+                      "type": "string"
+                    },
+                    "plan": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "keyType",
+                    "keySuffix",
+                    "plan"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown plan, or a plan for another credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Key not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -38158,6 +38357,9 @@
                         },
                         "excludedTaskCount": {
                           "type": "integer"
+                        },
+                        "subscriptionCostUsd": {
+                          "type": "number"
                         }
                       },
                       "required": [
@@ -38172,7 +38374,8 @@
                         "attributedCostUsd",
                         "attributableCostUsd",
                         "excludedCostUsd",
-                        "excludedTaskCount"
+                        "excludedTaskCount",
+                        "subscriptionCostUsd"
                       ]
                     },
                     "daily": {
@@ -38194,6 +38397,9 @@
                           },
                           "sessions": {
                             "type": "integer"
+                          },
+                          "subscriptionCostUsd": {
+                            "type": "number"
                           }
                         },
                         "required": [
@@ -38201,7 +38407,8 @@
                           "costUsd",
                           "inputTokens",
                           "outputTokens",
-                          "sessions"
+                          "sessions",
+                          "subscriptionCostUsd"
                         ]
                       }
                     },
@@ -38275,13 +38482,93 @@
                           "durationMs"
                         ]
                       }
+                    },
+                    "byCredential": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "keyType": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "keySuffix": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "name": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "subscription": {
+                            "type": "boolean"
+                          },
+                          "plan": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "planSource": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "enum": [
+                              "manual",
+                              "detected",
+                              "estimated",
+                              null
+                            ]
+                          },
+                          "costUsd": {
+                            "type": "number"
+                          },
+                          "inputTokens": {
+                            "type": "integer"
+                          },
+                          "outputTokens": {
+                            "type": "integer"
+                          },
+                          "sessions": {
+                            "type": "integer"
+                          },
+                          "firstSessionAt": {
+                            "type": "string"
+                          },
+                          "lastSessionAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "keyType",
+                          "keySuffix",
+                          "name",
+                          "subscription",
+                          "plan",
+                          "planSource",
+                          "costUsd",
+                          "inputTokens",
+                          "outputTokens",
+                          "sessions",
+                          "firstSessionAt",
+                          "lastSessionAt"
+                        ]
+                      }
                     }
                   },
                   "required": [
                     "totals",
                     "daily",
                     "byAgent",
-                    "byUser"
+                    "byUser",
+                    "byCredential"
                   ]
                 }
               }

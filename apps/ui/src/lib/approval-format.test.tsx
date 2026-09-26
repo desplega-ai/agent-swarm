@@ -139,6 +139,13 @@ describe("time, approvers and ordering", () => {
     expect(describeApprovers({ users: ["a", "b", "c"], policy: { min: 2 } })).toBe(
       "Needs 2 of 3: a, b, c",
     );
+    const names: Record<string, string> = { "4dacc65c": "Taras" };
+    expect(describeApprovers({ users: ["4dacc65c"], policy: "any" }, (id) => names[id])).toBe(
+      "Needs an answer from Taras",
+    );
+    expect(
+      describeApprovers({ users: ["4dacc65c", "unknown"], policy: "all" }, (id) => names[id]),
+    ).toBe("Needs every approver: Taras, unknown");
   });
 
   test("sorts pending first (oldest first), then newest resolved", () => {

@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { api } from "../client";
 import type { SessionCost, UsageStats } from "../types";
@@ -102,16 +102,37 @@ export function useTaskUsage(taskId: string) {
 
 // --- New hooks using server-side aggregation ---
 
-export function useUsageSummary(filters?: {
-  startDate?: string;
-  endDate?: string;
-  agentId?: string;
-  userId?: string;
-  groupBy?: "day" | "agent" | "both" | "user";
-}) {
+/** Per-page tuning for the aggregated usage hooks. */
+export interface UsageQueryOptions {
+  /** Poll interval in ms. Defaults to the app-wide interval. */
+  refetchInterval?: number;
+  /** Keep the last result on screen while a new filter loads. */
+  keepPreviousData?: boolean;
+}
+
+// Spread only the keys a caller set: an explicit `refetchInterval: undefined`
+// would override the app-wide polling default.
+function usageQueryOptions(options?: UsageQueryOptions) {
+  return {
+    ...(options?.refetchInterval !== undefined && { refetchInterval: options.refetchInterval }),
+    ...(options?.keepPreviousData && { placeholderData: keepPreviousData }),
+  };
+}
+
+export function useUsageSummary(
+  filters?: {
+    startDate?: string;
+    endDate?: string;
+    agentId?: string;
+    userId?: string;
+    groupBy?: "day" | "agent" | "both" | "user";
+  },
+  options?: UsageQueryOptions,
+) {
   return useQuery({
     queryKey: ["usage-summary", filters],
     queryFn: () => api.fetchUsageSummary(filters),
+    ...usageQueryOptions(options),
   });
 }
 
@@ -131,15 +152,19 @@ export function useDashboardCosts(opts?: { enabled?: boolean }) {
 }
 
 /** Four-metric per-person attribution from `GET /api/attribution/by-person`. */
-export function useAttributionByPerson(filters?: {
-  startDate?: string;
-  endDate?: string;
-  enabled?: boolean;
-}) {
+export function useAttributionByPerson(
+  filters?: {
+    startDate?: string;
+    endDate?: string;
+    enabled?: boolean;
+  },
+  options?: UsageQueryOptions,
+) {
   return useQuery({
     queryKey: ["attribution-by-person", filters],
     queryFn: () => api.fetchAttributionByPerson(filters),
     select: (data) => data.rows,
     enabled: filters?.enabled !== false,
+    ...usageQueryOptions(options),
   });
 }

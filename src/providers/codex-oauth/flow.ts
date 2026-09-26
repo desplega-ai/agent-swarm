@@ -191,6 +191,13 @@ export function getAccountId(accessToken: string): string | null {
  * claim is missing/empty. Callers MUST handle null by falling back to a
  * different identifier (typically `chatgpt_account_id`) — do not throw.
  */
+export function extractChatgptPlanType(accessToken: string): string | null {
+  const payload = decodeJwt(accessToken);
+  const auth = payload?.[JWT_CLAIM_PATH] as Record<string, unknown> | undefined;
+  const planType = auth?.chatgpt_plan_type;
+  return typeof planType === "string" && planType.length > 0 ? planType : null;
+}
+
 export function extractChatgptUserId(accessToken: string): string | null {
   const payload = decodeJwt(accessToken);
   const auth = payload?.[JWT_CLAIM_PATH] as Record<string, unknown> | undefined;

@@ -45,18 +45,17 @@ export function SetupFooter({ onBack, pending, skip, primary, busy }: SetupFoote
   return (
     <footer className="shrink-0 border-t border-border bg-background pb-[env(safe-area-inset-bottom)]">
       <div className={cn(SETUP_COLUMN, "relative flex h-14 items-center gap-2")}>
-        <Hint content={back ? "Back (Esc)" : undefined}>
-          <Button
-            variant="ghost"
-            onClick={onBack}
-            disabled={!onBack || busy}
-            aria-keyshortcuts="Escape"
-          >
-            <ArrowLeft />
-            Back
-            <Keycap>Esc</Keycap>
-          </Button>
-        </Hint>
+        {/* Step 1 has nothing to go back to, so it shows no Back at all
+            rather than a dead control. */}
+        {onBack ? (
+          <Hint content={back ? "Back (Esc)" : undefined}>
+            <Button variant="ghost" onClick={onBack} disabled={busy} aria-keyshortcuts="Escape">
+              <ArrowLeft />
+              Back
+              <Keycap>Esc</Keycap>
+            </Button>
+          </Hint>
+        ) : null}
         <span className="flex-1" />
         {/* `popLayout`: the spinner comes and goes in place, the buttons never move. */}
         <AnimatePresence mode="popLayout" initial={false}>
