@@ -7,6 +7,8 @@
  * the in-session composer so the bottom of the right pane is identical
  * regardless of state.
  * Enter sends, Shift+Enter inserts a new line, and Cmd/Ctrl+Enter also sends.
+ * On a touch device with a soft keyboard (no hardware Enter key), plain
+ * Enter inserts a newline instead — the send button submits there.
  */
 
 import { ArrowUp, FileText, Paperclip, X } from "lucide-react";
@@ -21,6 +23,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { isCoarsePointerInput, shouldSubmitOnEnterKeyDown } from "@/lib/enter-submit";
 import { cn } from "@/lib/utils";
 
 function formatFileSize(bytes: number): string {
@@ -161,11 +164,20 @@ export function ComposerDock({
   const canAttach = !disabled && !isPending && !!onAttachmentsChange;
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
-    if (e.key === "Enter" && (!e.shiftKey || e.metaKey || e.ctrlKey)) {
-      e.preventDefault();
-      if (canSubmit) onSubmit();
-    }
+    const submit = shouldSubmitOnEnterKeyDown(
+      {
+        key: e.key,
+        shiftKey: e.shiftKey,
+        metaKey: e.metaKey,
+        ctrlKey: e.ctrlKey,
+        isComposing: e.nativeEvent.isComposing,
+        keyCode: e.nativeEvent.keyCode,
+      },
+      isCoarsePointerInput(),
+    );
+    if (!submit) return;
+    e.preventDefault();
+    if (canSubmit) onSubmit();
   };
 
   const handleIncomingFiles = (incoming: File[]) => {
