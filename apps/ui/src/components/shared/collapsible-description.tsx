@@ -6,11 +6,14 @@ interface CollapsibleDescriptionProps {
   text: string;
   /** Tailwind class for the muted/foreground text color. Defaults to "text-foreground". */
   textClassName?: string;
+  /** Line clamp for the collapsed preview. Defaults to one line. */
+  collapsedClassName?: string;
 }
 
 export function CollapsibleDescription({
   text,
   textClassName = "text-foreground",
+  collapsedClassName = "line-clamp-1",
 }: CollapsibleDescriptionProps) {
   const [expanded, setExpanded] = useState(false);
   const isLong = text.length > 120 || text.includes("\n");
@@ -30,7 +33,7 @@ export function CollapsibleDescription({
           <MarkdownView text={text} />
         </div>
       ) : (
-        <p className={cn("text-sm leading-relaxed line-clamp-1", textClassName)}>
+        <p className={cn("text-sm leading-relaxed", collapsedClassName, textClassName)}>
           {text.split("\n")[0]}
         </p>
       )}

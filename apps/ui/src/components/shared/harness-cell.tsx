@@ -14,6 +14,11 @@ const HARNESS_LABEL: Record<string, string> = {
   acp: "ACP",
 };
 
+/** Display label for a harness provider id ("codex" → "Codex"). */
+export function harnessLabel(harnessProvider: string): string {
+  return HARNESS_LABEL[harnessProvider] ?? harnessProvider;
+}
+
 type CredHealth = "verified" | "configured" | "blocked" | "untested" | "unreported";
 
 function classifyCred(s: AgentCredStatus | null | undefined): CredHealth {
@@ -70,7 +75,7 @@ export function HarnessCell({
   if (!harnessProvider) {
     return <span className="text-muted-foreground">—</span>;
   }
-  const label = HARNESS_LABEL[harnessProvider] ?? harnessProvider;
+  const label = harnessLabel(harnessProvider);
   const health = classifyCred(credStatus);
   const transport = harnessProvider === "claude" ? (claudeTransport ?? null) : null;
 

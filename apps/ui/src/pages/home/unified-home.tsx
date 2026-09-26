@@ -2,7 +2,8 @@
  * Unified Home — the `/` landing page. This is the only home surface; there is
  * no `/old-home` or `/old-dashboard`. To change what `/` shows, change this file.
  *
- * A welcome heading above the full swarm `AgentActivityTimeline`. The timeline
+ * A welcome heading above the full swarm `AgentActivityTimeline` (from `md`;
+ * phones get the stacked `MobileNow` view instead). The timeline
  * fetches its own data and owns its loading/error/empty states, and fills the
  * height it is given, so this page contributes only the header and padding.
  *
@@ -21,9 +22,11 @@ import { Link } from "react-router-dom";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { AgentActivityTimeline } from "@/components/dashboard/agent-activity-timeline";
 import { DashboardNudges } from "@/components/dashboard/dashboard-nudges";
+import { MobileNow } from "@/components/dashboard/mobile-now";
 import { SetupChecklistCard } from "@/components/onboarding/setup-checklist-card";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 export function UnifiedHome() {
   const { supported, currentVersion, isError, error } = useFeatureGate("1.76.0");
@@ -34,6 +37,7 @@ export function UnifiedHome() {
   // Gate on the *resolved* version: `supported` is `false` while the version
   // query is pending, so distinguish "still resolving" from "confirmed too old".
   const versionResolved = currentVersion !== null;
+  const isMobile = useIsMobile();
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
@@ -43,8 +47,11 @@ export function UnifiedHome() {
         <SetupChecklistCard />
         <div className="flex flex-1 min-h-0 min-w-0 flex-col gap-4">
           <DashboardNudges />
-          <div className="flex-1 min-h-0">
+          {/* Below `md` the timeline cannot show a useful window, so phones
+              get the stacked "Now" view (approvals, running, failures). */}
+          <div className={isMobile ? "flex-1 min-h-0 overflow-y-auto" : "flex-1 min-h-0"}>
             <TimelineRegion
+              isMobile={isMobile}
               versionResolved={versionResolved}
               supported={supported}
               isError={isError}
@@ -58,11 +65,13 @@ export function UnifiedHome() {
 }
 
 function TimelineRegion({
+  isMobile,
   versionResolved,
   supported,
   isError,
   error,
 }: {
+  isMobile: boolean;
   versionResolved: boolean;
   supported: boolean;
   isError: boolean;
@@ -95,7 +104,7 @@ function TimelineRegion({
     );
   }
 
-  return <AgentActivityTimeline />;
+  return isMobile ? <MobileNow /> : <AgentActivityTimeline />;
 }
 
 export default UnifiedHome;

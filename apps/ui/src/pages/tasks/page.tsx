@@ -8,6 +8,7 @@ import { useTaskTemplates } from "@/api/hooks/use-task-templates";
 import { useCreateTask, useTasks } from "@/api/hooks/use-tasks";
 import { useUsers } from "@/api/hooks/use-users";
 import { type AgentTask, REASONING_EFFORT_LEVELS } from "@/api/types";
+import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
 import { StatusBadge } from "@/components/shared/status-badge";
 import {
   ignoreRowClickFromInteractives,
@@ -40,7 +41,10 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useCurrentUser } from "@/contexts/current-user-context";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { MODEL_TIER_OPTIONS } from "@/lib/model-tiers";
+import { taskListTitle } from "@/lib/task-title";
+import { formatRelativeTime } from "@/lib/utils";
 
 interface TaskFormData {
   task: string;
@@ -510,6 +514,7 @@ export default function TasksPage() {
   );
 
   const tasksColumns = useTasksColumns({ storageKey: "tasks-page" });
+  const isMobile = useIsMobile();
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
@@ -525,80 +530,85 @@ export default function TasksPage() {
             className="pl-9"
           />
         </div>
-        <SearchableSelect
-          value={statusFilter}
-          onChange={(v) => setParam("status", v)}
-          triggerClassName="w-[160px]"
-          placeholder="Status"
-          options={[
-            { value: "all", label: "All Statuses" },
-            { value: "pending", label: "Pending" },
-            { value: "in_progress", label: "In Progress" },
-            { value: "completed", label: "Completed" },
-            { value: "failed", label: "Failed" },
-            { value: "cancelled", label: "Cancelled" },
-            { value: "superseded", label: "Superseded" },
-          ]}
-        />
-        <SearchableSelect
-          value={agentFilter}
-          onChange={(v) => setParam("agent", v)}
-          triggerClassName="w-[200px]"
-          placeholder="Agent"
-          searchPlaceholder="Search agents…"
-          options={[
-            { value: "all", label: "All Agents" },
-            ...(agents ?? []).map((a) => ({
-              value: a.id,
-              label: a.name,
-              hint: a.isLead ? "lead" : undefined,
-            })),
-          ]}
-        />
-        <SearchableSelect
-          value={scheduleFilter}
-          onChange={(v) => setParam("schedule", v)}
-          triggerClassName="w-[200px]"
-          placeholder="Schedule"
-          searchPlaceholder="Search schedules…"
-          options={[
-            { value: "all", label: "All Schedules" },
-            ...(schedules ?? []).map((s) => ({
-              value: s.id,
-              label: s.name,
-              icon: <Clock className="h-3 w-3 shrink-0 text-muted-foreground" />,
-            })),
-          ]}
-        />
-        {requesterFacetSupported && (
+        {/* Below `md` the filters share one horizontally scrolling row, so
+            the list keeps the screen instead of four wrapped filter rows.
+            `md:contents` leaves the desktop toolbar exactly as it was. */}
+        <div className="-mx-1 flex w-full items-center gap-3 overflow-x-auto px-1 pb-1 [&>*]:shrink-0 md:contents">
           <SearchableSelect
-            value={requesterFilter}
-            onChange={(v) => setParam("requester", v)}
-            triggerClassName="w-[200px]"
-            placeholder="Requested by"
-            searchPlaceholder="Search requesters…"
+            value={statusFilter}
+            onChange={(v) => setParam("status", v)}
+            triggerClassName="w-[160px]"
+            placeholder="Status"
             options={[
-              { value: "all", label: "All requesters" },
-              ...(currentUserState === "ready" && currentUserId
-                ? [{ value: "me", label: "Me" }]
-                : []),
-              { value: "none", label: "Unattributed" },
-              ...(users ?? []).map((u) => ({
-                value: u.id,
-                label: u.name?.trim() || u.email?.trim() || u.id,
-                hint: u.role,
+              { value: "all", label: "All Statuses" },
+              { value: "pending", label: "Pending" },
+              { value: "in_progress", label: "In Progress" },
+              { value: "completed", label: "Completed" },
+              { value: "failed", label: "Failed" },
+              { value: "cancelled", label: "Cancelled" },
+              { value: "superseded", label: "Superseded" },
+            ]}
+          />
+          <SearchableSelect
+            value={agentFilter}
+            onChange={(v) => setParam("agent", v)}
+            triggerClassName="w-[200px]"
+            placeholder="Agent"
+            searchPlaceholder="Search agents…"
+            options={[
+              { value: "all", label: "All Agents" },
+              ...(agents ?? []).map((a) => ({
+                value: a.id,
+                label: a.name,
+                hint: a.isLead ? "lead" : undefined,
               })),
             ]}
           />
-        )}
-        <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
-          <Switch
-            size="sm"
-            checked={includeHeartbeat}
-            onCheckedChange={(checked) => setParam("heartbeat", checked ? "true" : "")}
+          <SearchableSelect
+            value={scheduleFilter}
+            onChange={(v) => setParam("schedule", v)}
+            triggerClassName="w-[200px]"
+            placeholder="Schedule"
+            searchPlaceholder="Search schedules…"
+            options={[
+              { value: "all", label: "All Schedules" },
+              ...(schedules ?? []).map((s) => ({
+                value: s.id,
+                label: s.name,
+                icon: <Clock className="h-3 w-3 shrink-0 text-muted-foreground" />,
+              })),
+            ]}
           />
-          Show system
-        </label>
+          {requesterFacetSupported && (
+            <SearchableSelect
+              value={requesterFilter}
+              onChange={(v) => setParam("requester", v)}
+              triggerClassName="w-[200px]"
+              placeholder="Requested by"
+              searchPlaceholder="Search requesters…"
+              options={[
+                { value: "all", label: "All requesters" },
+                ...(currentUserState === "ready" && currentUserId
+                  ? [{ value: "me", label: "Me" }]
+                  : []),
+                { value: "none", label: "Unattributed" },
+                ...(users ?? []).map((u) => ({
+                  value: u.id,
+                  label: u.name?.trim() || u.email?.trim() || u.id,
+                  hint: u.role,
+                })),
+              ]}
+            />
+          )}
+          <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
+            <Switch
+              size="sm"
+              checked={includeHeartbeat}
+              onCheckedChange={(checked) => setParam("heartbeat", checked ? "true" : "")}
+            />
+            Show system
+          </label>
+        </div>
         <div className="ml-auto flex items-center gap-2">
           {hasActiveFilters && (
             <Button
@@ -630,17 +640,37 @@ export default function TasksPage() {
         </div>
       </div>
 
-      <TasksTable
-        rowData={tasksData?.tasks ?? []}
-        loading={isLoading}
-        onRowClicked={onRowClicked}
-        agentNameById={agentMapRef.current}
-        columns={tasksColumns}
-        // This page does server-side offset pagination — disable AG Grid's
-        // own client-side pager so the two don't stack (which capped the view
-        // at the server's page size, e.g. 100 rows).
-        pagination={false}
-      />
+      {isMobile ? (
+        <MobileList label="Tasks" loading={isLoading} emptyMessage="No tasks match these filters">
+          {(tasksData?.tasks ?? []).map((task) => (
+            <MobileListRow
+              key={task.id}
+              to={`/tasks/${task.id}`}
+              live={task.status === "in_progress"}
+              title={taskListTitle(task)}
+              status={<StatusBadge status={task.status} />}
+              meta={[
+                task.agentId
+                  ? (agentMapRef.current.get(task.agentId) ?? "Unknown agent")
+                  : "Unassigned",
+                formatRelativeTime(task.createdAt),
+              ]}
+            />
+          ))}
+        </MobileList>
+      ) : (
+        <TasksTable
+          rowData={tasksData?.tasks ?? []}
+          loading={isLoading}
+          onRowClicked={onRowClicked}
+          agentNameById={agentMapRef.current}
+          columns={tasksColumns}
+          // This page does server-side offset pagination — disable AG Grid's
+          // own client-side pager so the two don't stack (which capped the view
+          // at the server's page size, e.g. 100 rows).
+          pagination={false}
+        />
+      )}
 
       {/* Server-side pagination controls */}
       <div className="flex items-center justify-between shrink-0 text-sm text-muted-foreground">

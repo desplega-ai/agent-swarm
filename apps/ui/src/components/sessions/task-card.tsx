@@ -160,7 +160,10 @@ export function TaskCard({
           className={cn("mt-0.5 shrink-0", isRunning && "ring-2 ring-primary/40 animate-pulse")}
         />
         <div className="flex-1 min-w-0 flex flex-col gap-1.5 pb-1">
-          <header className="flex items-center gap-2 min-w-0 text-xs">
+          {/* Wraps instead of squeezing: on a phone the agent name, time,
+              status pill and row actions do not fit one line, and the name
+              used to lose the fight ("Picat…"). */}
+          <header className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0 text-xs">
             {task.agentId ? (
               <Link
                 to={`/agents/${task.agentId}`}
@@ -186,11 +189,11 @@ export function TaskCard({
                 children finish), so the start time alone is misleading. */}
             {isTerminal && task.lastUpdatedAt && task.lastUpdatedAt !== task.createdAt ? (
               <>
-                <span aria-hidden="true" className="text-muted-foreground">
+                <span aria-hidden="true" className="hidden sm:inline text-muted-foreground">
                   ·
                 </span>
                 <span
-                  className="text-muted-foreground/70 whitespace-nowrap"
+                  className="hidden sm:inline text-muted-foreground/70 whitespace-nowrap"
                   title={`Finished ${new Date(task.lastUpdatedAt).toLocaleString()}`}
                 >
                   finished {formatRelativeTime(task.lastUpdatedAt)}

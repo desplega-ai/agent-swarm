@@ -217,11 +217,19 @@ export function formatRemaining(ms: number): string {
   return `${seconds}s left`;
 }
 
-/** "Needs approval from t@desplega.ai" / "Needs 2 of: a, b, c" / "Anyone can answer". */
+/**
+ * "Needs approval from Taras" / "Needs 2 of: a, b, c" / "Anyone can answer".
+ * `nameFor` maps a stored approver (user id or email) to a display name;
+ * unresolved entries show as stored.
+ */
 export function describeApprovers(
   approvers: ApprovalRequest["approvers"] | null | undefined,
+  nameFor: (idOrEmail: string) => string | undefined = () => undefined,
 ): string {
-  const people = [...(approvers?.users ?? []), ...(approvers?.roles ?? []).map((r) => `@${r}`)];
+  const people = [
+    ...(approvers?.users ?? []).map((u) => nameFor(u) ?? u),
+    ...(approvers?.roles ?? []).map((r) => `@${r}`),
+  ];
   const policy = approvers?.policy ?? "any";
   if (people.length === 0) return "Anyone on the team can answer";
   const list = people.join(", ");

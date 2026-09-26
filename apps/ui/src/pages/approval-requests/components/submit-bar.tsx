@@ -52,9 +52,11 @@ export function SubmitBar({
       initial={{ y: "100%", opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
       transition={{ duration: 0.28, ease: SNAPPY, delay: 0.05 }}
-      className="fixed inset-x-0 bottom-0 z-30 md:sticky md:inset-x-auto md:z-20 md:-mx-1 md:mt-2 md:px-1"
+      className="fixed inset-x-0 bottom-0 z-30 md:sticky md:inset-x-auto md:z-20 md:-mx-1 md:mt-2 md:bg-background md:px-1"
     >
-      <div className="border-t border-border bg-background/95 shadow-[0_-8px_24px_-12px_rgb(0_0_0/0.25)] backdrop-blur supports-[backdrop-filter]:bg-background/80 md:mb-3 md:rounded-xl md:border">
+      {/* Opaque and flush with the bottom of the scroll pane: a gap or a
+          translucent fill lets question text scroll visibly underneath. */}
+      <div className="border-t border-border bg-background shadow-[0_-8px_24px_-12px_rgb(0_0_0/0.25)] md:rounded-t-xl md:border md:border-b-0">
         <div
           className="h-0.5 overflow-hidden bg-muted md:rounded-t-xl"
           role="progressbar"

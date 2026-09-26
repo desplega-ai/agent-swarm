@@ -6,6 +6,7 @@ import type { ApprovalRequest } from "@/api/types";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { StatusLine } from "@/components/shared/status-icon";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useUserName } from "@/hooks/use-user-name";
 import {
   approvalRequestSource,
   describeApprovers,
@@ -42,6 +43,7 @@ export function RequestHeader({
   const expiresAt = request.expiresAt ? parseUTCDate(request.expiresAt).getTime() : null;
   const now = useNow(isPending && expiresAt !== null);
   const source = approvalRequestSource(request);
+  const userName = useUserName();
   const sourceTo = request.workflowRunId
     ? `/workflow-runs/${request.workflowRunId}`
     : request.sourceTaskId
@@ -114,14 +116,23 @@ export function RequestHeader({
           </StatusLine>
           <span className={cn("flex items-center gap-2 text-xs text-muted-foreground", WRAP)}>
             <Users className="size-4 shrink-0" aria-hidden />
-            {describeApprovers(request.approvers)}
+            {describeApprovers(request.approvers, userName)}
           </span>
         </div>
       ) : (
-        <ResolutionBanner request={request} />
+        <ResolutionBanner request={request} resolvedByName={resolvedByName(request, userName)} />
       )}
     </header>
   );
+}
+
+/** Who resolved the request, by name when the user directory knows them. */
+export function resolvedByName(
+  request: Pick<ApprovalRequest, "resolvedBy">,
+  userName: (idOrEmail: string) => string | undefined,
+): string | null {
+  if (!request.resolvedBy) return null;
+  return userName(request.resolvedBy) ?? request.resolvedBy;
 }
 
 const RESOLUTION = {
@@ -148,7 +159,13 @@ const RESOLUTION = {
 } as const;
 
 /** The outcome, first thing on a resolved request: who, when, and why. */
-function ResolutionBanner({ request }: { request: ApprovalRequest }) {
+function ResolutionBanner({
+  request,
+  resolvedByName,
+}: {
+  request: ApprovalRequest;
+  resolvedByName: string | null;
+}) {
   if (request.status === "pending") return null;
   const config = RESOLUTION[request.status];
   const Icon = config.icon;
@@ -158,8 +175,8 @@ function ResolutionBanner({ request }: { request: ApprovalRequest }) {
     detail = request.timeoutSeconds
       ? `No answer within ${humanizeSeconds(request.timeoutSeconds)}`
       : "No answer before the deadline";
-  } else if (request.resolvedBy) {
-    detail = `by ${request.resolvedBy}`;
+  } else if (resolvedByName) {
+    detail = `by ${resolvedByName}`;
   }
   return (
     <motion.div
