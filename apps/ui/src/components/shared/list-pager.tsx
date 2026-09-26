@@ -26,8 +26,10 @@ export interface ListPagerProps {
 /** "1–20 of 35" for the range summary; exported for tests. */
 export function formatPagerRange(page: number, pageSize: number, total: number): string | null {
   if (total <= 0) return null;
-  const first = page * pageSize + 1;
-  const last = Math.min((page + 1) * pageSize, total);
+  // A stale or hand-edited URL can point past the last page; show the last one.
+  const current = Math.min(page, Math.ceil(total / pageSize) - 1);
+  const first = current * pageSize + 1;
+  const last = Math.min((current + 1) * pageSize, total);
   return `${first}–${last} of ${total}`;
 }
 
@@ -48,17 +50,21 @@ export function ListPager({
   className,
 }: ListPagerProps) {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const current = Math.min(page, totalPages - 1);
+  // Wraps rather than overflows: with five-digit totals on a phone the range
+  // and the controls do not fit one row, so the controls drop below it and
+  // stay right-aligned (ml-auto) instead of pushing Next off-screen.
   return (
     <div
       className={cn(
-        "flex shrink-0 items-center justify-between gap-2 text-sm text-muted-foreground",
+        "flex shrink-0 flex-wrap items-center justify-between gap-x-2 gap-y-1.5 text-sm text-muted-foreground",
         className,
       )}
     >
       <span className="whitespace-nowrap tabular-nums">
-        {formatPagerRange(page, pageSize, total) ?? emptyLabel}
+        {formatPagerRange(current, pageSize, total) ?? emptyLabel}
       </span>
-      <div className="flex items-center gap-1.5 sm:gap-2">
+      <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
         <div className="flex items-center gap-1.5">
           <span className="hidden text-xs sm:inline">Rows</span>
           <Select value={String(pageSize)} onValueChange={(v) => onPageSizeChange(Number(v))}>
@@ -78,21 +84,21 @@ export function ListPager({
           variant="outline"
           size="icon"
           className="hit-area h-8 w-8"
-          disabled={page === 0}
-          onClick={() => onPageChange(Math.max(0, page - 1))}
+          disabled={current === 0}
+          onClick={() => onPageChange(Math.max(0, current - 1))}
           aria-label="Previous page"
         >
           <ChevronLeft className="h-4 w-4" />
         </Button>
         <span className="whitespace-nowrap px-1 text-xs tabular-nums sm:px-2">
-          Page {Math.min(page + 1, totalPages)} of {totalPages}
+          Page {current + 1} of {totalPages}
         </span>
         <Button
           variant="outline"
           size="icon"
           className="hit-area h-8 w-8"
-          disabled={page >= totalPages - 1}
-          onClick={() => onPageChange(Math.min(totalPages - 1, page + 1))}
+          disabled={current >= totalPages - 1}
+          onClick={() => onPageChange(Math.min(totalPages - 1, current + 1))}
           aria-label="Next page"
         >
           <ChevronRight className="h-4 w-4" />
