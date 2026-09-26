@@ -1,6 +1,6 @@
-import { useState } from "react";
 import type { User } from "@/api/types";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { cn } from "@/lib/utils";
 
 export function userInitials(name: string): string {
@@ -26,7 +26,7 @@ export function UserChip({
   user?: User;
   className?: string;
 }) {
-  const [copied, setCopied] = useState(false);
+  const { copied, copy } = useCopyToClipboard();
   const name = user?.name?.trim() || userRef;
   const copyValue = user?.id ?? userRef;
   const detail = user
@@ -41,10 +41,7 @@ export function UserChip({
           onClick={(event) => {
             event.preventDefault();
             event.stopPropagation();
-            void navigator.clipboard?.writeText(copyValue).then(() => {
-              setCopied(true);
-              window.setTimeout(() => setCopied(false), 1500);
-            });
+            void copy(copyValue);
           }}
           className={cn(
             "inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1.5 rounded-full align-middle text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
