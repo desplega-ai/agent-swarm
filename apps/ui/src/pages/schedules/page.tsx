@@ -44,7 +44,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { matchesSearchTerms, searchText } from "@/lib/list-search";
 import { MODEL_TIER_OPTIONS, modelTierLabel } from "@/lib/model-tiers";
-import { describeCron, formatInterval } from "@/lib/schedule-format";
+import { cronTimezone, describeCron, formatInterval, scheduleCadence } from "@/lib/schedule-format";
 import { formatSmartTime, formatUTCTime } from "@/lib/utils";
 
 interface ScheduleFormData extends ScheduleTargetFormValue {
@@ -300,20 +300,6 @@ function targetLabel(targetType: ScheduledTaskTargetType | undefined): string {
   return targetType === "workflow" ? "Workflow" : targetType === "script" ? "Script" : "Agent Task";
 }
 
-/** One-line cadence, the same words the Schedule column shows. */
-function scheduleCadence(data: ScheduledTask): string {
-  if (data.scheduleType === "one_time") {
-    return data.nextRunAt
-      ? `at ${formatUTCTime(data.nextRunAt)}`
-      : data.lastRunAt
-        ? `ran ${formatUTCTime(data.lastRunAt)}`
-        : "One-time";
-  }
-  if (data.cronExpression) return describeCron(data.cronExpression);
-  if (data.intervalMs) return `every ${formatInterval(data.intervalMs)}`;
-  return "No cadence";
-}
-
 export default function SchedulesPage() {
   const navigate = useNavigate();
   const { searchParams, setParam } = useUrlSearchState();
@@ -496,7 +482,7 @@ export default function SchedulesPage() {
           }
 
           if (data.cronExpression) {
-            const tz = data.timezone || "UTC";
+            const tz = cronTimezone(data.timezone);
             return (
               <Tooltip>
                 <TooltipTrigger asChild>

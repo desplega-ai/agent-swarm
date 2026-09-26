@@ -136,7 +136,11 @@ export function MobileNowView({
           <MobileList
             label="Failed tasks"
             loading={failed.isLoading}
-            emptyMessage="No failures in the last 24 hours"
+            emptyMessage={
+              recentFailures.complete
+                ? "No failures in the last 24 hours"
+                : `No failures from the last 24 hours in the ${FAILURE_PAGE} checked. View all for the rest.`
+            }
           >
             {recentFailures.tasks.map((task) => (
               <MobileListRow

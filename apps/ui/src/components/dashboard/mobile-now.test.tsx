@@ -104,4 +104,26 @@ describe("MobileNowView", () => {
     expect(html).toContain("Nothing running");
     expect(html).toContain("No failures in the last 24 hours");
   });
+
+  test("a full page with no recent failure does not claim the day was clean", () => {
+    // 50 failures that finished days ago but were edited in the last hour fill
+    // the page, so a failure from today can still be on page two.
+    const edited = Array.from(
+      { length: 50 },
+      (_, i) =>
+        ({
+          id: `t-old-${i}`,
+          task: "Old failure",
+          status: "failed",
+          agentId: null,
+          createdAt: "2026-09-20T10:00:00Z",
+          finishedAt: "2026-09-20T11:00:00Z",
+          lastUpdatedAt: "2026-09-26T11:30:00Z",
+        }) as AgentTask,
+    );
+    const html = render({ failed: ok({ tasks: edited, total: 51 }) });
+    expect(html).not.toContain("No failures in the last 24 hours");
+    expect(html).toContain("No failures from the last 24 hours in the 50 checked.");
+    expect(html).toContain("0+");
+  });
 });

@@ -71,7 +71,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MODEL_TIER_OPTIONS, modelTierLabel } from "@/lib/model-tiers";
-import { describeCron, formatInterval } from "@/lib/schedule-format";
+import { cronTimezone, describeCron, formatInterval } from "@/lib/schedule-format";
 import { formatSmartTime, formatUTCTime } from "@/lib/utils";
 
 function ScheduleTasks({ scheduleId }: { scheduleId: string }) {
@@ -316,7 +316,7 @@ export default function ScheduleDetailPage() {
                               <p className="text-xs text-muted-foreground">
                                 {describeCron(schedule.cronExpression)}
                                 <span className="ml-1 opacity-60">
-                                  ({schedule.timezone || "UTC"})
+                                  ({cronTimezone(schedule.timezone)})
                                 </span>
                               </p>
                             </div>
@@ -335,7 +335,7 @@ export default function ScheduleDetailPage() {
                     </InfoRow>
 
                     {schedule.cronExpression && (
-                      <InfoRow label="Timezone">{schedule.timezone || "UTC"}</InfoRow>
+                      <InfoRow label="Timezone">{cronTimezone(schedule.timezone)}</InfoRow>
                     )}
 
                     <InfoRow label="Target Agent">
