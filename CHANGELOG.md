@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.156.0] - 2026-09-26
+
+### Added
+- Subscription plan per credential: Codex reports the plan from its token, Claude plans are estimated from the 7-day rate-limit window, and `PATCH /api/keys/plan` sets a manual plan (`GET /api/keys/plans` lists the catalog). The Usage page compares each subscription with API pricing, and usage summaries are faster through a covering index (migration 164) and a 30 s cache (#1617).
+- Mobile dashboard: a stacked "Now" home view, list rows for agents and tasks, and fixes to approvals, budgets, configuration, and task detail below `md` (#1623).
+
+### Changed
+- Citation guidance in the base prompt and `store-progress` is scoped to factual claims the reader cannot already see, 1-2 sources (#1622).
+- Bundled agent-fs advances to 0.13.10 (#1621).
+
+### Fixed
+- A settlement that wakes a `defer-task` waiter no longer also creates a lead follow-up for the same agent (#1620).
+- ACP workers verify their target binary at boot instead of checking `claude` (#1619).
+- Slack outcome delivery give-up is persisted, so an API restart no longer re-arms an abandoned card; streams are stopped before the final update (#1618).
+
 ## [1.155.1] - 2026-09-25
 
 ### Added
