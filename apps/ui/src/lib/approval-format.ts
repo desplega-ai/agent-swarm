@@ -273,8 +273,8 @@ export function approvalRequestSource(
 
 /**
  * Pending first, in three bands: live deadlines (the one that expires soonest
- * on top), then no deadline, then deadlines already past, each of the last two
- * newest first. Resolved requests come last, newest first. Oldest-first used
+ * on top, equal deadlines newest first), then no deadline, then deadlines
+ * already past, each of the last two newest first. Resolved requests come last, newest first. Oldest-first used
  * to put stale March requests, long past their deadline, on top of today's.
  */
 export function sortApprovalRequests<
@@ -296,7 +296,10 @@ export function sortApprovalRequests<
     const aBand = band(a);
     const bBand = band(b);
     if (aBand !== bBand) return aBand - bBand;
-    if (aBand === 0) return (time(a.expiresAt) ?? 0) - (time(b.expiresAt) ?? 0);
+    if (aBand === 0) {
+      const byDeadline = (time(a.expiresAt) ?? 0) - (time(b.expiresAt) ?? 0);
+      if (byDeadline !== 0) return byDeadline;
+    }
     return (time(b.createdAt) ?? 0) - (time(a.createdAt) ?? 0);
   });
 }

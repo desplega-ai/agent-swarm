@@ -211,4 +211,14 @@ describe("time, approvers and ordering", () => {
       "r-old",
     ]);
   });
+
+  test("equal live deadlines fall back to newest first", () => {
+    const now = Date.parse("2026-09-26T08:00:00Z");
+    const expiresAt = "2026-09-27T10:00:00Z";
+    const rows = [
+      { id: "older", status: "pending" as const, createdAt: "2026-09-20T10:00:00Z", expiresAt },
+      { id: "newer", status: "pending" as const, createdAt: "2026-09-25T10:00:00Z", expiresAt },
+    ];
+    expect(sortApprovalRequests(rows, now).map((r) => r.id)).toEqual(["newer", "older"]);
+  });
 });
