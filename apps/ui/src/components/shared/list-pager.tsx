@@ -25,12 +25,30 @@ export interface ListPagerProps {
 
 /** "1–20 of 35" for the range summary; exported for tests. */
 export function formatPagerRange(page: number, pageSize: number, total: number): string | null {
-  if (total <= 0) return null;
-  // A stale or hand-edited URL can point past the last page; show the last one.
-  const current = Math.min(page, Math.ceil(total / pageSize) - 1);
-  const first = current * pageSize + 1;
-  const last = Math.min((current + 1) * pageSize, total);
+  const first = page * pageSize + 1;
+  if (total <= 0 || first > total) return null;
+  const last = Math.min((page + 1) * pageSize, total);
   return `${first}–${last} of ${total}`;
+}
+
+/**
+ * The page a server-paged list should be on. A stale or hand-edited `?page=`
+ * can point past the last page; once the server's `total` is known the caller
+ * moves its URL here and refetches, so the URL, the fetched rows, the range and
+ * Previous / Next all describe one page. The pager itself never clamps: it
+ * would show rows that were never fetched. `total` is undefined while the first
+ * response loads, which keeps the URL page so a deep link survives the load.
+ */
+export function resolveListPage(
+  page: number,
+  pageSize: number,
+  total: number | undefined,
+): { page: number; stale: boolean } {
+  const requested = Number.isFinite(page) && page > 0 ? Math.floor(page) : 0;
+  if (total === undefined) return { page: requested, stale: requested !== page };
+  const lastPage = Math.max(0, Math.ceil(total / pageSize) - 1);
+  const resolved = Math.min(requested, lastPage);
+  return { page: resolved, stale: resolved !== page };
 }
 
 /**
@@ -50,7 +68,6 @@ export function ListPager({
   className,
 }: ListPagerProps) {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  const current = Math.min(page, totalPages - 1);
   // Wraps rather than overflows: with five-digit totals on a phone the range
   // and the controls do not fit one row, so the controls drop below it and
   // stay right-aligned (ml-auto) instead of pushing Next off-screen.
@@ -62,7 +79,7 @@ export function ListPager({
       )}
     >
       <span className="whitespace-nowrap tabular-nums">
-        {formatPagerRange(current, pageSize, total) ?? emptyLabel}
+        {formatPagerRange(page, pageSize, total) ?? emptyLabel}
       </span>
       <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
         <div className="flex items-center gap-1.5">
@@ -84,21 +101,21 @@ export function ListPager({
           variant="outline"
           size="icon"
           className="hit-area h-8 w-8"
-          disabled={current === 0}
-          onClick={() => onPageChange(Math.max(0, current - 1))}
+          disabled={page === 0}
+          onClick={() => onPageChange(Math.max(0, page - 1))}
           aria-label="Previous page"
         >
           <ChevronLeft className="h-4 w-4" />
         </Button>
         <span className="whitespace-nowrap px-1 text-xs tabular-nums sm:px-2">
-          Page {current + 1} of {totalPages}
+          Page {page + 1} of {totalPages}
         </span>
         <Button
           variant="outline"
           size="icon"
           className="hit-area h-8 w-8"
-          disabled={current >= totalPages - 1}
-          onClick={() => onPageChange(Math.min(totalPages - 1, current + 1))}
+          disabled={page >= totalPages - 1}
+          onClick={() => onPageChange(Math.min(totalPages - 1, page + 1))}
           aria-label="Next page"
         >
           <ChevronRight className="h-4 w-4" />

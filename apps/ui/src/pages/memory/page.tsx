@@ -20,7 +20,7 @@ import type { MemoryEntry, MemoryListRequest, MemoryScopeFilter, MemorySource } 
 import { SharedBarChart } from "@/components/shared/charts/nivo-charts";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { DataGrid } from "@/components/shared/data-grid";
-import { ListPager } from "@/components/shared/list-pager";
+import { ListPager, resolveListPage } from "@/components/shared/list-pager";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -351,10 +351,12 @@ export default function MemoryPage() {
     if (match) setSelected(match);
   }, [memoryIdParam, selected?.id, results]);
 
+  // Same stale-page correction as Tasks. Waits for the total, so a deep link
+  // to page 3 is not reset to page 0 before the first response lands.
+  const { page: listPage, stale: pageStale } = resolveListPage(page, pageSize, data?.total);
   useEffect(() => {
-    const lastPage = Math.max(0, Math.ceil(total / pageSize) - 1);
-    if (page > lastPage) setParam("page", lastPage, { defaultValue: "0" });
-  }, [page, pageSize, setParam, total]);
+    if (pageStale) setParam("page", listPage, { defaultValue: "0" });
+  }, [listPage, pageStale, setParam]);
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
@@ -470,7 +472,7 @@ export default function MemoryPage() {
       <DataGrid
         rowData={results}
         columnDefs={columnDefs}
-        loading={isLoading}
+        loading={isLoading || pageStale}
         emptyMessage={
           submitted.query ? "No matches for this query" : "No memories — try a different filter"
         }
@@ -480,7 +482,7 @@ export default function MemoryPage() {
       />
 
       <ListPager
-        page={page}
+        page={listPage}
         pageSize={pageSize}
         total={total}
         pageSizeOptions={PAGE_SIZE_OPTIONS}
