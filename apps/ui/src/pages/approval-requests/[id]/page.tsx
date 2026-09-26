@@ -1,4 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
+import { ChevronRight } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -360,7 +361,12 @@ function ApprovalRequestView({ request }: { request: ApprovalRequest }) {
           {cardsList}
           {!isPending && request.responses ? (
             <details className="group rounded-lg border border-border-subtle px-3 py-2 text-xs text-muted-foreground">
-              <summary className="cursor-pointer select-none outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60">
+              {/* Lucide chevron instead of the native ▶ marker, like the rest of the page. */}
+              <summary className="flex cursor-pointer list-none select-none items-center gap-1.5 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 [&::-webkit-details-marker]:hidden">
+                <ChevronRight
+                  className="size-3.5 shrink-0 transition-transform group-open:rotate-90"
+                  aria-hidden
+                />
                 Raw responses
               </summary>
               <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px]">
@@ -386,7 +392,6 @@ function ApprovalRequestView({ request }: { request: ApprovalRequest }) {
   const rail = desktop ? (
     <DetailPageRail>
       <QuickStats>
-        <QuickStat label="Created" value={formatSmartTime(request.createdAt)} />
         {request.resolvedAt ? (
           <QuickStat label="Resolved" value={formatSmartTime(request.resolvedAt)} />
         ) : null}

@@ -55,6 +55,7 @@ import type { LiveModelsCatalog } from "@/lib/agent-runtime-models";
 import { getAgentModelPresentation } from "@/lib/agents-list-model-display";
 import { formatCost } from "@/lib/cost-format";
 import { modelTierLabel } from "@/lib/model-tiers";
+import { taskListTitle } from "@/lib/task-title";
 import { cn, formatElapsed, formatSmartTime } from "@/lib/utils";
 
 // ─── Column model ────────────────────────────────────────────────────────────
@@ -189,7 +190,9 @@ function StatusCell({ task }: { task: AgentTask }) {
  * so nothing is hidden behind the shorter label.
  */
 function DescriptionCell({ title, prompt }: { title?: string; prompt?: string }) {
-  const label = title?.trim() || prompt || "";
+  // Most prompts open with the same "Repo: <url>." line, which made every row
+  // read alike. Show the title or the first real line; the tooltip keeps all.
+  const label = taskListTitle({ title, task: prompt ?? "" });
   if (!label) return DASH;
   const tooltipText = prompt?.trim() || label;
   return (
@@ -598,10 +601,10 @@ export function TasksTable({
         field: "task",
         headerName: "Description",
         flex: 1,
-        minWidth: 240,
+        minWidth: 360,
         // Sort / filter / quick-search on the same string the cell displays,
         // otherwise a titled row sorts by a prompt the user can't see.
-        valueGetter: (p) => p.data?.title?.trim() || p.data?.task || "",
+        valueGetter: (p) => (p.data ? taskListTitle(p.data) : ""),
         cellRenderer: (p: { data?: AgentTask }) => (
           <DescriptionCell title={p.data?.title} prompt={p.data?.task} />
         ),

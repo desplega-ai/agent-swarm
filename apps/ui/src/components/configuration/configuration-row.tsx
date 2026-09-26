@@ -152,34 +152,32 @@ export function ConfigurationRow({ entry, inEnv }: ConfigurationRowProps) {
     </button>
   ) : null;
 
-  // A saved value equal to the default changes nothing, so a reset there is
-  // a control with nothing to do. The slot stays reserved on `sm+` so every
-  // row's control shares one right edge.
-  const differsFromDefault =
-    entry.kind === "boolean"
-      ? isTruthyConfigValue(savedValue) !== isTruthyConfigValue(entry.defaultValue)
-      : (savedValue ?? "") !== (entry.defaultValue ?? "");
-  const resetButton =
-    config && differsFromDefault ? (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            className="h-8 w-8 shrink-0"
-            onClick={reset}
-            disabled={isPending}
-            aria-label={`Reset ${entry.key} to its default`}
-          >
-            <RotateCcw className="h-3.5 w-3.5" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>Reset to default (removes the saved value)</TooltipContent>
-      </Tooltip>
-    ) : (
-      <span aria-hidden="true" className="hidden h-8 w-8 shrink-0 sm:block" />
-    );
+  // Any saved row gets a remove action, even when it equals the catalog
+  // default: the row still overrides the deployment env, and removing it is
+  // the only way back to inheriting that env value. The slot stays reserved
+  // on `sm+` so every row's control shares one right edge.
+  const resetButton = config ? (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          className="h-8 w-8 shrink-0"
+          onClick={reset}
+          disabled={isPending}
+          aria-label={`Remove the saved value for ${entry.key}`}
+        >
+          <RotateCcw className="h-3.5 w-3.5" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>
+        Remove the saved value. The deployment env value, or the default, applies again.
+      </TooltipContent>
+    </Tooltip>
+  ) : (
+    <span aria-hidden="true" className="hidden h-8 w-8 shrink-0 sm:block" />
+  );
 
   return (
     <div
@@ -223,7 +221,7 @@ export function ConfigurationRow({ entry, inEnv }: ConfigurationRowProps) {
               href={entry.docsUrl}
               target="_blank"
               rel="noreferrer"
-              className="text-muted-foreground hover:text-foreground"
+              className="hit-area text-muted-foreground hover:text-foreground"
               aria-label={`Documentation for ${entry.key}`}
               title="Open documentation"
             >

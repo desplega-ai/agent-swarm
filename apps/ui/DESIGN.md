@@ -211,7 +211,8 @@ Utilitarian and crisp: small radii (6–10px), 36px control heights, restrained 
 - **Style:** shadcn `Sidebar` shell (`app-sidebar.tsx`) on the sidebar token layer — one tonal step off the content field, amber for the active item; the borderless top bar's breadcrumb names the page (auto-humanized segments, entity names resolved; the home route shows the greeting there) while `PageHeader` carries only description/actions; global ⌘K `CommandMenu` for keyboard-first navigation.
 
 ### Signature Components
-- **DataGrid** (AG Grid wrapper): the mandatory surface for every data list — themed via `ag-grid.css` to the token system, fills remaining page height, row-click drill-down with `stopPropagation` on inline actions.
+- **DataGrid** (AG Grid wrapper): the mandatory surface for every data list from `md` up — themed via `ag-grid.css` to the token system, fills remaining page height, row-click drill-down with `stopPropagation` on inline actions.
+- **MobileListRow** (`MobileList` + `MobileListRow`): the one exception to DataGrid, below `md` only. A squeezed grid clips its status column off a 390px screen, so phone lists render one row per entity: title, status chip and chevron on the first line, a short meta line under it. Same data, same search, same focus ring as the grid it replaces.
 - **Detail-page rail:** `DetailPageBody` (1fr main + fixed 280px rail) with `QuickStats` → `Relationships` → `DangerZone` in order — the canonical anatomy of every entity detail page.
 - **Shimmer liveness:** `.shimmer-text` / `.shimmer-bar` — a sliding gradient that means, literally, "an agent is working right now." The system's one animated flourish, and it's semantic.
 
@@ -228,7 +229,7 @@ Utilitarian and crisp: small radii (6–10px), 36px control heights, restrained 
 - **Don't** hardcode theme colors — no `bg-zinc-950`, no `dark:` palette variants, no hex literals. Both themes are first-class.
 - **Don't** drift toward "AI-startup gradient slop" (PRODUCT.md's words): no purple gradients, no glassmorphism, no sparkle theater around agent work.
 - **Don't** rebuild "enterprise admin sprawl": no nested config mazes; primary actions live in the `PageHeader`, destructive ones confirm via `AlertDialog`, not click-again.
-- **Don't** use HTML `<Table>` for data lists — `DataGrid` is a hard rule.
+- **Don't** use HTML `<Table>` for data lists — `DataGrid` is a hard rule (below `md`, `MobileListRow` is the only allowed substitute).
 - **Don't** spend Hive Amber on decoration or inactive states; if it's not actionable or alive, it isn't amber.
 - **Don't** animate anything that isn't conveying state. No orchestrated page loads, no decorative motion — the operator is in a task.
 

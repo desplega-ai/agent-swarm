@@ -25,6 +25,7 @@ import {
 import { useIsMobile } from "@/hooks/use-mobile";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { getAgentModelDisplay, getAgentModelPresentation } from "@/lib/agents-list-model-display";
+import { agentSearchText, matchesSearchTerms } from "@/lib/list-search";
 import { formatSmartTime } from "@/lib/utils";
 
 export default function AgentsPage() {
@@ -63,30 +64,27 @@ export default function AgentsPage() {
     return modelByAgentId;
   }, [agentConfigs, filteredAgents]);
 
+  const modelSearchText = useCallback(
+    (agent: AgentWithTasks) => {
+      const display = getAgentModelDisplay(
+        configuredModelByAgentId.get(agent.id),
+        agent.credStatus?.latestModel?.model,
+        agent.credStatus?.latestModel?.reasoningEffort,
+      );
+      const primary = getAgentModelPresentation(display.primary, modelsCatalog?.providers);
+      return [primary?.label, primary?.raw, primary?.provider, display.configured, display.lastUsed]
+        .filter(Boolean)
+        .join(" ");
+    },
+    [configuredModelByAgentId, modelsCatalog?.providers],
+  );
+
   const columnDefs = useMemo<ColDef<AgentWithTasks>[]>(() => {
     const modelColumn: ColDef<AgentWithTasks> = {
       headerName: "Model",
       width: 320,
       minWidth: 260,
-      valueGetter: (params) => {
-        const agent = params.data;
-        if (!agent) return "";
-        const display = getAgentModelDisplay(
-          configuredModelByAgentId.get(agent.id),
-          agent.credStatus?.latestModel?.model,
-          agent.credStatus?.latestModel?.reasoningEffort,
-        );
-        const primary = getAgentModelPresentation(display.primary, modelsCatalog?.providers);
-        return [
-          primary?.label,
-          primary?.raw,
-          primary?.provider,
-          display.configured,
-          display.lastUsed,
-        ]
-          .filter(Boolean)
-          .join(" ");
-      },
+      valueGetter: (params) => (params.data ? modelSearchText(params.data) : ""),
       cellRenderer: (params: { data: AgentWithTasks | undefined }) => {
         const agent = params.data;
         if (!agent) return null;
@@ -175,16 +173,26 @@ export default function AgentsPage() {
         valueFormatter: (params) => (params.value ? formatSmartTime(params.value) : ""),
       },
     ];
-  }, [configuredModelByAgentId, modelColumnGate.supported, modelsCatalog?.providers]);
+  }, [
+    configuredModelByAgentId,
+    modelColumnGate.supported,
+    modelSearchText,
+    modelsCatalog?.providers,
+  ]);
 
-  // The grid's quick filter does this on desktop; the mobile rows filter here.
-  const matchesSearch = (agent: AgentWithTasks) => {
-    const q = search.trim().toLowerCase();
-    if (!q) return true;
-    return [agent.name, agent.role, agent.harnessProvider].some((v) =>
-      v?.toLowerCase().includes(q),
+  // One search for both widths, so a phone finds the same agents as the grid.
+  const searchedAgents = useMemo(() => {
+    if (!search.trim()) return filteredAgents;
+    return filteredAgents.filter((agent) =>
+      matchesSearchTerms(
+        agentSearchText(agent, [
+          agent.harnessProvider ? harnessLabel(agent.harnessProvider) : null,
+          modelColumnGate.supported ? modelSearchText(agent) : null,
+        ]),
+        search,
+      ),
     );
-  };
+  }, [filteredAgents, modelColumnGate.supported, modelSearchText, search]);
 
   const onRowClicked = useCallback(
     (event: RowClickedEvent<AgentWithTasks>) => {
@@ -228,7 +236,7 @@ export default function AgentsPage() {
 
       {isMobile ? (
         <MobileList label="Agents" loading={isLoading} emptyMessage="No agents found">
-          {filteredAgents.filter(matchesSearch).map((agent) => {
+          {searchedAgents.map((agent) => {
             const model = getAgentModelPresentation(
               getAgentModelDisplay(
                 configuredModelByAgentId.get(agent.id),
@@ -255,9 +263,8 @@ export default function AgentsPage() {
         </MobileList>
       ) : (
         <DataGrid
-          rowData={filteredAgents}
+          rowData={searchedAgents}
           columnDefs={columnDefs}
-          quickFilterText={search}
           onRowClicked={onRowClicked}
           loading={isLoading}
           emptyMessage="No agents found"

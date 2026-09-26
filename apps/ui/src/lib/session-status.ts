@@ -1,9 +1,28 @@
 import type { AgentTask, AgentTaskStatus } from "../api/types";
 
-/** Statuses that mean an agent is working on the task right now. */
-const LIVE_STATUSES = new Set<AgentTaskStatus>(["in_progress", "offered", "reviewing"]);
-/** Statuses that mean the task is queued and will run. */
-const QUEUED_STATUSES = new Set<AgentTaskStatus>(["pending", "backlog", "unassigned", "draft"]);
+/**
+ * Non-terminal statuses in the order the session header prefers them. The
+ * first one present in the tree wins and is shown as-is, so each keeps its
+ * own meaning:
+ *
+ * - `in_progress`: an agent is working on it now.
+ * - `pending`: accepted, waiting to start.
+ * - `unassigned`: in the pool, ready for any agent to claim.
+ * - `reviewing` / `offered`: offered to an agent that has not accepted yet.
+ *   An offer is not work in progress.
+ * - `paused`: interrupted, can resume.
+ * - `backlog` / `draft`: not dispatch-eligible yet.
+ */
+const OPEN_STATUS_PRIORITY: AgentTaskStatus[] = [
+  "in_progress",
+  "pending",
+  "unassigned",
+  "reviewing",
+  "offered",
+  "paused",
+  "backlog",
+  "draft",
+];
 
 export interface SessionStatus {
   /** Status to show for the whole session. */
@@ -19,9 +38,8 @@ export interface SessionStatus {
  * restart) while a retry and its children keep working. Showing the root's
  * FAILED badge then tells the operator the work failed while agents are on it.
  *
- * Order: any live task → `in_progress`; else any queued task → `pending`;
- * else any paused task → `paused`; else the most recently updated task's
- * terminal status.
+ * The most advanced open status in the tree wins (see `OPEN_STATUS_PRIORITY`);
+ * with nothing open, the most recently updated task's terminal status.
  */
 export function deriveSessionStatus(root: AgentTask, chain: AgentTask[]): SessionStatus {
   const byId = new Map<string, AgentTask>();
@@ -30,15 +48,9 @@ export function deriveSessionStatus(root: AgentTask, chain: AgentTask[]): Sessio
 
   const failedCount = tasks.filter((t) => t.status === "failed").length;
 
-  if (tasks.some((t) => LIVE_STATUSES.has(t.status))) {
-    return { status: "in_progress", failedCount };
-  }
-  if (tasks.some((t) => QUEUED_STATUSES.has(t.status))) {
-    return { status: "pending", failedCount };
-  }
-  if (tasks.some((t) => t.status === "paused")) {
-    return { status: "paused", failedCount };
-  }
+  const present = new Set(tasks.map((t) => t.status));
+  const open = OPEN_STATUS_PRIORITY.find((status) => present.has(status));
+  if (open) return { status: open, failedCount };
 
   const latest = tasks.reduce((a, b) => (b.lastUpdatedAt > a.lastUpdatedAt ? b : a));
   return { status: latest.status, failedCount };

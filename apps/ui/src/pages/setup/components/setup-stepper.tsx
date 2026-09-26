@@ -131,7 +131,8 @@ function StepMarker({
           aria-current={current ? "step" : undefined}
           aria-label={`Step ${number}: ${label}, ${current ? `current, ${word.toLowerCase()}` : word.toLowerCase()}`}
           className={cn(
-            "relative isolate flex h-6 min-w-6 shrink-0 items-center justify-center font-mono text-[11px] leading-none outline-none transition-colors",
+            // 36px slop: the marker pitch, so neighbours' hit areas meet but never overlap.
+            "hit-area relative isolate flex h-6 min-w-6 shrink-0 [--hit-size:36px] items-center justify-center font-mono text-[11px] leading-none outline-none transition-colors",
             "focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
             current
               ? "gap-1.5 px-1.5 font-semibold text-primary-foreground sm:pr-2.5"

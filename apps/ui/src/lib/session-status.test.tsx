@@ -40,4 +40,27 @@ describe("deriveSessionStatus", () => {
     const root = task("root", "failed");
     expect(deriveSessionStatus(root, [root, root]).failedCount).toBe(1);
   });
+
+  test("an offer nobody accepted is not in progress", () => {
+    const root = task("root", "failed");
+    expect(deriveSessionStatus(root, [root, task("a", "offered")])).toEqual({
+      status: "offered",
+      failedCount: 1,
+    });
+    expect(deriveSessionStatus(root, [root, task("a", "reviewing")]).status).toBe("reviewing");
+  });
+
+  test("an accepted task outranks an open offer", () => {
+    const root = task("root", "offered");
+    expect(deriveSessionStatus(root, [root, task("a", "pending")]).status).toBe("pending");
+  });
+
+  test("backlog and draft work does not read as queued to run", () => {
+    const root = task("root", "completed");
+    expect(deriveSessionStatus(root, [root, task("a", "backlog")]).status).toBe("backlog");
+    expect(deriveSessionStatus(root, [root, task("a", "draft")]).status).toBe("draft");
+    expect(
+      deriveSessionStatus(root, [root, task("a", "draft"), task("b", "unassigned")]).status,
+    ).toBe("unassigned");
+  });
 });

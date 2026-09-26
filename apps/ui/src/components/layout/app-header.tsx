@@ -70,7 +70,7 @@ export function AppHeader() {
                 onClick={() => navigate("/#setup")}
                 aria-label={`Swarm health: ${HEALTH_LABEL[aggregateHealth]}`}
                 className={cn(
-                  "flex items-center gap-2 rounded-md px-2 py-1 text-xs",
+                  "hit-area flex items-center gap-2 rounded-md px-2 py-1 text-xs",
                   "hover:bg-accent transition-colors",
                   "text-muted-foreground",
                 )}

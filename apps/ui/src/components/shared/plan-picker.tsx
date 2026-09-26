@@ -95,7 +95,8 @@ export function PlanPicker({
           aria-label={label}
           className={cn(
             compact ? "h-7 min-w-[8.5rem] max-w-[13rem] px-2 text-xs" : "w-full max-w-[17rem]",
-            !plan && "border-primary/60 data-[placeholder]:text-primary",
+            // A missing plan is not live or urgent, so it stays neutral (One Voice).
+            "data-[placeholder]:text-muted-foreground",
           )}
         >
           {/* The trigger shows the plan name only. The list adds the monthly price. */}

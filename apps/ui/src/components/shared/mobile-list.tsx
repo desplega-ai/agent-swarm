@@ -10,7 +10,6 @@
 import { ChevronRight } from "lucide-react";
 import { Children, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
@@ -92,7 +91,7 @@ export function MobileListRow({
     <li>
       <Link
         to={to}
-        className="relative flex min-h-11 items-start gap-3 px-4 py-3 outline-none transition-colors hover:bg-accent/40 focus-visible:bg-accent/50"
+        className="relative flex min-h-11 items-start gap-3 px-4 py-3 outline-none transition-colors hover:bg-accent/40 focus-visible:bg-accent/50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
       >
         <span
           aria-hidden
@@ -125,15 +124,5 @@ export function MobileListRow({
         <ChevronRight className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
       </Link>
     </li>
-  );
-}
-
-/** "Show N more" footer for client-side paged mobile lists. */
-export function MobileListMore({ count, onMore }: { count: number; onMore: () => void }) {
-  if (count <= 0) return null;
-  return (
-    <Button variant="ghost" className="h-11 w-full text-xs text-muted-foreground" onClick={onMore}>
-      Show {count} more
-    </Button>
   );
 }

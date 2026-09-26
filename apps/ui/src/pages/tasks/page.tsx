@@ -513,7 +513,12 @@ export default function TasksPage() {
     [navigate],
   );
 
-  const tasksColumns = useTasksColumns({ storageKey: "tasks-page" });
+  // Source and Effort start hidden so Description gets the width; Columns
+  // brings them back. Only applies before the first saved column choice.
+  const tasksColumns = useTasksColumns({
+    storageKey: "tasks-page",
+    defaultHiddenColumns: ["source", "effort", "deps", "tags"],
+  });
   const isMobile = useIsMobile();
 
   return (
