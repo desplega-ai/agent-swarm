@@ -3,6 +3,7 @@ import type { ApprovalQuestion } from "../api/types";
 import {
   answerHint,
   answerProgress,
+  approverParts,
   describeApprovers,
   formatApprovalAnswer,
   formatRemaining,
@@ -148,18 +149,76 @@ describe("time, approvers and ordering", () => {
     ).toBe("Needs every approver: Taras, unknown");
   });
 
-  test("sorts pending first (oldest first), then newest resolved", () => {
+  test("approverParts splits the sentence from the people, for chips", () => {
+    expect(approverParts({ users: ["u1"], policy: "any" })).toEqual({
+      lead: "Needs an answer from",
+      people: [{ kind: "user", ref: "u1" }],
+      tail: "",
+    });
+    expect(approverParts({ users: ["u1"], roles: ["ops"], policy: "any" })).toEqual({
+      lead: "Any one of",
+      people: [
+        { kind: "user", ref: "u1" },
+        { kind: "role", role: "ops" },
+      ],
+      tail: "can answer",
+    });
+    expect(approverParts(null)).toEqual({
+      lead: "Anyone on the team can answer",
+      people: [],
+      tail: "",
+    });
+  });
+
+  test("sorts live deadlines soonest first, then no deadline, then overdue, then resolved", () => {
+    const now = Date.parse("2026-09-26T10:00:00Z");
     const rows = [
       { id: "r-old", status: "approved" as const, createdAt: "2026-09-20T10:00:00Z" },
       { id: "p-new", status: "pending" as const, createdAt: "2026-09-24T10:00:00Z" },
       { id: "r-new", status: "rejected" as const, createdAt: "2026-09-23T10:00:00Z" },
-      { id: "p-old", status: "pending" as const, createdAt: "2026-09-22T10:00:00Z" },
+      {
+        id: "p-march-overdue",
+        status: "pending" as const,
+        createdAt: "2026-03-02T10:00:00Z",
+        expiresAt: "2026-03-03T10:00:00Z",
+      },
+      {
+        id: "p-july-overdue",
+        status: "pending" as const,
+        createdAt: "2026-07-15T10:00:00Z",
+        expiresAt: "2026-07-22T10:00:00Z",
+      },
+      {
+        id: "p-expires-late",
+        status: "pending" as const,
+        createdAt: "2026-09-01T10:00:00Z",
+        expiresAt: "2026-09-30T10:00:00Z",
+      },
+      {
+        id: "p-expires-soon",
+        status: "pending" as const,
+        createdAt: "2026-09-02T10:00:00Z",
+        expiresAt: "2026-09-26T12:00:00Z",
+      },
     ];
-    expect(sortApprovalRequests(rows).map((r) => r.id)).toEqual([
-      "p-old",
+    expect(sortApprovalRequests(rows, now).map((r) => r.id)).toEqual([
+      "p-expires-soon",
+      "p-expires-late",
       "p-new",
+      "p-july-overdue",
+      "p-march-overdue",
       "r-new",
       "r-old",
     ]);
+  });
+
+  test("equal live deadlines fall back to newest first", () => {
+    const now = Date.parse("2026-09-26T08:00:00Z");
+    const expiresAt = "2026-09-27T10:00:00Z";
+    const rows = [
+      { id: "older", status: "pending" as const, createdAt: "2026-09-20T10:00:00Z", expiresAt },
+      { id: "newer", status: "pending" as const, createdAt: "2026-09-25T10:00:00Z", expiresAt },
+    ];
+    expect(sortApprovalRequests(rows, now).map((r) => r.id)).toEqual(["newer", "older"]);
   });
 });

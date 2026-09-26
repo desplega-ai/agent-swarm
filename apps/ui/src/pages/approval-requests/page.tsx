@@ -1,8 +1,9 @@
 import { ClipboardCheck } from "lucide-react";
-import { useCallback, useMemo } from "react";
+import { type ReactNode, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useApprovalRequests } from "@/api/hooks/use-approval-requests";
 import { EmptyState } from "@/components/shared/empty-state";
+import { FilterField, FiltersPopover } from "@/components/shared/filters-popover";
 import { ListFilterBar } from "@/components/shared/list-filter-bar";
 import { PageHeader } from "@/components/ui/page-header";
 import {
@@ -12,7 +13,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
+import { useUserName } from "@/hooks/use-user-name";
 import { approvalRequestSource, sortApprovalRequests } from "@/lib/approval-format";
 import { RequestList } from "./components/request-list";
 
@@ -33,6 +36,19 @@ const AGE_FILTER_MS: Record<Exclude<(typeof AGE_FILTERS)[number], "all">, number
   "7d": 7 * 24 * 60 * 60 * 1000,
   "30d": 30 * 24 * 60 * 60 * 1000,
 };
+
+/** A facet with its label inside the mobile Filters popover, bare inline on desktop. */
+function FacetField({
+  label,
+  labelled,
+  children,
+}: {
+  label: string;
+  labelled: boolean;
+  children: ReactNode;
+}) {
+  return labelled ? <FilterField label={label}>{children}</FilterField> : children;
+}
 
 // The endpoint defaults to 100 rows; use a stable, explicit client-filter window.
 const APPROVAL_REQUESTS_LIST_LIMIT = 500;
@@ -71,6 +87,7 @@ export default function ApprovalRequestsPage() {
     });
   }, [ageFilter, requests, sourceFilter, statusFilter]);
 
+  const userName = useUserName();
   const rows = useMemo(() => {
     const query = search.trim().toLowerCase();
     const matched = query
@@ -79,6 +96,7 @@ export default function ApprovalRequestsPage() {
             request.title,
             request.id,
             request.resolvedBy,
+            request.resolvedBy ? userName(request.resolvedBy) : null,
             request.workflowRunId,
             request.workflowRunStepId,
             request.sourceTaskId,
@@ -88,7 +106,7 @@ export default function ApprovalRequestsPage() {
         )
       : filteredRequests;
     return sortApprovalRequests(matched);
-  }, [filteredRequests, search]);
+  }, [filteredRequests, search, userName]);
 
   const hasActiveFilters =
     search !== "" || statusFilter !== "all" || sourceFilter !== "all" || ageFilter !== "all";
@@ -108,6 +126,84 @@ export default function ApprovalRequestsPage() {
     );
   }, [setParams]);
 
+  const isMobile = useIsMobile();
+  // Below `md` the three facets fold into one "Filters (n)" popover so the
+  // first request is on screen instead of three rows of selects.
+  const activeFacetCount = [statusFilter, sourceFilter, ageFilter].filter(
+    (v) => v !== "all",
+  ).length;
+  const facets = (
+    <>
+      <FacetField label="Status" labelled={isMobile}>
+        <Select
+          value={statusFilter}
+          onValueChange={(value) =>
+            setParam("status", value, {
+              defaultValue: "all",
+              replace: false,
+              reset: ["approvalRequestsPage"],
+            })
+          }
+        >
+          <SelectTrigger className={isMobile ? "w-full" : "w-[150px]"}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {STATUS_OPTIONS.map((opt) => (
+              <SelectItem key={opt.value} value={opt.value}>
+                {opt.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </FacetField>
+      <FacetField label="Source" labelled={isMobile}>
+        <Select
+          value={sourceFilter}
+          onValueChange={(value) =>
+            setParam("source", value, {
+              defaultValue: "all",
+              replace: false,
+              reset: ["approvalRequestsPage"],
+            })
+          }
+        >
+          <SelectTrigger className={isMobile ? "w-full" : "w-[150px]"}>
+            <SelectValue placeholder="Source" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All sources</SelectItem>
+            <SelectItem value="workflow">Workflow</SelectItem>
+            <SelectItem value="agent">Agent</SelectItem>
+            <SelectItem value="manual">Manual</SelectItem>
+          </SelectContent>
+        </Select>
+      </FacetField>
+      <FacetField label="Age" labelled={isMobile}>
+        <Select
+          value={ageFilter}
+          onValueChange={(value) =>
+            setParam("age", value, {
+              defaultValue: "all",
+              replace: false,
+              reset: ["approvalRequestsPage"],
+            })
+          }
+        >
+          <SelectTrigger className={isMobile ? "w-full" : "w-[150px]"}>
+            <SelectValue placeholder="Age" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All ages</SelectItem>
+            <SelectItem value="24h">Last 24 hours</SelectItem>
+            <SelectItem value="7d">Last 7 days</SelectItem>
+            <SelectItem value="30d">Last 30 days</SelectItem>
+          </SelectContent>
+        </Select>
+      </FacetField>
+    </>
+  );
+
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
       <PageHeader title="Approval Requests" />
@@ -123,70 +219,15 @@ export default function ApprovalRequestsPage() {
             })
           }
           searchPlaceholder="Search title, ID, resolver, or source ID…"
+          searchClassName={isMobile ? "min-w-0 flex-1" : undefined}
           hasActiveFilters={hasActiveFilters}
           onClear={clearFilters}
         >
-          <Select
-            value={statusFilter}
-            onValueChange={(value) =>
-              setParam("status", value, {
-                defaultValue: "all",
-                replace: false,
-                reset: ["approvalRequestsPage"],
-              })
-            }
-          >
-            <SelectTrigger className="min-w-[140px] flex-1 sm:w-[150px] sm:flex-none">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {STATUS_OPTIONS.map((opt) => (
-                <SelectItem key={opt.value} value={opt.value}>
-                  {opt.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select
-            value={sourceFilter}
-            onValueChange={(value) =>
-              setParam("source", value, {
-                defaultValue: "all",
-                replace: false,
-                reset: ["approvalRequestsPage"],
-              })
-            }
-          >
-            <SelectTrigger className="min-w-[140px] flex-1 sm:w-[150px] sm:flex-none">
-              <SelectValue placeholder="Source" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All sources</SelectItem>
-              <SelectItem value="workflow">Workflow</SelectItem>
-              <SelectItem value="agent">Agent</SelectItem>
-              <SelectItem value="manual">Manual</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select
-            value={ageFilter}
-            onValueChange={(value) =>
-              setParam("age", value, {
-                defaultValue: "all",
-                replace: false,
-                reset: ["approvalRequestsPage"],
-              })
-            }
-          >
-            <SelectTrigger className="min-w-[140px] flex-1 sm:w-[150px] sm:flex-none">
-              <SelectValue placeholder="Age" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All ages</SelectItem>
-              <SelectItem value="24h">Last 24 hours</SelectItem>
-              <SelectItem value="7d">Last 7 days</SelectItem>
-              <SelectItem value="30d">Last 30 days</SelectItem>
-            </SelectContent>
-          </Select>
+          {isMobile ? (
+            <FiltersPopover activeCount={activeFacetCount}>{facets}</FiltersPopover>
+          ) : (
+            facets
+          )}
         </ListFilterBar>
       )}
 

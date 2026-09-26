@@ -233,8 +233,8 @@ export default function SessionDetailPage() {
       </header>
 
       {/* Timeline (scrollable) — wrapped in a relative container so the
-          "Jump to latest" button can float over its bottom-right corner
-          when the user has scrolled away from the tail. */}
+          "Jump to latest" button can sit on its bottom edge, where the
+          composer starts, when the user has scrolled away from the tail. */}
       <div className="relative flex-1 min-h-0">
         <div ref={setScrollEl} className="absolute inset-0 overflow-auto px-6 py-6">
           {detailLoading ? (
@@ -256,14 +256,16 @@ export default function SessionDetailPage() {
           )}
         </div>
 
-        {/* Floating "back to bottom" — only when user has scrolled up. */}
+        {/* "Back to bottom", only when the user has scrolled up. It sits on
+            the composer's top edge (half over the log's bottom padding), so
+            it never covers a log row or its timestamp. */}
         {!isFollowing ? (
           <Button
             type="button"
             size="sm"
             variant="outline"
             onClick={scrollToBottom}
-            className="absolute bottom-3 left-1/2 -translate-x-1/2 h-8 rounded-full px-3 shadow-sm bg-card"
+            className="absolute bottom-0 left-1/2 z-10 h-8 -translate-x-1/2 translate-y-1/2 rounded-full px-3 shadow-sm bg-card"
             aria-label="Jump to latest"
           >
             <ChevronDown className="h-3.5 w-3.5" />

@@ -11,6 +11,7 @@ import { findAutomation, NeedsSetupBadge } from "@/components/automations/needs-
 import { DataGrid } from "@/components/shared/data-grid";
 import { EmptyState } from "@/components/shared/empty-state";
 import { FavoriteButton } from "@/components/shared/favorite-button";
+import { FAVORITE_COLUMN } from "@/components/shared/favorite-column";
 import { ListFilterBar } from "@/components/shared/list-filter-bar";
 import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
 import { StatusBadge } from "@/components/shared/status-badge";
@@ -109,10 +110,7 @@ export default function WorkflowsPage() {
   const workflowColumns = useMemo<ColDef<WorkflowSummary>[]>(
     () => [
       {
-        headerName: "",
-        width: 52,
-        sortable: false,
-        filter: false,
+        ...FAVORITE_COLUMN,
         cellRenderer: (params: ICellRendererParams<WorkflowSummary>) => {
           const workflow = params.data;
           if (!workflow) return null;

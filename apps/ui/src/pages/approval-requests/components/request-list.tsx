@@ -5,6 +5,7 @@ import type { ApprovalRequest } from "@/api/types";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useUserName } from "@/hooks/use-user-name";
 import { approvalRequestSource } from "@/lib/approval-format";
 import { type ListShortcut, matchListShortcut } from "@/lib/approval-shortcuts";
 import { cn, formatSmartTime } from "@/lib/utils";
@@ -24,11 +25,14 @@ function questionCount(request: ApprovalRequest) {
 
 function Row({
   request,
+  resolverName,
   highlighted,
   onFocus,
   linkRef,
 }: {
   request: ApprovalRequest;
+  /** The resolver's display name, or the stored reference when unknown. */
+  resolverName: string | null;
   highlighted: boolean;
   onFocus: () => void;
   linkRef: (el: HTMLAnchorElement | null) => void;
@@ -48,7 +52,7 @@ function Row({
           highlighted && "bg-accent/50",
         )}
       >
-        {/* Amber rail: "waiting on you" reads before the words do. */}
+        {/* Amber rail: "pending" reads before the words do. */}
         <span
           aria-hidden
           className={cn(
@@ -71,7 +75,9 @@ function Row({
             ·
           </span>
           <span>{SOURCE_LABEL[approvalRequestSource(request)]}</span>
-          <span className="hidden truncate md:block">{request.resolvedBy ?? "—"}</span>
+          <span className="hidden truncate md:block" title={request.resolvedBy ?? undefined}>
+            {resolverName ?? "—"}
+          </span>
           <span aria-hidden className="md:hidden">
             ·
           </span>
@@ -83,8 +89,8 @@ function Row({
 }
 
 /**
- * The approval-request list: pending first (oldest on top, it expires
- * first), one responsive row per request (a card on phones, a table row from
+ * The approval-request list: pending first (soonest to expire on top, then
+ * newest), one responsive row per request (a card on phones, a table row from
  * `md`). j/k or ↑/↓ move the highlight, Enter opens.
  */
 export function RequestList({
@@ -100,6 +106,7 @@ export function RequestList({
   const [highlight, setHighlight] = useState(-1);
   const links = useRef<(HTMLAnchorElement | null)[]>([]);
   const finePointer = useFinePointer();
+  const userName = useUserName();
   const visible = rows.slice(0, limit);
   const pendingCount = rows.filter((row) => row.status === "pending").length;
 
@@ -146,7 +153,7 @@ export function RequestList({
       <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
         <span>
           {pendingCount > 0 ? (
-            <span className="font-medium text-foreground">{pendingCount} waiting on you · </span>
+            <span className="font-medium text-foreground">{pendingCount} pending · </span>
           ) : null}
           {rows.length} total
         </span>
@@ -177,6 +184,9 @@ export function RequestList({
             <Row
               key={request.id}
               request={request}
+              resolverName={
+                request.resolvedBy ? (userName(request.resolvedBy) ?? request.resolvedBy) : null
+              }
               highlighted={index === highlight}
               onFocus={() => setHighlight(index)}
               linkRef={(el) => {

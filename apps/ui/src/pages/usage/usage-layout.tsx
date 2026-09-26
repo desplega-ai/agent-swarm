@@ -7,15 +7,9 @@ import {
   Wallet,
 } from "lucide-react";
 import { useCallback, useEffect } from "react";
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { SectionTabs } from "@/components/shared/section-tabs";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { cn } from "@/lib/utils";
@@ -46,7 +40,7 @@ function readCollapsed(): boolean {
 }
 
 /**
- * Two-column shell for the usage section — same left-rail / mobile-Select
+ * Two-column shell for the usage section — same left-rail / mobile tab-strip
  * pattern as SettingsLayout. The rail drives nested routes (`/usage` index =
  * Usage, `/usage/budgets` = Budgets) rendered into the `<Outlet/>`. The
  * desktop rail is collapsible with state persisted in localStorage. Each
@@ -54,7 +48,6 @@ function readCollapsed(): boolean {
  */
 export function UsageLayout() {
   const location = useLocation();
-  const navigate = useNavigate();
   const { searchParams, setParam } = useUrlSearchState();
   const railParam = readStringParam(searchParams, "rail");
   const collapsed =
@@ -79,21 +72,13 @@ export function UsageLayout() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0 md:flex-row md:gap-6">
-      {/* Mobile: Select picker above the content. */}
-      <div className="md:hidden shrink-0 mb-4">
-        <Select value={activeItem.path} onValueChange={(next) => navigate(next)}>
-          <SelectTrigger className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {USAGE_NAV.map((item) => (
-              <SelectItem key={item.path} value={item.path}>
-                {item.title}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+      {/* Mobile: a tab strip above the content (no select repeating the page name). */}
+      <SectionTabs
+        label="Usage"
+        tabs={USAGE_NAV}
+        activePath={activeItem.path}
+        className="md:hidden shrink-0 mb-4"
+      />
 
       {/* Desktop: left rail. */}
       {!collapsed ? (

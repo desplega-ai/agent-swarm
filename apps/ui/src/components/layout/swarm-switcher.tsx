@@ -18,6 +18,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useConfig } from "@/hooks/use-config";
 import { cn } from "@/lib/utils";
 
@@ -36,20 +37,39 @@ export function SwarmSwitcher() {
 
   const isHealthy = !!health && !isError;
   const displayName = activeConnection?.name ?? "No connection";
+  // The one place the connection shows (the header only carries health), so
+  // the URL and server version ride in this tooltip.
+  const connectionDetail = [
+    isHealthy ? "Connected" : "Disconnected",
+    activeConnection?.apiUrl,
+    health?.version ? `v${health.version}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   if (connectionLocked) {
     return (
       <SidebarMenu>
         <SidebarMenuItem>
-          <div className="flex h-8 w-full items-center gap-2 overflow-hidden rounded-md px-2 text-xs">
-            <div
-              className={cn(
-                "size-2 shrink-0 rounded-full",
-                isHealthy ? "bg-status-success" : "bg-status-error",
-              )}
-            />
-            <span className="truncate font-medium">{displayName}</span>
-          </div>
+          <Tooltip>
+            {/* A button, not a div: this tooltip is the only place the URL and
+                version show, so keyboard users need a tab stop to open it. */}
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                className="flex h-8 w-full cursor-default items-center gap-2 overflow-hidden rounded-md px-2 text-left text-xs outline-hidden ring-sidebar-ring focus-visible:ring-2"
+              >
+                <div
+                  className={cn(
+                    "size-2 shrink-0 rounded-full",
+                    isHealthy ? "bg-status-success" : "bg-status-error",
+                  )}
+                />
+                <span className="truncate font-medium">{displayName}</span>
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">{connectionDetail}</TooltipContent>
+          </Tooltip>
         </SidebarMenuItem>
       </SidebarMenu>
     );
@@ -59,20 +79,25 @@ export function SwarmSwitcher() {
     <SidebarMenu>
       <SidebarMenuItem>
         <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <SidebarMenuButton className="w-full justify-between text-xs">
-              <div className="flex items-center gap-2 truncate">
-                <div
-                  className={cn(
-                    "size-2 shrink-0 rounded-full",
-                    isHealthy ? "bg-status-success" : "bg-status-error",
-                  )}
-                />
-                <span className="truncate font-medium">{displayName}</span>
-              </div>
-              <ChevronsUpDown className="ml-auto size-3.5 shrink-0 text-muted-foreground" />
-            </SidebarMenuButton>
-          </DropdownMenuTrigger>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <DropdownMenuTrigger asChild>
+                <SidebarMenuButton className="w-full justify-between text-xs">
+                  <div className="flex items-center gap-2 truncate">
+                    <div
+                      className={cn(
+                        "size-2 shrink-0 rounded-full",
+                        isHealthy ? "bg-status-success" : "bg-status-error",
+                      )}
+                    />
+                    <span className="truncate font-medium">{displayName}</span>
+                  </div>
+                  <ChevronsUpDown className="ml-auto size-3.5 shrink-0 text-muted-foreground" />
+                </SidebarMenuButton>
+              </DropdownMenuTrigger>
+            </TooltipTrigger>
+            <TooltipContent side="right">{connectionDetail}</TooltipContent>
+          </Tooltip>
           <DropdownMenuContent align="start" className="w-56" side="right" sideOffset={4}>
             {connections.map((conn) => {
               const isActive = conn.id === activeConnection?.id;

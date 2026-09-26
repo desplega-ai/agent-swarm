@@ -212,6 +212,8 @@ Utilitarian and crisp: small radii (6–10px), 36px control heights, restrained 
 
 ### Signature Components
 - **DataGrid** (AG Grid wrapper): the mandatory surface for every data list from `md` up — themed via `ag-grid.css` to the token system, fills remaining page height, row-click drill-down with `stopPropagation` on inline actions.
+- **ListPager**: the one pager under every list. `DataGrid` suppresses AG Grid's own paging panel and drives `ListPager` from its pagination API; server-paged lists (Tasks, Memory) drive it from URL state. Range on the left ("1–20 of 35"), rows-per-page and previous / next on the right.
+- **List toolbar**: search, then one `FiltersPopover` ("Filters (n)") holding the facet selects when there are more than three or the row would wrap, then page actions with a labelled primary button ("New task", not a bare "+"). Section subnavs below `md` are a `SectionTabs` strip, never a select that repeats the page name.
 - **MobileListRow** (`MobileList` + `MobileListRow`): the one exception to DataGrid, below `md` only. A squeezed grid clips its status column off a 390px screen, so phone lists render one row per entity: title, status chip and chevron on the first line, a short meta line under it. Same data, same search, same focus ring as the grid it replaces.
 - **Detail-page rail:** `DetailPageBody` (1fr main + fixed 280px rail) with `QuickStats` → `Relationships` → `DangerZone` in order — the canonical anatomy of every entity detail page.
 - **Shimmer liveness:** `.shimmer-text` / `.shimmer-bar` — a sliding gradient that means, literally, "an agent is working right now." The system's one animated flourish, and it's semantic.

@@ -76,15 +76,12 @@ export function AppHeader() {
                 )}
               >
                 <span className={cn("size-2 rounded-full", HEALTH_DOT_CLASS[aggregateHealth])} />
-                {activeConnection ? (
-                  <span className="hidden sm:inline font-medium">{activeConnection.name}</span>
-                ) : null}
-                {health?.version ? (
-                  <span className="hidden sm:inline">v{health.version}</span>
-                ) : null}
+                {/* The connection name and version live in the sidebar swarm
+                    switcher; the header only carries health. */}
+                <span className="hidden sm:inline">{HEALTH_LABEL[aggregateHealth]}</span>
               </button>
             </TooltipTrigger>
-            <TooltipContent side="bottom">{HEALTH_LABEL[aggregateHealth]}</TooltipContent>
+            <TooltipContent side="bottom">Open setup</TooltipContent>
           </Tooltip>
         ) : (
           // Fallback for older API servers that don't expose /status — keep
@@ -101,12 +98,7 @@ export function AppHeader() {
                     isHealthy ? "bg-status-success" : "bg-status-error",
                   )}
                 />
-                {activeConnection && (
-                  <span className="hidden sm:inline font-medium">{activeConnection.name}</span>
-                )}
-                {activeConnection && <span className="hidden sm:inline">&mdash;</span>}
                 <span className="hidden sm:inline">{isHealthy ? "Connected" : "Disconnected"}</span>
-                {health?.version && <span>v{health.version}</span>}
               </div>
             </TooltipTrigger>
             <TooltipContent side="bottom" className="max-w-xs text-balance">
