@@ -51,6 +51,9 @@ export function coerceExtensionSummary(entry: unknown) {
     priority: typeof extension.priority === "number" ? extension.priority : undefined,
     consecutiveFailures:
       typeof extension.consecutiveFailures === "number" ? extension.consecutiveFailures : undefined,
+    // Already secret-scrubbed by the REST read path. Bundled scripts and workflows
+    // have no ctx.config, so this is how they read the operator's config.
+    configJson: typeof extension.configJson === "string" ? extension.configJson : undefined,
   };
 }
 

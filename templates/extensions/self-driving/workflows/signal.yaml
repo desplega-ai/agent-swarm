@@ -1,0 +1,69 @@
+# Webhook: POST /api/webhooks/<workflowId> with a Sentry-shaped body.
+# Signed: the body must carry an HMAC-SHA256 of the raw body in X-Hub-Signature-256
+# (sha256=<hex>), keyed with the global secret SELF_DRIVING_WEBHOOK_SECRET. See README.md.
+name: self-driving-signal
+description: Ingest, classify and cluster one Sentry-shaped signal, then propose a dry-run task
+triggers:
+  - type: webhook
+    hmacSecret: secret.SELF_DRIVING_WEBHOOK_SECRET
+    hmacHeader: X-Hub-Signature-256
+triggerSchema:
+  type: object
+  required: [project, event]
+  properties:
+    project: { type: string }
+    event:
+      type: object
+      required: [title, level]
+      properties:
+        title: { type: string }
+        level: { type: string, enum: [debug, info, warning, error, fatal] }
+        fingerprint: { type: array, items: { type: string } }
+definition:
+  nodes:
+    - id: ingest
+      type: swarm-script
+      label: Normalize the payload into a signal
+      config:
+        scriptName: self-driving-ingest
+        scope: global
+        args:
+          payload: "{{trigger}}"
+      next: classify
+    - id: classify
+      type: swarm-script
+      label: Classify with the configured backend
+      inputs:
+        signal: ingest.result.signal
+      config:
+        scriptName: self-driving-classify
+        scope: global
+        args:
+          signal: "{{signal}}"
+      next: cluster
+    - id: cluster
+      type: swarm-script
+      label: Add the signal to its fingerprint cluster
+      inputs:
+        signal: ingest.result.signal
+        classification: classify.result.classification
+      config:
+        scriptName: self-driving-cluster
+        scope: global
+        args:
+          mode: ingest
+          signal: "{{signal}}"
+          classification: "{{classification}}"
+      next: propose
+    - id: propose
+      type: swarm-script
+      label: Propose the task it would create (dry run)
+      inputs:
+        overThreshold: cluster.result.overThreshold
+        cluster: cluster.result.cluster
+      config:
+        scriptName: self-driving-propose
+        scope: global
+        args:
+          overThreshold: "{{overThreshold}}"
+          cluster: "{{cluster}}"

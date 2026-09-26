@@ -282,6 +282,10 @@ describe("extension MCP HTTP proxy tools", () => {
     );
     expect(all.structuredContent).toMatchObject({ success: true });
     expect((all.structuredContent.extensions as unknown[]).length).toBe(1);
+    // Bundled scripts read the operator config from here.
+    expect(
+      typeof (all.structuredContent.extensions as Array<{ configJson?: unknown }>)[0]?.configJson,
+    ).toBe("string");
 
     const enabledOnly = (await tools.list.handler(
       { enabledOnly: true },

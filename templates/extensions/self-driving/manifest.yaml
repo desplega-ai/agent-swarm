@@ -1,0 +1,31 @@
+# yaml-language-server: $schema=../manifest.schema.json
+name: self-driving
+description: "MVP of the self-driving loop: ingest Sentry-shaped signals, classify, cluster by fingerprint, and propose a dry-run task. Never creates tasks."
+version: 0.1.0
+runtime: api
+assets:
+  hooks: hooks.ts
+  scripts:
+    - name: self-driving-ingest
+      file: scripts/ingest.ts
+      description: Normalize a Sentry-shaped payload into a signal (source, project, repo, fingerprint, title, level)
+    - name: self-driving-classify
+      file: scripts/classify.ts
+      description: Classify a signal into the default classification schema with the rules backend
+    - name: self-driving-cluster
+      file: scripts/cluster.ts
+      description: Group signals by fingerprint in swarm KV and flag clusters past the configured threshold
+    - name: self-driving-propose
+      file: scripts/propose.ts
+      description: Describe the task the loop would create for a cluster past threshold. Dry run only.
+  schedules:
+    - name: self-driving-sweep
+      description: Every 10 minutes, list clusters past threshold that still have no proposed action
+      script: self-driving-cluster
+      intervalMs: 600000
+      args:
+        mode: sweep
+  workflows:
+    - file: workflows/signal.yaml
+  skills:
+    - dir: skills/self-driving-guide
