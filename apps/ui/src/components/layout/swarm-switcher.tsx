@@ -52,8 +52,13 @@ export function SwarmSwitcher() {
       <SidebarMenu>
         <SidebarMenuItem>
           <Tooltip>
+            {/* A button, not a div: this tooltip is the only place the URL and
+                version show, so keyboard users need a tab stop to open it. */}
             <TooltipTrigger asChild>
-              <div className="flex h-8 w-full items-center gap-2 overflow-hidden rounded-md px-2 text-xs">
+              <button
+                type="button"
+                className="flex h-8 w-full cursor-default items-center gap-2 overflow-hidden rounded-md px-2 text-left text-xs outline-hidden ring-sidebar-ring focus-visible:ring-2"
+              >
                 <div
                   className={cn(
                     "size-2 shrink-0 rounded-full",
@@ -61,7 +66,7 @@ export function SwarmSwitcher() {
                   )}
                 />
                 <span className="truncate font-medium">{displayName}</span>
-              </div>
+              </button>
             </TooltipTrigger>
             <TooltipContent side="right">{connectionDetail}</TooltipContent>
           </Tooltip>
