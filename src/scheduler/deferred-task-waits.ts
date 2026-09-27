@@ -235,6 +235,34 @@ export async function reconcileDeferredTaskWaits(taskId?: string): Promise<void>
   }
 }
 
+/**
+ * How long a spent deferral timer is kept. Its `requestedDelayMs` /
+ * `requestedRunAt` provenance and its wait outcome live only on this row.
+ */
+export const SPENT_DEFERRED_SCHEDULE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * Delete deferral timers that fired, by ceiling or by event, before the
+ * retention window. Nothing reads a spent timer: waits only consult enabled
+ * rows, and the wake-up task's `scheduleId` has no foreign key, so it keeps the
+ * id. The wait and its members cascade. A timer that never fired (auto-disabled
+ * on a dispatch failure) has no `lastRunAt` and is kept as evidence.
+ */
+export async function reapSpentDeferredSchedules(now = new Date()): Promise<number> {
+  const cutoff = new Date(now.getTime() - SPENT_DEFERRED_SCHEDULE_RETENTION_MS).toISOString();
+  const result = await getDbClient().run(
+    `DELETE FROM scheduled_tasks
+     WHERE taskType = 'deferred' AND scheduleType = 'one_time' AND enabled = 0
+       AND lastRunAt IS NOT NULL AND lastRunAt < ?
+       AND NOT EXISTS (
+         SELECT 1 FROM deferred_task_waits w
+         WHERE w.scheduleId = scheduled_tasks.id AND w.status = 'pending'
+       )`,
+    [cutoff],
+  );
+  return result.changes;
+}
+
 function onTaskEvent(payload: unknown): void {
   if (
     !payload ||

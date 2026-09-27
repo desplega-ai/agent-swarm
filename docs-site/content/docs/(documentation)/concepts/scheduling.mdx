@@ -195,6 +195,8 @@ For `agent-task` schedules:
 5. The schedule's `lastRunAt` is updated
 6. **One-time schedules** are automatically disabled after execution
 
+A `defer-task` wake-up schedule (`deferred-*`) is deleted 30 days after it fires, whether the deadline or a watched task woke it. The wake-up task keeps its `scheduleId`. A deferral schedule that never fired is kept.
+
 ### Direct Workflow and Script Targets
 
 Native `targetType` replaces the old "workflow trigger references a schedule" indirection for many cases:
