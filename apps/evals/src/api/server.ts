@@ -2,6 +2,7 @@ import { join, normalize, sep } from "node:path";
 import { attachmentContentDisposition } from "../../../../src/utils/content-disposition.ts";
 import { DEFAULT_CONFIG_IDS } from "../../configs/index.ts";
 import { CONFIG_PRESETS } from "../../configs/presets.ts";
+import { getCatalog, refreshCatalog, startCatalogRefresh } from "../cost/catalog.ts";
 import { getClaudeAliasMap, listOpenrouterModels } from "../cost/pricing.ts";
 import { getDb, initDb } from "../db/client.ts";
 import {
@@ -521,6 +522,10 @@ export async function startServer(
     console.log(`[orphan-reconcile] reconciled ${reconciled} orphaned run(s)`);
   }
   warnIfApiOpen();
+  // Live models.dev catalog (6h revalidation). Off under `bun test` so suites stay offline.
+  if (process.env.NODE_ENV !== "test" && process.env.EVALS_MODEL_CATALOG_REFRESH !== "off") {
+    await startCatalogRefresh(db);
+  }
 
   const server = Bun.serve({
     port,
@@ -811,7 +816,25 @@ export async function startServer(
         // v7 §8: frozen claude alias map (fable → claude-fable-5, …) so the UI
         // resolves bare aliases stored on historical rows at display time.
         const aliases = await getClaudeAliasMap();
-        return json({ defaultJudgeModel: DEFAULT_JUDGE_MODEL, models, aliases });
+        const { source, fetchedAt } = await getCatalog();
+        return json({
+          defaultJudgeModel: DEFAULT_JUDGE_MODEL,
+          models,
+          aliases,
+          catalog: { source, fetchedAt },
+        });
+      },
+      /** Force a models.dev fetch now instead of waiting for the 6h revalidation. */
+      "/api/models/refresh": {
+        POST: async (req) => {
+          if (!(await isAuthorized(req))) return unauthorized();
+          const result = await refreshCatalog({ db });
+          const { source, fetchedAt } = await getCatalog();
+          return json(
+            { ...result, catalog: { source, fetchedAt } },
+            result.status === "error" ? 502 : 200,
+          );
+        },
       },
       /**
        * Pre-aggregated analytics (v5 spec §1 — frozen contract). One SQL pass
