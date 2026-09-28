@@ -39,6 +39,9 @@ export async function prepareStandaloneScheduleTask(
       // auto-wiring (see withSiblingAwareness in src/tasks/sibling-awareness.ts), so
       // the wake-up run continues the deferred task rather than a random sibling.
       parentTaskId: schedule.parentTaskId,
+      // A defer-task wake-up continues the deferred work, so it keeps the
+      // creator's onCompleted/onFailed. Other schedules start new work.
+      inheritParentFollowUpConfig: schedule.taskType === "deferred" && !!schedule.parentTaskId,
     },
     { origin: "schedule" },
   );

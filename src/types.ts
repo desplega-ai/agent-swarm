@@ -770,6 +770,15 @@ export const CreateTaskOptionsSchema = z.object({
    * Lead-only control-plane authorization.
    */
   inheritParentRoutingAffinity: z.boolean().optional(),
+  /**
+   * `followUpConfig` belongs to one piece of work, not to the thread, so a
+   * child does NOT inherit the parent's by default. Set this to `true` only on
+   * a continuation of the SAME work (interrupted-task resume, reboot-sweep
+   * retry, defer-task wake-up, a Lead `resume` re-delegation) so the creator's
+   * onCompleted/onFailed still fires when that work truly ends. An explicit
+   * `followUpConfig` always wins.
+   */
+  inheritParentFollowUpConfig: z.boolean().optional(),
   followUpConfig: FollowUpConfigSchema.optional(),
   requestedByUserId: z.string().optional(),
   contextKey: z.string().optional(),

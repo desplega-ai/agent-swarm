@@ -2487,7 +2487,15 @@ export async function createTaskExtended(
       if (parent.contextKey && !options.contextKey) {
         options.contextKey = parent.contextKey;
       }
-      if (parent.followUpConfig && !options.followUpConfig) {
+      // followUpConfig is opt-in: only a continuation of the same work carries
+      // the creator's onCompleted/onFailed forward. Lead follow-ups, new
+      // delegations and thread replies all pass parentTaskId too, and
+      // inheriting there spread one task's instructions down the thread.
+      if (
+        parent.followUpConfig &&
+        !options.followUpConfig &&
+        options.inheritParentFollowUpConfig === true
+      ) {
         options.followUpConfig = parent.followUpConfig;
       }
       if (parent.routingAffinityInvalid && options.inheritParentRoutingAffinity !== false) {

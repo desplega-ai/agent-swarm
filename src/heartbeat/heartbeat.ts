@@ -858,6 +858,9 @@ export async function runRebootSweep(): Promise<void> {
             priority: task.priority,
             source: task.source,
             taskType: task.taskType ?? undefined,
+            // The retry re-runs the same work, so it keeps the creator's
+            // onCompleted/onFailed.
+            inheritParentFollowUpConfig: true,
             routingAffinity,
           });
           if (authorization.decision) {
