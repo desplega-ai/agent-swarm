@@ -233,6 +233,56 @@ describe("blocker 1: a stale attempt cannot finish the replacement attempt", () 
   });
 });
 
+describe("headerless callers (Superagent P1)", () => {
+  function headerless(agentId: string) {
+    return {
+      sessionId: `session-${crypto.randomUUID()}`,
+      requestInfo: { headers: { "x-agent-id": agentId } },
+    };
+  }
+
+  test("a caller with no runtime id cannot write a reclaimed row restarted by a runtime", async () => {
+    const agent = await worker("fence-headerless-reclaimed");
+    const task = await startedThenReclaimed(agent.id);
+    await startTask(task.id, { runtimeInstanceId: RUNTIME_B });
+
+    const stale = (await tool("store-progress").handler(
+      { taskId: task.id, status: "completed", output: "headerless stale output" },
+      headerless(agent.id),
+    )) as ToolResult;
+    expect(stale.structuredContent.success).toBe(false);
+    expect((await getTaskById(task.id))?.status).toBe("in_progress");
+  });
+
+  test("a caller with no runtime id still writes a never-reclaimed row (remote harness)", async () => {
+    const agent = await worker("fence-headerless-fresh");
+    const task = await createTaskExtended("Remote harness work", { agentId: agent.id });
+    await startTask(task.id, { runtimeInstanceId: RUNTIME_A });
+
+    const result = (await tool("store-progress").handler(
+      { taskId: task.id, status: "completed", output: "remote harness output" },
+      headerless(agent.id),
+    )) as ToolResult;
+    expect(result.structuredContent.success).toBe(true);
+  });
+});
+
+describe("pause is fenced (Superagent P2)", () => {
+  test("a stale runtime cannot pause the replacement attempt; the holder can", async () => {
+    const agent = await worker("fence-pause");
+    const task = await startedThenReclaimed(agent.id);
+    await startTask(task.id, { runtimeInstanceId: RUNTIME_B });
+
+    const stale = await api("POST", `/api/tasks/${task.id}/pause`, as(agent.id, RUNTIME_A));
+    expect(stale.status).toBe(403);
+    expect((await getTaskById(task.id))?.status).toBe("in_progress");
+
+    const holder = await api("POST", `/api/tasks/${task.id}/pause`, as(agent.id, RUNTIME_B));
+    expect(holder.status).toBe(200);
+    expect((await getTaskById(task.id))?.status).toBe("paused");
+  });
+});
+
 describe("blocker 2: defer-task is fenced before the schedule and the terminal write", () => {
   async function schedulesFor(taskId: string) {
     return (await getScheduledTasks({ hideCompleted: false })).filter(

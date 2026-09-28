@@ -39,14 +39,17 @@ export function staleAttemptWriteReason(
   }
 
   // Same agent, different runtime: the current attempt runs elsewhere.
-  if (
-    ownsRow &&
-    task.status === "in_progress" &&
-    task.attemptRuntimeId &&
-    caller.runtimeInstanceId &&
-    task.attemptRuntimeId !== caller.runtimeInstanceId
-  ) {
-    return `Task ${task.id} attempt ${task.attempt ?? 0} is running in another runtime; this process holds an earlier attempt. Stop working on it.`;
+  if (ownsRow && task.status === "in_progress" && task.attemptRuntimeId) {
+    if (caller.runtimeInstanceId && task.attemptRuntimeId !== caller.runtimeInstanceId) {
+      return `Task ${task.id} attempt ${task.attempt ?? 0} is running in another runtime; this process holds an earlier attempt. Stop working on it.`;
+    }
+    // Fail closed on a reclaimed row: a caller that cannot say which runtime
+    // it is may be the attempt the heartbeat took the row away from. Rows
+    // never reclaimed (attempt 0) have one attempt only, so a headerless
+    // caller (remote harness) keeps the status + agent check there.
+    if (!caller.runtimeInstanceId && (task.attempt ?? 0) > 0) {
+      return `Task ${task.id} was reclaimed by the heartbeat (attempt ${task.attempt}) and restarted by a runtime; this call names no runtime (X-Runtime-Instance-ID), so it cannot prove it holds the current attempt. Stop working on it.`;
+    }
   }
 
   return null;

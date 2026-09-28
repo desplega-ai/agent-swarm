@@ -53,7 +53,7 @@ TLC (`HeartbeatSimple.cfg`): every invariant and property holds. With `FENCE = F
 
 ### Deviations from the model
 
-- **Fence by runtime, not attempt number.** A process never sends `attempt`; the fence compares the caller's runtime with `attemptRuntimeId`. This equals the model's `Current` check because a runtime runs at most one process per task id (`FreeFor` + `Start` above). A caller or starter without `X-Runtime-Instance-ID` (remote harnesses such as `claude-managed` and `devin`, pre-fence workers) falls back to the status + agent check, which the model does not cover.
+- **Fence by runtime, not attempt number.** A process never sends `attempt`; the fence compares the caller's runtime with `attemptRuntimeId`. This equals the model's `Current` check because a runtime runs at most one process per task id (`FreeFor` + `Start` above). A caller without `X-Runtime-Instance-ID` is refused on a reclaimed row a runtime restarted (fail closed). On a never-reclaimed row, and for an attempt started without a runtime id, the fence falls back to the status + agent check; with one attempt only there is no stale attempt to fence.
 - **Unfenced worker writes outside the model:** the runner's `/api/tasks/:id/progress` and the session heartbeat. They can refresh progress text or `lastHeartbeatAt`, never status.
 - **Unpin covers pins, not offers** (`UNPIN_OFFERED = FALSE`). Offers keep `releaseStaleOfferedTasksForOfflineAgents`, modeled by `Reject`. `acceptTask` still checks `offeredTo` in JS, not SQL.
 - **Unpin skips Lead-held pins.** Not modeled (the model has no Lead).

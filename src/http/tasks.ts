@@ -1533,41 +1533,42 @@ export async function handleTasks(
   if (pauseTaskRoute.match(req.method, pathSegments)) {
     const parsed = await pauseTaskRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const task = await getTaskById(parsed.params.id);
+    const runtimeInstanceId = headerRuntimeInstanceId(req);
 
-    if (!task) {
-      jsonError(res, "Task not found", 404);
+    // Read, attempt fence and pause in one transaction: a Reclaim or a
+    // replacement start between the check and the write cannot slip through.
+    const outcome = await getDbClient().transaction(
+      async (): Promise<
+        { error: string; status: number } | { task: AgentTask; paused: AgentTask }
+      > => {
+        const current = await getTaskById(parsed.params.id);
+        if (!current) return { error: "Task not found", status: 404 };
+        if (myAgentId && current.agentId !== myAgentId) {
+          return { error: "Task belongs to another agent", status: 403 };
+        }
+        if (current.status !== "in_progress") {
+          return { error: `Task status is '${current.status}', not 'in_progress'`, status: 400 };
+        }
+        // Attempt fence (src/tasks/attempt-fence.ts): a runner shutting down
+        // with an attempt the heartbeat reclaimed must not pause the replacement.
+        if (myAgentId) {
+          const staleAttempt = staleAttemptWriteReason(current, {
+            agentId: myAgentId,
+            runtimeInstanceId,
+          });
+          if (staleAttempt) return { error: staleAttempt, status: 403 };
+        }
+        const paused = await pauseTask(parsed.params.id);
+        if (!paused) return { error: "Failed to pause task", status: 500 };
+        return { task: current, paused };
+      },
+    );
+    if ("error" in outcome) {
+      jsonError(res, outcome.error, outcome.status);
       return true;
     }
-
-    if (myAgentId && task.agentId !== myAgentId) {
-      jsonError(res, "Task belongs to another agent", 403);
-      return true;
-    }
-
-    if (task.status !== "in_progress") {
-      jsonError(res, `Task status is '${task.status}', not 'in_progress'`, 400);
-      return true;
-    }
-
-    // Attempt fence (src/tasks/attempt-fence.ts): a runner shutting down with
-    // an attempt the heartbeat reclaimed must not pause the replacement.
-    if (myAgentId) {
-      const staleAttempt = staleAttemptWriteReason(task, {
-        agentId: myAgentId,
-        runtimeInstanceId: headerRuntimeInstanceId(req),
-      });
-      if (staleAttempt) {
-        jsonError(res, staleAttempt, 403);
-        return true;
-      }
-    }
-
-    const pausedTask = await pauseTask(parsed.params.id);
-    if (!pausedTask) {
-      jsonError(res, "Failed to pause task", 500);
-      return true;
-    }
+    const task = outcome.task;
+    const pausedTask = outcome.paused;
 
     ensure({
       id: "paused",
@@ -1738,6 +1739,26 @@ export async function handleTasks(
     // rolls the supersede back: the task stays in_progress and the heartbeat
     // reclaims it like any other stall.
     const outcome = await getDbClient().transaction(async () => {
+      // Re-check the attempt fence on a fresh read under the write lock: a
+      // Reclaim or replacement start since the check above must stop the
+      // supersede.
+      if (myAgentId) {
+        const current = await getTaskById(parsed.params.id);
+        const staleAttempt =
+          current?.status === "in_progress"
+            ? staleAttemptWriteReason(current, {
+                agentId: myAgentId,
+                runtimeInstanceId: headerRuntimeInstanceId(req),
+              })
+            : null;
+        if (staleAttempt) return { kind: "fenced" as const, message: staleAttempt };
+        if (current && current.status !== "in_progress" && !isTerminalTaskStatus(current.status)) {
+          return {
+            kind: "fenced" as const,
+            message: `Task status is '${current.status}', not 'in_progress'`,
+          };
+        }
+      }
       // Supersede FIRST (atomic + idempotent in db.ts) so we don't create a
       // resume child if a worker raced to complete/fail/cancel between the
       // pre-read status check and the supersede UPDATE.
@@ -1761,6 +1782,11 @@ export async function handleTasks(
       await backfillSupersedeTaskResumeTaskId(parsed.params.id, followUp.task.id);
       return { kind: "created" as const, superseded, resumeTask: followUp.task };
     });
+
+    if (outcome.kind === "fenced") {
+      jsonError(res, outcome.message, 403);
+      return true;
+    }
 
     if (outcome.kind === "lost") {
       // Worker won the race (terminal transition between status check and

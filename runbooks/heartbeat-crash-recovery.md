@@ -205,7 +205,7 @@ flowchart TD
 
 It guards `store-progress`, `defer-task` (before the schedule insert and the terminal write, in one transaction), the runner's `/finish`, `/pause` and `/supersede`, and `task-action release`. `DELETE /api/active-sessions/by-task/:id` deletes only the row the calling agent and runtime registered, so an old run's cleanup cannot remove the replacement's session. Leads keep their override on rows they do not own.
 
-Residual gaps: a caller that sends no `X-Runtime-Instance-ID` (remote harnesses such as `claude-managed` and `devin`, pre-fence workers), and an attempt started without one (`attemptRuntimeId` NULL), fall back to the status + agent check alone. The runner's own `/progress` and session heartbeat calls are not fenced; they can refresh progress text or `lastHeartbeatAt` but cannot change status.
+A caller that sends no `X-Runtime-Instance-ID` is rejected on a reclaimed row (`attempt > 0`) that a runtime restarted: it cannot prove it holds the current attempt. On a never-reclaimed row (one attempt only) it keeps the status + agent check, so remote harnesses such as `claude-managed` (static MCP headers) keep working; after a reclaim their tool writes are refused and the runner's `/finish` settles the task. An attempt started without a runtime id (`attemptRuntimeId` NULL) falls back to the status + agent check. `/pause` and `/supersede` re-read the row and run the fence inside their write transaction. The runner's own `/progress` and session heartbeat calls are not fenced; they can refresh progress text or `lastHeartbeatAt` but cannot change status.
 
 **Runner.** When the reclaimed row comes back to an agent that still runs the earlier attempt, the runner keeps the running copy and does not start a second one. When it starts a row with `attempt > 0`, it injects a resume preamble built from the task's own id (its earlier attempts' session logs).
 
@@ -277,9 +277,11 @@ worker write (caller agent, caller runtime):
     if task.attempt > 0 and caller is not Lead
        and not (task.status == in_progress and task.agentId == caller):
         reject                                  # reclaimed, not restarted by this agent
-    if task.agentId == caller and task.status == in_progress
-       and task.attemptRuntimeId and caller runtime and they differ:
-        reject                                  # replacement attempt runs in another runtime
+    if task.agentId == caller and task.status == in_progress and task.attemptRuntimeId:
+        if caller runtime and it differs:
+            reject                              # replacement attempt runs in another runtime
+        if no caller runtime and task.attempt > 0:
+            reject                              # fail closed on a reclaimed row
 # session cleanup:
 DELETE /api/active-sessions/by-task/:id  →  WHERE taskId AND agentId = caller
                                              AND (runtime unknown OR row runtime = caller runtime)
