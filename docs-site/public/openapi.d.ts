@@ -20097,6 +20097,12 @@ export interface paths {
                         } | {
                             created: boolean;
                             taskId?: string;
+                            skipped?: boolean;
+                            reason?: string;
+                            extension?: {
+                                id: string;
+                                name: string;
+                            };
                         };
                     };
                 };
@@ -20154,6 +20160,12 @@ export interface paths {
                         "application/json": {
                             created: boolean;
                             taskId?: string;
+                            skipped?: boolean;
+                            reason?: string;
+                            extension?: {
+                                id: string;
+                                name: string;
+                            };
                         };
                     };
                 };

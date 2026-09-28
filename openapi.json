@@ -49549,6 +49549,27 @@
                         },
                         "taskId": {
                           "type": "string"
+                        },
+                        "skipped": {
+                          "type": "boolean"
+                        },
+                        "reason": {
+                          "type": "string"
+                        },
+                        "extension": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "name"
+                          ]
                         }
                       },
                       "required": [
@@ -49602,6 +49623,27 @@
                     },
                     "taskId": {
                       "type": "string"
+                    },
+                    "skipped": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "extension": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name"
+                      ]
                     }
                   },
                   "required": [
