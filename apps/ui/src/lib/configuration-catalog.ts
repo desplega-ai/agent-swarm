@@ -274,6 +274,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         description:
           "Pending approval requests with no explicit timeout are cancelled after this many days. Requests with an explicit timeout are never auto-cancelled. 0 disables auto-cancellation.",
         kind: "number",
+        unit: "days",
         defaultValue: "7",
         placeholder: "7",
       },
