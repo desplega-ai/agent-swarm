@@ -102,6 +102,31 @@ async function handleTaskProgress(data: unknown): Promise<void> {
   });
 }
 
+// Linear documents no size limit for a comment or an AgentActivity body. 30k chars stays under
+// the 32,767 figure other Linear integrations use, and fits any realistic task output.
+export const LINEAR_BODY_MAX = 30_000;
+
+/**
+ * Build the body of the single Linear comment that carries a task's outcome.
+ *
+ * The text goes in as-is: no `+++ Title … +++` wrapper (Linear renders that as a
+ * collapsed section) and no boilerplate. A body over `LINEAR_BODY_MAX` is cut and ends
+ * with a visible note that points at the swarm task for the full text.
+ */
+export function formatLinearOutcomeBody(text: string, taskId: string): string {
+  if (text.length <= LINEAR_BODY_MAX) return text;
+
+  const dashboardUrl = (process.env.SWARM_DASHBOARD_URL || process.env.APP_URL)?.replace(
+    /\/+$/,
+    "",
+  );
+  const where = dashboardUrl ? `${dashboardUrl}/tasks/${taskId}` : `swarm task \`${taskId}\``;
+  const note = (shown: number) =>
+    `\n\n---\n_Truncated: showing ${shown} of ${text.length} characters. Full text: ${where}_`;
+  const shown = LINEAR_BODY_MAX - note(LINEAR_BODY_MAX).length;
+  return `${text.slice(0, shown).trimEnd()}${note(shown)}`;
+}
+
 async function handleTaskCompleted(data: unknown): Promise<void> {
   const { taskId, output } = data as { taskId: string; output?: string };
   if (!taskId) return;
@@ -112,11 +137,11 @@ async function handleTaskCompleted(data: unknown): Promise<void> {
   if (shouldSkipForLoopPrevention(sync)) return;
 
   const sessionId = taskSessionMap.get(taskId);
-  const body = output
-    ? `Task completed.\n\n+++ Output\n${output.slice(0, 2000)}\n+++`
-    : "Task completed.";
+  const body = output?.trim() ? formatLinearOutcomeBody(output, taskId) : "Task completed.";
 
-  // Prefer AgentSession activity (shows in the agent panel) over issue comment (avoids duplication)
+  // One comment only. A `response` activity ends the AgentSession and Linear renders it as a
+  // comment on the issue, so it carries the output itself. The plain comment below runs only
+  // when there is no session to end.
   if (sessionId) {
     endAgentSession(sessionId, body, "response").catch((err) => {
       console.error(`[Linear Outbound] Failed to end AgentSession for task ${taskId}:`, err);
@@ -133,10 +158,7 @@ async function handleTaskCompleted(data: unknown): Promise<void> {
         console.log("[Linear Outbound] No Linear client available, skipping sync for", taskId);
         return;
       }
-      const comment = output
-        ? `Task completed by swarm agent.\n\n+++ Output\n${output.slice(0, 2000)}\n+++`
-        : "Task completed by swarm agent.";
-      await client.createComment({ issueId: sync.externalId, body: comment });
+      await client.createComment({ issueId: sync.externalId, body });
       console.log(`[Linear Outbound] Posted completion comment for task ${taskId}`);
     } catch (error) {
       console.error(
@@ -162,11 +184,14 @@ async function handleTaskFailed(data: unknown): Promise<void> {
   if (shouldSkipForLoopPrevention(sync)) return;
 
   const sessionId = taskSessionMap.get(taskId);
-  const body = failureReason
-    ? `Task failed.\n\n+++ Error Details\n${failureReason.slice(0, 2000)}\n+++`
+  // Keep the one-line "Task failed." lead: without it a plain fallback comment reads like
+  // a normal answer.
+  const body = failureReason?.trim()
+    ? formatLinearOutcomeBody(`Task failed.\n\n${failureReason}`, taskId)
     : "Task failed.";
 
-  // Prefer AgentSession error activity over issue comment (avoids duplication)
+  // One comment only: the `error` activity ends the AgentSession and carries the reason.
+  // The plain comment below runs only when there is no session to end.
   if (sessionId) {
     endAgentSession(sessionId, body, "error").catch((err) => {
       console.error(`[Linear Outbound] Failed to end AgentSession for task ${taskId}:`, err);
@@ -183,10 +208,7 @@ async function handleTaskFailed(data: unknown): Promise<void> {
         console.log("[Linear Outbound] No Linear client available, skipping sync for", taskId);
         return;
       }
-      const comment = failureReason
-        ? `Task failed.\n\n+++ Error Details\n${failureReason.slice(0, 2000)}\n+++`
-        : "Task failed.";
-      await client.createComment({ issueId: sync.externalId, body: comment });
+      await client.createComment({ issueId: sync.externalId, body });
       console.log(`[Linear Outbound] Posted failure comment for task ${taskId}`);
     } catch (error) {
       console.error(
