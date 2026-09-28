@@ -68,6 +68,34 @@ export interface ConfigCatalogGroup {
   entries: ConfigCatalogEntry[];
 }
 
+/**
+ * Global tier defaults (MODEL_TIER_<PROVIDER>_<TIER>), resolved on the server
+ * when a task is claimed. Mirrors DEFAULT_MODEL_TIER_MAP for the placeholders.
+ * Other providers accept the same key shape through the config API.
+ */
+const MODEL_TIER_DEFAULTS: Record<string, Record<string, string>> = {
+  claude: { smol: "haiku", regular: "sonnet", smart: "opus", ultra: "fable" },
+  codex: {
+    smol: "gpt-5.6-luna",
+    regular: "gpt-5.6-terra",
+    smart: "gpt-5.6-sol",
+    ultra: "gpt-5.6-sol",
+  },
+};
+
+const MODEL_TIER_CONFIG_ENTRIES: ConfigCatalogEntry[] = Object.entries(MODEL_TIER_DEFAULTS).flatMap(
+  ([provider, tiers]) =>
+    Object.entries(tiers).map(([tier, fallback]) => ({
+      key: `MODEL_TIER_${provider.toUpperCase()}_${tier.toUpperCase()}`,
+      label: `${provider} ${tier} tier model`,
+      description: `Model a ${provider} worker runs for modelTier=${tier} tasks. A model id, a CLI alias, or latest:<anthropic|openai|openrouter>/<target>[@stable|@any]. A task's explicit model and the worker's own MODEL_TIER_${tier.toUpperCase()} env still win.`,
+      kind: "string" as const,
+      placeholder: fallback,
+      defaultValue: fallback,
+      docsUrl: `${DOCS}ui/configuration`,
+    })),
+);
+
 export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
   {
     id: "steering",
@@ -408,6 +436,27 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         options: ["fail", "fallback"],
         defaultValue: "fail",
         restartRequired: false,
+        docsUrl: `${DOCS}ui/configuration`,
+      },
+      ...MODEL_TIER_CONFIG_ENTRIES,
+      {
+        key: "MODEL_LATEST_SOAK_DAYS",
+        label: "latest: alias soak",
+        description:
+          "A `latest:...@stable` tier value skips models released fewer than this many days ago. 0 disables the soak. Preview ids and unpriced models are always skipped on @stable.",
+        kind: "number",
+        unit: "days",
+        defaultValue: "2",
+        placeholder: "2",
+        docsUrl: `${DOCS}ui/configuration`,
+      },
+      {
+        key: "MODEL_AUTO_UPGRADE",
+        label: "Auto-upgrade latest: aliases",
+        description:
+          "When off, every `latest:` alias stays on the model it last resolved to, even after a newer model lands in the catalog. Turn back on to let aliases move again.",
+        kind: "boolean",
+        defaultValue: "true",
         docsUrl: `${DOCS}ui/configuration`,
       },
     ],
