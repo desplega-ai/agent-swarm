@@ -149,7 +149,7 @@
         "cmdk": "^1.1.1",
         "cronstrue": "^3.14.0",
         "dagre": "^0.8.5",
-        "date-fns": "^4.4.0",
+        "date-fns": "^4.1.0",
         "jotai": "^3.0.0",
         "lucide-react": "^0.575.0",
         "motion": "^13.0.0",
