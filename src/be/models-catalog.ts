@@ -148,22 +148,61 @@ function mergePinnedEntries(catalog: ModelsCatalog): void {
   }
 }
 
-/** Called by the pricing-refresh loop after every successful full models.dev fetch. */
-export function updateLiveModelsCatalog(cache: ModelsDevCache, now = Date.now()): void {
-  const catalog = buildModelsCatalog(cache);
+/**
+ * Install a freshly built live catalog (already merged with the persistent
+ * table + overlay by `src/be/model-catalog-store.ts`). Pinned snapshot entries
+ * are re-merged so they never drop out of the picker.
+ */
+export function setLiveModelsCatalog(catalog: ModelsCatalog, updatedAt: number | null): void {
   mergePinnedEntries(catalog);
   liveCatalog = catalog;
-  liveUpdatedAt = now;
+  liveUpdatedAt = updatedAt;
+}
+
+/**
+ * Legacy in-memory update from a raw models.dev payload. The refresh path now
+ * persists to `model_catalog` and reloads via `reloadModelsCatalog()`; this
+ * stays for callers/tests that only have a payload in hand.
+ */
+export function updateLiveModelsCatalog(cache: ModelsDevCache, now = Date.now()): void {
+  setLiveModelsCatalog(buildModelsCatalog(cache), now);
+}
+
+/** Drop the in-memory catalog so the next async read rebuilds it from the DB. */
+export function invalidateModelsCatalog(): void {
+  liveCatalog = null;
+  liveUpdatedAt = null;
+  snapshotOverride = null;
+}
+
+export function isModelsCatalogLoaded(): boolean {
+  return liveCatalog !== null;
+}
+
+/** Deep copy of the slimmed vendored snapshot (safe to mutate). */
+export function snapshotModelsCatalog(): ModelsCatalog {
+  return structuredClone(bundledSnapshotCatalog());
+}
+
+/** Snapshot with overlay rows layered on; served while the table is empty. */
+let snapshotOverride: ModelsCatalog | null = null;
+export function setSnapshotOverlayCatalog(catalog: ModelsCatalog | null): void {
+  snapshotOverride = catalog;
 }
 
 export function getModelsCatalog(): ModelsCatalogResult {
   if (liveCatalog) {
     return { source: "live", updatedAt: liveUpdatedAt, providers: liveCatalog };
   }
-  return { source: "snapshot", updatedAt: null, providers: bundledSnapshotCatalog() };
+  return {
+    source: "snapshot",
+    updatedAt: null,
+    providers: snapshotOverride ?? bundledSnapshotCatalog(),
+  };
 }
 
 export function resetModelsCatalogForTests(): void {
   liveCatalog = null;
   liveUpdatedAt = null;
+  snapshotOverride = null;
 }

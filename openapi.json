@@ -22672,6 +22672,415 @@
         }
       }
     },
+    "/api/models-catalog/refresh": {
+      "post": {
+        "summary": "Refresh the model catalog from models.dev",
+        "description": "Unforced calls skip the network when the last models.dev check is younger than 4h (`skipped-fresh`). `force: true` always fetches, still conditional on the stored ETag (`not-modified` on 304). `added` lists provider/modelId keys new since the previous fetch.",
+        "tags": [
+          "Pricing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "force": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Refresh outcome",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "updated",
+                        "not-modified",
+                        "skipped-fresh",
+                        "error"
+                      ]
+                    },
+                    "models": {
+                      "type": "number"
+                    },
+                    "added": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "checkedAt": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "models",
+                    "added",
+                    "checkedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models-catalog/overlay": {
+      "put": {
+        "summary": "Upsert one model-catalog overlay row",
+        "description": "Overlay facts win per non-null field over the models.dev row; overlay-only models are served too. Overlay prices fill pricing-table gaps (never override an active price). With `expiresWhenUpstreamMatches` (default true) the row is deleted once upstream matches every non-null fact.",
+        "tags": [
+          "Pricing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "modelId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "family": {
+                    "type": "string"
+                  },
+                  "releaseDate": {
+                    "type": "string"
+                  },
+                  "contextWindow": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  },
+                  "maxOutput": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  },
+                  "reasoning": {
+                    "type": "boolean"
+                  },
+                  "reasoningOptions": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string"
+                        },
+                        "values": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "type"
+                      ]
+                    }
+                  },
+                  "pricing": {
+                    "type": "object",
+                    "properties": {
+                      "input": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "output": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "cache_read": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "cache_write": {
+                        "type": "number",
+                        "minimum": 0
+                      }
+                    }
+                  },
+                  "status": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "verifiedBy": {
+                    "type": "string"
+                  },
+                  "expiresWhenUpstreamMatches": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "provider",
+                  "modelId",
+                  "reason"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Overlay row upserted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "provider": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "modelId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "family": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "releaseDate": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "contextWindow": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "maxOutput": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "reasoning": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "reasoningOptions": {
+                      "type": [
+                        "array",
+                        "null"
+                      ],
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string"
+                          },
+                          "values": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "type"
+                        ]
+                      }
+                    },
+                    "pricing": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "input": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "output": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "cache_read": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "cache_write": {
+                          "type": "number",
+                          "minimum": 0
+                        }
+                      }
+                    },
+                    "status": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "verifiedBy": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "expiresWhenUpstreamMatches": {
+                      "type": "boolean"
+                    },
+                    "createdAt": {
+                      "type": "number"
+                    },
+                    "updatedAt": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "provider",
+                    "modelId",
+                    "reason",
+                    "expiresWhenUpstreamMatches",
+                    "createdAt",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete one model-catalog overlay row",
+        "tags": [
+          "Pricing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "modelId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "provider",
+                  "modelId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Overlay row deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "deleted"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/oauth/refresh-locks/{key}": {
       "post": {
         "summary": "Acquire a cross-process OAuth refresh lock",

@@ -1220,6 +1220,8 @@ const SWARM_TOOL_LABELS: Record<string, string | null> = {
   "set-config": "⚙️ Setting config",
   "list-config": "⚙️ Listing config",
   "delete-config": "⚙️ Deleting config",
+  "model-catalog-refresh": "🧠 Refreshing model catalog",
+  "model-catalog-overlay-upsert": "🧠 Updating model catalog overlay",
   // Schedules
   "create-schedule": "📅 Creating schedule",
   "list-schedules": "📅 Listing schedules",

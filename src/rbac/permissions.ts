@@ -153,6 +153,11 @@ export const PERMISSIONS = {
     description: "Delete any swarm-config entry.",
     namespace: "config",
   },
+  "models.catalog.write": {
+    description:
+      "Force a model-catalog refresh from models.dev or write/delete model-catalog overlay rows.",
+    namespace: "models",
+  },
   "config.read.secrets": {
     description: "Read unmasked secret config values.",
     namespace: "config",

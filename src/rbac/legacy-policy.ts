@@ -246,6 +246,7 @@ export const LEGACY_POLICY = {
   "config.write.any": leadOnly,
   "config.delete.any": leadOnly,
   "config.read.secrets": leadOnly,
+  "models.catalog.write": leadOrOperatorOrUser,
   "skill.create.swarm": leadOnly,
   "skill.install.any": leadOnly,
   "skill.install.global": leadOnly,

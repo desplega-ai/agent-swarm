@@ -46,6 +46,8 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [list-config](#list-config)
   - [delete-config](#delete-config)
   - [credential-bindings](#credential-bindings)
+  - [model-catalog-refresh](#model-catalog-refresh)
+  - [model-catalog-overlay-upsert](#model-catalog-overlay-upsert)
 - [Scripts Tools](#scripts-tools)
   - [script-search](#script-search)
   - [script-connections](#script-connections)
@@ -552,6 +554,14 @@ Advanced, lead-only management for standalone scripts-runtime credential broker 
 | `extraParams` | `object` | No | - | Extra OAuth authorization parameters stored with the OAuth app. |
 | `tokenAuthStyle` | `body \| basic` | No | - | How client credentials reach the token endpoint: body params (default) or HTTP Basic auth (required by e.g. Notion). |
 | `tokenBodyFormat` | `form \| json` | No | - | Token request body encoding: form-urlencoded (default) or JSON (required by e.g. Notion). |
+
+### model-catalog-refresh
+
+*Documentation not available*
+
+### model-catalog-overlay-upsert
+
+*Documentation not available*
 
 ## Scripts Tools
 

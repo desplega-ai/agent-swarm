@@ -9091,6 +9091,205 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/models-catalog/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh the model catalog from models.dev
+         * @description Unforced calls skip the network when the last models.dev check is younger than 4h (`skipped-fresh`). `force: true` always fetches, still conditional on the stored ETag (`not-modified` on 304). `added` lists provider/modelId keys new since the previous fetch.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        force?: boolean;
+                    };
+                };
+            };
+            responses: {
+                /** @description Refresh outcome */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {string} */
+                            status: "updated" | "not-modified" | "skipped-fresh" | "error";
+                            models: number;
+                            added: string[];
+                            checkedAt: number | null;
+                            error?: string;
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/models-catalog/overlay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Upsert one model-catalog overlay row
+         * @description Overlay facts win per non-null field over the models.dev row; overlay-only models are served too. Overlay prices fill pricing-table gaps (never override an active price). With `expiresWhenUpstreamMatches` (default true) the row is deleted once upstream matches every non-null fact.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        provider: string;
+                        modelId: string;
+                        name?: string;
+                        family?: string;
+                        releaseDate?: string;
+                        contextWindow?: number;
+                        maxOutput?: number;
+                        reasoning?: boolean;
+                        reasoningOptions?: {
+                            type: string;
+                            values?: string[];
+                        }[];
+                        pricing?: {
+                            input?: number;
+                            output?: number;
+                            cache_read?: number;
+                            cache_write?: number;
+                        };
+                        status?: string;
+                        reason: string;
+                        verifiedBy?: string;
+                        expiresWhenUpstreamMatches?: boolean;
+                    };
+                };
+            };
+            responses: {
+                /** @description Overlay row upserted */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            provider: string;
+                            modelId: string;
+                            name?: string | null;
+                            family?: string | null;
+                            releaseDate?: string | null;
+                            contextWindow?: number | null;
+                            maxOutput?: number | null;
+                            reasoning?: boolean | null;
+                            reasoningOptions?: {
+                                type: string;
+                                values?: string[];
+                            }[] | null;
+                            pricing?: {
+                                input?: number;
+                                output?: number;
+                                cache_read?: number;
+                                cache_write?: number;
+                            } | null;
+                            status?: string | null;
+                            reason: string;
+                            verifiedBy?: string | null;
+                            expiresWhenUpstreamMatches: boolean;
+                            createdAt: number;
+                            updatedAt: number;
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /** Delete one model-catalog overlay row */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        provider: string;
+                        modelId: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Overlay row deleted */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            deleted: boolean;
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/oauth/refresh-locks/{key}": {
         parameters: {
             query?: never;
