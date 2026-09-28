@@ -4,13 +4,16 @@ import { resolveTaskAuditUserId } from "../be/audit-user";
 import {
   type ApprovalRequest,
   createApprovalRequest,
+  getAgentById,
   getApprovalRequestById,
   getWorkflowRun,
   getWorkflowRunStep,
   listApprovalRequests,
   resolveApprovalRequest,
 } from "../be/db";
+import type { RbacPrincipal } from "../rbac";
 import { getRequestAuth } from "../utils/request-auth-context";
+import { cancelApprovalRequest } from "../workflows/approval-cancel";
 import { createApprovalFollowUpTask } from "../workflows/approval-notifications";
 import { workflowEventBus } from "../workflows/event-bus";
 import { route } from "./route-def";
@@ -261,6 +264,32 @@ const respondRoute = route({
   auth: { apiKey: true },
 });
 
+const cancelRoute = route({
+  method: "post",
+  path: "/api/approval-requests/{id}/cancel",
+  pattern: ["api", "approval-requests", null, "cancel"],
+  summary: "Cancel a pending approval request",
+  tags: ["ApprovalRequests"],
+  params: z.object({ id: z.string().uuid() }),
+  body: z.object({ reason: z.string().max(500).optional() }),
+  responses: {
+    200: {
+      description:
+        "Request cancelled, or already cancelled. A request that gates a running or waiting workflow run cancels that run too.",
+      schema: z.object({
+        approvalRequest: ApprovalRequestSchema,
+        alreadyCancelled: z.boolean(),
+        runCancelled: z.boolean(),
+      }),
+    },
+    403: { description: "Caller may not cancel this request" },
+    404: { description: "Not found" },
+    409: { description: "Already resolved with approved, rejected, or timeout" },
+  },
+  auth: { apiKey: true },
+  rbac: { permission: "approval.cancel.any" },
+});
+
 const listRoute = route({
   method: "get",
   path: "/api/approval-requests",
@@ -307,6 +336,21 @@ export async function handleApprovalRequests(
         `Approval request already resolved with status: ${existing.status}${reason}`,
         409,
       );
+      return true;
+    }
+
+    // A late answer never resolves the request: it becomes timeout at once.
+    // A workflow run then routes on its timeout port on the next heartbeat
+    // tick through getStuckApprovalRuns, so no approval.resolved is emitted.
+    if (existing.expiresAt && new Date(existing.expiresAt) < new Date()) {
+      const timedOut = await resolveApprovalRequest(existing.id, {
+        status: "timeout",
+        resolutionReason: `Timed out: the answer arrived after the deadline ${existing.expiresAt}`,
+      });
+      if (timedOut && !existing.workflowRunId) {
+        await createApprovalFollowUpTask(timedOut, "hitl.timeout");
+      }
+      jsonError(res, `Approval request expired at ${existing.expiresAt}`, 409);
       return true;
     }
 
@@ -378,6 +422,30 @@ export async function handleApprovalRequests(
     return true;
   }
 
+  // 4-segment: POST /api/approval-requests/{id}/cancel
+  if (cancelRoute.match(req.method, pathSegments)) {
+    const parsed = await cancelRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+
+    const { principal, resolvedBy } = await approvalCancelPrincipal(req);
+    const result = await cancelApprovalRequest({
+      id: parsed.params.id,
+      reason: parsed.body.reason,
+      principal,
+      resolvedBy,
+    });
+    if (!result.ok) {
+      jsonError(res, result.message, result.status);
+      return true;
+    }
+    cancelRoute.respond(res, 200, {
+      approvalRequest: toApprovalRequestResponse(result.request),
+      alreadyCancelled: result.alreadyCancelled,
+      runCancelled: result.runCancelled,
+    });
+    return true;
+  }
+
   // 3-segment with param: GET /api/approval-requests/{id}
   if (getByIdRoute.match(req.method, pathSegments)) {
     const parsed = await getByIdRoute.parse(req, res, pathSegments, queryParams);
@@ -443,4 +511,28 @@ export async function handleApprovalRequests(
   }
 
   return false;
+}
+
+/**
+ * The caller of the cancel route. The shared API key with an `X-Agent-ID`
+ * header identifies that agent, as on the create route.
+ */
+async function approvalCancelPrincipal(
+  req: IncomingMessage,
+): Promise<{ principal: RbacPrincipal; resolvedBy: string | null }> {
+  const auth = getRequestAuth(req);
+  if (auth?.kind === "user") {
+    return { principal: { kind: "user", userId: auth.userId }, resolvedBy: auth.userId };
+  }
+  const rawAgentId = req.headers["x-agent-id"];
+  const agentId =
+    auth?.kind === "agent" ? auth.agentId : Array.isArray(rawAgentId) ? rawAgentId[0] : rawAgentId;
+  if (agentId) {
+    const agent = await getAgentById(agentId);
+    return {
+      principal: { kind: "agent", agentId, isLead: agent?.isLead ?? false },
+      resolvedBy: agentId,
+    };
+  }
+  return { principal: { kind: "operator" }, resolvedBy: "operator" };
 }

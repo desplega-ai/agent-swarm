@@ -3205,6 +3205,7 @@ export interface paths {
                         workflowRunStepId?: string;
                         /** Format: uuid */
                         sourceTaskId?: string;
+                        /** @description Seconds until the request expires. After that the request becomes 'timeout' and you get a hitl-follow-up task. A request with no timeout is cancelled after APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS days (default 7). */
                         timeoutSeconds?: number;
                         notifications?: {
                             /** @enum {string} */
@@ -3502,6 +3503,131 @@ export interface paths {
                     };
                 };
                 /** @description Already resolved */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/approval-requests/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel a pending approval request */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        reason?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Request cancelled, or already cancelled. A request that gates a running or waiting workflow run cancels that run too. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            approvalRequest: {
+                                id: string;
+                                title: string;
+                                questions: {
+                                    id: string;
+                                    /** @enum {string} */
+                                    type: "approval" | "text" | "single-select" | "multi-select" | "boolean";
+                                    label: string;
+                                    required?: boolean;
+                                    description?: string;
+                                    placeholder?: string;
+                                    multiline?: boolean;
+                                    options?: {
+                                        value: string;
+                                        label: string;
+                                        description?: string;
+                                    }[];
+                                    minSelections?: number;
+                                    maxSelections?: number;
+                                    defaultValue?: boolean;
+                                }[];
+                                workflowRunId: string | null;
+                                workflowRunStepId: string | null;
+                                sourceTaskId: string | null;
+                                approvers: {
+                                    users?: string[];
+                                    roles?: string[];
+                                    policy: "any" | "all" | {
+                                        min: number;
+                                    };
+                                };
+                                /** @enum {string} */
+                                status: "pending" | "approved" | "rejected" | "timeout" | "cancelled";
+                                responses: {
+                                    [key: string]: unknown;
+                                } | null;
+                                resolvedBy: string | null;
+                                resolvedAt: string | null;
+                                resolutionReason: string | null;
+                                timeoutSeconds: number | null;
+                                expiresAt: string | null;
+                                notificationChannels: {
+                                    /** @enum {string} */
+                                    channel: "slack" | "email";
+                                    target: string;
+                                    messageTs?: string;
+                                }[] | null;
+                                createdBy?: string;
+                                createdAt: string;
+                                updatedAt: string;
+                            };
+                            alreadyCancelled: boolean;
+                            runCancelled: boolean;
+                        };
+                    };
+                };
+                /** @description Caller may not cancel this request */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Already resolved with approved, rejected, or timeout */
                 409: {
                     headers: {
                         [name: string]: unknown;
