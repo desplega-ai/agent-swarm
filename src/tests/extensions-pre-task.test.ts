@@ -178,6 +178,7 @@ describe("extension task boundaries", () => {
       config: {
         internal: ["tarasyarema", "harlequinetcie"],
         external: ["fuvidani", "capchase-bot"],
+        reviewBots: ["review-bot"],
       },
     });
     await enableExtension(installed.extension.id);
@@ -202,6 +203,12 @@ describe("extension task boundaries", () => {
       "https://github.com/acme/project/issues/1",
     );
     await createFromGitHub(
+      "internal sender review",
+      "tarasyarema",
+      "github-review",
+      "https://github.com/acme/project/pull/2",
+    );
+    await createFromGitHub(
       "external sender PR comment",
       "FuViDaNi",
       "github-comment",
@@ -213,13 +220,19 @@ describe("extension task boundaries", () => {
       "github-pr",
       "https://github.com/acme/project/pull/3",
     );
+    await createFromGitHub(
+      "external sender PR review",
+      "fuvidani",
+      "github-review",
+      "https://github.com/acme/project/pull/4",
+    );
 
     await expect(
       createFromGitHub(
         "external sender issue comment",
         "fuvidani",
         "github-comment",
-        "https://github.com/acme/project/issues/4",
+        "https://github.com/acme/project/issues/5",
       ),
     ).rejects.toThrow('GitHub sender "fuvidani" is blocked: external senders are allowed only');
     await expect(
@@ -227,21 +240,37 @@ describe("extension task boundaries", () => {
         "unknown sender issue",
         "unknown-user",
         "github-issue",
-        "https://github.com/acme/project/issues/5",
+        "https://github.com/acme/project/issues/6",
       ),
     ).rejects.toThrow('GitHub sender "unknown-user" is blocked: sender is not on the internal');
 
+    await expect(
+      createFromGitHub(
+        "unknown sender review",
+        "unknown-user",
+        "github-review",
+        "https://github.com/acme/project/pull/7",
+      ),
+    ).rejects.toThrow('GitHub sender "unknown-user" is blocked: sender is not on the internal');
     await createFromGitHub(
-      "unknown sender review",
-      "unknown-user",
+      "review bot review",
+      "REVIEW-BOT",
       "github-review",
-      "https://github.com/acme/project/pull/6",
+      "https://github.com/acme/project/pull/8",
     );
+    await expect(
+      createFromGitHub(
+        "review bot PR comment",
+        "review-bot",
+        "github-comment",
+        "https://github.com/acme/project/pull/9",
+      ),
+    ).rejects.toThrow('GitHub sender "review-bot" is blocked: review bots are allowed only');
     await createFromGitHub(
       "non-GitHub source",
       "unknown-user",
       "github-issue",
-      "https://github.com/acme/project/issues/7",
+      "https://github.com/acme/project/issues/10",
       "api",
     );
   });

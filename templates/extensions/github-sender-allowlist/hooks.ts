@@ -4,7 +4,8 @@ import { z } from "zod";
 export const config = z.object({
   internal: z.array(z.string()).default([]),
   external: z.array(z.string()).default([]),
-  exemptTaskTypes: z.array(z.string()).default(["github-review"]),
+  reviewBots: z.array(z.string()).default([]),
+  exemptTaskTypes: z.array(z.string()).default([]),
 });
 
 const manifest = {
@@ -26,20 +27,27 @@ const extension: SwarmExtension<typeof manifest> = (api) => {
     if (options.source !== "github") return;
 
     const taskType = options.taskType ?? "unknown";
-    if (ctx.config.exemptTaskTypes.includes(taskType)) return;
-
     const login = options.vcsAuthor ?? "";
     if (includesLogin(ctx.config.internal, login)) return;
 
+    const isReviewBot = includesLogin(ctx.config.reviewBots, login);
+    if (isReviewBot && taskType === "github-review") return;
+    if (!isReviewBot && ctx.config.exemptTaskTypes.includes(taskType)) return;
+
     const isPullRequest = options.vcsUrl?.includes("/pull/") ?? false;
     const isExternalPullRequestTask =
-      (taskType === "github-comment" || taskType === "github-pr") && isPullRequest;
+      (taskType === "github-comment" ||
+        taskType === "github-pr" ||
+        taskType === "github-review") &&
+      isPullRequest;
     const isExternalSender = includesLogin(ctx.config.external, login);
-    if (isExternalSender && isExternalPullRequestTask) return;
+    if (!isReviewBot && isExternalSender && isExternalPullRequestTask) return;
 
-    const rule = isExternalSender
-      ? "external senders are allowed only for PR comments and github-pr tasks on pull requests"
-      : "sender is not on the internal or external allowlist";
+    const rule = isReviewBot
+      ? "review bots are allowed only for github-review tasks"
+      : isExternalSender
+        ? "external senders are allowed only for PR comments, reviews, and github-pr tasks on pull requests"
+        : "sender is not on the internal, external, or reviewBots allowlist";
     const reason = `GitHub sender "${login || "unknown"}" is blocked: ${rule}.`;
     ctx.log.warn(reason, { login: login || null, taskType, vcsUrl: options.vcsUrl ?? null });
     return block(reason);
