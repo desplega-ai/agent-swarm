@@ -1,6 +1,7 @@
-import { Loader2, Plus, UserCircle2 } from "lucide-react";
+import { Plus, UserCircle2 } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { useCreateUser, useUsers } from "@/api/hooks/use-users";
+import { Spinner } from "@/components/kibo-ui/spinner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -91,7 +92,7 @@ export function IdentityForm({
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin mr-2" /> Loading users…
+        <Spinner className="size-4 mr-2" /> Loading users…
       </div>
     );
   }
@@ -189,14 +190,12 @@ export function IdentityForm({
         ) : (
           <span />
         )}
-        <Button type="submit" disabled={!newName.trim() || createUser.isPending}>
-          {createUser.isPending ? (
-            <>
-              <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> Creating…
-            </>
-          ) : (
-            (submitLabels?.create ?? "Create & continue")
-          )}
+        <Button
+          type="submit"
+          disabled={!newName.trim()}
+          status={createUser.isPending ? "loading" : "idle"}
+        >
+          {submitLabels?.create ?? "Create & continue"}
         </Button>
       </div>
     </form>

@@ -7,6 +7,7 @@ import {
   deleteSwarmConfigByKey,
   EXTENSION_AGENT_ROLE,
   getAgentById,
+  getAgentDailyTaskCounts,
   getAgentWithTasks,
   getAllAgents,
   getAllAgentsWithTasks,
@@ -416,6 +417,27 @@ const listAgentRuntimeInstances = route({
   },
 });
 
+const getAgentTaskActivity = route({
+  method: "get",
+  path: "/api/agents/{id}/task-activity",
+  pattern: ["api", "agents", null, "task-activity"],
+  summary: "Daily task counts for an agent",
+  description:
+    "Number of tasks created for the agent per UTC day over the last `days` days (default 365, max 730), oldest first. Days with no tasks are omitted. Backs the activity heatmap on the agent page.",
+  tags: ["Agents"],
+  params: z.object({ id: z.string() }),
+  query: z.object({ days: z.coerce.number().int().min(1).max(730).optional() }),
+  responses: {
+    200: {
+      description: "Daily task counts",
+      schema: z.object({
+        days: z.array(z.object({ date: z.string(), count: z.number().int() })),
+      }),
+    },
+    404: { description: "Agent not found" },
+  },
+});
+
 const ContentHashSchema = z.string().regex(/^[0-9a-f]{64}$/, "sha256 hex");
 
 const ProfileSyncRejectionSchema = z.object({
@@ -816,6 +838,19 @@ export async function handleAgentsRest(
         ({ metadata: _metadata, ...instance }) => instance,
       ),
       staleThresholdMinutes: runtimeStaleThresholdMinutes(),
+    });
+    return true;
+  }
+
+  if (getAgentTaskActivity.match(req.method, pathSegments)) {
+    const parsed = await getAgentTaskActivity.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    if (!(await getAgentById(parsed.params.id))) {
+      jsonError(res, "Agent not found", 404);
+      return true;
+    }
+    getAgentTaskActivity.respond(res, 200, {
+      days: await getAgentDailyTaskCounts(parsed.params.id, parsed.query.days ?? 365),
     });
     return true;
   }

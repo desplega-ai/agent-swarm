@@ -108,8 +108,10 @@ export function StatPanel({
 }: StatPanelProps) {
   const t = TONE_CLASSES[tone];
   return (
-    <Card className={className}>
-      <CardContent className="p-3 flex items-center gap-3">
+    // Number-first tiles (no icon) drop the Card's own vertical padding and
+    // top-align: label, value, and detail read as one block, about 96px tall.
+    <Card className={cn(!Icon && "py-0", className)}>
+      <CardContent className={cn("flex gap-3", Icon ? "items-center p-3" : "items-start p-4")}>
         {Icon ? (
           <div className={cn("rounded-md p-2", t.iconBg)}>
             <Icon className={cn("h-4 w-4", t.iconText)} />

@@ -61,6 +61,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAutoScroll } from "@/hooks/use-auto-scroll";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
+import { isCoarsePointerInput, shouldSubmitOnEnterKeyDown } from "@/lib/enter-submit";
 import { cn, formatRelativeTime } from "@/lib/utils";
 
 // --- Channel sidebar ---
@@ -396,10 +397,20 @@ function MessageInput({
           value={content}
           onChange={(e) => setContent(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              handleSend();
-            }
+            const submit = shouldSubmitOnEnterKeyDown(
+              {
+                key: e.key,
+                shiftKey: e.shiftKey,
+                metaKey: e.metaKey,
+                ctrlKey: e.ctrlKey,
+                isComposing: e.nativeEvent.isComposing,
+                keyCode: e.nativeEvent.keyCode,
+              },
+              isCoarsePointerInput(),
+            );
+            if (!submit) return;
+            e.preventDefault();
+            handleSend();
           }}
           className="min-h-[36px] max-h-24 resize-none text-sm"
           rows={1}

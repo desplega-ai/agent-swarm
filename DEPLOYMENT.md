@@ -511,7 +511,7 @@ When a worker starts, it:
 
 API retrieval defaults enable hybrid search and graph expansion, with `MEMORY_DEMOTION_FLOOR=1.0` disabling rating-based demotion. On the API and workers, unset `MEMORY_RATERS` enables `implicit-citation,explicit-self`; set it explicitly empty to disable all raters. The `llm` rater remains opt-in. Without embedding credentials, search falls back to full-text search, then recency when full-text search is unavailable.
 
-The bundled agent-fs service uses version 0.13.9. Provisioning seeds agent display names for readable file ownership.
+The bundled agent-fs service uses version 0.13.10. Provisioning seeds agent display names for readable file ownership.
 
 ## Environment Variables
 

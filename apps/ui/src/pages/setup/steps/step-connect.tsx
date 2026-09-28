@@ -1,9 +1,10 @@
-import { ExternalLink, Loader2, Plug, UserRound, XCircle } from "lucide-react";
+import { ExternalLink, Plug, UserRound, XCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import type { OnboardingResponse } from "@/api/types";
 import { IdentityForm } from "@/components/identity/identity-form";
+import { Spinner } from "@/components/kibo-ui/spinner";
 import { FadeIn } from "@/components/onboarding/fade-in";
 import { setupExitHref } from "@/components/onboarding/onboarding-redirect";
 import { SetupCard } from "@/components/onboarding/setup-card";
@@ -361,7 +362,7 @@ function ConnectForm({ onConnected }: { onConnected: () => void }) {
 
         <div>
           <Button type="submit" disabled={!urlValid || !apiKey || running}>
-            {running ? <Loader2 className="animate-spin" /> : null}
+            {running ? <Spinner className="size-4" /> : null}
             Connect
           </Button>
         </div>

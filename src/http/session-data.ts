@@ -18,7 +18,12 @@ import {
 import { recordSessionCost } from "../otel";
 import { incrementServerSessionsProcessed } from "../server-runtime-counters";
 import type { SessionCost } from "../types";
-import { SessionCostModelBreakdownSchema, SessionCostSchema, SessionLogSchema } from "../types";
+import {
+  PricingProviderSchema,
+  SessionCostModelBreakdownSchema,
+  SessionCostSchema,
+  SessionLogSchema,
+} from "../types";
 import { route } from "./route-def";
 import { recomputeSessionCost } from "./session-cost-recompute";
 import { cachedUsageReport } from "./usage-cache";
@@ -205,9 +210,9 @@ const createSessionCostRoute = route({
     // its own billing and the adapter reports `totalCostUsd: 0`, so the row
     // lands as `costSource: 'unpriced'`. It still has to be accepted here or
     // every ACP session's cost POST 400s and the row is silently dropped.
-    provider: z
-      .enum(["claude", "claude-managed", "codex", "pi", "opencode", "devin", "gemini", "acp"])
-      .optional(),
+    // Reuses PricingProviderSchema so this list can't drift from it again
+    // (#1636: it previously forgot `dsh`).
+    provider: PricingProviderSchema.optional(),
     /**
      * Phase 6: epoch-ms timestamp used as the "active price at time T" lookup
      * basis. Defaults to `Date.now()` when omitted. Including it lets

@@ -380,7 +380,7 @@ export class HumanInTheLoopExecutor extends BaseExecutor<
                   elements: [
                     {
                       type: "mrkdwn",
-                      text: `⏱ Timeout: ${formatTimeout(config.timeout.seconds)} — auto-rejects if not responded`,
+                      text: `⏱ Timeout: ${formatTimeout(config.timeout.seconds)} — times out if not responded`,
                     },
                   ],
                 },

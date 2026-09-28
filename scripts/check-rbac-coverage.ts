@@ -47,6 +47,7 @@ const GATE_HELPER_SPECIFIERS = [
   "realtime/auth", // Room tools enforce namespace access through the shared guard.
   "kv-write-auth", // kv-set / kv-delete / kv-incr shared write guard
   "task-tool-ctx", // assertOwnsTask → task.read.own / task.cancel.own / task.action.own
+  "workflows/approval-cancel", // cancelApprovalRequest → approval.cancel.any
 ];
 
 /**

@@ -5,6 +5,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import pkg from "../../package.json";
 import { getSlackConfiguration, isSlackConfigured } from "../slack/config.ts";
 import { getApiKey } from "../utils/api-key.ts";
+import {
+  CONTAINER_ENGINE_LABELS,
+  composeCommandText,
+  engineForCommands,
+  isContainerEnginePreference,
+  resolveContainerEnginePreference,
+} from "./onboard/container-engine.ts";
 import { buildOnboardDashboardUrl } from "./onboard/dashboard-url.ts";
 import {
   parseMaxConcurrentTasks,
@@ -53,6 +60,7 @@ export function Onboard({
   preset,
   maxConcurrentTasks,
   pullPolicy,
+  containerEngine,
 }: OnboardProps) {
   const { exit } = useApp();
   const [state, setState] = useState<OnboardState>(() => {
@@ -75,6 +83,13 @@ export function Onboard({
       }
       initial.pullPolicy = pullPolicy;
     }
+    const engine = resolveContainerEnginePreference(containerEngine, process.env);
+    if (!engine.ok) {
+      initial.step = "error";
+      initial.error = engine.error;
+      return initial;
+    }
+    initial.containerEngine = engine.value;
     return initial;
   });
 
@@ -311,8 +326,14 @@ export function Onboard({
           </Box>
           <Box marginTop={1} flexDirection="column">
             <Text bold>Useful commands:</Text>
-            <Text dimColor> docker compose logs -f</Text>
-            <Text dimColor> docker compose down</Text>
+            <Text dimColor>
+              {" "}
+              {composeCommandText(engineForCommands(state.containerEngine), "logs -f")}
+            </Text>
+            <Text dimColor>
+              {" "}
+              {composeCommandText(engineForCommands(state.containerEngine), "down")}
+            </Text>
             <Text dimColor> agent-swarm setup</Text>
           </Box>
         </Box>
@@ -341,8 +362,22 @@ function renderStep(step: OnboardStep, props: StepProps) {
           <Text bold>How would you like to deploy your swarm?</Text>
           <Box marginTop={1}>
             <Select
-              options={[{ label: "Local (Docker Compose)", value: "local" }]}
-              onChange={() => props.goToNext({ deployType: "local" })}
+              defaultValue={props.state.containerEngine}
+              options={[
+                {
+                  label: "Local, auto-detect engine (Docker if installed, else Podman)",
+                  value: "auto",
+                },
+                { label: `Local (${CONTAINER_ENGINE_LABELS.docker} Compose)`, value: "docker" },
+                {
+                  label: `Local (${CONTAINER_ENGINE_LABELS.podman} Compose, rootless)`,
+                  value: "podman",
+                },
+              ]}
+              onChange={(value) => {
+                if (!isContainerEnginePreference(value)) return;
+                props.goToNext({ deployType: "local", containerEngine: value });
+              }}
             />
           </Box>
           <Text dimColor>Remote (SSH) — Coming soon</Text>

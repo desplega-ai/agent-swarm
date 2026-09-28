@@ -1,15 +1,8 @@
-import {
-  AlertCircle,
-  AlertTriangle,
-  ChevronDown,
-  ChevronRight,
-  Code2,
-  Loader2,
-  Timer,
-} from "lucide-react";
+import { AlertCircle, AlertTriangle, ChevronDown, ChevronRight, Code2, Timer } from "lucide-react";
 import { forwardRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { WorkflowNode, WorkflowRunStep } from "@/api/types";
+import { Spinner } from "@/components/kibo-ui/spinner";
 import { AgentLink } from "@/components/shared/agent-link";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -265,7 +258,7 @@ function AgentTaskOutput({ step }: { step: WorkflowRunStep }) {
     if (step.status === "running" || step.status === "waiting" || step.status === "pending") {
       return (
         <div className="flex items-center gap-2 text-xs text-muted-foreground py-1">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          <Spinner className="size-3.5" />
           <span>Task in progress</span>
         </div>
       );
@@ -303,11 +296,11 @@ function AgentTaskOutput({ step }: { step: WorkflowRunStep }) {
   );
 }
 
-function HitlOutput({ step, node }: { step: WorkflowRunStep; node?: WorkflowNode }) {
+export function HitlOutput({ step, node }: { step: WorkflowRunStep; node?: WorkflowNode }) {
   const output = step.output as
     | {
         requestId: string;
-        status: "approved" | "rejected" | "timeout";
+        status: "approved" | "rejected" | "timeout" | "cancelled";
         responses: Record<string, unknown> | null;
       }
     | null
@@ -347,13 +340,17 @@ function HitlOutput({ step, node }: { step: WorkflowRunStep; node?: WorkflowNode
       ? "border-status-success/30 text-status-success-strong"
       : output.status === "rejected"
         ? "border-status-error/30 text-status-error-strong"
-        : "border-status-active/30 text-status-active-strong";
+        : output.status === "cancelled"
+          ? "border-border text-muted-foreground"
+          : "border-status-active/30 text-status-active-strong";
   const statusLabel =
     output.status === "approved"
       ? "Approved"
       : output.status === "rejected"
         ? "Rejected"
-        : "Timed out";
+        : output.status === "cancelled"
+          ? "Cancelled"
+          : "Timed out";
 
   return (
     <div className="space-y-2">

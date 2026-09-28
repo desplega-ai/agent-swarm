@@ -1,5 +1,5 @@
 import { Bot, House, ListTodo } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useConfigs } from "@/api/hooks/use-config-api";
 import { useStatus } from "@/api/hooks/use-status";
 import { SaveIndicator, WithIndicator } from "@/components/onboarding/save-indicator";
@@ -16,7 +16,9 @@ import {
   useAutosaveScope,
   useContinueAction,
 } from "@/hooks/use-autosave";
+import { useTheme } from "@/hooks/use-theme";
 import { AVATAR_COLOR_INPUT_FALLBACK, AVATAR_SUGGESTED_SWATCHES } from "@/lib/agent-color";
+import { resolveCssVarToHex } from "@/lib/css-color";
 import { cn } from "@/lib/utils";
 import { httpUrlError } from "../components/http-url";
 import { DEFAULT_SWARM_NAME, initialSwarmName } from "../components/swarm-name";
@@ -91,6 +93,18 @@ export function StepName({ onboarding, act, setContinueBlocker, setContinueActio
         : { value: "", touched: emojiDraft !== null, valid: true };
 
   const colorInput = colorDraft ?? identity?.brand_color ?? "";
+  // With no brand color the sidebar name renders in the theme's text color.
+  // Show that color in the swatch instead of the picker's black fallback.
+  const { theme, preset } = useTheme();
+  const [themeNameHex, setThemeNameHex] = useState<string | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-read the CSS variable when the theme or preset changes
+  useEffect(() => {
+    // The theme provider applies its class after this effect; read next frame.
+    const frame = requestAnimationFrame(() =>
+      setThemeNameHex(resolveCssVarToHex("--color-sidebar-foreground")),
+    );
+    return () => cancelAnimationFrame(frame);
+  }, [theme, preset]);
   const color = colorInput.trim();
   const colorValid = color === "" || HEX_RE.test(color);
 
@@ -271,7 +285,9 @@ export function StepName({ onboarding, act, setContinueBlocker, setContinueActio
                 <Input
                   type="color"
                   aria-label="Brand color picker"
-                  value={colorValid && color ? color : AVATAR_COLOR_INPUT_FALLBACK}
+                  value={
+                    colorValid && color ? color : (themeNameHex ?? AVATAR_COLOR_INPUT_FALLBACK)
+                  }
                   onChange={(event) => setColorDraft(event.target.value)}
                   className="w-10 shrink-0 p-1"
                 />
@@ -281,7 +297,7 @@ export function StepName({ onboarding, act, setContinueBlocker, setContinueActio
                 >
                   <Input
                     id="setup-brand-color"
-                    placeholder="#RRGGBB"
+                    placeholder={themeNameHex ? `${themeNameHex} (theme text)` : "#RRGGBB"}
                     maxLength={7}
                     spellCheck={false}
                     value={colorInput}

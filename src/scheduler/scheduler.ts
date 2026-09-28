@@ -36,6 +36,7 @@ import { handleScheduleTrigger } from "@/workflows/triggers";
 import {
   dispatchDeferredTaskWait,
   initDeferredTaskWaits,
+  reapSpentDeferredSchedules,
   reconcileDeferredTaskWaits,
   stopDeferredTaskWaits,
 } from "./deferred-task-waits";
@@ -46,6 +47,8 @@ export { createStandaloneScheduleTask } from "./schedule-task";
 let schedulerInterval: ReturnType<typeof setInterval> | null = null;
 let schedulerRun: object | null = null;
 let isProcessing = false;
+let lastDeferredReapAt = 0;
+const DEFERRED_REAP_INTERVAL_MS = 60 * 60 * 1000;
 let executorRegistry: ExecutorRegistry | null = null;
 
 /**
@@ -503,6 +506,17 @@ async function processSchedules(): Promise<void> {
         await executeSchedule(schedule);
       } catch (err) {
         console.error(`[Scheduler] Error executing "${schedule.name}":`, err);
+      }
+    }
+
+    // After dispatch, so a slow or failing reap never delays a due schedule.
+    if (Date.now() - lastDeferredReapAt >= DEFERRED_REAP_INTERVAL_MS) {
+      lastDeferredReapAt = Date.now();
+      try {
+        const reaped = await reapSpentDeferredSchedules();
+        if (reaped) console.log(`[Scheduler] Reaped ${reaped} spent deferral schedule(s)`);
+      } catch (err) {
+        console.error("[Scheduler] Deferral schedule reap failed:", err);
       }
     }
   } finally {

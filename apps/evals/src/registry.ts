@@ -1,6 +1,7 @@
 import { getAaForConfig } from "../configs/aa.ts";
 import { configs } from "../configs/index.ts";
 import { scenarios } from "../scenarios/index.ts";
+import { validateConfigModel } from "./cost/resolve-alias.ts";
 import { normalizeOutcome } from "./normalize-outcome.ts";
 import type { Registry } from "./runner/index.ts";
 import { findDependencyCycles } from "./runner/topo.ts";
@@ -279,6 +280,37 @@ export function validateScenario(s: Scenario): string[] {
   return errors;
 }
 
+/** DB-backed config rows (harness_configs) layered over the code seeds; null = code only. */
+let dbConfigs: { configs: HarnessConfig[]; archivedIds: Set<string> } | null = null;
+
+/**
+ * Install the harness_configs table contents as the config source. The server
+ * calls this at boot and after every POST/PATCH; the CLI never does, so it
+ * keeps using configs/index.ts alone. Rows win over code seeds with the same
+ * id, and archived rows drop out of the registry.
+ */
+export function setDbConfigs(
+  configs: HarnessConfig[] | null,
+  archivedIds: Iterable<string> = [],
+): void {
+  dbConfigs = configs ? { configs, archivedIds: new Set(archivedIds) } : null;
+}
+
+function mergedConfigs(): HarnessConfig[] {
+  if (!dbConfigs) return configs;
+  const byId = new Map(configs.map((c) => [c.id, c]));
+  for (const c of dbConfigs.configs) {
+    // A DB row that no longer validates is skipped, not fatal: one bad edit must not stop the server.
+    if (validateConfigModel(c).length > 0) {
+      console.warn(`[configs] skipping invalid DB config "${c.id}"`);
+      continue;
+    }
+    byId.set(c.id, c);
+  }
+  for (const id of dbConfigs.archivedIds) byId.delete(id);
+  return [...byId.values()];
+}
+
 /** Fail fast at CLI/server startup: aggregate every violation across all scenarios. */
 export function loadRegistry(): Registry {
   const violations: string[] = [];
@@ -287,14 +319,19 @@ export function loadRegistry(): Registry {
       violations.push(`scenario "${scenario.id}": ${error}`);
     }
   }
+  for (const config of configs) {
+    for (const error of validateConfigModel(config)) {
+      violations.push(`config "${config.id}": ${error}`);
+    }
+  }
   if (violations.length > 0) {
     throw new Error(
-      `invalid scenario definitions:\n${violations.map((v) => `  - ${v}`).join("\n")}`,
+      `invalid registry definitions:\n${violations.map((v) => `  - ${v}`).join("\n")}`,
     );
   }
   return {
     scenarios: new Map(scenarios.map((s) => [s.id, s])),
-    configs: new Map(configs.map((c) => [c.id, c])),
+    configs: new Map(mergedConfigs().map((c) => [c.id, c])),
   };
 }
 
@@ -419,6 +456,7 @@ export function serializeConfig(c: HarnessConfig) {
     label: c.label ?? null,
     provider: c.provider,
     model: c.model ?? null,
+    modelAlias: c.modelAlias ?? null,
     modelTier: c.modelTier ?? null,
     envKeys: c.env ? Object.keys(c.env) : [],
     /** v7.6 item D: AA benchmark block; null = unmatched (UI renders nothing). */

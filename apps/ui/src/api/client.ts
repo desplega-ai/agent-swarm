@@ -304,6 +304,16 @@ class ApiClient {
     return res.json();
   }
 
+  async fetchAgentTaskActivity(
+    id: string,
+    days = 365,
+  ): Promise<{ days: { date: string; count: number }[] }> {
+    const url = `${this.getBaseUrl()}/api/agents/${id}/task-activity?days=${days}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch agent task activity: ${res.status}`);
+    return res.json();
+  }
+
   async fetchAgentRuntime(id: string, repoId?: string): Promise<AgentRuntimeResponse | null> {
     const params = new URLSearchParams();
     if (repoId) params.set("repoId", repoId);
@@ -2048,6 +2058,24 @@ class ApiClient {
           : `Failed to respond to approval request: ${res.status}`;
       throw new Error(message);
     }
+    return res.json();
+  }
+
+  async cancelApprovalRequest(
+    id: string,
+    reason?: string,
+  ): Promise<{
+    approvalRequest: ApprovalRequest;
+    alreadyCancelled: boolean;
+    runCancelled: boolean;
+  }> {
+    const url = `${this.getBaseUrl()}/api/approval-requests/${id}/cancel`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify({ reason }),
+    });
+    if (!res.ok) throw new Error(`Failed to cancel approval request: ${res.status}`);
     return res.json();
   }
 

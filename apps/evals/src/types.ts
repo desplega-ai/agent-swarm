@@ -17,8 +17,14 @@ export interface HarnessConfig {
   id: string;
   label?: string;
   provider: HarnessProvider;
-  /** Concrete model override (MODEL_OVERRIDE for the worker). */
+  /** Concrete model override (MODEL_OVERRIDE for the worker). Exclusive with `modelAlias`. */
   model?: string;
+  /**
+   * Moving model alias (`latest:anthropic/opus`, `latest:openrouter/deepseek/deepseek-v4*`).
+   * Resolved once at run creation; the concrete id goes to MODEL_OVERRIDE and
+   * `eval_run_configs`. Exclusive with `model`. See src/cost/resolve-alias.ts.
+   */
+  modelAlias?: string;
   /** Portable tier intent; resolved by the worker at claim time. */
   modelTier?: ModelTier;
   /** Extra env vars for the worker container (merged over defaults). */
@@ -997,6 +1003,8 @@ export interface AnalyticsCell {
   maxCostUsd?: number | null;
   /** v7 §11: token sums over the cell's token-bearing attempts. */
   tokens?: AnalyticsTokenSums | null;
+  /** Resolved model keys the cell spans (same keys as the models rollup). */
+  models?: string[];
 }
 
 /** Per-model rollup (model key: tokens.model → registry config.model → "(configId)"). */

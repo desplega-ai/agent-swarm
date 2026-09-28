@@ -1,4 +1,8 @@
 import {
+  autoCancelStaleApprovalRequests,
+  timeoutExpiredApprovalRequests,
+} from "../be/approval-sweeps";
+import {
   assignUnassignedTaskPending,
   backfillSupersedeTaskResumeTaskId,
   buildRoutingAffinityFromAgent,
@@ -257,6 +261,8 @@ export interface HeartbeatFindings {
     staleRuntimes: number;
     staleOfferedTasks: number;
     abandonedDraftTasks: number;
+    approvalAutoCancelled: number;
+    approvalTimedOut: number;
   };
 }
 
@@ -334,6 +340,8 @@ export async function codeLevelTriage(): Promise<HeartbeatFindings> {
       staleRuntimes: 0,
       staleOfferedTasks: 0,
       abandonedDraftTasks: 0,
+      approvalAutoCancelled: 0,
+      approvalTimedOut: 0,
     },
   };
 
@@ -556,7 +564,10 @@ async function remediateCrashedWorkerTask(
   if (!task.agentId) return; // Type guard — caller already checked.
 
   if (decision.action === "fail") {
-    const failed = await failTask(task.id, decision.reason);
+    // CAS on the lastUpdatedAt this sweep read: progress since then wins.
+    const failed = await failTask(task.id, decision.reason, {
+      expectedLastUpdatedAt: task.lastUpdatedAt,
+    });
     if (failed) {
       findings.autoFailedTasks.push({
         taskId: task.id,
@@ -578,6 +589,8 @@ async function remediateCrashedWorkerTask(
   const superseded = await supersedeTask(task.id, {
     reason: decision.reason,
     resumeTaskId: null,
+    // CAS on the lastUpdatedAt this sweep read: progress since then wins.
+    expectedLastUpdatedAt: task.lastUpdatedAt,
   });
   if (!superseded) {
     return;
@@ -737,7 +750,16 @@ export async function runRebootSweep(): Promise<void> {
           // Heartbeated after (or within skew of) this boot → genuinely live, skip
           continue;
         }
-        // Pre-boot stale session → fall through to auto-fail + reboot-retry child
+        // Workers run in their own containers and outlive an API restart, and
+        // sessions heartbeat on tool calls only. A pre-boot heartbeat is
+        // therefore not evidence of a dead worker: a live one inside a long
+        // model call has none in the first seconds after boot. Only a session
+        // stale by the classifier's own threshold counts as dead; anything
+        // fresher is left to the regular stalled-task sweep.
+        if (Date.now() - sessionLastSeen < stallThresholdStaleHeartbeatMin() * 60 * 1000) {
+          continue;
+        }
+        // Stale session → fall through to auto-fail + reboot-retry child
       }
 
       // Clean up pre-boot stale session before failing (if it existed)
@@ -1187,6 +1209,24 @@ async function cleanupStaleResources(findings: HeartbeatFindings): Promise<void>
     // Workflow engine may not be initialized yet — skip recovery
     findings.staleCleanup.workflowRuns = 0;
   }
+  // Approval sweeps run after the recovery pass, so a waiting run past its
+  // expiresAt is routed on its timeout port before the timeout sweep reads it.
+  try {
+    findings.staleCleanup.approvalTimedOut = (
+      await timeoutExpiredApprovalRequests()
+    ).timedOut.length;
+  } catch (err) {
+    console.error("[heartbeat] approval timeout sweep failed:", err);
+    findings.staleCleanup.approvalTimedOut = 0;
+  }
+  try {
+    findings.staleCleanup.approvalAutoCancelled = (
+      await autoCancelStaleApprovalRequests()
+    ).cancelled.length;
+  } catch (err) {
+    console.error("[heartbeat] approval auto-cancel sweep failed:", err);
+    findings.staleCleanup.approvalAutoCancelled = 0;
+  }
 }
 
 // ============================================================================
@@ -1484,6 +1524,8 @@ export async function runHeartbeatSweep(): Promise<void> {
           staleRuntimes: 0,
           staleOfferedTasks: 0,
           abandonedDraftTasks: 0,
+          approvalAutoCancelled: 0,
+          approvalTimedOut: 0,
         },
       };
       // Expiry runs even on a cleanup-only tick: an idle agent whose runtime
@@ -1553,9 +1595,17 @@ function logFindings(findings: HeartbeatFindings): void {
     workflowRuns,
     staleOfferedTasks,
     abandonedDraftTasks,
+    approvalAutoCancelled,
+    approvalTimedOut,
   } = findings.staleCleanup;
   const totalCleanup =
-    sessions + reviewingTasks + mentionProcessing + inboxProcessing + workflowRuns;
+    sessions +
+    reviewingTasks +
+    mentionProcessing +
+    inboxProcessing +
+    workflowRuns +
+    approvalAutoCancelled +
+    approvalTimedOut;
   if (totalCleanup > 0) {
     parts.push(`stale_cleanup=${totalCleanup}`);
   }

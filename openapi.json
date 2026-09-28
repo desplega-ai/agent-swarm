@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "1.155.1",
+    "version": "1.157.0",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -3128,7 +3128,8 @@
               "opencode",
               "devin",
               "gemini",
-              "acp"
+              "acp",
+              "dsh"
             ]
           },
           "model": {
@@ -10525,6 +10526,85 @@
         }
       }
     },
+    "/api/agents/{id}/task-activity": {
+      "get": {
+        "summary": "Daily task counts for an agent",
+        "description": "Number of tasks created for the agent per UTC day over the last `days` days (default 365, max 730), oldest first. Days with no tasks are omitted. Backs the activity heatmap on the agent page.",
+        "tags": [
+          "Agents"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 730
+            },
+            "required": false,
+            "name": "days",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Daily task counts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "days": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "date": {
+                            "type": "string"
+                          },
+                          "count": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "date",
+                          "count"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "days"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Agent not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/agents/{id}/profile": {
       "put": {
         "summary": "Update agent profile (role, description, capabilities, etc.)",
@@ -11445,7 +11525,8 @@
                   },
                   "timeoutSeconds": {
                     "type": "integer",
-                    "minimum": 1
+                    "minimum": 1,
+                    "description": "Seconds until the request expires. After that the request becomes 'timeout' and you get a hitl-follow-up task. A request with no timeout is cancelled after APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS days (default 7)."
                   },
                   "notifications": {
                     "type": "array",
@@ -12712,6 +12793,353 @@
           },
           "409": {
             "description": "Already resolved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/approval-requests/{id}/cancel": {
+      "post": {
+        "summary": "Cancel a pending approval request",
+        "tags": [
+          "ApprovalRequests"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "maxLength": 500
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Request cancelled, or already cancelled. A request that gates a running or waiting workflow run cancels that run too.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "approvalRequest": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "questions": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "approval",
+                                  "text",
+                                  "single-select",
+                                  "multi-select",
+                                  "boolean"
+                                ]
+                              },
+                              "label": {
+                                "type": "string"
+                              },
+                              "required": {
+                                "type": "boolean"
+                              },
+                              "description": {
+                                "type": "string"
+                              },
+                              "placeholder": {
+                                "type": "string"
+                              },
+                              "multiline": {
+                                "type": "boolean"
+                              },
+                              "options": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "value": {
+                                      "type": "string"
+                                    },
+                                    "label": {
+                                      "type": "string"
+                                    },
+                                    "description": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "value",
+                                    "label"
+                                  ]
+                                }
+                              },
+                              "minSelections": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "maxSelections": {
+                                "type": "integer",
+                                "minimum": 1
+                              },
+                              "defaultValue": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "type",
+                              "label"
+                            ]
+                          }
+                        },
+                        "workflowRunId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "workflowRunStepId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "sourceTaskId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "approvers": {
+                          "type": "object",
+                          "properties": {
+                            "users": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "roles": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "policy": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "enum": [
+                                    "any"
+                                  ]
+                                },
+                                {
+                                  "type": "string",
+                                  "enum": [
+                                    "all"
+                                  ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "min": {
+                                      "type": "integer",
+                                      "minimum": 1
+                                    }
+                                  },
+                                  "required": [
+                                    "min"
+                                  ]
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "policy"
+                          ]
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "approved",
+                            "rejected",
+                            "timeout",
+                            "cancelled"
+                          ]
+                        },
+                        "responses": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "additionalProperties": {}
+                        },
+                        "resolvedBy": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "resolvedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "resolutionReason": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "timeoutSeconds": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "expiresAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "notificationChannels": {
+                          "type": [
+                            "array",
+                            "null"
+                          ],
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "channel": {
+                                "type": "string",
+                                "enum": [
+                                  "slack",
+                                  "email"
+                                ]
+                              },
+                              "target": {
+                                "type": "string"
+                              },
+                              "messageTs": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "channel",
+                              "target"
+                            ]
+                          }
+                        },
+                        "createdBy": {
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "updatedAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "title",
+                        "questions",
+                        "workflowRunId",
+                        "workflowRunStepId",
+                        "sourceTaskId",
+                        "approvers",
+                        "status",
+                        "responses",
+                        "resolvedBy",
+                        "resolvedAt",
+                        "resolutionReason",
+                        "timeoutSeconds",
+                        "expiresAt",
+                        "notificationChannels",
+                        "createdAt",
+                        "updatedAt"
+                      ]
+                    },
+                    "alreadyCancelled": {
+                      "type": "boolean"
+                    },
+                    "runCancelled": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "approvalRequest",
+                    "alreadyCancelled",
+                    "runCancelled"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller may not cancel this request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Already resolved with approved, rejected, or timeout, or its expiresAt passed",
             "content": {
               "application/json": {
                 "schema": {
@@ -28038,7 +28466,8 @@
                 "opencode",
                 "devin",
                 "gemini",
-                "acp"
+                "acp",
+                "dsh"
               ]
             },
             "required": true,
@@ -28119,7 +28548,8 @@
                 "opencode",
                 "devin",
                 "gemini",
-                "acp"
+                "acp",
+                "dsh"
               ]
             },
             "required": true,
@@ -28233,7 +28663,8 @@
                 "opencode",
                 "devin",
                 "gemini",
-                "acp"
+                "acp",
+                "dsh"
               ]
             },
             "required": true,
@@ -28315,7 +28746,8 @@
                 "opencode",
                 "devin",
                 "gemini",
-                "acp"
+                "acp",
+                "dsh"
               ]
             },
             "required": true,
@@ -38119,7 +38551,8 @@
                       "opencode",
                       "devin",
                       "gemini",
-                      "acp"
+                      "acp",
+                      "dsh"
                     ]
                   },
                   "createdAt": {
@@ -49810,6 +50243,27 @@
                         },
                         "taskId": {
                           "type": "string"
+                        },
+                        "skipped": {
+                          "type": "boolean"
+                        },
+                        "reason": {
+                          "type": "string"
+                        },
+                        "extension": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "name"
+                          ]
                         }
                       },
                       "required": [
@@ -49863,6 +50317,27 @@
                     },
                     "taskId": {
                       "type": "string"
+                    },
+                    "skipped": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "extension": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name"
+                      ]
                     }
                   },
                   "required": [

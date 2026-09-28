@@ -269,6 +269,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         placeholder: "5",
       },
       {
+        key: "APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS",
+        label: "Approval request auto-cancellation (days)",
+        description:
+          "Pending approval requests with no explicit timeout are cancelled after this many days. Requests with an explicit timeout are never auto-cancelled. 0 disables auto-cancellation.",
+        kind: "number",
+        unit: "days",
+        defaultValue: "7",
+        placeholder: "7",
+      },
+      {
         key: "HEARTBEAT_MAX_RESUME_GENERATIONS",
         label: "Max resume generations",
         description:

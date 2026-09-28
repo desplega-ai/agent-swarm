@@ -1,0 +1,130 @@
+import { describe, expect, mock, test } from "bun:test";
+import { renderToStaticMarkup } from "react-dom/server";
+import { MemoryRouter } from "react-router-dom";
+import type { AgentTask } from "../../api/types";
+import type { MobileNowViewProps, SectionQuery } from "./mobile-now";
+
+// The test runner cannot resolve ui's `@/` alias (see review-ack.test.tsx), so
+// each aliased module in this component's graph maps to its real file.
+mock.module("@/api/hooks/use-agents", () => require("../../api/hooks/use-agents"));
+mock.module("@/api/hooks/use-approval-requests", () =>
+  require("../../api/hooks/use-approval-requests"),
+);
+mock.module("@/api/hooks/use-tasks", () => require("../../api/hooks/use-tasks"));
+mock.module("@/components/kibo-ui/spinner", () => require("../kibo-ui/spinner"));
+mock.module("@/components/shared/mobile-list", () => require("../shared/mobile-list"));
+mock.module("@/components/shared/status-badge", () => require("../shared/status-badge"));
+mock.module("@/components/ui/badge", () => require("../ui/badge"));
+mock.module("@/components/ui/button", () => require("../ui/button"));
+mock.module("@/components/ui/skeleton", () => require("../ui/skeleton"));
+mock.module("@/components/ui/spinner", () => require("../ui/spinner"));
+mock.module("@/lib/config", () => require("../../lib/config"));
+mock.module("@/lib/recent-failures", () => require("../../lib/recent-failures"));
+mock.module("@/lib/task-title", () => require("../../lib/task-title"));
+mock.module("@/lib/utils", () => require("../../lib/utils"));
+
+const { MobileNowView } = await import("./mobile-now");
+
+const NOW = Date.parse("2026-09-26T12:00:00Z");
+
+function ok<T>(data: T): SectionQuery<T> {
+  return { data, isLoading: false, isError: false, errorUpdateCount: 0, refetch: () => {} };
+}
+function failedRead<T>(data?: T): SectionQuery<T> {
+  return { data, isLoading: false, isError: true, errorUpdateCount: 1, refetch: () => {} };
+}
+
+const runningTask = {
+  id: "t-run",
+  task: "Ship the mobile home",
+  status: "in_progress",
+  agentId: null,
+  createdAt: "2026-09-26T11:00:00Z",
+  lastUpdatedAt: "2026-09-26T11:30:00Z",
+} as AgentTask;
+
+function render(overrides: Partial<MobileNowViewProps>) {
+  const props: MobileNowViewProps = {
+    approvals: ok([]),
+    running: ok({ tasks: [], total: 0 }),
+    queuedCount: 0,
+    failed: ok({ tasks: [], total: 0 }),
+    agentName: () => "Picateclas",
+    now: NOW,
+    ...overrides,
+  };
+  return renderToStaticMarkup(
+    <MemoryRouter>
+      <MobileNowView {...props} />
+    </MemoryRouter>,
+  );
+}
+
+describe("MobileNowView", () => {
+  test("failed reads never render as an empty, healthy swarm", () => {
+    const html = render({
+      approvals: failedRead(),
+      running: failedRead(),
+      failed: failedRead(),
+    });
+    expect(html).toContain("Couldn&#x27;t load approvals");
+    expect(html).toContain("Couldn&#x27;t load running tasks");
+    expect(html).toContain("Couldn&#x27;t load failed tasks");
+    expect(html).not.toContain("No pending approvals");
+    expect(html).not.toContain("Nothing running");
+    expect(html).not.toContain("No failures in the last 24 hours");
+  });
+
+  test("a retry after a failed first read stays unavailable, not a skeleton", () => {
+    const retrying: SectionQuery<{ tasks: AgentTask[]; total: number }> = {
+      data: undefined,
+      isLoading: true,
+      isError: false,
+      errorUpdateCount: 2,
+      refetch: () => {},
+    };
+    const html = render({ running: retrying });
+    expect(html).toContain("Couldn&#x27;t load running tasks");
+  });
+
+  test("a failed refresh over cached data keeps the rows and flags them stale", () => {
+    const html = render({ running: failedRead({ tasks: [runningTask], total: 1 }) });
+    expect(html).toContain("Ship the mobile home");
+    expect(html).toContain("Refresh failed. Showing earlier data.");
+  });
+
+  test("approvals are worded team-wide, not as waiting on the viewer", () => {
+    const html = render({ approvals: ok([{}, {}]) });
+    expect(html).toContain("2 pending approvals");
+    expect(html).not.toContain("waiting on you");
+  });
+
+  test("the empty states still render when every read succeeded", () => {
+    const html = render({});
+    expect(html).toContain("No pending approvals");
+    expect(html).toContain("Nothing running");
+    expect(html).toContain("No failures in the last 24 hours");
+  });
+
+  test("a full page with no recent failure does not claim the day was clean", () => {
+    // 50 failures that finished days ago but were edited in the last hour fill
+    // the page, so a failure from today can still be on page two.
+    const edited = Array.from(
+      { length: 50 },
+      (_, i) =>
+        ({
+          id: `t-old-${i}`,
+          task: "Old failure",
+          status: "failed",
+          agentId: null,
+          createdAt: "2026-09-20T10:00:00Z",
+          finishedAt: "2026-09-20T11:00:00Z",
+          lastUpdatedAt: "2026-09-26T11:30:00Z",
+        }) as AgentTask,
+    );
+    const html = render({ failed: ok({ tasks: edited, total: 51 }) });
+    expect(html).not.toContain("No failures in the last 24 hours");
+    expect(html).toContain("No failures from the last 24 hours in the 50 checked.");
+    expect(html).toContain("0+");
+  });
+});

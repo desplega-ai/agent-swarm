@@ -23,10 +23,26 @@ type WorkflowRecord = {
   triggerSchema?: Record<string, unknown>;
   enabled?: boolean;
   nodeCount?: number;
+  createdByAgentId?: string | null;
+  createdAt?: string;
 };
 
+/**
+ * Workflows the worker created during this attempt. The sandbox can carry
+ * seeded or leaked workflows (6 or 11 seen), so only rows created by the
+ * worker, or after the task was created when no creator is recorded, count.
+ */
 async function workflows(ctx: JudgeContext): Promise<WorkflowRecord[]> {
-  return apiList<WorkflowRecord>(ctx, "/api/workflows?fields=full", ["workflows"]);
+  const rows = await apiList<WorkflowRecord>(ctx, "/api/workflows?fields=full", ["workflows"]);
+  const task = ctx.tasks[0];
+  const agentId =
+    typeof task?.agentId === "string" && task.agentId ? task.agentId : ctx.workers[0]?.agentId;
+  const since = typeof task?.createdAt === "string" ? Date.parse(task.createdAt) : Number.NaN;
+  return rows.filter((wf) => {
+    if (wf.createdByAgentId) return agentId === undefined || wf.createdByAgentId === agentId;
+    if (!Number.isFinite(since) || !wf.createdAt) return true;
+    return Date.parse(wf.createdAt) >= since;
+  });
 }
 
 function nextTargets(node: WorkflowNode): string[] {

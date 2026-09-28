@@ -34,6 +34,36 @@ describe("respondToApprovalRequest", () => {
   });
 });
 
+describe("cancelApprovalRequest", () => {
+  test("posts the reason to the cancel route", async () => {
+    let request: { url: string; method?: string; body?: unknown } | undefined;
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      request = { url, method: init?.method, body: JSON.parse(String(init?.body)) };
+      return new Response(
+        JSON.stringify({ approvalRequest: {}, alreadyCancelled: false, runCancelled: false }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    await api.cancelApprovalRequest("request-id", "Discarded from the dashboard");
+
+    expect(request).toEqual({
+      url: "https://api.example.test/api/approval-requests/request-id/cancel",
+      method: "POST",
+      body: { reason: "Discarded from the dashboard" },
+    });
+  });
+
+  test("throws with the status on a 409", async () => {
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ error: "already resolved" }), { status: 409 });
+
+    await expect(api.cancelApprovalRequest("request-id")).rejects.toThrow(
+      "Failed to cancel approval request: 409",
+    );
+  });
+});
+
 describe("updateAgentRuntime", () => {
   test("treats a missing runtime route as an unsupported capability", async () => {
     globalThis.fetch = async () => new Response("Not found", { status: 404 });

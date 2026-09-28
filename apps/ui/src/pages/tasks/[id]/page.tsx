@@ -87,6 +87,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DetailPageSection } from "@/components/ui/detail-page-layout";
+import { MiddleTruncation } from "@/components/ui/middle-truncation";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
@@ -221,7 +222,8 @@ function MetaRow({
         <Icon className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="text-xs text-muted-foreground">{label}</span>
       </div>
-      <div className="text-sm min-w-0">{children}</div>
+      {/* flex-1 gives middle-truncated values a definite width to fit. */}
+      <div className="text-sm min-w-0 flex-1">{children}</div>
     </div>
   );
 }
@@ -710,9 +712,7 @@ export default function TaskDetailPage() {
       )}
       {task.dir && (
         <MetaRow icon={FolderOpen} label="Dir">
-          <span className="text-xs font-mono truncate" title={task.dir}>
-            {task.dir}
-          </span>
+          <MiddleTruncation className="text-xs font-mono">{task.dir}</MiddleTruncation>
         </MetaRow>
       )}
       {task.claudeSessionId && (
@@ -799,7 +799,7 @@ export default function TaskDetailPage() {
                   className="flex items-center gap-1.5 text-xs text-primary hover:underline font-mono truncate"
                 >
                   <Link2 className="h-3.5 w-3.5 shrink-0" />
-                  {task.vcsUrl}
+                  <MiddleTruncation>{task.vcsUrl}</MiddleTruncation>
                   <ExternalLink className="h-3 w-3 shrink-0 text-muted-foreground" />
                 </a>
               )}

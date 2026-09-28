@@ -36,6 +36,7 @@ import {
 import { getEmbeddingProvider } from "../be/memory";
 import { getFileStorageProvider } from "../fs/registry";
 import { getSlackConfiguration } from "../slack/config";
+import { getSlackConnectionState } from "../slack/connection-state";
 import { type AgentCredStatus, AutomationIntegrationIdSchema, ProviderNameSchema } from "../types";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
@@ -438,6 +439,15 @@ function slackMilestone(state: AutomationSetupStates["slack"]): SetupMilestone {
     };
   }
 
+  if (config.mode === "socket" && getSlackConnectionState() === "connected") {
+    return {
+      id: "slack",
+      label: "Slack configured",
+      state: "verified",
+      action_url: automationIntegrationFixUrl("slack"),
+    };
+  }
+
   return {
     id: "slack",
     label: "Slack configured",
@@ -445,7 +455,7 @@ function slackMilestone(state: AutomationSetupStates["slack"]): SetupMilestone {
     hint:
       config.mode === "http"
         ? "HTTP credentials are configured, but HTTP ingress is unavailable until the receiver is installed."
-        : "Socket Mode credentials are configured; a live connection has not been verified.",
+        : "Socket Mode credentials are configured, but the bot is not connected to Slack.",
     action_url: automationIntegrationFixUrl("slack"),
   };
 }

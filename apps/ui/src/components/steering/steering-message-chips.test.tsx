@@ -2,9 +2,9 @@ import { describe, expect, mock, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { SteeringMessage } from "../../api/types";
 
-mock.module("@/components/ui/badge", () => import("../ui/badge"));
-mock.module("@/components/ui/tooltip", () => import("../ui/tooltip"));
-mock.module("@/lib/utils", () => import("../../lib/utils"));
+mock.module("@/components/ui/badge", () => require("../ui/badge"));
+mock.module("@/components/ui/tooltip", () => require("../ui/tooltip"));
+mock.module("@/lib/utils", () => require("../../lib/utils"));
 const { TooltipProvider } = await import("../ui/tooltip");
 const { SteeringLine, steeringSenderLabel } = await import("./steering-message-chips");
 const { QueuedSteeringBox } = await import("./queued-steering-box");

@@ -55,8 +55,11 @@ async function setupDb() {
        id TEXT PRIMARY KEY, run_id TEXT NOT NULL, scenario_id TEXT NOT NULL,
        config_id TEXT NOT NULL, attempt_index INTEGER NOT NULL, status TEXT NOT NULL,
        score REAL, cost_usd REAL, cost_source TEXT, judge_cost_usd REAL,
-       duration_ms INTEGER, tokens_json TEXT, sandbox_json TEXT
+       duration_ms INTEGER, tokens_json TEXT, sandbox_json TEXT, resolved_model TEXT
      )`,
+  );
+  await db.execute(
+    "CREATE TABLE eval_run_configs (run_id TEXT, config_id TEXT, resolved_model TEXT)",
   );
   await db.execute({
     sql: "INSERT INTO eval_runs (id, name, created_at) VALUES ('run-1', 'r', '2026-06-11T00:00:00Z')",

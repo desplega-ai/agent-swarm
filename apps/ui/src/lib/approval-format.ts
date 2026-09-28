@@ -1,5 +1,6 @@
 import type { ApprovalQuestion, ApprovalRequest } from "../api/types";
 import { hasRequiredResponse } from "./approval-responses";
+import { parseUTCDate } from "./utils";
 
 /**
  * Human rendering for approval-request answers and state, so the page never
@@ -217,6 +218,33 @@ export function formatRemaining(ms: number): string {
   return `${seconds}s left`;
 }
 
+export type ApproverRef = { kind: "user"; ref: string } | { kind: "role"; role: string };
+
+/**
+ * The approver sentence split into its words and its people, so the header can
+ * render each person as a chip: `{ lead: "Needs an answer from", people, tail: "" }`.
+ * `people` is empty for "Anyone on the team can answer".
+ */
+export function approverParts(approvers: ApprovalRequest["approvers"] | null | undefined): {
+  lead: string;
+  people: ApproverRef[];
+  tail: string;
+} {
+  const people: ApproverRef[] = [
+    ...(approvers?.users ?? []).map((ref) => ({ kind: "user" as const, ref })),
+    ...(approvers?.roles ?? []).map((role) => ({ kind: "role" as const, role })),
+  ];
+  const policy = approvers?.policy ?? "any";
+  if (people.length === 0) return { lead: "Anyone on the team can answer", people, tail: "" };
+  if (typeof policy === "object") {
+    return { lead: `Needs ${policy.min} of ${people.length}:`, people, tail: "" };
+  }
+  if (people.length === 1) return { lead: "Needs an answer from", people, tail: "" };
+  return policy === "all"
+    ? { lead: "Needs every approver:", people, tail: "" }
+    : { lead: "Any one of", people, tail: "can answer" };
+}
+
 /**
  * "Needs approval from Taras" / "Needs 2 of: a, b, c" / "Anyone can answer".
  * `nameFor` maps a stored approver (user id or email) to a display name;
@@ -226,16 +254,12 @@ export function describeApprovers(
   approvers: ApprovalRequest["approvers"] | null | undefined,
   nameFor: (idOrEmail: string) => string | undefined = () => undefined,
 ): string {
-  const people = [
-    ...(approvers?.users ?? []).map((u) => nameFor(u) ?? u),
-    ...(approvers?.roles ?? []).map((r) => `@${r}`),
-  ];
-  const policy = approvers?.policy ?? "any";
-  if (people.length === 0) return "Anyone on the team can answer";
-  const list = people.join(", ");
-  if (typeof policy === "object") return `Needs ${policy.min} of ${people.length}: ${list}`;
-  if (people.length === 1) return `Needs an answer from ${list}`;
-  return policy === "all" ? `Needs every approver: ${list}` : `Any one of ${list} can answer`;
+  const { lead, people, tail } = approverParts(approvers);
+  if (people.length === 0) return lead;
+  const list = people
+    .map((p) => (p.kind === "user" ? (nameFor(p.ref) ?? p.ref) : `@${p.role}`))
+    .join(", ");
+  return [lead, list, tail].filter(Boolean).join(" ");
 }
 
 /** Workflow / agent / manual, for list rows and the header meta line. */
@@ -247,15 +271,35 @@ export function approvalRequestSource(
   return "manual";
 }
 
-/** Pending first (oldest pending on top: it expires first), then newest resolved. */
-export function sortApprovalRequests<T extends Pick<ApprovalRequest, "status" | "createdAt">>(
-  requests: readonly T[],
-): T[] {
+/**
+ * Pending first, in three bands: live deadlines (the one that expires soonest
+ * on top, equal deadlines newest first), then no deadline, then deadlines
+ * already past, each of the last two newest first. Resolved requests come last, newest first. Oldest-first used
+ * to put stale March requests, long past their deadline, on top of today's.
+ */
+export function sortApprovalRequests<
+  T extends Pick<ApprovalRequest, "status" | "createdAt"> & { expiresAt?: string | null },
+>(requests: readonly T[], now: number = Date.now()): T[] {
+  const time = (value: string | null | undefined) => {
+    if (!value) return null;
+    const ms = parseUTCDate(value).getTime();
+    return Number.isFinite(ms) ? ms : null;
+  };
+  // 0 live deadline, 1 no deadline, 2 overdue, 3 resolved.
+  const band = (r: T) => {
+    if (r.status !== "pending") return 3;
+    const expires = time(r.expiresAt);
+    if (expires === null) return 1;
+    return expires > now ? 0 : 2;
+  };
   return [...requests].sort((a, b) => {
-    const aPending = a.status === "pending" ? 0 : 1;
-    const bPending = b.status === "pending" ? 0 : 1;
-    if (aPending !== bPending) return aPending - bPending;
-    const diff = Date.parse(a.createdAt) - Date.parse(b.createdAt);
-    return aPending === 0 ? diff : -diff;
+    const aBand = band(a);
+    const bBand = band(b);
+    if (aBand !== bBand) return aBand - bBand;
+    if (aBand === 0) {
+      const byDeadline = (time(a.expiresAt) ?? 0) - (time(b.expiresAt) ?? 0);
+      if (byDeadline !== 0) return byDeadline;
+    }
+    return (time(b.createdAt) ?? 0) - (time(a.createdAt) ?? 0);
   });
 }

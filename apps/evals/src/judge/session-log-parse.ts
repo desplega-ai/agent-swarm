@@ -21,6 +21,12 @@ export interface ToolUse {
    * Undefined when no result was seen / the provider gives no error signal.
    */
   isError?: boolean;
+  /**
+   * Raw text of the matching tool RESULT (Claude/pi `tool_result.content`,
+   * Codex `mcp_tool_call.result`, opencode `tool_end.result` /
+   * `state.output`). Undefined when no result was seen.
+   */
+  result?: string;
 }
 
 /** Narrowed view of one parsed JSONL line — every field optional/unknown. */
@@ -114,7 +120,11 @@ function collectFromLine(
         const isError = block.is_error === true;
         if (callId && byCallId.has(callId)) {
           const idx = byCallId.get(callId);
-          if (idx !== undefined && uses[idx]) uses[idx].isError = isError;
+          if (idx !== undefined && uses[idx]) {
+            uses[idx].isError = isError;
+            const result = resultText(block.content);
+            if (result !== undefined) uses[idx].result = result;
+          }
         }
       }
     }
@@ -131,7 +141,14 @@ function collectFromLine(
       uses.push({ taskId, toolName: tool.toolName, input: tool.input });
     } else {
       // item.completed — record the terminal state, carrying its error signal.
-      uses.push({ taskId, toolName: tool.toolName, input: tool.input, isError: tool.isError });
+      const result = resultText(item.result);
+      uses.push({
+        taskId,
+        toolName: tool.toolName,
+        input: tool.input,
+        isError: tool.isError,
+        ...(result !== undefined ? { result } : {}),
+      });
     }
     return;
   }
@@ -161,6 +178,7 @@ function collectFromLine(
       { taskId, toolName, input: parsed.args },
       // tool_end may carry an explicit error field in a future build; default false.
       type === "tool_end" ? opencodeErrorFlag(parsed) : undefined,
+      type === "tool_end" ? resultText(parsed.result) : undefined,
     );
     return;
   }
@@ -192,7 +210,14 @@ function collectFromLine(
         : status === "completed"
           ? false
           : undefined;
-    upsertOpencodeTool(uses, byCallId, callId, { taskId, toolName, input: richInput }, isError);
+    upsertOpencodeTool(
+      uses,
+      byCallId,
+      callId,
+      { taskId, toolName, input: richInput },
+      isError,
+      state ? resultText(state.output) : undefined,
+    );
     return;
   }
 }
@@ -209,12 +234,14 @@ function upsertOpencodeTool(
   callId: string | undefined,
   seed: { taskId: string | undefined; toolName: string; input: unknown },
   isError: boolean | undefined,
+  result?: string,
 ): void {
   const existingIdx = callId !== undefined ? byCallId.get(callId) : undefined;
   if (existingIdx !== undefined && uses[existingIdx]) {
     const use = uses[existingIdx];
     if (hasInput(seed.input)) use.input = seed.input;
     if (isError !== undefined) use.isError = isError;
+    if (result !== undefined) use.result = result;
     return;
   }
   const idx =
@@ -223,8 +250,26 @@ function upsertOpencodeTool(
       toolName: seed.toolName,
       input: hasInput(seed.input) ? seed.input : {},
       ...(isError !== undefined ? { isError } : {}),
+      ...(result !== undefined ? { result } : {}),
     }) - 1;
   if (callId !== undefined) byCallId.set(callId, idx);
+}
+
+/**
+ * Normalize a tool result payload to text: strings pass through, Claude-style
+ * `[{type:"text", text}]` arrays join their text, anything else is JSON.
+ */
+function resultText(value: unknown): string | undefined {
+  if (value == null) return undefined;
+  if (typeof value === "string") return value;
+  if (Array.isArray(value) && value.every((b) => typeof asObject(b)?.text === "string")) {
+    return value.map((b) => asObject(b)?.text as string).join("\n");
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return undefined;
+  }
 }
 
 /** A tool input is "present" when it's a non-empty object (opencode `args` is `{}`). */

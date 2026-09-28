@@ -1,8 +1,22 @@
 import { cva, type VariantProps } from "class-variance-authority";
+import { CheckIcon } from "lucide-react";
+import {
+  AnimatePresence,
+  motion,
+  type Transition,
+  useReducedMotion,
+  type Variants,
+} from "motion/react";
 import { Slot } from "radix-ui";
 import type * as React from "react";
+import { useEffect } from "react";
 
 import { cn } from "@/lib/utils";
+
+// Relative on purpose: the root `bun test` run cannot resolve ui's `@/` alias,
+// so ui tests mock each aliased module they reach. A relative import keeps
+// every test that renders Button from needing its own Spinner mock.
+import { Spinner } from "./spinner";
 
 const buttonVariants = cva(
   // Transitions live in globals.css ("Button motion", keyed on
@@ -45,16 +59,51 @@ const buttonVariants = cva(
   },
 );
 
+export type ButtonStatus = "idle" | "loading" | "success";
+
+type ButtonProps = React.ComponentProps<"button"> &
+  VariantProps<typeof buttonVariants> & {
+    asChild?: boolean;
+    /**
+     * Status variant (from chanhdai's Status Button): the label swaps to a
+     * spinner while "loading" and to a check on "success", at a fixed width.
+     * Controlled: derive it from the mutation. Omit it for a plain button.
+     * Ignored with `asChild`.
+     */
+    status?: ButtonStatus;
+    /** Shown next to the check on "success", e.g. "Saved" for a "Save" button. */
+    successLabel?: React.ReactNode;
+    /** Called with "idle" `successDuration` ms after the status turns "success". */
+    onStatusChange?: (status: ButtonStatus) => void;
+    successDuration?: number;
+  };
+
 function Button({
   className,
   variant = "default",
   size = "default",
   asChild = false,
+  status,
+  successLabel,
+  onStatusChange,
+  successDuration,
   ...props
-}: React.ComponentProps<"button"> &
-  VariantProps<typeof buttonVariants> & {
-    asChild?: boolean;
-  }) {
+}: ButtonProps) {
+  if (status !== undefined && !asChild) {
+    return (
+      <StatusButton
+        className={className}
+        variant={variant}
+        size={size}
+        status={status}
+        successLabel={successLabel}
+        onStatusChange={onStatusChange}
+        successDuration={successDuration}
+        {...props}
+      />
+    );
+  }
+
   const Comp = asChild ? Slot.Root : "button";
 
   return (
@@ -65,6 +114,144 @@ function Button({
       className={cn(buttonVariants({ variant, size, className }))}
       {...props}
     />
+  );
+}
+
+const swapVariants: Variants = {
+  initial: { opacity: 0, y: 8, filter: "blur(4px)" },
+  animate: { opacity: 1, y: 0, filter: "blur(0px)" },
+  exit: { opacity: 0, y: -8, filter: "blur(4px)" },
+};
+
+const reducedMotionVariants: Variants = {
+  initial: { opacity: 0 },
+  animate: { opacity: 1 },
+  exit: { opacity: 0 },
+};
+
+// A spring keeps its velocity when the status changes mid-swap; a
+// cubic-bezier would restart from zero.
+const swapTransition: Transition = { type: "spring", duration: 0.3, bounce: 0 };
+
+// Bounce only on the entrance, and only on movement: opacity and blur would
+// overshoot.
+const successVariants: Variants = {
+  ...swapVariants,
+  animate: {
+    ...swapVariants.animate,
+    transition: {
+      type: "spring",
+      duration: 0.45,
+      bounce: 0.35,
+      opacity: swapTransition,
+      filter: swapTransition,
+    },
+  },
+};
+
+function StatusButton({
+  className,
+  variant,
+  size,
+  status,
+  successLabel,
+  onStatusChange,
+  successDuration = 1500,
+  onClick,
+  children,
+  ...props
+}: Omit<ButtonProps, "asChild" | "status"> & { status: ButtonStatus }) {
+  const shouldReduceMotion = useReducedMotion();
+
+  useEffect(() => {
+    if (status !== "success" || !onStatusChange) return;
+    const timeoutId = window.setTimeout(() => onStatusChange("idle"), successDuration);
+    return () => window.clearTimeout(timeoutId);
+  }, [status, successDuration, onStatusChange]);
+
+  const isBusy = status !== "idle";
+  const variants = shouldReduceMotion ? reducedMotionVariants : swapVariants;
+  const transition = shouldReduceMotion ? { duration: 0 } : swapTransition;
+  const successContent = (
+    <>
+      <CheckIcon />
+      {successLabel ?? <span className="sr-only">Success</span>}
+    </>
+  );
+
+  return (
+    <button
+      data-slot="button"
+      data-variant={variant}
+      data-size={size}
+      data-status={status}
+      aria-busy={status === "loading"}
+      // Neither `disabled` nor `aria-disabled` while busy: the button keeps
+      // focus and its normal look (callers style `aria-disabled` as blocked),
+      // and presses are ignored meanwhile, including a form's implicit submit.
+      onClick={(event) => {
+        if (isBusy) {
+          event.preventDefault();
+          return;
+        }
+        onClick?.(event);
+      }}
+      className={cn(
+        buttonVariants({ variant, size }),
+        "inline-grid justify-items-center *:col-start-1 *:row-start-1 *:flex *:items-center *:gap-[inherit]",
+        className,
+      )}
+      {...props}
+    >
+      {/* Invisible copies of the widest states keep the button's width fixed. */}
+      <span aria-hidden className="invisible">
+        {children}
+      </span>
+      <span aria-hidden className="invisible">
+        {successContent}
+      </span>
+      <AnimatePresence initial={false}>
+        {status === "idle" && (
+          <motion.span
+            key="idle"
+            variants={variants}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            transition={transition}
+          >
+            {children}
+          </motion.span>
+        )}
+        {status === "loading" && (
+          <motion.span
+            key="loading"
+            role="status"
+            variants={variants}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            transition={transition}
+          >
+            <Spinner aria-hidden />
+            <span className="sr-only">Loading</span>
+          </motion.span>
+        )}
+        {status === "success" && (
+          <motion.span
+            key="success"
+            role="status"
+            variants={shouldReduceMotion ? variants : successVariants}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            transition={transition}
+          >
+            {successContent}
+          </motion.span>
+        )}
+      </AnimatePresence>
+    </button>
   );
 }
 

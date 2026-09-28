@@ -33,6 +33,10 @@ export const PERMISSIONS = {
     description: "Cancel any task (beyond tasks the caller created).",
     namespace: "task",
   },
+  "approval.cancel.any": {
+    description: "Cancel a pending approval request.",
+    namespace: "approval",
+  },
   "task.steer.any": {
     description: "Steer any task (beyond tasks the caller created).",
     namespace: "task",

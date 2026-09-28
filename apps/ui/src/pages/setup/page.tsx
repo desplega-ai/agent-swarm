@@ -29,7 +29,7 @@ import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
 import { useConfig } from "@/hooks/use-config";
 import { cn } from "@/lib/utils";
-import { SetupFooter } from "./components/setup-footer";
+import { type SetupBusyAction, SetupFooter } from "./components/setup-footer";
 import { SETUP_COLUMN } from "./components/setup-layout";
 import { SetupStepper } from "./components/setup-stepper";
 import { SetupTopBar } from "./components/setup-top-bar";
@@ -232,7 +232,9 @@ function SetupFlow() {
   const [mountedAt] = useState(Date.now);
   const query = useOnboarding({ refetchInterval: 5000, enabled: isConfigured });
   const { mutateAsync: act } = useOnboardingAction();
-  const [busy, setBusy] = useState(false);
+  // The footer action in flight: its button shows the spinner.
+  const [busyAction, setBusyAction] = useState<SetupBusyAction | null>(null);
+  const busy = busyAction !== null;
   // True from a successful connect until the shell knows whether step 1 must
   // still ask "Who are you?". Step 1 stays on screen the whole time.
   const [afterConnect, setAfterConnect] = useState(false);
@@ -323,10 +325,11 @@ function SetupFlow() {
     goTo(identityPick.needed ? "connect" : onboardingResumeStep(data.state));
   }, [afterConnect, data, identityPick.resolving, identityPick.needed, goTo]);
 
-  async function leave() {
+  /** `via` names the control that left; a Continue or Skip already in flight keeps its spinner. */
+  async function leave(via: SetupBusyAction = "primary") {
     // Minimizing must not look like "opened while minimized" to the resume check.
     resumeChecked.current = true;
-    setBusy(true);
+    setBusyAction((current) => current ?? via);
     if (data && !isOnboardingFinished(data.state)) {
       try {
         await act({ action: "minimize" });
@@ -344,14 +347,14 @@ function SetupFlow() {
   }
 
   async function skip(step: Exclude<OnboardingStepId, "connect">) {
-    setBusy(true);
+    setBusyAction("skip");
     try {
       await act({ action: "skip", step });
       goNext();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not skip this step");
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   }
 
@@ -361,7 +364,7 @@ function SetupFlow() {
       goNext();
       return;
     }
-    setBusy(true);
+    setBusyAction("primary");
     try {
       await action.run();
       goNext();
@@ -370,7 +373,7 @@ function SetupFlow() {
       // Same id as the save toast (`useSetupSave`): one toast per error, not two.
       toast.error(message, { id: message });
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   }
 
@@ -437,7 +440,7 @@ function SetupFlow() {
             onSelect={data && !afterConnect ? goTo : undefined}
           />
         }
-        onMinimize={data ? () => void leave() : undefined}
+        onMinimize={data ? () => void leave("minimize") : undefined}
         minimizing={busy}
       />
 
@@ -477,8 +480,18 @@ function SetupFlow() {
       </main>
 
       <SetupFooter
-        pending={busy ? "Working…" : blocker?.busy ? blocker.reason : null}
+        pending={
+          // Continue and Skip spin on their own button; other work spins in the footer.
+          busyAction === "primary" || busyAction === "skip"
+            ? null
+            : busy
+              ? "Working…"
+              : blocker?.busy
+                ? blocker.reason
+                : null
+        }
         busy={busy}
+        busyAction={busyAction}
         onBack={index > 1 && data ? () => goTo(ONBOARDING_STEPS[index - 2].id) : undefined}
         skip={
           // A done step has nothing to skip.

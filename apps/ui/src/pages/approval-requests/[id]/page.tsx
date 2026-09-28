@@ -1,11 +1,17 @@
 import { useQueryClient } from "@tanstack/react-query";
+import { ChevronRight } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { useApprovalRequest, useRespondToApprovalRequest } from "@/api/hooks/use-approval-requests";
+import {
+  useApprovalRequest,
+  useCancelApprovalRequest,
+  useRespondToApprovalRequest,
+} from "@/api/hooks/use-approval-requests";
 import type { ApprovalQuestion, ApprovalRequest } from "@/api/types";
 import { FadeIn } from "@/components/onboarding/fade-in";
 import type { StatusTone } from "@/components/shared/status-icon";
+import { UserChip } from "@/components/shared/user-chip";
 import {
   DetailPageBody,
   DetailPageRail,
@@ -16,7 +22,7 @@ import {
 } from "@/components/ui/detail-page-layout";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCurrentUser } from "@/contexts/current-user-context";
-import { useUserName } from "@/hooks/use-user-name";
+import { useUserLookup } from "@/hooks/use-user-name";
 import {
   answerHint,
   answerProgress,
@@ -36,8 +42,8 @@ import {
 } from "../components/keyboard";
 import { QuestionCard } from "../components/question-card";
 import { optionValues, QuestionField } from "../components/question-field";
-import { RequestHeader, resolvedByName } from "../components/request-header";
-import { SubmitBar } from "../components/submit-bar";
+import { RequestHeader } from "../components/request-header";
+import { DISCARD_REASON, SubmitBar } from "../components/submit-bar";
 
 /** Above this many questions, answered cards fold to one line. */
 const COMPACT_AFTER = 5;
@@ -93,8 +99,9 @@ function ApprovalRequestView({ request }: { request: ApprovalRequest }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const respondMutation = useRespondToApprovalRequest();
+  const cancelMutation = useCancelApprovalRequest();
   const { user } = useCurrentUser();
-  const userName = useUserName();
+  const lookupUser = useUserLookup();
   const reduceMotion = useReducedMotion();
   const finePointer = useFinePointer();
   const desktop = useMediaQuery("(min-width: 1024px)");
@@ -142,7 +149,8 @@ function ApprovalRequestView({ request }: { request: ApprovalRequest }) {
   };
 
   const handleSubmit = async () => {
-    if (!isPending || submitting) return;
+    // The ⌘/Ctrl+Enter shortcut reaches here too, so a discard in flight blocks it.
+    if (!isPending || submitting || cancelMutation.isPending) return;
     if (progress.blockedReason) {
       setAttempted(true);
       const firstBlocked = questions.findIndex((question) =>
@@ -165,6 +173,20 @@ function ApprovalRequestView({ request }: { request: ApprovalRequest }) {
       top.current?.scrollIntoView({ block: "start", behavior: reduceMotion ? "auto" : "smooth" });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to submit response");
+    }
+  };
+
+  const handleDiscard = async () => {
+    if (!isPending || submitting || cancelMutation.isPending) return;
+    setError(null);
+    try {
+      const result = await cancelMutation.mutateAsync({ id: request.id, reason: DISCARD_REASON });
+      queryClient.setQueryData(["approval-request", request.id], {
+        approvalRequest: result.approvalRequest,
+      });
+      setActiveIndex(-1);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to discard request");
     }
   };
 
@@ -360,7 +382,12 @@ function ApprovalRequestView({ request }: { request: ApprovalRequest }) {
           {cardsList}
           {!isPending && request.responses ? (
             <details className="group rounded-lg border border-border-subtle px-3 py-2 text-xs text-muted-foreground">
-              <summary className="cursor-pointer select-none outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60">
+              {/* Lucide chevron instead of the native ▶ marker, like the rest of the page. */}
+              <summary className="flex cursor-pointer list-none select-none items-center gap-1.5 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 [&::-webkit-details-marker]:hidden">
+                <ChevronRight
+                  className="size-3.5 shrink-0 transition-transform group-open:rotate-90"
+                  aria-hidden
+                />
                 Raw responses
               </summary>
               <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px]">
@@ -373,10 +400,13 @@ function ApprovalRequestView({ request }: { request: ApprovalRequest }) {
         {isPending ? <div aria-hidden className="h-28 md:hidden" /> : null}
         {isPending ? (
           <SubmitBar
+            request={request}
             progress={progress}
             submitting={submitting}
+            discarding={cancelMutation.isPending}
             error={error}
             onSubmit={() => void handleSubmit()}
+            onDiscard={() => void handleDiscard()}
           />
         ) : null}
       </motion.div>
@@ -386,12 +416,14 @@ function ApprovalRequestView({ request }: { request: ApprovalRequest }) {
   const rail = desktop ? (
     <DetailPageRail>
       <QuickStats>
-        <QuickStat label="Created" value={formatSmartTime(request.createdAt)} />
         {request.resolvedAt ? (
           <QuickStat label="Resolved" value={formatSmartTime(request.resolvedAt)} />
         ) : null}
         {request.resolvedBy ? (
-          <QuickStat label="Resolved by" value={resolvedByName(request, userName)} />
+          <QuickStat
+            label="Resolved by"
+            value={<UserChip userRef={request.resolvedBy} user={lookupUser(request.resolvedBy)} />}
+          />
         ) : null}
         {request.timeoutSeconds ? (
           <QuickStat label="Timeout" value={humanizeSeconds(request.timeoutSeconds)} />

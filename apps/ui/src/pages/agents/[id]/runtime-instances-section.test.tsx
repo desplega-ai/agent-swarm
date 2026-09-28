@@ -3,19 +3,19 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { RuntimeInstance } from "../../../api/types";
 
 // The root-level test run cannot resolve ui's `@/` alias (same pattern as client.test.tsx).
-mock.module("@/lib/utils", () => import("../../../lib/utils"));
-mock.module("@/lib/relative-time", () => import("../../../lib/relative-time"));
-mock.module("@/lib/runtime-instances", () => import("../../../lib/runtime-instances"));
-mock.module("@/components/ui/tooltip", () => import("../../../components/ui/tooltip"));
-mock.module("@/components/ui/badge", () => import("../../../components/ui/badge"));
-mock.module("@/components/ui/button", () => import("../../../components/ui/button"));
-mock.module("@/components/ui/card", () => import("../../../components/ui/card"));
-mock.module("@/components/ui/info-row", () => import("../../../components/ui/info-row"));
-mock.module("@/components/ui/info-tip", () => import("../../../components/ui/info-tip"));
-mock.module("@/components/ui/input", () => import("../../../components/ui/input"));
-mock.module("@/components/ui/skeleton", () => import("../../../components/ui/skeleton"));
-mock.module("@/components/ui/alert-callout", () => import("../../../components/ui/alert-callout"));
-mock.module("@/hooks/use-copy-to-clipboard", () => import("../../../hooks/use-copy-to-clipboard"));
+mock.module("@/lib/utils", () => require("../../../lib/utils"));
+mock.module("@/lib/relative-time", () => require("../../../lib/relative-time"));
+mock.module("@/lib/runtime-instances", () => require("../../../lib/runtime-instances"));
+mock.module("@/components/ui/tooltip", () => require("../../../components/ui/tooltip"));
+mock.module("@/components/ui/badge", () => require("../../../components/ui/badge"));
+mock.module("@/components/ui/button", () => require("../../../components/ui/button"));
+mock.module("@/components/ui/card", () => require("../../../components/ui/card"));
+mock.module("@/components/ui/info-row", () => require("../../../components/ui/info-row"));
+mock.module("@/components/ui/info-tip", () => require("../../../components/ui/info-tip"));
+mock.module("@/components/ui/input", () => require("../../../components/ui/input"));
+mock.module("@/components/ui/skeleton", () => require("../../../components/ui/skeleton"));
+mock.module("@/components/ui/alert-callout", () => require("../../../components/ui/alert-callout"));
+mock.module("@/hooks/use-copy-to-clipboard", () => require("../../../hooks/use-copy-to-clipboard"));
 mock.module("@/api/hooks/use-agents", () => ({
   useAgentRuntimeInstances: () => ({ data: undefined, isLoading: false, isError: false }),
   useUpdateAgentMaxTasks: () => ({ mutate: () => {}, isPending: false }),

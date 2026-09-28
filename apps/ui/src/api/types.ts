@@ -295,15 +295,21 @@ export interface AgentTask {
   supportedSteerModes?: SteerMode[];
 }
 
-export type ProviderName =
-  | "claude"
-  | "codex"
-  | "pi"
-  | "devin"
-  | "claude-managed"
-  | "opencode"
-  | "acp"
-  | "dsh";
+/** Mirrors `ProviderNameSchema` in `src/types.ts`. The single list runtime provider checks derive from. */
+export const PROVIDER_NAMES = [
+  "claude",
+  "codex",
+  "pi",
+  "devin",
+  "claude-managed",
+  "opencode",
+  "acp",
+  "dsh",
+] as const;
+export type ProviderName = (typeof PROVIDER_NAMES)[number];
+export function isProviderName(value: string | null | undefined): value is ProviderName {
+  return (PROVIDER_NAMES as readonly (string | null | undefined)[]).includes(value);
+}
 export type DevinProviderMeta = {
   sessionUrl: string;
   maxAcuLimit?: number;

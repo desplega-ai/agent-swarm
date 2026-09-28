@@ -6,6 +6,44 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- Pending approval requests with no explicit timeout are auto-cancelled by the heartbeat after `APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS` days (default 7, `0` disables); a request that gates a running or waiting workflow run cancels that run too.
+- The heartbeat now times out standalone approval requests whose `expiresAt` passed, and notifies the requesting agent with a `hitl.timeout` follow-up task while its source task is still active.
+- Migration 166 adds the `idx_approval_requests_pending_created` index for the auto-cancel sweep.
+- `POST /api/approval-requests/{id}/cancel`, the `cancel-approval-request` MCP tool, the `approval_cancel` scripts SDK method, and a Discard button on the dashboard cancel a pending approval request.
+
+### Changed
+- An answer or a cancel that arrives after an approval request's `expiresAt` gets 409 and the request becomes `timeout`.
+- The `request-human-input` tool text and the workflow Slack card no longer say that a timeout auto-rejects; the request becomes `timeout`.
+
+## [1.157.0] - 2026-09-28
+
+### Added
+- UI audit closed out: one pager under every list, a Filters popover and labelled "New task" on Tasks, approvals sorted by the soonest live deadline, approver and resolver shown as user chips, compact Usage KPI cards, and a tab strip for the Usage and Settings subnavs on phones (#1627).
+
+### Changed
+- Worker image bumps `@anthropic-ai/claude-code` 2.1.280 -> 2.1.283 and `@openai/codex` 0.156.1 -> 0.157.1 (#1630).
+- agent-fs 0.13.10 is pinned in the UI e2e workflow and the all-workers Helm example (#1626).
+
+### Fixed
+- Spent `defer-task` wake-up schedules are deleted 30 days after they fire instead of piling up forever (#1629).
+- On touch devices, Return inserts a newline in the session and chat composers; the send button submits (#1628).
+
+## [1.156.0] - 2026-09-26
+
+### Added
+- Subscription plan per credential: Codex reports the plan from its token, Claude plans are estimated from the 7-day rate-limit window, and `PATCH /api/keys/plan` sets a manual plan (`GET /api/keys/plans` lists the catalog). The Usage page compares each subscription with API pricing, and usage summaries are faster through a covering index (migration 164) and a 30 s cache (#1617).
+- Mobile dashboard: a stacked "Now" home view, list rows for agents and tasks, and fixes to approvals, budgets, configuration, and task detail below `md` (#1623).
+
+### Changed
+- Citation guidance in the base prompt and `store-progress` is scoped to factual claims the reader cannot already see, 1-2 sources (#1622).
+- Bundled agent-fs advances to 0.13.10 (#1621).
+
+### Fixed
+- A settlement that wakes a `defer-task` waiter no longer also creates a lead follow-up for the same agent (#1620).
+- ACP workers verify their target binary at boot instead of checking `claude` (#1619).
+- Slack outcome delivery give-up is persisted, so an API restart no longer re-arms an abandoned card; streams are stopped before the final update (#1618).
+
 ## [1.155.1] - 2026-09-25
 
 ### Added

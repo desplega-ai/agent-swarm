@@ -53,6 +53,7 @@ Dev server proxies `/api/*` and `/health` to `http://localhost:3013`.
 ## Data tables (AG Grid)
 
 - **Always use `DataGrid`** from `@/components/shared/data-grid`. **Never** use HTML `<Table>` components for data lists — this is a hard rule.
+- **Phone exception (below `md`):** list pages render `MobileList` + `MobileListRow` from `@/components/shared/mobile-list` instead of the grid, gated with `useIsMobile()`. Keep the `DataGrid` from `md` up, and share filtering and search logic between both so a phone finds the same rows as the grid.
 - Page wrapper for grid pages in the main layout: `flex flex-col flex-1 min-h-0 gap-4` (DataGrid fills remaining height).
 - For config-style pages that scroll, set `domLayout="autoHeight"` on the DataGrid.
 - Sizing: `width` for fixed columns, `flex: 1 + minWidth` for stretch. `DataGrid` calls `sizeColumnsToFit()` on grid ready.

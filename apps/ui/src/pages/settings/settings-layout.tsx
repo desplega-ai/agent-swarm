@@ -14,17 +14,11 @@ import {
   SlidersHorizontal,
 } from "lucide-react";
 import { useCallback, useEffect } from "react";
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useOnboarding } from "@/api/hooks/use-onboarding";
 import { AnimatedReveal } from "@/components/shared/animated-reveal";
+import { SectionTabs } from "@/components/shared/section-tabs";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { cn } from "@/lib/utils";
@@ -64,15 +58,14 @@ function readCollapsed(): boolean {
 }
 
 /**
- * Two-column shell for the admin section. A left rail of NavLinks (collapsing
- * to a Select below `md`) drives nested routes that render into the `<Outlet/>`.
+ * Two-column shell for the admin section. A left rail of NavLinks (a tab strip
+ * below `md`) drives nested routes that render into the `<Outlet/>`.
  * The desktop rail itself is collapsible — state persists in localStorage,
  * mirroring the Sessions panel pattern. The shell renders no PageHeader of its
  * own — each embedded page keeps its own header as the section title.
  */
 export function SettingsLayout() {
   const location = useLocation();
-  const navigate = useNavigate();
   const { searchParams, setParam } = useUrlSearchState();
   const railParam = readStringParam(searchParams, "rail");
   const collapsed =
@@ -102,21 +95,13 @@ export function SettingsLayout() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0 md:flex-row md:gap-6">
-      {/* Mobile: Select picker above the content. */}
-      <div className="md:hidden shrink-0 mb-4">
-        <Select value={activeItem.path} onValueChange={(next) => navigate(next)}>
-          <SelectTrigger className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {navItems.map((item) => (
-              <SelectItem key={item.path} value={item.path}>
-                {item.title}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+      {/* Mobile: a tab strip above the content (no select repeating the page name). */}
+      <SectionTabs
+        label="Settings"
+        tabs={navItems}
+        activePath={activeItem.path}
+        className="md:hidden shrink-0 mb-4"
+      />
 
       {/* Desktop: left rail. Width + fade on collapse/expand (DESIGN.md
           § Motion collapse pattern). */}

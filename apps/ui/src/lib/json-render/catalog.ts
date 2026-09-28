@@ -15,7 +15,8 @@
  * Component set: Container, Card, Heading, Text, Button, Metric, Alert
  * (original pages set — unchanged), Table, Form, Badge (swarm-apps), the
  * layout + interactivity tier: Stack, Grid, Split, Divider, Tabs, SearchInput,
- * Select, Markdown, plus the router tier: Drawer, DetailList.
+ * Select, Markdown, plus the router tier: Drawer, DetailList, and the Kibo-based
+ * data blocks: Kanban, Calendar, ContributionGraph.
  * Action set: `swarm.sdk`, `swarm.call` (original) plus `app.mutate`,
  * `app.refresh`, `app.action`, `app.navigate` (swarm-apps; the pages renderer
  * registers inert stubs).
@@ -419,6 +420,71 @@ const detailListProps = z.object({
   loading: z.boolean().optional(),
 });
 
+const kanbanColumnSchema = z.union([
+  z.string(),
+  z.object({
+    /** Value stored in `columnField` for cards in this column. */
+    id: z.string(),
+    /** Header label; defaults to `id`. */
+    label: z.string().optional(),
+  }),
+]);
+
+const kanbanProps = z.object({
+  /** Usually `{ "$state": "/queries/<name>/data" }` — one card per row. */
+  data: z.array(z.record(z.string(), z.unknown())).optional(),
+  /** Usually `{ "$state": "/queries/<name>/loading" }`. */
+  loading: z.boolean().optional(),
+  /** Row field holding the card's column (usually an enum column). */
+  columnField: z.string(),
+  /** Columns in display order. Rows whose value matches none are not shown. */
+  columns: z.array(kanbanColumnSchema).min(1),
+  /** Row field rendered as the card title. */
+  titleField: z.string(),
+  /** Extra fields shown under the title, with Table column kinds. */
+  cardFields: z.array(detailListFieldSchema).optional(),
+  /** Row field holding the stable card id. Defaults to `id`. */
+  idField: z.string().optional(),
+  /**
+   * Chain run when a card is dropped in another column. `$row` is the moved
+   * row with `columnField` already set to the destination column. Omit it and
+   * the board is read-only (no drag).
+   */
+  onMove: actionChainSchema.optional(),
+  /** Chain run when a card is clicked; params may reference `$row`. */
+  onCardClick: actionChainSchema.optional(),
+});
+
+const calendarProps = z.object({
+  /** Usually `{ "$state": "/queries/<name>/data" }` — one event per row. */
+  data: z.array(z.record(z.string(), z.unknown())).optional(),
+  /** Usually `{ "$state": "/queries/<name>/loading" }`. */
+  loading: z.boolean().optional(),
+  /** Row field with the event start (ISO date/datetime or epoch ms). */
+  startField: z.string(),
+  /** Row field with the event end. Omitted → single-day events on `startField`. */
+  endField: z.string().optional(),
+  /** Row field rendered as the event label. */
+  titleField: z.string(),
+  /** Row field holding the stable event id. Defaults to `id`. */
+  idField: z.string().optional(),
+  /** Chain run when an event is clicked; params may reference `$row`. */
+  onSelect: actionChainSchema.optional(),
+});
+
+const contributionGraphProps = z.object({
+  /** Usually `{ "$state": "/queries/<name>/data" }`. */
+  data: z.array(z.record(z.string(), z.unknown())).optional(),
+  /** Usually `{ "$state": "/queries/<name>/loading" }`. */
+  loading: z.boolean().optional(),
+  /** Row field with the date (ISO date/datetime or epoch ms). Defaults to `date`. */
+  dateField: z.string().optional(),
+  /** Numeric row field summed per day. Omitted → each row counts as 1. */
+  countField: z.string().optional(),
+  /** Trailing window in days, ending today. Defaults to 365. */
+  days: z.number().int().min(7).max(730).optional(),
+});
+
 const elementRefProps = z.object({
   app: z.string().optional(),
   element: z.string(),
@@ -439,6 +505,7 @@ export type TabsTab = z.infer<typeof tabsTabSchema>;
 export type SelectOption = z.infer<typeof selectOptionSchema>;
 export type DetailListField = z.infer<typeof detailListFieldSchema>;
 export type DrawerProps = z.infer<typeof drawerProps>;
+export type KanbanColumn = z.infer<typeof kanbanColumnSchema>;
 
 // ─── Catalog ────────────────────────────────────────────────────────────────
 
@@ -553,6 +620,21 @@ export const swarmCatalogSpec = {
       props: detailListProps,
       description:
         'Read-only label/value detail view for ONE record. Bind `data` to a single row — usually `{ "$state": "/queries/<name>/data/0" }` with a `$param`-filtered query. `fields` pick and format properties with the same kinds as Table columns (badge tones, relative dates) plus `code` for raw/JSON values. Bind `loading` to the query (`/queries/<name>/loading`) for skeleton fields while it loads; `emptyMessage` shows when the record is genuinely missing.',
+    },
+    Kanban: {
+      props: kanbanProps,
+      description:
+        'Kanban board: one card per row, grouped into `columns` by the row\'s `columnField`. Bind `data`/`loading` to a named query. `titleField` is the card title; `cardFields` add label/value lines with Table column kinds (badge tones, relative dates). Dragging a card to another column runs `onMove` with `$row` = the moved row, `columnField` already set to the new column — typically `[{ "action": "app.mutate", "params": { "model": "<m>", "op": "update", "rowId": { "$row": "id" }, "values": { "<columnField>": { "$row": "<columnField>" } } } }]`. Without `onMove` the board is read-only. `onCardClick` runs with `$row` (e.g. an `app.navigate` that opens a Drawer).',
+    },
+    Calendar: {
+      props: calendarProps,
+      description:
+        "Read-only month calendar of rows. `startField` (and optional `endField`) hold dates; an event shows on every day it spans. `titleField` labels it. Has its own prev/next month controls; each Calendar keeps its own month. `onSelect` runs when an event is clicked, with `$row` (e.g. `app.navigate` to open a Drawer).",
+    },
+    ContributionGraph: {
+      props: contributionGraphProps,
+      description:
+        "GitHub-style activity heatmap over the trailing `days` (default 365). Buckets rows by the calendar day of `dateField` (default `date`); each row counts 1, or sums `countField` when set. Read-only.",
     },
     ElementRef: {
       props: elementRefProps,

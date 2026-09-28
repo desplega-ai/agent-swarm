@@ -358,6 +358,8 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   ),
   // 0 is meaningful here: "auto-assign nothing this sweep".
   ...integerValidators(["HEARTBEAT_MAX_AUTO_ASSIGN"], 0),
+  // 0 turns approval auto-cancellation off.
+  ...integerValidators(["APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS"], 0),
   // Below ~100 tokens the preamble can't fit a useful summary; above 20000
   // (~80k chars) it risks the SIGTERM-143 context-saturation failure mode
   // the cap exists to prevent (see context-preamble.ts).

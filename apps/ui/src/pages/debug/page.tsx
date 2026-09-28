@@ -1,8 +1,9 @@
 import Editor from "@monaco-editor/react";
 import type { ColDef, GetRowIdParams } from "ag-grid-community";
-import { Bug, ChevronDown, ChevronRight, Loader2, Play, Table2 } from "lucide-react";
+import { Bug, ChevronDown, ChevronRight, Play, Table2 } from "lucide-react";
 import { useCallback, useMemo, useRef } from "react";
 import { useDbQuery, useTableColumns, useTableList } from "@/api/hooks";
+import { Spinner } from "@/components/kibo-ui/spinner";
 import { DataGrid } from "@/components/shared/data-grid";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -42,7 +43,7 @@ function TableBrowser({
         <div className="py-1">
           {isLoading && (
             <div className="flex items-center gap-2 px-3 py-2 text-muted-foreground text-sm">
-              <Loader2 className="h-3 w-3 animate-spin" /> Loading...
+              <Spinner className="size-3" /> Loading...
             </div>
           )}
           {tables.map((name) => (
@@ -232,7 +233,7 @@ export default function DebugPage() {
               disabled={dbQuery.isPending}
             >
               {dbQuery.isPending ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <Spinner className="size-3.5" />
               ) : (
                 <Play className="h-3.5 w-3.5" />
               )}

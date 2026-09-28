@@ -55,6 +55,8 @@ const ROUTING_PREFIXES_BY_PROVIDER: Record<PricingProvider, readonly string[]> =
   // A generic ACP target reports whatever model id it likes and has no seeded
   // rate rows, so there is no canonical key to collapse onto — no-op.
   acp: [],
+  // dsh emits bare model ids today — no-op, same as claude/devin/gemini above.
+  dsh: [],
 };
 
 /**

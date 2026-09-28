@@ -192,6 +192,28 @@ describe("Memory System", () => {
       }
     });
 
+    test("hard-splits a long unbroken run and terminates", () => {
+      // No separator (space, newline, ". ") in 2600 chars, as in base64 or minified JSON.
+      const run = Array.from({ length: 2600 }, (_, i) => String.fromCharCode(97 + (i % 26))).join(
+        "",
+      );
+      const chunks = chunkContent(run);
+      expect(chunks.length).toBe(2);
+      for (const chunk of chunks) {
+        expect(run).toContain(chunk.content);
+        expect(chunk.content.length).toBeLessThanOrEqual(2000);
+      }
+      expect(run.startsWith(chunks[0]!.content)).toBe(true);
+      expect(run.endsWith(chunks[1]!.content)).toBe(true);
+    });
+
+    test("terminates when an unbroken run follows normal text", () => {
+      const chunks = chunkContent(`${"word ".repeat(600)}\n\n${"x".repeat(2500)}`);
+      expect(chunks.length).toBeGreaterThan(1);
+      const xChars = chunks.reduce((n, c) => n + (c.content.match(/x/g)?.length ?? 0), 0);
+      expect(xChars).toBeGreaterThanOrEqual(2500);
+    });
+
     test("chunk indices are sequential", () => {
       const longText = "A ".repeat(3000);
       const chunks = chunkContent(longText);

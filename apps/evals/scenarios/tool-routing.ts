@@ -1,4 +1,11 @@
-import type { CheckResult, DeterministicCheck, Scenario, SwarmTask } from "../src/types.ts";
+import { type ToolUse, toolUseMatches } from "../src/judge/session-log-parse.ts";
+import type {
+  CheckResult,
+  DeterministicCheck,
+  JudgeContext,
+  Scenario,
+  SwarmTask,
+} from "../src/types.ts";
 import {
   apiList,
   firstStageIndices,
@@ -92,10 +99,40 @@ const routingSequenceCheck: DeterministicCheck = {
   },
 };
 
+/**
+ * Namespaces the worker's kv-set may have written to, most specific first: an
+ * explicit `namespace` arg, the task's `contextKey` (the server default when
+ * the call carries X-Source-Task-Id), then `task:agent:<workerId>`. The judge
+ * client sends no X-Agent-ID, so a bare `GET /api/kv` lists the wrong
+ * namespace; every read here uses the explicit `/api/kv/_/<ns>` form.
+ */
+function kvNamespaces(ctx: JudgeContext, tools: ToolUse[]): string[] {
+  const out: string[] = [];
+  for (const u of tools) {
+    if (!toolUseMatches(u.toolName, ["kv-set", "kv_set"])) continue;
+    const input = (u.input ?? {}) as Record<string, unknown>;
+    const args = (input.arguments ?? input) as Record<string, unknown>;
+    if (typeof args.namespace === "string" && args.namespace) out.push(args.namespace);
+  }
+  const task = ctx.tasks[0];
+  if (typeof task?.contextKey === "string" && task.contextKey) out.push(task.contextKey);
+  const agentId = task?.agentId ?? ctx.workers[0]?.agentId;
+  if (typeof agentId === "string" && agentId) out.push(`task:agent:${agentId}`);
+  return [...new Set(out)];
+}
+
+async function workerKvEntries(ctx: JudgeContext, tools: ToolUse[]): Promise<KvEntry[]> {
+  for (const ns of kvNamespaces(ctx, tools)) {
+    const entries = await apiList<KvEntry>(ctx, `/api/kv/_/${encodeURIComponent(ns)}`, ["entries"]);
+    if (entries.length > 0) return entries;
+  }
+  return [];
+}
+
 const routingCorrectnessCheck: DeterministicCheck = {
   name: "routing-artifacts",
   fn: async (ctx): Promise<CheckResult> => {
-    const kvEntries = await apiList<KvEntry>(ctx, "/api/kv", ["entries"]);
+    const kvEntries = await workerKvEntries(ctx, await taskToolUses(ctx, ctx.tasks[0]));
     const alphaTasks = ctx.tasks.filter((t: SwarmTask) =>
       /alpha/i.test(`${t.title}\n${t.description}\n${safeStringify(t.tags)}`),
     );

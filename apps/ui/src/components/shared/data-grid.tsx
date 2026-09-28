@@ -18,8 +18,9 @@ import {
   ValidationModule,
 } from "ag-grid-community";
 import { AgGridReact } from "ag-grid-react";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { ListPager } from "@/components/shared/list-pager";
 import { cn } from "@/lib/utils";
 
 ModuleRegistry.registerModules([
@@ -35,6 +36,8 @@ ModuleRegistry.registerModules([
 ]);
 
 const DEFAULT_PAGE_SIZE_SELECTOR = [10, 20, 50, 100];
+/** The grid fills the wrapper's height minus the pager below it. */
+const FILL_CONTAINER_STYLE = { flex: "1 1 0%", minHeight: 0, width: "100%" } as const;
 
 interface DataGridProps<TData> {
   rowData: TData[] | undefined;
@@ -112,6 +115,9 @@ export function DataGrid<TData>({
     [columnDefs],
   );
   const gridRef = useRef<AgGridReact<TData>>(null);
+  // AG Grid's own paging panel is suppressed; this mirrors its state so the
+  // shared `ListPager` renders the same pager the server-paged lists use.
+  const [pager, setPager] = useState({ page: 0, pageSize: paginationPageSize, total: 0 });
   const [searchParams, setSearchParams] = useSearchParams();
   const pageParamName = paginationQueryKey ? `${paginationQueryKey}Page` : null;
   const pageSizeParamName = paginationQueryKey ? `${paginationQueryKey}PageSize` : null;
@@ -206,11 +212,17 @@ export function DataGrid<TData>({
 
   const onPaginationChanged = useCallback(
     (event: PaginationChangedEvent<TData>) => {
-      if (!paginationEnabled || !paginationQueryKey) return;
-      writePaginationParams(
-        event.api.paginationGetCurrentPage(),
-        event.api.paginationGetPageSize(),
+      if (!paginationEnabled) return;
+      const page = event.api.paginationGetCurrentPage();
+      const pageSize = event.api.paginationGetPageSize();
+      const total = event.api.paginationGetRowCount();
+      setPager((prev) =>
+        prev.page === page && prev.pageSize === pageSize && prev.total === total
+          ? prev
+          : { page, pageSize, total },
       );
+      if (!paginationQueryKey) return;
+      writePaginationParams(page, pageSize);
     },
     [paginationEnabled, paginationQueryKey, writePaginationParams],
   );
@@ -245,7 +257,7 @@ export function DataGrid<TData>({
     <div
       ref={containerRef}
       className={cn(
-        "ag-theme-quartz w-full min-w-0",
+        "ag-theme-quartz flex w-full min-w-0 flex-col gap-3",
         domLayout === "normal" && "h-[500px] flex-1",
         onRowClicked && "[&_.ag-row]:cursor-pointer",
         className,
@@ -253,6 +265,7 @@ export function DataGrid<TData>({
     >
       <AgGridReact<TData>
         ref={gridRef}
+        containerStyle={domLayout === "normal" ? FILL_CONTAINER_STYLE : undefined}
         rowData={rowData ?? []}
         columnDefs={columnDefs}
         defaultColDef={defaultColDef}
@@ -260,7 +273,7 @@ export function DataGrid<TData>({
         onRowClicked={onRowClicked}
         pagination={paginationEnabled}
         paginationPageSize={urlPageSize}
-        paginationPageSizeSelector={paginationEnabled ? paginationPageSizeSelector : undefined}
+        suppressPaginationPanel
         domLayout={domLayout}
         loading={loading}
         overlayNoRowsTemplate={overlayNoRowsTemplate}
@@ -275,6 +288,18 @@ export function DataGrid<TData>({
         ensureDomOrder={enableCellTextSelection}
         rowHeight={rowHeight}
       />
+      {paginationEnabled ? (
+        <ListPager
+          page={pager.page}
+          pageSize={pager.pageSize}
+          total={pager.total}
+          pageSizeOptions={paginationPageSizeSelector}
+          onPageChange={(page) => gridRef.current?.api?.paginationGoToPage(page)}
+          onPageSizeChange={(size) =>
+            gridRef.current?.api?.setGridOption("paginationPageSize", size)
+          }
+        />
+      ) : null}
     </div>
   );
 }

@@ -1,0 +1,8 @@
+{
+  "$schema": "../manifest.schema.json",
+  "name": "github-sender-allowlist",
+  "description": "Blocks GitHub webhook tasks from senders outside configured allowlists",
+  "version": "1.0.0",
+  "runtime": "api",
+  "assets": { "hooks": "hooks.ts" }
+}

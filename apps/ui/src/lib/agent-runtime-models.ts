@@ -211,7 +211,7 @@ export const HARNESS_LABEL: Record<ProviderName | string, string> = {
   pi: "Pi-Mono",
   acp: "ACP",
   dsh: "DeepSeek (dsh)",
-};
+} satisfies Record<ProviderName, string>;
 
 export function harnessSupportsModelSelection(harness: LocalHarnessProvider): boolean {
   return harness !== "acp";

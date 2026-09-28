@@ -7,7 +7,7 @@
  */
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, rmSync } from "node:fs";
+import { lstatSync, mkdirSync, readFileSync, readlinkSync, rmSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import type {
   AgentMessageItem,
@@ -1130,6 +1130,8 @@ describe("CodexAdapter.canResume", () => {
 
 describe("writeCodexAgentsMd round-trip", () => {
   const tmpDir = `/tmp/codex-agents-md-test-${Date.now()}`;
+  // Crash-recovery records live outside every per-test repo dir.
+  const stateDir = join(tmpDir, ".state");
 
   beforeAll(() => {
     mkdirSync(tmpDir, { recursive: true });
@@ -1238,6 +1240,129 @@ stale
     const after = await Bun.file(agentsMd).text();
     expect(after).not.toContain("<swarm_system_prompt>");
     expect(after).toContain("# Project instructions");
+  });
+
+  test("cleanup restores a plain AGENTS.md byte-identically", async () => {
+    const dir = join(tmpDir, "byte-identical");
+    mkdirSync(dir, { recursive: true });
+    const original = "# Project instructions\n\nDo things.\n";
+    await Bun.write(join(dir, "AGENTS.md"), original);
+
+    const handle = await writeCodexAgentsMd(dir, "swarm prompt");
+    await handle.cleanup();
+
+    expect(readFileSync(join(dir, "AGENTS.md"), "utf8")).toBe(original);
+  });
+
+  test("never writes through an AGENTS.md -> CLAUDE.md symlink", async () => {
+    const dir = join(tmpDir, "symlink");
+    mkdirSync(dir, { recursive: true });
+    const original = "# Repo rules\n\nDo things.\n";
+    const claudeMd = join(dir, "CLAUDE.md");
+    const agentsMd = join(dir, "AGENTS.md");
+    await Bun.write(claudeMd, original);
+    symlinkSync("CLAUDE.md", agentsMd);
+
+    const handle = await writeCodexAgentsMd(dir, "swarm prompt", { stateDir });
+
+    // During the session: AGENTS.md is a real file, CLAUDE.md is untouched.
+    expect(lstatSync(agentsMd).isSymbolicLink()).toBe(false);
+    const during = readFileSync(agentsMd, "utf8");
+    expect(during).toContain("swarm prompt");
+    expect(during).toContain("# Repo rules");
+    expect(readFileSync(claudeMd, "utf8")).toBe(original);
+
+    await handle.cleanup();
+
+    expect(lstatSync(agentsMd).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(agentsMd)).toBe("CLAUDE.md");
+    expect(readFileSync(claudeMd, "utf8")).toBe(original);
+  });
+
+  test("carries agent edits to a symlinked AGENTS.md over to the link target", async () => {
+    const dir = join(tmpDir, "symlink-edit");
+    mkdirSync(dir, { recursive: true });
+    const claudeMd = join(dir, "CLAUDE.md");
+    const agentsMd = join(dir, "AGENTS.md");
+    await Bun.write(claudeMd, "# Repo rules\n");
+    symlinkSync("CLAUDE.md", agentsMd);
+
+    const handle = await writeCodexAgentsMd(dir, "swarm prompt", { stateDir });
+    await Bun.write(agentsMd, `${readFileSync(agentsMd, "utf8")}- new rule\n`);
+    await handle.cleanup();
+
+    expect(lstatSync(agentsMd).isSymbolicLink()).toBe(true);
+    expect(readFileSync(claudeMd, "utf8")).toBe("# Repo rules\n- new rule\n");
+  });
+
+  test("restores a symlink left swapped out by a crashed session", async () => {
+    const dir = join(tmpDir, "symlink-crash");
+    mkdirSync(dir, { recursive: true });
+    const original = "# Repo rules\n";
+    const claudeMd = join(dir, "CLAUDE.md");
+    const agentsMd = join(dir, "AGENTS.md");
+    await Bun.write(claudeMd, original);
+    symlinkSync("CLAUDE.md", agentsMd);
+
+    // First session never runs cleanup (crash).
+    await writeCodexAgentsMd(dir, "first prompt", { stateDir });
+    expect(lstatSync(agentsMd).isSymbolicLink()).toBe(false);
+
+    const handle = await writeCodexAgentsMd(dir, "second prompt", { stateDir });
+    const during = readFileSync(agentsMd, "utf8");
+    expect(during).toContain("second prompt");
+    expect(during).not.toContain("first prompt");
+    expect(readFileSync(claudeMd, "utf8")).toBe(original);
+
+    await handle.cleanup();
+    expect(lstatSync(agentsMd).isSymbolicLink()).toBe(true);
+    expect(readFileSync(claudeMd, "utf8")).toBe(original);
+  });
+
+  test("ignores a forged symlink marker pointing out of the repo", async () => {
+    const dir = join(tmpDir, "forged-marker");
+    mkdirSync(dir, { recursive: true });
+    const secretPath = join(tmpDir, "outside-secret.txt");
+    const secret = "TOP-SECRET-CONTENTS\n";
+    await Bun.write(secretPath, secret);
+    const agentsMd = join(dir, "AGENTS.md");
+
+    for (const forged of ["../outside-secret.txt", secretPath]) {
+      const original = `<swarm_system_prompt symlink="${encodeURIComponent(forged)}">\nold\n</swarm_system_prompt>\n# Rules\n`;
+      await Bun.write(agentsMd, original);
+
+      const handle = await writeCodexAgentsMd(dir, "swarm prompt", { stateDir });
+      expect(lstatSync(agentsMd).isSymbolicLink()).toBe(false);
+      expect(readFileSync(agentsMd, "utf8")).not.toContain("TOP-SECRET");
+      expect(readFileSync(secretPath, "utf8")).toBe(secret);
+
+      await handle.cleanup();
+      expect(lstatSync(agentsMd).isSymbolicLink()).toBe(false);
+      expect(readFileSync(agentsMd, "utf8")).toBe(original);
+      expect(readFileSync(secretPath, "utf8")).toBe(secret);
+    }
+  });
+
+  test("never reads or writes an out-of-tree symlink target", async () => {
+    const dir = join(tmpDir, "symlink-out-of-tree");
+    mkdirSync(dir, { recursive: true });
+    const secretPath = join(tmpDir, "outside-target.txt");
+    const secret = "OUT-OF-TREE\n";
+    await Bun.write(secretPath, secret);
+    const agentsMd = join(dir, "AGENTS.md");
+    symlinkSync("../outside-target.txt", agentsMd);
+
+    const handle = await writeCodexAgentsMd(dir, "swarm prompt", { stateDir });
+    expect(lstatSync(agentsMd).isSymbolicLink()).toBe(false);
+    const during = readFileSync(agentsMd, "utf8");
+    expect(during).toContain("swarm prompt");
+    expect(during).not.toContain("OUT-OF-TREE");
+
+    await Bun.write(agentsMd, `${during}- agent edit\n`);
+    await handle.cleanup();
+
+    expect(readlinkSync(agentsMd)).toBe("../outside-target.txt");
+    expect(readFileSync(secretPath, "utf8")).toBe(secret);
   });
 });
 

@@ -184,6 +184,7 @@ export {
   extensionAgentAssignmentError,
   getActiveTaskCount,
   getAgentById,
+  getAgentDailyTaskCounts,
   getAgentHarnessProviders,
   getAllAgents,
   getLeadAgent,
@@ -9550,6 +9551,7 @@ export async function resolveApprovalRequest(
     status: "approved" | "rejected" | "timeout";
     responses?: unknown;
     resolvedBy?: string;
+    resolutionReason?: string;
   },
   options?: { requireActionableWorkflow?: boolean },
 ): Promise<ApprovalRequest | null> {
@@ -9574,7 +9576,8 @@ export async function resolveApprovalRequest(
     : "";
   const row = await getDbClient().get<ApprovalRequestRow>(
     `UPDATE approval_requests
-       SET status = ?, responses = ?, resolvedBy = ?, resolvedAt = ?, updatedAt = ?
+       SET status = ?, responses = ?, resolvedBy = ?, resolutionReason = ?, resolvedAt = ?,
+           updatedAt = ?
        WHERE id = ? AND status = 'pending'
          ${actionableWorkflowClause}
        RETURNING *`,
@@ -9582,10 +9585,28 @@ export async function resolveApprovalRequest(
       data.status,
       data.responses ? JSON.stringify(data.responses) : null,
       data.resolvedBy ?? null,
+      data.resolutionReason ?? null,
       now,
       now,
       id,
     ],
+  );
+  return row ? rowToApprovalRequest(row) : null;
+}
+
+// Cancels 1 pending request. The `status = 'pending'` guard lets a concurrent
+// human answer win; null means the row was not pending.
+export async function cancelApprovalRequestById(
+  id: string,
+  data: { reason: string; resolvedBy: string | null },
+): Promise<ApprovalRequest | null> {
+  const now = new Date().toISOString();
+  const row = await getDbClient().get<ApprovalRequestRow>(
+    `UPDATE approval_requests
+       SET status = 'cancelled', resolutionReason = ?, resolvedBy = ?, resolvedAt = ?, updatedAt = ?
+       WHERE id = ? AND status = 'pending'
+       RETURNING *`,
+    [data.reason, data.resolvedBy, now, now, id],
   );
   return row ? rowToApprovalRequest(row) : null;
 }
@@ -9793,13 +9814,34 @@ export async function getApprovalRequestByStepId(stepId: string): Promise<Approv
   return row ? rowToApprovalRequest(row) : null;
 }
 
-// TODO: Wire into a periodic cron/sweep to auto-timeout expired approval requests (Phase 2)
-export async function getExpiredPendingApprovals(): Promise<ApprovalRequest[]> {
+// Called by timeoutExpiredApprovalRequests in src/be/approval-sweeps.ts on each heartbeat tick.
+export async function getExpiredPendingApprovals(opts?: {
+  now?: string;
+}): Promise<ApprovalRequest[]> {
   const rows = await getDbClient().query<ApprovalRequestRow>(
     `SELECT * FROM approval_requests
        WHERE status = 'pending'
          AND expiresAt IS NOT NULL
-         AND expiresAt < strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
+         AND expiresAt < ?
+       ORDER BY expiresAt ASC`,
+    [opts?.now ?? new Date().toISOString()],
+  );
+  return rows.map(rowToApprovalRequest);
+}
+
+// Pending requests with no explicit deadline created before `cutoff`. Served
+// by idx_approval_requests_pending_created (migration 166). Called by
+// autoCancelStaleApprovalRequests in src/be/approval-sweeps.ts.
+export async function getStaleApprovalRequests(opts: {
+  cutoff: string;
+}): Promise<ApprovalRequest[]> {
+  const rows = await getDbClient().query<ApprovalRequestRow>(
+    `SELECT * FROM approval_requests
+       WHERE status = 'pending'
+         AND expiresAt IS NULL
+         AND createdAt < ?
+       ORDER BY createdAt ASC`,
+    [opts.cutoff],
   );
   return rows.map(rowToApprovalRequest);
 }
