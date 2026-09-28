@@ -969,6 +969,40 @@
           ]
         }
       ]
+    },
+    "gpt-daybreak-blue-latest": {
+      "id": "gpt-daybreak-blue-latest",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "effort",
+          "values": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
+      ]
+    },
+    "gpt-daybreak-red-latest": {
+      "id": "gpt-daybreak-red-latest",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "effort",
+          "values": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
+      ]
     }
   },
   "openrouter": {
@@ -4572,6 +4606,507 @@
     "nousresearch/hermes-3-llama-3.1-405b:free": {
       "id": "nousresearch/hermes-3-llama-3.1-405b:free",
       "reasoning": false
+    },
+    "stealth/space-bunny-alpha": {
+      "id": "stealth/space-bunny-alpha",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "effort",
+          "values": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
+      ]
+    },
+    "prism-ml/ternary-bonsai-2-27b": {
+      "id": "prism-ml/ternary-bonsai-2-27b",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "toggle"
+        },
+        {
+          "type": "effort",
+          "values": [
+            "medium",
+            "xhigh"
+          ]
+        }
+      ]
+    },
+    "anthropic/claude-opus-5.5": {
+      "id": "anthropic/claude-opus-5.5",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "effort",
+          "values": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
+      ]
+    },
+    "cohere/command-a-plus": {
+      "id": "cohere/command-a-plus",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "toggle"
+        }
+      ]
+    },
+    "deepseek/deepseek-v4.1-flash": {
+      "id": "deepseek/deepseek-v4.1-flash",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "toggle"
+        },
+        {
+          "type": "effort",
+          "values": [
+            "low",
+            "high",
+            "max"
+          ]
+        }
+      ]
+    },
+    "unbiased/pareto": {
+      "id": "unbiased/pareto",
+      "reasoning": false
+    },
+    "perceptron/perceptron-mk1.5": {
+      "id": "perceptron/perceptron-mk1.5",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "effort",
+          "values": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      ]
+    },
+    "z-ai/glm-5.3-prime": {
+      "id": "z-ai/glm-5.3-prime",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "effort",
+          "values": [
+            "low",
+            "high",
+            "max"
+          ]
+        }
+      ]
+    },
+    "z-ai/glm-5.3-flashx": {
+      "id": "z-ai/glm-5.3-flashx",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "effort",
+          "values": [
+            "low",
+            "high",
+            "max"
+          ]
+        }
+      ]
+    },
+    "inference-net/schematron-v2-small": {
+      "id": "inference-net/schematron-v2-small",
+      "reasoning": false
+    },
+    "inference-net/schematron-v2-turbo": {
+      "id": "inference-net/schematron-v2-turbo",
+      "reasoning": false
+    },
+    "~openai/gpt-terra-latest": {
+      "id": "~openai/gpt-terra-latest",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "effort",
+          "values": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
+      ]
+    },
+    "~openai/gpt-luna-latest": {
+      "id": "~openai/gpt-luna-latest",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "effort",
+          "values": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
+      ]
+    },
+    "~openai/gpt-sol-latest": {
+      "id": "~openai/gpt-sol-latest",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "effort",
+          "values": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
+      ]
+    },
+    "~openai/gpt-astra-latest": {
+      "id": "~openai/gpt-astra-latest",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "effort",
+          "values": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
+      ]
+    },
+    "x-ai/grok-4.7": {
+      "id": "x-ai/grok-4.7",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "effort",
+          "values": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      ]
+    },
+    "upstage/solar-mini4": {
+      "id": "upstage/solar-mini4",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "effort",
+          "values": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
+      ]
+    },
+    "~deepseek/deepseek-flash-latest": {
+      "id": "~deepseek/deepseek-flash-latest",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "toggle"
+        },
+        {
+          "type": "effort",
+          "values": [
+            "low",
+            "high",
+            "max"
+          ]
+        }
+      ]
+    },
+    "~deepseek/deepseek-pro-latest": {
+      "id": "~deepseek/deepseek-pro-latest",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "toggle"
+        },
+        {
+          "type": "effort",
+          "values": [
+            "low",
+            "high",
+            "max"
+          ]
+        }
+      ]
+    },
+    "fireworks/ember-1": {
+      "id": "fireworks/ember-1",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "toggle"
+        },
+        {
+          "type": "effort",
+          "values": [
+            "low",
+            "high",
+            "max"
+          ]
+        }
+      ]
+    },
+    "sakana/fugu-max": {
+      "id": "sakana/fugu-max",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "effort",
+          "values": [
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
+      ]
+    },
+    "sakana/fugu-ultra-v2": {
+      "id": "sakana/fugu-ultra-v2",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "effort",
+          "values": [
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
+      ]
+    },
+    "inclusionai/ling-3.0-flash-vl": {
+      "id": "inclusionai/ling-3.0-flash-vl",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "toggle"
+        }
+      ]
+    },
+    "xiaomi/mimo-v2.6-pro": {
+      "id": "xiaomi/mimo-v2.6-pro",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "toggle"
+        }
+      ]
+    },
+    "xiaomi/mimo-v2.6-pro-ultraspeed": {
+      "id": "xiaomi/mimo-v2.6-pro-ultraspeed",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "toggle"
+        }
+      ]
+    },
+    "xiaomi/mimo-v2.6-flash": {
+      "id": "xiaomi/mimo-v2.6-flash",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "toggle"
+        }
+      ]
+    },
+    "inception/mercury-2.5": {
+      "id": "inception/mercury-2.5",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "effort",
+          "values": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      ]
+    },
+    "aion-labs/aion-3.5": {
+      "id": "aion-labs/aion-3.5",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "effort",
+          "values": [
+            "low",
+            "high",
+            "max"
+          ]
+        }
+      ]
+    },
+    "aion-labs/aion-3.5-mini": {
+      "id": "aion-labs/aion-3.5-mini",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "effort",
+          "values": [
+            "low",
+            "high",
+            "max"
+          ]
+        }
+      ]
+    },
+    "qwen/qwen3.8-omni-flash": {
+      "id": "qwen/qwen3.8-omni-flash",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "toggle"
+        },
+        {
+          "type": "budget_tokens"
+        }
+      ]
+    },
+    "qwen/qwen3.8-max-prime": {
+      "id": "qwen/qwen3.8-max-prime",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "effort",
+          "values": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      ]
+    },
+    "qwen/qwen3.8-27b:free": {
+      "id": "qwen/qwen3.8-27b:free",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "toggle"
+        },
+        {
+          "type": "effort",
+          "values": [
+            "low",
+            "medium",
+            "xhigh"
+          ]
+        }
+      ]
+    },
+    "openai/gpt-6-sol-pro": {
+      "id": "openai/gpt-6-sol-pro",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "effort",
+          "values": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
+      ]
+    },
+    "openai/gpt-6-luna": {
+      "id": "openai/gpt-6-luna",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "effort",
+          "values": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
+      ]
+    },
+    "openai/gpt-6-luna-pro": {
+      "id": "openai/gpt-6-luna-pro",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "effort",
+          "values": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
+      ]
+    },
+    "openai/gpt-6-sol": {
+      "id": "openai/gpt-6-sol",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "effort",
+          "values": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
+      ]
     }
   },
   "amazon-bedrock": {

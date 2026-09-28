@@ -72,6 +72,32 @@ export const configs: HarnessConfig[] = [
     // target. Historical rows with model "fable" resolve at read time (v7 §8).
     model: "claude-fable-5",
   },
+  // Round-12 September 2026 refresh: concrete ids pinned so each config grades
+  // one model, independent of where the bare aliases resolve today.
+  {
+    id: "claude-opus-5",
+    label: "Claude Code / opus 5",
+    provider: "claude",
+    model: "claude-opus-5",
+  },
+  {
+    id: "claude-opus-5.5",
+    label: "Claude Code / opus 5.5",
+    provider: "claude",
+    model: "claude-opus-5-5",
+  },
+  {
+    id: "claude-fable-5.1",
+    label: "Claude Code / fable 5.1",
+    provider: "claude",
+    model: "claude-fable-5-1",
+  },
+  {
+    id: "claude-haiku-4.5",
+    label: "Claude Code / haiku 4.5",
+    provider: "claude",
+    model: "claude-haiku-4-5-20251001",
+  },
   {
     id: "pi-deepseek-flash",
     label: "pi-mono / DeepSeek v4 flash (OpenRouter)",
@@ -319,6 +345,81 @@ export const configs: HarnessConfig[] = [
     provider: "pi",
     model: "openrouter/meta-llama/llama-4-maverick",
   },
+  // Round-12 September 2026 refresh: newest tool-capable family members on the
+  // live OpenRouter list (2026-09-28), all present in the models.dev snapshot.
+  // Paid slugs only. Skipped premium variants: glm-5.3-prime, qwen3.8-max-prime.
+  {
+    id: "pi-deepseek-v4.1-flash",
+    label: "pi-mono / DeepSeek V4.1 Flash (OpenRouter)",
+    provider: "pi",
+    model: "openrouter/deepseek/deepseek-v4.1-flash",
+  },
+  {
+    id: "pi-glm-5.3",
+    label: "pi-mono / GLM 5.3 (OpenRouter)",
+    provider: "pi",
+    model: "openrouter/z-ai/glm-5.3",
+  },
+  {
+    id: "pi-glm-5.3-flash",
+    label: "pi-mono / GLM 5.3 Flash (OpenRouter)",
+    provider: "pi",
+    model: "openrouter/z-ai/glm-5.3-flash",
+  },
+  {
+    id: "pi-qwen3.8-max-0902",
+    label: "pi-mono / Qwen3.8 Max 0902 (OpenRouter)",
+    provider: "pi",
+    model: "openrouter/qwen/qwen3.8-max-0902",
+  },
+  {
+    id: "pi-qwen3.8-flash",
+    label: "pi-mono / Qwen3.8 Flash (OpenRouter)",
+    provider: "pi",
+    model: "openrouter/qwen/qwen3.8-flash",
+  },
+  {
+    id: "pi-kimi-k3",
+    label: "pi-mono / Kimi K3 (OpenRouter)",
+    provider: "pi",
+    model: "openrouter/moonshotai/kimi-k3",
+  },
+  {
+    id: "pi-gemini-3.8-flash",
+    label: "pi-mono / Gemini 3.8 Flash (OpenRouter)",
+    provider: "pi",
+    model: "openrouter/google/gemini-3.8-flash",
+  },
+  {
+    id: "pi-grok-4.7",
+    label: "pi-mono / Grok 4.7 (OpenRouter)",
+    provider: "pi",
+    model: "openrouter/x-ai/grok-4.7",
+  },
+  {
+    id: "pi-mimo-v2.6-pro",
+    label: "pi-mono / MiMo V2.6 Pro (OpenRouter)",
+    provider: "pi",
+    model: "openrouter/xiaomi/mimo-v2.6-pro",
+  },
+  {
+    id: "pi-mimo-v2.6-flash",
+    label: "pi-mono / MiMo V2.6 Flash (OpenRouter)",
+    provider: "pi",
+    model: "openrouter/xiaomi/mimo-v2.6-flash",
+  },
+  {
+    id: "pi-mercury-2.5",
+    label: "pi-mono / Mercury 2.5 (OpenRouter)",
+    provider: "pi",
+    model: "openrouter/inception/mercury-2.5",
+  },
+  {
+    id: "pi-nemotron-3.5-lightning",
+    label: "pi-mono / Nemotron 3.5 Lightning (OpenRouter)",
+    provider: "pi",
+    model: "openrouter/nvidia/nemotron-3.5-lightning",
+  },
   {
     id: "opencode-gemini-flash",
     label: "opencode / Gemini 3 flash (OpenRouter)",
@@ -526,6 +627,79 @@ export const configs: HarnessConfig[] = [
     provider: "opencode",
     model: "openrouter/meta-llama/llama-4-maverick",
   },
+  // Round-12 September 2026 refresh — opencode twins of the pi entries above.
+  {
+    id: "opencode-deepseek-v4.1-flash",
+    label: "opencode / DeepSeek V4.1 Flash (OpenRouter)",
+    provider: "opencode",
+    model: "openrouter/deepseek/deepseek-v4.1-flash",
+  },
+  {
+    id: "opencode-glm-5.3",
+    label: "opencode / GLM 5.3 (OpenRouter)",
+    provider: "opencode",
+    model: "openrouter/z-ai/glm-5.3",
+  },
+  {
+    id: "opencode-glm-5.3-flash",
+    label: "opencode / GLM 5.3 Flash (OpenRouter)",
+    provider: "opencode",
+    model: "openrouter/z-ai/glm-5.3-flash",
+  },
+  {
+    id: "opencode-qwen3.8-max-0902",
+    label: "opencode / Qwen3.8 Max 0902 (OpenRouter)",
+    provider: "opencode",
+    model: "openrouter/qwen/qwen3.8-max-0902",
+  },
+  {
+    id: "opencode-qwen3.8-flash",
+    label: "opencode / Qwen3.8 Flash (OpenRouter)",
+    provider: "opencode",
+    model: "openrouter/qwen/qwen3.8-flash",
+  },
+  {
+    id: "opencode-kimi-k3",
+    label: "opencode / Kimi K3 (OpenRouter)",
+    provider: "opencode",
+    model: "openrouter/moonshotai/kimi-k3",
+  },
+  {
+    id: "opencode-gemini-3.8-flash",
+    label: "opencode / Gemini 3.8 Flash (OpenRouter)",
+    provider: "opencode",
+    model: "openrouter/google/gemini-3.8-flash",
+  },
+  {
+    id: "opencode-grok-4.7",
+    label: "opencode / Grok 4.7 (OpenRouter)",
+    provider: "opencode",
+    model: "openrouter/x-ai/grok-4.7",
+  },
+  {
+    id: "opencode-mimo-v2.6-pro",
+    label: "opencode / MiMo V2.6 Pro (OpenRouter)",
+    provider: "opencode",
+    model: "openrouter/xiaomi/mimo-v2.6-pro",
+  },
+  {
+    id: "opencode-mimo-v2.6-flash",
+    label: "opencode / MiMo V2.6 Flash (OpenRouter)",
+    provider: "opencode",
+    model: "openrouter/xiaomi/mimo-v2.6-flash",
+  },
+  {
+    id: "opencode-mercury-2.5",
+    label: "opencode / Mercury 2.5 (OpenRouter)",
+    provider: "opencode",
+    model: "openrouter/inception/mercury-2.5",
+  },
+  {
+    id: "opencode-nemotron-3.5-lightning",
+    label: "opencode / Nemotron 3.5 Lightning (OpenRouter)",
+    provider: "opencode",
+    model: "openrouter/nvidia/nemotron-3.5-lightning",
+  },
   {
     id: "codex-5.6-sol",
     label: "Codex / gpt-5.6-sol",
@@ -567,6 +741,25 @@ export const configs: HarnessConfig[] = [
     label: "Codex / gpt-5.5-pro",
     provider: "codex",
     model: "gpt-5.5-pro",
+  },
+  // Round-12 September 2026 refresh: GPT-6 tiers from src/providers/codex-models.ts.
+  {
+    id: "codex-6-astra",
+    label: "Codex / gpt-6-astra",
+    provider: "codex",
+    model: "gpt-6-astra",
+  },
+  {
+    id: "codex-6-sol",
+    label: "Codex / gpt-6-sol",
+    provider: "codex",
+    model: "gpt-6-sol",
+  },
+  {
+    id: "codex-6-luna",
+    label: "Codex / gpt-6-luna",
+    provider: "codex",
+    model: "gpt-6-luna",
   },
 ];
 
