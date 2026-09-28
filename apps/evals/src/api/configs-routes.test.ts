@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { configs as seedConfigs } from "../../configs/index.ts";
+import { getResolutionCatalog } from "../cost/catalog.ts";
+import { resolveAlias } from "../cost/resolve-alias.ts";
 import { getDb, initDb, resetDbForTests } from "../db/client.ts";
 import { getHarnessConfig, syncSeedConfigs } from "../db/harness-configs.ts";
 import { loadRegistry, setDbConfigs } from "../registry.ts";
@@ -80,6 +82,68 @@ describe("/api/configs", () => {
       const body = (await res.json()) as Array<{ id: string; source: string }>;
       expect(body.map((c) => c.id).sort()).toEqual(seedConfigs.map((c) => c.id).sort());
       expect(body.every((c) => c.source === "seed")).toBe(true);
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("GET carries resolvedModel: the alias target today, null for pinned configs", async () => {
+    const server = await startServer(0);
+    try {
+      const res = await fetch(url(server, "/api/configs"));
+      const body = (await res.json()) as Array<{
+        id: string;
+        model: string | null;
+        modelAlias: string | null;
+        resolvedModel: string | null;
+      }>;
+      const catalog = await getResolutionCatalog();
+      const aliased = body.filter((c) => c.modelAlias);
+      expect(aliased.map((c) => c.id)).toEqual(
+        expect.arrayContaining(["claude-haiku", "claude-sonnet", "claude-opus"]),
+      );
+      for (const c of aliased) {
+        expect(c.resolvedModel).toBe(resolveAlias(c.modelAlias as string, catalog));
+        expect(c.resolvedModel).not.toBeNull();
+      }
+      const opus = body.find((c) => c.id === "claude-opus");
+      expect(opus?.resolvedModel).toStartWith("claude-opus");
+      const piAlias = body.find((c) => c.modelAlias?.startsWith("latest:openrouter/"));
+      expect(piAlias?.resolvedModel).toStartWith("openrouter/");
+      const pinned = body.filter((c) => c.model !== null);
+      expect(pinned.length).toBeGreaterThan(0);
+      expect(pinned.every((c) => c.resolvedModel === null)).toBe(true);
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("POST and PATCH echo resolvedModel for alias configs", async () => {
+    const server = await startServer(0);
+    try {
+      const created = await send(server, "POST", "/api/configs", {
+        provider: "claude",
+        modelAlias: "latest:anthropic/fable",
+        id: "claude-fable-latest",
+      });
+      expect(created.status).toBe(201);
+      const createdBody = (await created.json()) as { resolvedModel: string | null };
+      expect(createdBody.resolvedModel).toBe(
+        resolveAlias("latest:anthropic/fable", await getResolutionCatalog()),
+      );
+      expect(createdBody.resolvedModel).toStartWith("claude-fable");
+
+      const patched = await send(server, "PATCH", "/api/configs/claude-fable-latest", {
+        label: "Fable (latest)",
+      });
+      expect(patched.status).toBe(200);
+      const patchedBody = (await patched.json()) as { resolvedModel: string | null };
+      expect(patchedBody.resolvedModel).toBe(createdBody.resolvedModel);
+
+      const pinned = await send(server, "PATCH", "/api/configs/claude-fable-latest", {
+        model: "claude-fable-5",
+      });
+      expect(((await pinned.json()) as { resolvedModel: string | null }).resolvedModel).toBeNull();
     } finally {
       server.stop(true);
     }

@@ -96,6 +96,11 @@ function ConfigCard(props: { config: ConfigJson; modelName: string }): ReactNode
           <span className="dim">Harness default</span>
         )}
       </CardRow>
+      {c.modelAlias ? (
+        <CardRow label="Resolves To">
+          {c.resolvedModel ? <code>{c.resolvedModel}</code> : <span className="dim">no match</span>}
+        </CardRow>
+      ) : null}
       <CardRow label="Tier">{c.modelTier ?? <span className="dim">—</span>}</CardRow>
       <CardRow label="Env Keys">
         {c.envKeys.length > 0 ? c.envKeys.join(", ") : <span className="dim">—</span>}

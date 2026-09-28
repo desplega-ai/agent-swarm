@@ -508,6 +508,11 @@ export interface ConfigJson {
   model: string | null;
   /** Moving alias (`latest:anthropic/opus`); resolved per run at creation. */
   modelAlias?: string | null;
+  /**
+   * What `modelAlias` resolves to in the reviewed catalog right now (the id a
+   * run created today would pin); null for pinned configs and unmatched aliases.
+   */
+  resolvedModel?: string | null;
   modelTier: string | null;
   envKeys: string[];
   isDefault: boolean;
@@ -543,15 +548,40 @@ export interface ModelJson {
   cacheWritePerM: number | null;
 }
 
+/** Where the server's models.dev catalog came from (GET /api/models `catalog`). */
+export interface CatalogInfo {
+  source: "live" | "db" | "snapshot";
+  /** ISO time of the last successful models.dev fetch; null while on the snapshot. */
+  fetchedAt: string | null;
+}
+
+/** POST /api/models/refresh body (502 with `status: "error"` on failure). */
+export interface CatalogRefreshResponse {
+  status: "updated" | "not-modified" | "error";
+  fetchedAt?: string;
+  modelCount?: number;
+  error?: string;
+  catalog: CatalogInfo;
+}
+
 export interface ModelsResponse {
   defaultJudgeModel: string;
+  /** The judge picker list (openrouter section only). */
   models: ModelJson[];
+  /**
+   * Display-only claude (anthropic) + codex (openai) entries so `resolve()` can
+   * name and price non-openrouter ids. Never a picker source. Absent on older
+   * servers — resolution then covers openrouter ids only.
+   */
+  harnessModels?: ModelJson[];
   /**
    * v7 §8: frozen claude bare-alias map ("fable" → "claude-fable-5", …),
    * computed server-side from the models.dev anthropic section. Absent on
    * pre-v7 servers — resolution then degrades to the raw id (old behavior).
    */
   aliases?: Record<string, string>;
+  /** Catalog freshness. Absent on older servers. */
+  catalog?: CatalogInfo;
 }
 
 export interface CreateRunBody {

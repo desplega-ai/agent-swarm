@@ -53,6 +53,30 @@ export async function listOpenrouterModels(): Promise<PricedModel[]> {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/**
+ * Every `anthropic` (claude harness) and `openai` (codex harness) model, sorted
+ * by name. DISPLAY-ONLY: the UI resolves the model ids configs and attempts
+ * carry (`claude-sonnet-5-5`, `gpt-5.6-sol`, dated snapshots) to a name and
+ * price card with this list, so it is not filtered to the reviewed allowlist:
+ * ids are the union of the committed snapshot and the live catalog, live
+ * pricing winning. It is never a picker source (the judge picker stays
+ * `listOpenrouterModels`).
+ */
+export async function listHarnessModels(): Promise<PricedModel[]> {
+  const snapshot = await getSnapshotCatalog();
+  const live = await loadCache();
+  const out: PricedModel[] = [];
+  for (const section of ["anthropic", "openai"] as const) {
+    const fromSnapshot = snapshot[section]?.models ?? {};
+    const fromLive = live[section]?.models ?? {};
+    for (const id of new Set([...Object.keys(fromSnapshot), ...Object.keys(fromLive)])) {
+      const model = fromLive[id] ?? fromSnapshot[id];
+      if (model) out.push(toPriced(id, model));
+    }
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
 const PROVIDER_SECTION: Record<HarnessProvider, string> = {
   claude: "anthropic",
   codex: "openai",

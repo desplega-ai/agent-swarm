@@ -2,8 +2,13 @@ import { join, normalize, sep } from "node:path";
 import { attachmentContentDisposition } from "../../../../src/utils/content-disposition.ts";
 import { DEFAULT_CONFIG_IDS } from "../../configs/index.ts";
 import { CONFIG_PRESETS } from "../../configs/presets.ts";
-import { getCatalog, refreshCatalog, startCatalogRefresh } from "../cost/catalog.ts";
-import { getClaudeAliasMap, listOpenrouterModels } from "../cost/pricing.ts";
+import {
+  getCatalog,
+  getResolutionCatalog,
+  refreshCatalog,
+  startCatalogRefresh,
+} from "../cost/catalog.ts";
+import { getClaudeAliasMap, listHarnessModels, listOpenrouterModels } from "../cost/pricing.ts";
 import { getDb, initDb } from "../db/client.ts";
 import { listHarnessConfigs } from "../db/harness-configs.ts";
 import {
@@ -21,7 +26,7 @@ import {
 } from "../db/queries.ts";
 import { getJudgeLive } from "../judge/live-registry.ts";
 import { getAttemptProgress } from "../live/attempt-progress.ts";
-import { loadRegistry, serializeConfig, serializeScenario } from "../registry.ts";
+import { loadRegistry, serializeScenario } from "../registry.ts";
 import { summarizeRun } from "../results.ts";
 import {
   executeRun,
@@ -45,7 +50,12 @@ import {
   type SandboxInfo,
 } from "../types.ts";
 import { type AnalyticsSourceRow, buildAnalytics } from "./analytics.ts";
-import { createConfig, initHarnessConfigs, patchConfig } from "./configs-routes.ts";
+import {
+  createConfig,
+  initHarnessConfigs,
+  patchConfig,
+  serializeConfigResolved,
+} from "./configs-routes.ts";
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data, null, 2), {
@@ -815,9 +825,10 @@ export async function startServer(
           const sources = new Map(
             (await listHarnessConfigs(db)).map((r) => [r.config.id, r.source]),
           );
+          const catalog = await getResolutionCatalog();
           return json(
             [...registry.configs.values()].map((c) => ({
-              ...serializeConfig(c),
+              ...serializeConfigResolved(c, catalog),
               isDefault: DEFAULT_CONFIG_IDS.includes(c.id),
               source: sources.get(c.id) ?? "seed",
             })),
@@ -827,7 +838,10 @@ export async function startServer(
           if (!(await isAuthorized(req))) return unauthorized();
           const result = await createConfig(db, await req.json().catch(() => null));
           if (!result.ok) return json({ error: result.error }, result.status);
-          return json(serializeConfig(result.config), result.status);
+          return json(
+            serializeConfigResolved(result.config, await getResolutionCatalog()),
+            result.status,
+          );
         },
       },
       "/api/configs/:id": {
@@ -835,7 +849,10 @@ export async function startServer(
           if (!(await isAuthorized(req))) return unauthorized();
           const result = await patchConfig(db, req.params.id, await req.json().catch(() => null));
           if (!result.ok) return json({ error: result.error }, result.status);
-          return json(serializeConfig(result.config), result.status);
+          return json(
+            serializeConfigResolved(result.config, await getResolutionCatalog()),
+            result.status,
+          );
         },
       },
       /** Quick-run config presets (v7.7 item 1) — static catalog data, validated by registry.test.ts. */
@@ -845,7 +862,11 @@ export async function startServer(
       },
       "/api/models": async (req) => {
         if (!(await isAuthorized(req))) return unauthorized();
+        // The judge picker list: openrouter only.
         const models = await listOpenrouterModels();
+        // Display-only claude (anthropic) + codex (openai) entries, so the UI
+        // can name and price any config or attempt model id, not just openrouter's.
+        const harnessModels = await listHarnessModels();
         // v7 §8: frozen claude alias map (fable → claude-fable-5, …) so the UI
         // resolves bare aliases stored on historical rows at display time.
         const aliases = await getClaudeAliasMap();
@@ -853,6 +874,7 @@ export async function startServer(
         return json({
           defaultJudgeModel: DEFAULT_JUDGE_MODEL,
           models,
+          harnessModels,
           aliases,
           catalog: { source, fetchedAt },
         });

@@ -87,7 +87,9 @@ Local-first dashboard + API; **runs can be triggered, resumed, and cancelled fro
 - `#/scenarios` — searchable scenario registry; `#/scenarios/:id` shows what the scenario will do (tasks, seeding, checks, judges, rubric) + recent attempts across runs.
 - Light/dark theme (persisted, follows `prefers-color-scheme`).
 
-Key endpoints: `GET/POST /api/runs`, `POST /api/runs/:id/{resume,cancel}`, `GET /api/runs/:id`, `GET /api/attempts/:id{,/transcript}`, `GET /api/scenarios{,/:id}`, `GET /api/configs`, `GET /api/artifacts/:id`.
+Key endpoints: `GET/POST /api/runs`, `POST /api/runs/:id/{resume,cancel}`, `GET /api/runs/:id`, `GET /api/attempts/:id{,/transcript}`, `GET /api/scenarios{,/:id}`, `GET/POST /api/configs`, `PATCH /api/configs/:id`, `GET /api/models`, `POST /api/models/refresh`, `GET /api/artifacts/:id`.
+
+`GET /api/models` feeds every model name and price in the UI: `models` is the judge picker list (openrouter only), `harnessModels` holds the claude (anthropic) and codex (openai) entries used only to name and price ids, `aliases` maps bare claude shortnames, and `catalog` says whether the data is `live`, `db` (last persisted fetch) or the committed `snapshot`, and when it was fetched. `GET /api/configs` rows carry `resolvedModel`: what a `modelAlias` resolves to today. The Configs page shows the catalog badge and a refresh button (`POST /api/models/refresh`).
 
 When `EVALS_API_KEY` is set, every `/api/*` endpoint requires `Authorization: Bearer <key>`.
 Static UI assets and `/health` stay public. Browser users open the URL, paste the same key once,
@@ -133,6 +135,7 @@ Required Dokploy env/secrets:
 | `EVAL_JUDGE_MODEL` | no | Default judge model override. |
 | `EVALS_E2B_TEMPLATE_API` | no | API sandbox template override. |
 | `EVALS_E2B_TEMPLATE_WORKER` | no | Worker sandbox template override. |
+| `EVALS_MODEL_CATALOG_REFRESH` | no | `off` disables the models.dev refresh loop; the committed snapshot serves. |
 
 Do not use `EVALS_DB_PATH` for Dokploy unless intentionally running an offline disposable DB; the
 container filesystem can be replaced on redeploy, so persisted history should use the Turso
@@ -141,7 +144,27 @@ remote primary via `EVALS_DB_SYNC_URL` + `EVALS_DB_AUTH_TOKEN`.
 ## Defining scenarios and configs
 
 - Scenarios live in `scenarios/*.ts` (`Scenario` type): description, optional seeding, initial task(s), and an `outcome` (deterministic `checks`, `llmJudge` and/or `agenticJudge` rubrics, `passThreshold`). Register in `scenarios/index.ts` — every scenario is shape-validated at registry load (`validateScenario`; bad definitions fail CLI/server startup with the full violation list).
-- Harness configs live in `configs/index.ts` (`HarnessConfig`): provider (`claude` / `pi` / `codex` / `opencode`), concrete `model` (worker `MODEL_OVERRIDE`) or `modelTier`, plus extra env.
+- Harness configs live in `configs/index.ts` (`HarnessConfig`): provider (`claude` / `pi` / `codex` / `opencode`), then either a concrete `model` (worker `MODEL_OVERRIDE`) or a moving `modelAlias` (see [Model catalog and `latest:` aliases](#model-catalog-and-latest-aliases)), plus extra env. The two are mutually exclusive. The seed catalog leaves `modelTier` unset: a tier resolved at claim time would grade a moving target.
+
+### Model catalog and `latest:` aliases
+
+Prices, display names and alias resolution come from models.dev. `src/cost/catalog.ts` serves the newest payload it holds: a live fetch, else the last one persisted in `model_catalog_cache`, else the committed `src/be/modelsdev-cache.json` snapshot. `serve` loads the persisted payload at boot, then revalidates every 6h with `If-None-Match`; a failed fetch keeps the previous payload. `POST /api/models/refresh` (or the refresh button on the Configs page) forces a fetch now. The snapshot is the reviewed allowlist of model ids: a live fetch updates pricing and metadata such as `release_date` but never adds a model to the judge picker or to alias resolution.
+
+A config may set `modelAlias` instead of `model`:
+
+- `latest:anthropic/<family>` (provider `claude`): the newest undated `claude-*` id of that family (`latest:anthropic/opus`).
+- `latest:openrouter/<glob>` (provider `pi` / `opencode`): the newest openrouter id matching the glob (`*` = any run of characters), returned with the `openrouter/` prefix (`latest:openrouter/deepseek/deepseek-v4*-flash`). Dated, `-latest`, `:free` and preview ids are skipped unless the glob names them.
+- Newest means the greatest `release_date`, ties broken by the greatest id.
+- Evals accepts only that grammar. It rejects the `@stable` / `@any` channel suffix and `latest:openai/*`, which the swarm's shared resolver (`packages/model-catalog`) understands, so eval configs keep resolving exactly as before.
+
+An alias resolves once, when a run is created, and the concrete id is pinned in `eval_run_configs`. Attempts and resumes read the pin, never the live catalog, so one run grades one model. `GET /api/configs` shows what each alias resolves to today (`resolvedModel`), and `POST` / `PATCH /api/configs` reject an alias that matches nothing.
+
+Two deliberate differences from the swarm's own catalog:
+
+- **Alias rule.** The evals rule is frozen for reproducibility (v7 spec §8): a model without a `release_date` ranks oldest in its family. The swarm's `buildClaudeShortnameMap` ranks an undated model newest, because only just-launched models lack a date there. The two can pick different ids for the same shortname. On the committed snapshot alone, `latest:anthropic/opus` resolves to `claude-opus-5` here, while the swarm resolves `opus` to `claude-opus-5-5`, which the snapshot lists without a `release_date`; once a live models.dev fetch supplies that date, both pick `claude-opus-5-5`. Evals keeps its rule so historical alias rows and analytics grouping do not shift.
+- **No swarm DB.** Evals does not read the swarm's `model_catalog` (`GET /api/models-catalog`). It is a separate service with its own libsql database and no swarm API URL or key. Attempts run in ephemeral E2B swarm stacks, and configs pin exact ids. The swarm's overlay rows and `harness_model_support` describe the production CLIs, not what an eval worker image runs, and its catalog projection omits `tool_call`, which the model cards here show.
+
+`EVALS_MODEL_CATALOG_REFRESH=off` turns the boot load and the 6h refresh off, so the committed snapshot serves (the loop is also off under `NODE_ENV=test`). The manual refresh endpoint still works.
 
 ### Seeding (`scenario.seed`)
 
@@ -221,6 +244,7 @@ The DB of record is the Turso database `swarm-evals-local`, accessed through a *
 | `EVALS_API_KEY` | static master key for deployed `/api/*`; when unset the API is open for local dev/tests |
 | `EVALS_MAX_CONCURRENT_RUNS` | max active runs accepted by `serve` (default `1`; over-cap creates/resumes return 429) |
 | `EVALS_PORT` | serve port override |
+| `EVALS_MODEL_CATALOG_REFRESH` | set to `off` to skip the models.dev boot load and 6h refresh and serve the committed snapshot (see [Model catalog](#model-catalog-and-latest-aliases)) |
 | `EVALS_E2B_TEMPLATE_API` / `EVALS_E2B_TEMPLATE_WORKER` | template overrides (default `agent-swarm-{api,worker}-latest`; see [Evaluating a branch](#evaluating-a-branch)) |
 
 ## Notes

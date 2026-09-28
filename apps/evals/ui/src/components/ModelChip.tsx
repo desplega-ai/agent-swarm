@@ -8,23 +8,41 @@ import { Tooltip } from "./Tooltip.tsx";
  * Reusable model rendering (item 18): human display name from models.dev with a
  * hover card carrying the full info (id, pricing, context, capabilities).
  * Unresolved ids gracefully fall back to the raw id.
+ *
+ * `alias` marks a moving `latest:…` alias config: pass the id it resolves to as
+ * `model` (null when it matches nothing today). The resolved model is the label
+ * and the alias sits in the hover card, so an alias is never reported as
+ * "not in the catalog".
  */
-export function ModelChip(props: { model: string | null; dim?: boolean }): ReactNode {
+export function ModelChip(props: {
+  model: string | null;
+  alias?: string | null;
+  dim?: boolean;
+}): ReactNode {
   const { resolve } = useModels();
-  if (props.model === null || props.model.length === 0) {
-    return <span className="dim">—</span>;
+  const className = props.dim ? "model-chip dim" : "model-chip";
+  const alias = props.alias ?? null;
+  const hasModel = props.model !== null && props.model.length > 0;
+  if (!hasModel) {
+    if (alias === null) return <span className="dim">—</span>;
+    return (
+      <Tooltip text={`Moving alias ${alias} matches no model in the current catalog`}>
+        <code className={className}>{alias}</code>
+      </Tooltip>
+    );
   }
-  const model = resolve(props.model);
+  const modelId = props.model as string;
+  const model = resolve(modelId);
   if (!model) {
     return (
-      <Tooltip text="Not in the models.dev catalog">
-        <code className={props.dim ? "model-chip dim" : "model-chip"}>{props.model}</code>
+      <Tooltip text={alias ? `${alias} resolves to ${modelId}` : "Not in the models.dev catalog"}>
+        <code className={className}>{modelId}</code>
       </Tooltip>
     );
   }
   return (
-    <Tooltip wide text={<ModelCard model={model} />}>
-      <span className={props.dim ? "model-chip dim" : "model-chip"}>{model.name}</span>
+    <Tooltip wide text={<ModelCard model={model} alias={alias} />}>
+      <span className={className}>{model.name}</span>
     </Tooltip>
   );
 }
@@ -38,11 +56,16 @@ function CardRow(props: { label: string; children: ReactNode }): ReactNode {
   );
 }
 
-function ModelCard(props: { model: ModelJson }): ReactNode {
+function ModelCard(props: { model: ModelJson; alias: string | null }): ReactNode {
   const m = props.model;
   return (
     <div className="tip-card">
       <div className="tip-card-title">{m.name}</div>
+      {props.alias !== null ? (
+        <CardRow label="Alias">
+          <code>{props.alias}</code>
+        </CardRow>
+      ) : null}
       <CardRow label="Id">
         <code>{m.id}</code>
       </CardRow>

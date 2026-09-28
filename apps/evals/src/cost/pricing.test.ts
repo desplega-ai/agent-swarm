@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import type { TokenTotals } from "../types.ts";
-import { listOpenrouterModels, lookupModelCost, type PricedModel, priceUsage } from "./pricing.ts";
+import {
+  listHarnessModels,
+  listOpenrouterModels,
+  lookupModelCost,
+  type PricedModel,
+  priceUsage,
+} from "./pricing.ts";
 
 interface SnapshotModel {
   cost?: { input?: number; output?: number };
@@ -8,6 +14,8 @@ interface SnapshotModel {
 
 interface ModelsDevSnapshot {
   openrouter: { models: Record<string, SnapshotModel> };
+  anthropic: { models: Record<string, SnapshotModel> };
+  openai: { models: Record<string, SnapshotModel> };
 }
 
 const snapshot = Bun.file(
@@ -112,5 +120,28 @@ describe("listOpenrouterModels", () => {
     expect(pro?.outputPerM).toBe(snapshotModel.cost?.output);
     const names = models.map((m) => m.name);
     expect([...names].sort((a, b) => a.localeCompare(b))).toEqual(names);
+  });
+});
+
+describe("listHarnessModels", () => {
+  test("returns anthropic + openai entries with snapshot pricing, sorted by name", async () => {
+    const models = await listHarnessModels();
+    const snap = await snapshot;
+    const sonnet = models.find((m) => m.id === "claude-sonnet-5-5");
+    expect(sonnet).toBeDefined();
+    expect(sonnet?.inputPerM).toBe(snap.anthropic.models["claude-sonnet-5-5"]?.cost?.input);
+    const codex = models.find((m) => m.id === "gpt-5.6-sol");
+    expect(codex?.outputPerM).toBe(snap.openai.models["gpt-5.6-sol"]?.cost?.output);
+    // dated snapshot ids stay resolvable for historical rows
+    expect(models.some((m) => m.id === "claude-haiku-4-5-20251001")).toBe(true);
+    const names = models.map((m) => m.name);
+    expect([...names].sort((a, b) => a.localeCompare(b))).toEqual(names);
+  });
+
+  test("never mixes in openrouter ids, so the judge picker stays a separate list", async () => {
+    const harnessIds = new Set((await listHarnessModels()).map((m) => m.id));
+    const openrouterIds = (await listOpenrouterModels()).map((m) => m.id);
+    expect(openrouterIds.filter((id) => harnessIds.has(id))).toEqual([]);
+    expect(harnessIds.has("deepseek/deepseek-v4-pro")).toBe(false);
   });
 });

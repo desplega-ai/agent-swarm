@@ -4,6 +4,7 @@ import type {
   AttemptJson,
   AttemptProgressResponse,
   AttemptTasksResponse,
+  CatalogRefreshResponse,
   ConfigJson,
   CreateRunBody,
   JudgeLiveResponse,
@@ -198,6 +199,11 @@ export function listPresets(): Promise<PresetJson[]> {
 
 export function getModels(): Promise<ModelsResponse> {
   return request("/api/models");
+}
+
+/** Force a models.dev fetch now (rejects with the server's message on a 502). */
+export function refreshModelCatalog(): Promise<CatalogRefreshResponse> {
+  return request("/api/models/refresh", { method: "POST" });
 }
 
 /**

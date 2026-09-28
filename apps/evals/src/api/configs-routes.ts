@@ -1,7 +1,7 @@
 import type { Client } from "@libsql/client";
 import { configs as seedConfigs } from "../../configs/index.ts";
-import { getResolutionCatalog } from "../cost/catalog.ts";
-import { validateConfigResolves } from "../cost/resolve-alias.ts";
+import { getResolutionCatalog, type ModelsDevCatalog } from "../cost/catalog.ts";
+import { resolveAlias, validateConfigResolves } from "../cost/resolve-alias.ts";
 import {
   getHarnessConfig,
   insertUserConfig,
@@ -9,7 +9,7 @@ import {
   syncSeedConfigs,
   updateUserConfig,
 } from "../db/harness-configs.ts";
-import { setDbConfigs } from "../registry.ts";
+import { serializeConfig, setDbConfigs } from "../registry.ts";
 import type { HarnessConfig, HarnessProvider } from "../types.ts";
 
 const PROVIDERS = new Set<HarnessProvider>(["claude", "pi", "codex", "opencode"]);
@@ -34,6 +34,19 @@ export async function reloadDbConfigs(db: Client): Promise<void> {
 export async function initHarnessConfigs(db: Client): Promise<void> {
   await syncSeedConfigs(db, seedConfigs);
   await reloadDbConfigs(db);
+}
+
+/**
+ * The `/api/configs` row: `serializeConfig` plus `resolvedModel`, what a
+ * `modelAlias` resolves to in the reviewed catalog right now (the id a run
+ * created today would pin). Null for pinned-`model` configs and for an alias
+ * that matches nothing. Pass `getResolutionCatalog()`.
+ */
+export function serializeConfigResolved(config: HarnessConfig, catalog: ModelsDevCatalog) {
+  return {
+    ...serializeConfig(config),
+    resolvedModel: config.modelAlias ? resolveAlias(config.modelAlias, catalog) : null,
+  };
 }
 
 /** `claude` + `latest:anthropic/opus` → `claude-opus`; `pi` + `openrouter/x/y-1.5` → `pi-y-1.5`. */

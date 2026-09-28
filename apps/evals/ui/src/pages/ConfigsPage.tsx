@@ -1,5 +1,6 @@
 import { type FormEvent, type ReactNode, useMemo, useState } from "react";
 import { createConfig, listConfigs, listRuns } from "../api.ts";
+import { CatalogBadge } from "../components/CatalogBadge.tsx";
 import { ConfigChip } from "../components/ConfigChip.tsx";
 import { type Column, DataTable } from "../components/DataTable.tsx";
 import { EntityLink } from "../components/EntityLink.tsx";
@@ -226,10 +227,16 @@ const configColumns: Column<ConfigJson>[] = [
     key: "model",
     header: "Model",
     width: "170px",
-    sortValue: (c) => c.model ?? c.modelAlias ?? null,
-    searchText: (c) => c.model ?? c.modelAlias ?? "",
-    titleText: (c) => c.model ?? c.modelAlias ?? "Harness default model",
-    render: (c) => <ModelChip model={c.model ?? c.modelAlias ?? null} />,
+    sortValue: (c) => c.model ?? c.resolvedModel ?? c.modelAlias ?? null,
+    searchText: (c) => [c.model, c.modelAlias, c.resolvedModel].filter(Boolean).join(" "),
+    titleText: (c) =>
+      c.modelAlias
+        ? `${c.modelAlias} → ${c.resolvedModel ?? "no match in the current catalog"}`
+        : (c.model ?? "Harness default model"),
+    // Alias configs show the model the alias resolves to today, alias in the hover card.
+    render: (c) => (
+      <ModelChip model={c.model ?? c.resolvedModel ?? null} alias={c.modelAlias ?? null} />
+    ),
   },
   ...aaColumns,
   {
@@ -338,6 +345,7 @@ function ConfigList(): ReactNode {
       <div className="cfg-header">
         <h3 className="panel-title">Configs{data ? ` · ${data.length}` : ""}</h3>
         <NewConfigForm onCreated={refresh} />
+        <CatalogBadge onRefreshed={refresh} />
       </div>
       {error ? <div className="cfg-error">{error}</div> : null}
       {loading && !data ? <Spinner label="Loading configs…" /> : null}
@@ -511,6 +519,8 @@ function ConfigDetail(props: { configId: string }): ReactNode {
             rawLabel="config"
             labels={{
               provider: "Harness",
+              modelAlias: "Model Alias",
+              resolvedModel: "Resolved Model",
               isDefault: "Default",
               aa: "Artificial Analysis (2026-06-12)",
               sourceRow: "Source Row",
@@ -525,6 +535,12 @@ function ConfigDetail(props: { configId: string }): ReactNode {
             renderers={{
               provider: (v) => <HarnessIcon harness={typeof v === "string" ? v : null} showLabel />,
               model: (v) => <ModelChip model={typeof v === "string" ? v : null} />,
+              resolvedModel: (v) => (
+                <ModelChip
+                  model={typeof v === "string" ? v : null}
+                  alias={config.modelAlias ?? null}
+                />
+              ),
               blendedUsdPer1M: (v) => (typeof v === "number" ? `$${v.toFixed(2)}` : dim()),
               latencyFirstChunkS: (v) => (typeof v === "number" ? `${v.toFixed(2)}s` : dim()),
               totalResponseS: (v) => (typeof v === "number" ? `${v.toFixed(2)}s` : dim()),
