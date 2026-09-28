@@ -170,7 +170,7 @@ const COMMAND_HELP: Record<
       "  --preset <name>        Preset: full, dev, content, research, solo (required with --yes)",
       "  --max-concurrent-tasks <n>  Tasks per agent (1-100; default: lead 2, worker 1)",
       "  --pull-policy <policy> Pull policy: always, missing, never (default: always)",
-      "  --container-engine <engine>  auto, docker, podman (default: auto; auto prefers Docker)",
+      "  --container-engine <engine>  auto, docker, podman (default: $AGENT_SWARM_CONTAINER_ENGINE, else auto; auto prefers Docker)",
       "  -h, --help             Show this help",
     ].join("\n"),
     examples: [

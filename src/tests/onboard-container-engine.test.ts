@@ -7,6 +7,7 @@ import {
   engineForCommands,
   isContainerEnginePreference,
   resolveContainerEngine,
+  resolveContainerEnginePreference,
 } from "../commands/onboard/container-engine.ts";
 import { INITIAL_STATE } from "../commands/onboard/types.ts";
 
@@ -153,6 +154,62 @@ describe("container engine helpers", () => {
     expect(composeCommandText(engineForCommands("podman"), "logs -f")).toBe(
       "podman compose logs -f",
     );
+  });
+});
+
+describe("resolveContainerEnginePreference", () => {
+  const ENV = "AGENT_SWARM_CONTAINER_ENGINE";
+
+  test("defaults to auto with neither flag nor env var", () => {
+    expect(resolveContainerEnginePreference(undefined, {})).toEqual({ ok: true, value: "auto" });
+  });
+
+  test("an empty env var counts as unset", () => {
+    expect(resolveContainerEnginePreference(undefined, { [ENV]: "" })).toEqual({
+      ok: true,
+      value: "auto",
+    });
+  });
+
+  test("reads the env var when the flag is absent", () => {
+    for (const value of ["auto", "docker", "podman"]) {
+      expect(resolveContainerEnginePreference(undefined, { [ENV]: value })).toEqual({
+        ok: true,
+        value,
+      });
+    }
+  });
+
+  test("the flag wins over the env var", () => {
+    expect(resolveContainerEnginePreference("docker", { [ENV]: "podman" })).toEqual({
+      ok: true,
+      value: "docker",
+    });
+    expect(resolveContainerEnginePreference("auto", { [ENV]: "podman" })).toEqual({
+      ok: true,
+      value: "auto",
+    });
+  });
+
+  test("a valid flag is not blocked by an invalid env var", () => {
+    expect(resolveContainerEnginePreference("podman", { [ENV]: "nerdctl" })).toEqual({
+      ok: true,
+      value: "podman",
+    });
+  });
+
+  test("an invalid env var fails and names the variable", () => {
+    expect(resolveContainerEnginePreference(undefined, { [ENV]: "nerdctl" })).toEqual({
+      ok: false,
+      error: 'Invalid AGENT_SWARM_CONTAINER_ENGINE "nerdctl". Options: auto, docker, podman',
+    });
+  });
+
+  test("an invalid flag fails even when the env var is valid", () => {
+    expect(resolveContainerEnginePreference("", { [ENV]: "podman" })).toEqual({
+      ok: false,
+      error: 'Invalid container engine "". Options: auto, docker, podman',
+    });
   });
 });
 
