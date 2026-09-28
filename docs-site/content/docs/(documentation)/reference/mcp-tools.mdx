@@ -728,14 +728,24 @@ Partially update a single node in a workflow definition. Merges the provided fie
 
 ### request-human-input
 
-Create an approval request that pauses until a human responds. Supports multiple question types: approval (yes/no), text, single-select, multi-select, and boolean. Returns the request ID and URL for the human to respond.
+Create an approval request and return at once with the request ID and URL. The answer arrives later as a `hitl-follow-up` task. Supports multiple question types: approval (yes/no), text, single-select, multi-select, and boolean.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `title` | string | Yes | Title of the approval request |
 | `questions` | array | Yes | Questions to ask the human |
+| `timeoutSeconds` | integer | No | Seconds until the request expires. After that it becomes `timeout` and the requesting agent gets a `hitl-follow-up` task. |
 
-Approval requests are accessible via the dashboard at `/approval-requests/{id}`. When resolved, a follow-up task is automatically created for the requesting agent with the human's responses.
+Approval requests are accessible via the dashboard at `/approval-requests/{id}`. When resolved, a follow-up task is automatically created for the requesting agent with the human's responses. A request with no `timeoutSeconds` is cancelled after `APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS` days (default 7) with no answer. An answer after the deadline is refused with 409.
+
+### cancel-approval-request
+
+Cancel a pending approval request by ID. Allowed for a lead agent, or for the agent that owns the request's source task. If the request gates a running or waiting workflow run, that run is cancelled too. A second cancel returns `alreadyCancelled: true`. The same action is available as `POST /api/approval-requests/{id}/cancel` and as `approval_cancel` in the scripts SDK.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `requestId` | uuid | Yes | Approval request ID |
+| `reason` | string | No | Reason for cancellation (max 500 characters) |
 
 ## Pages Tools
 
