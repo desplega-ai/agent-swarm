@@ -3,7 +3,6 @@ import {
   ChevronRight,
   Clock,
   History,
-  Loader2,
   Radio,
   RotateCcw,
   ZoomIn,
@@ -16,6 +15,7 @@ import { api } from "@/api/client";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useTasks } from "@/api/hooks/use-tasks";
 import type { AgentTask, AgentTaskStatus, AgentWithTasks } from "@/api/types";
+import { Spinner } from "@/components/kibo-ui/spinner";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Button } from "@/components/ui/button";
@@ -1023,7 +1023,7 @@ export function AgentActivityTimeline() {
   if (!liveTasksQ.data && (agentsQ.isLoading || liveTasksQ.isLoading)) {
     return (
       <div className="flex h-full items-center justify-center rounded-lg border bg-card">
-        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        <Spinner className="size-5 text-muted-foreground" />
       </div>
     );
   }
@@ -1112,7 +1112,7 @@ export function AgentActivityTimeline() {
             disabled={isLoadingHistory || !hasMoreHistory}
           >
             {isLoadingHistory ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <Spinner className="size-3.5" />
             ) : (
               <History className="h-3.5 w-3.5" />
             )}

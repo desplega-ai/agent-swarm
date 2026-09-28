@@ -1,5 +1,6 @@
 import { ExternalLink } from "lucide-react";
 import type { ClaudeProviderMeta, DevinProviderMeta, ProviderName } from "@/api/types";
+import { MiddleTruncation } from "@/components/ui/middle-truncation";
 
 interface SessionIdProps {
   sessionId: string;
@@ -22,9 +23,5 @@ export function SessionId({ sessionId, provider, providerMeta }: SessionIdProps)
     );
   }
 
-  return (
-    <span className="text-xs font-mono truncate" title={sessionId}>
-      {sessionId.slice(0, 6)}...
-    </span>
-  );
+  return <MiddleTruncation className="text-xs font-mono">{sessionId}</MiddleTruncation>;
 }

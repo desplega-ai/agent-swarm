@@ -11,15 +11,18 @@
 import { ChevronDown, Eye, EyeOff, Pencil } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
+import { useAgents } from "@/api/hooks/use-agents";
 import { useSessionCosts } from "@/api/hooks/use-costs";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useSession, useUpdateSessionTitle } from "@/api/hooks/use-sessions";
 import { useSteeringEnabled } from "@/api/hooks/use-stats";
 import { useUsers } from "@/api/hooks/use-users";
 import { UpgradeRequired } from "@/components/feature-gate/upgrade-required";
+import { AvatarStack } from "@/components/kibo-ui/avatar-stack";
 import { SessionComposer } from "@/components/sessions/session-composer";
 import { SessionTimeline } from "@/components/sessions/session-timeline";
 import { SessionsShell } from "@/components/sessions/sessions-shell";
+import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -84,6 +87,13 @@ export default function SessionDetailPage() {
     () => (detail ? deriveSessionStatus(detail.root, detail.chain) : null),
     [detail],
   );
+
+  // Every agent that worked a task in the session, in order of first appearance.
+  const sessionAgentIds = useMemo(() => {
+    if (!detail) return [];
+    const ids = [detail.root, ...detail.chain].map((t) => t.agentId).filter(Boolean) as string[];
+    return [...new Set(ids)];
+  }, [detail]);
 
   const totalCost = costs?.reduce((sum, c) => sum + c.totalCostUsd, 0) ?? 0;
 
@@ -184,6 +194,12 @@ export default function SessionDetailPage() {
             <span className="shrink-0">
               {detail.chain.length} task{detail.chain.length === 1 ? "" : "s"}
             </span>
+            {sessionAgentIds.length > 0 ? (
+              <>
+                <span aria-hidden="true">·</span>
+                <SessionAgents agentIds={sessionAgentIds} />
+              </>
+            ) : null}
             {sessionStatus && sessionStatus.failedCount > 0 && sessionStatus.status !== "failed" ? (
               <>
                 <span aria-hidden="true">·</span>
@@ -281,5 +297,39 @@ export default function SessionDetailPage() {
         steeringSupported={steerGate.supported && steeringEnabled}
       />
     </SessionsShell>
+  );
+}
+
+const MAX_STACKED_AGENTS = 5;
+
+/** The session's agents as an overlapping avatar stack; hover lists their names. */
+function SessionAgents({ agentIds }: { agentIds: string[] }) {
+  const { data: agents } = useAgents();
+  const knownName = (id: string) => agents?.find((a) => a.id === id)?.name;
+  const names = agentIds.map((id) => knownName(id) ?? `${id.slice(0, 8)}…`);
+  const visible = agentIds.slice(0, MAX_STACKED_AGENTS);
+  const extra = agentIds.length - visible.length;
+  const label = `${agentIds.length} agent${agentIds.length === 1 ? "" : "s"}: ${names.join(", ")}`;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex shrink-0 items-center gap-1">
+          <AvatarStack size={20}>
+            {visible.map((id) => (
+              <AgentAvatar
+                key={id}
+                agentId={id}
+                agentName={knownName(id)}
+                size="xs"
+                className="size-full"
+              />
+            ))}
+          </AvatarStack>
+          {extra > 0 ? <span className="tabular-nums">+{extra}</span> : null}
+          <span className="sr-only">{label}</span>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{label}</TooltipContent>
+    </Tooltip>
   );
 }

@@ -1,4 +1,4 @@
-import { Eye, EyeOff, Loader2, XCircle } from "lucide-react";
+import { Eye, EyeOff, XCircle } from "lucide-react";
 import { useState } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -129,19 +129,11 @@ export function ConnectionFormDialog({
             </Button>
             <Button
               type="submit"
-              disabled={status === "loading" || !form.apiUrl || !form.apiKey}
+              disabled={!form.apiUrl || !form.apiKey}
+              status={status === "loading" ? "loading" : "idle"}
               className="bg-primary hover:bg-primary/90"
             >
-              {status === "loading" ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Checking...
-                </>
-              ) : editConnection ? (
-                "Save"
-              ) : (
-                "Connect"
-              )}
+              {editConnection ? "Save" : "Connect"}
             </Button>
           </DialogFooter>
         </form>

@@ -1,5 +1,6 @@
-import { CheckCircle2, Loader2, Pencil, Signal, Trash2, XCircle } from "lucide-react";
+import { CheckCircle2, Pencil, Signal, Trash2, XCircle } from "lucide-react";
 import { useState } from "react";
+import { Spinner } from "@/components/kibo-ui/spinner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -63,7 +64,7 @@ export function ConnectionCard({
             disabled={testStatus === "loading"}
           >
             {testStatus === "loading" ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <Spinner className="size-3.5" />
             ) : testStatus === "success" ? (
               <CheckCircle2 className="h-3.5 w-3.5 text-status-success-strong" />
             ) : testStatus === "error" ? (

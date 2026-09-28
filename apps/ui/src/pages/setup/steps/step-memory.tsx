@@ -1,4 +1,4 @@
-import { Check, Loader2, RotateCw, SlidersHorizontal, TextCursorInput } from "lucide-react";
+import { Check, RotateCw, SlidersHorizontal, TextCursorInput } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { useEnvPresence } from "@/api/hooks/use-integrations-meta";
 import { useTestOnboardingMemory } from "@/api/hooks/use-onboarding";
@@ -8,6 +8,7 @@ import type {
   OnboardingMemoryTestRequest,
   OnboardingMemoryTestResponse,
 } from "@/api/types";
+import { Spinner } from "@/components/kibo-ui/spinner";
 import {
   checkSecret,
   KEY_RULES,
@@ -326,7 +327,7 @@ export function StepMemory({ onboarding, setContinueBlocker }: StepProps) {
               disabled={test.isPending}
               onClick={() => void run({ preset: "existing" }).catch(() => undefined)}
             >
-              {testingExisting ? <Loader2 className="size-3.5 animate-spin" /> : null}
+              {testingExisting ? <Spinner className="size-3.5" /> : null}
               Test current setup
             </Button>
           </div>
