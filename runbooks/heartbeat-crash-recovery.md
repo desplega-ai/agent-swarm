@@ -62,19 +62,28 @@ so a concurrent human answer, the recovery pass, or the other sweep wins cleanly
 # every sweep, inside cleanupStaleResources, after recoverIncompleteRuns:
 timeoutExpiredApprovalRequests():
   for each pending request with expiresAt < now (any workflow run state):
-    resolveApprovalRequest(status = timeout, reason = "Timed out by the approval sweep: ...")
-    if standalone and source task not terminal: create hitl.timeout follow-up task
+    transaction:
+      resolveApprovalRequest(status = timeout, reason = "Timed out by the approval sweep: ...")
+      if standalone and source task not terminal: create hitl.timeout follow-up task
+    # a failed row rolls back alone and stays pending for the next tick
   # a waiting run whose request became timeout routes on its timeout port
   # on the next tick through getStuckApprovalRuns
 
 autoCancelStaleApprovalRequests():
   days = APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS (default 7; 0 = off)
   for each pending request with expiresAt IS NULL and createdAt < now - days:
-    cancelApprovalRequestById(reason = "Auto-cancelled by the approval sweep after <days> days ...")
-  for each distinct running/waiting workflow run of those requests:
-    cancelWorkflowRun(runId, reason)   # steps, linked tasks, run → cancelled
-  post "no longer actionable" to each recorded Slack thread (claimed once)
+    transaction:
+      cancelApprovalRequestById(reason = "Auto-cancelled by the approval sweep after <days> days ...")
+      if its workflow run is running/waiting:
+        cancelWorkflowRunRows(runId, reason)   # steps, linked tasks, run → cancelled
+      afterCommit: post "no longer actionable" to each recorded Slack thread (claimed once)
+    # a failed row rolls back alone and stays pending for the next tick
 ```
+
+`recoverApprovalWaitingRuns` writes `timeout` for an expired pending request,
+re-reads the request, and claims the step in 1 transaction. It routes on the
+re-read status, so a request cancelled after the `getStuckApprovalRuns`
+snapshot never reaches a port.
 
 A request with `expiresAt` is never auto-cancelled. A `cancelled` request never
 routes to a workflow port. The counts land in `staleCleanup.approvalTimedOut`

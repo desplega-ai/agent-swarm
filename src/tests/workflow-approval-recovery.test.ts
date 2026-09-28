@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { z } from "zod";
 import * as db from "../be/db";
@@ -171,5 +171,33 @@ describe("recoverApprovalWaitingRuns", () => {
     const nodeIds = (await getWorkflowRunStepsByRunId(runId)).map((s) => s.nodeId);
     expect(nodeIds).toContain("notify-timeout");
     expect(nodeIds).not.toContain("deploy");
+  });
+
+  test("a request cancelled after the snapshot never routes its waiting step", async () => {
+    const registry = makeRegistry();
+    const { runId, requestId } = await startWaitingRun(registry);
+    await getDbClient().run("UPDATE approval_requests SET expiresAt = ? WHERE id = ?", [
+      new Date(Date.now() - 60_000).toISOString(),
+      requestId,
+    ]);
+
+    // The snapshot still reads pending past expiresAt; a cancel then lands
+    // before the recovery pass writes timeout.
+    const original = db.getStuckApprovalRuns;
+    const spy = spyOn(db, "getStuckApprovalRuns").mockImplementation(async () => {
+      const rows = await original();
+      await db.cancelApprovalRequestById(requestId, { reason: "cancelled", resolvedBy: null });
+      return rows;
+    });
+    try {
+      await recoverIncompleteRuns(registry);
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect((await getApprovalRequestById(requestId))!.status).toBe("cancelled");
+    const steps = await getWorkflowRunStepsByRunId(runId);
+    expect(steps.map((s) => s.nodeId)).toEqual(["review"]);
+    expect(steps[0]!.status).toBe("waiting");
   });
 });
