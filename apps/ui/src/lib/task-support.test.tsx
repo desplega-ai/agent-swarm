@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { Agent } from "@/api/types";
+import { type Agent, PROVIDER_NAMES } from "../api/types";
 import { getLeadCredentialIssue, shouldShowTaskFailureHelp } from "./task-support";
 
 const baseLead: Agent = {
@@ -52,6 +52,21 @@ describe("getLeadCredentialIssue", () => {
 
     expect(issue?.missing).toEqual(["OPENROUTER_API_KEY"]);
     expect(issue?.provider).toBe("pi");
+  });
+
+  test("keeps every known provider from the legacy provider field, including dsh", () => {
+    for (const provider of PROVIDER_NAMES) {
+      const issue = getLeadCredentialIssue(
+        [{ ...baseLead, provider, credentialMissing: ["DEEPSEEK_API_KEY"] }],
+        true,
+      );
+      expect(issue?.provider).toBe(provider);
+    }
+    const unknown = getLeadCredentialIssue(
+      [{ ...baseLead, provider: "not-a-harness", credentialMissing: ["X"] }],
+      true,
+    );
+    expect(unknown?.provider).toBeNull();
   });
 
   test("does not inspect credential fields from an older API", () => {

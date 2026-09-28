@@ -11,6 +11,7 @@ import type {
   SwarmConfig,
 } from "@/api/types";
 import { SetupCard, SetupChip } from "@/components/onboarding/setup-card";
+import { HarnessIcon } from "@/components/shared/harness-icon";
 import { ModelLabel } from "@/components/shared/model-logo";
 import { REASONING_EFFORT_LABEL } from "@/components/shared/reasoning-effort-icon";
 import { StatusIcon } from "@/components/shared/status-icon";
@@ -36,7 +37,6 @@ import {
 } from "@/lib/model-dial";
 import { cn } from "@/lib/utils";
 import type { StepProps } from "../../step-contract";
-import { AiHarnessIcon } from "../ai/harness-switch";
 
 /** Who picks the model for a harness without a dial. */
 const MANAGED_BY: Record<string, string> = {
@@ -537,7 +537,7 @@ function AgentModelRow({
         <span className="flex min-w-0 flex-col gap-0.5">
           <span className="truncate font-mono text-xs">{agent.name}</span>
           <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-            <AiHarnessIcon harness={agent.harnessProvider} />
+            <HarnessIcon harness={agent.harnessProvider} />
             {harnessLabel}
           </span>
         </span>

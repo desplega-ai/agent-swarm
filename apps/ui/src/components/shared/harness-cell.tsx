@@ -1,18 +1,9 @@
 import type { AgentCredStatus, ClaudeTransport, ProviderName } from "@/api/types";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { HARNESS_LABEL } from "@/lib/agent-runtime-models";
 import { cn } from "@/lib/utils";
 import { HarnessIcon } from "./harness-icon";
 import { ReasoningEffortIcon } from "./reasoning-effort-icon";
-
-const HARNESS_LABEL: Record<string, string> = {
-  claude: "Claude",
-  "claude-managed": "Claude (managed)",
-  codex: "Codex",
-  devin: "Devin",
-  opencode: "Opencode",
-  pi: "Pi-Mono",
-  acp: "ACP",
-};
 
 /** Display label for a harness provider id ("codex" → "Codex"). */
 export function harnessLabel(harnessProvider: string): string {

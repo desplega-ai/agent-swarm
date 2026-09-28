@@ -8,6 +8,7 @@ import {
   type SwarmConfig,
 } from "@/api/types";
 import { setupExitHref } from "@/components/onboarding/onboarding-redirect";
+import { HarnessIcon } from "@/components/shared/harness-icon";
 import { ModelLabel } from "@/components/shared/model-logo";
 import { REASONING_EFFORT_LABEL } from "@/components/shared/reasoning-effort-icon";
 import { StatusBadge } from "@/components/shared/status-badge";
@@ -20,7 +21,6 @@ import { HARNESS_LABEL } from "@/lib/agent-runtime-models";
 import { type AgentModelDisplay, getAgentModelDisplay } from "@/lib/agents-list-model-display";
 import { formatRelative } from "@/lib/relative-time";
 import { cn, parseUTCDate } from "@/lib/utils";
-import { AiHarnessIcon } from "../ai/harness-switch";
 import { ExternalTextLink } from "../integrations/pane-parts";
 
 const MAX_ROWS = 8;
@@ -152,7 +152,7 @@ function RuntimeTip({
           tabIndex={0}
           className="inline-flex size-4 shrink-0 items-center justify-center rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
         >
-          <AiHarnessIcon harness={harness} />
+          <HarnessIcon harness={harness} />
           {/* No mark for an unknown harness: a neutral glyph keeps the tooltip reachable. */}
           <SquareTerminal aria-hidden className="hidden size-4 opacity-80 only:block" />
         </span>
