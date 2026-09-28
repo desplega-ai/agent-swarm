@@ -30,7 +30,7 @@
   },
   "overrides": [
     {
-      "includes": ["src/components/ui/**"],
+      "includes": ["src/components/ui/**", "src/components/kibo-ui/**"],
       "linter": {
         "rules": {
           "suspicious": {

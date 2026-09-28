@@ -25,6 +25,7 @@
  *     every child and hides the inactive ones instead of slicing the array.
  */
 
+import { KeyboardSensor, MouseSensor, TouchSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { getByPath, type InferComponentProps } from "@json-render/core";
 import type { Components } from "@json-render/react";
 import { useActions, useStateStore } from "@json-render/react";
@@ -34,12 +35,40 @@ import type {
   FullWidthCellKeyDownEvent,
   ICellRendererParams,
 } from "ag-grid-community";
+import { eachDayOfInterval, format, parseISO, startOfDay, subDays } from "date-fns";
+import { Provider as JotaiProvider } from "jotai";
 import { AlertCircle, AlertTriangle, ArrowRight, CheckCircle, Info, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { Children, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Streamdown } from "streamdown";
+import {
+  CalendarBody,
+  CalendarDatePagination,
+  type Feature as CalendarFeature,
+  CalendarHeader,
+  CalendarItem,
+  CalendarProvider,
+  useCalendarMonth,
+  useCalendarYear,
+} from "@/components/kibo-ui/calendar";
+import {
+  type Activity,
+  ContributionGraph,
+  ContributionGraphBlock,
+  ContributionGraphCalendar,
+  ContributionGraphFooter,
+  ContributionGraphLegend,
+  ContributionGraphTotalCount,
+} from "@/components/kibo-ui/contribution-graph";
+import {
+  KanbanBoard,
+  KanbanCard,
+  KanbanCards,
+  KanbanHeader,
+  KanbanProvider,
+} from "@/components/kibo-ui/kanban";
 import { Spinner } from "@/components/kibo-ui/spinner";
 import { DataGrid } from "@/components/shared/data-grid";
 import { SearchBox } from "@/components/shared/search-box";
@@ -95,6 +124,7 @@ import type {
   DetailListField,
   FormField,
   GridColumns,
+  KanbanColumn,
   SelectOption,
   SpacingToken,
   swarmCatalog,
@@ -1289,6 +1319,12 @@ function FormComponent({ props }: { props: FormProps }) {
 
 type DrawerComponentProps = InferComponentProps<typeof swarmCatalog, "Drawer">;
 type DetailListComponentProps = InferComponentProps<typeof swarmCatalog, "DetailList">;
+type KanbanComponentProps = InferComponentProps<typeof swarmCatalog, "Kanban">;
+type CalendarComponentProps = InferComponentProps<typeof swarmCatalog, "Calendar">;
+type ContributionGraphComponentProps = InferComponentProps<
+  typeof swarmCatalog,
+  "ContributionGraph"
+>;
 
 /** Panel width per `size`, on top of `SheetContent`'s `w-3/4` base. */
 const drawerSizeClass: Record<"sm" | "md" | "lg" | "xl", string> = {
@@ -1447,6 +1483,359 @@ function DetailListComponent({ props }: { props: DetailListComponentProps }) {
   );
 }
 
+// ─── Kibo data blocks (Kanban / Calendar / ContributionGraph) ───────────────
+
+type Row = Record<string, unknown>;
+
+/** A row date value → Date. Date-only ISO strings stay in local time. */
+function toDate(value: unknown): Date | null {
+  if (value === null || value === undefined || value === "") return null;
+  const date =
+    typeof value === "number"
+      ? new Date(value)
+      : typeof value === "string"
+        ? parseISO(value)
+        : value instanceof Date
+          ? value
+          : null;
+  return date && !Number.isNaN(date.getTime()) ? date : null;
+}
+
+/** Runs an action chain with `$row` bound, the same way Table row actions do. */
+function useRowActionRunner() {
+  const { execute } = useActions();
+  const { getSnapshot } = useStateStore();
+  const executeRef = useRef(execute);
+  executeRef.current = execute;
+  const snapshotRef = useRef(getSnapshot);
+  snapshotRef.current = getSnapshot;
+  return useCallback(async (chain: ActionChain | undefined, row: Row) => {
+    if (!chain) return;
+    const scope = { row, state: snapshotRef.current() };
+    for (const binding of chain) {
+      await executeRef.current({ ...binding, params: resolveScopedParams(binding.params, scope) });
+    }
+  }, []);
+}
+
+function BlockSkeleton({ testId }: { testId: string }) {
+  return (
+    <div className="flex flex-col gap-2" data-testid={testId}>
+      <Skeleton className="h-4 w-40" />
+      <Skeleton className="h-32 w-full" />
+    </div>
+  );
+}
+
+interface KanbanItem {
+  [key: string]: unknown;
+  id: string;
+  name: string;
+  column: string;
+  row: Row;
+}
+
+function normalizeKanbanColumns(columns: KanbanColumn[]): { id: string; name: string }[] {
+  return columns.map((column) =>
+    typeof column === "string"
+      ? { id: column, name: column }
+      : { id: column.id, name: column.label ?? column.id },
+  );
+}
+
+/**
+ * Kanban board over query rows. Drag state is local: a dropped card stays in
+ * its new column until `onMove` settles, then the refetched rows take over.
+ */
+function KanbanComponent({ props }: { props: KanbanComponentProps }) {
+  const runChain = useRowActionRunner();
+  const idField = props.idField ?? "id";
+  const { columnField, titleField } = props;
+  const columns = useMemo(
+    () => normalizeKanbanColumns((props.columns ?? []) as KanbanColumn[]),
+    [props.columns],
+  );
+  const cardFields = (props.cardFields ?? []) as DetailListField[];
+  const draggable = Boolean(props.onMove?.length);
+
+  const serverItems = useMemo<KanbanItem[]>(() => {
+    const rows = Array.isArray(props.data) ? (props.data as Row[]) : [];
+    return rows.flatMap((row) => {
+      const id = row[idField];
+      if (id === null || id === undefined) return [];
+      const title = row[titleField];
+      return [
+        {
+          id: String(id),
+          name: title === null || title === undefined ? "" : String(title),
+          column: String(row[columnField] ?? ""),
+          row,
+        },
+      ];
+    });
+  }, [props.data, idField, titleField, columnField]);
+
+  // Moves not yet reflected by the server rows: card id → destination column.
+  const [pending, setPending] = useState<Record<string, string>>({});
+  const [dragItems, setDragItems] = useState<KanbanItem[] | null>(null);
+  const dragRef = useRef<{ id: string; from: string } | null>(null);
+
+  const items = useMemo(() => {
+    if (dragItems) return dragItems;
+    return serverItems.map((item) =>
+      Object.hasOwn(pending, item.id) ? { ...item, column: pending[item.id] as string } : item,
+    );
+  }, [dragItems, serverItems, pending]);
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+
+  // Kibo mutates the objects it is handed, so give it copies every render.
+  const kiboData = useMemo(() => items.map((item) => ({ ...item })), [items]);
+
+  const dragSensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
+    useSensor(KeyboardSensor),
+  );
+  const noSensors = useSensors();
+
+  if (props.loading && serverItems.length === 0) {
+    return <BlockSkeleton testId="json-render-kanban" />;
+  }
+
+  const handleDragEnd = async () => {
+    const drag = dragRef.current;
+    dragRef.current = null;
+    const moved = drag ? itemsRef.current.find((item) => item.id === drag.id) : undefined;
+    setDragItems(null);
+    if (!drag || !moved || moved.column === drag.from) return;
+    const to = moved.column;
+    setPending((current) => ({ ...current, [drag.id]: to }));
+    try {
+      await runChain(props.onMove as ActionChain, { ...moved.row, [columnField]: to });
+    } finally {
+      setPending((current) => {
+        const { [drag.id]: _done, ...rest } = current;
+        return rest;
+      });
+    }
+  };
+
+  return (
+    <div className="min-w-0 overflow-x-auto" data-testid="json-render-kanban">
+      <KanbanProvider
+        className="min-w-max"
+        columns={columns}
+        data={kiboData}
+        sensors={draggable ? dragSensors : noSensors}
+        onDataChange={(next) => setDragItems(next as KanbanItem[])}
+        onDragStart={(event) => {
+          const id = String(event.active.id);
+          const item = itemsRef.current.find((entry) => entry.id === id);
+          dragRef.current = item ? { id, from: item.column } : null;
+        }}
+        onDragEnd={() => void handleDragEnd()}
+        onDragCancel={() => {
+          dragRef.current = null;
+          setDragItems(null);
+        }}
+      >
+        {(column) => (
+          <KanbanBoard className="w-64" id={column.id} key={column.id}>
+            <KanbanHeader className="flex items-center justify-between">
+              <span>{column.name}</span>
+              <span className="font-normal text-muted-foreground">
+                {items.filter((item) => item.column === column.id).length}
+              </span>
+            </KanbanHeader>
+            <KanbanCards<KanbanItem> id={column.id}>
+              {(item) => (
+                <KanbanCard
+                  className={cn(!draggable && "cursor-default")}
+                  column={item.column}
+                  id={item.id}
+                  key={item.id}
+                  name={item.name}
+                >
+                  <div
+                    className={cn("flex flex-col gap-1.5", props.onCardClick && "cursor-pointer")}
+                    onClick={
+                      props.onCardClick
+                        ? () => void runChain(props.onCardClick as ActionChain, item.row)
+                        : undefined
+                    }
+                  >
+                    <p className="m-0 font-medium text-sm">{item.name || "Untitled"}</p>
+                    {cardFields.map((field) => (
+                      <div
+                        className="flex items-center justify-between gap-2 text-xs"
+                        key={field.key}
+                      >
+                        <span className="text-muted-foreground">{field.label ?? field.key}</span>
+                        <DetailFieldValue field={field} value={item.row[field.key]} />
+                      </div>
+                    ))}
+                  </div>
+                </KanbanCard>
+              )}
+            </KanbanCards>
+          </KanbanBoard>
+        )}
+      </KanbanProvider>
+    </div>
+  );
+}
+
+function CalendarMonthLabel() {
+  const [month] = useCalendarMonth();
+  const [year] = useCalendarYear();
+  return (
+    <span className="font-medium text-sm">
+      {new Date(year, month, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" })}
+    </span>
+  );
+}
+
+function CalendarBlockBody({ props }: { props: CalendarComponentProps }) {
+  const runChain = useRowActionRunner();
+  const idField = props.idField ?? "id";
+  const { startField, endField, titleField } = props;
+
+  const { features, rowsById } = useMemo(() => {
+    const rows = Array.isArray(props.data) ? (props.data as Row[]) : [];
+    const byId = new Map<string, Row>();
+    const list: CalendarFeature[] = [];
+    for (const [index, row] of rows.entries()) {
+      const startAt = toDate(row[startField]);
+      if (!startAt) continue;
+      const endAt = (endField ? toDate(row[endField]) : null) ?? startAt;
+      const id = String(row[idField] ?? index);
+      byId.set(id, row);
+      list.push({
+        id,
+        name: String(row[titleField] ?? ""),
+        startAt,
+        endAt,
+        status: { id: "event", name: "event", color: "var(--primary)" },
+      });
+    }
+    return { features: list, rowsById: byId };
+  }, [props.data, idField, startField, endField, titleField]);
+
+  if (props.loading && features.length === 0) {
+    return <BlockSkeleton testId="json-render-calendar" />;
+  }
+
+  return (
+    <div
+      className="flex flex-col rounded-md border border-border"
+      data-testid="json-render-calendar"
+    >
+      <div className="flex items-center justify-between border-b border-border px-3 py-2">
+        <CalendarMonthLabel />
+        <CalendarDatePagination />
+      </div>
+      <CalendarHeader />
+      <CalendarBody features={features}>
+        {({ feature }) => {
+          const row = rowsById.get(feature.id);
+          return props.onSelect && row ? (
+            <button
+              className="w-full rounded-sm text-left hover:bg-muted"
+              key={feature.id}
+              onClick={() => void runChain(props.onSelect as ActionChain, row)}
+              type="button"
+            >
+              <CalendarItem feature={feature} />
+            </button>
+          ) : (
+            <CalendarItem feature={feature} key={feature.id} />
+          );
+        }}
+      </CalendarBody>
+    </div>
+  );
+}
+
+/**
+ * Month calendar. Kibo keeps the visible month in module-level jotai atoms, so
+ * each block gets its own jotai store — two Calendars on one page page through
+ * months independently.
+ */
+function CalendarComponent({ props }: { props: CalendarComponentProps }) {
+  return (
+    <JotaiProvider>
+      <CalendarProvider>
+        <CalendarBlockBody props={props} />
+      </CalendarProvider>
+    </JotaiProvider>
+  );
+}
+
+/** Buckets rows per calendar day over the trailing window, 0–4 levels. */
+function toActivities(
+  rows: Row[],
+  dateField: string,
+  countField: string | undefined,
+  days: number,
+): Activity[] {
+  const totals = new Map<string, number>();
+  for (const row of rows) {
+    const date = toDate(row[dateField]);
+    if (!date) continue;
+    const key = format(date, "yyyy-MM-dd");
+    const amount = countField ? Number(row[countField]) : 1;
+    totals.set(key, (totals.get(key) ?? 0) + (Number.isFinite(amount) ? amount : 0));
+  }
+  const today = startOfDay(new Date());
+  const window = eachDayOfInterval({ start: subDays(today, days - 1), end: today });
+  const counts = window.map((day) => Math.max(0, totals.get(format(day, "yyyy-MM-dd")) ?? 0));
+  const max = Math.max(0, ...counts);
+  return window.map((day, index) => {
+    const count = counts[index] ?? 0;
+    return {
+      date: format(day, "yyyy-MM-dd"),
+      count,
+      level: max === 0 || count === 0 ? 0 : Math.min(4, Math.ceil((count / max) * 4)),
+    };
+  });
+}
+
+function ContributionGraphComponent({ props }: { props: ContributionGraphComponentProps }) {
+  const activities = useMemo(
+    () =>
+      toActivities(
+        Array.isArray(props.data) ? (props.data as Row[]) : [],
+        props.dateField ?? "date",
+        props.countField,
+        props.days ?? 365,
+      ),
+    [props.data, props.dateField, props.countField, props.days],
+  );
+
+  if (props.loading && !props.data?.length) {
+    return <BlockSkeleton testId="json-render-contribution-graph" />;
+  }
+
+  return (
+    <div className="min-w-0" data-testid="json-render-contribution-graph">
+      <ContributionGraph className="text-muted-foreground" data={activities} fontSize={12}>
+        <ContributionGraphCalendar>
+          {({ activity, dayIndex, weekIndex }) => (
+            <ContributionGraphBlock activity={activity} dayIndex={dayIndex} weekIndex={weekIndex}>
+              <title>{`${activity.count} on ${activity.date}`}</title>
+            </ContributionGraphBlock>
+          )}
+        </ContributionGraphCalendar>
+        <ContributionGraphFooter>
+          <ContributionGraphTotalCount />
+          <ContributionGraphLegend />
+        </ContributionGraphFooter>
+      </ContributionGraph>
+    </div>
+  );
+}
+
 // ─── Component registry ─────────────────────────────────────────────────────
 
 export const swarmComponents: Components<typeof swarmCatalog> = {
@@ -1516,4 +1905,7 @@ export const swarmComponents: Components<typeof swarmCatalog> = {
   },
   Table: ({ props }) => <TableComponent props={props} />,
   Form: ({ props }) => <FormComponent props={props} />,
+  Kanban: ({ props }) => <KanbanComponent props={props} />,
+  Calendar: ({ props }) => <CalendarComponent props={props} />,
+  ContributionGraph: ({ props }) => <ContributionGraphComponent props={props} />,
 };

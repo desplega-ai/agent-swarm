@@ -43,6 +43,24 @@ export const ELEMENT_KEYS = new Set([
   "watch",
 ]);
 const UI_STATE_COMPONENTS = new Set(["SearchInput", "Select", "Tabs"]);
+
+/**
+ * Props that hold a plain action chain (an array of `{ action, params }`),
+ * keyed by component type. Table's `rowActions[].actions` is nested one level
+ * deeper and handled separately.
+ */
+const PROP_ACTION_CHAINS: Record<string, readonly string[]> = {
+  Form: ["onSubmit"],
+  Kanban: ["onMove", "onCardClick"],
+  Calendar: ["onSelect"],
+};
+
+/** Props naming a row field of the bound `data` query's model, per type. */
+const DATA_FIELD_PROPS: Record<string, readonly string[]> = {
+  Kanban: ["columnField", "titleField", "idField"],
+  Calendar: ["startField", "endField", "titleField", "idField"],
+  ContributionGraph: ["dateField", "countField"],
+};
 const CONDITION_KEYS = new Set(["eq", "neq", "gt", "gte", "lt", "lte", "not"]);
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -705,8 +723,8 @@ function visitPageActionSteps(
         );
       }
     }
-    if (rawElement.type === "Form") {
-      visitActionChain(rawElement.props.onSubmit, `${elementPath}.props.onSubmit`, visit, false);
+    for (const prop of PROP_ACTION_CHAINS[String(rawElement.type)] ?? []) {
+      visitActionChain(rawElement.props[prop], `${elementPath}.props.${prop}`, visit, false);
     }
   }
 }
@@ -1234,7 +1252,7 @@ export function validatePage(
     if (component) {
       const propsPath = appendPath(elementPath, "props");
       const actionChainPath = (path: string): boolean =>
-        (type === "Form" && path === `${propsPath}.onSubmit`) ||
+        (PROP_ACTION_CHAINS[String(type)] ?? []).some((prop) => path === `${propsPath}.${prop}`) ||
         (type === "Table" && /^.+\.rowActions\.\d+\.actions$/.test(path));
       const propsResult = validateSchema(
         Object.hasOwn(rawElement, "props") ? rawElement.props : {},
@@ -1329,6 +1347,44 @@ export function validatePage(
               `${elementPath}.props.fields.${index}.key`,
             );
             if (found) issues.push(found);
+          }
+        }
+      } else if (typeof type === "string" && Object.hasOwn(DATA_FIELD_PROPS, type)) {
+        // Kanban / Calendar / ContributionGraph name row fields of the bound
+        // query's model (`columnField`, `startField`, ...) — a typo'd name
+        // would silently render an empty board/grid, so cross-check it.
+        const queryModel = queryModelFromDataBinding(definition, rawElement.props.data);
+        if (queryModel) {
+          const props = rawElement.props;
+          const fieldNames: [string, unknown][] = (DATA_FIELD_PROPS[type] ?? []).map((prop) => [
+            `${elementPath}.props.${prop}`,
+            props[prop],
+          ]);
+          if (type === "Kanban" && Array.isArray(props.cardFields)) {
+            for (const [index, field] of props.cardFields.entries()) {
+              if (isPlainObject(field)) {
+                fieldNames.push([`${elementPath}.props.cardFields.${index}.key`, field.key]);
+              }
+            }
+          }
+          for (const [fieldPath, fieldName] of fieldNames) {
+            if (typeof fieldName !== "string") continue;
+            const found = fieldBindingIssue(
+              queryModel.modelName,
+              queryModel.model,
+              fieldName,
+              fieldPath,
+            );
+            if (found) issues.push(found);
+          }
+          for (const prop of PROP_ACTION_CHAINS[type] ?? []) {
+            collectRowFieldIssues(
+              props[prop],
+              `${elementPath}.props.${prop}`,
+              queryModel.modelName,
+              queryModel.model,
+              issues,
+            );
           }
         }
       } else if (type === "Form") {
@@ -1440,19 +1496,18 @@ export function validatePage(
         stateRefs.push(...chainResult.stateRefs);
       }
     }
-    if (
-      type === "Form" &&
-      isPlainObject(rawElement.props) &&
-      Object.hasOwn(rawElement.props, "onSubmit")
-    ) {
-      const chainResult = validateActionChain(
-        rawElement.props.onSubmit,
-        `${elementPath}.props.onSubmit`,
-        definition,
-        catalog,
-      );
-      issues.push(...chainResult.issues);
-      stateRefs.push(...chainResult.stateRefs);
+    if (isPlainObject(rawElement.props)) {
+      for (const prop of PROP_ACTION_CHAINS[String(type)] ?? []) {
+        if (!Object.hasOwn(rawElement.props, prop)) continue;
+        const chainResult = validateActionChain(
+          rawElement.props[prop],
+          `${elementPath}.props.${prop}`,
+          definition,
+          catalog,
+        );
+        issues.push(...chainResult.issues);
+        stateRefs.push(...chainResult.stateRefs);
+      }
     }
   }
 

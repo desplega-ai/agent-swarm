@@ -157,6 +157,13 @@ export const CONFIG_AA_ROWS: Record<string, { sourceRow: string; matchedVariant:
       matchedVariant:
         "(max) — the only Opus 4.8 row; reasoning measurement matches Claude Code's thinking-on default.",
     },
+    // [II 37] — pinned concrete Haiku 4.5; same reasoning row as the moving haiku alias.
+    "claude-haiku-4.5": {
+      sourceRow: "Claude 4.5 Haiku",
+      matchedVariant:
+        "Reasoning row — pinned concrete Haiku 4.5; same row as the moving haiku alias " +
+        "(Claude Code runs with extended thinking on by default).",
+    },
     // [II 65] — spec-pinned.
     "claude-fable": {
       sourceRow: "Claude Fable 5 (with fallback)",
@@ -416,6 +423,37 @@ export const AA_UNMATCHED_CONFIG_IDS: Record<string, string> = {
   "pi-llama-4-maverick": "no Llama 4 Maverick row in the 2026-06-12 snapshot",
   "opencode-llama-4-maverick": "no Llama 4 Maverick row in the 2026-06-12 snapshot",
   "codex-5.5-pro": "no GPT-5.5 Pro row in the 2026-06-12 snapshot",
+  // Round-12 September 2026 refresh.
+  "claude-opus-5": "released after the 2026-06-12 AA snapshot",
+  "claude-opus-5.5": "released after the 2026-06-12 AA snapshot",
+  "claude-fable-5.1": "released after the 2026-06-12 AA snapshot",
+  "pi-deepseek-v4.1-flash": "released after the 2026-06-12 AA snapshot",
+  "pi-glm-5.3": "released after the 2026-06-12 AA snapshot",
+  "pi-glm-5.3-flash": "released after the 2026-06-12 AA snapshot",
+  "pi-qwen3.8-max-0902": "released after the 2026-06-12 AA snapshot",
+  "pi-qwen3.8-flash": "released after the 2026-06-12 AA snapshot",
+  "pi-kimi-k3": "released after the 2026-06-12 AA snapshot",
+  "pi-gemini-3.8-flash": "released after the 2026-06-12 AA snapshot",
+  "pi-grok-4.7": "released after the 2026-06-12 AA snapshot",
+  "pi-mimo-v2.6-pro": "released after the 2026-06-12 AA snapshot",
+  "pi-mimo-v2.6-flash": "released after the 2026-06-12 AA snapshot",
+  "pi-mercury-2.5": "released after the 2026-06-12 AA snapshot",
+  "pi-nemotron-3.5-lightning": "released after the 2026-06-12 AA snapshot",
+  "opencode-deepseek-v4.1-flash": "released after the 2026-06-12 AA snapshot",
+  "opencode-glm-5.3": "released after the 2026-06-12 AA snapshot",
+  "opencode-glm-5.3-flash": "released after the 2026-06-12 AA snapshot",
+  "opencode-qwen3.8-max-0902": "released after the 2026-06-12 AA snapshot",
+  "opencode-qwen3.8-flash": "released after the 2026-06-12 AA snapshot",
+  "opencode-kimi-k3": "released after the 2026-06-12 AA snapshot",
+  "opencode-gemini-3.8-flash": "released after the 2026-06-12 AA snapshot",
+  "opencode-grok-4.7": "released after the 2026-06-12 AA snapshot",
+  "opencode-mimo-v2.6-pro": "released after the 2026-06-12 AA snapshot",
+  "opencode-mimo-v2.6-flash": "released after the 2026-06-12 AA snapshot",
+  "opencode-mercury-2.5": "released after the 2026-06-12 AA snapshot",
+  "opencode-nemotron-3.5-lightning": "released after the 2026-06-12 AA snapshot",
+  "codex-6-astra": "released after the 2026-06-12 AA snapshot",
+  "codex-6-sol": "released after the 2026-06-12 AA snapshot",
+  "codex-6-luna": "released after the 2026-06-12 AA snapshot",
 };
 
 /** Joined blocks, built eagerly so a mapping → missing-row typo fails at import. */

@@ -21,6 +21,9 @@
     "Form",
     "Drawer",
     "DetailList",
+    "Kanban",
+    "Calendar",
+    "ContributionGraph",
     "ElementRef",
     "ElementSlot"
   ],
@@ -839,6 +842,232 @@
           }
         },
         "required": ["fields"],
+        "additionalProperties": false
+      }
+    },
+    "Kanban": {
+      "description": "Kanban board: one card per row, grouped into `columns` by the row's `columnField`. Bind `data`/`loading` to a named query. `titleField` is the card title; `cardFields` add label/value lines with Table column kinds (badge tones, relative dates). Dragging a card to another column runs `onMove` with `$row` = the moved row, `columnField` already set to the new column — typically `[{ \"action\": \"app.mutate\", \"params\": { \"model\": \"<m>\", \"op\": \"update\", \"rowId\": { \"$row\": \"id\" }, \"values\": { \"<columnField>\": { \"$row\": \"<columnField>\" } } } }]`. Without `onMove` the board is read-only. `onCardClick` runs with `$row` (e.g. an `app.navigate` that opens a Drawer).",
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            }
+          },
+          "loading": {
+            "type": "boolean"
+          },
+          "columnField": {
+            "type": "string"
+          },
+          "columns": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["id"],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "titleField": {
+            "type": "string"
+          },
+          "cardFields": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": ["text", "string", "number", "boolean", "date", "badge", "enum", "code"]
+                },
+                "tones": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": "string",
+                    "enum": [
+                      "neutral",
+                      "success",
+                      "active",
+                      "error",
+                      "info",
+                      "pending",
+                      "warning",
+                      "paused"
+                    ]
+                  }
+                }
+              },
+              "required": ["key"],
+              "additionalProperties": false
+            }
+          },
+          "idField": {
+            "type": "string"
+          },
+          "onMove": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "type": "string"
+                },
+                "params": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                }
+              },
+              "required": ["action"],
+              "additionalProperties": false
+            }
+          },
+          "onCardClick": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "type": "string"
+                },
+                "params": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                }
+              },
+              "required": ["action"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["columnField", "columns", "titleField"],
+        "additionalProperties": false
+      }
+    },
+    "Calendar": {
+      "description": "Read-only month calendar of rows. `startField` (and optional `endField`) hold dates; an event shows on every day it spans. `titleField` labels it. Has its own prev/next month controls; each Calendar keeps its own month. `onSelect` runs when an event is clicked, with `$row` (e.g. `app.navigate` to open a Drawer).",
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            }
+          },
+          "loading": {
+            "type": "boolean"
+          },
+          "startField": {
+            "type": "string"
+          },
+          "endField": {
+            "type": "string"
+          },
+          "titleField": {
+            "type": "string"
+          },
+          "idField": {
+            "type": "string"
+          },
+          "onSelect": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "type": "string"
+                },
+                "params": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                }
+              },
+              "required": ["action"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["startField", "titleField"],
+        "additionalProperties": false
+      }
+    },
+    "ContributionGraph": {
+      "description": "GitHub-style activity heatmap over the trailing `days` (default 365). Buckets rows by the calendar day of `dateField` (default `date`); each row counts 1, or sums `countField` when set. Read-only.",
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            }
+          },
+          "loading": {
+            "type": "boolean"
+          },
+          "dateField": {
+            "type": "string"
+          },
+          "countField": {
+            "type": "string"
+          },
+          "days": {
+            "type": "integer",
+            "minimum": 7,
+            "maximum": 730
+          }
+        },
         "additionalProperties": false
       }
     },

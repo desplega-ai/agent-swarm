@@ -1,0 +1,105 @@
+{
+  "models": {
+    "deal": {
+      "columns": {
+        "title": { "kind": "string", "required": true },
+        "stage": { "kind": "enum", "enum": ["lead", "qualified", "won", "lost"], "default": "lead" },
+        "owner": { "kind": "string" },
+        "value": { "kind": "number" },
+        "closeDate": { "kind": "date" }
+      }
+    }
+  },
+  "queries": {
+    "deals": { "model": "deal", "sort": { "column": "createdAt", "dir": "desc" } },
+    "dealById": { "model": "deal", "filter": { "id": { "$param": "deal" } } }
+  },
+  "pages": {
+    "main": {
+      "params": { "deal": { "kind": "string" } },
+      "root": "root",
+      "elements": {
+        "root": {
+          "type": "Stack",
+          "props": { "gap": "lg" },
+          "children": ["board", "calendars", "activity", "dealDrawer"]
+        },
+        "board": {
+          "type": "Kanban",
+          "props": {
+            "data": { "$state": "/queries/deals/data" },
+            "loading": { "$state": "/queries/deals/loading" },
+            "columnField": "stage",
+            "columns": ["lead", "qualified", { "id": "won", "label": "Won" }, { "id": "lost", "label": "Lost" }],
+            "titleField": "title",
+            "cardFields": [
+              { "key": "owner", "label": "Owner" },
+              { "key": "value", "label": "Value", "kind": "number" }
+            ],
+            "onMove": [
+              {
+                "action": "app.mutate",
+                "params": {
+                  "model": "deal",
+                  "op": "update",
+                  "rowId": { "$row": "id" },
+                  "values": { "stage": { "$row": "stage" } }
+                }
+              }
+            ],
+            "onCardClick": [
+              { "action": "app.navigate", "params": { "page": "main", "params": { "deal": { "$row": "id" } } } }
+            ]
+          }
+        },
+        "calendars": { "type": "Grid", "props": { "columns": 2 }, "children": ["closeCalendar", "createdCalendar"] },
+        "closeCalendar": {
+          "type": "Calendar",
+          "props": {
+            "data": { "$state": "/queries/deals/data" },
+            "startField": "closeDate",
+            "titleField": "title",
+            "onSelect": [
+              { "action": "app.navigate", "params": { "page": "main", "params": { "deal": { "$row": "id" } } } }
+            ]
+          }
+        },
+        "createdCalendar": {
+          "type": "Calendar",
+          "props": {
+            "data": { "$state": "/queries/deals/data" },
+            "startField": "createdAt",
+            "endField": "closeDate",
+            "titleField": "title"
+          }
+        },
+        "activity": {
+          "type": "ContributionGraph",
+          "props": {
+            "data": { "$state": "/queries/deals/data" },
+            "dateField": "createdAt",
+            "countField": "value",
+            "days": 180
+          }
+        },
+        "dealDrawer": {
+          "type": "Drawer",
+          "props": { "param": "deal", "title": "Deal" },
+          "children": ["dealDetail"]
+        },
+        "dealDetail": {
+          "type": "DetailList",
+          "props": {
+            "data": { "$state": "/queries/dealById/data/0" },
+            "fields": [
+              { "key": "title" },
+              { "key": "stage", "kind": "badge" },
+              { "key": "closeDate", "kind": "date" }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "defaultPage": "main"
+}
