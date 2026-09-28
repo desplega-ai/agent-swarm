@@ -34,6 +34,15 @@ export function useAgentRuntimeInstances(id: string, enabled = true) {
   });
 }
 
+export function useAgentTaskActivity(id: string, days = 365) {
+  return useQuery({
+    queryKey: ["agent-task-activity", id, days],
+    queryFn: () => api.fetchAgentTaskActivity(id, days),
+    enabled: !!id,
+    staleTime: 5 * 60_000,
+  });
+}
+
 export function useAgentRuntime(id: string, repoId?: string) {
   return useQuery({
     queryKey: ["agent-runtime", id, repoId],
@@ -115,7 +124,7 @@ export function useUpdateAgentRuntime() {
     mutationFn: (data: {
       id: string;
       repoId?: string;
-      harnessProvider: "claude" | "codex" | "pi" | "opencode" | "acp";
+      harnessProvider: "claude" | "codex" | "pi" | "opencode" | "acp" | "dsh";
       model: string | null;
       allowCustomModel?: boolean;
       reasoningEffort?: ReasoningEffortLevel | null;

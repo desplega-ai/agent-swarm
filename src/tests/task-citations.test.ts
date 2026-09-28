@@ -16,12 +16,20 @@ import {
   buildCitationUrl,
   CitationInputSchema,
   getTaskCitations,
+  githubCitationUrl,
   MAX_TASK_CITATIONS,
   memoryQuoteMatches,
   upsertTaskCitations,
 } from "../be/task-citations";
 import { registerStoreProgressTool } from "../tools/store-progress";
-import { renderTaskCitations, type TaskCitation } from "../utils/task-citations";
+import {
+  citationDropReason,
+  renderTaskCitationSources,
+  renderTaskCitations,
+  type TaskCitation,
+  taskCitationIssues,
+  taskCitationWarnings,
+} from "../utils/task-citations";
 
 const citation: TaskCitation = {
   index: 1,
@@ -143,6 +151,75 @@ describe("citation links and presentation", () => {
       CitationInputSchema.safeParse({ index: 1, kind: "memory", ref: "x", quote: "x".repeat(301) })
         .success,
     ).toBe(false);
+  });
+});
+
+describe("github refs, grouping, and accuracy issues", () => {
+  const repo = "https://github.com/desplega-ai/agent-swarm";
+
+  test.each([
+    ["desplega-ai/agent-swarm#1595", `${repo}/issues/1595`],
+    [`${repo}/pull/1595`, `${repo}/pull/1595`],
+    [`${repo}/pull/1595/files#diff-abc`, `${repo}/pull/1595`],
+    [`http://www.github.com/desplega-ai/agent-swarm/issues/42?x=1`, `${repo}/issues/42`],
+    [`${repo}/commit/C172A21BC`, `${repo}/commit/c172a21bc`],
+    ["desplega-ai/agent-swarm@c172a21bc", `${repo}/commit/c172a21bc`],
+  ])("github ref %s resolves to %s", (ref, url) => {
+    expect(buildCitationUrl({ index: 1, kind: "github", ref })).toBe(url);
+  });
+
+  test.each([
+    "https://gitlab.com/desplega-ai/agent-swarm/pull/1",
+    `${repo}/pulls`,
+    `${repo}/tree/main`,
+    "https://github.com.evil.test/desplega-ai/agent-swarm/pull/1",
+    "javascript:alert(1)",
+    "desplega-ai/agent-swarm",
+  ])("github ref %s does not resolve", (ref) => {
+    expect(githubCitationUrl(ref)).toBeNull();
+  });
+
+  test("drop reasons name the expected ref shape per kind", () => {
+    const base = { index: 1, ref: "r", resolvedUrl: null, verified: "unchecked" } as const;
+    expect(citationDropReason({ ...base, kind: "github" })).toContain("owner/repo#N");
+    expect(citationDropReason({ ...base, kind: "url" })).toContain("http(s) URL");
+    expect(citationDropReason({ ...base, kind: "slack" })).toBeNull();
+    expect(citationDropReason({ ...base, kind: "task", verified: "false" })).toBe(
+      'task "r" was not found',
+    );
+  });
+
+  const cited: TaskCitation = { ...citation, index: 1, label: "Cited" };
+  const general: TaskCitation = { ...citation, index: 2, label: "Whole", general: true };
+  const loose: TaskCitation = { ...citation, index: 3, label: "Loose" };
+  const broken: TaskCitation = { ...citation, index: 4, kind: "github", resolvedUrl: null };
+
+  test("referenced citations go under Sources, the rest under General sources", () => {
+    const text = "Claim [citation:1].";
+    const rendered = renderTaskCitations(text, [cited, general, loose, broken]);
+    expect(rendered).toBe(
+      "Claim <https://example.com/|[1]>.\n\nSources: <https://example.com/|[1]> Cited\nGeneral sources: <https://example.com/|[2]> Whole · <https://example.com/|[3]> Loose",
+    );
+    expect(renderTaskCitationSources(text, [cited], "markdown")).toBe(
+      "Sources: [[1]](https://example.com/) Cited",
+    );
+    expect(renderTaskCitationSources("", [cited, general], "markdown")).toBe(
+      "General sources: [[1]](https://example.com/) Cited · [[2]](https://example.com/) Whole",
+    );
+    expect(renderTaskCitationSources(text, [broken])).toBe("");
+  });
+
+  test("issues: missing entries, invalid rows, and unreferenced non-general rows", () => {
+    const issues = taskCitationIssues("A [citation:1] B [citation:7] C [citation:4]", [
+      cited,
+      general,
+      loose,
+      broken,
+    ]);
+    expect(issues.missingEntries).toEqual([7]);
+    expect(issues.invalid.map((entry) => entry.index)).toEqual([4]);
+    expect(issues.unreferenced).toEqual([3]);
+    expect(taskCitationWarnings("A [citation:1]", [cited, general])).toEqual([]);
   });
 });
 
@@ -298,7 +375,7 @@ describe("citation persistence and completion warnings", () => {
       const args = tool.inputSchema.parse({
         taskId: task.id,
         status: "completed",
-        output: "Done",
+        output: `Done ${entries.map((entry) => `[citation:${entry.index}]`).join(" ")}`,
         citations,
       });
       const result = await tool.handler(args, {
@@ -358,7 +435,7 @@ describe("citation persistence and completion warnings", () => {
     expect(renderTaskCitations(completed!.output!, stored)).toBe("Done now");
   });
 
-  test("accumulates, upserts by index, verifies memory quotes, and completes despite bad citations", async () => {
+  test("accumulates, upserts by index, verifies memory quotes, refuses once, then completes despite bad citations", async () => {
     const task = await createTaskExtended("Citation handler test", { agentId, source: "system" });
     await startTask(task.id);
     const memoryId = crypto.randomUUID();
@@ -400,25 +477,38 @@ describe("citation persistence and completion warnings", () => {
       "true",
       "true",
     ]);
-    const result = await handler(
-      {
-        taskId: task.id,
-        status: "completed",
-        output: "Done [citation:1] [citation:9]",
-        citations: [
-          { index: 2, kind: "memory", ref: memoryId, quote: "invented statement" },
-          { index: 3, kind: "page", ref: "missing-page" },
-          { index: 4, kind: "url", ref: "javascript:alert(1)" },
-        ],
-      },
-      meta,
+    const completion = {
+      taskId: task.id,
+      status: "completed",
+      output: "Done [citation:1] [citation:9]",
+      citations: [
+        { index: 2, kind: "memory", ref: memoryId, quote: "invented statement" },
+        { index: 3, kind: "page", ref: "missing-page" },
+        { index: 4, kind: "url", ref: "javascript:alert(1)" },
+      ],
+    };
+    const refused = (await handler(completion, meta)) as unknown as {
+      structuredContent: { success: boolean; message: string };
+    };
+    expect(refused.structuredContent.success).toBe(false);
+    expect(refused.structuredContent.message).toContain("Completion refused");
+    expect(refused.structuredContent.message).toContain(
+      "[citation:9] is in the output but has no citation entry.",
     );
+    expect(refused.structuredContent.message).toContain(
+      'Citation 3 fails validation: page "missing-page" was not found.',
+    );
+    expect(refused.structuredContent.message).toContain(
+      "Citation 4 fails validation: ref does not resolve to a link; expected an http(s) URL.",
+    );
+    expect((await getTaskById(task.id))?.status).toBe("in_progress");
+    // The refused call still stored its citations so the author can fix them.
+    expect(await getTaskCitations(task.id)).toHaveLength(4);
+
+    const result = await handler(completion, meta);
     expect(result.structuredContent.success).toBe(true);
     expect(result.structuredContent.details).toContain(
       "WARNING: [citation:9] has no citation entry; its marker is removed from rendered output.",
-    );
-    expect(result.structuredContent.details).toContain(
-      "WARNING: citation 2 is not referenced in output.",
     );
     expect((await getTaskById(task.id))?.status).toBe("completed");
     const rows = await getTaskCitations(task.id);
@@ -440,5 +530,105 @@ describe("citation persistence and completion warnings", () => {
       "false",
       "false",
     ]);
+  });
+
+  test("completion check: general sources pass, unreferenced ones are refused once, fixes complete", async () => {
+    const server = new McpServer({ name: "citation-accuracy", version: "1" });
+    registerStoreProgressTool(server);
+    const handler = (
+      server as unknown as {
+        _registeredTools: Record<
+          string,
+          {
+            handler: (
+              args: unknown,
+              meta: unknown,
+            ) => Promise<{ structuredContent: { success: boolean; message: string } }>;
+          }
+        >;
+      }
+    )._registeredTools["store-progress"]!.handler;
+    const meta = { requestInfo: { headers: { "x-agent-id": agentId } } };
+    const pr = "https://github.com/desplega-ai/agent-swarm/pull/1595";
+
+    // A general source may stay unreferenced; a full GitHub URL resolves.
+    const generalTask = await createTaskExtended("General source", { agentId, source: "system" });
+    await startTask(generalTask.id);
+    const ok = await handler(
+      {
+        taskId: generalTask.id,
+        status: "completed",
+        output: "Answer.",
+        citations: [{ index: 1, kind: "github", ref: pr, general: true }],
+      },
+      meta,
+    );
+    expect(ok.structuredContent.success).toBe(true);
+    const [row] = await getTaskCitations(generalTask.id);
+    expect(row).toMatchObject({ general: true, resolvedUrl: pr });
+    expect(renderTaskCitations("Answer.", [row!])).toContain("General sources:");
+
+    // An unreferenced, non-general source is refused; adding the marker fixes it.
+    const task = await createTaskExtended("Unreferenced source", { agentId, source: "system" });
+    await startTask(task.id);
+    const refused = await handler(
+      {
+        taskId: task.id,
+        status: "completed",
+        output: "Answer.",
+        citations: [{ index: 1, kind: "github", ref: pr }],
+      },
+      meta,
+    );
+    expect(refused.structuredContent.success).toBe(false);
+    expect(refused.structuredContent.message).toContain(
+      "Citation 1 is not referenced in the output",
+    );
+    expect((await getTaskById(task.id))?.status).toBe("in_progress");
+    const fixed = await handler(
+      { taskId: task.id, status: "completed", output: "Answer [citation:1]." },
+      meta,
+    );
+    expect(fixed.structuredContent.success).toBe(true);
+    expect((await getTaskById(task.id))?.status).toBe("completed");
+    const logs = await getDbClient().query<{ newValue: string }>(
+      "SELECT newValue FROM agent_log WHERE taskId = ? AND eventType = 'task_citation_check_refused'",
+      [task.id],
+    );
+    expect(logs).toHaveLength(1);
+    expect(logs[0]?.newValue).toContain("Citation 1 is not referenced");
+  });
+
+  test("completion check does not apply to a non-assignee completing the task", async () => {
+    const other = await createAgent({
+      name: "Citation non-assignee",
+      role: "lead",
+      isLead: true,
+      status: "idle",
+      capabilities: [],
+    });
+    const task = await createTaskExtended("Lead completes", { agentId, source: "system" });
+    await startTask(task.id);
+    await upsertTaskCitations(task.id, [{ index: 1, kind: "url", ref: "https://example.com/" }]);
+    const server = new McpServer({ name: "citation-non-assignee", version: "1" });
+    registerStoreProgressTool(server);
+    const handler = (
+      server as unknown as {
+        _registeredTools: Record<
+          string,
+          {
+            handler: (
+              args: unknown,
+              meta: unknown,
+            ) => Promise<{ structuredContent: { success: boolean } }>;
+          }
+        >;
+      }
+    )._registeredTools["store-progress"]!.handler;
+    const result = await handler(
+      { taskId: task.id, status: "completed", output: "No markers" },
+      { requestInfo: { headers: { "x-agent-id": other.id } } },
+    );
+    expect(result.structuredContent.success).toBe(true);
   });
 });

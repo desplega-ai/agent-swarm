@@ -19,6 +19,18 @@ The Usage page can filter costs by canonical requester and shows **Cost by User*
 
 When a dashboard tab authenticates with a user-bound `aswt_` token, the dashboard resolves the principal from `GET /api/whoami` and locks the tab to that user. Identity switching and local identity overrides stay hidden so requester and audit attribution cannot diverge from the bearer token. Operator-key sessions keep the existing user picker.
 
+## Subscriptions vs API
+
+The Usage page compares each subscription credential (Claude OAuth, Codex OAuth) with what its sessions would cost at API prices. The plan cost is the monthly list price, prorated per day from the credential's first session in the window. **Saved** is the API value minus that plan cost.
+
+The plan of each credential shows on the Usage page and in the **Plan** column of Settings → API Keys:
+
+- **Detected**: a Codex token names its ChatGPT plan, and the worker reports it. The token says `pro` for both Pro tiers, so it maps to Pro 20x.
+- **Estimated**: a Claude token cannot name its plan. The API estimates it from the 7-day rate-limit window: the spend at API prices divided by the share of the window used. It needs at least 25% of the week used, and usage of the same account outside the swarm can make it read one tier low.
+- **Set by you**: pick a plan on either page. Your choice wins over a detected or estimated plan. **Use detected plan** removes it.
+
+Credentials with no plan are left out of the savings total.
+
 ## Task list filters
 
 The Tasks page keeps its filters in the URL so views can be bookmarked and shared. In addition to status, agent, schedule, heartbeat visibility, and text search, the **Requested by** facet can show work attributed to a specific user, **Me** for the current dashboard identity, or **Unattributed** for tasks without a canonical requester. The requester filter is single-select and is never enabled by default.

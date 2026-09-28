@@ -348,6 +348,29 @@ export async function waitForOutcome(
 }
 
 /**
+ * Slack never shows a deferral's wake-up time: no `at the latest` ceiling, no
+ * `today at` / `tomorrow at` / `on 09-24 at` day, no HH:MM clock. Checks the
+ * visible text and blocks of every message in the thread (not the raw
+ * payload, whose ids and links are not read by a human).
+ */
+export function expectNoWakeTime(ctx: ScenarioContext, threadTs: string, label: string): void {
+  const visible = JSON.stringify(
+    ctx.slack
+      .messages("general")
+      .filter((message) => message.ts === threadTs || message.thread_ts === threadTs)
+      .map((message) => [message.text, message.blocks]),
+  );
+  for (const [what, pattern] of [
+    ["an `at the latest` ceiling", /at the latest/],
+    ["a wake-up day", /\b(?:today|tomorrow|on \d{2}-\d{2}) at\b/],
+    ["an HH:MM wake-up time", /\b(?:[01]?\d|2[0-3]):[0-5]\d\b/],
+  ] as const) {
+    const match = visible.match(pattern);
+    expect(!match, `${label} Slack thread showed ${what}: ${JSON.stringify(match?.[0])}`);
+  }
+}
+
+/**
  * Optional pause between steps, so a live recording of the mock's web UI
  * shows each card state long enough to read. Zero in CI.
  */

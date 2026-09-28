@@ -32,7 +32,11 @@ import {
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { renderTaskCitations, type TaskCitation } from "../../../../../../src/utils/task-citations";
+import {
+  renderTaskCitationSources,
+  renderTaskCitations,
+  type TaskCitation,
+} from "../../../../../../src/utils/task-citations";
 import "streamdown/styles.css";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useSessionCosts } from "@/api/hooks/use-costs";
@@ -65,6 +69,7 @@ import { SessionId } from "@/components/shared/session-id";
 import { SessionLogViewer } from "@/components/shared/session-log-viewer";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { TaskAttachmentsSection } from "@/components/shared/task-attachments-section";
+import { TaskCitationsSection } from "@/components/shared/task-citations-section";
 import { CollapsibleComposerDock } from "@/components/steering/collapsible-composer-dock";
 import { SteerComposer } from "@/components/steering/steer-composer";
 import { TaskFailureHelpDialog } from "@/components/support/task-failure-help-dialog";
@@ -82,6 +87,8 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DetailPageSection } from "@/components/ui/detail-page-layout";
+import { MiddleTruncation } from "@/components/ui/middle-truncation";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -100,6 +107,7 @@ import { taskIsRunning } from "@/lib/task-activity";
 import { cn, formatRelativeTime, formatSmartTime } from "@/lib/utils";
 
 const TASK_DETAIL_TABS = new Set(["details", "outcome", "logs"]);
+const TERMINAL_TASK_STATUSES = new Set(["completed", "failed", "cancelled", "superseded"]);
 
 function coerceTaskDetailTab(value: string): string {
   return TASK_DETAIL_TABS.has(value) ? value : "details";
@@ -214,7 +222,8 @@ function MetaRow({
         <Icon className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="text-xs text-muted-foreground">{label}</span>
       </div>
-      <div className="text-sm min-w-0">{children}</div>
+      {/* flex-1 gives middle-truncated values a definite width to fit. */}
+      <div className="text-sm min-w-0 flex-1">{children}</div>
     </div>
   );
 }
@@ -279,7 +288,7 @@ function StructuredOutputContent({
         </div>
       )}
       {citations.length > 0 && (
-        <MarkdownView text={renderTaskCitations("", citations, "markdown")} />
+        <MarkdownView text={renderTaskCitationSources(raw, citations, "markdown")} />
       )}
     </div>
   );
@@ -575,13 +584,16 @@ export default function TaskDetailPage() {
   const pauseTask = usePauseTask();
   const resumeTask = useResumeTask();
   const { searchParams, setParam } = useUrlSearchState();
-  const activeTab = coerceTaskDetailTab(readStringParam(searchParams, "tab", "details"));
+  // A finished task is opened for its result, so its mobile default tab is
+  // Outcome; a live one opens on Details.
+  const defaultTab = task && TERMINAL_TASK_STATUSES.has(task.status) ? "outcome" : "details";
+  const activeTab = coerceTaskDetailTab(readStringParam(searchParams, "tab", defaultTab));
   const railParam = readStringParam(searchParams, "rail");
   const railCollapsed =
     railParam === "expanded" ? false : railParam === "collapsed" ? true : readStoredRailCollapsed();
   const setActiveTab = useCallback(
-    (tab: string) => setParam("tab", coerceTaskDetailTab(tab), { defaultValue: "details" }),
-    [setParam],
+    (tab: string) => setParam("tab", coerceTaskDetailTab(tab), { defaultValue: defaultTab }),
+    [setParam, defaultTab],
   );
   const setRailCollapsed = useCallback(
     (collapsed: boolean) => setParam("rail", collapsed ? "collapsed" : "expanded"),
@@ -624,8 +636,8 @@ export default function TaskDetailPage() {
     return <p className="text-muted-foreground">Task not found.</p>;
   }
 
-  const terminalStatuses = ["completed", "failed", "cancelled", "superseded"];
-  const canCancel = !terminalStatuses.includes(task.status) && task.status !== "paused";
+  const isTerminal = TERMINAL_TASK_STATUSES.has(task.status);
+  const canCancel = !isTerminal && task.status !== "paused";
   const canPause = task.status === "in_progress";
   const canResume = task.status === "paused";
 
@@ -700,9 +712,7 @@ export default function TaskDetailPage() {
       )}
       {task.dir && (
         <MetaRow icon={FolderOpen} label="Dir">
-          <span className="text-xs font-mono truncate" title={task.dir}>
-            {task.dir}
-          </span>
+          <MiddleTruncation className="text-xs font-mono">{task.dir}</MiddleTruncation>
         </MetaRow>
       )}
       {task.claudeSessionId && (
@@ -789,7 +799,7 @@ export default function TaskDetailPage() {
                   className="flex items-center gap-1.5 text-xs text-primary hover:underline font-mono truncate"
                 >
                   <Link2 className="h-3.5 w-3.5 shrink-0" />
-                  {task.vcsUrl}
+                  <MiddleTruncation>{task.vcsUrl}</MiddleTruncation>
                   <ExternalLink className="h-3 w-3 shrink-0 text-muted-foreground" />
                 </a>
               )}
@@ -821,7 +831,9 @@ export default function TaskDetailPage() {
         </>
       )}
 
-      {task.progress && (
+      {/* The last progress line ("Running script") is stale once the task
+          ends; the outcome carries the result. */}
+      {task.progress && !isTerminal && (
         <>
           <Separator className="my-2" />
           <div className="space-y-1">
@@ -931,6 +943,7 @@ export default function TaskDetailPage() {
       )}
 
       <TaskAttachmentsSection taskId={task.id} attachments={task.attachments} />
+      <TaskCitationsSection output={task.output ?? ""} citations={task.citations ?? []} />
 
       {!isFailed && !hasOutput && !hasAttachments && (
         <div className="flex items-center justify-center py-8 text-muted-foreground">
@@ -1000,6 +1013,43 @@ export default function TaskDetailPage() {
   // collapsible description + action buttons. Rendered inside the center column
   // on desktop (lg+) and above the Tabs on mobile/tablet (<lg). Same JSX in both
   // places — single-use; not extractable per the "appears in 2+ places" rule.
+  const secondaryChips = [
+    task.taskType ? (
+      <Badge key="type" variant="outline" size="tag">
+        {task.taskType}
+      </Badge>
+    ) : null,
+    task.priority !== undefined ? (
+      <Badge
+        key="priority"
+        variant="outline"
+        className="text-[9px] px-1.5 py-0 h-5 font-mono leading-none items-center"
+      >
+        P{task.priority}
+      </Badge>
+    ) : null,
+    ...(task.tags ?? []).map((tag) => (
+      <Badge key={`tag-${tag}`} variant="outline" size="tag">
+        {tag}
+      </Badge>
+    )),
+    task.source ? (
+      <Badge key="source" variant="outline" size="tag">
+        {task.source}
+      </Badge>
+    ) : null,
+    task.effort ? (
+      <Badge
+        key="effort"
+        variant="outline"
+        className="text-[9px] px-1.5 py-0 h-5 font-mono leading-none items-center gap-1"
+      >
+        <Zap className="h-2.5 w-2.5" />
+        effort: {task.effort}
+      </Badge>
+    ) : null,
+  ].filter((chip) => chip !== null);
+
   const heroBlock = (
     // Phase 17 — generous padding around the badges/description/actions block
     // ("the task details part on top of the logs"). Brand kit's
@@ -1009,29 +1059,6 @@ export default function TaskDetailPage() {
     <div className="space-y-3 px-4 pt-4 pb-5 shrink-0">
       <div className="flex items-center gap-2 flex-wrap">
         <StatusBadge status={task.status} size="md" />
-        {task.taskType && (
-          <Badge variant="outline" size="tag">
-            {task.taskType}
-          </Badge>
-        )}
-        {task.priority !== undefined && (
-          <Badge
-            variant="outline"
-            className="text-[9px] px-1.5 py-0 h-5 font-mono leading-none items-center"
-          >
-            P{task.priority}
-          </Badge>
-        )}
-        {task.tags?.map((tag) => (
-          <Badge key={tag} variant="outline" size="tag">
-            {tag}
-          </Badge>
-        ))}
-        {task.source && (
-          <Badge variant="outline" size="tag">
-            {task.source}
-          </Badge>
-        )}
         {task.provider && (
           <Badge
             variant="outline"
@@ -1087,17 +1114,29 @@ export default function TaskDetailPage() {
             </Badge>
           ) : null;
         })()}
-        {task.effort ? (
-          <Badge
-            variant="outline"
-            className="text-[9px] px-1.5 py-0 h-5 font-mono leading-none items-center gap-1"
-          >
-            <Zap className="h-2.5 w-2.5" />
-            effort: {task.effort}
-          </Badge>
+        {/* Routing metadata (type, priority, tags, source, effort) sits
+            behind one "+N" chip: eight equal-weight chips pushed the task
+            text to the fourth row on a phone. */}
+        {secondaryChips.length > 0 ? (
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                className="rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                aria-label={`Show ${secondaryChips.length} more task labels`}
+              >
+                <Badge variant="outline" size="tag" className="hover:bg-accent">
+                  +{secondaryChips.length}
+                </Badge>
+              </button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-auto max-w-xs p-2">
+              <div className="flex flex-wrap gap-1.5">{secondaryChips}</div>
+            </PopoverContent>
+          </Popover>
         ) : null}
       </div>
-      <CollapsibleDescription text={task.task} />
+      <CollapsibleDescription text={task.task} collapsedClassName="line-clamp-3 lg:line-clamp-1" />
       <div className="flex items-center gap-2">
         {(canCancel || canPause || canResume) && (
           <div className="flex items-center gap-1.5 shrink-0">
@@ -1267,6 +1306,7 @@ export default function TaskDetailPage() {
             )}
 
             <TaskAttachmentsSection taskId={task.id} attachments={task.attachments} />
+            <TaskCitationsSection output={task.output ?? ""} citations={task.citations ?? []} />
 
             {sessionLogsContent}
 

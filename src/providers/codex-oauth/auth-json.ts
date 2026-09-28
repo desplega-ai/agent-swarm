@@ -22,7 +22,8 @@
  * purposes and doesn't validate it as a separate JWT.
  */
 
-import { extractChatgptUserId } from "./flow.js";
+import { codexPlanFromClaim } from "../../utils/subscription-plans.js";
+import { extractChatgptPlanType, extractChatgptUserId } from "./flow.js";
 import type { CodexAuthJson, CodexOAuthCredentials } from "./types.js";
 
 /**
@@ -58,6 +59,8 @@ export function authJsonToCredentialSelection(auth: CodexAuthJson, slot = 0, tot
     keySuffix: deriveCodexKeySuffix(auth.tokens.access_token, auth.tokens.account_id),
     keyType: "CODEX_OAUTH",
     isRateLimitFallback: false,
+    // The ChatGPT plan rides in the token itself (`chatgpt_plan_type`).
+    plan: codexPlanFromClaim(extractChatgptPlanType(auth.tokens.access_token)),
   };
 }
 

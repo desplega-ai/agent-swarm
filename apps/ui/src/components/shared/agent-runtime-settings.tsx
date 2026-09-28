@@ -60,6 +60,7 @@ import {
   type ModelOption,
   modelGroupsForAcpTarget,
   modelGroupsForHarness,
+  nearestSupportedLevel,
   pickDefaultModelForHarness,
 } from "@/lib/agent-runtime-models";
 import { cn } from "@/lib/utils";
@@ -144,20 +145,6 @@ function configuredAcpTarget(
 ): AcpTarget {
   const target = configuredValue(configs, "ACP_TARGET");
   return target === "opencode" || target === "custom" ? target : fallback;
-}
-
-/** Nearest supported level by canonical-order distance — used to make the grey-out tooltip suggest an alternative without hardcoding any model name. */
-function nearestSupportedLevel(
-  level: ReasoningEffortLevel,
-  levels: ReadonlyArray<ReasoningEffortLevel>,
-): ReasoningEffortLevel | null {
-  if (levels.length === 0) return null;
-  const idx = REASONING_EFFORT_LEVELS.indexOf(level);
-  return [...levels].sort(
-    (a, b) =>
-      Math.abs(REASONING_EFFORT_LEVELS.indexOf(a) - idx) -
-      Math.abs(REASONING_EFFORT_LEVELS.indexOf(b) - idx),
-  )[0];
 }
 
 export function AgentRuntimeSettings({ agent }: { agent: Agent }) {

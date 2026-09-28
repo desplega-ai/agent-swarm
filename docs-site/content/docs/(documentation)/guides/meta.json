@@ -3,6 +3,7 @@
   "pages": [
     "deployment",
     "kubernetes",
+    "podman-rootless",
     "published-artifacts",
     "asset-namespaces",
     "agent-fs-co-deployment",

@@ -63,6 +63,7 @@ import { handleApprovalRequests } from "./approval-requests";
 import { handleApps } from "./apps";
 import { handleAssets } from "./assets";
 import { handleBudgets } from "./budgets";
+import { handleCodexOAuthDevice } from "./codex-oauth-device";
 import { handleCodexOAuthKeepWarm } from "./codex-oauth-keep-warm";
 import { handleConfig } from "./config";
 import { handleContext } from "./context";
@@ -94,6 +95,7 @@ import { handleModelsCatalog } from "./models-catalog";
 import { handleOAuthCallback, startOAuthPendingGc, stopOAuthPendingGc } from "./oauth-callback";
 import { handleGenericOAuth } from "./oauth-generic";
 import { handleOAuthLocks } from "./oauth-locks";
+import { handleOnboarding } from "./onboarding";
 import { handlePageProxy } from "./page-proxy";
 import { handlePages } from "./pages";
 import { handlePagesPublic } from "./pages-public";
@@ -333,6 +335,8 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleTasks(req, res, pathSegments, queryParams, myAgentId),
         () => handleStats(req, res, pathSegments, queryParams, myAgentId),
         () => handleStatus(req, res, pathSegments, queryParams),
+        () => handleOnboarding(req, res, pathSegments, queryParams),
+        () => handleCodexOAuthDevice(req, res, pathSegments, queryParams),
         () => handleActiveSessions(req, res, pathSegments, queryParams, myAgentId),
         () => handlePricing(req, res, pathSegments, queryParams, myAgentId),
         () => handleSchedules(req, res, pathSegments, queryParams, myAgentId),
@@ -345,7 +349,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleKv(req, res, pathSegments, queryParams),
         () => handleRooms(req, res, pathSegments, queryParams),
         () => handleRealtimeAsset(req, res),
-        () => handleIntegrations(req, res, pathSegments),
+        () => handleIntegrations(req, res, pathSegments, queryParams),
         () => handlePromptTemplates(req, res, pathSegments, queryParams),
         () => handleDbQuery(req, res, pathSegments, queryParams),
         () => handleMetrics(req, res, pathSegments, queryParams, myAgentId),

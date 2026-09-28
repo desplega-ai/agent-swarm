@@ -56,6 +56,56 @@ footer .sep{width:3px;height:3px;border-radius:50%;background:var(--border)}
 
 <div class="page">
   <div class="hero">
+    <p class="kicker">First run</p>
+    <h2>Onboarding: three directions</h2>
+    <p>Full-page first-run setup for the dashboard: Connect, Name your swarm, AI provider, Memory, Integrations, First task. Every option is minimizable into the home checklist card and supports <b>?step=N</b>, <b>?theme=dark</b>, <b>?state=minimized</b> deep links. Spec: <a href="onboarding/SPEC.md">onboarding/SPEC.md</a>.</p>
+  </div>
+
+  <div class="grid" id="grid-onboarding">
+    <a class="card" href="onboarding/option-a-rail-stage/index.html" data-opt="onb-a">
+      <div class="head">
+        <span class="letter">A</span>
+        <div><h3>Rail + Stage</h3><p class="tag">Exploration · overview always visible</p></div>
+        <span class="open">Open</span>
+      </div>
+      <ul>
+        <li>Left rail lists all six steps with live status.</li>
+        <li>Stage shows one step; jump in any order.</li>
+        <li>Maps 1:1 onto the minimized checklist card.</li>
+      </ul>
+      <div class="preview"><iframe loading="lazy" title="Onboarding A preview" src="onboarding/option-a-rail-stage/index.html?step=3"></iframe><span class="veil"></span></div>
+    </a>
+    <a class="card feat" href="onboarding/option-b-focused-flow/index.html" data-opt="onb-b">
+      <div class="head">
+        <span class="letter">B</span>
+        <div><h3>Focused Flow</h3><p class="tag">Chosen · round 2 · one step at a time</p></div>
+        <span class="open">Open</span>
+      </div>
+      <ul>
+        <li>800px column, animated linear progress bar + step overview.</li>
+        <li>Four provider cards with logos, split-view integrations, agents list.</li>
+        <li>Minimize to a header Setup pill with a checklist popover.</li>
+      </ul>
+      <div class="preview"><iframe loading="lazy" title="Onboarding B preview" src="onboarding/option-b-focused-flow/index.html?step=3"></iframe><span class="veil"></span></div>
+    </a>
+    <a class="card" href="onboarding/option-c-launchpad/index.html" data-opt="onb-c">
+      <div class="head">
+        <span class="letter">C</span>
+        <div><h3>Launchpad</h3><p class="tag">The page is the checklist</p></div>
+        <span class="open">Open</span>
+      </div>
+      <ul>
+        <li>Six step cards in a grid with a progress ring.</li>
+        <li>A card expands in place to do the step.</li>
+        <li>Stepper and checklist are the same object at two sizes.</li>
+      </ul>
+      <div class="preview"><iframe loading="lazy" title="Onboarding C preview" src="onboarding/option-c-launchpad/index.html?step=3"></iframe><span class="veil"></span></div>
+    </a>
+  </div>
+</div>
+
+<div class="page">
+  <div class="hero">
     <p class="kicker">Task Details</p>
     <h2>Session Logs — three redesigns</h2>
     <p>Same data, three directions for the agent-session log stream. Each is driven by a real 40-event session and has <b>Push next</b> / <b>Load&nbsp;all</b> / <b>Reset</b> controls, a live “agent is running” footer, and a light/dark toggle.</p>
@@ -136,10 +186,10 @@ const SUN='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-wid
 const MOON='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>';
 function syncLinks(t){
   document.querySelectorAll('.card').forEach(c=>{
-    const base=c.getAttribute('href').split('?')[0];
-    c.setAttribute('href',base+'?theme='+t);
-    const f=c.querySelector('iframe'); const fb=f.getAttribute('src').split('?')[0];
-    if(!f.dataset.set||f.dataset.theme!==t){f.dataset.set='1';f.dataset.theme=t;f.setAttribute('src',fb+'?theme='+t);}
+    const withTheme=(u)=>{const [b,q='']=u.split('?');const sp=new URLSearchParams(q);sp.set('theme',t);return b+'?'+sp.toString()};
+    c.setAttribute('href',withTheme(c.getAttribute('href')));
+    const f=c.querySelector('iframe');
+    if(!f.dataset.set||f.dataset.theme!==t){f.dataset.set='1';f.dataset.theme=t;f.setAttribute('src',withTheme(f.getAttribute('src')));}
   });
 }
 function setTheme(t){root.classList.toggle('dark',t==='dark');tb.innerHTML=t==='dark'?SUN:MOON;try{localStorage.swarmMock=t}catch(e){}syncLinks(t);}

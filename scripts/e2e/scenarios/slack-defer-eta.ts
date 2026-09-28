@@ -5,6 +5,7 @@ import {
   ask,
   claim,
   enableSlackRenderV2Only,
+  expectNoWakeTime,
   findSlackTask,
   registerLead,
   slackPace,
@@ -12,6 +13,9 @@ import {
   waitForOutcome,
   waitForReaction,
 } from "./slack-helpers";
+
+/** The time-based card `defer-task` stores: `Checking back tomorrow at 18:38`. */
+const STORED_TIME_CARD = /^Checking back (?:today|tomorrow|on \S+) at \d{1,2}:\d{2}/;
 
 async function deferAndCheckSlack(ctx: ScenarioContext, renderer: "legacy" | "v2") {
   await registerLead(ctx, `e2e-lead-defer-${renderer}`);
@@ -48,8 +52,9 @@ async function deferAndCheckSlack(ctx: ScenarioContext, renderer: "legacy" | "v2
   // This defer is time-based (delayMs, no wakeOn), so the card is the
   // "checking back" shape. A wakeOn defer instead reads "Waiting on <agent> —
   // or <when> at the latest"; both are asserted as units in defer-task.test.ts.
+  // The stored card keeps the wake-up time for the API and the UI; only Slack drops it.
   expect(
-    typeof deferred.output === "string" && deferred.output.startsWith("Checking back "),
+    typeof deferred.output === "string" && STORED_TIME_CARD.test(deferred.output),
     `Stored output must be the human-facing defer ETA, got: ${JSON.stringify(deferred.output)}`,
   );
   // The schedule UUID link used to ride along in the stored output, where Slack
@@ -63,8 +68,8 @@ async function deferAndCheckSlack(ctx: ScenarioContext, renderer: "legacy" | "v2
     "Stored output must not carry the agent's internal handoff note",
   );
 
-  // The ETA is the card: it is what a human needs to decide whether to wait.
-  const outcome = await waitForOutcome(ctx, message.ts, "Checking back ");
+  // Slack reads the card without its wake-up time.
+  const outcome = await waitForOutcome(ctx, message.ts, "Checking back later");
   expect(outcome.bot_id === ctx.slack.bot.botId, "Deferral outcome must come from the bot");
   if (renderer === "v2") {
     // Require the outcome stream to finish, so a tree update cannot satisfy this assertion.
@@ -124,6 +129,7 @@ async function deferAndCheckSlack(ctx: ScenarioContext, renderer: "legacy" | "v2
     !thread.includes("/schedules/"),
     `${renderer} Slack thread leaked the defer schedule link`,
   );
+  expectNoWakeTime(ctx, message.ts, renderer);
 }
 
 // registry.ts discovers both exports. Legacy must precede the scenarios that enable v2;

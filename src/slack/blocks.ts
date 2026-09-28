@@ -112,6 +112,62 @@ function contextBlock(...elements: string[]): SlackBlock {
   };
 }
 
+// Block Kit limits for a `context` block: at most 10 elements, and each text
+// object at most 3000 characters.
+// https://docs.slack.dev/reference/block-kit/blocks/context-block
+export const MAX_CONTEXT_ELEMENTS = 10;
+export const MAX_CONTEXT_TEXT_LENGTH = 3000;
+
+/**
+ * A caption: a `context` block (Slack's small grey text) for secondary
+ * metadata such as sources and attachments, so it never competes with the
+ * answer. Items are pre-rendered mrkdwn joined by ` · ` after an optional
+ * `heading:` and packed into elements inside Block Kit limits. Items that
+ * do not fit collapse into a trailing `+N more`, linked to `moreUrl` when
+ * given. Returns undefined when there is nothing to show.
+ */
+export function buildCaptionBlock(
+  items: readonly string[],
+  opts: { heading?: string; moreUrl?: string } = {},
+): SlackBlock | undefined {
+  const packed: { text: string; count: number }[] = [];
+  for (const item of items) {
+    const last = packed.at(-1);
+    const separator = last?.count === 0 ? " " : " · ";
+    if (last && last.text.length + separator.length + item.length <= MAX_CONTEXT_TEXT_LENGTH) {
+      last.text += `${separator}${item}`;
+      last.count++;
+      continue;
+    }
+    if (!last && opts.heading) {
+      const headed = `${opts.heading}: ${item}`;
+      if (headed.length <= MAX_CONTEXT_TEXT_LENGTH) {
+        packed.push({ text: headed, count: 1 });
+        continue;
+      }
+      packed.push({ text: `${opts.heading}:`, count: 0 });
+    }
+    // An item longer than one text object cannot be shown without breaking
+    // its link; it is counted under "+N more" instead.
+    if (item.length <= MAX_CONTEXT_TEXT_LENGTH) packed.push({ text: item, count: 1 });
+  }
+  const shownIn = (elements: typeof packed) =>
+    elements.reduce((total, element) => total + element.count, 0);
+  let kept = packed;
+  if (
+    kept.length > MAX_CONTEXT_ELEMENTS ||
+    (kept.length === MAX_CONTEXT_ELEMENTS && shownIn(kept) < items.length)
+  ) {
+    kept = kept.slice(0, MAX_CONTEXT_ELEMENTS - 1);
+  }
+  const omitted = items.length - shownIn(kept);
+  const elements = kept.filter((element) => element.count > 0 || omitted > 0).map((e) => e.text);
+  if (omitted > 0) {
+    elements.push(opts.moreUrl ? `<${opts.moreUrl}|+${omitted} more>` : `+${omitted} more`);
+  }
+  return elements.length > 0 ? contextBlock(...elements) : undefined;
+}
+
 function sectionBlock(text: string): SlackBlock {
   return { type: "section", text: { type: "mrkdwn", text } };
 }

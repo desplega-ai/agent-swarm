@@ -224,6 +224,26 @@
  * renders near-black hairlines in light mode and ignores theme presets.
  * Default every border to the themed token instead (the standard shadcn v4
  * base rule) — explicit `border-<color>` utilities still win. */
+/*
+ * Touch hit slop (WCAG 2.2 2.5.8): on coarse pointers, an invisible ::after
+ * grows a small control's hit area to --hit-size (40px by default) without
+ * changing how it looks. Desktop pointers are untouched.
+ */
+@utility hit-area {
+  position: relative;
+  @media (pointer: coarse) {
+    &::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: max(100%, var(--hit-size, 40px));
+      height: max(100%, var(--hit-size, 40px));
+      transform: translate(-50%, -50%);
+    }
+  }
+}
+
 @layer base {
   *,
   ::after,

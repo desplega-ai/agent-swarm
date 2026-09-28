@@ -1426,6 +1426,12 @@ export const AgentLogEventTypeSchema = z.enum([
   "task_authorization_rejected",
   "task_recovery_authorization",
   "task_released",
+  // A settled task's settlement fired a deferred wait (metadata names the waiter)
+  "task_deferred_wait_woke",
+  // The lead follow-up was skipped because the woken waiter already carries the result
+  "task_follow_up_suppressed",
+  // store-progress refused a completion once because its citations were inaccurate
+  "task_citation_check_refused",
   "channel_message",
   // Service registry events
   "service_registered",
@@ -3315,6 +3321,7 @@ export const PricingProviderSchema = z.enum([
   // adapter reports `totalCostUsd: 0`, so these rows settle at
   // `costSource: 'unpriced'`. Accepted here so the row is recorded at all.
   "acp",
+  "dsh",
 ]);
 export type PricingProvider = z.infer<typeof PricingProviderSchema>;
 

@@ -45,7 +45,7 @@ Tasks created by a schedule are automatic tasks. Their completed output is not s
 
 A task whose answer needs time (a build, a deploy, a reply) calls `defer-task` with `delayMs` or `runAt`, a `summary` of what you did so far, and a `note` that says what is pending. The tool completes the task and creates the one-off schedule for you. The task reaches its final state (`completed`) on this call, and the `summary` becomes its output. The wake-up task carries the deferred task as its parent, so you receive that task's context. Add `checks` to list what to verify on wake-up. Do not hand-roll this with `create-schedule`.
 
-When waiting on tasks, include `wakeOn:{event:"settled",taskIds:["<id>"],mode:"all"}` alongside `delayMs` or `runAt`. The displayed time is a ceiling; matching task outcomes wake you sooner.
+When waiting on tasks, include `wakeOn:{event:"settled",taskIds:["<id>"],mode:"all"}` alongside `delayMs` or `runAt`. The displayed time is a ceiling; matching task outcomes wake you sooner. The task whose outcome wakes you creates no separate follow-up for you; the wake-up task is where you review it. In `mode:"all"`, a member that settles while others are pending still creates its follow-up.
 
 ## Secrets
 
@@ -59,7 +59,7 @@ A `taskTemplate` and `scriptArgs` are stored as plain text and replayed on every
 
 ## Repair a failing schedule
 
-`list-schedules` with `lastRunStatus: "failed"` or `consecutiveErrorsMin: 3` lists the failing ones. Fix the cause, then `run-schedule-now` to confirm. A schedule you cannot fix now: `patch-schedule` with `enabled: false` and say so in your task output. A second schedule next to a broken one is not a fix.
+Schedules fail in two places. A schedule whose spawned tasks fail: `get-tasks` with `scheduleId` and `status: "failed"`. A schedule the scheduler could not dispatch at all: `list-schedules` with `lastRunStatus: "failed"` or `consecutiveErrorsMin: 1`; these errors back off and auto-disable after 5. The `list-schedules` filters never see spawned-task failures. Fix the cause, then `run-schedule-now` to confirm. A schedule you cannot fix now: `patch-schedule` with `enabled: false` and say so in your task output. A second schedule next to a broken one is not a fix.
 
 ## Related skills
 

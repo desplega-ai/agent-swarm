@@ -15,6 +15,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { isTruthyConfigValue, useSwarmConfig } from "@/hooks/use-swarm-config";
+import { AVATAR_COLOR_INPUT_FALLBACK } from "@/lib/agent-color";
 import type { ConfigCatalogEntry } from "@/lib/configuration-catalog";
 import { formatDuration, isJsonObject } from "@/lib/configuration-values";
 import { cn } from "@/lib/utils";
@@ -151,6 +152,10 @@ export function ConfigurationRow({ entry, inEnv }: ConfigurationRowProps) {
     </button>
   ) : null;
 
+  // Any saved row gets a remove action, even when it equals the catalog
+  // default: the row still overrides the deployment env, and removing it is
+  // the only way back to inheriting that env value. The slot stays reserved
+  // on `sm+` so every row's control shares one right edge.
   const resetButton = config ? (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -161,14 +166,18 @@ export function ConfigurationRow({ entry, inEnv }: ConfigurationRowProps) {
           className="h-8 w-8 shrink-0"
           onClick={reset}
           disabled={isPending}
-          aria-label={`Reset ${entry.key} to its default`}
+          aria-label={`Remove the saved value for ${entry.key}`}
         >
           <RotateCcw className="h-3.5 w-3.5" />
         </Button>
       </TooltipTrigger>
-      <TooltipContent>Reset to default (removes the saved value)</TooltipContent>
+      <TooltipContent>
+        Remove the saved value. The deployment env value, or the default, applies again.
+      </TooltipContent>
     </Tooltip>
-  ) : null;
+  ) : (
+    <span aria-hidden="true" className="hidden h-8 w-8 shrink-0 sm:block" />
+  );
 
   return (
     <div
@@ -212,7 +221,7 @@ export function ConfigurationRow({ entry, inEnv }: ConfigurationRowProps) {
               href={entry.docsUrl}
               target="_blank"
               rel="noreferrer"
-              className="text-muted-foreground hover:text-foreground"
+              className="hit-area text-muted-foreground hover:text-foreground"
               aria-label={`Documentation for ${entry.key}`}
               title="Open documentation"
             >
@@ -305,7 +314,7 @@ export function ConfigurationRow({ entry, inEnv }: ConfigurationRowProps) {
                 handleSave(next);
               }}
             >
-              <SelectTrigger id={inputId} className="w-full sm:w-56">
+              <SelectTrigger id={inputId} className="min-w-0 flex-1 sm:w-56 sm:flex-none">
                 <SelectValue placeholder="Not set" />
               </SelectTrigger>
               <SelectContent>
@@ -374,7 +383,7 @@ export function ConfigurationRow({ entry, inEnv }: ConfigurationRowProps) {
                   <Input
                     type="color"
                     aria-label={`${entry.label} picker`}
-                    value={/^#[0-9a-f]{6}$/i.test(draft) ? draft : "#000000"}
+                    value={/^#[0-9a-f]{6}$/i.test(draft) ? draft : AVATAR_COLOR_INPUT_FALLBACK}
                     disabled={isPending}
                     onChange={(event) => setDraft(event.target.value)}
                     className="w-10 shrink-0 p-1"

@@ -19,13 +19,17 @@ export async function getJiraOAuthConfig(): Promise<OAuthProviderConfig | null> 
   return app ? oauthAppRowToProviderConfig(app) : null;
 }
 
-export async function getJiraAuthorizationUrl(): Promise<string | null> {
+export async function getJiraAuthorizationUrl(finalRedirect?: string): Promise<string | null> {
   const config = await getJiraOAuthConfig();
   if (!config) return null;
   // flow='tracker' so the unified state-keyed callback runs the tracker
   // post-processing (cloudId capture) after landing tokens on the default
   // authorization.
-  const result = await buildAuthorizationUrl(config, { flow: "tracker", label: "default" });
+  const result = await buildAuthorizationUrl(config, {
+    flow: "tracker",
+    label: "default",
+    ...(finalRedirect ? { finalRedirect } : {}),
+  });
   return result.url;
 }
 

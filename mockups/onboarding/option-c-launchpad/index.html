@@ -1,0 +1,1278 @@
+<!doctype html>
+<!--
+  Onboarding option C: "Launchpad". The whole page is the checklist: a progress ring plus a
+  one-line "what is next" hint sit above a grid of six step cards, clicking a card spotlights it
+  in place while the others dim into compact rows, and Minimize folds those same rows into the
+  home dashboard card, so the stepper and the checklist are one object at two sizes.
+  Trade-off: it unifies stepper and checklist, which serves returning users and half-finished
+  setups well, at the cost of a less guided first impression than a linear wizard.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Agent Swarm · Onboarding · Option C Launchpad</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&family=Space+Mono:ital,wght@0,400;0,700;1,400;1,700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="../../session-logs/demo-shared.css" />
+<style>
+/* ============================================================
+   Option C "Launchpad" layout. Tokens come from demo-shared.css.
+   ============================================================ */
+:root{ --brand: var(--primary); --line: color-mix(in oklch, var(--border) 62%, transparent); }
+body{font-size:15px;overflow-x:hidden}
+.hidden{display:none !important}
+.mono{font-family:var(--font-mono)}
+.muted{color:var(--muted-foreground)}
+.ic{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.ic.xs{width:13px;height:13px}
+
+/* ---------- buttons (36px controls per DESIGN.md) ---------- */
+.btn{height:36px;font-size:13.5px;border-radius:8px;padding:0 13px}
+.btn.sm{height:30px;font-size:12.5px;padding:0 10px;border-radius:7px}
+.btn.ghost{border-color:transparent;background:transparent;color:var(--muted-foreground)}
+.btn.ghost:hover{background:var(--accent);color:var(--foreground)}
+.btn.iconbtn{width:36px;padding:0;justify-content:center}
+.btn.sm.iconbtn{width:30px}
+.btn:focus-visible{outline:2px solid var(--ring);outline-offset:1px}
+.btn.is-busy{opacity:.75;pointer-events:none}
+.lnk{color:var(--primary);text-decoration:none;font-size:13px;font-weight:500;display:inline-flex;align-items:center;gap:5px}
+.lnk:hover{text-decoration:underline;text-underline-offset:2px}
+
+/* ---------- chips ---------- */
+.chip{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 7px;border-radius:6px;font-size:9px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;border:1px solid var(--border);color:var(--muted-foreground);white-space:nowrap;flex:none}
+.chip.done{border-color:color-mix(in oklch,var(--success) 42%,transparent);color:var(--success-strong);background:color-mix(in oklch,var(--success) 12%,transparent)}
+.chip.skipped{border-color:var(--border);color:var(--neutral);background:color-mix(in oklch,var(--muted) 70%,transparent)}
+.chip.failed{border-color:color-mix(in oklch,var(--error) 42%,transparent);color:var(--error-strong);background:color-mix(in oklch,var(--error) 10%,transparent)}
+.chip.busy{border-color:color-mix(in oklch,var(--active) 45%,transparent);color:var(--active-strong);background:color-mix(in oklch,var(--active) 12%,transparent)}
+.chip.info{border-color:color-mix(in oklch,var(--info) 40%,transparent);color:var(--info-strong);background:color-mix(in oklch,var(--info) 10%,transparent)}
+
+/* ---------- top bar ---------- */
+.topbar{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:11px;padding:11px 22px;border-bottom:1px solid var(--border);background:color-mix(in oklch,var(--background) 88%,transparent);backdrop-filter:blur(10px)}
+.mark{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;font-family:var(--font-mono);font-weight:700;font-size:11px;color:oklch(0.985 0 0);background:var(--brand);flex:none}
+.brandname{font-weight:600;font-size:14.5px;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.topbar .kicker{font-family:var(--font-mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted-foreground);border:1px solid var(--border);border-radius:999px;padding:3px 9px;white-space:nowrap}
+.sp{flex:1}
+
+/* ---------- page ---------- */
+.wrap{width:100%;max-width:1180px;margin:0 auto;padding:26px 22px 72px}
+
+/* ---------- hero ---------- */
+.hero{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:24px;row-gap:14px;align-items:center;padding-bottom:17px;margin-bottom:16px;border-bottom:1px solid var(--border)}
+.ringwrap{position:relative;width:116px;height:116px;flex:none}
+.ring{width:100%;height:100%;transform:rotate(-90deg)}
+.ring circle{fill:none;stroke-width:9;stroke-linecap:round}
+.ring .track{stroke:color-mix(in oklch,var(--muted-foreground) 20%,transparent)}
+.ring .val{stroke:var(--primary)}
+.ringtxt{position:absolute;inset:0;display:grid;place-content:center;justify-items:center;gap:3px}
+.ringtxt b{font-family:var(--font-mono);font-size:23px;line-height:1;font-variant-numeric:tabular-nums}
+.ringtxt b i{font-style:normal;color:var(--muted-foreground);font-size:15px}
+.ringtxt u{text-decoration:none;font-size:9px;text-transform:uppercase;letter-spacing:.15em;color:var(--muted-foreground)}
+.herotext{min-width:0}
+.herotext h2{margin:0 0 5px;font-size:22px;font-weight:600;letter-spacing:-.022em}
+.herotext .lede{margin:0;color:var(--muted-foreground);font-size:14px}
+.nextline{grid-column:2;display:flex;align-items:center;gap:11px;flex-wrap:wrap;font-size:13.5px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:7px 7px 7px 12px}
+.nextline .k{font-family:var(--font-mono);font-size:9.5px;letter-spacing:.15em;text-transform:uppercase;color:var(--primary)}
+.nextline .n{flex:1 1 auto;min-width:0}
+.nextline b{font-weight:600}
+
+/* ---------- the grid of six ---------- */
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(316px,1fr));gap:15px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);overflow:hidden;transition:border-color .16s,opacity .16s,background .16s}
+.card:hover{border-color:color-mix(in oklch,var(--primary) 30%,var(--border))}
+.card.is-open{border-color:color-mix(in oklch,var(--primary) 40%,var(--border));box-shadow:0 0 0 1px color-mix(in oklch,var(--primary) 16%,transparent),var(--shadow)}
+
+/* one row shape, used by the card head AND the home checklist row: same object, two sizes */
+.head,.crow{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:12px;width:100%;text-align:left;background:none;border:0;color:inherit;font:inherit;padding:14px 15px;cursor:pointer}
+.head:focus-visible,.crow:focus-visible{outline:2px solid var(--ring);outline-offset:-2px;border-radius:10px}
+.crow{padding:9px 14px;border-top:1px solid var(--line)}
+.crow:first-of-type{border-top:0}
+.crow:hover{background:var(--accent)}
+.idx{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;font-family:var(--font-mono);font-size:12px;border:1px solid var(--border);color:var(--muted-foreground);background:var(--surface);flex:none}
+.is-done .idx,.crow.is-done .idx{border-color:color-mix(in oklch,var(--success) 42%,transparent);color:var(--success-strong);background:color-mix(in oklch,var(--success) 12%,transparent)}
+.card.is-open .idx{border-color:transparent;background:var(--primary);color:oklch(0.985 0 0)}
+.htext{min-width:0}
+.htext .t{display:block;font-size:14.5px;font-weight:600;letter-spacing:-.012em;line-height:1.25}
+.htext .s{display:block;font-size:12.5px;color:var(--muted-foreground);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card.is-open .htext{display:flex;align-items:baseline;gap:9px;min-width:0}
+.card.is-open .htext .s{margin-top:0}
+.crow .htext{display:flex;align-items:baseline;gap:9px;flex-wrap:nowrap}
+.crow .htext .t{font-size:13.5px;font-weight:500}
+.crow .htext .s{margin-top:0;font-size:12px}
+.hend{display:flex;align-items:center;gap:9px}
+.chev{width:14px;height:14px;color:var(--muted-foreground);fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+.card.is-open .chev{transform:rotate(180deg)}
+
+/* card face: the "what is inside" preview, grid mode only */
+.blurb{margin:-4px 0 9px;padding:0 15px 0 53px;font-size:12.5px;color:color-mix(in oklch,var(--foreground) 74%,var(--muted-foreground))}
+.face{display:flex;flex-wrap:wrap;gap:6px;padding:0 15px 13px 53px}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--muted-foreground);border:1px solid var(--border);border-radius:999px;padding:3px 9px;background:var(--surface);white-space:nowrap}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--muted-foreground);opacity:.45;flex:none}
+.dot.ok{background:var(--success);opacity:1}
+.dot.act{background:var(--active);opacity:1}
+.dot.off{background:var(--neutral);opacity:.5}
+
+/* spotlight: expanded card goes full width, the rest shrink to dim compact rows */
+.grid.spot{grid-template-columns:1fr;gap:7px}
+.grid.spot .card:not(.is-open){opacity:.55;box-shadow:none;background:color-mix(in oklch,var(--card) 60%,var(--background))}
+.grid.spot .card:not(.is-open):hover{opacity:1}
+.grid.spot .card:not(.is-open) .head{padding:9px 14px}
+.grid.spot .card:not(.is-open) .htext{display:flex;align-items:baseline;gap:9px}
+.grid.spot .card:not(.is-open) .htext .t{font-size:13.5px;font-weight:500}
+.grid.spot .card:not(.is-open) .htext .s{margin-top:0;font-size:12px}
+.card:not(.is-open) .body,.grid.spot .card:not(.is-open) .face,.card.is-open .face,.grid.spot .card .blurb,.card.is-open .blurb{display:none}
+.body{display:block;padding:14px 15px 15px;border-top:1px solid var(--line)}
+.bodyhead{margin:-2px 0 11px;font-size:13.5px;color:var(--muted-foreground);max-width:92ch}
+.footnote{margin-top:22px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:12.5px;color:var(--muted-foreground)}
+
+/* ---------- form atoms ---------- */
+.two{display:grid;grid-template-columns:minmax(300px,1fr) minmax(270px,.82fr);gap:26px;align-items:start}
+@media(max-width:880px){.two{grid-template-columns:1fr;gap:18px}}
+.field{margin-bottom:12px}
+.field>label,.flabel{display:block;font-size:10.5px;font-weight:500;letter-spacing:.07em;text-transform:uppercase;color:var(--muted-foreground);margin-bottom:5px}
+.inp{width:100%;height:36px;padding:0 11px;border:1px solid var(--border);border-radius:8px;background:transparent;color:var(--foreground);font:inherit;font-size:13.5px}
+.inp::placeholder{color:color-mix(in oklch,var(--muted-foreground) 72%,transparent)}
+.inp:focus{outline:2px solid var(--ring);outline-offset:-1px;border-color:var(--ring)}
+.inp.mono{font-family:var(--font-mono);font-size:12.5px;letter-spacing:.01em}
+.secret{position:relative}
+.secret .inp{padding-right:38px}
+.secret.two-act .inp{padding-right:70px}
+.secret .act{position:absolute;top:3px;right:3px;display:flex;gap:2px}
+.act .btn{width:30px;height:30px;padding:0;justify-content:center;border-color:transparent;background:transparent;color:var(--muted-foreground)}
+.act .btn:hover{background:var(--accent);color:var(--foreground)}
+.hint{font-size:12px;color:var(--muted-foreground);margin:7px 0 0;line-height:1.5}
+.actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:14px}
+.stat{font-size:12.5px;color:var(--muted-foreground);display:inline-flex;align-items:center;gap:6px}
+.stat.ok{color:var(--success-strong)}
+
+/* segmented control */
+.seg{display:inline-flex;padding:2px;gap:2px;background:var(--muted);border:1px solid var(--border);border-radius:9px;flex-wrap:wrap}
+.seg button{font:inherit;font-size:12.5px;height:28px;padding:0 10px;border:0;border-radius:7px;background:transparent;color:var(--muted-foreground);cursor:pointer;white-space:nowrap}
+.seg button.on{background:var(--card);color:var(--foreground);font-weight:600;box-shadow:0 1px 2px oklch(0 0 0/.07)}
+
+/* callouts */
+.callout{display:flex;gap:9px;align-items:flex-start;font-size:13px;line-height:1.5;border:1px solid var(--border);border-radius:9px;padding:9px 11px;margin-top:12px;background:var(--surface);color:var(--muted-foreground)}
+.callout.ok{border-color:color-mix(in oklch,var(--success) 35%,transparent);background:color-mix(in oklch,var(--success) 9%,transparent);color:var(--success-strong)}
+.callout.warn{border-color:color-mix(in oklch,var(--active) 42%,transparent);background:color-mix(in oklch,var(--active) 10%,transparent);color:var(--active-strong)}
+.callout b{color:inherit}
+
+.spin{width:13px;height:13px;border-radius:50%;border:2px solid color-mix(in oklch,currentColor 26%,transparent);border-top-color:currentColor;animation:sp .7s linear infinite;flex:none}
+@keyframes sp{to{transform:rotate(360deg)}}
+.dots i{animation:dt 1.4s infinite;opacity:0;font-style:normal}
+.dots i:nth-child(2){animation-delay:.2s}
+.dots i:nth-child(3){animation-delay:.4s}
+@keyframes dt{0%,60%,100%{opacity:0}30%{opacity:1}}
+
+/* code + copy */
+.codewrap{position:relative}
+pre.code{margin:0;padding:12px 13px;border-radius:9px;background:var(--code-bg);border:1px solid var(--border);overflow-x:auto;font-family:var(--font-mono);font-size:12px;line-height:1.7;max-width:100%}
+pre.code .cm{color:var(--muted-foreground)}
+pre.code .fl{color:var(--info-strong)}
+.codewrap .copy{position:absolute;top:7px;right:7px}
+
+/* probe readout (step 1) */
+.panelbox{border:1px solid var(--border);border-radius:10px;background:var(--surface);overflow:hidden}
+.panelbox .ph{display:flex;align-items:center;gap:9px;padding:9px 12px;border-bottom:1px solid var(--line);font-family:var(--font-mono);font-size:11.5px;color:var(--muted-foreground)}
+.kv{display:flex;flex-direction:column}
+.kv div{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 12px;border-top:1px solid var(--line);font-size:12.5px}
+.kv div:first-child{border-top:0}
+.kv span{color:var(--muted-foreground)}
+.kv b{font-family:var(--font-mono);font-weight:400;font-size:12px}
+.kv b.ok{color:var(--success-strong)}
+.kv b.idle{color:color-mix(in oklch,var(--muted-foreground) 80%,transparent)}
+.panelbox .ph.sans{font-family:var(--font-sans);font-size:10.5px;letter-spacing:.07em;text-transform:uppercase}
+.kv.sans b{font-family:var(--font-sans);font-size:12.5px}
+
+/* sidebar preview (step 2) */
+.sbp{border:1px solid var(--border);border-radius:10px;background:var(--surface);overflow:hidden}
+.sbp .sbh{display:flex;align-items:center;gap:10px;padding:12px;border-bottom:1px solid var(--line)}
+.sbp .sbn{font-weight:600;font-size:13.5px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sbp .sbu{font-size:11px;color:var(--muted-foreground)}
+.sbp .sbl{padding:8px;display:flex;flex-direction:column;gap:2px}
+.sbp .sbi{display:flex;align-items:center;gap:9px;padding:6px 9px;border-radius:7px;font-size:12.5px;color:var(--muted-foreground)}
+.sbp .sbi .sq{width:13px;height:13px;border-radius:4px;border:1.5px solid currentColor;opacity:.5}
+.sbp .sbi.on{background:color-mix(in oklch,var(--brand) 12%,transparent);color:var(--brand);font-weight:600}
+.sbp .sbi.on .sq{opacity:1}
+.swatches{display:flex;gap:7px;flex-wrap:wrap}
+.sw{width:28px;height:28px;border-radius:8px;border:1px solid var(--border);cursor:pointer;padding:0;position:relative}
+.sw.on{outline:2px solid var(--ring);outline-offset:2px}
+
+/* provider + integration sub-grids */
+.provgrid{display:grid;gap:12px;grid-template-columns:1fr}
+@media(min-width:760px){.provgrid{grid-template-columns:repeat(3,1fr)}}
+.prov,.intg{border:1px solid var(--border);border-radius:11px;background:var(--surface);padding:12px;display:flex;flex-direction:column;gap:9px}
+.prov.verified,.intg.verified{border-color:color-mix(in oklch,var(--success) 38%,transparent);background:color-mix(in oklch,var(--success) 6%,transparent)}
+.phead{display:flex;align-items:center;gap:9px}
+.pmark{width:26px;height:26px;border-radius:7px;display:grid;place-items:center;font-family:var(--font-mono);font-size:10px;letter-spacing:.02em;font-weight:700;border:1px solid var(--border);background:var(--card);color:var(--muted-foreground);flex:none}
+.pname{font-size:13.5px;font-weight:600;flex:1;min-width:0}
+.prow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.pfoot{margin-top:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+
+/* codex device block */
+.device{border:1px dashed color-mix(in oklch,var(--primary) 40%,var(--border));border-radius:10px;background:var(--card);padding:12px;display:flex;flex-direction:column;gap:9px}
+.dcode{display:flex;align-items:center;gap:8px}
+.dcode code{font-family:var(--font-mono);font-size:22px;font-weight:700;letter-spacing:.14em;color:var(--foreground);background:none;border:0;padding:0}
+.polling{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--active-strong)}
+.note{font-size:11.5px;line-height:1.5;color:var(--muted-foreground);margin:0}
+details.alt{border-top:1px solid var(--line);padding-top:9px}
+details.alt summary{cursor:pointer;font-size:12px;color:var(--muted-foreground);list-style:none;display:flex;align-items:center;gap:6px}
+details.alt summary::-webkit-details-marker{display:none}
+details.alt summary::before{content:"";width:0;height:0;border-left:4px solid currentColor;border-top:3.5px solid transparent;border-bottom:3.5px solid transparent;transition:transform .15s}
+details.alt[open] summary::before{transform:rotate(90deg)}
+details.alt .altbody{padding-top:9px;display:flex;flex-direction:column;gap:9px}
+
+/* integrations */
+.intgrid{display:grid;gap:12px;grid-template-columns:1fr}
+@media(min-width:720px){.intgrid{grid-template-columns:repeat(2,1fr)}}
+@media(min-width:1020px){.intgrid{grid-template-columns:repeat(4,1fr)}}
+.intg.wide{grid-column:1/-1}
+.intg p{margin:0;font-size:12.5px;color:var(--muted-foreground);line-height:1.5}
+.slackfields{display:grid;gap:10px;grid-template-columns:1fr}
+@media(min-width:720px){.slackfields{grid-template-columns:repeat(3,1fr)}}
+
+/* worker + task (step 6) */
+.waiting{display:flex;align-items:center;gap:11px;padding:10px 12px;border:1px solid color-mix(in oklch,var(--active) 34%,transparent);border-radius:10px;background:color-mix(in oklch,var(--active) 8%,transparent);font-size:13px;color:var(--active-strong);margin-top:12px}
+.shimmerbar{position:relative;height:4px;border-radius:99px;background:color-mix(in oklch,var(--active) 20%,transparent);overflow:hidden;flex:0 1 170px;min-width:60px}
+.shimmerbar::after{content:"";position:absolute;top:0;bottom:0;left:0;width:36%;border-radius:99px;background:linear-gradient(90deg,transparent,var(--active),transparent);animation:slide 1.5s linear infinite}
+@keyframes slide{from{transform:translateX(-110%)}to{transform:translateX(320%)}}
+@media (prefers-reduced-motion:reduce){.shimmerbar::after{animation:none;width:100%;background:color-mix(in oklch,var(--active) 40%,transparent)}}
+.workerrow{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--surface);font-size:13px;flex-wrap:wrap}
+.taskcard{border:1px solid var(--border);border-radius:11px;background:var(--surface);overflow:hidden;margin-top:12px}
+.taskcard .th{display:flex;align-items:center;gap:10px;padding:11px 12px;border-bottom:1px solid var(--line)}
+.taskcard .tt{font-size:13.5px;font-weight:600;flex:1;min-width:0}
+.tline{display:flex;align-items:center;gap:9px;padding:8px 12px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted-foreground)}
+.tline:first-child{border-top:0}
+.tline .tm{margin-left:auto;font-family:var(--font-mono);font-size:11px}
+.celebrate{display:flex;align-items:center;gap:11px;padding:12px;border-top:1px solid var(--line);background:color-mix(in oklch,var(--success) 9%,transparent);color:var(--success-strong);font-size:13.5px;font-weight:500}
+.celebrate .ck{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;background:color-mix(in oklch,var(--success) 22%,transparent);flex:none;animation:pop .22s cubic-bezier(.2,0,0,1) both}
+@keyframes pop{from{transform:scale(.72)}to{transform:scale(1)}}
+
+/* ---------- home shell (minimized) ---------- */
+.home{display:grid;grid-template-columns:230px 1fr;min-height:100vh}
+.hsb{border-right:1px solid var(--border);background:var(--surface);padding:13px 11px;display:flex;flex-direction:column;gap:16px}
+.hsb .sbrand{display:flex;align-items:center;gap:10px;padding:5px 6px}
+.hnav{display:flex;flex-direction:column;gap:2px}
+.hnav a{display:flex;align-items:center;gap:9px;padding:7px 10px;border-radius:8px;font-size:13.5px;color:var(--muted-foreground);text-decoration:none}
+.hnav a .sq{width:14px;height:14px;border-radius:4px;border:1.5px solid currentColor;opacity:.45;flex:none}
+.hnav a.on{background:var(--accent);color:var(--foreground);font-weight:500}
+.hnav a.on .sq{opacity:1;color:var(--brand)}
+.hnav a:hover{color:var(--foreground)}
+.hsb .sfoot{margin-top:auto;font-size:11.5px;color:var(--muted-foreground);padding:6px}
+.hmain{min-width:0;display:flex;flex-direction:column}
+.htop{display:flex;align-items:center;gap:10px;padding:11px 20px;border-bottom:1px solid var(--border)}
+.htop .crumbs{font-size:13.5px;color:var(--muted-foreground)}
+.htop .crumbs b{color:var(--foreground);font-weight:500}
+.hbody{padding:22px 20px 60px;width:100%;max-width:1040px}
+.greet{font-size:19px;font-weight:600;letter-spacing:-.02em;margin:0 0 4px}
+.greetsub{margin:0 0 18px;font-size:13.5px;color:var(--muted-foreground)}
+.statstrip{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px}
+.statbox{border:1px solid var(--border);border-radius:11px;background:var(--card);padding:12px 13px}
+.statbox .sl{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted-foreground)}
+.statbox .sv{font-family:var(--font-mono);font-size:19px;margin-top:5px;font-variant-numeric:tabular-nums}
+.setupcard{border:1px solid var(--border);border-radius:12px;background:var(--card);box-shadow:var(--shadow);overflow:hidden}
+.scardhead{display:flex;align-items:center;gap:14px;padding:15px;border-bottom:1px solid var(--line)}
+.scardhead h3{margin:0 0 3px;font-size:15px;font-weight:600;letter-spacing:-.012em}
+.scardhead p{margin:0;font-size:12.5px;color:var(--muted-foreground)}
+.miniring{position:relative;width:46px;height:46px;flex:none}
+.miniring .ring circle{stroke-width:7}
+.miniring .rt{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:11px;font-variant-numeric:tabular-nums}
+.scardfoot{display:flex;align-items:center;gap:10px;padding:12px 15px;border-top:1px solid var(--line);background:var(--surface);flex-wrap:wrap}
+
+/* ---------- responsive ---------- */
+@media(max-width:900px){
+  .home{grid-template-columns:1fr}
+  .hsb{display:none}
+}
+@media(max-width:640px){
+  .blurb{padding-left:15px}
+  body{font-size:14px}
+  .topbar{padding:9px 13px;gap:8px}
+  .topbar .kicker{display:none}
+  .wrap{padding:18px 13px 56px}
+  .hero{gap:16px}
+  .ringwrap{width:84px;height:84px}
+  .ringtxt b{font-size:18px}
+  .ringtxt b i{font-size:12px}
+  .ringtxt u{font-size:8px;letter-spacing:.1em}
+  .nextline{grid-column:1/-1}
+  .herotext h2{font-size:19px}
+  .grid{grid-template-columns:1fr;gap:10px}
+  .face{padding-left:15px}
+  .body{padding:14px 13px}
+  .head,.crow{padding:12px 13px}
+  .hbody{padding:18px 13px 50px}
+  .dcode code{font-size:19px;letter-spacing:.1em}
+  .htext .s{white-space:normal}
+}
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M4 16a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-ext" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+  <symbol id="i-min" viewBox="0 0 24 24"><path d="M4 14h6v6"/><path d="M20 10h-6V4"/><path d="M14 10 21 3"/><path d="M3 21l7-7"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v5M12 16h.01"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="m6 4 14 8-14 8Z"/></symbol>
+</svg>
+
+<!-- ============================================================
+     FULL PAGE: the launchpad
+     ============================================================ -->
+<div id="full">
+  <div class="topbar">
+    <span class="mark" id="topMark">YS</span>
+    <span class="brandname" id="topName">Your Swarm</span>
+    <span class="kicker">Setup</span>
+    <span class="sp"></span>
+    <button class="btn sm" id="minBtn"><svg class="ic xs"><use href="#i-min"/></svg> Minimize</button>
+    <button class="btn sm iconbtn theme" title="Toggle theme" aria-label="Toggle theme"><svg class="ic xs"><use href="#i-moon"/></svg></button>
+  </div>
+
+  <div class="wrap">
+    <div class="hero">
+      <div class="ringwrap">
+        <svg class="ring" viewBox="0 0 120 120" aria-hidden="true">
+          <circle class="track" cx="60" cy="60" r="52"></circle>
+          <circle class="val" id="ringVal" cx="60" cy="60" r="52" stroke-dasharray="326.7" stroke-dashoffset="326.7"></circle>
+        </svg>
+        <div class="ringtxt"><b><span id="ringDone">0</span><i>/6</i></b><u>verified</u></div>
+      </div>
+      <div class="herotext">
+        <h2>Set up your swarm</h2>
+        <p class="lede" id="heroLede">Six steps. Each one is verified by a live check, not by a save button. Do them in any order.</p>
+      </div>
+      <div class="nextline">
+        <span class="k">Next</span>
+        <span class="n" id="nextText"><b>Connect to your API server</b>. Nothing else works until this check passes.</span>
+        <button class="btn sm primary" id="nextBtn">Open step 1 <svg class="ic xs"><use href="#i-arrow"/></svg></button>
+      </div>
+    </div>
+
+    <div class="grid" id="grid">
+
+      <!-- ================= STEP 1 ================= -->
+      <article class="card" data-step="1">
+        <button class="head" data-toggle="1" aria-expanded="false">
+          <span class="idx">1</span>
+          <span class="htext"><span class="t">Connect</span><span class="s" data-sum>Not connected</span></span>
+          <span class="hend"><span class="chip" data-chip>Not started</span><svg class="chev" viewBox="0 0 24 24"><use href="#i-chev"/></svg></span>
+        </button>
+        <p class="blurb">Point the dashboard at your API server.</p>
+        <div class="face"><span class="pill"><span class="dot" data-fdot="1a"></span>API URL</span><span class="pill"><span class="dot" data-fdot="1b"></span>API key</span><span class="pill mono">GET /health</span></div>
+        <div class="body">
+          <p class="bodyhead">Point the dashboard at your Agent Swarm API server. The key is the one your server was started with.</p>
+          <div class="two">
+            <div>
+              <div class="field">
+                <label for="c-name">Connection name</label>
+                <input class="inp" id="c-name" placeholder="swift-hive" value="Home lab" />
+              </div>
+              <div class="field">
+                <label for="c-url">API URL</label>
+                <input class="inp mono" id="c-url" value="http://localhost:3013" />
+              </div>
+              <div class="field">
+                <label for="c-key">API key</label>
+                <div class="secret two-act">
+                  <input class="inp mono" id="c-key" type="text" value="sk-swarm-…••••" />
+                  <span class="act">
+                    <button class="btn" data-reveal="#c-key" aria-label="Show key"><svg class="ic xs"><use href="#i-eye"/></svg></button>
+                    <button class="btn" data-copy="sk-swarm-…••••" aria-label="Copy key"><svg class="ic xs"><use href="#i-copy"/></svg></button>
+                  </span>
+                </div>
+                <p class="hint">Stored in this browser only. It never leaves the dashboard except as a bearer token to your server.</p>
+              </div>
+              <div class="actions">
+                <button class="btn primary" id="s1test" data-busy-label="Testing">Test connection</button>
+                <span class="stat hidden" id="s1stat"><svg class="ic xs"><use href="#i-check"/></svg> Connected</span>
+              </div>
+            </div>
+            <div class="panelbox">
+              <div class="ph"><span>GET /health</span><span class="sp"></span><span class="chip" id="s1probechip">Idle</span></div>
+              <div class="kv" id="s1kv">
+                <div><span>Status</span><b class="idle" data-k="status">not checked</b></div>
+                <div><span>Latency</span><b class="idle" data-k="latency">not checked</b></div>
+                <div><span>Server version</span><b class="idle" data-k="version">not checked</b></div>
+                <div><span>Workers online</span><b class="idle" data-k="workers">not checked</b></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- ================= STEP 2 ================= -->
+      <article class="card" data-step="2">
+        <button class="head" data-toggle="2" aria-expanded="false">
+          <span class="idx">2</span>
+          <span class="htext"><span class="t">Name your swarm</span><span class="s" data-sum>Unnamed</span></span>
+          <span class="hend"><span class="chip" data-chip>Not started</span><svg class="chev" viewBox="0 0 24 24"><use href="#i-chev"/></svg></span>
+        </button>
+        <p class="blurb">Sidebar name, logo and brand color.</p>
+        <div class="face"><span class="pill"><span class="dot" data-fdot="2a"></span>Name</span><span class="pill">Logo</span><span class="pill">Brand color</span></div>
+        <div class="body">
+          <p class="bodyhead">The name shows in the sidebar, in Slack replies and on shared pages. You can change it later in Settings.</p>
+          <div class="two">
+            <div>
+              <div class="field">
+                <label for="c-swarm">Swarm name</label>
+                <input class="inp" id="c-swarm" value="Your Swarm" />
+              </div>
+              <div class="field">
+                <label for="c-logo">Logo URL <span class="muted">(optional)</span></label>
+                <input class="inp mono" id="c-logo" placeholder="https://example.com/logo.png" />
+              </div>
+              <div class="field">
+                <span class="flabel">Brand color</span>
+                <div class="swatches" id="swatches">
+                  <button class="sw on" data-color="var(--primary)" style="background:var(--primary)" aria-label="Amber"></button>
+                  <button class="sw" data-color="var(--success)" style="background:var(--success)" aria-label="Emerald"></button>
+                  <button class="sw" data-color="var(--info)" style="background:var(--info)" aria-label="Sky"></button>
+                  <button class="sw" data-color="var(--paused)" style="background:var(--paused)" aria-label="Blue"></button>
+                  <button class="sw" data-color="var(--error)" style="background:var(--error)" aria-label="Red"></button>
+                  <button class="sw" data-color="var(--neutral)" style="background:var(--neutral)" aria-label="Zinc"></button>
+                </div>
+              </div>
+              <div class="actions">
+                <button class="btn primary" id="s2save" data-busy-label="Saving">Save name</button>
+                <button class="btn ghost" data-skip="2">Skip for now</button>
+                <span class="stat hidden" id="s2stat"><svg class="ic xs"><use href="#i-check"/></svg> Saved</span>
+              </div>
+            </div>
+            <div>
+              <span class="flabel">Sidebar preview</span>
+              <div class="sbp">
+                <div class="sbh"><span class="mark" id="pvMark">YS</span><span style="min-width:0"><span class="sbn" id="pvName">Your Swarm</span><span class="sbu">agent-swarm.dev</span></span></div>
+                <div class="sbl">
+                  <span class="sbi on"><span class="sq"></span> Home</span>
+                  <span class="sbi"><span class="sq"></span> Tasks</span>
+                  <span class="sbi"><span class="sq"></span> Agents</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- ================= STEP 3 ================= -->
+      <article class="card" data-step="3">
+        <button class="head" data-toggle="3" aria-expanded="false">
+          <span class="idx">3</span>
+          <span class="htext"><span class="t">AI provider</span><span class="s" data-sum>No provider yet</span></span>
+          <span class="hend"><span class="chip" data-chip>Not started</span><svg class="chev" viewBox="0 0 24 24"><use href="#i-chev"/></svg></span>
+        </button>
+        <p class="blurb">Claude, Codex or OpenRouter.</p>
+        <div class="face"><span class="pill"><span class="dot" data-fdot="claude"></span>Claude</span><span class="pill"><span class="dot" data-fdot="codex"></span>Codex</span><span class="pill"><span class="dot" data-fdot="openrouter"></span>OpenRouter</span></div>
+        <div class="body">
+          <p class="bodyhead">Agents need one model provider. Verify one to finish this step, add the rest whenever you want.</p>
+          <div class="provgrid">
+
+            <!-- Claude -->
+            <div class="prov" data-prov="claude">
+              <div class="phead"><span class="pmark">CL</span><span class="pname">Claude</span><span class="chip" data-pchip>Not tested</span></div>
+              <div class="seg" data-seg="claude">
+                <button class="on" data-mode="key">API key</button>
+                <button data-mode="token">Setup token</button>
+              </div>
+              <div data-mode-pane="key">
+                <div class="secret">
+                  <input class="inp mono" type="text" value="sk-ant-api03-…••••" aria-label="Claude API key" />
+                  <span class="act"><button class="btn" data-reveal="prev" aria-label="Show key"><svg class="ic xs"><use href="#i-eye"/></svg></button></span>
+                </div>
+                <p class="hint">From console.anthropic.com. Billed per token.</p>
+              </div>
+              <div data-mode-pane="token" class="hidden">
+                <div class="secret">
+                  <input class="inp mono" type="text" value="sk-ant-oat01-…••••" aria-label="Claude setup token" />
+                  <span class="act"><button class="btn" data-reveal="prev" aria-label="Show token"><svg class="ic xs"><use href="#i-eye"/></svg></button></span>
+                </div>
+                <p class="hint">Run <code class="mono">claude setup-token</code> on a machine where you are logged in, then paste it here. Uses your Claude subscription.</p>
+              </div>
+              <div class="prow"><span class="pill">Opus</span><span class="pill">Sonnet</span><span class="pill">Haiku</span></div>
+              <a class="lnk" style="font-size:12px" href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer">console.anthropic.com <svg class="ic xs"><use href="#i-ext"/></svg></a>
+              <div class="pfoot"><button class="btn sm" data-test="claude" data-busy-label="Testing">Test key</button><span class="stat hidden" data-ok="claude"><svg class="ic xs"><use href="#i-check"/></svg> Verified</span></div>
+            </div>
+
+            <!-- Codex -->
+            <div class="prov" data-prov="codex">
+              <div class="phead"><span class="pmark">CX</span><span class="pname">Codex</span><span class="chip busy" data-pchip>Waiting</span></div>
+              <div class="device" id="codexDevice">
+                <div>
+                  <span class="flabel">Enter this code to sign in</span>
+                  <div class="dcode"><code id="codexCode">ABCD-EFGH</code><button class="btn sm iconbtn" data-copy="#codexCode" aria-label="Copy code"><svg class="ic xs"><use href="#i-copy"/></svg></button></div>
+                </div>
+                <a class="lnk" href="https://auth.openai.com/codex/device" target="_blank" rel="noreferrer">auth.openai.com/codex/device <svg class="ic xs"><use href="#i-ext"/></svg></a>
+                <div class="polling" id="codexPoll"><span class="spin"></span> Waiting for approval<span class="dots"><i>.</i><i>.</i><i>.</i></span></div>
+                <p class="note">Enable "Allow device code login" in ChatGPT Settings &rarr; Security. Without it the code is rejected.</p>
+                <details class="alt">
+                  <summary>Other ways to sign in</summary>
+                  <div class="altbody">
+                    <div>
+                      <span class="flabel">Paste the redirected URL</span>
+                      <input class="inp mono" placeholder="http://localhost:1455/auth/callback?code=…" aria-label="Redirected URL" />
+                    </div>
+                    <div>
+                      <span class="flabel">Or run it on the host</span>
+                      <div class="codewrap"><pre class="code">npx @desplega.ai/agent-swarm codex-login</pre><button class="btn sm iconbtn copy" data-copy="npx @desplega.ai/agent-swarm codex-login" aria-label="Copy command"><svg class="ic xs"><use href="#i-copy"/></svg></button></div>
+                    </div>
+                  </div>
+                </details>
+              </div>
+              <div class="pfoot"><button class="btn sm" data-test="codex" data-busy-label="Checking">Test login</button><button class="btn sm ghost" id="codexNew">New code</button><span class="stat hidden" data-ok="codex"><svg class="ic xs"><use href="#i-check"/></svg> Signed in</span></div>
+            </div>
+
+            <!-- OpenRouter -->
+            <div class="prov" data-prov="openrouter">
+              <div class="phead"><span class="pmark">OR</span><span class="pname">OpenRouter</span><span class="chip" data-pchip>Not tested</span></div>
+              <div>
+                <span class="flabel">API key</span>
+                <div class="secret">
+                  <input class="inp mono" type="text" value="sk-or-v1-…••••" aria-label="OpenRouter API key" />
+                  <span class="act"><button class="btn" data-reveal="prev" aria-label="Show key"><svg class="ic xs"><use href="#i-eye"/></svg></button></span>
+                </div>
+                <p class="hint">One key, many models. Good for mixing Claude, GPT and open models per task.</p>
+              </div>
+              <div class="prow"><span class="pill">300+ models</span><span class="pill">One invoice</span></div>
+              <a class="lnk" style="font-size:12px" href="https://openrouter.ai/keys" target="_blank" rel="noreferrer">openrouter.ai/keys <svg class="ic xs"><use href="#i-ext"/></svg></a>
+              <div class="pfoot"><button class="btn sm" data-test="openrouter" data-busy-label="Testing">Test key</button><span class="stat hidden" data-ok="openrouter"><svg class="ic xs"><use href="#i-check"/></svg> Verified</span></div>
+            </div>
+          </div>
+          <div class="actions">
+            <a class="lnk" href="#settings">More providers (OpenAI, Bedrock, Claude Managed) <svg class="ic xs"><use href="#i-arrow"/></svg></a>
+          </div>
+        </div>
+      </article>
+
+      <!-- ================= STEP 4 ================= -->
+      <article class="card" data-step="4">
+        <button class="head" data-toggle="4" aria-expanded="false">
+          <span class="idx">4</span>
+          <span class="htext"><span class="t">Memory</span><span class="s" data-sum>Off</span></span>
+          <span class="hend"><span class="chip" data-chip>Not started</span><svg class="chev" viewBox="0 0 24 24"><use href="#i-chev"/></svg></span>
+        </button>
+        <p class="blurb">Let agents recall past work.</p>
+        <div class="face"><span class="pill"><span class="dot" data-fdot="4a"></span>Embeddings</span><span class="pill">OpenAI</span><span class="pill">OpenRouter</span><span class="pill">Custom</span></div>
+        <div class="body">
+          <p class="bodyhead">Memory lets agents recall past tasks, decisions and fixes. It needs an embeddings endpoint. Any OpenAI-compatible embeddings endpoint works.</p>
+          <div class="two">
+            <div>
+              <div class="field">
+                <span class="flabel">Preset</span>
+                <div class="seg" data-seg="mem">
+                  <button class="on" data-mode="openai">OpenAI</button>
+                  <button data-mode="openrouter">OpenRouter</button>
+                  <button data-mode="vercel">Vercel AI Gateway</button>
+                  <button data-mode="custom">Custom</button>
+                </div>
+              </div>
+              <div class="field hidden" id="memBase">
+                <label for="c-membase">Base URL</label>
+                <input class="inp mono" id="c-membase" placeholder="https://embeddings.internal/v1" />
+              </div>
+              <div class="field">
+                <label for="c-memmodel">Model</label>
+                <input class="inp mono" id="c-memmodel" value="text-embedding-3-small" />
+              </div>
+              <div class="field">
+                <label for="c-memkey">API key</label>
+                <div class="secret">
+                  <input class="inp mono" id="c-memkey" type="text" value="sk-…••••" />
+                  <span class="act"><button class="btn" data-reveal="#c-memkey" aria-label="Show key"><svg class="ic xs"><use href="#i-eye"/></svg></button></span>
+                </div>
+                <div class="actions" style="margin-top:8px">
+                  <button class="btn sm" id="memReuse" disabled>Reuse the key from step 3</button>
+                  <span class="hint" id="memReuseHint" style="margin:0">Verify an OpenAI or OpenRouter key in step 3 to reuse it here.</span>
+                </div>
+              </div>
+              <div class="actions">
+                <button class="btn primary" id="s4test" data-busy-label="Embedding">Test embedding</button>
+                <button class="btn ghost" data-skip="4">Skip for now</button>
+              </div>
+              <div class="callout ok hidden" id="s4ok"><svg class="ic xs"><use href="#i-check"/></svg><span>Embedded a probe string. 1536 dimensions in 240 ms.</span></div>
+              <div class="callout warn hidden" id="s4warn"><svg class="ic xs"><use href="#i-alert"/></svg><span>Memory stays off. Agents will not remember across tasks.</span></div>
+            </div>
+            <div class="panelbox">
+              <div class="ph sans"><span>What memory changes</span></div>
+              <div class="kv sans">
+                <div><span>Recall past tasks</span><b class="ok">yes</b></div>
+                <div><span>Reuse known fixes</span><b class="ok">yes</b></div>
+                <div><span>Per-agent profiles</span><b class="ok">yes</b></div>
+                <div><span>Cost</span><b>about 1 cent per 1000 tasks</b></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- ================= STEP 5 ================= -->
+      <article class="card" data-step="5">
+        <button class="head" data-toggle="5" aria-expanded="false">
+          <span class="idx">5</span>
+          <span class="htext"><span class="t">Integrations</span><span class="s" data-sum>None connected</span></span>
+          <span class="hend"><span class="chip" data-chip>Not started</span><svg class="chev" viewBox="0 0 24 24"><use href="#i-chev"/></svg></span>
+        </button>
+        <p class="blurb">Slack, GitHub, GitLab, Linear and Jira.</p>
+        <div class="face"><span class="pill"><span class="dot" data-fdot="slack"></span>Slack</span><span class="pill"><span class="dot" data-fdot="github"></span>GitHub</span><span class="pill"><span class="dot" data-fdot="gitlab"></span>GitLab</span><span class="pill"><span class="dot" data-fdot="linear"></span>Linear</span><span class="pill"><span class="dot" data-fdot="jira"></span>Jira</span></div>
+        <div class="body">
+          <p class="bodyhead">All optional. Connect one to send the swarm work from where you already are, or skip and do it later.</p>
+          <div class="intgrid">
+
+            <div class="intg wide" data-intg="slack">
+              <div class="phead"><span class="pmark">SL</span><span class="pname">Slack</span><span class="chip" data-ichip>Not connected</span></div>
+              <p>Mention the bot in a channel and it becomes a task. Replies land in the thread.</p>
+              <div id="slackStart" class="prow">
+                <button class="btn sm primary" id="slackManifest">Create Slack app from manifest</button>
+                <span class="hint" style="margin:0">Manifest name: <b id="slackName">Your Swarm</b></span>
+              </div>
+              <div id="slackFields" class="hidden">
+                <div class="slackfields">
+                  <div><span class="flabel">Bot token</span><input class="inp mono" type="text" value="xoxb-…••••" aria-label="Slack bot token" /></div>
+                  <div><span class="flabel">App token</span><input class="inp mono" type="text" value="xapp-…••••" aria-label="Slack app token" /></div>
+                  <div><span class="flabel">Signing secret</span><input class="inp mono" type="text" value="••••••••" aria-label="Slack signing secret" /></div>
+                </div>
+                <div class="prow" style="margin-top:10px"><button class="btn sm primary" data-connect="slack" data-busy-label="Verifying">Save tokens</button><span class="hint" style="margin:0">Copied from the app page after the manifest runs.</span></div>
+              </div>
+            </div>
+
+            <div class="intg" data-intg="github">
+              <div class="phead"><span class="pmark">GH</span><span class="pname">GitHub</span><span class="chip" data-ichip>Not connected</span></div>
+              <p>Issues, pull requests and reviews.</p>
+              <div class="secret"><input class="inp mono" type="text" value="ghp_…••••" aria-label="GitHub token" /><span class="act"><button class="btn" data-reveal="prev" aria-label="Show token"><svg class="ic xs"><use href="#i-eye"/></svg></button></span></div>
+              <div class="pfoot"><button class="btn sm" data-connect="github" data-busy-label="Checking">Connect GitHub</button></div>
+            </div>
+
+            <div class="intg" data-intg="gitlab">
+              <div class="phead"><span class="pmark">GL</span><span class="pname">GitLab</span><span class="chip" data-ichip>Not connected</span></div>
+              <p>Issues and merge requests.</p>
+              <div class="secret"><input class="inp mono" type="text" value="glpat-…••••" aria-label="GitLab token" /><span class="act"><button class="btn" data-reveal="prev" aria-label="Show token"><svg class="ic xs"><use href="#i-eye"/></svg></button></span></div>
+              <div class="pfoot"><button class="btn sm" data-connect="gitlab" data-busy-label="Checking">Connect GitLab</button></div>
+            </div>
+
+            <div class="intg" data-intg="linear">
+              <div class="phead"><span class="pmark">LN</span><span class="pname">Linear</span><span class="chip" data-ichip>Not connected</span></div>
+              <p>Assign an issue to the swarm and it picks it up.</p>
+              <div class="pfoot"><button class="btn sm" data-connect="linear" data-busy-label="Authorizing">Connect Linear</button><span class="hint" style="margin:0">OAuth</span></div>
+            </div>
+
+            <div class="intg" data-intg="jira">
+              <div class="phead"><span class="pmark">JI</span><span class="pname">Jira</span><span class="chip" data-ichip>Not connected</span></div>
+              <p>Same flow for Jira projects.</p>
+              <div class="pfoot"><button class="btn sm" data-connect="jira" data-busy-label="Authorizing">Connect Jira</button><span class="hint" style="margin:0">OAuth</span></div>
+            </div>
+          </div>
+          <div class="actions">
+            <button class="btn ghost" data-skip="5">Skip for now</button>
+            <a class="lnk" href="#settings">More integrations <svg class="ic xs"><use href="#i-arrow"/></svg></a>
+          </div>
+        </div>
+      </article>
+
+      <!-- ================= STEP 6 ================= -->
+      <article class="card" data-step="6">
+        <button class="head" data-toggle="6" aria-expanded="false">
+          <span class="idx">6</span>
+          <span class="htext"><span class="t">First task</span><span class="s" data-sum>No worker yet</span></span>
+          <span class="hend"><span class="chip" data-chip>Not started</span><svg class="chev" viewBox="0 0 24 24"><use href="#i-chev"/></svg></span>
+        </button>
+        <p class="blurb">Start a worker, then say hello.</p>
+        <div class="face"><span class="pill"><span class="dot" data-fdot="worker"></span>Worker</span><span class="pill"><span class="dot" data-fdot="task"></span>Hello task</span></div>
+        <div class="body">
+          <!-- (a) no worker alive -->
+          <div id="s6a">
+            <p class="bodyhead">A worker is the container that runs the agent. Start one on any machine that can reach your API server.</p>
+            <div class="codewrap">
+              <pre class="code" id="dockerSnippet">docker run -d --name swarm-worker \
+  -e <span class="fl">MCP_BASE_URL</span>=<span id="dkUrl">http://localhost:3013</span> \
+  -e <span class="fl">AGENT_SWARM_API_KEY</span>=sk-swarm-…•••• \
+  -e <span class="fl">HARNESS_PROVIDER</span>=<span id="dkProvider">claude</span> \
+  ghcr.io/desplega-ai/agent-swarm-worker:latest</pre>
+              <button class="btn sm iconbtn copy" id="dockerCopy" aria-label="Copy the docker command"><svg class="ic xs"><use href="#i-copy"/></svg></button>
+            </div>
+            <div class="waiting"><span class="dot act"></span> Waiting for a worker<span class="dots"><i>.</i><i>.</i><i>.</i></span><span class="shimmerbar"></span></div>
+            <div class="actions">
+              <button class="btn ghost" data-skip="6">Skip for now</button>
+              <span class="hint" style="margin:0">Copy the command and run it. This panel flips as soon as the worker checks in.</span>
+            </div>
+          </div>
+
+          <!-- (b) worker alive -->
+          <div id="s6b" class="hidden">
+            <p class="bodyhead">A worker is online. Send it a small task to prove the loop end to end.</p>
+            <div class="workerrow">
+              <span class="dot ok"></span><b class="mono" style="font-weight:400">worker-7fa3</b>
+              <span class="muted">claude</span><span class="chip done">Idle</span>
+              <span class="sp" style="flex:1"></span><span class="muted mono" style="font-size:11px">checked in 2s ago</span>
+            </div>
+            <div class="actions">
+              <button class="btn primary" id="s6send"><svg class="ic xs"><use href="#i-play"/></svg> Send a hello task</button>
+              <button class="btn ghost" data-skip="6">Skip for now</button>
+            </div>
+            <div class="taskcard hidden" id="s6task">
+              <div class="th"><span class="tt">Say hello and list the tools you can use</span><span class="chip busy" id="s6taskChip">Created</span></div>
+              <div id="s6taskLines">
+                <div class="tline"><span class="dot ok"></span> Task created and queued<span class="tm">0.0s</span></div>
+              </div>
+              <div class="celebrate hidden" id="s6done"><span class="ck"><svg class="ic"><use href="#i-check"/></svg></span><span>Your swarm is live. That was a real task, start to finish.</span></div>
+            </div>
+          </div>
+        </div>
+      </article>
+    </div>
+
+    <div class="footnote">
+      <span>Everything here can be changed later in Settings.</span>
+      <span class="sp" style="flex:1"></span>
+      <button class="btn sm ghost" id="minBtn2">Minimize and explore the dashboard</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     HOME SHELL: the same six items, compressed
+     ============================================================ -->
+<div id="home" class="hidden">
+  <div class="home">
+    <aside class="hsb">
+      <div class="sbrand"><span class="mark" id="homeMark">YS</span><span style="min-width:0"><span class="brandname" id="homeName" style="display:block">Your Swarm</span><span class="muted" style="font-size:11px">agent-swarm.dev</span></span></div>
+      <nav class="hnav">
+        <a class="on" href="#home"><span class="sq"></span> Home</a>
+        <a href="#tasks"><span class="sq"></span> Tasks</a>
+        <a href="#agents"><span class="sq"></span> Agents</a>
+        <a href="#workflows"><span class="sq"></span> Workflows</a>
+        <a href="#skills"><span class="sq"></span> Skills</a>
+        <a href="#settings"><span class="sq"></span> Settings</a>
+      </nav>
+      <div class="sfoot">v1.154.0</div>
+    </aside>
+    <div class="hmain">
+      <div class="htop">
+        <span class="crumbs"><b>Home</b></span>
+        <span class="sp"></span>
+        <button class="btn sm iconbtn theme" title="Toggle theme" aria-label="Toggle theme"><svg class="ic xs"><use href="#i-moon"/></svg></button>
+      </div>
+      <div class="hbody">
+        <h2 class="greet">Good afternoon</h2>
+        <p class="greetsub">Nothing is running. Finish setup and the swarm can take work.</p>
+        <div class="statstrip">
+          <div class="statbox"><div class="sl">Workers online</div><div class="sv" id="homeWorkers">0</div></div>
+          <div class="statbox"><div class="sl">Tasks today</div><div class="sv">0</div></div>
+          <div class="statbox"><div class="sl">Spend today</div><div class="sv">$0.00</div></div>
+          <div class="statbox"><div class="sl">Memory</div><div class="sv" id="homeMemory" style="font-size:15px">off</div></div>
+        </div>
+
+        <div class="setupcard">
+          <div class="scardhead">
+            <div class="miniring">
+              <svg class="ring" viewBox="0 0 120 120" aria-hidden="true">
+                <circle class="track" cx="60" cy="60" r="52"></circle>
+                <circle class="val" id="miniRingVal" cx="60" cy="60" r="52" stroke-dasharray="326.7" stroke-dashoffset="326.7"></circle>
+              </svg>
+              <div class="rt"><span id="miniDone">0</span>/6</div>
+            </div>
+            <div style="flex:1;min-width:0">
+              <h3>Finish setting up your swarm</h3>
+              <p id="homeSubline">2 of 6 steps verified. Pick up where you left off.</p>
+            </div>
+            <button class="btn primary" id="resumeBtn">Resume <svg class="ic xs"><use href="#i-arrow"/></svg></button>
+          </div>
+          <div id="homeRows"></div>
+          <div class="scardfoot">
+            <span class="hint" style="margin:0">Each step is verified by a live check, so nothing here is guesswork.</span>
+            <span class="sp" style="flex:1"></span>
+            <button class="btn sm ghost">Dismiss</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const q = (s, r = document) => r.querySelector(s);
+  const qa = (s, r = document) => Array.from(r.querySelectorAll(s));
+  const STEPS = [1, 2, 3, 4, 5, 6];
+  const META = {
+    1: { t: "Connect", done: "Verified", todo: "Not connected" },
+    2: { t: "Name your swarm", done: "Saved", todo: "Unnamed" },
+    3: { t: "AI provider", done: "Verified", todo: "No provider yet" },
+    4: { t: "Memory", done: "Verified", todo: "Off" },
+    5: { t: "Integrations", done: "Connected", todo: "None connected" },
+    6: { t: "First task", done: "Completed", todo: "No worker yet" },
+  };
+  const NEXT = {
+    1: "<b>Connect to your API server</b>. Nothing else works until this check passes.",
+    2: "<b>Name your swarm</b>. It shows in the sidebar, in Slack and on shared pages.",
+    3: "<b>Add an AI provider</b>. Agents cannot run a task without one.",
+    4: "<b>Turn on memory</b>. One embeddings key and agents recall past work.",
+    5: "<b>Connect an integration</b>. Slack, GitHub, GitLab, Linear or Jira.",
+    6: "<b>Run your first task</b>. Start a worker, then say hello.",
+  };
+
+  const S = {
+    status: { 1: "done", 2: "done", 3: "todo", 4: "todo", 5: "todo", 6: "todo" },
+    summary: {
+      1: "http://localhost:3013 · verified",
+      2: "Your Swarm · amber",
+      3: "No provider yet",
+      4: "Off",
+      5: "None connected",
+      6: "No worker yet",
+    },
+    open: null,
+    view: "full",
+    name: "Your Swarm",
+    color: "amber",
+    providers: { claude: false, codex: false, openrouter: false },
+    integrations: { slack: false, github: false, gitlab: false, linear: false, jira: false },
+    memPreset: "openai",
+    workerOnline: false,
+  };
+
+  const C = 2 * Math.PI * 52;
+
+  /* ---------------- theme ---------------- */
+  function setTheme(dark) {
+    document.documentElement.classList.toggle("dark", dark);
+    qa(".theme use").forEach((u) => u.setAttribute("href", dark ? "#i-sun" : "#i-moon"));
+    syncURL();
+  }
+  qa(".theme").forEach((b) => b.addEventListener("click", () => setTheme(!document.documentElement.classList.contains("dark"))));
+
+  /* ---------------- render ---------------- */
+  function chipFor(n) {
+    const st = S.status[n];
+    if (st === "done") return { cls: "done", label: META[n].done };
+    if (st === "skipped") return { cls: "skipped", label: "Skipped" };
+    if (st === "failed") return { cls: "failed", label: "Failed" };
+    return { cls: "", label: "Not started" };
+  }
+
+  function buildHomeRows() {
+    const host = q("#homeRows");
+    host.innerHTML = "";
+    STEPS.forEach((n) => {
+      const b = document.createElement("button");
+      b.className = "crow";
+      b.dataset.step = String(n);
+      b.innerHTML =
+        '<span class="idx">' + n + "</span>" +
+        '<span class="htext"><span class="t">' + META[n].t + '</span><span class="s" data-sum></span></span>' +
+        '<span class="hend"><span class="chip" data-chip></span><svg class="chev" viewBox="0 0 24 24" style="transform:rotate(-90deg)"><use href="#i-chev"/></svg></span>';
+      b.addEventListener("click", () => resume(n));
+      host.appendChild(b);
+    });
+  }
+
+  function render() {
+    let done = 0, skipped = 0;
+    STEPS.forEach((n) => {
+      const st = S.status[n];
+      if (st === "done") done++;
+      if (st === "skipped") skipped++;
+      const ch = chipFor(n);
+      const card = q('.card[data-step="' + n + '"]');
+      card.classList.toggle("is-done", st === "done");
+      const cChip = q("[data-chip]", card);
+      cChip.className = "chip " + ch.cls;
+      cChip.textContent = ch.label;
+      q("[data-sum]", card).textContent = S.summary[n];
+      const row = q('.crow[data-step="' + n + '"]');
+      if (row) {
+        row.classList.toggle("is-done", st === "done");
+        const rChip = q("[data-chip]", row);
+        rChip.className = "chip " + ch.cls;
+        rChip.textContent = ch.label;
+        q("[data-sum]", row).textContent = S.summary[n];
+      }
+    });
+
+    // rings
+    q("#ringDone").textContent = String(done);
+    q("#miniDone").textContent = String(done);
+    const off = C * (1 - done / 6);
+    q("#ringVal").setAttribute("stroke-dashoffset", String(off));
+    q("#miniRingVal").setAttribute("stroke-dashoffset", String(off));
+
+    // hero copy
+    const next = STEPS.find((n) => S.status[n] === "todo");
+    const lede = q("#heroLede");
+    if (next) {
+      q("#nextText").innerHTML = NEXT[next];
+      const nb = q("#nextBtn");
+      nb.innerHTML = 'Open step ' + next + ' <svg class="ic xs"><use href="#i-arrow"/></svg>';
+      nb.onclick = () => openStep(next, true);
+      lede.textContent = "Six steps, each verified by a live check. Do them in any order." + (skipped ? " " + skipped + (skipped > 1 ? " steps" : " step") + " skipped." : "");
+    } else {
+      q("#nextText").innerHTML = "<b>Setup is handled.</b> Minimize this page and send the swarm some work.";
+      const nb = q("#nextBtn");
+      nb.innerHTML = 'Minimize <svg class="ic xs"><use href="#i-arrow"/></svg>';
+      nb.onclick = minimize;
+      lede.textContent = "All six steps are handled." + (skipped ? " " + skipped + (skipped > 1 ? " steps were" : " step was") + " skipped, you can revisit them any time." : "");
+    }
+
+    // home card copy
+    q("#homeSubline").textContent = done + " of 6 steps verified." + (next ? " Pick up where you left off." : " Nothing left to do.");
+    q("#homeWorkers").textContent = S.workerOnline ? "1" : "0";
+    q("#homeMemory").textContent = S.status[4] === "done" ? "on" : "off";
+
+    // face dots
+    const dot = (key, cls) => qa('[data-fdot="' + key + '"]').forEach((d) => (d.className = "dot" + (cls ? " " + cls : "")));
+    dot("1a", S.status[1] === "done" ? "ok" : "");
+    dot("1b", S.status[1] === "done" ? "ok" : "");
+    dot("2a", S.status[2] === "done" ? "ok" : "");
+    Object.keys(S.providers).forEach((k) => dot(k, S.providers[k] ? "ok" : k === "codex" ? "act" : ""));
+    dot("4a", S.status[4] === "done" ? "ok" : S.status[4] === "skipped" ? "off" : "");
+    Object.keys(S.integrations).forEach((k) => dot(k, S.integrations[k] ? "ok" : ""));
+    dot("worker", S.workerOnline ? "ok" : "act");
+    dot("task", S.status[6] === "done" ? "ok" : "");
+  }
+
+  function setStatus(n, st, summary) {
+    S.status[n] = st;
+    if (summary) S.summary[n] = summary;
+    else if (st === "skipped") S.summary[n] = "Skipped";
+    render();
+  }
+
+  /* ---------------- open / collapse ---------------- */
+  function openStep(n, scroll) {
+    S.open = n;
+    q("#grid").classList.add("spot");
+    qa(".card").forEach((c) => {
+      const on = Number(c.dataset.step) === n;
+      c.classList.toggle("is-open", on);
+      q(".head", c).setAttribute("aria-expanded", on ? "true" : "false");
+    });
+    const card = q('.card[data-step="' + n + '"]');
+    if (card && scroll) card.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    syncURL();
+  }
+  function collapse() {
+    S.open = null;
+    q("#grid").classList.remove("spot");
+    qa(".card").forEach((c) => {
+      c.classList.remove("is-open");
+      q(".head", c).setAttribute("aria-expanded", "false");
+    });
+    syncURL();
+  }
+  qa("[data-toggle]").forEach((b) =>
+    b.addEventListener("click", () => {
+      const n = Number(b.dataset.toggle);
+      S.open === n ? collapse() : openStep(n, true);
+    })
+  );
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && S.open && S.view === "full") collapse();
+  });
+
+  /* ---------------- minimize / resume ---------------- */
+  function minimize() {
+    S.view = "home";
+    q("#full").classList.add("hidden");
+    q("#home").classList.remove("hidden");
+    window.scrollTo(0, 0);
+    syncURL();
+  }
+  function resume(n) {
+    S.view = "full";
+    q("#home").classList.add("hidden");
+    q("#full").classList.remove("hidden");
+    const target = n || S.open || STEPS.find((x) => S.status[x] === "todo") || 1;
+    openStep(target, true);
+  }
+  q("#minBtn").addEventListener("click", minimize);
+  q("#minBtn2").addEventListener("click", minimize);
+  q("#resumeBtn").addEventListener("click", () => resume());
+
+  /* ---------------- small helpers ---------------- */
+  function busy(btn, ms, cb) {
+    if (btn.dataset.busy) return;
+    btn.dataset.busy = "1";
+    const html = btn.innerHTML;
+    btn.classList.add("is-busy");
+    btn.innerHTML = '<span class="spin"></span> ' + (btn.dataset.busyLabel || "Testing");
+    setTimeout(() => {
+      btn.innerHTML = html;
+      btn.classList.remove("is-busy");
+      delete btn.dataset.busy;
+      cb();
+    }, ms);
+  }
+  function flashCopy(btn) {
+    const html = btn.innerHTML;
+    btn.innerHTML = '<svg class="ic xs"><use href="#i-check"/></svg>';
+    setTimeout(() => (btn.innerHTML = html), 1200);
+  }
+  document.addEventListener("click", (e) => {
+    const rev = e.target.closest("[data-reveal]");
+    if (rev) {
+      const inp = rev.closest(".secret").querySelector("input");
+      inp.type = inp.type === "text" ? "password" : "text";
+      return;
+    }
+    const cp = e.target.closest("[data-copy]");
+    if (cp) {
+      const v = cp.dataset.copy;
+      const text = v.startsWith("#") ? (q(v).innerText || "").trim() : v;
+      try { navigator.clipboard && navigator.clipboard.writeText(text); } catch (err) { /* file:// */ }
+      flashCopy(cp);
+    }
+  });
+  qa("[data-skip]").forEach((b) =>
+    b.addEventListener("click", () => {
+      const n = Number(b.dataset.skip);
+      setStatus(n, "skipped");
+      if (n === 4) { q("#s4warn").classList.remove("hidden"); q("#s4ok").classList.add("hidden"); }
+    })
+  );
+  qa(".seg").forEach((seg) =>
+    seg.addEventListener("click", (e) => {
+      const b = e.target.closest("button");
+      if (!b) return;
+      qa("button", seg).forEach((x) => x.classList.toggle("on", x === b));
+      seg.dispatchEvent(new CustomEvent("segchange", { detail: b.dataset.mode }));
+    })
+  );
+
+  /* ---------------- step 1 ---------------- */
+  function step1Done(animate) {
+    const kv = q("#s1kv");
+    const set = (k, v, ok) => {
+      const el = q('[data-k="' + k + '"]', kv);
+      el.textContent = v;
+      el.className = ok ? "ok" : "";
+    };
+    set("status", "200 OK", true);
+    set("latency", "42 ms", false);
+    set("version", "v1.154.0", false);
+    set("workers", S.workerOnline ? "1" : "0", false);
+    const chip = q("#s1probechip");
+    chip.className = "chip done";
+    chip.textContent = "Healthy";
+    q("#s1stat").classList.remove("hidden");
+    const url = q("#c-url").value.trim();
+    setStatus(1, "done", url + " · verified");
+    if (animate) q("#dkUrl").textContent = url;
+  }
+  q("#s1test").addEventListener("click", (e) => {
+    const chip = q("#s1probechip");
+    chip.className = "chip busy";
+    chip.textContent = "Checking";
+    busy(e.currentTarget, 800, () => step1Done(true));
+  });
+
+  /* ---------------- step 2 ---------------- */
+  function applyName() {
+    const v = q("#c-swarm").value.trim() || "Your Swarm";
+    S.name = v;
+    const initials = v.split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
+    q("#pvName").textContent = v;
+    q("#pvMark").textContent = initials;
+    q("#topName").textContent = v;
+    q("#topMark").textContent = initials;
+    q("#homeName").textContent = v;
+    q("#homeMark").textContent = initials;
+    q("#slackName").textContent = v;
+  }
+  q("#c-swarm").addEventListener("input", applyName);
+  q("#swatches").addEventListener("click", (e) => {
+    const b = e.target.closest(".sw");
+    if (!b) return;
+    qa(".sw").forEach((x) => x.classList.toggle("on", x === b));
+    document.documentElement.style.setProperty("--brand", b.dataset.color);
+    S.color = (b.getAttribute("aria-label") || "amber").toLowerCase();
+    if (S.status[2] === "done") S.summary[2] = S.name + " · " + S.color;
+    render();
+  });
+  q("#s2save").addEventListener("click", (e) =>
+    busy(e.currentTarget, 800, () => {
+      q("#s2stat").classList.remove("hidden");
+      setStatus(2, "done", S.name + " · " + S.color);
+    })
+  );
+
+  /* ---------------- step 3 ---------------- */
+  q('[data-seg="claude"]').addEventListener("segchange", (e) => {
+    const prov = q('.prov[data-prov="claude"]');
+    qa("[data-mode-pane]", prov).forEach((p) => p.classList.toggle("hidden", p.dataset.modePane !== e.detail));
+  });
+  function providerLabel() {
+    const names = { claude: "Claude", codex: "Codex", openrouter: "OpenRouter" };
+    const on = Object.keys(S.providers).filter((k) => S.providers[k]);
+    if (!on.length) return "No provider yet";
+    return on.map((k) => names[k]).join(", ") + " · verified";
+  }
+  function verifyProvider(key) {
+    S.providers[key] = true;
+    const prov = q('.prov[data-prov="' + key + '"]');
+    prov.classList.add("verified");
+    const chip = q("[data-pchip]", prov);
+    chip.className = "chip done";
+    chip.textContent = "Verified";
+    const ok = q('[data-ok="' + key + '"]');
+    if (ok) ok.classList.remove("hidden");
+    if (key === "codex") q("#codexPoll").innerHTML = '<span style="color:var(--success-strong);display:inline-flex;align-items:center;gap:7px"><svg class="ic xs"><use href="#i-check"/></svg> Approved in the browser</span>';
+    q("#dkProvider").textContent = key;
+    if (key === "openrouter") {
+      const btn = q("#memReuse");
+      btn.disabled = false;
+      q("#memReuseHint").textContent = "An OpenRouter key is available from step 3.";
+    }
+    setStatus(3, "done", providerLabel());
+  }
+  qa("[data-test]").forEach((b) =>
+    b.addEventListener("click", (e) => {
+      const key = e.currentTarget.dataset.test;
+      busy(e.currentTarget, key === "codex" ? 1600 : 800, () => verifyProvider(key));
+    })
+  );
+  function newCode() {
+    const A = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+    let s = "";
+    for (let i = 0; i < 8; i++) s += A[Math.floor(Math.random() * A.length)];
+    q("#codexCode").textContent = s.slice(0, 4) + "-" + s.slice(4);
+  }
+  q("#codexNew").addEventListener("click", () => {
+    newCode();
+    S.providers.codex = false;
+    const prov = q('.prov[data-prov="codex"]');
+    prov.classList.remove("verified");
+    const chip = q("[data-pchip]", prov);
+    chip.className = "chip busy";
+    chip.textContent = "Waiting";
+    q('[data-ok="codex"]').classList.add("hidden");
+    q("#codexPoll").innerHTML = '<span class="spin"></span> Waiting for approval<span class="dots"><i>.</i><i>.</i><i>.</i></span>';
+    setStatus(3, Object.values(S.providers).some(Boolean) ? "done" : "todo", providerLabel());
+  });
+
+  /* ---------------- step 4 ---------------- */
+  const MEM = {
+    openai: { model: "text-embedding-3-small", base: false, label: "OpenAI" },
+    openrouter: { model: "openai/text-embedding-3-small", base: false, label: "OpenRouter" },
+    vercel: { model: "text-embedding-3-small", base: false, label: "Vercel AI Gateway" },
+    custom: { model: "bge-large-en-v1.5", base: true, label: "Custom" },
+  };
+  q('[data-seg="mem"]').addEventListener("segchange", (e) => {
+    S.memPreset = e.detail;
+    const m = MEM[e.detail];
+    q("#c-memmodel").value = m.model;
+    q("#memBase").classList.toggle("hidden", !m.base);
+  });
+  q("#memReuse").addEventListener("click", () => {
+    q("#c-memkey").value = "sk-or-v1-…••••";
+    S.memPreset = "openrouter";
+    qa('[data-seg="mem"] button').forEach((x) => x.classList.toggle("on", x.dataset.mode === "openrouter"));
+    q("#c-memmodel").value = MEM.openrouter.model;
+    q("#memBase").classList.add("hidden");
+    q("#memReuseHint").textContent = "Reusing the OpenRouter key from step 3.";
+  });
+  q("#s4test").addEventListener("click", (e) =>
+    busy(e.currentTarget, 800, () => {
+      q("#s4ok").classList.remove("hidden");
+      q("#s4warn").classList.add("hidden");
+      setStatus(4, "done", MEM[S.memPreset].label + " · " + q("#c-memmodel").value);
+    })
+  );
+
+  /* ---------------- step 5 ---------------- */
+  const INTG = { slack: "Slack", github: "GitHub", gitlab: "GitLab", linear: "Linear", jira: "Jira" };
+  q("#slackManifest").addEventListener("click", (e) =>
+    busy(e.currentTarget, 800, () => {
+      q("#slackStart").classList.add("hidden");
+      q("#slackFields").classList.remove("hidden");
+      const chip = q('.intg[data-intg="slack"] [data-ichip]');
+      chip.className = "chip busy";
+      chip.textContent = "App created";
+    })
+  );
+  qa("[data-connect]").forEach((b) =>
+    b.addEventListener("click", (e) => {
+      const key = e.currentTarget.dataset.connect;
+      busy(e.currentTarget, 800, () => {
+        S.integrations[key] = true;
+        const card = q('.intg[data-intg="' + key + '"]');
+        card.classList.add("verified");
+        const chip = q("[data-ichip]", card);
+        chip.className = "chip done";
+        chip.textContent = "Connected";
+        const on = Object.keys(S.integrations).filter((k) => S.integrations[k]).map((k) => INTG[k]);
+        setStatus(5, "done", on.join(", ") + " connected");
+      });
+    })
+  );
+
+  /* ---------------- step 6 ---------------- */
+  function workerOnline() {
+    if (S.workerOnline) return;
+    S.workerOnline = true;
+    q("#s6a").classList.add("hidden");
+    q("#s6b").classList.remove("hidden");
+    S.summary[6] = "Worker online · no task yet";
+    render();
+  }
+  q("#dockerCopy").addEventListener("click", () => setTimeout(workerOnline, 2600));
+  function addLine(text, time, live) {
+    const d = document.createElement("div");
+    d.className = "tline";
+    d.innerHTML = '<span class="dot ' + (live ? "act" : "ok") + '"></span> ' + text + '<span class="tm">' + time + "</span>";
+    q("#s6taskLines").appendChild(d);
+  }
+  q("#s6send").addEventListener("click", (e) => {
+    const btn = e.currentTarget;
+    btn.classList.add("is-busy");
+    q("#s6task").classList.remove("hidden");
+    q("#s6taskLines").innerHTML = '<div class="tline"><span class="dot ok"></span> Task created and queued<span class="tm">0.0s</span></div>';
+    const chip = q("#s6taskChip");
+    chip.className = "chip busy";
+    chip.textContent = "Created";
+    q("#s6done").classList.add("hidden");
+    setTimeout(() => {
+      chip.textContent = "Running";
+      addLine("worker-7fa3 claimed the task", "0.7s", true);
+    }, 800);
+    setTimeout(() => {
+      addLine("Agent replied: hello, I can use 14 tools", "2.2s");
+      chip.className = "chip done";
+      chip.textContent = "Completed";
+      q("#s6done").classList.remove("hidden");
+      btn.classList.remove("is-busy");
+      setStatus(6, "done", "Hello task completed");
+    }, 2000);
+  });
+
+  /* ---------------- url state ---------------- */
+  function syncURL() {
+    const p = new URLSearchParams();
+    if (S.view === "home") p.set("state", "minimized");
+    else if (S.open) p.set("step", String(S.open));
+    if (document.documentElement.classList.contains("dark")) p.set("theme", "dark");
+    const qs = p.toString();
+    try { history.replaceState(null, "", qs ? "?" + qs : location.pathname); } catch (err) { /* file:// */ }
+  }
+
+  /* ---------------- boot ---------------- */
+  buildHomeRows();
+  newCode();
+  applyName();
+  step1Done(false);
+  q("#s2stat").classList.remove("hidden");
+  render();
+
+  const params = new URLSearchParams(location.search);
+  if (params.get("theme") === "dark") setTheme(true);
+  const step = Number(params.get("step"));
+  if (step >= 1 && step <= 6) openStep(step);
+  if (params.get("state") === "minimized") minimize();
+})();
+</script>
+</body>
+</html>

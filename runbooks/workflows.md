@@ -127,6 +127,47 @@ run on the first failed/cancelled child. With `onNodeFailure: "continue"`, the c
 `failed` result whose output contains the existing `[FAILED: <reason>]` marker; the remaining
 children finish and the parent closes the join.
 
+## Human-in-the-loop nodes
+
+A `human-in-the-loop` node creates one approval card, pauses the run, and routes on the `approved`,
+`rejected`, or `timeout` port. Question types: `approval`, `text`, `single-select`, `multi-select`,
+`boolean`. The run is `rejected` only when an `approval` question is answered with a rejection.
+
+`config.questions` is either a static array or one exact interpolation token that resolves to an
+array built upstream, for example one question per item:
+
+```yaml
+- id: plan-card
+  type: human-in-the-loop
+  inputs: { t: "triage.taskOutput" }
+  config:
+    title: "Plan for {{t.count}} items"
+    questions: "{{t.questions}}"
+    approvers: { policy: any }
+  next: { approved: execute, rejected: skip, timeout: skip }
+```
+
+- The exact token injects the raw array. A token with surrounding text is rejected at authoring
+  time, because string interpolation would JSON-stringify the array.
+- Resolved questions are validated at execute time with the same schema as static ones. The node
+  fails, and no card is created, when the value is missing, not an array, empty, over 100
+  questions, has a malformed item (the error names the index and field), repeats an `id`, or has a
+  select question with no options. Unknown fields are stripped.
+- Resolved questions are display data. They are stored as-is and never re-interpolated, so a
+  `{{token}}` inside upstream text stays literal.
+- Downstream nodes read answers by question id: `inputs: { decision: "plan-card" }`, then
+  `{{decision.responses.<questionId>}}`. An optional question the human skipped is absent from
+  `responses`, so give the consumer a default (for example the proposed action).
+
+Rendering limits:
+
+- The dashboard approval page lists every question as its own card. No cap beyond the 100-question
+  node limit.
+- The Slack notification lists question labels in one section block, capped by Block Kit at 3000
+  characters. When the labels do not fit, the tail becomes `…and N more` and the reviewer answers
+  on the dashboard via the card's button. Labels are escaped, so upstream text cannot add mentions
+  or links.
+
 ## Script node types
 
 There are two script-oriented workflow nodes:

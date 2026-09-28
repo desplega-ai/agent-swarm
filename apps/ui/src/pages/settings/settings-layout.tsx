@@ -4,6 +4,7 @@ import {
   Cable,
   Key,
   KeyRound,
+  ListChecks,
   type LucideIcon,
   Palette,
   PanelLeftClose,
@@ -13,16 +14,11 @@ import {
   SlidersHorizontal,
 } from "lucide-react";
 import { useCallback, useEffect } from "react";
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { useOnboarding } from "@/api/hooks/use-onboarding";
 import { AnimatedReveal } from "@/components/shared/animated-reveal";
+import { SectionTabs } from "@/components/shared/section-tabs";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { cn } from "@/lib/utils";
@@ -33,8 +29,13 @@ interface SettingsNavItem {
   icon: LucideIcon;
 }
 
+// The first-run stepper lives outside the settings shell; the rail links to
+// it only when the API serves `/api/onboarding`.
+const SETUP_PATH = "/setup";
+
 const SETTINGS_NAV: SettingsNavItem[] = [
   { title: "Connections", path: "/settings/connections", icon: Cable },
+  { title: "Setup", path: SETUP_PATH, icon: ListChecks },
   { title: "Appearance", path: "/settings/appearance", icon: Palette },
   { title: "Secrets", path: "/settings/secrets", icon: KeyRound },
   { title: "API Keys", path: "/settings/api-keys", icon: Key },
@@ -57,15 +58,14 @@ function readCollapsed(): boolean {
 }
 
 /**
- * Two-column shell for the admin section. A left rail of NavLinks (collapsing
- * to a Select below `md`) drives nested routes that render into the `<Outlet/>`.
+ * Two-column shell for the admin section. A left rail of NavLinks (a tab strip
+ * below `md`) drives nested routes that render into the `<Outlet/>`.
  * The desktop rail itself is collapsible — state persists in localStorage,
  * mirroring the Sessions panel pattern. The shell renders no PageHeader of its
  * own — each embedded page keeps its own header as the section title.
  */
 export function SettingsLayout() {
   const location = useLocation();
-  const navigate = useNavigate();
   const { searchParams, setParam } = useUrlSearchState();
   const railParam = readStringParam(searchParams, "rail");
   const collapsed =
@@ -83,28 +83,25 @@ export function SettingsLayout() {
     }
   }, [collapsed]);
 
+  const onboarding = useOnboarding();
+  const navItems = onboarding.data
+    ? SETTINGS_NAV
+    : SETTINGS_NAV.filter((item) => item.path !== SETUP_PATH);
+
   // Match the active rail item by path prefix so deep links (e.g.
   // /settings/integrations/slack) keep "Integrations" highlighted.
   const activeItem =
-    SETTINGS_NAV.find((item) => location.pathname.startsWith(item.path)) ?? SETTINGS_NAV[0];
+    navItems.find((item) => location.pathname.startsWith(item.path)) ?? navItems[0];
 
   return (
     <div className="flex flex-col flex-1 min-h-0 md:flex-row md:gap-6">
-      {/* Mobile: Select picker above the content. */}
-      <div className="md:hidden shrink-0 mb-4">
-        <Select value={activeItem.path} onValueChange={(next) => navigate(next)}>
-          <SelectTrigger className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {SETTINGS_NAV.map((item) => (
-              <SelectItem key={item.path} value={item.path}>
-                {item.title}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+      {/* Mobile: a tab strip above the content (no select repeating the page name). */}
+      <SectionTabs
+        label="Settings"
+        tabs={navItems}
+        activePath={activeItem.path}
+        className="md:hidden shrink-0 mb-4"
+      />
 
       {/* Desktop: left rail. Width + fade on collapse/expand (DESIGN.md
           § Motion collapse pattern). */}
@@ -129,7 +126,7 @@ export function SettingsLayout() {
               <TooltipContent side="right">Collapse rail</TooltipContent>
             </Tooltip>
           </div>
-          {SETTINGS_NAV.map((item) => (
+          {navItems.map((item) => (
             <NavLink
               key={item.path}
               to={item.path}

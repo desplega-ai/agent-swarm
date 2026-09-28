@@ -252,6 +252,20 @@ describe("Phase 6 — /api/pricing REST surface", () => {
       expect(res.status).toBe(400);
     });
 
+    // `dsh` is a registered ProviderNameSchema harness provider
+    // (src/types.ts) but PricingProviderSchema forgot it, so an operator
+    // could not record a dsh price row (#1636). `acp` sets the precedent
+    // for accepting a provider here even without seeded rate rows.
+    test("POST /api/pricing/dsh/{model}/input accepts the dsh provider", async () => {
+      const res = await authedFetch(`/api/pricing/dsh/dsh-model/input`, {
+        method: "POST",
+        body: JSON.stringify({ pricePerMillionUsd: 2.5 }),
+      });
+      expect(res.status).toBe(201);
+      const row = await res.json();
+      expect(row.provider).toBe("dsh");
+    });
+
     test("POST 400 on invalid token class", async () => {
       const res = await authedFetch(`/api/pricing/codex/gpt-5.3-codex/wrong-class`, {
         method: "POST",

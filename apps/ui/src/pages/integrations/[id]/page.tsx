@@ -44,6 +44,7 @@ import { IntegrationStatusBadge } from "@/components/integrations/integration-st
 import { JiraOAuthSection } from "@/components/integrations/jira-oauth-section";
 import { LinearOAuthSection } from "@/components/integrations/linear-oauth-section";
 import { RecommendedSkillsSection } from "@/components/integrations/required-skills-section";
+import { BrandLogo } from "@/components/shared/brand-logo";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageSkeleton } from "@/components/shared/page-skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -211,12 +212,7 @@ function IntegrationDetailInner({
 }: InnerProps) {
   const Icon = resolveIcon(def.iconKey);
   const logo = def.logoSrc ? (
-    <img
-      src={def.logoSrc}
-      alt=""
-      className="h-6 w-6 object-contain dark:invert"
-      aria-hidden="true"
-    />
+    <BrandLogo src={def.logoSrc} className="size-6 text-foreground" />
   ) : (
     <Icon className="h-6 w-6 text-foreground" aria-hidden="true" />
   );

@@ -1,5 +1,5 @@
 import type { ColDef, ICellRendererParams, RowClickedEvent } from "ag-grid-community";
-import { Clock, Plus, Search } from "lucide-react";
+import { Clock, Plus, Search, Star } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
@@ -17,6 +17,8 @@ import {
 import { DataGrid } from "@/components/shared/data-grid";
 import { EmptyState } from "@/components/shared/empty-state";
 import { FavoriteButton } from "@/components/shared/favorite-button";
+import { FAVORITE_COLUMN } from "@/components/shared/favorite-column";
+import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -39,9 +41,11 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
+import { matchesSearchTerms, searchText } from "@/lib/list-search";
 import { MODEL_TIER_OPTIONS, modelTierLabel } from "@/lib/model-tiers";
-import { describeCron, formatInterval } from "@/lib/schedule-format";
+import { cronTimezone, describeCron, formatInterval, scheduleCadence } from "@/lib/schedule-format";
 import { formatSmartTime, formatUTCTime } from "@/lib/utils";
 
 interface ScheduleFormData extends ScheduleTargetFormValue {
@@ -293,6 +297,10 @@ function ScheduleDialog({
   );
 }
 
+function targetLabel(targetType: ScheduledTaskTargetType | undefined): string {
+  return targetType === "workflow" ? "Workflow" : targetType === "script" ? "Script" : "Agent Task";
+}
+
 export default function SchedulesPage() {
   const navigate = useNavigate();
   const { searchParams, setParam } = useUrlSearchState();
@@ -304,6 +312,7 @@ export default function SchedulesPage() {
   const favoriteToggle = useFavoriteToggle("schedule");
   const [dialogOpen, setDialogOpen] = useState(false);
   const search = readStringParam(searchParams, "search");
+  const isMobile = useIsMobile();
   const scheduleRows = useMemo(() => {
     return [...(schedules ?? [])].sort((a, b) => {
       if (a.favorite !== b.favorite) return a.favorite ? -1 : 1;
@@ -351,6 +360,27 @@ export default function SchedulesPage() {
     return m;
   }, [agents]);
 
+  // One search for both widths, so a phone finds the same schedules as the grid.
+  const searchedRows = useMemo(() => {
+    if (!search.trim()) return scheduleRows;
+    return scheduleRows.filter((schedule) =>
+      matchesSearchTerms(
+        searchText([
+          schedule.name,
+          schedule.description,
+          schedule.scheduleType === "one_time" ? "one-time" : "recurring",
+          targetLabel(schedule.targetType),
+          scheduleCadence(schedule),
+          schedule.cronExpression,
+          schedule.model,
+          schedule.modelTier,
+          schedule.targetAgentId ? agentMap.get(schedule.targetAgentId) : "pool",
+        ]),
+        search,
+      ),
+    );
+  }, [agentMap, scheduleRows, search]);
+
   const handleToggleEnabled = useCallback(
     (schedule: ScheduledTask, enabled: boolean) => {
       updateSchedule.mutate({ id: schedule.id, data: { enabled } });
@@ -361,10 +391,7 @@ export default function SchedulesPage() {
   const columnDefs = useMemo<ColDef<ScheduledTask>[]>(
     () => [
       {
-        headerName: "",
-        width: 52,
-        sortable: false,
-        filter: false,
+        ...FAVORITE_COLUMN,
         cellRenderer: (params: ICellRendererParams<ScheduledTask>) => {
           const schedule = params.data;
           if (!schedule) return null;
@@ -412,11 +439,7 @@ export default function SchedulesPage() {
         width: 110,
         cellRenderer: (params: { value?: ScheduledTaskTargetType }) => (
           <Badge variant="outline" size="tag">
-            {params.value === "workflow"
-              ? "Workflow"
-              : params.value === "script"
-                ? "Script"
-                : "Agent Task"}
+            {targetLabel(params.value)}
           </Badge>
         ),
       },
@@ -457,7 +480,7 @@ export default function SchedulesPage() {
           }
 
           if (data.cronExpression) {
-            const tz = data.timezone || "UTC";
+            const tz = cronTimezone(data.timezone);
             return (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -622,31 +645,75 @@ export default function SchedulesPage() {
             className="pl-9"
           />
         </div>
-        {/* Create lives in the toolbar as a bare "+" — no lone header action row. */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              size="icon"
-              className="size-8 ml-auto"
-              onClick={() => setDialogOpen(true)}
-              aria-label="Create schedule"
-            >
-              <Plus className="h-4 w-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Create schedule</TooltipContent>
-        </Tooltip>
+        {/* Labelled primary action in the toolbar row (DESIGN.md § List toolbar). */}
+        <Button size="sm" className="ml-auto" onClick={() => setDialogOpen(true)}>
+          <Plus className="h-4 w-4" />
+          New schedule
+        </Button>
       </div>
 
-      <DataGrid
-        rowData={scheduleRows}
-        columnDefs={columnDefs}
-        quickFilterText={search}
-        onRowClicked={onRowClicked}
-        loading={isLoading}
-        emptyMessage="No scheduled tasks"
-        paginationQueryKey="schedules"
-      />
+      {isMobile ? (
+        <MobileList label="Schedules" loading={isLoading} emptyMessage="No scheduled tasks">
+          {searchedRows.map((schedule) => {
+            const needsSetup =
+              findAutomation(status?.automations, "schedule", schedule.key, schedule.name)
+                ?.state === "needs_setup";
+            return (
+              <MobileListRow
+                key={schedule.id}
+                to={`/schedules/${schedule.id}`}
+                title={
+                  <>
+                    {schedule.favorite ? (
+                      <Star
+                        className="mr-1 inline size-3 -translate-y-px fill-current text-muted-foreground"
+                        role="img"
+                        aria-label="Favorite"
+                      />
+                    ) : null}
+                    {schedule.name}
+                  </>
+                }
+                status={
+                  !schedule.enabled ? (
+                    <Badge variant="outline" size="tag">
+                      Disabled
+                    </Badge>
+                  ) : needsSetup ? (
+                    <Badge
+                      variant="outline"
+                      size="tag"
+                      className="border-status-pending/30 text-status-pending-strong"
+                    >
+                      Needs setup
+                    </Badge>
+                  ) : null
+                }
+                meta={[
+                  scheduleCadence(schedule),
+                  schedule.targetType === "agent-task" || !schedule.targetType
+                    ? schedule.targetAgentId
+                      ? (agentMap.get(schedule.targetAgentId) ?? "Unknown agent")
+                      : "Pool"
+                    : targetLabel(schedule.targetType),
+                  schedule.enabled && schedule.nextRunAt
+                    ? `next ${formatSmartTime(schedule.nextRunAt)}`
+                    : null,
+                ]}
+              />
+            );
+          })}
+        </MobileList>
+      ) : (
+        <DataGrid
+          rowData={searchedRows}
+          columnDefs={columnDefs}
+          onRowClicked={onRowClicked}
+          loading={isLoading}
+          emptyMessage="No scheduled tasks"
+          paginationQueryKey="schedules"
+        />
+      )}
 
       <ScheduleDialog
         open={dialogOpen}

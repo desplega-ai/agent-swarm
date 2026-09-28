@@ -33,6 +33,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { InfoRow } from "@/components/ui/info-row";
+import { InfoTip } from "@/components/ui/info-tip";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
@@ -654,20 +655,23 @@ export default function ExtensionDetailPage() {
             />
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="ext-config">Config (JSON)</Label>
+            <div className="flex items-center gap-1.5">
+              <Label htmlFor="ext-config">Config (JSON)</Label>
+              <InfoTip content="Stored values are scrubbed on read, so secrets show as placeholders. The server validates the config against the extension schema on enable." />
+            </div>
             <Textarea
               id="ext-config"
               value={configText}
               rows={6}
               className="font-mono text-xs"
+              aria-describedby="ext-config-note"
               onChange={(e) => {
                 setConfigText(e.target.value);
                 setConfigDirty(true);
               }}
             />
-            <p className="text-xs text-muted-foreground">
-              Stored values are scrubbed on read, so secrets show as placeholders. Saving replaces
-              the whole object. The server validates it against the extension schema on enable.
+            <p id="ext-config-note" className="text-xs text-muted-foreground">
+              Saving replaces the whole object.
             </p>
           </div>
           <div className="flex justify-end">

@@ -575,6 +575,10 @@ describe("script connections", () => {
       // 157 alters scheduled_tasks and slack_messages, neither of which this
       // migration-112-only fixture creates.
       markMigrationApplied(database, "157_defer_provenance_and_marker.sql");
+      // 164 indexes agent_tasks columns and alters api_key_status, neither of
+      // which this migration-112-only fixture creates.
+      markMigrationApplied(database, "164_usage_cover_index_and_key_plans.sql");
+      markMigrationApplied(database, "166_approval_request_auto_cancellation.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

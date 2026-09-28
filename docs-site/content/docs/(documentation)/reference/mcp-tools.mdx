@@ -156,6 +156,7 @@ Store task progress, or mark a task as completed or failed.
 | `output` | string | No | Output (for completion). Validated against `outputSchema` if the task defines one |
 | `failureReason` | string | No | Reason (for failure) |
 | `attachments` | array | No | Pointer-based artifacts to attach to the task (max 20 per call). Each entry is one of: `{kind: "agent-fs", path, name, orgId?, driveId?, ...}`, `{kind: "url", url, name, ...}`, `{kind: "shared-fs", path, name, ...}`, `{kind: "page", pageId, name, ...}`. Agent-fs pointers are verified before task state changes using the explicit org/drive pair or the registering agent's configured defaults. May be sent on any call (progress or completion); accumulates across calls; deduped by `sha256` when present, else by `(kind, pointer, name)`. No inline file data — upload to agent-fs first and attach by path. |
+| `citations` | array | No | Claim sources, upserted by index across calls. Use only for factual claims the reader cannot already see in the thread or task tree, 1-2 sources; none on delegation, routing, acks, or status replies. Reference each in `output` with `[citation:N]`, or set `general: true` for a source that backs the whole answer. Kinds: `task`, `memory`, `github`, `slack`, `agent-fs`, `page`, `script-run`, `url`. The first completing call is refused (the task stays in progress) if a marker has no entry, a citation fails validation, or a non-general citation is unreferenced; after one refusal, completion proceeds and those markers are dropped. At most 50 per call/task. |
 | `persistMemory` | boolean | No | Opt in to task-completion memory persistence for automatic or recurring tasks. Manual tasks persist by default; scheduled, system, heartbeat, monitor, and digest tasks are skipped unless this is `true`. |
 | `force` | boolean | No | On an already-terminal task, replace only the explicitly supplied `output` and/or `failureReason`. Status, `finishedAt`, completion events, memories, follow-ups, and capacity updates are preserved rather than replayed. |
 
@@ -571,7 +572,7 @@ Complete the current task now and wake up later to continue it. Use it when the 
 
 Pass `taskId`, one of `delayMs` or `runAt`, a `summary` of what you did and where things stand, a `note` that says what is pending, and optional `checks` to verify on wake-up. The task reaches its final state (`completed`) on this call and receives a `deferred` tag. A one-off schedule targets you, and its child task carries the deferred task as `parentTaskId` so the wake-up run receives the prior context. Use this tool instead of creating a continuation schedule by hand.
 
-- **Early wake-up:** optionally pass `wakeOn: { event: "settled", taskId: "<watched-task-id>" }`, or use `taskIds: ["<first-id>", "<second-id>"]` instead of `taskId`. `mode` defaults to `all` (every member must match); use `mode: "any"` for the first match. Events are `task.completed`, `task.failed`, or `settled` (completed, failed, or cancelled). Cancellation does not match either named event. IDs must be unique, exist, be nonterminal, and differ from the task being deferred. Any invalid or already-terminal member rejects the entire call without completing the task or creating a schedule. One `delayMs` or `runAt` deadline is still required for the whole set; events and the deadline share a single wake-up so racing triggers do not create duplicate children. Pending waits survive API restarts.
+- **Early wake-up:** optionally pass `wakeOn: { event: "settled", taskId: "<watched-task-id>" }`, or use `taskIds: ["<first-id>", "<second-id>"]` instead of `taskId`. `mode` defaults to `all` (every member must match); use `mode: "any"` for the first match. Events are `task.completed`, `task.failed`, or `settled` (completed, failed, or cancelled). Cancellation does not match either named event. IDs must be unique, exist, be nonterminal, and differ from the task being deferred. Any invalid or already-terminal member rejects the entire call without completing the task or creating a schedule. One `delayMs` or `runAt` deadline is still required for the whole set; events and the deadline share a single wake-up so racing triggers do not create duplicate children. Pending waits survive API restarts. The member whose settlement wakes you creates no separate lead follow-up for your agent unless its `followUpConfig` sets `onCompleted`/`onFailed`; an `all`-mode member that settles while others are pending still does.
 - **Structured output:** if the task has an `outputSchema`, pass `output` as a JSON string matching it. The tool stores that string verbatim as terminal output and puts the summary and deferral details in the task log. Missing or invalid output is rejected before creating a schedule. Without a schema, terminal output says when the agent will check back, or names the agents it is waiting on and the latest wake-up time; `output` is ignored. The time uses the requester's stored timezone, falling back to a labeled UTC time when none is set. Full summary, checks, and schedule details remain in the task log.
 
 See [deferring until another task finishes](/docs/concepts/scheduling#deferring-until-another-task-finishes) for an example.
@@ -727,14 +728,24 @@ Partially update a single node in a workflow definition. Merges the provided fie
 
 ### request-human-input
 
-Create an approval request that pauses until a human responds. Supports multiple question types: approval (yes/no), text, single-select, multi-select, and boolean. Returns the request ID and URL for the human to respond.
+Create an approval request and return at once with the request ID and URL. The answer arrives later as a `hitl-follow-up` task. Supports multiple question types: approval (yes/no), text, single-select, multi-select, and boolean.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `title` | string | Yes | Title of the approval request |
 | `questions` | array | Yes | Questions to ask the human |
+| `timeoutSeconds` | integer | No | Seconds until the request expires. After that it becomes `timeout` and the requesting agent gets a `hitl-follow-up` task. |
 
-Approval requests are accessible via the dashboard at `/approval-requests/{id}`. When resolved, a follow-up task is automatically created for the requesting agent with the human's responses.
+Approval requests are accessible via the dashboard at `/approval-requests/{id}`. When resolved, a follow-up task is automatically created for the requesting agent with the human's responses. A request with no `timeoutSeconds` is cancelled after `APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS` days (default 7) with no answer. An answer after the deadline is refused with 409.
+
+### cancel-approval-request
+
+Cancel a pending approval request by ID. Allowed for a lead agent, or for the agent that owns the request's source task. If the request gates a running or waiting workflow run, that run is cancelled too. A second cancel returns `alreadyCancelled: true`. The same action is available as `POST /api/approval-requests/{id}/cancel` and as `approval_cancel` in the scripts SDK.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `requestId` | uuid | Yes | Approval request ID |
+| `reason` | string | No | Reason for cancellation (max 500 characters) |
 
 ## Pages Tools
 
@@ -1166,20 +1177,26 @@ and owner (`createdByAgentId`). The owner differs from the extension runtime `ag
 |-----------|------|----------|-------------|
 | `enabledOnly` | boolean | No | Return only enabled extensions |
 
+### extension-catalog
+
+List the predefined extensions that can be installed, with their declared assets and
+installed state. The catalog (also `GET /api/extensions/catalog`) is the only install source.
+
+*No parameters.*
+
 ### extension-install
 
-Any authenticated agent can validate and store a manifest and its files as an inert,
-disabled draft. Validation typechecks the bundle without importing it. The installing
-agent becomes its owner; workers may stage subsequent versions only for their own
-extensions, without activating them. Fetch
-`GET /api/extensions/type-defs` first for the `swarm-extension` TypeScript contract.
-A trusted lead can enable the draft with `extension-enable`; operators and dashboard users
-can also activate it. Installation itself never enables an extension.
+Install a predefined extension from the catalog by name. Inline bundles are rejected.
+Install creates the extension, its `ext:<name>` agent, and every asset it declares
+(scripts, and disabled schedules). Any authenticated agent can install; the installing
+agent becomes its owner (`createdByAgentId`), and workers may install subsequent versions
+only for their own extensions, without activating them. A trusted lead can enable the new
+extension with `extension-enable`; operators and dashboard users can also activate it.
+Installation itself never enables an extension.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `manifest` | object | Yes | Extension bundle manifest |
-| `files` | object | Yes | Source files keyed by relative path |
+| `template` | string | Yes | Name of a predefined extension from `extension-catalog` |
 | `priority` | integer | No | Handler priority; lower values run first |
 | `config` | object | No | Extension configuration |
 

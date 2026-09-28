@@ -13,10 +13,18 @@
 #   docker compose -f docker-compose.local.yml down
 
 services:
-  # Use quay.io because MinIO's Docker Hub repositories were removed.
+  # MinIO stopped publishing images: minio/minio is archived upstream and its
+  # Docker Hub and quay.io repositories no longer allow anonymous pulls.
+  # pgsty/minio is a community-maintained build of the same server
+  # (source: github.com/pgsty/minio). It also ships `mc`, so minio-init reuses
+  # the same image. The image is not signed. We pin the digest after checking
+  # its BuildKit provenance: tag -> commit d88f46cc -> pgsty GitHub Actions run
+  # 30961368219. To bump, repeat that check for the new RELEASE tag and update
+  # the digest in all three compose files. To revoke, replace the image with a
+  # trusted S3-compatible server or build MinIO from source.
   minio:
     container_name: swarm-agent-fs-minio
-    image: quay.io/minio/minio:latest
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -34,7 +42,7 @@ services:
     restart: unless-stopped
 
   minio-init:
-    image: quay.io/minio/mc:latest
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
     depends_on:
       minio:
         condition: service_healthy
@@ -46,7 +54,7 @@ services:
 
   agent-fs:
     container_name: swarm-agent-fs
-    image: ghcr.io/desplega-ai/agent-fs:0.13.9
+    image: ghcr.io/desplega-ai/agent-fs:0.13.10
     platform: linux/amd64
     depends_on:
       minio-init:

@@ -1,0 +1,1319 @@
+<!doctype html>
+<!--
+  Option A: "Rail + Stage".
+
+  A persistent left rail lists all six setup steps with live status (number, title, one line
+  of state), while the right side stages exactly one step at a time. The operator always sees
+  the whole map, can jump out of order, and never loses the sense of how much is left.
+
+  Trade-off: the rail spends ~300px of width permanently, so the stage column is narrower than
+  a full bleed layout. Dense steps (provider cards, integrations) stack instead of spreading.
+
+  Mock controls:
+    ?step=N            land on step N (steps before N are pre-verified, so the view is representative)
+    ?step=N&fresh=1    land on step N with every step still to do
+    ?theme=dark        dark mode
+    ?state=minimized   render the home dashboard shell with the setup checklist card
+    ?worker=1          step 6 starts with a live worker
+    press "d"          hidden dev panel (set status per step, toggle worker, reset)
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Agent Swarm · Onboarding · Rail + Stage</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&family=Space+Mono:ital,wght@0,400;0,700;1,400;1,700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="../../session-logs/demo-shared.css" />
+<style>
+:root{ --brand: var(--primary); --rail: 300px; }
+
+body{overflow-x:hidden}
+.i{width:15px;height:15px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.i.sm{width:13px;height:13px}
+.i.lg{width:18px;height:18px}
+.mono{font-family:var(--font-mono)}
+.sp{flex:1}
+.hide{display:none !important}
+
+/* ---------- buttons (36px control height per DESIGN.md) ---------- */
+.btn{height:36px;border-radius:8px;font-size:13px;text-decoration:none}
+.icon-btn{width:36px;height:36px}
+.btn.ghost{background:transparent;border-color:transparent;color:var(--muted-foreground)}
+.btn.ghost:hover{background:var(--accent);color:var(--foreground)}
+.btn.sm{height:30px;font-size:12.5px;padding:0 10px}
+.btn:focus-visible{outline:2px solid color-mix(in oklch,var(--ring) 65%,transparent);outline-offset:1px}
+
+/* ---------- top bar ---------- */
+.onb{display:flex;flex-direction:column;height:100dvh}
+body[data-state="minimized"] .onb{display:none}
+.topbar{flex:none;display:flex;align-items:center;gap:12px;height:54px;padding:0 16px;border-bottom:1px solid var(--border);background:color-mix(in oklch,var(--background) 88%,transparent);backdrop-filter:blur(10px);z-index:30}
+.brandbox{display:flex;align-items:center;gap:9px;min-width:0}
+.mark{flex:none;width:26px;height:26px;border-radius:7px;display:grid;place-items:center;font-size:11px;font-weight:700;letter-spacing:.02em;color:oklch(0.985 0 0);background:var(--brand);overflow:hidden}
+.mark img{width:100%;height:100%;object-fit:cover}
+.brandbox .nm{font-size:13.5px;font-weight:600;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:30vw}
+.brandbox .sub{font-family:var(--font-mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted-foreground);border:1px solid var(--border);border-radius:999px;padding:2px 8px;white-space:nowrap}
+.prog{display:flex;align-items:center;gap:9px;margin-left:6px;padding-left:14px;border-left:1px solid var(--border);min-width:0}
+.ticks{display:flex;gap:3px}
+.ticks i{width:16px;height:4px;border-radius:2px;background:var(--border);transition:background .2s}
+.ticks i.done{background:var(--success)}
+.ticks i.skipped{background:color-mix(in oklch,var(--neutral) 45%,transparent)}
+.ticks i.cur{background:var(--primary)}
+.prog .txt{font-size:12.5px;color:var(--muted-foreground);white-space:nowrap}
+.prog .txt b{color:var(--foreground);font-weight:600;font-variant-numeric:tabular-nums}
+
+/* ---------- shell ---------- */
+.shell{flex:1;display:grid;grid-template-columns:var(--rail) minmax(0,1fr);min-height:0}
+
+/* ---------- rail ---------- */
+.rail{border-right:1px solid var(--border);background:var(--surface);padding:20px 14px 18px;display:flex;flex-direction:column;overflow-y:auto}
+.rail-kicker{font-family:var(--font-mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted-foreground);margin:0 0 12px;padding:0 10px}
+.steps{list-style:none;margin:0;padding:0;position:relative;display:flex;flex-direction:column;gap:2px}
+.steps::before{content:"";position:absolute;left:23px;top:26px;bottom:26px;width:1px;background:var(--border)}
+.step{position:relative;width:100%;display:grid;grid-template-columns:26px minmax(0,1fr) 16px;gap:11px;align-items:start;text-align:left;font:inherit;color:inherit;background:transparent;border:1px solid transparent;border-radius:9px;padding:9px 10px;cursor:pointer;transition:background .12s,border-color .12s}
+.step:hover{background:var(--accent)}
+.step:focus-visible{outline:2px solid color-mix(in oklch,var(--ring) 65%,transparent);outline-offset:1px}
+.step[aria-current="true"]{background:var(--card);border-color:var(--border);box-shadow:var(--shadow)}
+.step .num{flex:none;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-family:var(--font-mono);font-size:11px;font-weight:700;color:var(--muted-foreground);background:var(--background);border:1px solid var(--border);transition:border-color .15s,color .15s,background .15s}
+.step[aria-current="true"] .num{border-color:var(--primary);color:var(--primary)}
+.step[data-status="done"] .num{background:color-mix(in oklch,var(--success) 14%,transparent);border-color:color-mix(in oklch,var(--success) 40%,transparent);color:var(--success-strong)}
+.step[data-status="skipped"] .num{opacity:.6}
+.step .t{display:block;font-size:13.5px;font-weight:600;letter-spacing:-.005em;line-height:1.25}
+.step .s{display:block;font-size:11.5px;line-height:1.4;color:var(--muted-foreground);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.step[data-status="done"] .s{color:var(--success-strong)}
+.step .tick{color:var(--success-strong);opacity:0;transition:opacity .15s;margin-top:5px}
+.step[data-status="done"] .tick{opacity:1}
+.rail-foot{margin-top:auto;padding:12px 10px 0;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px}
+.rail-foot p{margin:0;font-size:11.5px;line-height:1.5;color:var(--muted-foreground)}
+.rail-foot .k{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted-foreground)}
+
+/* ---------- stage ---------- */
+.stage{overflow-y:auto;padding:30px 34px 80px}
+.stagewrap{max-width:760px;margin:0 auto}
+.stepview{display:none;animation:fade .18s cubic-bezier(.2,0,0,1)}
+.stepview.on{display:block}
+@keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.stepview{animation:none}}
+.eyebrow{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--primary);margin:0 0 9px}
+.title{font-size:23px;font-weight:600;letter-spacing:-.022em;margin:0 0 8px;line-height:1.2}
+.lead{margin:0 0 22px;font-size:14px;line-height:1.6;color:var(--muted-foreground);max-width:62ch}
+
+/* ---------- cards ---------- */
+.card{border:1px solid var(--border);background:var(--card);border-radius:12px;box-shadow:var(--shadow);overflow:hidden}
+.card + .card{margin-top:12px}
+.card-h{display:flex;align-items:center;gap:11px;padding:13px 16px;border-bottom:1px solid var(--border);background:color-mix(in oklch,var(--muted) 24%,var(--card))}
+.card-h h3{margin:0;font-size:14px;font-weight:600;letter-spacing:-.01em}
+.card-h .d{margin:2px 0 0;font-size:12px;color:var(--muted-foreground);line-height:1.35}
+.card-b{padding:16px;display:flex;flex-direction:column;gap:14px}
+.mk{flex:none;width:30px;height:30px;border-radius:8px;display:grid;place-items:center;font-family:var(--font-mono);font-size:11px;font-weight:700;background:var(--muted);border:1px solid var(--border)}
+
+/* ---------- fields ---------- */
+.field{display:flex;flex-direction:column;gap:6px;min-width:0}
+.field > label{font-size:10.5px;font-weight:500;letter-spacing:.07em;text-transform:uppercase;color:var(--muted-foreground)}
+.in{width:100%;min-width:0;height:36px;border:1px solid var(--border);background:transparent;color:var(--foreground);border-radius:8px;padding:0 11px;font:inherit;font-size:13.5px;box-shadow:0 1px 2px oklch(0.141 0.005 285 / .04)}
+.in::placeholder{color:color-mix(in oklch,var(--muted-foreground) 72%,transparent)}
+.in:focus-visible{outline:2px solid color-mix(in oklch,var(--ring) 60%,transparent);outline-offset:0;border-color:var(--ring)}
+.in.mono{font-family:var(--font-mono);font-size:12.5px}
+.inrow{display:flex;gap:6px;align-items:center;min-width:0}
+.hint{font-size:12px;line-height:1.5;color:var(--muted-foreground);margin:0}
+.hint code,.hint .mono,.callout span.mono,.callout code{white-space:nowrap;font-family:var(--font-mono);font-size:11.5px;background:var(--code-bg);border:1px solid color-mix(in oklch,var(--border) 60%,transparent);border-radius:5px;padding:1px 5px}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.foot{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding-top:14px;border-top:1px solid var(--border)}
+.linkish{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:500;color:var(--primary);text-decoration:none;cursor:pointer;background:none;border:0;font-family:inherit;padding:0}
+.linkish:hover{text-decoration:underline;text-underline-offset:3px}
+
+/* ---------- chips / pills ---------- */
+.pill{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 7px;border-radius:6px;font-size:9px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;border:1px solid var(--border);color:var(--muted-foreground);white-space:nowrap}
+.pill.ok{border-color:color-mix(in oklch,var(--success) 34%,transparent);color:var(--success-strong);background:color-mix(in oklch,var(--success) 10%,transparent)}
+.pill.run{border-color:color-mix(in oklch,var(--active) 40%,transparent);color:var(--active-strong);background:color-mix(in oklch,var(--active) 12%,transparent)}
+.pill.info{border-color:color-mix(in oklch,var(--info) 34%,transparent);color:var(--info-strong);background:color-mix(in oklch,var(--info) 10%,transparent)}
+.chipbtn{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 9px;border-radius:7px;border:1px solid color-mix(in oklch,var(--info) 34%,transparent);background:color-mix(in oklch,var(--info) 9%,transparent);color:var(--info-strong);font:inherit;font-size:12px;font-weight:500;cursor:pointer}
+.chipbtn:hover{background:color-mix(in oklch,var(--info) 16%,transparent)}
+
+/* ---------- callouts ---------- */
+.callout{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--border);background:var(--surface);border-radius:10px;padding:11px 13px;font-size:12.5px;line-height:1.55;color:color-mix(in oklch,var(--foreground) 85%,var(--muted-foreground))}
+.callout .i{margin-top:1px}
+.callout b{font-weight:600;color:var(--foreground)}
+.callout.info{border-color:color-mix(in oklch,var(--info) 30%,transparent);background:color-mix(in oklch,var(--info) 7%,transparent)}
+.callout.info .i{color:var(--info-strong)}
+.callout.warn{border-color:color-mix(in oklch,var(--active) 34%,transparent);background:color-mix(in oklch,var(--active) 9%,transparent)}
+.callout.warn .i{color:var(--active-strong)}
+.callout.ok{border-color:color-mix(in oklch,var(--success) 32%,transparent);background:color-mix(in oklch,var(--success) 8%,transparent)}
+.callout.ok .i{color:var(--success-strong)}
+
+/* ---------- readouts ---------- */
+.readout{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;background:var(--border);border:1px solid var(--border);border-radius:9px;overflow:hidden}
+.readout div{background:var(--card);padding:9px 11px}
+.readout dt{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted-foreground);margin:0 0 3px}
+.readout dd{margin:0;font-family:var(--font-mono);font-size:12.5px;font-variant-numeric:tabular-nums}
+
+/* ---------- code ---------- */
+.codewrap{position:relative}
+.codewrap .copy{position:absolute;top:7px;right:7px}
+pre.code{margin:0;font-family:var(--font-mono);font-size:12px;line-height:1.7;background:var(--code-bg);border:1px solid var(--border);border-radius:9px;padding:12px 13px;white-space:pre-wrap;overflow-wrap:anywhere;color:color-mix(in oklch,var(--foreground) 90%,var(--muted-foreground))}
+pre.code.pad{padding-right:46px}
+
+/* ---------- segmented ---------- */
+.seg{display:inline-flex;align-self:flex-start;padding:2px;border:1px solid var(--border);border-radius:9px;background:var(--muted);gap:2px}
+.seg button{font:inherit;font-size:12.5px;height:28px;padding:0 11px;border:0;border-radius:7px;background:transparent;color:var(--muted-foreground);cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--card);color:var(--foreground);font-weight:600;box-shadow:var(--shadow)}
+
+/* ---------- tiles ---------- */
+.tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.tile{text-align:left;font:inherit;color:inherit;cursor:pointer;border:1px solid var(--border);background:var(--card);border-radius:10px;padding:11px 12px;display:flex;flex-direction:column;gap:3px;transition:border-color .12s,background .12s}
+.tile:hover{background:var(--accent)}
+.tile[aria-pressed="true"]{border-color:var(--primary);background:color-mix(in oklch,var(--primary) 6%,var(--card));box-shadow:inset 0 0 0 1px color-mix(in oklch,var(--primary) 45%,transparent)}
+.tile .tn{font-size:13px;font-weight:600;display:flex;align-items:center;gap:7px}
+.tile .ts{font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground);overflow-wrap:anywhere}
+
+/* ---------- swatches ---------- */
+.swatches{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.sw{width:28px;height:28px;border-radius:8px;border:1px solid var(--border);cursor:pointer;padding:0;position:relative}
+.sw[aria-pressed="true"]{box-shadow:0 0 0 2px var(--background),0 0 0 4px var(--ring)}
+
+/* ---------- sidebar preview ---------- */
+.preview{border:1px solid var(--border);border-radius:11px;background:var(--surface);overflow:hidden}
+.preview .cap{font-family:var(--font-mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted-foreground);padding:9px 12px;border-bottom:1px solid var(--border)}
+.pv-sb{padding:12px 10px;display:flex;flex-direction:column;gap:2px;background:var(--card)}
+.pv-head{display:flex;align-items:center;gap:9px;padding:6px 8px 12px;border-bottom:1px solid var(--border);margin-bottom:8px}
+.pv-head .mark{width:28px;height:28px;border-radius:8px;font-size:11px}
+.pv-head .nm{font-size:13px;font-weight:600;letter-spacing:-.01em;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pv-head .st{display:flex;align-items:center;gap:5px;font-size:10.5px;color:var(--muted-foreground);margin-top:2px}
+.pv-head .st i{width:6px;height:6px;border-radius:50%;background:var(--success);display:inline-block}
+.pv-row{display:flex;align-items:center;gap:9px;padding:6px 8px;border-radius:7px;font-size:12.5px;color:var(--muted-foreground)}
+.pv-row.on{background:color-mix(in oklch,var(--primary) 11%,transparent);color:var(--primary);font-weight:600}
+.pv-row .bar{height:7px;border-radius:4px;background:currentColor;opacity:.22}
+
+/* ---------- details ---------- */
+details.more{border-top:1px solid var(--border);padding-top:13px}
+details.more > summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:500;color:var(--muted-foreground)}
+details.more > summary::-webkit-details-marker{display:none}
+details.more > summary:hover{color:var(--foreground)}
+details.more > summary .chev{transition:transform .15s}
+details.more[open] > summary .chev{transform:rotate(90deg)}
+details.more .body{display:flex;flex-direction:column;gap:11px;padding-top:12px}
+
+/* ---------- device code ---------- */
+.devbox{display:flex;align-items:center;gap:14px;flex-wrap:wrap;border:1px dashed color-mix(in oklch,var(--primary) 40%,var(--border));border-radius:11px;background:color-mix(in oklch,var(--primary) 5%,var(--surface));padding:14px 16px}
+.devcode{font-family:var(--font-mono);font-weight:700;font-size:clamp(23px,5.4vw,32px);letter-spacing:.13em;line-height:1;color:var(--foreground)}
+.devbox .meta{font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground);margin-top:6px;font-variant-numeric:tabular-nums}
+.polling{display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--muted-foreground)}
+.spin{width:14px;height:14px;flex:none;border-radius:50%;border:2px solid color-mix(in oklch,var(--muted-foreground) 32%,transparent);border-top-color:var(--primary);animation:rot .7s linear infinite}
+@keyframes rot{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation-duration:2.4s}}
+
+/* ---------- shimmer (step 6 only) ---------- */
+.shimmer{background:linear-gradient(90deg,var(--muted-foreground) 8%,var(--active-strong) 40%,var(--active) 52%,var(--muted-foreground) 84%);background-size:220% 100%;-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;animation:sh 2s linear infinite;font-weight:600}
+@keyframes sh{0%{background-position:130% 0}100%{background-position:-30% 0}}
+@media (prefers-reduced-motion:reduce){.shimmer{animation:none;-webkit-text-fill-color:currentColor;color:var(--active-strong);background:none}}
+.orb{position:relative;width:9px;height:9px;flex:none;border-radius:50%;background:var(--active);animation:orbp 1.7s ease-out infinite}
+@keyframes orbp{0%{box-shadow:0 0 0 0 color-mix(in oklch,var(--active) 55%,transparent)}70%{box-shadow:0 0 0 8px transparent}100%{box-shadow:0 0 0 0 transparent}}
+
+/* ---------- task timeline ---------- */
+.tl{display:flex;flex-direction:column}
+.ev{display:grid;grid-template-columns:14px minmax(0,1fr) auto;gap:11px;align-items:center;padding:9px 0;font-size:13px}
+.ev + .ev{border-top:1px solid var(--border)}
+.ev .dot{width:9px;height:9px;border-radius:50%;background:var(--border);margin-left:3px}
+.ev .tm{font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
+.ev.pending{color:var(--muted-foreground)}
+.ev.on .dot{background:var(--active)}
+.ev.ok .dot{background:var(--success)}
+.celebrate{display:flex;gap:13px;align-items:center;border:1px solid color-mix(in oklch,var(--success) 32%,transparent);background:color-mix(in oklch,var(--success) 8%,transparent);border-radius:11px;padding:14px 16px;margin-top:12px}
+.celebrate .burst{width:34px;height:34px;flex:none;border-radius:50%;display:grid;place-items:center;background:color-mix(in oklch,var(--success) 18%,transparent);color:var(--success-strong);animation:pop .3s cubic-bezier(.2,0,0,1)}
+@keyframes pop{from{transform:scale(.6);opacity:0}to{transform:none;opacity:1}}
+.celebrate h4{margin:0 0 2px;font-size:14px;font-weight:600}
+.celebrate p{margin:0;font-size:12.5px;color:var(--muted-foreground)}
+
+/* ============ HOME SHELL (minimized) ============ */
+.home{display:none}
+body[data-state="minimized"] .home{display:grid;grid-template-columns:232px minmax(0,1fr);height:100dvh}
+.hsb{border-right:1px solid var(--border);background:var(--surface);padding:12px 10px;display:flex;flex-direction:column;gap:2px;overflow-y:auto}
+.hsb .hd{display:flex;align-items:center;gap:9px;padding:6px 8px 12px;margin-bottom:6px;border-bottom:1px solid var(--border)}
+.hsb .hd .nm{font-size:13px;font-weight:600;letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hsb .hd .st{font-family:var(--font-mono);font-size:10px;color:var(--muted-foreground)}
+.nav{display:flex;align-items:center;gap:10px;padding:7px 9px;border-radius:8px;font-size:13px;color:var(--muted-foreground);text-decoration:none;cursor:default}
+.nav:hover{background:var(--accent);color:var(--foreground)}
+.nav.on{background:color-mix(in oklch,var(--primary) 11%,transparent);color:var(--primary);font-weight:600}
+.hsb .grp{font-family:var(--font-mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted-foreground);padding:12px 9px 5px}
+.hmain{display:flex;flex-direction:column;min-width:0;overflow:hidden}
+.hbar{flex:none;display:flex;align-items:center;gap:12px;height:54px;padding:0 20px;border-bottom:1px solid var(--border)}
+.hbar .crumb{font-size:13.5px;font-weight:600}
+.hbody{flex:1;overflow-y:auto;padding:26px 24px 60px}
+.hwrap{max-width:900px;margin:0 auto}
+.greet{margin:0 0 4px;font-size:20px;font-weight:600;letter-spacing:-.02em}
+.greet + p{margin:0 0 22px;font-size:13.5px;color:var(--muted-foreground)}
+.setupcard{border:1px solid color-mix(in oklch,var(--primary) 30%,var(--border));background:var(--card);border-radius:13px;box-shadow:var(--shadow);overflow:hidden}
+.setupcard .sh{display:flex;align-items:flex-start;gap:12px;padding:16px 18px 14px}
+.setupcard h3{margin:0 0 3px;font-size:15px;font-weight:600;letter-spacing:-.01em}
+.setupcard .sd{margin:0;font-size:12.5px;color:var(--muted-foreground)}
+.bar{height:5px;border-radius:3px;background:var(--muted);overflow:hidden;margin:0 18px}
+.bar i{display:block;height:100%;background:var(--success);border-radius:3px;transition:width .3s cubic-bezier(.2,0,0,1)}
+.clist{list-style:none;margin:14px 0 0;padding:0;border-top:1px solid var(--border)}
+.clist li + li{border-top:1px solid color-mix(in oklch,var(--border) 60%,transparent)}
+.crow{width:100%;display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:11px;align-items:center;padding:10px 18px;background:transparent;border:0;font:inherit;color:inherit;text-align:left;cursor:pointer}
+.crow:hover{background:var(--accent)}
+.crow .cn{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-family:var(--font-mono);font-size:10px;font-weight:700;border:1px solid var(--border);color:var(--muted-foreground)}
+.crow[data-status="done"] .cn{background:color-mix(in oklch,var(--success) 14%,transparent);border-color:color-mix(in oklch,var(--success) 40%,transparent);color:var(--success-strong)}
+.crow .ct{display:block;font-size:13px;font-weight:500;line-height:1.3}
+.crow .cs{display:block;font-size:11.5px;color:var(--muted-foreground);margin-top:2px}
+.setupcard .sf{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:14px 18px;border-top:1px solid var(--border);background:color-mix(in oklch,var(--muted) 24%,var(--card))}
+.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:20px}
+.stat{border:1px solid var(--border);border-radius:11px;background:var(--card);padding:13px 14px}
+.stat .l{font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted-foreground)}
+.stat .v{font-size:20px;font-weight:600;margin-top:4px;font-variant-numeric:tabular-nums;color:color-mix(in oklch,var(--foreground) 45%,var(--muted-foreground))}
+
+/* ---------- dev panel ---------- */
+.dev{position:fixed;left:12px;bottom:12px;z-index:90;display:none;flex-direction:column;gap:7px;border:1px solid var(--border);background:var(--card);border-radius:10px;padding:10px;box-shadow:var(--shadow);font-size:11.5px}
+body[data-dev="1"] .dev{display:flex}
+.dev .t{font-family:var(--font-mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted-foreground)}
+.dev .r{display:flex;gap:5px;flex-wrap:wrap}
+.dev button{font:inherit;font-size:11px;height:24px;padding:0 7px;border-radius:6px;border:1px solid var(--border);background:var(--background);color:var(--foreground);cursor:pointer}
+.dev button:hover{background:var(--accent)}
+
+/* ============ RESPONSIVE ============ */
+@media (max-width:1100px){ :root{--rail:260px} .stage{padding:26px 24px 70px} }
+@media (max-width:900px){
+  .onb{height:auto;min-height:100dvh}
+  .topbar{position:sticky;top:0}
+  .shell{display:block;min-height:0}
+  .rail{position:sticky;top:54px;z-index:20;border-right:0;border-bottom:1px solid var(--border);padding:9px 0;overflow:visible;background:color-mix(in oklch,var(--surface) 92%,transparent);backdrop-filter:blur(10px)}
+  .rail-kicker,.rail-foot{display:none}
+  .steps{flex-direction:row;gap:7px;overflow-x:auto;padding:1px 12px;scrollbar-width:none}
+  .steps::-webkit-scrollbar{display:none}
+  .steps::before{display:none}
+  .steps li{flex:none}
+  .step{width:auto;grid-template-columns:22px auto;gap:8px;align-items:center;padding:6px 11px 6px 7px;border-color:var(--border);background:var(--card);white-space:nowrap}
+  .step .num{width:22px;height:22px;font-size:10px}
+  .step .s,.step .tick{display:none}
+  .step .t{font-size:12.5px}
+  .stage{overflow:visible;padding:20px 14px 64px}
+  .grid2,.grid3,.tiles,.readout{grid-template-columns:minmax(0,1fr)}
+  .stack2{grid-template-columns:minmax(0,1fr) !important}
+  .title{font-size:20px}
+  body[data-state="minimized"] .home{grid-template-columns:minmax(0,1fr)}
+  .hsb{display:none}
+  .stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .hbody{padding:20px 14px 60px}
+}
+@media (max-width:560px){
+  .prog .txt .lbl{display:none}
+  .brandbox .sub{display:none}
+  .btn .lbl{display:none}
+  .btn.keeplbl .lbl{display:inline}
+  .topbar{gap:8px;padding:0 12px}
+  .prog{padding-left:10px;margin-left:2px}
+  .ticks i{width:11px}
+}
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M6.3 17.7l-1.4 1.4M19.1 4.9l-1.4 1.4"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+  <symbol id="i-min" viewBox="0 0 24 24"><path d="M8 3v3a2 2 0 0 1-2 2H3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M16 21v-3a2 2 0 0 1 2-2h3"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+  <symbol id="i-ext" viewBox="0 0 24 24"><path d="M15 3h6v6M10 14 21 3M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-eyeoff" viewBox="0 0 24 24"><path d="M10.6 5.1A9.9 9.9 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3 3.9M6.6 6.6A17 17 0 0 0 2 12s3.5 7 10 7a9.6 9.6 0 0 0 5.4-1.6M2 2l20 20"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></symbol>
+  <symbol id="i-warn" viewBox="0 0 24 24"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5"/></symbol>
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 10 9-7 9 7v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><path d="M9 22V12h6v10"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></symbol>
+  <symbol id="i-bot" viewBox="0 0 24 24"><rect x="3" y="8" width="18" height="12" rx="2"/><path d="M12 8V4M8 14h.01M16 14h.01"/></symbol>
+  <symbol id="i-flow" viewBox="0 0 24 24"><rect x="3" y="3" width="6" height="6" rx="1"/><rect x="15" y="15" width="6" height="6" rx="1"/><path d="M6 9v4a2 2 0 0 0 2 2h7"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 7.9 19.4l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.6 1.6 0 0 0 3 15.4a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.1-2.7l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 2.8-1.1V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 2.7 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0 1.1 2.7H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1Z"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="m6 4 14 8-14 8Z"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z"/></symbol>
+</svg>
+
+<!-- =================== FULL PAGE ONBOARDING =================== -->
+<div class="onb">
+
+  <header class="topbar">
+    <div class="brandbox">
+      <span class="mark" id="tbMark">YS</span>
+      <span class="nm" id="tbName">Your Swarm</span>
+      <span class="sub">Setup</span>
+    </div>
+    <div class="prog">
+      <span class="ticks" id="tbTicks"></span>
+      <span class="txt"><b id="tbCount">0</b> of 6 <span class="lbl">verified</span></span>
+    </div>
+    <div class="sp"></div>
+    <button class="btn icon-btn" id="themeBtn" title="Toggle theme" aria-label="Toggle theme"><svg class="i"><use href="#i-moon"/></svg></button>
+    <button class="btn" id="minBtn" title="Minimize to the dashboard"><svg class="i"><use href="#i-min"/></svg><span class="lbl">Minimize</span></button>
+  </header>
+
+  <div class="shell">
+
+    <!-- ---------------- RAIL ---------------- -->
+    <nav class="rail" aria-label="Setup steps">
+      <p class="rail-kicker">Setup checklist</p>
+      <ol class="steps" id="railSteps"></ol>
+      <div class="rail-foot">
+        <span class="k" id="railCount">0 of 6 verified</span>
+        <p>Progress is saved per step. Minimize at any point and pick it up from the dashboard.</p>
+        <a class="linkish" href="https://docs.agent-swarm.dev" target="_blank" rel="noreferrer"><svg class="i sm"><use href="#i-book"/></svg>Read the setup docs</a>
+      </div>
+    </nav>
+
+    <!-- ---------------- STAGE ---------------- -->
+    <main class="stage" id="stage">
+      <div class="stagewrap">
+
+        <!-- ========== STEP 1 ========== -->
+        <section class="stepview" data-panel="1" aria-label="Connect">
+          <p class="eyebrow">Step 1 of 6</p>
+          <h2 class="title">Connect to your API server</h2>
+          <p class="lead">This dashboard is a client. Point it at one Agent Swarm API and verify the connection before anything else. Nothing is stored on the server side.</p>
+
+          <div class="card">
+            <div class="card-h">
+              <span class="mk">01</span>
+              <div><h3>Connection</h3><p class="d">The dashboard probes <span class="mono">GET /health</span> with your key.</p></div>
+              <div class="sp"></div>
+              <span class="pill" id="p1Pill">Not tested</span>
+            </div>
+            <div class="card-b">
+              <div class="grid2">
+                <div class="field">
+                  <label for="f1name">Connection name</label>
+                  <input class="in" id="f1name" placeholder="amber-hive-04" />
+                </div>
+                <div class="field">
+                  <label for="f1url">API URL</label>
+                  <input class="in mono" id="f1url" value="http://localhost:3013" />
+                </div>
+              </div>
+              <div class="field">
+                <label for="f1key">API key</label>
+                <div class="inrow">
+                  <input class="in mono" id="f1key" type="password" value="sk-swarm-…••••" />
+                  <button class="btn icon-btn" id="f1eye" title="Show key" aria-label="Show key"><svg class="i"><use href="#i-eye"/></svg></button>
+                  <button class="btn icon-btn" data-copy="AGENT_SWARM_API_KEY" title="Copy" aria-label="Copy key"><svg class="i"><use href="#i-copy"/></svg></button>
+                </div>
+                <p class="hint">The server prints this on boot. It is the value of <code>AGENT_SWARM_API_KEY</code>, and it stays in this browser.</p>
+              </div>
+
+              <div class="callout hide" id="p1Result">
+                <svg class="i"><use href="#i-check"/></svg>
+                <div style="flex:1;min-width:0">
+                  <b>Connection verified.</b> Saved as <span class="mono" id="p1SavedName">amber-hive-04</span>.
+                  <dl class="readout" style="margin-top:10px">
+                    <div><dt>Status</dt><dd>healthy</dd></div>
+                    <div><dt>Version</dt><dd>v1.154.0</dd></div>
+                    <div><dt>Round trip</dt><dd>42 ms</dd></div>
+                  </dl>
+                </div>
+              </div>
+
+              <div class="foot">
+                <button class="btn primary keeplbl" id="p1Test" data-busy="Probing /health"><span class="lbl">Test connection</span></button>
+                <span class="hint">No worker is needed yet.</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="callout info" style="margin-top:12px">
+            <svg class="i"><use href="#i-info"/></svg>
+            <div>Running the API on this machine? Start it with <span class="mono">bun run start:http</span>, then leave the URL at <span class="mono">http://localhost:3013</span>.</div>
+          </div>
+        </section>
+
+        <!-- ========== STEP 2 ========== -->
+        <section class="stepview" data-panel="2" aria-label="Name your swarm">
+          <p class="eyebrow">Step 2 of 6</p>
+          <h2 class="title">Name your swarm</h2>
+          <p class="lead">The name and mark show up in the sidebar, in Slack replies and on every shared page. You can change both later in Settings.</p>
+
+          <div class="grid2 stack2" style="grid-template-columns:minmax(0,1fr) 262px;align-items:start;gap:14px">
+            <div class="card" style="margin:0">
+              <div class="card-h">
+                <span class="mk">02</span>
+                <div><h3>Identity</h3><p class="d">Name is required. Logo and color are optional.</p></div>
+              </div>
+              <div class="card-b">
+                <div class="field">
+                  <label for="f2name">Swarm name</label>
+                  <input class="in" id="f2name" value="Your Swarm" />
+                </div>
+                <div class="field">
+                  <label for="f2logo">Logo URL</label>
+                  <input class="in mono" id="f2logo" placeholder="https://acme.dev/mark.png" />
+                  <p class="hint">Square image, 64px or larger. Leave empty to use the initials mark.</p>
+                </div>
+                <div class="field">
+                  <label>Brand color</label>
+                  <div class="swatches" id="f2sw">
+                    <button class="sw" data-c="" style="background:var(--primary)" aria-pressed="true" title="Hive amber"></button>
+                    <button class="sw" data-c="oklch(0.696 0.17 162.48)" style="background:oklch(0.696 0.17 162.48)" aria-pressed="false" title="Emerald"></button>
+                    <button class="sw" data-c="oklch(0.685 0.169 237.323)" style="background:oklch(0.685 0.169 237.323)" aria-pressed="false" title="Sky"></button>
+                    <button class="sw" data-c="oklch(0.606 0.25 292.717)" style="background:oklch(0.606 0.25 292.717)" aria-pressed="false" title="Violet"></button>
+                    <button class="sw" data-c="oklch(0.645 0.246 16.439)" style="background:oklch(0.645 0.246 16.439)" aria-pressed="false" title="Rose"></button>
+                    <button class="sw" data-c="oklch(0.442 0.017 285.786)" style="background:oklch(0.442 0.017 285.786)" aria-pressed="false" title="Graphite"></button>
+                    <span class="pill mono" id="f2swName" style="text-transform:none;letter-spacing:0;font-family:var(--font-mono)">hive amber</span>
+                  </div>
+                  <p class="hint">Color paints the mark only. Amber stays the accent for anything interactive.</p>
+                </div>
+                <div class="foot">
+                  <button class="btn primary keeplbl" id="p2Save" data-busy="Saving"><span class="lbl">Save name</span></button>
+                  <button class="btn ghost keeplbl" id="p2Keep"><span class="lbl">Keep the default</span></button>
+                </div>
+              </div>
+            </div>
+
+            <div class="preview">
+              <div class="cap">Sidebar preview</div>
+              <div class="pv-sb">
+                <div class="pv-head">
+                  <span class="mark" id="pvMark">YS</span>
+                  <div style="min-width:0">
+                    <div class="nm" id="pvName">Your Swarm</div>
+                    <div class="st"><i></i>2 agents idle</div>
+                  </div>
+                </div>
+                <div class="pv-row on"><svg class="i sm"><use href="#i-home"/></svg>Home</div>
+                <div class="pv-row"><svg class="i sm"><use href="#i-list"/></svg>Tasks</div>
+                <div class="pv-row"><svg class="i sm"><use href="#i-bot"/></svg>Agents</div>
+                <div class="pv-row"><svg class="i sm"><use href="#i-flow"/></svg>Workflows</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ========== STEP 3 ========== -->
+        <section class="stepview" data-panel="3" aria-label="AI provider">
+          <p class="eyebrow">Step 3 of 6</p>
+          <h2 class="title">Connect an AI provider</h2>
+          <p class="lead">Workers run one coding harness. Connect at least one provider now. More can be added later without touching the workers.</p>
+
+          <!-- Claude -->
+          <div class="card" style="margin-top:0">
+            <div class="card-h">
+              <span class="mk">C</span>
+              <div><h3>Claude</h3><p class="d">Claude Code. Use an API key or a setup token from an existing subscription.</p></div>
+              <div class="sp"></div>
+              <span class="pill" id="pvClaudePill">Not connected</span>
+            </div>
+            <div class="card-b">
+              <div class="seg" id="claudeSeg" role="group" aria-label="Claude credential type">
+                <button type="button" aria-pressed="true" data-mode="key">API key</button>
+                <button type="button" aria-pressed="false" data-mode="token">Setup token</button>
+              </div>
+              <div class="field">
+                <label for="f3claude" id="f3claudeLabel">Anthropic API key</label>
+                <input class="in mono" id="f3claude" type="password" value="sk-ant-…••••" />
+                <p class="hint" id="f3claudeHint">Starts with <code>sk-ant-</code>. Billing runs through your Anthropic account.</p>
+              </div>
+              <div class="foot">
+                <button class="btn primary keeplbl" data-test="claude" data-busy="Testing"><span class="lbl">Test Claude</span></button>
+                <span class="hint">Sends one 4 token completion.</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Codex -->
+          <div class="card">
+            <div class="card-h">
+              <span class="mk">Cx</span>
+              <div><h3>Codex</h3><p class="d">Sign in to ChatGPT with a device code. No key to paste.</p></div>
+              <div class="sp"></div>
+              <span class="pill run" id="pvCodexPill">Waiting</span>
+            </div>
+            <div class="card-b">
+              <div class="devbox">
+                <div>
+                  <div class="devcode" id="codexCode">FJ7Q-2LMA</div>
+                  <div class="meta">Expires in <span id="codexTimer">09:42</span></div>
+                </div>
+                <div class="sp"></div>
+                <button class="btn keeplbl" data-copy="device-code"><svg class="i"><use href="#i-copy"/></svg><span class="lbl">Copy code</span></button>
+              </div>
+
+              <div class="row">
+                <a class="btn primary keeplbl" href="https://auth.openai.com/codex/device" target="_blank" rel="noreferrer"><svg class="i"><use href="#i-ext"/></svg><span class="lbl">Open device page</span></a>
+                <span class="hint">Then enter the code at <span class="mono">auth.openai.com/codex/device</span></span>
+              </div>
+
+              <div class="polling" id="codexPolling"><span class="spin"></span>Polling for approval. This page updates on its own.</div>
+
+              <div class="callout info">
+                <svg class="i"><use href="#i-info"/></svg>
+                <div>Enable <b>Allow device code login</b> in ChatGPT Settings, under Security. Without it the code is rejected.</div>
+              </div>
+
+              <details class="more">
+                <summary><svg class="i sm chev"><use href="#i-chev"/></svg>Other ways to sign in</summary>
+                <div class="body">
+                  <div class="field">
+                    <label for="f3codexurl">Paste the redirected URL</label>
+                    <input class="in mono" id="f3codexurl" placeholder="http://localhost:1455/auth/callback?code=…" />
+                    <p class="hint">Use this when the browser cannot reach this machine.</p>
+                  </div>
+                  <div class="field">
+                    <label>Or run it from your terminal</label>
+                    <div class="codewrap">
+                      <pre class="code pad">npx @desplega.ai/agent-swarm codex-login</pre>
+                      <button class="btn icon-btn sm copy" data-copy="codex-login" title="Copy" aria-label="Copy command"><svg class="i sm"><use href="#i-copy"/></svg></button>
+                    </div>
+                  </div>
+                </div>
+              </details>
+
+              <div class="foot">
+                <button class="btn primary keeplbl" data-test="codex" data-busy="Checking"><span class="lbl">Check approval</span></button>
+                <button class="btn ghost keeplbl" id="codexNew"><svg class="i"><use href="#i-refresh"/></svg><span class="lbl">New code</span></button>
+              </div>
+            </div>
+          </div>
+
+          <!-- OpenRouter -->
+          <div class="card">
+            <div class="card-h">
+              <span class="mk">OR</span>
+              <div><h3>OpenRouter</h3><p class="d">One key, many models. Good for mixed fleets.</p></div>
+              <div class="sp"></div>
+              <span class="pill" id="pvOrPill">Not connected</span>
+            </div>
+            <div class="card-b">
+              <div class="field">
+                <label for="f3or">OpenRouter API key</label>
+                <input class="in mono" id="f3or" type="password" value="sk-or-v1-…••••" />
+                <p class="hint">Also reusable for memory embeddings in the next step.</p>
+              </div>
+              <div class="foot">
+                <button class="btn primary keeplbl" data-test="openrouter" data-busy="Testing"><span class="lbl">Test OpenRouter</span></button>
+              </div>
+            </div>
+          </div>
+
+          <div class="row" style="margin-top:14px">
+            <button class="linkish">More providers (OpenAI, Bedrock, Claude Managed)<svg class="i sm"><use href="#i-arrow"/></svg></button>
+          </div>
+        </section>
+
+        <!-- ========== STEP 4 ========== -->
+        <section class="stepview" data-panel="4" aria-label="Memory">
+          <p class="eyebrow">Step 4 of 6</p>
+          <h2 class="title">Turn on memory</h2>
+          <p class="lead">Embeddings let agents recall earlier work instead of restarting cold on every task. Any OpenAI compatible embeddings endpoint works.</p>
+
+          <div class="card">
+            <div class="card-h">
+              <span class="mk">04</span>
+              <div><h3>Embeddings</h3><p class="d">Pick a preset, or point at your own endpoint.</p></div>
+              <div class="sp"></div>
+              <span class="pill" id="p4Pill">Off</span>
+            </div>
+            <div class="card-b">
+              <div class="tiles" id="memTiles">
+                <button class="tile" aria-pressed="true" data-mem="OpenAI" data-model="text-embedding-3-small"><span class="tn">OpenAI <span class="pill info">Default</span></span><span class="ts">text-embedding-3-small</span></button>
+                <button class="tile" aria-pressed="false" data-mem="OpenRouter" data-model="openai/text-embedding-3-small"><span class="tn">OpenRouter</span><span class="ts">openai/text-embedding-3-small</span></button>
+                <button class="tile" aria-pressed="false" data-mem="Vercel AI Gateway" data-model="openai/text-embedding-3-small"><span class="tn">Vercel AI Gateway</span><span class="ts">ai-gateway.vercel.sh/v1</span></button>
+                <button class="tile" aria-pressed="false" data-mem="Custom" data-model="your-model"><span class="tn">Custom</span><span class="ts">your own base URL</span></button>
+              </div>
+
+              <div class="grid2 hide" id="memCustom">
+                <div class="field"><label for="f4base">Base URL</label><input class="in mono" id="f4base" placeholder="https://embeddings.internal/v1" /></div>
+                <div class="field"><label for="f4model">Model</label><input class="in mono" id="f4model" placeholder="bge-large-en-v1.5" /></div>
+              </div>
+
+              <div class="field">
+                <label for="f4key">API key</label>
+                <input class="in mono" id="f4key" type="password" value="sk-…••••" />
+                <div class="row" style="gap:8px">
+                  <button class="chipbtn hide" id="memReuse"><svg class="i sm"><use href="#i-check"/></svg>Reuse the OpenRouter key from step 3</button>
+                </div>
+                <p class="hint">Any OpenAI compatible embeddings endpoint works. The key is stored encrypted on the API server.</p>
+              </div>
+
+              <div class="callout ok hide" id="p4Result">
+                <svg class="i"><use href="#i-check"/></svg>
+                <div><b>Embedding returned.</b> 1536 dimensions in 210 ms. Memory is on for every agent.</div>
+              </div>
+              <div class="callout warn hide" id="p4Warn">
+                <svg class="i"><use href="#i-warn"/></svg>
+                <div><b>Memory stays off.</b> Agents will not remember across tasks. Turn it on later in Settings, under Memory.</div>
+              </div>
+
+              <div class="foot">
+                <button class="btn primary keeplbl" id="p4Test" data-busy="Embedding"><span class="lbl">Test embedding</span></button>
+                <button class="btn ghost keeplbl" id="p4Skip"><span class="lbl">Skip memory</span></button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ========== STEP 5 ========== -->
+        <section class="stepview" data-panel="5" aria-label="Integrations">
+          <p class="eyebrow">Step 5 of 6</p>
+          <h2 class="title">Connect your integrations</h2>
+          <p class="lead">All optional. Connect the places your team already works so tasks arrive where the conversation happens.</p>
+
+          <div class="card" style="margin-top:0">
+            <div class="card-h">
+              <span class="mk">S</span>
+              <div><h3>Slack</h3><p class="d">Mention the bot in a channel to hand work to the swarm.</p></div>
+              <div class="sp"></div>
+              <span class="pill" data-intpill="slack">Not connected</span>
+            </div>
+            <div class="card-b">
+              <div class="row">
+                <button class="btn keeplbl" id="slackManifest"><svg class="i"><use href="#i-ext"/></svg><span class="lbl">Create Slack app from manifest</span></button>
+                <span class="hint">Pre-filled with the name <b id="slackName">Your Swarm</b>.</span>
+              </div>
+              <div class="grid3">
+                <div class="field"><label for="f5bot">Bot token</label><input class="in mono" id="f5bot" type="password" value="xoxb-…••••" /></div>
+                <div class="field"><label for="f5app">App token</label><input class="in mono" id="f5app" type="password" value="xapp-…••••" /></div>
+                <div class="field"><label for="f5sign">Signing secret</label><input class="in mono" id="f5sign" type="password" value="••••••••" /></div>
+              </div>
+              <div class="foot">
+                <button class="btn primary keeplbl" data-int="slack" data-busy="Connecting"><span class="lbl">Connect Slack</span></button>
+                <span class="hint">Socket mode. No public URL needed.</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid2" style="margin-top:12px">
+            <div class="card" style="margin:0">
+              <div class="card-h">
+                <span class="mk">GH</span>
+                <div><h3>GitHub</h3></div>
+                <div class="sp"></div>
+                <span class="pill" data-intpill="github">Not connected</span>
+              </div>
+              <div class="card-b">
+                <div class="field"><label for="f5gh">Personal access token</label><input class="in mono" id="f5gh" type="password" value="ghp_…••••" /><p class="hint">Scopes: <code>repo</code>, <code>read:org</code>.</p></div>
+                <div class="foot"><button class="btn primary keeplbl" data-int="github" data-busy="Connecting"><span class="lbl">Connect GitHub</span></button></div>
+              </div>
+            </div>
+
+            <div class="card" style="margin:0">
+              <div class="card-h">
+                <span class="mk">GL</span>
+                <div><h3>GitLab</h3></div>
+                <div class="sp"></div>
+                <span class="pill" data-intpill="gitlab">Not connected</span>
+              </div>
+              <div class="card-b">
+                <div class="field"><label for="f5gl">Project access token</label><input class="in mono" id="f5gl" type="password" value="glpat-…••••" /><p class="hint">Scopes: <code>api</code>, <code>write_repository</code>.</p></div>
+                <div class="foot"><button class="btn primary keeplbl" data-int="gitlab" data-busy="Connecting"><span class="lbl">Connect GitLab</span></button></div>
+              </div>
+            </div>
+
+            <div class="card" style="margin:0">
+              <div class="card-h">
+                <span class="mk">Ln</span>
+                <div><h3>Linear</h3></div>
+                <div class="sp"></div>
+                <span class="pill" data-intpill="linear">Not connected</span>
+              </div>
+              <div class="card-b">
+                <p class="hint">Authorize once. Issues assigned to the swarm become tasks.</p>
+                <div class="foot" style="border:0;padding-top:0"><button class="btn primary keeplbl" data-int="linear" data-busy="Authorizing"><svg class="i"><use href="#i-ext"/></svg><span class="lbl">Connect Linear</span></button></div>
+              </div>
+            </div>
+
+            <div class="card" style="margin:0">
+              <div class="card-h">
+                <span class="mk">Jr</span>
+                <div><h3>Jira</h3></div>
+                <div class="sp"></div>
+                <span class="pill" data-intpill="jira">Not connected</span>
+              </div>
+              <div class="card-b">
+                <p class="hint">Authorize once. Pick the projects the swarm may read on the next screen.</p>
+                <div class="foot" style="border:0;padding-top:0"><button class="btn primary keeplbl" data-int="jira" data-busy="Authorizing"><svg class="i"><use href="#i-ext"/></svg><span class="lbl">Connect Jira</span></button></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="row" style="margin-top:16px">
+            <button class="linkish">More integrations<svg class="i sm"><use href="#i-arrow"/></svg></button>
+            <div class="sp"></div>
+            <button class="btn ghost keeplbl" id="p5Skip"><span class="lbl">Skip for now</span></button>
+          </div>
+        </section>
+
+        <!-- ========== STEP 6 ========== -->
+        <section class="stepview" data-panel="6" aria-label="First task">
+          <p class="eyebrow">Step 6 of 6</p>
+          <h2 class="title">Run your first task</h2>
+          <p class="lead" id="p6Lead">A worker is the machine that does the work. Start one, then hand it a small task and watch it run.</p>
+
+          <!-- (a) no worker -->
+          <div id="p6NoWorker">
+            <div class="card" style="margin-top:0">
+              <div class="card-h">
+                <span class="mk">06</span>
+                <div><h3>Start a worker</h3><p class="d">Run this on any machine with Docker. It registers itself with the API.</p></div>
+              </div>
+              <div class="card-b">
+                <div class="codewrap">
+                  <pre class="code pad" id="dockerCmd">docker run -d --name swarm-worker \
+  -e MCP_BASE_URL=http://localhost:3013 \
+  -e AGENT_SWARM_API_KEY=sk-swarm-…•••• \
+  -e HARNESS_PROVIDER=claude \
+  ghcr.io/desplega-ai/agent-swarm-worker:latest</pre>
+                  <button class="btn icon-btn copy" data-copy="docker" title="Copy command" aria-label="Copy command"><svg class="i"><use href="#i-copy"/></svg></button>
+                </div>
+                <p class="hint">The URL, key and provider above match what you verified in steps 1 and 3.</p>
+
+                <div class="callout">
+                  <span class="orb" style="margin-top:4px"></span>
+                  <div style="flex:1;min-width:0">
+                    <div class="shimmer">Waiting for a worker to check in</div>
+                    <div class="hint mono" style="margin-top:3px">polling /api/agents every 3s</div>
+                  </div>
+                  <button class="btn sm" id="p6Check" data-busy="Checking"><span class="lbl">Check again</span></button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- (b) worker alive -->
+          <div id="p6Worker" class="hide">
+            <div class="card" style="margin-top:0">
+              <div class="card-h">
+                <span class="mk">06</span>
+                <div><h3>Say hello</h3><p class="d">One small task, end to end, so you can see the whole loop.</p></div>
+                <div class="sp"></div>
+                <span class="pill ok"><svg class="i sm"><use href="#i-check"/></svg>Worker online</span>
+              </div>
+              <div class="card-b">
+                <div class="callout">
+                  <span style="width:9px;height:9px;border-radius:50%;background:var(--success);margin-top:5px;flex:none"></span>
+                  <div><b class="mono">worker-01</b> <span class="hint">idle · docker · claude · joined 4s ago</span></div>
+                </div>
+
+                <div class="field">
+                  <label for="f6task">Task</label>
+                  <input class="in" id="f6task" value="Say hello and list the tools you can use." />
+                </div>
+
+                <div class="hide" id="p6TaskCard">
+                  <div class="card" style="margin:0;box-shadow:none">
+                    <div class="card-h" style="padding:11px 14px">
+                      <span class="mono" style="font-size:11.5px;color:var(--muted-foreground)">task_8f3a2c</span>
+                      <div class="sp"></div>
+                      <span class="pill run" id="p6TaskPill">Running</span>
+                    </div>
+                    <div class="card-b" style="padding:6px 14px 12px">
+                      <div class="tl">
+                        <div class="ev ok" id="ev1"><span class="dot"></span><span>Task created and queued</span><span class="tm">00:00</span></div>
+                        <div class="ev pending" id="ev2"><span class="dot"></span><span id="ev2t">Claimed by worker-01</span><span class="tm" id="ev2m">waiting</span></div>
+                        <div class="ev pending" id="ev3"><span class="dot"></span><span>Completed</span><span class="tm" id="ev3m">waiting</span></div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="celebrate hide" id="p6Done">
+                    <span class="burst"><svg class="i lg"><use href="#i-check"/></svg></span>
+                    <div>
+                      <h4>Your swarm is live.</h4>
+                      <p>First task completed in 6.2s for $0.004. Everything else is in the dashboard.</p>
+                    </div>
+                    <div class="sp"></div>
+                    <button class="btn primary keeplbl" id="p6Go"><span class="lbl">Go to dashboard</span></button>
+                  </div>
+                </div>
+
+                <div class="foot">
+                  <button class="btn primary keeplbl" id="p6Send" data-busy="Sending"><svg class="i"><use href="#i-play"/></svg><span class="lbl">Send a hello task</span></button>
+                  <span class="hint">Costs a fraction of a cent.</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </main>
+  </div>
+</div>
+
+<!-- =================== HOME SHELL (minimized) =================== -->
+<div class="home">
+  <aside class="hsb">
+    <div class="hd">
+      <span class="mark" id="hMark">YS</span>
+      <div style="min-width:0"><div class="nm" id="hName">Your Swarm</div><div class="st">localhost:3013</div></div>
+    </div>
+    <a class="nav on"><svg class="i sm"><use href="#i-home"/></svg>Home</a>
+    <a class="nav"><svg class="i sm"><use href="#i-list"/></svg>Tasks</a>
+    <a class="nav"><svg class="i sm"><use href="#i-bot"/></svg>Agents</a>
+    <a class="nav"><svg class="i sm"><use href="#i-flow"/></svg>Workflows</a>
+    <div class="grp">Configure</div>
+    <a class="nav"><svg class="i sm"><use href="#i-gear"/></svg>Settings</a>
+  </aside>
+  <div class="hmain">
+    <header class="hbar">
+      <span class="crumb">Home</span>
+      <div class="sp"></div>
+      <button class="btn icon-btn" id="themeBtn2" title="Toggle theme" aria-label="Toggle theme"><svg class="i"><use href="#i-moon"/></svg></button>
+    </header>
+    <div class="hbody">
+      <div class="hwrap">
+        <h1 class="greet">Good afternoon</h1>
+        <p>Nothing is running. Finish the setup and the swarm can take work.</p>
+
+        <section class="setupcard">
+          <div class="sh">
+            <div style="flex:1;min-width:0">
+              <h3>Finish setting up your swarm</h3>
+              <p class="sd" id="hSub">3 of 6 verified. Pick up where you left off.</p>
+            </div>
+            <span class="pill run" id="hPill">In progress</span>
+          </div>
+          <div class="bar"><i id="hBar" style="width:50%"></i></div>
+          <ul class="clist" id="hList"></ul>
+          <div class="sf">
+            <button class="btn primary keeplbl" id="resumeBtn"><span class="lbl">Resume setup</span><svg class="i"><use href="#i-arrow"/></svg></button>
+            <button class="btn ghost keeplbl"><span class="lbl">Dismiss</span></button>
+            <div class="sp"></div>
+            <span class="hint" id="hLeft">About 4 minutes left.</span>
+          </div>
+        </section>
+
+        <div class="stats">
+          <div class="stat"><div class="l">Agents</div><div class="v">0</div></div>
+          <div class="stat"><div class="l">Tasks today</div><div class="v">0</div></div>
+          <div class="stat"><div class="l">Spend today</div><div class="v">$0.00</div></div>
+          <div class="stat"><div class="l">Memories</div><div class="v">0</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- =================== DEV PANEL =================== -->
+<div class="dev" id="dev">
+  <span class="t">Mock controls (press d)</span>
+  <div class="r" id="devSteps"></div>
+  <div class="r">
+    <button data-dev="all">All verified</button>
+    <button data-dev="reset">Reset</button>
+    <button data-dev="worker">Toggle worker</button>
+    <button data-dev="min">Minimize</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var qsa = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+
+  /* ---------------- state ---------------- */
+  var META = [null,
+    { title: "Connect",         todo: "Not connected" },
+    { title: "Name your swarm", todo: "Using the default name" },
+    { title: "AI provider",     todo: "No provider yet" },
+    { title: "Memory",          todo: "Embeddings off" },
+    { title: "Integrations",    todo: "Nothing connected" },
+    { title: "First task",      todo: "Waiting for worker" }
+  ];
+
+  var S = {
+    current: 1,
+    status: [null, "todo", "todo", "todo", "todo", "todo", "todo"],
+    detail: [null, "", "", "", "", "", ""],
+    name: "Your Swarm",
+    logo: "",
+    providers: [],
+    integrations: [],
+    worker: false,
+    memPreset: "OpenAI"
+  };
+
+  function initials(n) {
+    var w = (n || "").trim().split(/\s+/).filter(Boolean);
+    if (!w.length) return "YS";
+    if (w.length === 1) return w[0].slice(0, 2).toUpperCase();
+    return (w[0][0] + w[1][0]).toUpperCase();
+  }
+  function hostOf(u) { return (u || "").replace(/^https?:\/\//, "").replace(/\/+$/, "") || "localhost:3013"; }
+  function doneCount() { var c = 0; for (var i = 1; i <= 6; i++) if (S.status[i] === "done") c++; return c; }
+
+  function statusLine(n) {
+    var st = S.status[n];
+    if (st === "done") return S.detail[n] || "Verified";
+    if (st === "skipped") return "Skipped";
+    if (n === 6) return S.worker ? "Worker online, no task yet" : "Waiting for worker";
+    return META[n].todo;
+  }
+
+  /* ---------------- rail + home list ---------------- */
+  var railHTML = "", devHTML = "", homeHTML = "";
+  for (var i = 1; i <= 6; i++) {
+    railHTML += '<li><button class="step" data-go="' + i + '" data-status="todo">' +
+      '<span class="num" data-num="' + i + '">' + i + '</span>' +
+      '<span><span class="t">' + META[i].title + '</span><span class="s"></span></span>' +
+      '<svg class="i sm tick"><use href="#i-check"/></svg></button></li>';
+    homeHTML += '<li><button class="crow" data-go="' + i + '" data-status="todo">' +
+      '<span class="cn" data-num="' + i + '">' + i + '</span>' +
+      '<span><span class="ct">' + META[i].title + '</span><span class="cs"></span></span>' +
+      '<span class="pill"></span></button></li>';
+    devHTML += '<button data-dev="step" data-n="' + i + '">' + i + '</button>';
+  }
+  $("railSteps").innerHTML = railHTML;
+  $("hList").innerHTML = homeHTML;
+  $("devSteps").innerHTML = devHTML;
+
+  var CHECK = '<svg class="i sm"><use href="#i-check"/></svg>';
+
+  function render() {
+    var done = doneCount();
+
+    // rail
+    qsa("#railSteps .step").forEach(function (b) {
+      var n = +b.dataset.go;
+      b.dataset.status = S.status[n];
+      b.setAttribute("aria-current", n === S.current ? "true" : "false");
+      b.querySelector(".s").textContent = statusLine(n);
+      b.querySelector(".num").innerHTML = S.status[n] === "done" ? CHECK : String(n);
+    });
+
+    // top bar
+    $("tbCount").textContent = String(done);
+    $("railCount").textContent = done + " of 6 verified";
+    var ticks = "";
+    for (var n = 1; n <= 6; n++) {
+      var cls = S.status[n] === "done" ? "done" : S.status[n] === "skipped" ? "skipped" : (n === S.current ? "cur" : "");
+      ticks += '<i class="' + cls + '"></i>';
+    }
+    $("tbTicks").innerHTML = ticks;
+
+    // identity
+    var nm = S.name || "Your Swarm";
+    $("tbName").textContent = nm;
+    $("pvName").textContent = nm;
+    $("hName").textContent = nm;
+    $("slackName").textContent = nm;
+    [["tbMark"], ["pvMark"], ["hMark"]].forEach(function (p) {
+      var el = $(p[0]);
+      if (S.logo) el.innerHTML = '<img src="' + S.logo + '" alt="" />';
+      else el.textContent = initials(nm);
+    });
+
+    // panels
+    qsa(".stepview").forEach(function (p) { p.classList.toggle("on", +p.dataset.panel === S.current); });
+
+    // home checklist
+    qsa("#hList .crow").forEach(function (b) {
+      var n = +b.dataset.go;
+      b.dataset.status = S.status[n];
+      b.querySelector(".cs").textContent = statusLine(n);
+      b.querySelector(".cn").innerHTML = S.status[n] === "done" ? CHECK : String(n);
+      var pill = b.querySelector(".pill");
+      pill.className = "pill" + (S.status[n] === "done" ? " ok" : "");
+      pill.textContent = S.status[n] === "done" ? "Verified" : S.status[n] === "skipped" ? "Skipped" : "To do";
+    });
+    $("hSub").textContent = done + " of 6 verified. Pick up where you left off.";
+    $("hBar").style.width = Math.round((done / 6) * 100) + "%";
+    $("hPill").className = "pill " + (done === 6 ? "ok" : "run");
+    $("hPill").textContent = done === 6 ? "Complete" : "In progress";
+    $("hLeft").textContent = "About " + Math.max(1, (6 - done)) + " minutes left.";
+    $("resumeBtn").querySelector(".lbl").textContent = "Resume at step " + S.current;
+
+    // step 6 substate
+    $("p6NoWorker").classList.toggle("hide", S.worker);
+    $("p6Worker").classList.toggle("hide", !S.worker);
+    $("p6Lead").textContent = S.worker
+      ? "A worker is online and idle. Hand it one small task and watch the whole loop."
+      : "A worker is the machine that does the work. Start one, then hand it a small task and watch it run.";
+  }
+
+  function setStatus(n, st, detail) {
+    S.status[n] = st;
+    S.detail[n] = detail || "";
+    render();
+  }
+
+  function go(n) {
+    S.current = n;
+    render();
+    var st = $("stage"); if (st) st.scrollTop = 0;
+    window.scrollTo(0, 0);
+    var chip = document.querySelector('#railSteps .step[data-go="' + n + '"]');
+    if (chip && window.matchMedia("(max-width:900px)").matches) {
+      chip.scrollIntoView({ block: "nearest", inline: "center" });
+    }
+  }
+
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest("[data-go]");
+    if (!b) return;
+    document.body.dataset.state = "full";
+    go(+b.dataset.go);
+  });
+
+  /* ---------------- fake verification ---------------- */
+  function busy(btn, ms, cb) {
+    if (btn.dataset.running === "1") return;
+    btn.dataset.running = "1";
+    var old = btn.innerHTML;
+    btn.innerHTML = '<span class="spin"></span><span class="lbl">' + (btn.dataset.busy || "Working") + '</span>';
+    btn.classList.add("is-disabled");
+    setTimeout(function () {
+      btn.innerHTML = old;
+      btn.classList.remove("is-disabled");
+      btn.dataset.running = "";
+      cb();
+    }, ms || 800);
+  }
+
+  /* ---------------- step 1 ---------------- */
+  $("f1eye").addEventListener("click", function () {
+    var f = $("f1key"); var on = f.type === "password";
+    f.type = on ? "text" : "password";
+    this.innerHTML = '<svg class="i"><use href="#i-' + (on ? "eyeoff" : "eye") + '"/></svg>';
+  });
+  $("p1Test").addEventListener("click", function () {
+    var self = this;
+    busy(self, 850, function () {
+      var nm = $("f1name").value.trim() || "amber-hive-04";
+      $("p1SavedName").textContent = nm;
+      $("p1Result").classList.remove("hide");
+      $("p1Result").className = "callout ok";
+      $("p1Pill").className = "pill ok";
+      $("p1Pill").textContent = "Verified";
+      setStatus(1, "done", "Verified · " + hostOf($("f1url").value));
+      $("dockerCmd").textContent = $("dockerCmd").textContent.replace(/MCP_BASE_URL=\S+/, "MCP_BASE_URL=" + ($("f1url").value.trim() || "http://localhost:3013"));
+    });
+  });
+
+  /* ---------------- step 2 ---------------- */
+  $("f2name").addEventListener("input", function () { S.name = this.value; render(); });
+  $("f2logo").addEventListener("input", function () { S.logo = this.value.trim(); render(); });
+  qsa("#f2sw .sw").forEach(function (b) {
+    b.addEventListener("click", function () {
+      qsa("#f2sw .sw").forEach(function (x) { x.setAttribute("aria-pressed", "false"); });
+      b.setAttribute("aria-pressed", "true");
+      var c = b.dataset.c;
+      if (c) document.documentElement.style.setProperty("--brand", c);
+      else document.documentElement.style.removeProperty("--brand");
+      $("f2swName").textContent = (b.title || "hive amber").toLowerCase();
+    });
+  });
+  $("p2Save").addEventListener("click", function () {
+    var self = this;
+    busy(self, 700, function () { setStatus(2, "done", "Saved · " + (S.name || "Your Swarm")); });
+  });
+  $("p2Keep").addEventListener("click", function () {
+    $("f2name").value = "Your Swarm"; S.name = "Your Swarm";
+    setStatus(2, "done", "Saved · Your Swarm");
+  });
+
+  /* ---------------- step 3 ---------------- */
+  qsa("#claudeSeg button").forEach(function (b) {
+    b.addEventListener("click", function () {
+      qsa("#claudeSeg button").forEach(function (x) { x.setAttribute("aria-pressed", "false"); });
+      b.setAttribute("aria-pressed", "true");
+      var token = b.dataset.mode === "token";
+      $("f3claudeLabel").textContent = token ? "Setup token" : "Anthropic API key";
+      $("f3claude").value = token ? "sk-ant-oat01-…••••" : "sk-ant-…••••";
+      $("f3claudeHint").innerHTML = token
+        ? 'Run <code>claude setup-token</code> on a machine already signed in, then paste the result.'
+        : 'Starts with <code>sk-ant-</code>. Billing runs through your Anthropic account.';
+    });
+  });
+
+  var PROVIDERS = {
+    claude: { label: "Claude", pill: "pvClaudePill" },
+    codex: { label: "Codex", pill: "pvCodexPill" },
+    openrouter: { label: "OpenRouter", pill: "pvOrPill" }
+  };
+  qsa("[data-test]").forEach(function (b) {
+    b.addEventListener("click", function () {
+      var key = b.dataset.test, p = PROVIDERS[key], self = this;
+      busy(self, key === "codex" ? 1100 : 850, function () {
+        if (S.providers.indexOf(p.label) < 0) S.providers.push(p.label);
+        var pill = $(p.pill);
+        pill.className = "pill ok";
+        pill.innerHTML = CHECK + "Verified";
+        if (key === "codex") $("codexPolling").innerHTML = '<span style="color:var(--success-strong);display:inline-flex;gap:7px;align-items:center">' + CHECK + 'Approved in the browser. Token stored.</span>';
+        if (key === "openrouter") $("memReuse").classList.remove("hide");
+        setStatus(3, "done", "Verified · " + S.providers.join(", "));
+        $("dockerCmd").textContent = $("dockerCmd").textContent.replace(/HARNESS_PROVIDER=\S+/, "HARNESS_PROVIDER=" + (S.providers[0] || "claude").toLowerCase());
+      });
+    });
+  });
+  $("codexNew").addEventListener("click", function () {
+    var A = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789", s = "";
+    for (var i = 0; i < 8; i++) s += A[Math.floor(Math.random() * A.length)];
+    $("codexCode").textContent = s.slice(0, 4) + "-" + s.slice(4);
+    $("codexTimer").textContent = "10:00";
+    $("codexPolling").innerHTML = '<span class="spin"></span>Polling for approval. This page updates on its own.';
+    $("pvCodexPill").className = "pill run";
+    $("pvCodexPill").textContent = "Waiting";
+  });
+
+  /* ---------------- step 4 ---------------- */
+  qsa("#memTiles .tile").forEach(function (b) {
+    b.addEventListener("click", function () {
+      qsa("#memTiles .tile").forEach(function (x) { x.setAttribute("aria-pressed", "false"); });
+      b.setAttribute("aria-pressed", "true");
+      S.memPreset = b.dataset.mem;
+      $("memCustom").classList.toggle("hide", S.memPreset !== "Custom");
+    });
+  });
+  $("memReuse").addEventListener("click", function () {
+    $("f4key").value = "sk-or-v1-…••••";
+    this.innerHTML = CHECK + "Key reused from step 3";
+  });
+  $("p4Test").addEventListener("click", function () {
+    var self = this;
+    busy(self, 900, function () {
+      $("p4Result").classList.remove("hide");
+      $("p4Warn").classList.add("hide");
+      $("p4Pill").className = "pill ok";
+      $("p4Pill").innerHTML = CHECK + "On";
+      setStatus(4, "done", "Verified · " + S.memPreset);
+    });
+  });
+  $("p4Skip").addEventListener("click", function () {
+    $("p4Warn").classList.remove("hide");
+    $("p4Result").classList.add("hide");
+    $("p4Pill").className = "pill";
+    $("p4Pill").textContent = "Off";
+    setStatus(4, "skipped", "");
+  });
+
+  /* ---------------- step 5 ---------------- */
+  var INT = { slack: "Slack", github: "GitHub", gitlab: "GitLab", linear: "Linear", jira: "Jira" };
+  qsa("[data-int]").forEach(function (b) {
+    b.addEventListener("click", function () {
+      var k = b.dataset.int, self = this;
+      busy(self, 900, function () {
+        if (S.integrations.indexOf(INT[k]) < 0) S.integrations.push(INT[k]);
+        var pill = document.querySelector('[data-intpill="' + k + '"]');
+        pill.className = "pill ok";
+        pill.innerHTML = CHECK + "Connected";
+        var d = S.integrations.length > 2 ? "Connected · " + S.integrations.length + " apps" : "Connected · " + S.integrations.join(", ");
+        setStatus(5, "done", d);
+      });
+    });
+  });
+  $("p5Skip").addEventListener("click", function () { setStatus(5, "skipped", ""); });
+  $("slackManifest").addEventListener("click", function () {
+    this.innerHTML = '<svg class="i"><use href="#i-ext"/></svg><span class="lbl">Opened api.slack.com in a new tab</span>';
+  });
+
+  /* ---------------- step 6 ---------------- */
+  $("p6Check").addEventListener("click", function () {
+    var self = this;
+    busy(self, 900, function () { S.worker = true; render(); });
+  });
+  $("p6Send").addEventListener("click", function () {
+    var self = this;
+    self.classList.add("is-disabled");
+    $("p6TaskCard").classList.remove("hide");
+    $("ev2").className = "ev on"; $("ev2m").textContent = "00:01";
+    setTimeout(function () {
+      $("ev2").className = "ev ok"; $("ev2t").textContent = "Claimed by worker-01, running";
+      $("ev3").className = "ev on"; $("ev3m").textContent = "running";
+      $("p6TaskPill").className = "pill run"; $("p6TaskPill").textContent = "Running";
+    }, 800);
+    setTimeout(function () {
+      $("ev3").className = "ev ok"; $("ev3m").textContent = "00:06";
+      $("p6TaskPill").className = "pill ok"; $("p6TaskPill").innerHTML = CHECK + "Completed";
+      $("p6Done").classList.remove("hide");
+      self.classList.remove("is-disabled");
+      self.classList.remove("primary");
+      self.innerHTML = '<svg class="i"><use href="#i-play"/></svg><span class="lbl">Send another task</span>';
+      setStatus(6, "done", "Hello task completed");
+    }, 2200);
+  });
+  $("p6Go").addEventListener("click", function () { setMin(true); });
+
+  /* ---------------- copy buttons ---------------- */
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest("[data-copy]");
+    if (!b) return;
+    var map = {
+      "docker": $("dockerCmd").textContent,
+      "device-code": $("codexCode").textContent,
+      "codex-login": "npx @desplega.ai/agent-swarm codex-login",
+      "AGENT_SWARM_API_KEY": "sk-swarm-…••••"
+    };
+    try { navigator.clipboard.writeText(map[b.dataset.copy] || ""); } catch (err) { /* mock */ }
+    var old = b.innerHTML;
+    b.innerHTML = CHECK + (b.querySelector(".lbl") ? '<span class="lbl">Copied</span>' : "");
+    setTimeout(function () { b.innerHTML = old; }, 1200);
+  });
+
+  /* ---------------- minimize / resume ---------------- */
+  function setMin(on) {
+    document.body.dataset.state = on ? "minimized" : "full";
+    window.scrollTo(0, 0);
+    render();
+  }
+  $("minBtn").addEventListener("click", function () { setMin(true); });
+  $("resumeBtn").addEventListener("click", function () { setMin(false); go(S.current); });
+
+  /* ---------------- theme ---------------- */
+  var SUN = '<svg class="i"><use href="#i-sun"/></svg>', MOON = '<svg class="i"><use href="#i-moon"/></svg>';
+  function setTheme(t) {
+    document.documentElement.classList.toggle("dark", t === "dark");
+    var h = t === "dark" ? SUN : MOON;
+    $("themeBtn").innerHTML = h; $("themeBtn2").innerHTML = h;
+    try { localStorage.swarmOnbTheme = t; } catch (e) { /* ignore */ }
+  }
+  function toggleTheme() { setTheme(document.documentElement.classList.contains("dark") ? "light" : "dark"); }
+  $("themeBtn").addEventListener("click", toggleTheme);
+  $("themeBtn2").addEventListener("click", toggleTheme);
+
+  /* ---------------- dev panel ---------------- */
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "d" && !/^(INPUT|TEXTAREA)$/.test((e.target.tagName || ""))) {
+      document.body.dataset.dev = document.body.dataset.dev === "1" ? "" : "1";
+    }
+  });
+  var DEV_DETAIL = [null, "Verified · localhost:3013", "Saved · Your Swarm", "Verified · Claude", "Verified · OpenAI", "Connected · Slack", "Hello task completed"];
+  $("dev").addEventListener("click", function (e) {
+    var b = e.target.closest("button"); if (!b) return;
+    var a = b.dataset.dev;
+    if (a === "step") { setStatus(+b.dataset.n, S.status[+b.dataset.n] === "done" ? "todo" : "done", DEV_DETAIL[+b.dataset.n]); }
+    if (a === "all") { for (var i = 1; i <= 6; i++) { S.status[i] = "done"; S.detail[i] = DEV_DETAIL[i]; } S.worker = true; render(); }
+    if (a === "reset") { for (var j = 1; j <= 6; j++) { S.status[j] = "todo"; S.detail[j] = ""; } S.worker = false; render(); }
+    if (a === "worker") { S.worker = !S.worker; render(); }
+    if (a === "min") { setMin(document.body.dataset.state !== "minimized"); }
+  });
+
+  /* ---------------- boot / deep links ---------------- */
+  var q = new URLSearchParams(location.search);
+  var theme = q.get("theme");
+  if (theme !== "dark" && theme !== "light") { try { theme = localStorage.swarmOnbTheme || "light"; } catch (e) { theme = "light"; } }
+  setTheme(theme);
+
+  var minimized = q.get("state") === "minimized";
+  var step = parseInt(q.get("step"), 10);
+  if (!(step >= 1 && step <= 6)) step = minimized ? 4 : 1;
+
+  if (q.get("fresh") !== "1") {
+    // Mock convenience: arriving at step N implies the earlier steps were finished.
+    for (var k = 1; k < step; k++) { S.status[k] = "done"; S.detail[k] = DEV_DETAIL[k]; }
+    if (step > 1) { $("p1Result").classList.remove("hide"); $("p1Result").className = "callout ok"; $("p1Pill").className = "pill ok"; $("p1Pill").textContent = "Verified"; }
+    if (step > 2) { S.detail[2] = "Saved · Your Swarm"; }
+    if (step > 3) { S.providers = ["Claude"]; $("pvClaudePill").className = "pill ok"; $("pvClaudePill").innerHTML = CHECK + "Verified"; }
+    if (step > 4) { $("p4Result").classList.remove("hide"); $("p4Pill").className = "pill ok"; $("p4Pill").innerHTML = CHECK + "On"; }
+    if (step > 5) { S.integrations = ["Slack"]; var sp = document.querySelector('[data-intpill="slack"]'); sp.className = "pill ok"; sp.innerHTML = CHECK + "Connected"; }
+  }
+  if (q.get("worker") === "1") S.worker = true;
+  if (q.get("dev") === "1") document.body.dataset.dev = "1";
+
+  document.body.dataset.state = minimized ? "minimized" : "full";
+  S.current = step;
+  render();
+})();
+</script>
+</body>
+</html>

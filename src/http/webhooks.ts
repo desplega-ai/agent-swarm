@@ -52,6 +52,7 @@ import type { KapsoConfig } from "../integrations/kapso/config";
 import { getKapsoConfig } from "../integrations/kapso/config";
 import type { KapsoWebhookPayload } from "../integrations/kapso/inbound";
 import { resolveKapsoRequestedByUserId, routeKapsoInbound } from "../integrations/kapso/inbound";
+import { TaskCreationBlockedError } from "../tasks/errors";
 import { getExecutorRegistry } from "../workflows";
 import { workflowEventBus } from "../workflows/event-bus";
 import { handleWebhookTrigger, verifyHmacSignature, WebhookError } from "../workflows/triggers";
@@ -67,7 +68,33 @@ import { route } from "./route-def";
 const WebhookDispatchResultSchema = z.object({
   created: z.boolean(),
   taskId: z.string().optional(),
+  skipped: z.boolean().optional(),
+  reason: z.string().optional(),
+  extension: z.object({ id: z.string(), name: z.string() }).optional(),
 });
+
+type WebhookDispatchResult = z.infer<typeof WebhookDispatchResultSchema>;
+
+/**
+ * Runs a webhook's task-creating handler. A `pre.task.create` extension block
+ * is an expected outcome, not a server error: the delivery is acked with a
+ * skipped result so the provider does not retry and the caller still emits the
+ * delivery's workflow events. Any other error propagates.
+ */
+async function runBlockableHandler(
+  source: string,
+  handler: () => Promise<WebhookDispatchResult>,
+): Promise<WebhookDispatchResult> {
+  try {
+    return await handler();
+  } catch (err) {
+    if (!(err instanceof TaskCreationBlockedError)) throw err;
+    console.log(
+      `[${source}] Task creation blocked by extension ${err.extension.name}: ${err.reason}`,
+    );
+    return { created: false, skipped: true, reason: err.reason, extension: err.extension };
+  }
+}
 
 const githubWebhook = route({
   method: "post",
@@ -249,37 +276,32 @@ export async function handleWebhooks(
 
     console.log(`[GitHub] Received ${eventType} event`);
 
-    let result: { created: boolean; taskId?: string } = { created: false };
+    let result: WebhookDispatchResult = { created: false };
 
     try {
-      switch (eventType) {
-        case "pull_request":
-          result = await handlePullRequest(body as PullRequestEvent);
-          break;
-        case "issues":
-          result = await handleIssue(body as IssueEvent);
-          break;
-        case "issue_comment":
-          result = await handleComment(body as CommentEvent, "issue_comment");
-          break;
-        case "pull_request_review_comment":
-          result = await handleComment(body as CommentEvent, "pull_request_review_comment");
-          break;
-        case "pull_request_review":
-          result = await handlePullRequestReview(body as PullRequestReviewEvent);
-          break;
-        case "check_run":
-          result = await handleCheckRun(body as CheckRunEvent);
-          break;
-        case "check_suite":
-          result = await handleCheckSuite(body as CheckSuiteEvent);
-          break;
-        case "workflow_run":
-          result = await handleWorkflowRun(body as WorkflowRunEvent);
-          break;
-        default:
-          console.log(`[GitHub] Ignoring unsupported event type: ${eventType}`);
-      }
+      result = await runBlockableHandler("GitHub", async () => {
+        switch (eventType) {
+          case "pull_request":
+            return await handlePullRequest(body as PullRequestEvent);
+          case "issues":
+            return await handleIssue(body as IssueEvent);
+          case "issue_comment":
+            return await handleComment(body as CommentEvent, "issue_comment");
+          case "pull_request_review_comment":
+            return await handleComment(body as CommentEvent, "pull_request_review_comment");
+          case "pull_request_review":
+            return await handlePullRequestReview(body as PullRequestReviewEvent);
+          case "check_run":
+            return await handleCheckRun(body as CheckRunEvent);
+          case "check_suite":
+            return await handleCheckSuite(body as CheckSuiteEvent);
+          case "workflow_run":
+            return await handleWorkflowRun(body as WorkflowRunEvent);
+          default:
+            console.log(`[GitHub] Ignoring unsupported event type: ${eventType}`);
+            return { created: false };
+        }
+      });
 
       // Emit workflow trigger event for matching event types
       switch (eventType) {
@@ -376,25 +398,24 @@ export async function handleWebhooks(
     const objectKind = body.object_kind as string | undefined;
     console.log(`[GitLab] Received ${objectKind} event`);
 
-    let result: { created: boolean; taskId?: string } = { created: false };
+    let result: WebhookDispatchResult = { created: false };
 
     try {
-      switch (objectKind) {
-        case "merge_request":
-          result = await handleMergeRequest(body as unknown as MergeRequestEvent);
-          break;
-        case "issue":
-          result = await handleGitLabIssue(body as unknown as GitLabIssueEvent);
-          break;
-        case "note":
-          result = await handleNote(body as unknown as NoteEvent);
-          break;
-        case "pipeline":
-          result = await handlePipeline(body as unknown as PipelineEvent);
-          break;
-        default:
-          console.log(`[GitLab] Ignoring unsupported event type: ${objectKind}`);
-      }
+      result = await runBlockableHandler("GitLab", async () => {
+        switch (objectKind) {
+          case "merge_request":
+            return await handleMergeRequest(body as unknown as MergeRequestEvent);
+          case "issue":
+            return await handleGitLabIssue(body as unknown as GitLabIssueEvent);
+          case "note":
+            return await handleNote(body as unknown as NoteEvent);
+          case "pipeline":
+            return await handlePipeline(body as unknown as PipelineEvent);
+          default:
+            console.log(`[GitLab] Ignoring unsupported event type: ${objectKind}`);
+            return { created: false };
+        }
+      });
 
       // Emit workflow trigger events for GitLab
       switch (objectKind) {

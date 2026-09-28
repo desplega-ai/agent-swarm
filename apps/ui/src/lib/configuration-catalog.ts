@@ -269,6 +269,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         placeholder: "5",
       },
       {
+        key: "APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS",
+        label: "Approval request auto-cancellation (days)",
+        description:
+          "Pending approval requests with no explicit timeout are cancelled after this many days. Requests with an explicit timeout are never auto-cancelled. 0 disables auto-cancellation.",
+        kind: "number",
+        unit: "days",
+        defaultValue: "7",
+        placeholder: "7",
+      },
+      {
         key: "HEARTBEAT_MAX_RESUME_GENERATIONS",
         label: "Max resume generations",
         description:
@@ -387,6 +397,17 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         defaultValue: "2000",
         placeholder: "2000",
         restartRequired: true,
+        docsUrl: `${DOCS}ui/configuration`,
+      },
+      {
+        key: "MODEL_WINDOW_EXHAUSTED_POLICY",
+        label: "Model window exhausted policy",
+        description:
+          "What a worker does when every Claude key has exhausted the weekly window of the task model. fail: fail the task with the reset time. fallback: pick a key at random, legacy behaviour.",
+        kind: "enum",
+        options: ["fail", "fallback"],
+        defaultValue: "fail",
+        restartRequired: false,
         docsUrl: `${DOCS}ui/configuration`,
       },
     ],

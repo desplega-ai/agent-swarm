@@ -6,6 +6,78 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- Pending approval requests with no explicit timeout are auto-cancelled by the heartbeat after `APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS` days (default 7, `0` disables); a request that gates a running or waiting workflow run cancels that run too.
+- The heartbeat now times out standalone approval requests whose `expiresAt` passed, and notifies the requesting agent with a `hitl.timeout` follow-up task while its source task is still active.
+- Migration 166 adds the `idx_approval_requests_pending_created` index for the auto-cancel sweep.
+- `POST /api/approval-requests/{id}/cancel`, the `cancel-approval-request` MCP tool, the `approval_cancel` scripts SDK method, and a Discard button on the dashboard cancel a pending approval request.
+
+### Changed
+- An answer or a cancel that arrives after an approval request's `expiresAt` gets 409 and the request becomes `timeout`.
+- The `request-human-input` tool text and the workflow Slack card no longer say that a timeout auto-rejects; the request becomes `timeout`.
+
+## [1.157.0] - 2026-09-28
+
+### Added
+- UI audit closed out: one pager under every list, a Filters popover and labelled "New task" on Tasks, approvals sorted by the soonest live deadline, approver and resolver shown as user chips, compact Usage KPI cards, and a tab strip for the Usage and Settings subnavs on phones (#1627).
+
+### Changed
+- Worker image bumps `@anthropic-ai/claude-code` 2.1.280 -> 2.1.283 and `@openai/codex` 0.156.1 -> 0.157.1 (#1630).
+- agent-fs 0.13.10 is pinned in the UI e2e workflow and the all-workers Helm example (#1626).
+
+### Fixed
+- Spent `defer-task` wake-up schedules are deleted 30 days after they fire instead of piling up forever (#1629).
+- On touch devices, Return inserts a newline in the session and chat composers; the send button submits (#1628).
+
+## [1.156.0] - 2026-09-26
+
+### Added
+- Subscription plan per credential: Codex reports the plan from its token, Claude plans are estimated from the 7-day rate-limit window, and `PATCH /api/keys/plan` sets a manual plan (`GET /api/keys/plans` lists the catalog). The Usage page compares each subscription with API pricing, and usage summaries are faster through a covering index (migration 164) and a 30 s cache (#1617).
+- Mobile dashboard: a stacked "Now" home view, list rows for agents and tasks, and fixes to approvals, budgets, configuration, and task detail below `md` (#1623).
+
+### Changed
+- Citation guidance in the base prompt and `store-progress` is scoped to factual claims the reader cannot already see, 1-2 sources (#1622).
+- Bundled agent-fs advances to 0.13.10 (#1621).
+
+### Fixed
+- A settlement that wakes a `defer-task` waiter no longer also creates a lead follow-up for the same agent (#1620).
+- ACP workers verify their target binary at boot instead of checking `claude` (#1619).
+- Slack outcome delivery give-up is persisted, so an API restart no longer re-arms an abandoned card; streams are stopped before the final update (#1618).
+
+## [1.155.1] - 2026-09-25
+
+### Added
+- First-run onboarding at `/setup` for new installs: connect, swarm identity and theme, AI providers with worker-verified keys and Codex device login, a per-agent model level (Cheap, Optimal, Max), memory embeddings, integrations, and a first task. `GET/PUT /api/onboarding` stores progress in an internal config row and sends onboarding telemetry. Existing installs are marked done on first read and never see it; older APIs keep today's dashboard (#1604).
+- Approval-request pages redesigned: answers read as words, keyboard shortcuts for the whole answer and submit flow, and a mobile layout (#1604).
+
+### Changed
+- Memory embedding calls request `encoding_format: "float"`, so gateways that answer with floats decode correctly (#1604).
+
+### Fixed
+- Slack no longer shows when a deferred task wakes up (#1615).
+
+## [1.155.0] - 2026-09-25
+
+### Added
+- Task citations: `store-progress` accepts `citations` (task, memory, GitHub, Slack, agent-fs, page, script-run, URL) referenced as `[citation:N]` in output, rendered as sources in Slack outcome cards; Slack input attachments are no longer echoed in outcomes (#1594).
+- Extensions ship scripts and schedules, and install only from the predefined catalog by name (`extension-catalog`, `extension-install` with `template`); manifests may be YAML or JSON and are typed by a generated JSON Schema (#1595).
+- Workflow human-in-the-loop nodes can build `questions` at run time from one upstream `{{token}}`, validated before the card is created (#1611).
+- Structured PR and issue templates with a PR Body CI check (#1603).
+
+### Changed
+- Worker Claude settings deny `ScheduleWakeup` and `Artifact`, blank commit/PR attribution, and disable auto memory (#1608).
+- Bundled agent-fs advances to 0.13.9 (#1595).
+- README hero video switched to "Every team, one swarm" (#1599).
+
+### Removed
+- Inline manifest/files extension installs; they now return `400 inline_install_disabled` (#1595).
+
+### Fixed
+- `store-progress` refuses the first inaccurate citation completion, accepts GitHub pull, issue, and commit URLs, and shows only referenced citations inline (#1607).
+- Capability-only task affinity matches on capabilities instead of a role, so such tasks are claimable and assignable again (#1601).
+- Preserve selected workflow ports during interrupted-run recovery (#1600).
+- Show delegated progress and follow-up output in the session view (#1598).
+
 ## [1.154.0] - 2026-09-24
 
 ### Added

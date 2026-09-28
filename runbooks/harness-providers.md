@@ -319,13 +319,14 @@ Internal refactors that don't change observable behavior don't need a doc update
 1. Read the docs-site guide's "Reference implementations" section to see how `claude`, `pi`, `codex`, and `devin` are wired.
 2. Implement the `ProviderAdapter` in `src/providers/<name>/`.
 3. Add its name to `ProviderNameSchema`, wire `createProviderAdapter`, and keep `traits.steerModes` synchronized with `PROVIDER_STEER_CAPABILITIES`.
-4. Branch in `docker-entrypoint.sh` for credential restoration if the provider needs auth files.
-5. Update the docs-site guide:
+4. Branch in `docker-entrypoint.sh` for credential restoration if the provider needs auth files, and give it its own branch in the `verify_provider_binary` chain (or add it to the final `!= "pi"` guard when it has no binary).
+5. Run `bun run test:root -- src/tests/provider-registration.test.ts`. It iterates `ProviderNameSchema` over every mandatory touch point (credential checkers, the live Test-connection switch, both unknown-provider messages, `PricingProviderSchema`, the pricing seeder, the local-harness lists on server and dashboard, the dashboard's `PROVIDER_NAMES`, and both entrypoint chains) and names the provider and file on a miss. When a touch point should not carry the provider, add it to that touch point's `exempt` map with a one-line reason; an exemption for a provider that is present fails as stale.
+6. Update the docs-site guide:
    - Add to "Reference implementations" table.
    - Add to "Files to touch" checklist.
-6. Add the new provider to `README.md`'s multi-provider bullet.
-7. Add adapter tests for advertised steering modes and SDK rejection.
-8. Verify the docs build per [docs-site/CLAUDE.md](../docs-site/CLAUDE.md).
+7. Add the new provider to `README.md`'s multi-provider bullet.
+8. Add adapter tests for advertised steering modes and SDK rejection.
+9. Verify the docs build per [docs-site/CLAUDE.md](../docs-site/CLAUDE.md).
 
 ## Alt-binary: claude-bridge
 

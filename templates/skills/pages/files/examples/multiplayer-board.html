@@ -142,7 +142,6 @@
       }
 
       .peer-name { font-weight: 650; overflow-wrap: anywhere; }
-      .cursor { color: #67665f; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .78rem; }
       .room-meta { color: #67665f; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .75rem; margin: 0 0 16px; }
       .save-state { color: #67665f; font-size: .82rem; margin: 8px 0 0; min-height: 1.2em; }
 
@@ -156,6 +155,7 @@
     </style>
   </head>
   <body>
+    <swarm-cursors room="match-42"></swarm-cursors>
     <main class="page">
       <header>
         <div>
@@ -185,7 +185,7 @@
         <aside>
           <section class="panel" aria-labelledby="peers-heading">
             <h2 id="peers-heading">Live peers</h2>
-            <p class="muted">Cursor values use each peer's viewport coordinates.</p>
+            <p class="muted">Pointers use document-normalized coordinates and line up across viewports.</p>
             <ul id="peers" class="peers" aria-live="polite"></ul>
           </section>
 
@@ -294,13 +294,7 @@
             const name = document.createElement('span');
             name.className = 'peer-name';
             name.textContent = peer.name || 'Guest';
-            const cursor = document.createElement('span');
-            cursor.className = 'cursor';
-            const data = peer.data || {};
-            cursor.textContent = Number.isFinite(data.x) && Number.isFinite(data.y)
-              ? `cursor: ${Math.round(data.x)}, ${Math.round(data.y)}`
-              : 'cursor: not shared yet';
-            item.append(name, cursor);
+            item.append(name);
             ui.peers.append(item);
           }
         }
@@ -401,9 +395,6 @@
           event.preventDefault();
           saveLobbyMessage();
         });
-        document.addEventListener('pointermove', event => {
-          if (board) board.presence.set({ x: event.clientX, y: event.clientY });
-        }, { passive: true });
         window.addEventListener('pagehide', () => {
           if (board) board.close();
           if (lobby) lobby.close();

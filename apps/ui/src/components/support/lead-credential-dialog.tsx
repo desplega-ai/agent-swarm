@@ -1,7 +1,9 @@
 import { AlertTriangle, ExternalLink, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { isOnboardingOpen, useOnboarding } from "@/api/hooks/use-onboarding";
 import { useTestConnection } from "@/api/hooks/use-status";
+import { useResumeSetup } from "@/components/onboarding/use-resume-setup";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -23,6 +25,10 @@ export function LeadCredentialDialog() {
   const { issue, refetch } = useLeadCredentialIssue();
   const testConnection = useTestConnection();
   const [dismissed, setDismissed] = useState(false);
+  // While first-run setup is open, its AI Providers step is where keys go.
+  const { data: onboarding } = useOnboarding();
+  const setupOpen = isOnboardingOpen(onboarding);
+  const { resume } = useResumeSetup();
 
   if (!issue) return null;
 
@@ -111,11 +117,23 @@ export function LeadCredentialDialog() {
               {testConnection.isPending ? "Checking…" : "Re-check"}
             </Button>
           )}
-          <Button asChild onClick={() => setDismissed(true)}>
-            <Link to={configurationPath}>
-              {configurationKey ? "Open configuration" : "View credential details"}
-            </Link>
-          </Button>
+          {setupOpen ? (
+            <Button
+              type="button"
+              onClick={() => {
+                setDismissed(true);
+                void resume("ai");
+              }}
+            >
+              Set up AI providers
+            </Button>
+          ) : (
+            <Button asChild onClick={() => setDismissed(true)}>
+              <Link to={configurationPath}>
+                {configurationKey ? "Open configuration" : "View credential details"}
+              </Link>
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

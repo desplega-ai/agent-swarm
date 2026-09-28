@@ -15,6 +15,7 @@ import {
   _resolveIntegrationType,
   emitIntegrationConnected,
   initTelemetry,
+  telemetry,
   track,
 } from "../telemetry";
 
@@ -232,6 +233,39 @@ describe("initTelemetry", () => {
       const metadata = (captured as { metadata: Record<string, unknown> }).metadata;
       expect(metadata.organization_id).toBe("org_acme_123");
       expect(metadata.organization_name).toBe("Acme Engineering");
+    });
+
+    test("onboarding events include the install-relative duration when known", async () => {
+      await initTelemetry(
+        "api-server",
+        async (key) => {
+          if (key === "telemetry_installation_id") return "install_onboarding";
+          if (key === "telemetry_installed_at") return "2026-01-01T00:00:00.000Z";
+          return undefined;
+        },
+        async () => {},
+      );
+
+      telemetry.onboarding("step_completed", {
+        step: "connect",
+        method: "api_key",
+        derived: true,
+        seconds_since_start: 2,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      const event = captured as {
+        event: string;
+        properties: Record<string, unknown>;
+      };
+      expect(event.event).toBe("onboarding.step_completed");
+      expect(event.properties).toMatchObject({
+        step: "connect",
+        method: "api_key",
+        derived: true,
+        seconds_since_start: 2,
+      });
+      expect(event.properties.seconds_since_install).toBeInteger();
     });
 
     test("metadata.is_cloud === false when SWARM_CLOUD unset", async () => {

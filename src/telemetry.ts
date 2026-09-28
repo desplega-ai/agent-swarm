@@ -559,6 +559,33 @@ export const telemetry = {
     track({ event: `agent.${event}`, properties: props });
   },
 
+  onboarding(
+    event:
+      | "started"
+      | "step_viewed"
+      | "step_completed"
+      | "step_skipped"
+      | "step_failed"
+      | "dismissed"
+      | "completed"
+      | "first_task_completed",
+    props: Record<string, string | boolean | number>,
+  ): void {
+    const installedAtMs = installedAt ? Date.parse(installedAt) : Number.NaN;
+    const secondsSinceInstall = Number.isFinite(installedAtMs)
+      ? Math.max(0, Math.floor((Date.now() - installedAtMs) / 1_000))
+      : undefined;
+    track({
+      event: `onboarding.${event}`,
+      properties: {
+        ...props,
+        ...(secondsSinceInstall !== undefined
+          ? { seconds_since_install: secondsSinceInstall }
+          : {}),
+      },
+    });
+  },
+
   integration(
     event: string,
     props: { type: IntegrationType; provider?: IntegrationProvider; first_of_type: boolean },

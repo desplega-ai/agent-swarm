@@ -36,6 +36,7 @@ import {
 import { getEmbeddingProvider } from "../be/memory";
 import { getFileStorageProvider } from "../fs/registry";
 import { getSlackConfiguration } from "../slack/config";
+import { getSlackConnectionState } from "../slack/connection-state";
 import { type AgentCredStatus, AutomationIntegrationIdSchema, ProviderNameSchema } from "../types";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
@@ -199,9 +200,10 @@ export const TestConnectionResponseSchema = z.object({
  */
 type CredRollupState = "verified" | "configured" | "unverified";
 
-interface CredRollup {
+export interface CredRollup {
   state: CredRollupState;
   workers: number;
+  verifiedWorkers: number;
   reports: number;
   latestLiveTest: AgentCredStatus["liveTest"];
   latestMissing: string[];
@@ -225,7 +227,7 @@ export function _resetTestConnectionCache(): void {
   // intentionally empty
 }
 
-async function rollupCredStatusForProvider(provider: string): Promise<CredRollup> {
+export async function rollupCredStatusForProvider(provider: string): Promise<CredRollup> {
   const agents = await listAgentsWithCredStatusByProvider(provider);
   const reports = agents.map((a) => a.credStatus).filter((s): s is AgentCredStatus => s != null);
 
@@ -233,6 +235,7 @@ async function rollupCredStatusForProvider(provider: string): Promise<CredRollup
     return {
       state: "unverified",
       workers: agents.length,
+      verifiedWorkers: 0,
       reports: 0,
       latestLiveTest: null,
       latestMissing: [],
@@ -244,8 +247,10 @@ async function rollupCredStatusForProvider(provider: string): Promise<CredRollup
   // most-recent live test of any kind.
   const ttl = getCredVerifyTtlMs();
   const now = Date.now();
+  const isFreshPassingReport = (report: AgentCredStatus): boolean =>
+    report.liveTest?.ok === true && now - (report.liveTest?.testedAt ?? 0) < ttl;
   const passing = reports
-    .filter((r) => r.liveTest?.ok === true && now - (r.liveTest?.testedAt ?? 0) < ttl)
+    .filter(isFreshPassingReport)
     .sort((a, b) => (b.liveTest?.testedAt ?? 0) - (a.liveTest?.testedAt ?? 0));
   const anyLive = reports
     .filter((r) => r.liveTest != null)
@@ -268,6 +273,8 @@ async function rollupCredStatusForProvider(provider: string): Promise<CredRollup
   return {
     state,
     workers: agents.length,
+    // Every agent on the harness counts (leads too), same as `workers` and `state`.
+    verifiedWorkers: passing.length,
     reports: reports.length,
     latestLiveTest,
     latestMissing,
@@ -432,6 +439,15 @@ function slackMilestone(state: AutomationSetupStates["slack"]): SetupMilestone {
     };
   }
 
+  if (config.mode === "socket" && getSlackConnectionState() === "connected") {
+    return {
+      id: "slack",
+      label: "Slack configured",
+      state: "verified",
+      action_url: automationIntegrationFixUrl("slack"),
+    };
+  }
+
   return {
     id: "slack",
     label: "Slack configured",
@@ -439,7 +455,7 @@ function slackMilestone(state: AutomationSetupStates["slack"]): SetupMilestone {
     hint:
       config.mode === "http"
         ? "HTTP credentials are configured, but HTTP ingress is unavailable until the receiver is installed."
-        : "Socket Mode credentials are configured; a live connection has not been verified.",
+        : "Socket Mode credentials are configured, but the bot is not connected to Slack.",
     action_url: automationIntegrationFixUrl("slack"),
   };
 }
@@ -718,9 +734,9 @@ const postTestConnection = route({
   method: "post",
   path: "/status/test-connection",
   pattern: ["status", "test-connection"],
-  summary: "Live-test the harness provider's credentials",
+  summary: "Read worker-reported harness credential status",
   description:
-    "Issues a real upstream call (Anthropic /v1/models, OpenAI /v1/models, etc.) for the given provider. Updates an in-memory cache so the next GET /status reports `harness.state = 'verified'` for SWARM_VERIFY_TTL_MS (default 1h).",
+    "Reads worker-reported credential checks from agent rows. This route makes no upstream request and returns a reported live-test result when one exists.",
   tags: ["Status"],
   body: TestConnectionRequestSchema,
   responses: {

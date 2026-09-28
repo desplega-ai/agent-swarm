@@ -1,0 +1,1152 @@
+<!doctype html>
+<!--
+  Option B, "Focused Flow". One step owns the whole screen: a centered single column,
+  a large step title, and a six-segment progress bar that is the only view of the other steps
+  (hover a segment for its title, click it to jump).
+  Trade-off: maximum focus and clarity per step, at the cost of overview. You cannot read all
+  six statuses at once until you minimize into the home checklist card.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Agent Swarm · Onboarding · Focused Flow</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&family=Space+Mono:ital,wght@0,400;0,700;1,400;1,700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="../../session-logs/demo-shared.css" />
+<style>
+/* ============ shell ============ */
+body{overflow-x:hidden}
+#app{min-height:100dvh;display:flex;flex-direction:column}
+#full,#min{flex:1;min-height:100dvh;display:flex;flex-direction:column}
+#full[hidden],#min[hidden]{display:none}
+.hdr{position:sticky;top:0;z-index:40;display:flex;align-items:center;gap:10px;padding:9px 18px;background:color-mix(in oklch,var(--background) 88%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--border)}
+.hdr .mark{width:22px;height:22px;flex:none;display:block}
+.hdr .nm{font-size:13.5px;font-weight:600;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:40vw}
+.hdr .kick{font-family:var(--font-mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted-foreground);border-left:1px solid var(--border);padding-left:10px;margin-left:2px;white-space:nowrap}
+.hdr .sp{flex:1}
+
+/* ============ segmented progress ============ */
+.rail{display:flex;gap:7px;width:100%;max-width:680px;margin:0 auto;padding:14px 20px 4px}
+.seg{position:relative;flex:1;padding:9px 0 14px;background:none;border:0;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.seg .bar{display:block;height:4px;border-radius:999px;background:var(--border);transition:background .18s,box-shadow .18s,transform .18s cubic-bezier(.2,0,0,1);transform-origin:center}
+.seg:hover .bar{transform:scaleY(1.7)}
+.seg:focus-visible{outline:none}
+.seg:focus-visible .bar{box-shadow:0 0 0 2px var(--ring)}
+.seg.done .bar{background:var(--primary)}
+.seg.failed .bar{background:var(--error)}
+.seg.skipped .bar{background-color:color-mix(in oklch,var(--neutral) 14%,transparent);background-image:repeating-linear-gradient(115deg,color-mix(in oklch,var(--neutral) 42%,transparent) 0 1.5px,transparent 1.5px 4.5px)}
+.seg.cur .bar{background:color-mix(in oklch,var(--primary) 26%,var(--border));box-shadow:inset 0 0 0 1px color-mix(in oklch,var(--primary) 55%,transparent)}
+.seg.cur.done .bar{background:var(--primary);box-shadow:none}
+.seg.cur::before{content:"";position:absolute;top:0;left:50%;margin-left:-2.5px;width:5px;height:5px;border-radius:50%;background:var(--primary)}
+.seg .tip{position:absolute;top:calc(100% - 2px);left:50%;transform:translateX(-50%) translateY(-3px);white-space:nowrap;font-size:11.5px;color:var(--foreground);background:var(--card);border:1px solid var(--border);border-radius:7px;padding:4px 9px;box-shadow:var(--shadow);opacity:0;pointer-events:none;transition:opacity .14s,transform .14s;z-index:9}
+.seg .tip em{font-style:normal;color:var(--muted-foreground);font-family:var(--font-mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;margin-left:6px}
+.seg:hover .tip,.seg:focus-visible .tip{opacity:1;transform:translateX(-50%) translateY(0)}
+.seg:first-child .tip{left:0;transform:translateX(0) translateY(-3px)}
+.seg:first-child:hover .tip,.seg:first-child:focus-visible .tip{transform:translateX(0) translateY(0)}
+.seg:last-child .tip{left:auto;right:0;transform:translateX(0) translateY(-3px)}
+.seg:last-child:hover .tip,.seg:last-child:focus-visible .tip{transform:translateX(0) translateY(0)}
+
+/* ============ stage ============ */
+.stage{flex:1;display:flex;flex-direction:column;justify-content:center;justify-content:safe center;padding:20px 20px 26px}
+.col{width:100%;max-width:640px;margin:0 auto}
+.kicker{font-family:var(--font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--primary);margin:0 0 9px}
+.kicker .of{color:var(--muted-foreground)}
+h2.title{margin:0 0 8px;font-size:30px;line-height:1.12;letter-spacing:-.022em;font-weight:600;text-wrap:balance}
+p.sub{margin:0 0 22px;color:var(--muted-foreground);font-size:14.5px;line-height:1.55;max-width:56ch}
+@keyframes inF{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes inB{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:none}}
+.col.in-f{animation:inF .22s cubic-bezier(.2,0,0,1) both}
+.col.in-b{animation:inB .22s cubic-bezier(.2,0,0,1) both}
+.col.out{opacity:0;transform:translateY(-7px);transition:opacity .12s cubic-bezier(.2,0,0,1),transform .12s cubic-bezier(.2,0,0,1)}
+.col.out-b{opacity:0;transform:translateY(7px);transition:opacity .12s,transform .12s}
+
+/* ============ cards + fields ============ */
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);overflow:hidden}
+.card+.card,.card+.note,.note+.card,.card+.linkrow{margin-top:12px}
+.cardh{display:flex;align-items:center;gap:10px;padding:11px 15px;border-bottom:1px solid var(--border);background:color-mix(in oklch,var(--muted) 24%,var(--card))}
+.cardh h3{margin:0;font-size:13.5px;font-weight:600;letter-spacing:-.005em}
+.cardh .sp{flex:1}
+.cardb{padding:15px}
+.field+.field,.field+.acts,.acts+.result,.field+.result,.result+.result{margin-top:13px}
+.lbl{display:block;font-size:11.5px;font-weight:500;letter-spacing:.025em;text-transform:uppercase;color:var(--muted-foreground);margin:0 0 6px}
+.inp{width:100%;height:36px;padding:0 11px;font-family:var(--font-sans);font-size:14px;color:var(--foreground);background:transparent;border:1px solid var(--border);border-radius:8px;transition:border-color .12s,box-shadow .12s}
+.inp::placeholder{color:color-mix(in oklch,var(--muted-foreground) 70%,transparent)}
+.inp:focus{outline:none;border-color:var(--ring);box-shadow:0 0 0 2px color-mix(in oklch,var(--ring) 45%,transparent)}
+.inp.mono{font-family:var(--font-mono);font-size:12.5px}
+.inrow{display:flex;gap:6px;align-items:center}
+.inrow .inp{flex:1;min-width:0}
+.inrow .icon-btn{width:36px;height:36px;flex:none}
+.hint{margin:6px 0 0;font-size:12px;line-height:1.45;color:var(--muted-foreground)}
+.hint code,code.k{font-family:var(--font-mono);font-size:11.5px;background:var(--code-bg);border:1px solid color-mix(in oklch,var(--border) 60%,transparent);border-radius:5px;padding:.1em .35em}
+.acts{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.acts .sp{flex:1}
+.note{font-size:12.5px;color:var(--muted-foreground);line-height:1.5;margin:10px 2px 0}
+.linkrow{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:14px}
+.lnk{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:500;color:var(--primary);text-decoration:none;cursor:pointer;background:none;border:0;padding:0;font-family:var(--font-sans)}
+.lnk:hover{text-decoration:underline;text-underline-offset:3px}
+.lnk svg{width:13px;height:13px}
+.quiet{color:var(--muted-foreground)}
+.quiet:hover{color:var(--foreground)}
+
+/* ============ chips + results ============ */
+.chip{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 7px;border-radius:6px;font-family:var(--font-sans);font-size:9.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;border:1px solid var(--border);color:var(--muted-foreground);white-space:nowrap}
+.chip.ok{border-color:color-mix(in oklch,var(--success) 38%,transparent);color:var(--success-strong)}
+.chip.run{border-color:color-mix(in oklch,var(--active) 45%,transparent);color:var(--active-strong)}
+.chip.err{border-color:color-mix(in oklch,var(--error) 38%,transparent);color:var(--error-strong)}
+.chip.skip{border-color:color-mix(in oklch,var(--neutral) 38%,transparent);color:var(--neutral)}
+.chip.info{border-color:color-mix(in oklch,var(--info) 38%,transparent);color:var(--info-strong)}
+.chip .dot{width:6px;height:6px;border-radius:50%;background:currentColor}
+.result{display:flex;gap:9px;align-items:flex-start;padding:9px 11px;border:1px solid var(--border);border-radius:9px;font-size:13px;line-height:1.45}
+.result svg{width:15px;height:15px;flex:none;margin-top:1px}
+.result b{font-weight:600}
+.result .mono{display:block;margin-top:3px;font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground);word-break:break-word}
+.result.ok{border-color:color-mix(in oklch,var(--success) 32%,transparent);background:color-mix(in oklch,var(--success) 9%,transparent);color:var(--success-strong)}
+.result.err{border-color:color-mix(in oklch,var(--error) 32%,transparent);background:color-mix(in oklch,var(--error) 8%,transparent);color:var(--error-strong)}
+.result.warn{border-color:color-mix(in oklch,var(--active) 38%,transparent);background:color-mix(in oklch,var(--active) 10%,transparent);color:var(--active-strong)}
+.result.info{border-color:color-mix(in oklch,var(--info) 30%,transparent);background:color-mix(in oklch,var(--info) 8%,transparent);color:var(--info-strong)}
+.result.plain{color:var(--muted-foreground);background:color-mix(in oklch,var(--muted) 40%,transparent)}
+.spin{width:14px;height:14px;flex:none;border-radius:50%;border:2px solid color-mix(in oklch,var(--primary) 22%,transparent);border-top-color:var(--primary);animation:sp .7s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+
+/* ============ code block ============ */
+.codeblk{position:relative;background:var(--code-bg);border:1px solid var(--border);border-radius:9px;padding:11px 42px 11px 12px;font-family:var(--font-mono);font-size:11.5px;line-height:1.65;color:color-mix(in oklch,var(--foreground) 88%,var(--muted-foreground));white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere}
+.codeblk .cp{position:absolute;top:7px;right:7px}
+.codeblk .cm{color:var(--muted-foreground)}
+
+/* ============ step 2 preview ============ */
+.two{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start}
+.two .card+.card{margin-top:0}
+.swatches{display:flex;gap:7px;flex-wrap:wrap}
+.sw{width:26px;height:26px;border-radius:7px;border:1px solid var(--border);cursor:pointer;padding:0;position:relative;transition:transform .12s}
+.sw:hover{transform:scale(1.08)}
+.sw.on{box-shadow:0 0 0 2px var(--background),0 0 0 4px var(--foreground)}
+.pv{padding:13px;background:var(--surface)}
+.pvside{border:1px solid var(--border);border-radius:9px;background:var(--card);overflow:hidden}
+.pvhead{display:flex;align-items:center;gap:9px;padding:10px 11px;border-bottom:1px solid var(--border)}
+.pvmark{width:26px;height:26px;border-radius:7px;flex:none;display:grid;place-items:center;overflow:hidden}
+.pvmark svg{width:16px;height:16px}
+.pvmark img{width:100%;height:100%;object-fit:cover}
+.pvname{font-size:12.5px;font-weight:600;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pvsub{font-size:10px;color:var(--muted-foreground);line-height:1.2;margin-top:2px}
+.pvnav{padding:7px}
+.pvrow{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:7px;font-size:11.5px;color:var(--muted-foreground)}
+.pvrow i{width:13px;height:13px;border-radius:4px;background:currentColor;opacity:.45;flex:none}
+.pvrow.on{font-weight:600}
+
+/* ============ accordion (providers) ============ */
+.acc{border:1px solid var(--border);border-radius:12px;background:var(--card);box-shadow:var(--shadow);overflow:hidden}
+.acc+.acc{margin-top:10px}
+.acc.open{border-color:color-mix(in oklch,var(--primary) 40%,var(--border))}
+.acch{display:flex;align-items:center;gap:11px;width:100%;padding:12px 14px;background:none;border:0;cursor:pointer;text-align:left;font-family:var(--font-sans);color:var(--foreground)}
+.acch:hover{background:color-mix(in oklch,var(--accent) 60%,transparent)}
+.pm{width:28px;height:28px;flex:none;border-radius:8px;display:grid;place-items:center;font-family:var(--font-mono);font-size:10.5px;font-weight:700;letter-spacing:.02em;background:color-mix(in oklch,var(--muted) 80%,transparent);border:1px solid var(--border);color:var(--muted-foreground)}
+.acc.open .pm{background:color-mix(in oklch,var(--primary) 12%,transparent);border-color:color-mix(in oklch,var(--primary) 30%,transparent);color:var(--primary)}
+.acc.ok .pm{background:color-mix(in oklch,var(--success) 12%,transparent);border-color:color-mix(in oklch,var(--success) 32%,transparent);color:var(--success-strong)}
+.pname{flex:1;min-width:0;font-size:13.5px;font-weight:600;line-height:1.25}
+.pname em{display:block;font-style:normal;font-size:11.5px;font-weight:400;color:var(--muted-foreground);margin-top:2px}
+.chev{width:15px;height:15px;color:var(--muted-foreground);transition:transform .15s cubic-bezier(.2,0,0,1)}
+.acc.open .chev{transform:rotate(180deg)}
+.accb{padding:0 14px 14px;border-top:1px solid var(--border);padding-top:14px}
+.seg2{display:inline-flex;padding:2px;gap:2px;background:var(--muted);border:1px solid var(--border);border-radius:9px}
+.seg2 button{height:28px;padding:0 11px;border:0;background:none;border-radius:7px;font-family:var(--font-sans);font-size:12.5px;font-weight:500;color:var(--muted-foreground);cursor:pointer}
+.seg2 button.on{background:var(--card);color:var(--foreground);box-shadow:var(--shadow)}
+
+/* ============ codex device code ============ */
+.devwrap{border:1px solid color-mix(in oklch,var(--primary) 28%,var(--border));border-radius:10px;padding:14px;background:color-mix(in oklch,var(--primary) 4%,transparent)}
+.devcode{display:flex;align-items:center;justify-content:center;gap:12px;padding:12px 8px 14px}
+.devcode span{font-family:var(--font-mono);font-size:29px;font-weight:700;letter-spacing:.18em;color:var(--foreground);text-indent:.18em}
+.devsteps{margin:0;padding:0 0 0 18px;font-size:13px;line-height:1.7;color:color-mix(in oklch,var(--foreground) 85%,var(--muted-foreground))}
+.devsteps a{color:var(--primary);font-weight:500;text-underline-offset:3px}
+.poll{display:flex;align-items:center;gap:9px;margin-top:12px;padding-top:11px;border-top:1px dashed var(--border);font-size:12.5px;color:var(--foreground)}
+.poll .sp2{margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
+details.more{margin-top:12px;border-top:1px solid var(--border);padding-top:11px}
+details.more summary{cursor:pointer;font-size:12.5px;color:var(--muted-foreground);list-style:none;display:flex;align-items:center;gap:6px}
+details.more summary::-webkit-details-marker{display:none}
+details.more summary svg{width:13px;height:13px;transition:transform .15s}
+details.more[open] summary svg{transform:rotate(90deg)}
+details.more summary:hover{color:var(--foreground)}
+.moreb{padding-top:11px}
+.moreb .fbk+.fbk{margin-top:12px}
+.fbk h4{margin:0 0 6px;font-size:12px;font-weight:600}
+
+/* ============ step 4 presets ============ */
+.presets{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}
+.preset{padding:9px 8px;border:1px solid var(--border);border-radius:9px;background:transparent;cursor:pointer;font-family:var(--font-sans);text-align:left;transition:border-color .12s,background .12s}
+.preset:hover{background:var(--accent)}
+.preset.on{border-color:var(--primary);background:color-mix(in oklch,var(--primary) 8%,transparent)}
+.preset b{display:block;font-size:12px;font-weight:600;color:var(--foreground);line-height:1.2}
+.preset em{display:block;font-style:normal;font-size:10px;color:var(--muted-foreground);margin-top:3px;line-height:1.2}
+.readout{margin-top:12px;border:1px solid var(--border);border-radius:9px;overflow:hidden}
+.ro{display:flex;gap:10px;align-items:center;padding:7px 11px;font-size:12px}
+.ro+.ro{border-top:1px solid var(--border)}
+.ro span{width:74px;flex:none;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-foreground)}
+.ro b{font-family:var(--font-mono);font-size:11.5px;font-weight:400;word-break:break-all}
+.reuse{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 9px;border-radius:7px;border:1px dashed color-mix(in oklch,var(--primary) 45%,transparent);color:var(--primary);background:none;font-family:var(--font-sans);font-size:11.5px;font-weight:500;cursor:pointer}
+.reuse:hover{background:color-mix(in oklch,var(--primary) 8%,transparent)}
+
+/* ============ step 5 integrations ============ */
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.grid2 .card{margin:0}
+.grid2 .wide{grid-column:1/-1}
+.icard .cardb{padding:12px}
+.mark2{width:24px;height:24px;flex:none;border-radius:7px;display:grid;place-items:center;font-family:var(--font-mono);font-size:9.5px;font-weight:700;background:color-mix(in oklch,var(--muted) 80%,transparent);border:1px solid var(--border);color:var(--muted-foreground)}
+.icard.on .mark2{background:color-mix(in oklch,var(--success) 12%,transparent);border-color:color-mix(in oklch,var(--success) 30%,transparent);color:var(--success-strong)}
+.icard .desc{margin:0 0 10px;font-size:12px;color:var(--muted-foreground);line-height:1.45}
+
+/* ============ step 6 ============ */
+.wait{display:flex;align-items:center;gap:10px;margin-top:12px;font-size:13px}
+.shimbar{position:relative;height:3px;border-radius:999px;background:color-mix(in oklch,var(--active) 16%,transparent);overflow:hidden;margin-top:10px}
+.shimbar i{position:absolute;inset:0;background:linear-gradient(90deg,transparent,color-mix(in oklch,var(--active) 85%,transparent),transparent);background-size:45% 100%;background-repeat:no-repeat;animation:shim 1.5s linear infinite}
+@keyframes shim{0%{background-position:-60% 0}100%{background-position:160% 0}}
+.wdot{width:8px;height:8px;border-radius:50%;background:var(--active);flex:none;box-shadow:0 0 0 0 color-mix(in oklch,var(--active) 55%,transparent);animation:orb2 1.6s ease-out infinite}
+@keyframes orb2{0%{box-shadow:0 0 0 0 color-mix(in oklch,var(--active) 50%,transparent)}70%{box-shadow:0 0 0 7px transparent}100%{box-shadow:0 0 0 0 transparent}}
+.tl{list-style:none;margin:12px 0 0;padding:0}
+.tl li{position:relative;padding:0 0 11px 22px;font-size:12.5px;color:var(--muted-foreground)}
+.tl li:last-child{padding-bottom:0}
+.tl li::before{content:"";position:absolute;left:3px;top:4px;width:8px;height:8px;border-radius:50%;border:2px solid var(--border);background:var(--card)}
+.tl li::after{content:"";position:absolute;left:6.5px;top:14px;bottom:0;width:1px;background:var(--border)}
+.tl li:last-child::after{display:none}
+.tl li.hit{color:var(--foreground)}
+.tl li.hit::before{border-color:var(--success);background:var(--success)}
+.tl li.now::before{border-color:var(--active);background:var(--active)}
+.tl li time{float:right;font-family:var(--font-mono);font-size:10.5px;color:var(--muted-foreground)}
+.party{position:relative}
+.party i{position:absolute;bottom:-2px;width:5px;height:5px;border-radius:1px;opacity:0;animation:pop .75s cubic-bezier(.2,0,0,1) forwards}
+@keyframes pop{0%{opacity:1;transform:translate(0,0) scale(1)}100%{opacity:0;transform:translate(var(--dx),-46px) scale(.5)}}
+
+/* ============ footer ============ */
+.foot{position:sticky;bottom:0;z-index:30;border-top:1px solid var(--border);background:color-mix(in oklch,var(--background) 92%,transparent);backdrop-filter:blur(10px)}
+.footin{display:flex;align-items:center;gap:10px;width:100%;max-width:640px;margin:0 auto;padding:12px 20px}
+.footin .sp{flex:1}
+.footnote{font-size:11.5px;color:var(--muted-foreground)}
+.btn.lg{height:36px;padding:0 15px;font-size:13.5px}
+.btn.ghost{border-color:transparent;background:none;color:var(--muted-foreground)}
+.btn.ghost:hover{background:var(--accent);color:var(--foreground)}
+
+/* ============ minimized home shell ============ */
+.shell{display:flex;min-height:100dvh}
+.side{width:216px;flex:none;border-right:1px solid var(--border);background:color-mix(in oklch,var(--muted) 30%,var(--background));display:flex;flex-direction:column}
+.side .sh{display:flex;align-items:center;gap:9px;padding:13px 14px;border-bottom:1px solid var(--border)}
+.side nav{padding:9px 8px;display:flex;flex-direction:column;gap:2px}
+.nrow{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:8px;font-size:13px;color:var(--muted-foreground);cursor:pointer;background:none;border:0;font-family:var(--font-sans);text-align:left;width:100%}
+.nrow svg{width:15px;height:15px}
+.nrow:hover{background:var(--accent);color:var(--foreground)}
+.nrow.on{background:color-mix(in oklch,var(--primary) 12%,transparent);color:var(--primary);font-weight:600}
+.side .foot2{margin-top:auto;padding:12px 14px;border-top:1px solid var(--border);font-size:11px;color:var(--muted-foreground);font-family:var(--font-mono)}
+.mainwrap{flex:1;min-width:0;display:flex;flex-direction:column}
+.topbar{display:flex;align-items:center;gap:10px;padding:11px 20px;border-bottom:1px solid var(--border)}
+.crumb{font-size:13px;color:var(--muted-foreground)}
+.crumb b{color:var(--foreground);font-weight:600}
+.main{padding:22px 20px 40px;max-width:900px;width:100%}
+.hello{font-size:20px;font-weight:600;letter-spacing:-.015em;margin:0 0 3px}
+.hellosub{margin:0 0 18px;font-size:13.5px;color:var(--muted-foreground)}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px}
+.stat{border:1px solid var(--border);border-radius:11px;background:var(--card);padding:12px 13px}
+.stat .l{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-foreground)}
+.stat .v{font-size:20px;font-weight:600;margin-top:5px;font-variant-numeric:tabular-nums}
+.setup .cardh{padding:13px 15px}
+.prog{height:4px;border-radius:999px;background:var(--border);overflow:hidden;margin:0 15px}
+.prog i{display:block;height:100%;background:var(--primary);border-radius:999px;transition:width .3s cubic-bezier(.2,0,0,1)}
+.srow{display:flex;align-items:center;gap:11px;width:100%;padding:11px 15px;background:none;border:0;border-top:1px solid var(--border);cursor:pointer;font-family:var(--font-sans);text-align:left}
+.srow:first-of-type{border-top:0}
+.srow:hover{background:var(--accent)}
+.snum{width:21px;height:21px;flex:none;border-radius:6px;display:grid;place-items:center;font-family:var(--font-mono);font-size:10.5px;border:1px solid var(--border);color:var(--muted-foreground);background:var(--card)}
+.srow.done .snum{background:color-mix(in oklch,var(--success) 14%,transparent);border-color:color-mix(in oklch,var(--success) 32%,transparent);color:var(--success-strong)}
+.srow.skipped .snum{color:var(--neutral)}
+.sttl{flex:1;min-width:0;font-size:13px;font-weight:500;color:var(--foreground)}
+.sttl em{display:block;font-style:normal;font-size:11.5px;font-weight:400;color:var(--muted-foreground);margin-top:2px}
+.srow.done .sttl{color:var(--muted-foreground)}
+.setupfoot{display:flex;align-items:center;gap:10px;padding:13px 15px;border-top:1px solid var(--border);background:color-mix(in oklch,var(--muted) 22%,var(--card))}
+.setupfoot .sp{flex:1}
+
+/* ============ dev panel ============ */
+.dev{position:fixed;left:12px;bottom:12px;z-index:60;display:none;gap:6px;flex-wrap:wrap;align-items:center;max-width:min(560px,92vw);padding:8px 10px;border:1px solid var(--border);border-radius:10px;background:var(--card);box-shadow:var(--shadow)}
+.dev.show{display:flex}
+.dev .t{font-family:var(--font-mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted-foreground);margin-right:2px}
+.dev .btn{height:26px;padding:0 8px;font-size:11.5px}
+
+/* ============ mobile ============ */
+@media (max-width:640px){
+  .hdr{padding:8px 12px;gap:8px}
+  .hdr .kick{display:none}
+  .rail{padding:10px 12px 4px;gap:5px}
+  .stage{padding:20px 14px 24px}
+  h2.title{font-size:24px}
+  p.sub{font-size:13.5px;margin-bottom:18px}
+  .two,.grid2,.stats{grid-template-columns:1fr}
+  .presets{grid-template-columns:1fr 1fr}
+  .footin{padding:10px 12px;gap:8px}
+  .foot .footnote{display:none}
+  .devcode span{font-size:23px;letter-spacing:.12em}
+  .side{display:none}
+  .main{padding:16px 13px 36px}
+  .seg .tip{font-size:11px;padding:3px 7px}
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <!-- full-page onboarding -->
+  <div id="full">
+    <header class="hdr">
+      <svg class="mark" id="hdrmark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 20.5 7v10L12 22 3.5 17V7z" fill="currentColor" opacity=".16"/><path d="M12 2 20.5 7v10L12 22 3.5 17V7z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><circle cx="12" cy="12" r="2.4" fill="currentColor"/></svg>
+      <span class="nm" id="hdrname">Your Swarm</span>
+      <span class="kick">Setup</span>
+      <span class="sp"></span>
+      <button class="btn icon-btn" id="theme" title="Toggle theme" aria-label="Toggle theme"></button>
+      <button class="btn" id="minimize" title="Continue later from the home page">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v3a2 2 0 0 1-2 2H3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M16 21v-3a2 2 0 0 1 2-2h3"/></svg>
+        Minimize
+      </button>
+    </header>
+    <div class="rail" id="rail"></div>
+    <main class="stage"><div class="col" id="col"></div></main>
+    <footer class="foot"><div class="footin" id="footin"></div></footer>
+  </div>
+
+  <!-- minimized: home dashboard shell -->
+  <div id="min" hidden></div>
+</div>
+
+<div class="dev" id="devpanel"></div>
+
+<script>
+"use strict";
+/* ============================================================
+   Option B - Focused Flow. Mockup only: every check is faked with
+   a timer. No network calls, no real secrets.
+   ============================================================ */
+
+const STEPS = [
+  { key:"connect",      nav:"Connect",         title:"Connect to your API server", sub:"Point this dashboard at a running Agent Swarm API. The check probes /health, so a green result means the server really answered." },
+  { key:"brand",        nav:"Name your swarm", title:"Name your swarm",            sub:"The name and mark used in the sidebar, in Slack, and on shared pages." },
+  { key:"provider",     nav:"AI provider",     title:"Pick an AI provider",        sub:"One verified provider is enough to start. You can add the rest later in Settings." },
+  { key:"memory",       nav:"Memory",          title:"Turn on memory",             sub:"Embeddings let agents recall earlier work. Any OpenAI-compatible endpoint works." },
+  { key:"integrations", nav:"Integrations",    title:"Connect your tools",         sub:"All optional. Connect what your team already uses, or skip and do it later." },
+  { key:"task",         nav:"First task",      title:"Run your first task",        sub:"Start a worker, then send it a hello task. Setup is done when that task completes." },
+];
+
+const state = {
+  view: "full",
+  step: 1,
+  dismissed: false,
+  status: ["todo","todo","todo","todo","todo","todo"],
+  conn: { name:"", url:"http://localhost:3013", key:"sk-swarm-••••4f2a", shown:false, phase:"idle", ok:false },
+  brand:{ name:"Your Swarm", logo:"", color:"oklch(0.62 0.16 55)", phase:"idle" },
+  prov: { open:"claude", claude:{ mode:"key", phase:"idle" }, codex:{ phase:"idle", left:899 }, openrouter:{ phase:"idle" } },
+  mem:  { preset:"openai", base:"", model:"", key:"", phase:"idle" },
+  intg: { slack:"idle", slackForm:false, github:"idle", gitlab:"idle", linear:"idle", jira:"idle" },
+  task: { worker:false, joining:false, phase:"idle" },
+  timers: [],
+};
+
+const PRESETS = {
+  openai:     { label:"OpenAI",            note:"default",      base:"https://api.openai.com/v1",     model:"text-embedding-3-small" },
+  openrouter: { label:"OpenRouter",        note:"one key",      base:"https://openrouter.ai/api/v1",  model:"openai/text-embedding-3-small" },
+  vercel:     { label:"Vercel AI Gateway", note:"routed",       base:"https://ai-gateway.vercel.sh/v1", model:"openai/text-embedding-3-small" },
+  custom:     { label:"Custom",            note:"any endpoint", base:"",                              model:"" },
+};
+
+const COLORS = ["oklch(0.62 0.16 55)","oklch(0.6 0.19 25)","oklch(0.6 0.14 163)","oklch(0.6 0.14 237)","oklch(0.57 0.19 290)","oklch(0.5 0.02 286)"];
+
+/* ---------- tiny helpers ---------- */
+const $  = (s, r) => (r || document).querySelector(s);
+const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
+function later(fn, ms){ const t = setTimeout(fn, ms); state.timers.push(t); return t; }
+function clearLater(){ state.timers.forEach(clearTimeout); state.timers = []; }
+
+const ICON = {
+  check:'<path d="M20 6 9 17l-5-5"/>',
+  x:'<path d="M18 6 6 18M6 6l12 12"/>',
+  right:'<path d="M5 12h14M13 6l6 6-6 6"/>',
+  left:'<path d="M19 12H5M11 18l-6-6 6-6"/>',
+  copy:'<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  eye:'<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',
+  eyeoff:'<path d="m2 2 20 20"/><path d="M6.7 6.7A11.6 11.6 0 0 0 2 12s3.6 7 10 7a10.3 10.3 0 0 0 5.3-1.5"/><path d="M9.9 4.2A11 11 0 0 1 12 5c6.4 0 10 7 10 7a18.5 18.5 0 0 1-3 3.6"/>',
+  ext:'<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+  down:'<path d="m6 9 6 6 6-6"/>',
+  chevr:'<path d="m9 6 6 6-6 6"/>',
+  sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  moon:'<path d="M12 3a6.4 6.4 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
+  alert:'<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/>',
+  home:'<path d="m3 10 9-7 9 7v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><path d="M9 21v-8h6v8"/>',
+  list:'<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+  bot:'<rect x="3" y="8" width="18" height="12" rx="2"/><path d="M12 3v5M8 14h.01M16 14h.01"/>',
+  flow:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><path d="M6.5 10v4a2 2 0 0 0 2 2H14"/>',
+  gear:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 7.5 19l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.6 1.6 0 0 0 3 13.6H3a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 4.7 7l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.6 1.6 0 0 0 10 4.6V4a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 2.7 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0 1.1 2.7H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1.3Z"/>',
+  book:'<path d="M4 19.5V5a2 2 0 0 1 2-2h13v18H6.5A2.5 2.5 0 0 1 4 19.5Z"/><path d="M8 7h7"/>',
+};
+function svg(name, cls){
+  return '<svg class="' + (cls || "") + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + ICON[name] + "</svg>";
+}
+function btn(id, label, kind, extra){
+  return '<button class="btn ' + (kind || "") + '" id="' + id + '"' + (extra || "") + ">" + label + "</button>";
+}
+function copyBtn(id, text){
+  return '<button class="btn icon-btn cp" data-copy="' + esc(text) + '" id="' + id + '" title="Copy" aria-label="Copy">' + svg("copy") + "</button>";
+}
+function bindCopies(root){
+  $$(".cp", root).forEach((b) => {
+    b.addEventListener("click", () => {
+      const text = b.getAttribute("data-copy") || "";
+      try { navigator.clipboard && navigator.clipboard.writeText(text); } catch (e) { /* file:// may refuse */ }
+      const old = b.innerHTML;
+      b.innerHTML = svg("check");
+      setTimeout(() => { b.innerHTML = old; }, 1300);
+    });
+  });
+}
+function resultRow(kind, title, mono){
+  const ic = kind === "ok" ? "check" : kind === "err" ? "x" : kind === "warn" ? "alert" : "alert";
+  return '<div class="result ' + kind + '">' + svg(ic) + "<div><b>" + title + "</b>" + (mono ? '<span class="mono">' + mono + "</span>" : "") + "</div></div>";
+}
+function pendingRow(label){
+  return '<div class="result plain"><span class="spin"></span><div>' + label + "</div></div>";
+}
+
+/* ---------- status plumbing ---------- */
+function setStatus(i, s){ state.status[i] = s; renderRail(); renderFoot(); syncUrl(); }
+function stepDone(i){ setStatus(i, "done"); }
+const STATUS_WORD = { todo:"not done", done:"verified", skipped:"skipped", failed:"failed" };
+
+/* ---------- theme ---------- */
+function applyTheme(t){
+  document.documentElement.classList.toggle("dark", t === "dark");
+  const b = $("#theme"); if (b) b.innerHTML = svg(t === "dark" ? "sun" : "moon");
+  const b2 = $("#theme2"); if (b2) b2.innerHTML = svg(t === "dark" ? "sun" : "moon");
+  syncUrl();
+}
+function theme(){ return document.documentElement.classList.contains("dark") ? "dark" : "light"; }
+
+/* ---------- url sync ---------- */
+function syncUrl(){
+  const p = new URLSearchParams();
+  p.set("step", String(state.step));
+  if (theme() === "dark") p.set("theme", "dark");
+  if (state.view === "min") p.set("state", "minimized");
+  history.replaceState(null, "", location.pathname + "?" + p.toString());
+}
+
+/* ---------- rail (the only view of the other steps) ---------- */
+function renderRail(){
+  const rail = $("#rail");
+  rail.innerHTML = STEPS.map((s, i) => {
+    const st = state.status[i];
+    const cur = state.step === i + 1 ? " cur" : "";
+    return '<button class="seg ' + st + cur + '" data-go="' + (i + 1) + '" type="button" aria-label="Step ' + (i + 1) + ": " + esc(s.nav) + '">' +
+      '<span class="bar"></span>' +
+      '<span class="tip">' + (i + 1) + ". " + esc(s.nav) + "<em>" + STATUS_WORD[st] + "</em></span>" +
+      "</button>";
+  }).join("");
+  $$(".seg", rail).forEach((b) => b.addEventListener("click", () => {
+    const n = Number(b.getAttribute("data-go"));
+    gotoStep(n, n > state.step ? 1 : -1);
+  }));
+}
+
+/* ---------- footer ---------- */
+function renderFoot(){
+  const i = state.step - 1;
+  const last = state.step === 6;
+  const st = state.status[i];
+  let note = "";
+  if (st === "done") note = "This step is verified.";
+  else if (st === "skipped") note = "Skipped. You can come back to it.";
+  else if (state.step === 4) note = "Skipping leaves memory off.";
+  else note = "Nothing is saved until a check passes.";
+  $("#footin").innerHTML =
+    btn("back", svg("left") + " Back", "lg ghost", state.step === 1 ? " disabled" : "") +
+    '<span class="sp"></span>' +
+    '<span class="footnote">' + note + "</span>" +
+    btn("skip", st === "skipped" ? "Skipped" : "Skip", "lg ghost", st === "skipped" ? " disabled" : "") +
+    btn("next", last ? "Finish" : "Continue " + svg("right"), "lg primary");
+  $("#back").addEventListener("click", () => gotoStep(Math.max(1, state.step - 1), -1));
+  $("#skip").addEventListener("click", () => {
+    setStatus(i, "skipped");
+    renderStep(1);
+    later(() => gotoStep(Math.min(6, state.step + 1), 1), 260);
+  });
+  $("#next").addEventListener("click", () => {
+    if (last) { minimize(); return; }
+    gotoStep(state.step + 1, 1);
+  });
+}
+
+/* ---------- stage ---------- */
+function gotoStep(n, dir){
+  if (n === state.step) return;
+  clearLater();
+  const col = $("#col");
+  col.classList.remove("in-f", "in-b");
+  col.classList.add(dir > 0 ? "out" : "out-b");
+  setTimeout(() => { state.step = n; renderStep(dir); renderRail(); renderFoot(); syncUrl(); }, 120);
+}
+function renderStep(dir){
+  const i = state.step - 1, s = STEPS[i], col = $("#col");
+  col.className = "col " + (dir < 0 ? "in-b" : "in-f");
+  col.innerHTML =
+    '<p class="kicker">Step ' + state.step + ' <span class="of">of 6</span></p>' +
+    '<h2 class="title">' + esc(s.title) + "</h2>" +
+    '<p class="sub">' + esc(s.sub) + "</p>" +
+    '<div id="body"></div>';
+  const body = $("#body", col);
+  ({ connect:step1, brand:step2, provider:step3, memory:step4, integrations:step5, task:step6 })[s.key](body);
+  bindCopies(body);
+}
+
+/* ============================================================
+   STEP 1 - Connect
+   ============================================================ */
+function step1(root){
+  const c = state.conn;
+  root.innerHTML =
+    '<div class="card"><div class="cardh"><h3>API connection</h3><span class="sp"></span>' +
+      '<span class="chip ' + (c.ok ? "ok" : "") + '">' + (c.ok ? "Verified" : "Not tested") + "</span></div>" +
+    '<div class="cardb">' +
+      '<div class="field"><label class="lbl" for="c-name">Connection name</label>' +
+        '<input class="inp" id="c-name" placeholder="amber-badger-41" value="' + esc(c.name) + '">' +
+        '<p class="hint">Shows in the connection switcher. Optional.</p></div>' +
+      '<div class="field"><label class="lbl" for="c-url">API URL</label>' +
+        '<input class="inp mono" id="c-url" value="' + esc(c.url) + '" spellcheck="false">' +
+        '<p class="hint">The dashboard probes <code>GET /health</code> on this address.</p></div>' +
+      '<div class="field"><label class="lbl" for="c-key">API key</label><div class="inrow">' +
+        '<input class="inp mono" id="c-key" type="' + (c.shown ? "text" : "password") + '" value="' + esc(c.key) + '" spellcheck="false">' +
+        '<button class="btn icon-btn" id="c-eye" title="' + (c.shown ? "Hide key" : "Show key") + '">' + svg(c.shown ? "eyeoff" : "eye") + "</button>" +
+        copyBtn("c-copy", "sk-swarm-••••4f2a") +
+      '</div><p class="hint">The value of <code>AGENT_SWARM_API_KEY</code> on the server. Kept in this browser only.</p></div>' +
+      '<div class="acts">' + btn("c-test", "Test connection", "primary") +
+        '<span class="footnote" id="c-probe">GET ' + esc(c.url.replace(/\/+$/, "")) + "/health</span></div>" +
+      '<div id="c-out">' + connOut() + "</div>" +
+    "</div></div>";
+
+  $("#c-name", root).addEventListener("input", (e) => { c.name = e.target.value; });
+  $("#c-url", root).addEventListener("input", (e) => {
+    c.url = e.target.value;
+    $("#c-probe", root).textContent = "GET " + c.url.replace(/\/+$/, "") + "/health";
+  });
+  $("#c-key", root).addEventListener("input", (e) => { c.key = e.target.value; });
+  $("#c-eye", root).addEventListener("click", () => { c.shown = !c.shown; step1(root); bindCopies(root); });
+  $("#c-test", root).addEventListener("click", () => {
+    const valid = /^https?:\/\/\S+/.test(c.url.trim());
+    c.phase = "run"; $("#c-out", root).innerHTML = pendingRow("Probing " + esc(c.url.replace(/\/+$/, "")) + "/health");
+    later(() => {
+      c.phase = valid ? "ok" : "err"; c.ok = valid;
+      setStatus(0, valid ? "done" : "failed");
+      step1(root); bindCopies(root);
+    }, 850);
+  });
+}
+function connOut(){
+  const c = state.conn;
+  if (c.phase === "ok") return resultRow("ok", "Server answered. Connection saved.", "200 OK · agent-swarm v1.154.0 · 34 ms · " + esc(c.name || "amber-badger-41"));
+  if (c.phase === "err") return resultRow("err", "Could not reach that address.", "The URL must start with http:// or https://");
+  return "";
+}
+
+/* ============================================================
+   STEP 2 - Name your swarm
+   ============================================================ */
+function step2(root){
+  const b = state.brand;
+  root.innerHTML =
+    '<div class="two">' +
+      '<div class="card"><div class="cardh"><h3>Identity</h3><span class="sp"></span>' +
+        '<span class="chip ' + (b.phase === "ok" ? "ok" : "") + '">' + (b.phase === "ok" ? "Saved" : "Unsaved") + "</span></div>" +
+      '<div class="cardb">' +
+        '<div class="field"><label class="lbl" for="b-name">Swarm name</label>' +
+          '<input class="inp" id="b-name" value="' + esc(b.name) + '" maxlength="28"></div>' +
+        '<div class="field"><label class="lbl" for="b-logo">Logo URL</label>' +
+          '<input class="inp mono" id="b-logo" placeholder="https://acme.dev/mark.png" value="' + esc(b.logo) + '" spellcheck="false">' +
+          '<p class="hint">Optional. Falls back to the hive mark.</p></div>' +
+        '<div class="field"><span class="lbl">Brand color</span><div class="swatches" id="b-sw">' +
+          COLORS.map((c) => '<button class="sw ' + (c === b.color ? "on" : "") + '" data-c="' + c + '" style="background:' + c + '" aria-label="Brand color"></button>').join("") +
+        "</div></div>" +
+        '<div class="acts" style="margin-top:14px">' + btn("b-save", "Save name", "primary") + "</div>" +
+        '<div id="b-out">' + (b.phase === "ok" ? resultRow("ok", "Name saved.", "SWARM_ORG_NAME · sidebar and Slack app use it right away") : "") + "</div>" +
+      "</div></div>" +
+      '<div class="card"><div class="cardh"><h3>Sidebar preview</h3></div>' +
+      '<div class="cardb pv"><div class="pvside">' +
+        '<div class="pvhead"><span class="pvmark" id="pvmark" style="background:' + esc(b.color) + ';color:#fff">' + brandMark() + "</span>" +
+          '<div style="min-width:0"><div class="pvname" id="pvname">' + esc(b.name || "Your Swarm") + '</div><div class="pvsub">Mission control</div></div></div>' +
+        '<div class="pvnav">' +
+          '<div class="pvrow on" id="pvrow" style="color:' + esc(b.color) + ';background:color-mix(in oklch,' + esc(b.color) + ' 12%,transparent)"><i></i>Home</div>' +
+          '<div class="pvrow"><i></i>Tasks</div><div class="pvrow"><i></i>Agents</div>' +
+        "</div></div>" +
+        '<p class="hint" style="margin-top:11px">Live preview. Both themes use the same color.</p>' +
+      "</div></div>" +
+    "</div>";
+
+  $("#b-name", root).addEventListener("input", (e) => {
+    b.name = e.target.value;
+    $("#pvname", root).textContent = b.name || "Your Swarm";
+    $("#hdrname").textContent = b.name || "Your Swarm";
+  });
+  $("#b-logo", root).addEventListener("input", (e) => { b.logo = e.target.value; $("#pvmark", root).innerHTML = brandMark(); });
+  $$(".sw", root).forEach((s) => s.addEventListener("click", () => {
+    b.color = s.getAttribute("data-c");
+    $$(".sw", root).forEach((o) => o.classList.toggle("on", o === s));
+    $("#pvmark", root).style.background = b.color;
+    const r = $("#pvrow", root);
+    r.style.color = b.color;
+    r.style.background = "color-mix(in oklch," + b.color + " 12%,transparent)";
+    $("#hdrmark").style.color = b.color;
+  }));
+  $("#b-save", root).addEventListener("click", () => {
+    $("#b-out", root).innerHTML = pendingRow("Saving branding");
+    later(() => { b.phase = "ok"; setStatus(1, "done"); step2(root); bindCopies(root); }, 600);
+  });
+  $("#hdrmark").style.color = b.color;
+}
+function brandMark(){
+  const b = state.brand;
+  if (b.logo.trim()) return '<img src="' + esc(b.logo.trim()) + '" alt="">';
+  return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3 19.5 7.5v9L12 21 4.5 16.5v-9z"/><circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/></svg>';
+}
+
+/* ============================================================
+   STEP 3 - AI provider
+   ============================================================ */
+const PROV = {
+  claude:     { mark:"CL", name:"Claude",     line:"API key or a claude setup-token" },
+  codex:      { mark:"CX", name:"Codex",      line:"Device code login, no terminal needed" },
+  openrouter: { mark:"OR", name:"OpenRouter", line:"One key, many models" },
+};
+function provChip(p){
+  const ph = state.prov[p].phase;
+  if (ph === "ok")  return '<span class="chip ok"><span class="dot"></span>Verified</span>';
+  if (ph === "run") return '<span class="chip run"><span class="dot"></span>Testing</span>';
+  if (ph === "polling" || ph === "starting") return '<span class="chip run"><span class="dot"></span>Waiting</span>';
+  if (ph === "err") return '<span class="chip err">Failed</span>';
+  return '<span class="chip">Not set up</span>';
+}
+function anyProvider(){ return ["claude","codex","openrouter"].some((p) => state.prov[p].phase === "ok"); }
+
+function step3(root){
+  root.innerHTML =
+    ["claude","codex","openrouter"].map((p) => {
+      const open = state.prov.open === p, ok = state.prov[p].phase === "ok";
+      return '<div class="acc ' + (open ? "open " : "") + (ok ? "ok" : "") + '" data-p="' + p + '">' +
+        '<button class="acch" type="button" data-open="' + p + '" aria-expanded="' + open + '">' +
+          '<span class="pm">' + PROV[p].mark + "</span>" +
+          '<span class="pname">' + PROV[p].name + "<em>" + PROV[p].line + "</em></span>" +
+          provChip(p) + svg("down", "chev") +
+        "</button>" +
+        (open ? '<div class="accb">' + ({ claude:claudeBody, codex:codexBody, openrouter:orBody })[p]() + "</div>" : "") +
+      "</div>";
+    }).join("") +
+    '<div class="linkrow"><a class="lnk" href="#settings" id="p-more">More providers (OpenAI, Bedrock, Claude Managed)' + svg("ext") + "</a></div>" +
+    (anyProvider() ? "" : '<p class="note">One verified provider finishes this step.</p>');
+
+  $$(".acch", root).forEach((h) => h.addEventListener("click", () => {
+    const p = h.getAttribute("data-open");
+    state.prov.open = state.prov.open === p ? "" : p;
+    step3(root); bindCopies(root);
+  }));
+  bindClaude(root); bindCodex(root); bindOr(root);
+  $("#p-more", root).addEventListener("click", (e) => e.preventDefault());
+}
+
+/* --- Claude --- */
+function claudeBody(){
+  const c = state.prov.claude;
+  const keyMode = c.mode === "key";
+  return '<div class="seg2" id="cl-mode"><button class="' + (keyMode ? "on" : "") + '" data-m="key">API key</button>' +
+      '<button class="' + (!keyMode ? "on" : "") + '" data-m="token">Setup token</button></div>' +
+    (keyMode
+      ? '<div class="field" style="margin-top:13px"><label class="lbl" for="cl-key">Anthropic API key</label>' +
+        '<input class="inp mono" id="cl-key" type="password" value="sk-ant-••••8d21" spellcheck="false">' +
+        '<p class="hint">Stored as a secret <code>swarm_config</code> row. Workers read it at boot.</p></div>'
+      : '<div class="field" style="margin-top:13px"><span class="lbl">Mint a token on your machine</span>' +
+        '<div class="codeblk">claude setup-token' + copyBtn("cl-cp", "claude setup-token") + "</div>" +
+        '<p class="hint">Uses your Claude subscription instead of API billing.</p></div>' +
+        '<div class="field"><label class="lbl" for="cl-key">Paste the token</label>' +
+        '<input class="inp mono" id="cl-key" type="password" value="sk-ant-oat01-••••b73f" spellcheck="false"></div>') +
+    '<div class="acts" style="margin-top:13px">' + btn("cl-test", "Test Claude", "primary") + "</div>" +
+    '<div id="cl-out">' + (state.prov.claude.phase === "ok"
+      ? resultRow("ok", "Claude answered.", "messages.create · claude-sonnet-4-5 · 410 ms")
+      : "") + "</div>";
+}
+function bindClaude(root){
+  const mode = $("#cl-mode", root); if (!mode) return;
+  $$("button", mode).forEach((b) => b.addEventListener("click", () => {
+    state.prov.claude.mode = b.getAttribute("data-m"); step3(root); bindCopies(root);
+  }));
+  $("#cl-test", root).addEventListener("click", () => {
+    state.prov.claude.phase = "run"; $("#cl-out", root).innerHTML = pendingRow("Calling the Anthropic API");
+    later(() => { state.prov.claude.phase = "ok"; if (anyProvider()) setStatus(2, "done"); step3(root); bindCopies(root); }, 850);
+  });
+}
+
+/* --- Codex device code --- */
+function fmt(s){ const m = Math.floor(s / 60), r = s % 60; return m + ":" + String(r).padStart(2, "0"); }
+function codexBody(){
+  const c = state.prov.codex;
+  const note = '<div class="result info" style="margin-bottom:13px">' + svg("alert") +
+    "<div><b>Turn on device code login first.</b><span class=\"mono\">ChatGPT Settings → Security → Allow device code login. Workspace accounts need an admin to enable it.</span></div></div>";
+  let core;
+  if (c.phase === "idle" || c.phase === "starting"){
+    core = '<p class="hint" style="margin:0 0 12px">The API server asks OpenAI for a code, then polls for your approval. Nothing has to reach this browser or your laptop.</p>' +
+      '<div class="acts">' + btn("cx-start", c.phase === "starting" ? "Requesting a code" : "Start device login", "primary", c.phase === "starting" ? " disabled" : "") + "</div>" +
+      (c.phase === "starting" ? '<div style="margin-top:13px">' + pendingRow("Requesting a device code from auth.openai.com") + "</div>" : "");
+  } else if (c.phase === "polling"){
+    core = '<div class="devwrap">' +
+      '<div class="devcode"><span>ABCD-EFGH</span>' + copyBtn("cx-cp", "ABCD-EFGH") + "</div>" +
+      '<ol class="devsteps">' +
+        '<li>Open <a href="https://auth.openai.com/codex/device" target="_blank" rel="noreferrer noopener">auth.openai.com/codex/device</a></li>' +
+        "<li>Type the code above.</li>" +
+        "<li>Approve the request. This page updates on its own.</li>" +
+      "</ol>" +
+      '<div class="poll"><span class="spin"></span> Waiting for you to approve the code' +
+        '<span class="sp2" id="cx-left">expires in ' + fmt(c.left) + "</span></div>" +
+    "</div>";
+  } else {
+    core = resultRow("ok", "Codex is signed in.", "token stored as codex_oauth_1 · workers refresh it per task");
+  }
+  const fallbacks = '<details class="more"><summary>' + svg("chevr") + "Other ways to sign in</summary>" +
+    '<div class="moreb">' +
+      '<div class="fbk"><h4>Paste the redirected URL</h4>' +
+        '<div class="inrow"><input class="inp mono" id="cx-url" placeholder="http://localhost:1455/auth/callback?code=…" spellcheck="false">' +
+        btn("cx-sub", "Submit", "") + "</div>" +
+        '<p class="hint">Use this when you already ran the browser login and it landed on a dead page.</p></div>' +
+      '<div class="fbk"><h4>Run the CLI login</h4>' +
+        '<div class="codeblk">npx @desplega.ai/agent-swarm codex-login --api-url ' + esc(state.conn.url.replace(/\/+$/, "")) +
+        copyBtn("cx-cp2", "npx @desplega.ai/agent-swarm codex-login --api-url " + state.conn.url.replace(/\/+$/, "")) + "</div></div>" +
+    "</div></details>";
+  return note + core + fallbacks;
+}
+function bindCodex(root){
+  const start = $("#cx-start", root);
+  if (start) start.addEventListener("click", () => {
+    const c = state.prov.codex;
+    c.phase = "starting"; step3(root); bindCopies(root);
+    later(() => {
+      c.phase = "polling"; c.left = 899; step3(root); bindCopies(root); tickCodex(root);
+      later(() => {
+        if (state.prov.codex.phase !== "polling") return;
+        state.prov.codex.phase = "ok";
+        if (anyProvider()) setStatus(2, "done");
+        step3(root); bindCopies(root);
+      }, 4600);
+    }, 700);
+  });
+  const sub = $("#cx-sub", root);
+  if (sub) sub.addEventListener("click", () => {
+    state.prov.codex.phase = "ok"; if (anyProvider()) setStatus(2, "done"); step3(root); bindCopies(root);
+  });
+  if (state.prov.codex.phase === "polling" && $("#cx-left", root)) tickCodex(root);
+}
+function tickCodex(root){
+  const el = $("#cx-left", root);
+  if (!el || state.prov.codex.phase !== "polling") return;
+  later(() => {
+    const c = state.prov.codex;
+    if (c.phase !== "polling") return;
+    c.left = Math.max(0, c.left - 1);
+    const e2 = $("#cx-left", root);
+    if (e2){ e2.textContent = "expires in " + fmt(c.left); tickCodex(root); }
+  }, 1000);
+}
+
+/* --- OpenRouter --- */
+function orBody(){
+  return '<div class="field"><label class="lbl" for="or-key">OpenRouter API key</label>' +
+    '<input class="inp mono" id="or-key" type="password" value="sk-or-v1-••••c3b7" spellcheck="false">' +
+    '<p class="hint">Workers run the <code>pi</code> harness with this key. Model choice stays per task.</p></div>' +
+    '<div class="acts" style="margin-top:13px">' + btn("or-test", "Test OpenRouter", "primary") + "</div>" +
+    '<div id="or-out">' + (state.prov.openrouter.phase === "ok"
+      ? resultRow("ok", "OpenRouter answered.", "chat.completions · 202 models reachable · 380 ms") : "") + "</div>";
+}
+function bindOr(root){
+  const t = $("#or-test", root); if (!t) return;
+  t.addEventListener("click", () => {
+    state.prov.openrouter.phase = "run"; $("#or-out", root).innerHTML = pendingRow("Calling the OpenRouter API");
+    later(() => { state.prov.openrouter.phase = "ok"; if (anyProvider()) setStatus(2, "done"); step3(root); bindCopies(root); }, 850);
+  });
+}
+
+/* ============================================================
+   STEP 4 - Memory
+   ============================================================ */
+function step4(root){
+  const m = state.mem, p = PRESETS[m.preset];
+  const base = m.preset === "custom" ? m.base : p.base;
+  const model = m.preset === "custom" ? m.model : p.model;
+  const reuse = state.prov.openrouter.phase === "ok" ? "OpenRouter" : (state.prov.claude.phase === "ok" ? "" : "");
+  root.innerHTML =
+    '<div class="card"><div class="cardh"><h3>Embeddings</h3><span class="sp"></span>' +
+      '<span class="chip ' + (m.phase === "ok" ? "ok" : state.status[3] === "skipped" ? "skip" : "") + '">' +
+      (m.phase === "ok" ? "Verified" : state.status[3] === "skipped" ? "Skipped" : "Not tested") + "</span></div>" +
+    '<div class="cardb">' +
+      '<span class="lbl">Provider</span><div class="presets" id="m-pre">' +
+        Object.keys(PRESETS).map((k) => '<button class="preset ' + (k === m.preset ? "on" : "") + '" data-p="' + k + '"><b>' +
+          PRESETS[k].label + "</b><em>" + PRESETS[k].note + "</em></button>").join("") +
+      "</div>" +
+      (m.preset === "custom"
+        ? '<div class="field" style="margin-top:13px"><label class="lbl" for="m-base">Base URL</label>' +
+          '<input class="inp mono" id="m-base" placeholder="https://embeddings.internal/v1" value="' + esc(m.base) + '" spellcheck="false"></div>' +
+          '<div class="field"><label class="lbl" for="m-model">Model</label>' +
+          '<input class="inp mono" id="m-model" placeholder="bge-m3" value="' + esc(m.model) + '" spellcheck="false"></div>'
+        : '<div class="readout"><div class="ro"><span>Base URL</span><b>' + esc(base) + "</b></div>" +
+          '<div class="ro"><span>Model</span><b>' + esc(model) + "</b></div></div>") +
+      '<div class="field" style="margin-top:13px"><label class="lbl" for="m-key">Embeddings key</label>' +
+        '<input class="inp mono" id="m-key" type="password" placeholder="sk-…" value="' + esc(m.key) + '" spellcheck="false">' +
+        (reuse ? '<p class="hint" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
+          '<button class="reuse" id="m-reuse">Reuse the ' + reuse + " key from step 3</button> No second key needed.</p>" : "") +
+      "</div>" +
+      '<div class="acts" style="margin-top:13px">' + btn("m-test", "Test embedding", "primary") +
+        '<span class="footnote">One vector, then it is discarded.</span></div>' +
+      '<div id="m-out">' + (m.phase === "ok"
+        ? resultRow("ok", "Embedding call succeeded. Memory is on.", "1 vector · 1536 dims · 242 ms") : "") + "</div>" +
+    "</div></div>" +
+    '<p class="note">Any OpenAI-compatible embeddings endpoint works. The presets only fill the base URL and the model.</p>' +
+    (state.status[3] === "skipped"
+      ? '<div style="margin-top:12px">' + resultRow("warn", "Memory stays off.", "Agents will not remember across tasks. Turn it on later in Settings → Configuration.") + "</div>"
+      : "");
+
+  $$(".preset", root).forEach((b) => b.addEventListener("click", () => {
+    m.preset = b.getAttribute("data-p"); m.phase = "idle"; step4(root); bindCopies(root);
+  }));
+  const mb = $("#m-base", root); if (mb) mb.addEventListener("input", (e) => { m.base = e.target.value; });
+  const mm = $("#m-model", root); if (mm) mm.addEventListener("input", (e) => { m.model = e.target.value; });
+  $("#m-key", root).addEventListener("input", (e) => { m.key = e.target.value; });
+  const ru = $("#m-reuse", root);
+  if (ru) ru.addEventListener("click", () => { m.key = "sk-or-v1-••••c3b7"; m.preset = "openrouter"; step4(root); bindCopies(root); });
+  $("#m-test", root).addEventListener("click", () => {
+    m.phase = "run"; $("#m-out", root).innerHTML = pendingRow("Embedding one short string");
+    later(() => { m.phase = "ok"; setStatus(3, "done"); step4(root); bindCopies(root); }, 900);
+  });
+}
+
+/* ============================================================
+   STEP 5 - Integrations
+   ============================================================ */
+const INTG = {
+  slack:  { mark:"SL", name:"Slack",  line:"Run the swarm from a channel. Tasks, replies, and approvals." },
+  github: { mark:"GH", name:"GitHub", line:"Issues, pull requests, reviews." },
+  gitlab: { mark:"GL", name:"GitLab", line:"Issues and merge requests." },
+  linear: { mark:"LN", name:"Linear", line:"Issues and status sync." },
+  jira:   { mark:"JR", name:"Jira",   line:"Issues and status sync." },
+};
+function iChip(k){
+  const s = state.intg[k];
+  if (s === "ok")  return '<span class="chip ok"><span class="dot"></span>Connected</span>';
+  if (s === "run") return '<span class="chip run"><span class="dot"></span>Connecting</span>';
+  return '<span class="chip">Not connected</span>';
+}
+function iHead(k){
+  return '<div class="cardh"><span class="mark2">' + INTG[k].mark + "</span><h3>" + INTG[k].name + '</h3><span class="sp"></span>' + iChip(k) + "</div>";
+}
+function connectIntg(k, root, ms){
+  state.intg[k] = "run"; step5(root); bindCopies(root);
+  later(() => {
+    state.intg[k] = "ok";
+    if (state.status[4] !== "done") setStatus(4, "done");
+    step5(root); bindCopies(root);
+  }, ms || 800);
+}
+function step5(root){
+  const name = state.brand.name || "Your Swarm";
+  const manifest = "api.slack.com/apps?new_app=1&manifest_json=" + encodeURIComponent('{"display_information":{"name":"' + name + '"}}').slice(0, 46) + "…";
+  root.innerHTML =
+    '<div class="grid2">' +
+      '<div class="card icard wide ' + (state.intg.slack === "ok" ? "on" : "") + '">' + iHead("slack") +
+        '<div class="cardb"><p class="desc">' + INTG.slack.line + "</p>" +
+        (state.intg.slack === "ok"
+          ? resultRow("ok", "Slack connected.", "bot user @" + name.toLowerCase().replace(/\s+/g, "-") + " · 3 tokens stored")
+          : (!state.intg.slackForm
+            ? '<div class="acts">' + btn("sl-make", "Create Slack app from manifest", "") + "</div>" +
+              '<p class="hint" style="margin-top:9px"><code>' + esc(manifest) + "</code> opens Slack with a manifest that names the app <b>" + esc(name) + "</b>. Paste the three values it hands back.</p>"
+            : '<div class="field"><label class="lbl" for="sl-bot">Bot token</label><input class="inp mono" id="sl-bot" type="password" value="xoxb-••••2f41"></div>' +
+              '<div class="field"><label class="lbl" for="sl-app">App token</label><input class="inp mono" id="sl-app" type="password" value="xapp-••••a907"></div>' +
+              '<div class="field"><label class="lbl" for="sl-sig">Signing secret</label><input class="inp mono" id="sl-sig" type="password" value="••••••••6b3c"></div>' +
+              '<div class="acts" style="margin-top:12px">' + btn("sl-go", state.intg.slack === "run" ? "Connecting" : "Connect Slack", "primary", state.intg.slack === "run" ? " disabled" : "") + "</div>")) +
+        "</div></div>" +
+      ["github","gitlab"].map((k) => '<div class="card icard ' + (state.intg[k] === "ok" ? "on" : "") + '">' + iHead(k) +
+        '<div class="cardb"><p class="desc">' + INTG[k].line + "</p>" +
+        (state.intg[k] === "ok"
+          ? resultRow("ok", "Token accepted.", (k === "github" ? "repo, workflow scopes" : "api scope") + " · stored as a secret")
+          : '<div class="field"><label class="lbl" for="' + k + '-t">Personal access token</label><input class="inp mono" id="' + k + '-t" type="password" value="' +
+            (k === "github" ? "ghp_••••e71d" : "glpat-••••9c0a") + '"></div>' +
+            '<div class="acts" style="margin-top:10px">' + btn(k + "-go", state.intg[k] === "run" ? "Checking" : "Connect", "", state.intg[k] === "run" ? " disabled" : "") + "</div>") +
+        "</div></div>").join("") +
+      ["linear","jira"].map((k) => '<div class="card icard ' + (state.intg[k] === "ok" ? "on" : "") + '">' + iHead(k) +
+        '<div class="cardb"><p class="desc">' + INTG[k].line + "</p>" +
+        (state.intg[k] === "ok"
+          ? resultRow("ok", "OAuth complete.", "workspace connected · token refreshes on its own")
+          : '<div class="acts">' + btn(k + "-go", state.intg[k] === "run" ? "Opening OAuth" : "Connect " + INTG[k].name, "", state.intg[k] === "run" ? " disabled" : "") + "</div>" +
+            '<p class="hint" style="margin-top:9px">Opens the ' + INTG[k].name + " consent screen.</p>") +
+        "</div></div>").join("") +
+    "</div>" +
+    '<div class="linkrow"><a class="lnk" href="#settings" id="i-more">More integrations' + svg("ext") + "</a>" +
+      '<span class="sp" style="flex:1"></span>' +
+      '<button class="lnk quiet" id="i-skip">Skip integrations for now</button></div>';
+
+  const mk = $("#sl-make", root);
+  if (mk) mk.addEventListener("click", () => { state.intg.slackForm = true; step5(root); bindCopies(root); });
+  const sg = $("#sl-go", root);
+  if (sg) sg.addEventListener("click", () => connectIntg("slack", root, 900));
+  ["github","gitlab","linear","jira"].forEach((k) => {
+    const b = $("#" + k + "-go", root);
+    if (b) b.addEventListener("click", () => connectIntg(k, root, k === "linear" || k === "jira" ? 950 : 800));
+  });
+  $("#i-more", root).addEventListener("click", (e) => e.preventDefault());
+  $("#i-skip", root).addEventListener("click", () => { setStatus(4, "skipped"); later(() => gotoStep(6, 1), 240); });
+}
+
+/* ============================================================
+   STEP 6 - First task
+   ============================================================ */
+function chosenProvider(){
+  return ["claude","codex","openrouter"].find((p) => state.prov[p].phase === "ok") || "claude";
+}
+function providerLines(){
+  if (chosenProvider() === "codex")
+    return ["  -e HARNESS_PROVIDER=codex \\", "  # the Codex token is pulled from the API at boot"];
+  if (chosenProvider() === "openrouter")
+    return ["  -e HARNESS_PROVIDER=pi \\", "  -e OPENROUTER_API_KEY=sk-or-v1-••••c3b7 \\"];
+  return ["  -e HARNESS_PROVIDER=claude \\", "  -e ANTHROPIC_API_KEY=sk-ant-••••8d21 \\"];
+}
+function dockerCmd(){
+  const url = state.conn.url.replace(/\/+$/, "");
+  return ["docker run -d --name swarm-worker \\",
+    "  -e MCP_BASE_URL=" + url + " \\",
+    "  -e AGENT_SWARM_API_KEY=sk-swarm-••••4f2a \\"]
+    .concat(providerLines())
+    .concat(["  ghcr.io/desplega-ai/agent-swarm-worker:latest"]).join("\n");
+}
+function step6(root){
+  const t = state.task;
+  if (!t.worker){
+    root.innerHTML =
+      '<div class="card"><div class="cardh"><h3>Start a worker</h3><span class="sp"></span>' +
+        '<span class="chip run"><span class="dot"></span>Waiting</span></div>' +
+      '<div class="cardb">' +
+        '<p class="desc" style="margin:0 0 11px;font-size:13px;color:var(--muted-foreground)">Run this on any machine with Docker. The worker registers itself, then this page moves on by itself.</p>' +
+        '<div class="codeblk">' + esc(dockerCmd()) + copyBtn("w-cp", dockerCmd()) + "</div>" +
+        '<div class="wait"><span class="wdot"></span><b style="font-weight:600">Waiting for a worker to check in</b>' +
+          '<span class="sp" style="flex:1"></span><span class="footnote">polling /status every 5s</span></div>' +
+        '<div class="shimbar"><i></i></div>' +
+      "</div></div>" +
+      '<div class="linkrow"><a class="lnk" href="#compose" id="w-compose">Use Docker Compose instead' + svg("ext") + "</a>" +
+        '<span style="flex:1"></span><button class="lnk quiet" id="w-sim" title="Mockup control">Simulate a worker joining (mock)</button></div>';
+    $("#w-compose", root).addEventListener("click", (e) => e.preventDefault());
+    $("#w-sim", root).addEventListener("click", () => workerJoins(root));
+    if (!t.joining){ t.joining = true; later(() => { if (!state.task.worker && state.step === 6) workerJoins(root); }, 6500); }
+    return;
+  }
+  const phase = t.phase;
+  root.innerHTML =
+    '<div class="card"><div class="cardh"><h3>Worker online</h3><span class="sp"></span>' +
+      '<span class="chip ok"><span class="dot"></span>Alive</span></div>' +
+    '<div class="cardb" style="padding:12px 15px">' +
+      '<div class="ro" style="padding:0"><span>Worker</span><b>worker-7c1a · ' +
+      (chosenProvider() === "codex" ? "codex" : chosenProvider() === "openrouter" ? "pi" : "claude") +
+      ' · joined just now</b></div>' +
+    "</div></div>" +
+    '<div class="card"><div class="cardh"><h3>Hello task</h3><span class="sp"></span>' +
+      (phase === "done" ? '<span class="chip ok"><span class="dot"></span>Completed</span>'
+        : phase === "idle" ? '<span class="chip">Not sent</span>'
+        : '<span class="chip run"><span class="dot"></span>' + (phase === "created" ? "Created" : "Running") + "</span>") + "</div>" +
+    '<div class="cardb">' +
+      (phase === "idle"
+        ? '<p class="desc" style="margin:0 0 12px;font-size:13px;color:var(--muted-foreground)">A fixed prompt that touches the model and the MCP round trip. No repository needed.</p>' +
+          '<div class="codeblk">Say hello, then list three tools you can reach.</div>' +
+          '<div class="acts" style="margin-top:12px">' + btn("t-send", "Send a hello task", "primary") + "</div>"
+        : '<div class="ro" style="padding:0 0 4px"><span>Task</span><b>4f9c2a1e · hello</b></div>' +
+          '<ol class="tl">' +
+            '<li class="hit">Created<time>0.0s</time></li>' +
+            '<li class="' + (phase === "created" ? "now" : "hit") + '">Claimed by worker-7c1a<time>' + (phase === "created" ? "…" : "0.4s") + "</time></li>" +
+            '<li class="' + (phase === "running" ? "now" : phase === "done" ? "hit" : "") + '">Running<time>' + (phase === "created" ? "" : phase === "running" ? "…" : "2.9s") + "</time></li>" +
+            '<li class="' + (phase === "done" ? "hit" : "") + '">Completed<time>' + (phase === "done" ? "3.1s" : "") + "</time></li>" +
+          "</ol>" +
+          (phase === "done"
+            ? '<div class="party" style="margin-top:12px">' + resultRow("ok", "First task completed. Your swarm is live.", "1 agent · 1 task · $0.004 · 3.1s") + party() + "</div>"
+            : "")) +
+    "</div></div>" +
+    (phase === "done" ? '<p class="note">Setup is done. Finish closes this page and drops you on the dashboard.</p>' : "");
+
+  const send = $("#t-send", root);
+  if (send) send.addEventListener("click", () => {
+    state.task.phase = "created"; step6(root); bindCopies(root);
+    later(() => { state.task.phase = "running"; step6(root); bindCopies(root); }, 1200);
+    later(() => { state.task.phase = "done"; setStatus(5, "done"); step6(root); bindCopies(root); }, 3100);
+  });
+}
+function workerJoins(root){
+  state.task.worker = true;
+  if (state.step === 6) { step6(root); bindCopies(root); }
+}
+function party(){
+  let out = "";
+  for (let i = 0; i < 9; i++){
+    const dx = (i - 4) * 11 + (i % 2 ? 4 : -4);
+    const col = i % 3 === 0 ? "var(--success)" : i % 3 === 1 ? "var(--active)" : "var(--primary)";
+    out += '<i style="left:' + (12 + i * 4) + "%;--dx:" + dx + "px;background:" + col + ";animation-delay:" + (i * 40) + 'ms"></i>';
+  }
+  return out;
+}
+
+/* ============================================================
+   MINIMIZED - home dashboard shell with the checklist card
+   ============================================================ */
+function subline(i){
+  const st = state.status[i];
+  if (st === "skipped") return "Skipped";
+  switch (i){
+    case 0: return st === "done" ? state.conn.url.replace(/\/+$/, "") + " answered /health" : st === "failed" ? "Last probe failed" : "Not tested yet";
+    case 1: return st === "done" ? "Called " + (state.brand.name || "Your Swarm") : "Still called Your Swarm";
+    case 2: {
+      if (st !== "done") return "No provider verified";
+      const on = ["claude","codex","openrouter"].filter((p) => state.prov[p].phase === "ok").map((p) => PROV[p].name);
+      return on.join(", ") + " verified";
+    }
+    case 3: return st === "done" ? PRESETS[state.mem.preset].label + " embeddings" : "Memory is off";
+    case 4: {
+      const on = Object.keys(INTG).filter((k) => state.intg[k] === "ok").map((k) => INTG[k].name);
+      return on.length ? on.join(", ") + " connected" : "Nothing connected";
+    }
+    default: return st === "done" ? "First task completed" : state.task.worker ? "Worker online, no task sent" : "No worker yet";
+  }
+}
+function renderMin(){
+  const done = state.status.filter((s) => s === "done").length;
+  const open = state.status.filter((s) => s === "todo" || s === "failed").length;
+  const b = state.brand;
+  $("#min").innerHTML =
+    '<div class="shell">' +
+      '<aside class="side">' +
+        '<div class="sh"><span class="pvmark" style="background:' + esc(b.color) + ';color:#fff">' + brandMark() + "</span>" +
+          '<div style="min-width:0"><div class="pvname">' + esc(b.name || "Your Swarm") + '</div><div class="pvsub">Mission control</div></div></div>' +
+        "<nav>" +
+          '<button class="nrow on">' + svg("home") + "Home</button>" +
+          '<button class="nrow">' + svg("list") + "Tasks</button>" +
+          '<button class="nrow">' + svg("bot") + "Agents</button>" +
+          '<button class="nrow">' + svg("flow") + "Workflows</button>" +
+          '<button class="nrow">' + svg("book") + "Skills</button>" +
+          '<button class="nrow">' + svg("gear") + "Settings</button>" +
+        "</nav>" +
+        '<div class="foot2">v1.154.0</div>' +
+      "</aside>" +
+      '<div class="mainwrap">' +
+        '<div class="topbar"><span class="crumb"><b>Home</b></span><span style="flex:1"></span>' +
+          '<button class="btn icon-btn" id="theme2" title="Toggle theme" aria-label="Toggle theme"></button></div>' +
+        '<div class="main">' +
+          '<h1 class="hello">Welcome back</h1>' +
+          '<p class="hellosub">' + (open ? "Setup is still open. " + done + " of 6 steps verified." : "Everything is set up.") + "</p>" +
+          '<div class="stats">' +
+            '<div class="stat"><div class="l">Workers alive</div><div class="v">' + (state.task.worker ? 1 : 0) + "</div></div>" +
+            '<div class="stat"><div class="l">Tasks today</div><div class="v">' + (state.status[5] === "done" ? 1 : 0) + "</div></div>" +
+            '<div class="stat"><div class="l">Integrations</div><div class="v">' + Object.keys(INTG).filter((k) => state.intg[k] === "ok").length + "</div></div>" +
+          "</div>" +
+          (state.dismissed
+            ? '<div class="card"><div class="cardb"><p class="hint" style="margin:0">Setup is hidden. <button class="lnk" id="reopen">Reopen the checklist</button></p></div></div>'
+            : '<div class="card setup"><div class="cardh"><h3>' + (open ? "Finish setting up your swarm" : "Your swarm is set up") + '</h3><span class="sp"></span>' +
+              '<span class="chip ' + (open ? "" : "ok") + '">' + done + " / 6 verified</span></div>" +
+              '<div style="padding:12px 0 2px"><div class="prog"><i style="width:' + Math.round((done / 6) * 100) + '%"></i></div></div>' +
+              '<div style="padding-top:10px">' +
+              STEPS.map((s, i) => '<button class="srow ' + state.status[i] + '" data-go="' + (i + 1) + '">' +
+                '<span class="snum">' + (state.status[i] === "done" ? svg("check") : i + 1) + "</span>" +
+                '<span class="sttl">' + esc(s.nav) + "<em>" + esc(subline(i)) + "</em></span>" +
+                (state.status[i] === "done" ? '<span class="chip ok">Done</span>'
+                  : state.status[i] === "skipped" ? '<span class="chip skip">Skipped</span>'
+                  : state.status[i] === "failed" ? '<span class="chip err">Failed</span>'
+                  : '<span class="chip">To do</span>') +
+                svg("chevr", "chev") + "</button>").join("") +
+              "</div>" +
+              '<div class="setupfoot"><span class="footnote">' +
+                (open ? "Progress is kept per step. Resume opens step " + state.step + "." : "Nothing left to do.") +
+              '</span><span class="sp"></span>' +
+              btn("dismiss", "Dismiss", "ghost") + btn("resume", (open ? "Resume" : "Review") + " " + svg("right"), "primary") + "</div>" +
+            "</div>") +
+        "</div></div></div>";
+
+  $$(".srow").forEach((r) => r.addEventListener("click", () => resume(Number(r.getAttribute("data-go")))));
+  const rs = $("#resume"); if (rs) rs.addEventListener("click", () => resume(state.step));
+  const dm = $("#dismiss"); if (dm) dm.addEventListener("click", () => { state.dismissed = true; renderMin(); });
+  const ro = $("#reopen"); if (ro) ro.addEventListener("click", () => { state.dismissed = false; renderMin(); });
+  $("#theme2").addEventListener("click", () => applyTheme(theme() === "dark" ? "light" : "dark"));
+  applyTheme(theme());
+}
+function minimize(){
+  clearLater();
+  state.view = "min";
+  $("#full").hidden = true; $("#min").hidden = false;
+  renderMin(); syncUrl(); renderDev();
+}
+function resume(step){
+  state.view = "full"; state.step = step || state.step;
+  $("#min").hidden = true; $("#full").hidden = false;
+  renderRail(); renderStep(1); renderFoot(); syncUrl(); renderDev();
+}
+
+/* ============================================================
+   dev panel (hidden, press "d" or add ?dev=1)
+   ============================================================ */
+function renderDev(){
+  const d = $("#devpanel");
+  d.innerHTML = '<span class="t">mock</span>' +
+    [1,2,3,4,5,6].map((n) => '<button class="btn" data-d="' + n + '">' + n + "</button>").join("") +
+    '<button class="btn" data-d="theme">theme</button>' +
+    '<button class="btn" data-d="min">' + (state.view === "min" ? "resume" : "minimize") + "</button>" +
+    '<button class="btn" data-d="worker">worker joins</button>' +
+    '<button class="btn" data-d="reset">reset</button>';
+  $$("[data-d]", d).forEach((b) => b.addEventListener("click", () => {
+    const v = b.getAttribute("data-d");
+    if (v === "theme") return applyTheme(theme() === "dark" ? "light" : "dark");
+    if (v === "min") return state.view === "min" ? resume(state.step) : minimize();
+    if (v === "worker"){ state.task.worker = true; if (state.view === "full" && state.step === 6) renderStep(1); return; }
+    if (v === "reset"){ location.href = location.pathname; return; }
+    if (state.view === "min") resume(Number(v)); else gotoStep(Number(v), Number(v) > state.step ? 1 : -1);
+    renderDev();
+  }));
+}
+
+/* ============================================================
+   boot
+   ============================================================ */
+(function init(){
+  const q = new URLSearchParams(location.search);
+  applyTheme(q.get("theme") === "dark" ? "dark" : "light");
+  $("#hdrmark").style.color = state.brand.color;
+  $("#theme").addEventListener("click", () => applyTheme(theme() === "dark" ? "light" : "dark"));
+  $("#minimize").addEventListener("click", minimize);
+
+  const step = Math.min(6, Math.max(1, Number(q.get("step") || 1)));
+  const minimized = q.get("state") === "minimized";
+
+  /* Deep links land mid-flow, so seed plausible progress for the steps behind you. */
+  if (minimized){
+    state.status = ["done","done","done","skipped","todo","todo"];
+    state.conn.ok = true; state.conn.phase = "ok";
+    state.brand.phase = "ok"; state.brand.name = "Hive Field";
+    state.prov.claude.phase = "ok"; state.prov.open = "claude";
+    state.step = 5;
+  } else if (step > 1){
+    for (let i = 0; i < step - 1; i++) state.status[i] = i === 1 ? "skipped" : "done";
+    state.conn.ok = true; state.conn.phase = "ok";
+    if (step > 3){ state.prov.claude.phase = "ok"; state.prov.openrouter.phase = "ok"; }
+    if (step > 4){ state.mem.phase = "ok"; }
+  }
+  if (q.get("provider") && PROV[q.get("provider")]) state.prov.open = q.get("provider");
+  if (q.get("codex") === "polling"){ state.prov.codex.phase = "polling"; state.prov.open = "codex"; }
+  if (q.get("worker") === "1") state.task.worker = true;
+
+  state.step = minimized ? state.step : step;
+  renderRail(); renderStep(1); renderFoot(); renderDev();
+  if (minimized) minimize(); else syncUrl();
+  if (q.get("dev") === "1") $("#devpanel").classList.add("show");
+
+  document.addEventListener("keydown", (e) => {
+    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement && document.activeElement.tagName);
+    if (e.key === "d" && !typing){ $("#devpanel").classList.toggle("show"); return; }
+    if (state.view !== "full" || typing) return;
+    if (e.key === "ArrowRight" && state.step < 6) gotoStep(state.step + 1, 1);
+    if (e.key === "ArrowLeft" && state.step > 1) gotoStep(state.step - 1, -1);
+  });
+})();
+</script>
+</body>
+</html>

@@ -88,7 +88,13 @@ function ConfigCard(props: { config: ConfigJson; modelName: string }): ReactNode
         <HarnessIcon harness={c.provider} plain /> {providerLabel(c.provider)}
       </CardRow>
       <CardRow label="Model">
-        {c.model !== null ? <code>{c.model}</code> : <span className="dim">Harness default</span>}
+        {c.model !== null ? (
+          <code>{c.model}</code>
+        ) : c.modelAlias ? (
+          <code>{c.modelAlias}</code>
+        ) : (
+          <span className="dim">Harness default</span>
+        )}
       </CardRow>
       <CardRow label="Tier">{c.modelTier ?? <span className="dim">—</span>}</CardRow>
       <CardRow label="Env Keys">

@@ -13,6 +13,7 @@ import type {
   AgentTask,
   McpServerWithInstallInfo,
 } from "@/api/types";
+import { AgentActivityGraph } from "@/components/shared/agent-activity-graph";
 import { AgentAppearancePicker } from "@/components/shared/agent-appearance-picker";
 import { AgentAvatar as AgentAvatarDisc } from "@/components/shared/agent-avatar";
 import { AgentRuntimeSettings } from "@/components/shared/agent-runtime-settings";
@@ -376,6 +377,12 @@ export default function AgentDetailPage() {
                       <InfoRow label="Joined">{formatSmartTime(agent.createdAt)}</InfoRow>
                       <InfoRow label="Last update">{formatSmartTime(agent.lastUpdatedAt)}</InfoRow>
                     </DefinitionList>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="space-y-3 p-4">
+                    <h3 className="font-medium text-sm">Task activity</h3>
+                    <AgentActivityGraph agentId={agent.id} />
                   </CardContent>
                 </Card>
                 <RuntimeInstancesSection agent={agent} />

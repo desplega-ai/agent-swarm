@@ -147,6 +147,8 @@ export interface Agent {
    * necessarily the last one that ran.
    */
   claudeTransport?: ClaudeTransport;
+  /** Last heartbeat or activity (ISO). "Alive" in `/status` = within 5 min and not offline. */
+  lastActivityAt?: string;
   createdAt: string;
   lastUpdatedAt: string;
 }
@@ -293,14 +295,21 @@ export interface AgentTask {
   supportedSteerModes?: SteerMode[];
 }
 
-export type ProviderName =
-  | "claude"
-  | "codex"
-  | "pi"
-  | "devin"
-  | "claude-managed"
-  | "opencode"
-  | "acp";
+/** Mirrors `ProviderNameSchema` in `src/types.ts`. The single list runtime provider checks derive from. */
+export const PROVIDER_NAMES = [
+  "claude",
+  "codex",
+  "pi",
+  "devin",
+  "claude-managed",
+  "opencode",
+  "acp",
+  "dsh",
+] as const;
+export type ProviderName = (typeof PROVIDER_NAMES)[number];
+export function isProviderName(value: string | null | undefined): value is ProviderName {
+  return (PROVIDER_NAMES as readonly (string | null | undefined)[]).includes(value);
+}
 export type DevinProviderMeta = {
   sessionUrl: string;
   maxAcuLimit?: number;
@@ -962,6 +971,8 @@ export interface UsageSummaryTotals {
   excludedCostUsd?: number;
   /** Distinct tasks behind `excludedCostUsd` — name the exclusion, don't just show a percentage. */
   excludedTaskCount?: number;
+  /** API-priced cost of sessions on subscription credentials (Claude OAuth, Codex OAuth). Older API servers omit it. */
+  subscriptionCostUsd?: number;
 }
 
 /**
@@ -989,6 +1000,44 @@ export interface UsageSummaryDailyRow {
   inputTokens: number;
   outputTokens: number;
   sessions: number;
+  /** Part of `costUsd` on subscription credentials. Older API servers omit it. */
+  subscriptionCostUsd?: number;
+}
+
+/** Spend per credential in the window (`groupBy=both` only). */
+export interface UsageSummaryByCredentialRow {
+  /** `null` when the task recorded no credential. */
+  keyType: string | null;
+  keySuffix: string | null;
+  /** Label set on the API Keys page. */
+  name: string | null;
+  /** Billed as a flat subscription (Claude OAuth, Codex OAuth) rather than per token. */
+  subscription: boolean;
+  /** Plan id from `GET /api/keys/plans`, or null when unknown. */
+  plan: string | null;
+  /** `estimated` = Claude plan guessed from rate-limit utilization. The server applies the precedence. */
+  planSource: "detected" | "manual" | "estimated" | null;
+  /** API-priced cost of the sessions. */
+  costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  sessions: number;
+  firstSessionAt: string;
+  lastSessionAt: string;
+}
+
+export interface SubscriptionPlan {
+  id: string;
+  label: string;
+  keyType: string;
+  /** Monthly list price in USD. */
+  monthlyUsd: number;
+}
+
+export interface SubscriptionPlansResponse {
+  /** Date the list prices were checked. */
+  checkedAt: string;
+  plans: SubscriptionPlan[];
 }
 
 export interface UsageSummaryByAgentRow {
@@ -1015,6 +1064,8 @@ export interface UsageSummaryResponse {
   daily: UsageSummaryDailyRow[];
   byAgent: UsageSummaryByAgentRow[];
   byUser?: UsageSummaryByUserRow[];
+  /** Spend per credential (`groupBy=both` only). Older API servers omit it. */
+  byCredential?: UsageSummaryByCredentialRow[];
 }
 
 export interface DashboardCostResponse {
@@ -2363,6 +2414,9 @@ export interface ApiKeyStatus {
   provider: string;
   /** Optional human-friendly label set from the dashboard. */
   name: string | null;
+  /** Subscription plan id (see `GET /api/keys/plans`), when known. */
+  plan: string | null;
+  planSource: "manual" | "detected" | "estimated" | null;
   rateLimitWindows: Record<
     string,
     {
@@ -2374,6 +2428,14 @@ export interface ApiKeyStatus {
       lastSeenAt: string;
     }
   >;
+  /** Derived, readable view of any rejected model-scoped window (Fable/Opus/Sonnet) on this key. */
+  modelLimits: Array<{
+    model: string;
+    window: string;
+    resetsAt: number;
+    resetsAtIso: string;
+    active: boolean;
+  }>;
   createdAt: string;
   updatedAt: string;
 }
@@ -3077,3 +3139,138 @@ export type AppRow = Record<string, unknown> & {
   createdAt: string;
   updatedAt: string;
 };
+
+// ─── Onboarding (GET/PUT /api/onboarding) ────────────────────────────────────
+// Contract: thoughts/taras/plans-yolo/2026-09-24-ui-onboarding.md § API contract.
+
+export type OnboardingStepId =
+  | "connect"
+  | "name"
+  | "ai"
+  | "agents"
+  | "memory"
+  | "integrations"
+  | "first_task";
+
+export type OnboardingStepStatus = "todo" | "done" | "skipped" | "failed";
+
+export type OnboardingErrorClass =
+  | "auth"
+  | "network"
+  | "timeout"
+  | "dimension"
+  | "model"
+  | "not_enabled"
+  | "expired"
+  | "unknown";
+
+export type OnboardingAiMethod =
+  | "claude_setup_token"
+  | "claude_api_key"
+  | "codex_device"
+  | "codex_cli"
+  | "openrouter"
+  | "openai_gateway"
+  | "deepseek"
+  | "devin";
+
+/** The dial level every agent got, or `mixed` (different levels or a custom model). */
+export type OnboardingAgentsMethod = "cheap" | "optimal" | "max" | "mixed";
+
+export type OnboardingMemoryPreset = "openai" | "openrouter" | "vercel" | "custom" | "existing";
+
+export type OnboardingIntegrationMethod =
+  | "slack"
+  | "github"
+  | "gitlab"
+  | "linear_oauth"
+  | "jira_oauth";
+
+export interface OnboardingStepState {
+  status: OnboardingStepStatus;
+  at: string | null;
+  method: string | null;
+  errorClass: OnboardingErrorClass | null;
+}
+
+export interface OnboardingState {
+  version: 1;
+  startedAt: string;
+  currentStep: OnboardingStepId;
+  minimizedAt: string | null;
+  dismissedAt: string | null;
+  completedAt: string | null;
+  autoCompleted: boolean;
+  firstTaskId: string | null;
+  steps: Record<OnboardingStepId, OnboardingStepState>;
+}
+
+export interface OnboardingProviderSignal {
+  provider: ProviderName;
+  state: "unverified" | "configured" | "verified";
+  workers: number;
+  verifiedWorkers: number;
+}
+
+export interface OnboardingSignals {
+  providers: OnboardingProviderSignal[];
+  embeddings: { configured: boolean; dimensions: number };
+  integrations: {
+    slack: boolean;
+    github: boolean;
+    gitlab: boolean;
+    linear: boolean;
+    jira: boolean;
+  };
+  agents: { leadsOnline: number; workersOnline: number };
+  firstTask: { id: string; status: string } | null;
+}
+
+export interface OnboardingResponse {
+  state: OnboardingState;
+  signals: OnboardingSignals;
+}
+
+export type OnboardingAction =
+  | { action: "view"; step: OnboardingStepId }
+  | { action: "complete"; step: "connect"; method: "api_key" }
+  | { action: "complete"; step: "name"; method: "custom_name" | "default_name" }
+  | { action: "complete"; step: "ai"; method: OnboardingAiMethod }
+  | { action: "complete"; step: "agents"; method: OnboardingAgentsMethod }
+  | { action: "complete"; step: "integrations"; method: OnboardingIntegrationMethod }
+  | { action: "skip"; step: Exclude<OnboardingStepId, "connect"> }
+  | { action: "fail"; step: OnboardingStepId; errorClass: OnboardingErrorClass }
+  | { action: "first_task"; taskId: string; method: "suggestion" | "free_form" }
+  | { action: "minimize" }
+  | { action: "resume" }
+  | { action: "dismiss" };
+
+export interface OnboardingMemoryTestRequest {
+  preset: OnboardingMemoryPreset;
+  baseUrl?: string;
+  model?: string;
+  apiKey?: string;
+  reuseKey?: "OPENAI_API_KEY" | "OPENROUTER_API_KEY";
+}
+
+export interface OnboardingMemoryTestResponse {
+  ok: boolean;
+  dimensions?: number;
+  latencyMs: number;
+  error?: string;
+  errorClass?: OnboardingErrorClass;
+}
+
+export interface CodexDeviceStartResponse {
+  flowId: string;
+  userCode: string;
+  verificationUrl: string;
+  intervalSeconds: number;
+  expiresAt: string;
+}
+
+export interface CodexDevicePollResponse {
+  status: "pending" | "complete" | "failed" | "expired";
+  slot?: number;
+  error?: string;
+}

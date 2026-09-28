@@ -1,18 +1,14 @@
 import type { AgentCredStatus, ClaudeTransport, ProviderName } from "@/api/types";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { HARNESS_LABEL } from "@/lib/agent-runtime-models";
 import { cn } from "@/lib/utils";
 import { HarnessIcon } from "./harness-icon";
 import { ReasoningEffortIcon } from "./reasoning-effort-icon";
 
-const HARNESS_LABEL: Record<string, string> = {
-  claude: "Claude",
-  "claude-managed": "Claude (managed)",
-  codex: "Codex",
-  devin: "Devin",
-  opencode: "Opencode",
-  pi: "Pi-Mono",
-  acp: "ACP",
-};
+/** Display label for a harness provider id ("codex" → "Codex"). */
+export function harnessLabel(harnessProvider: string): string {
+  return HARNESS_LABEL[harnessProvider] ?? harnessProvider;
+}
 
 type CredHealth = "verified" | "configured" | "blocked" | "untested" | "unreported";
 
@@ -70,7 +66,7 @@ export function HarnessCell({
   if (!harnessProvider) {
     return <span className="text-muted-foreground">—</span>;
   }
-  const label = HARNESS_LABEL[harnessProvider] ?? harnessProvider;
+  const label = harnessLabel(harnessProvider);
   const health = classifyCred(credStatus);
   const transport = harnessProvider === "claude" ? (claudeTransport ?? null) : null;
 

@@ -22,5 +22,17 @@ export default defineConfig({
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
     },
+    {
+      // iOS soft-keyboard emulation for the composer Enter-key behavior
+      // (`pointer: coarse` under `isMobile`/`hasTouch`). Scoped to that one
+      // spec — every other spec assumes the desktop chrome layout. Forces
+      // Chromium (the device descriptor defaults to WebKit, which the
+      // `swarm` fixture doesn't support) — Chromium's own mobile/touch
+      // emulation is what flips `pointer: coarse`, the same signal a real
+      // iOS Safari/Chrome tab reports.
+      name: "mobile-iphone",
+      use: { ...devices["iPhone 13"], browserName: "chromium" },
+      testMatch: /composer-enter-key\.spec\.ts/,
+    },
   ],
 });

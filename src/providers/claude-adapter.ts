@@ -930,6 +930,7 @@ class ClaudeSession implements ProviderSession {
       failureReason,
       rateLimitResetAt: this.errorTracker.getRateLimitResetAt(),
       rateLimitWindows: this.errorTracker.getRateLimitWindows(),
+      modelRateLimit: this.errorTracker.getModelRateLimit(),
       appliedReasoningEffort: this.appliedReasoningEffort,
     };
   }

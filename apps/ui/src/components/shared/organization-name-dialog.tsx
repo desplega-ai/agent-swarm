@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useUpsertConfig } from "@/api/hooks/use-config-api";
 import { useEnvPresence, useReloadConfig } from "@/api/hooks/use-integrations-meta";
+import { useOnboardingOwnsFirstRun } from "@/api/hooks/use-onboarding";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -21,6 +22,8 @@ export function OrganizationNameDialog() {
   const { pendingConnection } = useConfig();
   const { state: identityState } = useCurrentUser();
   const presence = useEnvPresence([ORG_NAME_KEY]);
+  // Open onboarding owns naming (step 2). Stay closed until its query settles.
+  const onboardingOwnsName = useOnboardingOwnsFirstRun();
   const upsert = useUpsertConfig();
   const reload = useReloadConfig();
   const [name, setName] = useState("");
@@ -40,6 +43,7 @@ export function OrganizationNameDialog() {
   const open =
     !dismissed &&
     !pendingConnection &&
+    !onboardingOwnsName &&
     identityState !== "needs-pick" &&
     (missing || saving || error !== null);
 

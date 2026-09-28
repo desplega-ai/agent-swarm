@@ -7,6 +7,7 @@ import {
   getAgentById,
   getDependentTasks,
   getLeadAgent,
+  getLogsByTaskIdAndEventType,
   getTaskAttachments,
   getTaskById,
   hasNonTerminalRerouteDecisionChild,
@@ -15,6 +16,10 @@ import {
 import { repointTrackerSyncBySwarmId } from "../be/db-queries/tracker";
 import { dispatchPre } from "../extensions/dispatcher";
 import { resolveTemplate } from "../prompts/resolver";
+import {
+  DEFERRED_WAIT_WOKE_EVENT,
+  reconcileDeferredTaskWaits,
+} from "../scheduler/deferred-task-waits";
 import {
   type Agent,
   type AgentTask,
@@ -168,6 +173,51 @@ function formatAttachmentsBlock(attachments: TaskAttachment[]): string {
   return `\n\nAttachments (${attachments.length}):\n${lines.join("\n")}`;
 }
 
+type DeferredWake = { scheduleId: string; waiterTaskId: string | null; wakeTaskId: string };
+
+/**
+ * The deferred wake this settlement fired for `agentId`, if any.
+ *
+ * Runs the wake reconcile for this task first and waits for it, so the answer
+ * comes from the claim that actually resumed the waiter: the claim writes
+ * `DEFERRED_WAIT_WOKE_EVENT` on the trigger task in its own transaction. When
+ * the event-bus listener claims first, its commit is visible here because our
+ * reconcile only returns after its own claim attempt lost to that commit.
+ */
+async function findDeferredWakeFor(taskId: string, agentId: string): Promise<DeferredWake | null> {
+  try {
+    await reconcileDeferredTaskWaits(taskId);
+    for (const log of await getLogsByTaskIdAndEventType(taskId, DEFERRED_WAIT_WOKE_EVENT)) {
+      const meta = JSON.parse(log.metadata ?? "{}") as Partial<DeferredWake> & {
+        wakeAgentId?: string | null;
+      };
+      if (meta.wakeAgentId === agentId && meta.scheduleId && meta.wakeTaskId) {
+        return {
+          scheduleId: meta.scheduleId,
+          waiterTaskId: meta.waiterTaskId ?? null,
+          wakeTaskId: meta.wakeTaskId,
+        };
+      }
+    }
+  } catch (err) {
+    // Fail open: a broken lookup must never drop the follow-up.
+    console.warn(
+      `[worker-follow-up] Deferred wake lookup failed for ${taskId.slice(0, 8)}: ${err}`,
+    );
+  }
+  return null;
+}
+
+/**
+ * Create the lead follow-up for a finished worker task.
+ *
+ * Skipped when this settlement woke a deferred waiter (`defer-task` with
+ * `wakeOn`) assigned to the same agent the follow-up targets: that wake-up
+ * task already reviews the result, so a follow-up would duplicate it. An
+ * `all` wait with siblings still pending wakes nobody, so the follow-up stays.
+ * A `followUpConfig.onCompleted` / `onFailed` instruction for this status also
+ * keeps the follow-up, because the wake-up task does not carry that text.
+ */
 export async function createWorkerTaskFollowUp(args: {
   task: AgentTask;
   status: "completed" | "failed";
@@ -263,6 +313,29 @@ export async function createWorkerTaskFollowUp(args: {
 
   const changes = preFollowUp.action === "modify" ? preFollowUp.data : {};
   const followUpAgentId = changes.agentId === undefined ? leadAgent.id : changes.agentId;
+
+  const wake =
+    followUpAgentId && !instructions ? await findDeferredWakeFor(task.id, followUpAgentId) : null;
+  if (wake) {
+    try {
+      await createLogEntry({
+        eventType: "task_follow_up_suppressed",
+        taskId: task.id,
+        agentId: followUpAgentId ?? undefined,
+        metadata: {
+          reason: "deferred_wait_woke",
+          status,
+          waiterTaskId: wake.waiterTaskId,
+          wakeTaskId: wake.wakeTaskId,
+          scheduleId: wake.scheduleId,
+        },
+      });
+    } catch {}
+    console.log(
+      `[worker-follow-up] Skipped follow-up for ${status} task ${task.id.slice(0, 8)}: woke deferred waiter ${wake.waiterTaskId?.slice(0, 8) ?? "?"} (wake-up task ${wake.wakeTaskId.slice(0, 8)})`,
+    );
+    return null;
+  }
   return await createTaskWithSiblingAwareness(
     changes.description ?? followUpDescription,
     {

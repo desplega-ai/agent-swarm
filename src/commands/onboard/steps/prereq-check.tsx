@@ -1,13 +1,19 @@
 import { Select, Spinner } from "@inkjs/ui";
 import { Box, Text } from "ink";
 import { useEffect, useRef, useState } from "react";
+import {
+  CONTAINER_ENGINE_LABELS,
+  ENGINE_INSTALL_HINTS,
+  type EngineCheck,
+  type EngineResolution,
+  resolveContainerEngine,
+} from "../container-engine.ts";
 import type { StepProps } from "../types.ts";
 
 type CheckStatus = "checking" | "passed" | "failed";
 
 interface CheckResult {
-  docker: { ok: boolean; version?: string; error?: string };
-  compose: { ok: boolean; version?: string; error?: string };
+  engine: EngineResolution;
   ports: { ok: boolean; conflicts?: string[] };
 }
 
@@ -22,34 +28,9 @@ export function PrereqCheckStep({ state, addLog, goToNext, goToStep, goToError }
 
     const run = async () => {
       const res: CheckResult = {
-        docker: { ok: false },
-        compose: { ok: false },
+        engine: await resolveContainerEngine(state.containerEngine),
         ports: { ok: true },
       };
-
-      // Check Docker
-      try {
-        const out = await Bun.$`docker --version`.quiet();
-        if (out.exitCode === 0) {
-          res.docker = { ok: true, version: out.text().trim() };
-        } else {
-          res.docker = { ok: false, error: "Docker exited with non-zero status" };
-        }
-      } catch {
-        res.docker = { ok: false, error: "Docker not found" };
-      }
-
-      // Check Docker Compose
-      try {
-        const out = await Bun.$`docker compose version`.quiet();
-        if (out.exitCode === 0) {
-          res.compose = { ok: true, version: out.text().trim() };
-        } else {
-          res.compose = { ok: false, error: "Docker Compose not found" };
-        }
-      } catch {
-        res.compose = { ok: false, error: "Docker Compose v2 not found" };
-      }
 
       // Check ports
       const portsToCheck = [3013];
@@ -75,7 +56,8 @@ export function PrereqCheckStep({ state, addLog, goToNext, goToStep, goToError }
 
       setResult(res);
 
-      if (res.docker.ok && res.compose.ok && res.ports.ok) {
+      if (res.engine.ok && res.ports.ok) {
+        addLog(`Container engine: ${CONTAINER_ENGINE_LABELS[res.engine.engine]}`);
         addLog("All prerequisites met");
         setStatus("passed");
       } else {
@@ -84,15 +66,16 @@ export function PrereqCheckStep({ state, addLog, goToNext, goToStep, goToError }
     };
 
     run().catch((err) => goToError(err.message));
-  }, [state.services, addLog, goToError]);
+  }, [state.services, state.containerEngine, addLog, goToError]);
 
   // Auto-advance on pass
   useEffect(() => {
-    if (status === "passed") {
-      const timer = setTimeout(() => goToNext(), 500);
+    if (status === "passed" && result?.engine.ok) {
+      const engine = result.engine.engine;
+      const timer = setTimeout(() => goToNext({ containerEngine: engine }), 500);
       return () => clearTimeout(timer);
     }
-  }, [status, goToNext]);
+  }, [status, result, goToNext]);
 
   if (status === "checking") {
     return (
@@ -102,46 +85,41 @@ export function PrereqCheckStep({ state, addLog, goToNext, goToStep, goToError }
     );
   }
 
-  if (status === "passed" && result) {
+  if (status === "passed" && result?.engine.ok) {
     return (
       <Box flexDirection="column" padding={1}>
         <Text color="green">
-          {"✓"} {result.docker.version}
+          {"✓"} {result.engine.probe.binary.version}
         </Text>
         <Text color="green">
-          {"✓"} {result.compose.version}
+          {"✓"} {result.engine.probe.compose.version}
         </Text>
         <Text color="green">{"✓"} All ports available</Text>
       </Box>
     );
   }
 
+  const probe = result?.engine.probe ?? null;
+  const engineLabel = probe ? CONTAINER_ENGINE_LABELS[probe.engine] : "Container engine";
+
   // Failed
   return (
     <Box flexDirection="column" padding={1}>
-      {result?.docker.ok ? (
-        <Text color="green">
-          {"✓"} {result.docker.version}
-        </Text>
-      ) : (
+      {result && !result.engine.ok && !result.engine.engine ? (
         <Box flexDirection="column">
           <Text color="red">
-            {"✗"} Docker: {result?.docker.error}
+            {"✗"} {result.engine.error}
           </Text>
-          <Text dimColor>
-            {" "}
-            Install: brew install --cask docker (macOS) or https://docs.docker.com/get-docker/
-          </Text>
+          <Text dimColor> {ENGINE_INSTALL_HINTS.docker}</Text>
+          <Text dimColor> or {ENGINE_INSTALL_HINTS.podman}</Text>
         </Box>
-      )}
-      {result?.compose.ok ? (
-        <Text color="green">
-          {"✓"} {result.compose.version}
-        </Text>
       ) : (
-        <Text color="red">
-          {"✗"} Docker Compose v2: {result?.compose.error}
-        </Text>
+        <>
+          <CheckLine label={engineLabel} check={probe?.binary} />
+          {probe?.binary.ok ? (
+            <CheckLine label={`${engineLabel} Compose`} check={probe.compose} />
+          ) : null}
+        </>
       )}
       {result?.ports.ok ? (
         <Text color="green">{"✓"} All ports available</Text>
@@ -173,6 +151,24 @@ export function PrereqCheckStep({ state, addLog, goToNext, goToStep, goToError }
           }}
         />
       </Box>
+    </Box>
+  );
+}
+
+function CheckLine({ label, check }: { label: string; check: EngineCheck | undefined }) {
+  if (check?.ok) {
+    return (
+      <Text color="green">
+        {"✓"} {check.version}
+      </Text>
+    );
+  }
+  return (
+    <Box flexDirection="column">
+      <Text color="red">
+        {"✗"} {label}: {check?.error}
+      </Text>
+      {check?.hint ? <Text dimColor> {check.hint}</Text> : null}
     </Box>
   );
 }

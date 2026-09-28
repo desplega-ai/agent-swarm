@@ -1,7 +1,18 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  spyOn,
+  test,
+} from "bun:test";
 import { unlink } from "node:fs/promises";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
+  abandonSlackOutcomeDelivery,
   cancelTask,
   closeDb,
   completeTask,
@@ -26,6 +37,7 @@ import {
   insertTaskAttachment,
   isPendingSlackMessage,
   markTaskSlackReplySent,
+  noteSlackOutcomeDeliveryFailure,
   startTask,
   supersedeTask,
   upsertSwarmConfig,
@@ -34,14 +46,17 @@ import { upsertTaskCitations } from "../be/task-citations";
 import { createStandaloneScheduleTask } from "../scheduler/schedule-task";
 import { getTaskLink, MAX_SECTION_LENGTH } from "../slack/blocks";
 import {
+  _noteOutcomeDeliveryFailureForTests,
   _resetSlackRenderV2ForTests,
   callSlackWithRetry,
   childOutcomeContent,
   ensureSlackThreadTree,
   formatV2Duration,
   isSlackRenderV2Enabled,
+  isTerminalSlackError,
   processSlackRenderV2,
   renderThreadTree,
+  slackErrorSummary,
   streamOutcomeCard,
   withStatusLead,
 } from "../slack/render-v2";
@@ -60,9 +75,18 @@ let permalinkFailuresRemaining = 0;
 let slackAddressSequence = 0;
 let missingMessageTs: string | undefined;
 let updateFailuresRemaining = 0;
+let startStreamFailuresRemaining = 0;
 // A `chat.update` that answers with a Slack verdict other than 404 — the
 // permanent, non-retryable class (`cant_update_message`, `channel_not_found`).
 let rejectedUpdateTs: string | undefined;
+let rejectedUpdateCode = "cant_update_message";
+let rejectedUpdateMessages: string[] = [];
+// A `chat.stopStream` that answers with a Slack API verdict (e.g. the
+// documented `rate_limited` spelling), distinct from `stopCallsUntilFailure`'s
+// bare, uncoded failure.
+let rejectedStopTs: string | undefined;
+let rejectedStopCode = "rate_limited";
+let postMessageErrorCode: string | undefined;
 let disableRenderAfterMethod: string | undefined;
 
 type RemoteMessage = {
@@ -150,6 +174,12 @@ const mockApiCall = mock(async (method: string, payload: Record<string, unknown>
     };
   }
   if (method === "chat.postMessage") {
+    if (
+      postMessageErrorCode &&
+      (payload.blocks as { type?: string }[] | undefined)?.[0]?.type === "markdown"
+    ) {
+      throw { data: { error: postMessageErrorCode } };
+    }
     const ts = `tree.${++treeCounter}`;
     remoteMessages.set(remoteKey(String(payload.channel), ts), {
       channel: String(payload.channel),
@@ -161,6 +191,10 @@ const mockApiCall = mock(async (method: string, payload: Record<string, unknown>
     return { ok: true, ts };
   }
   if (method === "chat.startStream") {
+    if (startStreamFailuresRemaining > 0) {
+      startStreamFailuresRemaining--;
+      throw { data: { error: "user_not_found" } };
+    }
     if (String(payload.markdown_text ?? "").length > 12_000) {
       throw new Error("markdown_text exceeded Slack's streaming limit");
     }
@@ -188,6 +222,7 @@ const mockApiCall = mock(async (method: string, payload: Record<string, unknown>
       }
       stopCallsUntilFailure--;
     }
+    if (rejectedStopTs === payload.ts) throw { data: { error: rejectedStopCode } };
     const message = remoteMessages.get(remoteKey(String(payload.channel), String(payload.ts)));
     if (!message) throw { data: { error: "message_not_found" } };
     if (!message.streaming) throw { data: { error: "message_not_in_streaming_state" } };
@@ -216,9 +251,16 @@ const mockApiCall = mock(async (method: string, payload: Record<string, unknown>
       throw new Error("temporary update failure");
     }
     if (missingMessageTs === payload.ts) throw { data: { error: "message_not_found" } };
-    if (rejectedUpdateTs === payload.ts) throw { data: { error: "cant_update_message" } };
+    if (rejectedUpdateTs === payload.ts)
+      throw {
+        data: {
+          error: rejectedUpdateCode,
+          response_metadata: { messages: rejectedUpdateMessages },
+        },
+      };
     const message = remoteMessages.get(remoteKey(String(payload.channel), String(payload.ts)));
     if (!message) throw { data: { error: "message_not_found" } };
+    if (message.streaming) throw { data: { error: "streaming_state_conflict" } };
     const barrier = nextUpdateBarrier;
     if (barrier) {
       nextUpdateBarrier = undefined;
@@ -277,6 +319,11 @@ beforeEach(async () => {
   missingMessageTs = undefined;
   updateFailuresRemaining = 0;
   rejectedUpdateTs = undefined;
+  rejectedUpdateCode = "cant_update_message";
+  rejectedUpdateMessages = [];
+  rejectedStopTs = undefined;
+  rejectedStopCode = "rate_limited";
+  postMessageErrorCode = undefined;
   disableRenderAfterMethod = undefined;
   nextUpdateBarrier = undefined;
   _resetSlackRenderV2ForTests();
@@ -286,6 +333,42 @@ afterAll(async () => {
   _resetSlackRenderV2ForTests();
   closeDb();
   await removeDbFiles();
+});
+
+describe("Slack error classification", () => {
+  test.each([
+    "msg_too_long",
+    "streaming_state_conflict",
+    "message_not_found",
+    "channel_not_found",
+    "cant_update_message",
+    "user_not_found",
+  ])("%s is terminal", (code) => {
+    expect(isTerminalSlackError({ data: { error: code } })).toBe(true);
+  });
+
+  test.each([
+    "ratelimited",
+    "rate_limited",
+    "internal_error",
+    "service_unavailable",
+    "fatal_error",
+    "request_timeout",
+  ])("%s is transient", (code) => {
+    expect(isTerminalSlackError({ data: { error: code } })).toBe(false);
+  });
+
+  test("an error with no Slack code is transient", () => {
+    expect(isTerminalSlackError(new Error("socket hang up"))).toBe(false);
+  });
+
+  test("slackErrorSummary joins the code and response messages", () => {
+    expect(
+      slackErrorSummary({
+        data: { error: "msg_too_long", response_metadata: { messages: ["[ERROR] text too long"] } },
+      }),
+    ).toBe("msg_too_long: [ERROR] text too long");
+  });
 });
 
 describe("Slack renderer v2", () => {
@@ -1302,7 +1385,16 @@ describe("Slack renderer v2", () => {
     );
     const payload = calls.find((call) => call.method === "chat.postMessage")?.payload;
     expect(payload?.text).toContain("<https://example.com/|[1]>");
-    expect(JSON.stringify(payload?.blocks)).toContain("Sources:");
+    // Sources are a caption: never in the body or the notification text.
+    expect(payload?.text).not.toContain("Sources");
+    const blocks = payload?.blocks as { type: string; text?: { text: string } }[];
+    expect(JSON.stringify(blocks.filter((block) => block.type !== "context"))).not.toContain(
+      "Sources",
+    );
+    expect(blocks).toContainEqual({
+      type: "context",
+      elements: [{ type: "mrkdwn", text: "Sources: <https://example.com/|[1]> Evidence" }],
+    });
     expect(JSON.stringify(payload?.blocks)).not.toContain("[citation:");
     expect(JSON.stringify(payload?.blocks)).not.toContain("[9]");
     expect(payload?.text).toContain("|[1]> remains");
@@ -1442,10 +1534,95 @@ describe("Slack renderer v2", () => {
     await backdateLastUpdated([ask.id], 20);
     await processSlackRenderV2();
     const content = calls.find((call) => call.method === "chat.startStream")?.payload.markdown_text;
-    expect(content).toContain("<https://example.com/|[1]>");
-    expect(content).toContain("unknown.");
-    expect(content).not.toContain("[9]");
-    expect(content).toContain("Sources: <https://example.com/|[1]> Evidence");
+    expect(content).toBe("✅ Supported <https://example.com/|[1]>, unknown.");
+  });
+
+  test("outcome cards caption sources and attachments under the answer, footer last", async () => {
+    const originalHost = process.env.AGENT_FS_LIVE_URL;
+    process.env.AGENT_FS_LIVE_URL = "https://files.example.test";
+    try {
+      const lead = await createAgent({ name: "Caption Lead", isLead: true, status: "idle" });
+      const { channelId, threadTs } = uniqueSlackAddress("C_CAPTIONS");
+      const ask = await createTaskExtended("Captioned outcome", {
+        agentId: lead.id,
+        source: "slack",
+        slackChannelId: channelId,
+        slackThreadTs: threadTs,
+        contextKey: slackContextKey({ channelId, threadTs }),
+      });
+      await startTask(ask.id);
+      await upsertTaskCitations(ask.id, [
+        { index: 1, kind: "url", ref: "https://example.com/a", label: "Cited" },
+        { index: 2, kind: "url", ref: "https://example.com/b", label: "Whole answer" },
+      ]);
+      await insertTaskAttachment({
+        taskId: ask.id,
+        agentId: lead.id,
+        kind: "url",
+        name: "report.md",
+        url: "https://example.com/report.md",
+        isPrimary: true,
+      });
+      await completeTask(ask.id, "The answer [citation:1].");
+      await backdateLastUpdated([ask.id], 20);
+      await processSlackRenderV2();
+
+      const started = calls.find((call) => call.method === "chat.startStream");
+      expect(started?.payload.markdown_text).toBe("✅ The answer <https://example.com/a|[1]>.");
+      const stopped = calls.find((call) => call.method === "chat.stopStream");
+      const blocks = stopped?.payload.blocks as { type: string; elements: { text: string }[] }[];
+      expect(blocks.every((block) => block.type === "context")).toBe(true);
+      expect(blocks.map((block) => block.elements.map((element) => element.text))).toEqual([
+        ["Sources: <https://example.com/a|[1]> Cited"],
+        ["General sources: <https://example.com/b|[2]> Whole answer"],
+        ["📎 <https://example.com/report.md|report.md>"],
+        [expect.stringContaining(ask.id.slice(0, 8))],
+      ]);
+    } finally {
+      if (originalHost === undefined) delete process.env.AGENT_FS_LIVE_URL;
+      else process.env.AGENT_FS_LIVE_URL = originalHost;
+    }
+  });
+
+  test("the postMessage fallback keeps captions out of the notification text", async () => {
+    const lead = await createAgent({ name: "Fallback Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_CAPTION_FALLBACK");
+    const ask = await createTaskExtended("Fallback outcome", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    await startTask(ask.id);
+    await upsertTaskCitations(ask.id, [
+      { index: 1, kind: "url", ref: "https://example.com/", label: "Evidence" },
+    ]);
+    await completeTask(ask.id, "Supported [citation:1].");
+    await backdateLastUpdated([ask.id], 20);
+    await ensureSlackThreadTree([ask.id]);
+    calls.length = 0;
+    startStreamFailuresRemaining = 1;
+    try {
+      await processSlackRenderV2();
+    } finally {
+      startStreamFailuresRemaining = 0;
+    }
+
+    const posted = calls.find(
+      (call) =>
+        call.method === "chat.postMessage" &&
+        call.payload.text !== undefined &&
+        String(call.payload.text).startsWith("✅"),
+    );
+    const answer = "✅ Supported <https://example.com/|[1]>.";
+    expect(posted?.payload.text).toBe(answer);
+    const blocks = posted?.payload.blocks as { type: string; text?: string }[];
+    expect(blocks[0]).toEqual({ type: "markdown", text: answer });
+    expect(blocks.slice(1).every((block) => block.type === "context")).toBe(true);
+    expect(JSON.stringify(blocks.slice(1))).toContain(
+      "Sources: <https://example.com/|[1]> Evidence",
+    );
   });
 
   test("preserves complete native Markdown beyond the Block Kit text ceiling", async () => {
@@ -1505,50 +1682,50 @@ describe("Slack renderer v2", () => {
       label: "plain ASCII positive control",
       attachment: { kind: "agent-fs", name: "report.txt", path: "/reports/report.txt" },
       expected:
-        "📎 [report.txt](https://files.example.test/file/~/org-1/drive-1/reports/report.txt)",
+        "📎 <https://files.example.test/file/~/org-1/drive-1/reports/report.txt|report.txt>",
     },
     {
       label: "raw path spaces and parentheses",
       attachment: { kind: "agent-fs", name: "final report", path: "/shared reports/final (v1).md" },
       expected:
-        "📎 [final report](https://files.example.test/file/~/org-1/drive-1/shared%20reports/final%20%28v1%29.md)",
+        "📎 <https://files.example.test/file/~/org-1/drive-1/shared%20reports/final%20(v1).md|final report>",
     },
     {
       label: "already encoded positive control",
       attachment: { kind: "agent-fs", name: "report", path: "/reports/final%20%28v1%29.md" },
       expected:
-        "📎 [report](https://files.example.test/file/~/org-1/drive-1/reports/final%20%28v1%29.md)",
+        "📎 <https://files.example.test/file/~/org-1/drive-1/reports/final%20%28v1%29.md|report>",
     },
     {
       label: "label delimiters, backslashes, and whitespace",
       attachment: {
         kind: "url",
-        name: " \t[report] (final)\\\r\n\t copy  ",
+        name: " \t[report] <final> & (copy)\\\r\n\t two  ",
         url: "https://example.test/report",
       },
-      expected: "📎 [\\[report\\] \\(final\\)\\\\ copy](https://example.test/report)",
+      expected: "📎 <https://example.test/report|[report] &lt;final&gt; &amp; (copy)\\ two>",
     },
     {
       label: "URL positive control with an IPv6 host",
       attachment: { kind: "url", name: "report", url: "http://[::1]/report.txt?q=a%20b&x=1#part" },
-      expected: "📎 [report](http://[::1]/report.txt?q=a%20b&x=1#part)",
+      expected: "📎 <http://[::1]/report.txt?q=a%20b&x=1#part|report>",
     },
     {
       label: "URL delimiters with existing escapes and query parameters",
       attachment: {
         kind: "url",
         name: "report",
-        url: "https://example.test/a%20b) [c]<(d)>\\file?q=one two&x=1#part",
+        url: "https://example.test/a%20b) [c]<(d)>|\\file?q=one two&x=1#part",
       },
       expected:
-        "📎 [report](https://example.test/a%20b%29%20[c]%3C%28d%29%3E%5Cfile?q=one%20two&x=1#part)",
+        "📎 <https://example.test/a%20b)%20[c]%3C(d)%3E%7C%5Cfile?q=one%20two&x=1#part|report>",
     },
     {
       label: "non-HTTP fallback stays omitted",
       attachment: { kind: "url", name: "report", url: "agent-fs:/reports/report.md" },
       expected: "",
     },
-  ])("streams safe attachment Markdown: $label", async ({ attachment, expected }) => {
+  ])("captions safe attachment links: $label", async ({ attachment, expected }) => {
     const originalHost = process.env.AGENT_FS_LIVE_URL;
     process.env.AGENT_FS_LIVE_URL = "https://files.example.test";
     try {
@@ -1587,8 +1764,14 @@ describe("Slack renderer v2", () => {
 
       await processSlackRenderV2();
 
+      // The attachment is a caption under the answer, never part of the streamed text.
       const started = calls.find((call) => call.method === "chat.startStream");
-      expect(started?.payload.markdown_text).toBe(`✅ Done${expected ? `\n\n${expected}` : ""}`);
+      expect(started?.payload.markdown_text).toBe("✅ Done");
+      const stopped = calls.find((call) => call.method === "chat.stopStream");
+      const captions = (stopped?.payload.blocks as { type: string; elements: { text: string }[] }[])
+        .filter((block) => block.type === "context")
+        .map((block) => block.elements.map((element) => element.text).join(" "));
+      expect(captions.filter((text) => text.startsWith("📎"))).toEqual(expected ? [expected] : []);
     } finally {
       if (originalHost === undefined) delete process.env.AGENT_FS_LIVE_URL;
       else process.env.AGENT_FS_LIVE_URL = originalHost;
@@ -2063,9 +2246,10 @@ describe("Slack renderer v2", () => {
     await processSlackRenderV2();
 
     const started = calls.find((call) => call.method === "chat.startStream");
-    // ⏳ not ✅: the ask was parked, not answered. The ETA is what a human
-    // needs; the agent's internal note and the schedule link are dropped.
-    expect(started?.payload.markdown_text).toBe("⏳ Checking back today 17:30:19 UTC");
+    // ⏳ not ✅: the ask was parked, not answered. The ETA, the agent's
+    // internal note, and the schedule link are all dropped from Slack.
+    expect(started?.payload.markdown_text).toBe("⏳ Checking back later");
+    expect(JSON.stringify(calls)).not.toContain("17:30");
     expect(JSON.stringify(calls)).not.toContain("checking the new defer card");
     expect(JSON.stringify(calls)).not.toContain("715bf847-fe3e");
     expect(JSON.stringify(calls)).not.toContain("Deferred until");
@@ -2095,7 +2279,7 @@ describe("Slack renderer v2", () => {
     await processSlackRenderV2();
 
     const opening = calls.find((call) => call.method === "chat.startStream");
-    expect(opening?.payload.markdown_text).toBe("⏳ Checking back today at 18:38");
+    expect(opening?.payload.markdown_text).toBe("⏳ Checking back later");
     const card = await getSlackOutcomeMessage(ask.id);
     expect(card?.finalizedAt).toBeTruthy();
     expect(card?.deferralResolvedAt).toBeUndefined();
@@ -2124,6 +2308,7 @@ describe("Slack renderer v2", () => {
     );
     expect(rewrite).toBeDefined();
     expect(rewrite?.payload.text).toBe("✅ The build passed.");
+    expect(rewrite?.payload.blocks).toEqual([{ type: "markdown", text: "✅ The build passed." }]);
     expect(rewrite?.payload.text).not.toContain("Checking back");
     expect((await getSlackOutcomeMessage(ask.id))?.deferralResolvedAt).toBeTruthy();
     // The rewrite IS the wake-up's answer: no second card repeating it.
@@ -2228,7 +2413,7 @@ describe("Slack renderer v2", () => {
 
     // The chain continues on a new ⏳ card, which the next wake-up resolves.
     const next = calls.find((call) => call.method === "chat.startStream");
-    expect(next?.payload.markdown_text).toBe("⏳ Checking back today at 20:00");
+    expect(next?.payload.markdown_text).toBe("⏳ Checking back later");
     const nextCard = await getSlackOutcomeMessage(wake.id);
     expect(nextCard?.permalink).toBeTruthy();
     // The old card hands over to it rather than repeating the new ETA.
@@ -2256,8 +2441,13 @@ describe("Slack renderer v2", () => {
       deferredAt: new Date().toISOString(),
     });
     await backdateLastUpdated([ask.id], 20);
+    calls.length = 0;
     await processSlackRenderV2();
     const card = await getSlackOutcomeMessage(ask.id);
+    // The event-based card names who it waits on; the ceiling time stays out of Slack.
+    const opening = calls.find((call) => call.method === "chat.startStream");
+    expect(opening?.payload.markdown_text).toBe("⏳ Waiting on Researcher");
+    expect(JSON.stringify(calls)).not.toContain("at the latest");
 
     const schedule = await createScheduledTask({
       name: "deferred-resolve-fail",
@@ -2433,10 +2623,10 @@ describe("Slack renderer v2", () => {
     );
     calls.length = 0;
     await processSlackRenderV2();
-    // The ETA IS the message now, so there is no such thing as an "ETA-only"
-    // notice worth suppressing — a thread that says nothing is the bug.
+    // An empty legacy notice still posts a card — a thread that says nothing
+    // is the bug — but without its ETA.
     const started = calls.find((call) => call.method === "chat.startStream");
-    expect(started?.payload.markdown_text).toBe("⏳ Checking back today 17:30 UTC");
+    expect(started?.payload.markdown_text).toBe("⏳ Checking back later");
   });
 
   test("refreshes a stream started with stale content before finalizing it", async () => {
@@ -2485,6 +2675,401 @@ describe("Slack renderer v2", () => {
       "PRIVATE OUTPUT",
     );
     expect((await getSlackOutcomeMessage(ask.id))?.finalizedAt).toBeDefined();
+    expect(
+      calls
+        .filter((c) => c.payload.ts === interrupted!.ts || c.payload.message_ts === interrupted!.ts)
+        .map((c) => c.method),
+    ).toEqual(["chat.stopStream", "chat.update", "chat.getPermalink"]);
+  });
+
+  test("an outcome stream with empty text left open by an earlier process is stopped, then filled", async () => {
+    const lead = await createAgent({ name: "Empty Stream Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_RENDER_EMPTY_STREAM");
+    const ask = await createTaskExtended("ask whose stream was left open and empty", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    await startTask(ask.id);
+    await ensureSlackThreadTree([ask.id]);
+    await completeTask(ask.id, "The answer.");
+    calls.length = 0;
+    _resetSlackRenderV2ForTests();
+    stopCallsUntilFailure = 0;
+
+    await processSlackRenderV2();
+
+    const interrupted = await getSlackOutcomeMessage(ask.id);
+    remoteMessages.get(remoteKey(channelId, interrupted!.ts))!.text = "";
+    calls.length = 0;
+    _resetSlackRenderV2ForTests();
+
+    await processSlackRenderV2();
+
+    const remote = remoteMessages.get(remoteKey(channelId, interrupted!.ts));
+    expect(remote?.streaming).toBe(false);
+    expect(remote?.text).toBe("✅ The answer.");
+    expect((await getSlackOutcomeMessage(ask.id))?.finalizedAt).toBeDefined();
+  });
+});
+
+describe("Outcome delivery give-up", () => {
+  /** A completed ask whose stream was started, then orphaned before chat.stopStream. */
+  async function orphanedOutcomeStream(label: string) {
+    const lead = await createAgent({ name: `${label} Lead`, isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress(label);
+    const ask = await createTaskExtended("answer", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    await startTask(ask.id);
+    await ensureSlackThreadTree([ask.id]);
+    await completeTask(ask.id, "The answer.");
+    stopCallsUntilFailure = 0;
+    await processSlackRenderV2();
+    const card = (await getSlackOutcomeMessage(ask.id))!;
+    calls.length = 0;
+    _resetSlackRenderV2ForTests();
+    return { askId: ask.id, channelId, threadTs, ts: card.ts };
+  }
+
+  test.each([
+    "msg_too_long",
+    "streaming_state_conflict",
+  ])("a %s verdict on the outcome card ends delivery on the first attempt", async (code) => {
+    const { askId, ts } = await orphanedOutcomeStream(`C_GIVEUP_${code}`);
+    rejectedUpdateTs = ts;
+    rejectedUpdateCode = code;
+
+    await processSlackRenderV2();
+
+    expect(calls.filter((c) => c.method === "chat.update" && c.payload.ts === ts)).toHaveLength(1);
+    const card = await getSlackOutcomeMessage(askId);
+    expect(card?.deliveryAbandonedAt).toBeDefined();
+    // orphanedOutcomeStream's own setup tick already burns 1 attempt (the
+    // injected chat.stopStream failure it uses to leave the stream open),
+    // so the terminal verdict below lands on attempt 2, not attempt 1.
+    expect(card?.deliveryAttempts).toBe(2);
+    expect(card?.deliveryLastError?.startsWith(code)).toBe(true);
+    const warnings = calls.filter(
+      (c) =>
+        c.method === "chat.postMessage" &&
+        String(c.payload.text ?? "").startsWith(
+          `⚠️ Couldn't deliver this task's reply after 2 attempt(s) (${code}`,
+        ),
+    );
+    expect(warnings).toHaveLength(1);
+
+    _resetSlackRenderV2ForTests();
+    await processSlackRenderV2();
+    await processSlackRenderV2();
+
+    expect(calls.filter((c) => c.method === "chat.update" && c.payload.ts === ts)).toHaveLength(1);
+    expect(
+      calls.filter(
+        (c) => c.method === "chat.postMessage" && String(c.payload.text ?? "").startsWith("⚠️"),
+      ),
+    ).toHaveLength(1);
+  });
+
+  test("a rate_limited verdict on chat.stopStream stays retryable and succeeds once the limit clears", async () => {
+    const { askId, ts } = await orphanedOutcomeStream("C_GIVEUP_RATE_LIMITED");
+    rejectedStopTs = ts;
+
+    await processSlackRenderV2();
+
+    // orphanedOutcomeStream's own setup tick already burns 1 attempt, so the
+    // rate_limited verdict lands on attempt 2 — and, being transient, must
+    // not abandon delivery there.
+    let card = await getSlackOutcomeMessage(askId);
+    expect(card?.deliveryAbandonedAt).toBeUndefined();
+    expect(card?.deliveryAttempts).toBe(2);
+    expect(card?.deliveryLastError?.startsWith("rate_limited")).toBe(true);
+    expect(
+      calls.some(
+        (c) => c.method === "chat.postMessage" && String(c.payload.text ?? "").startsWith("⚠️"),
+      ),
+    ).toBe(false);
+
+    // The rate limit clears; the next attempt succeeds and finalizes the card.
+    rejectedStopTs = undefined;
+    _resetSlackRenderV2ForTests();
+    await processSlackRenderV2();
+
+    card = await getSlackOutcomeMessage(askId);
+    expect(card?.deliveryAbandonedAt).toBeUndefined();
+    expect(card?.finalizedAt).toBeDefined();
+    expect(calls.filter((c) => c.method === "chat.update" && c.payload.ts === ts)).toHaveLength(1);
+  });
+
+  test("an unclassifiable outcome failure is retried across restarts, bounded by the persisted count", async () => {
+    // orphanedOutcomeStream's own setup tick already burns 1 attempt, so 3
+    // more (not 4) reach attempt 4, and a 4th (not 5th) reaches the ceiling.
+    const { askId } = await orphanedOutcomeStream("C_GIVEUP_PERSIST");
+    updateFailuresRemaining = 100;
+
+    for (let tick = 1; tick <= 3; tick++) {
+      _resetSlackRenderV2ForTests();
+      await processSlackRenderV2();
+    }
+    let card = await getSlackOutcomeMessage(askId);
+    expect(card?.deliveryAttempts).toBe(4);
+    expect(card?.deliveryAbandonedAt).toBeUndefined();
+    expect(calls.filter((c) => c.method === "chat.postMessage")).toHaveLength(0);
+
+    _resetSlackRenderV2ForTests();
+    await processSlackRenderV2();
+    card = await getSlackOutcomeMessage(askId);
+    expect(card?.deliveryAttempts).toBe(5);
+    expect(card?.deliveryAbandonedAt).toBeDefined();
+    const warnings = calls.filter(
+      (c) =>
+        c.method === "chat.postMessage" &&
+        String(c.payload.text ?? "").includes("after 5 attempt(s)"),
+    );
+    expect(warnings).toHaveLength(1);
+
+    const cardTs = card?.ts;
+    calls.length = 0;
+    _resetSlackRenderV2ForTests();
+    await processSlackRenderV2();
+    await processSlackRenderV2();
+    // Scoped to the abandoned card's own ts: the tree message keeps updating
+    // independently and is not part of this card's delivery gate.
+    expect(calls.some((c) => c.method === "chat.update" && c.payload.ts === cardTs)).toBe(false);
+    expect(calls.some((c) => c.method === "chat.startStream")).toBe(false);
+    expect(
+      calls.some(
+        (c) => c.method === "chat.postMessage" && String(c.payload.text ?? "").startsWith("⚠️"),
+      ),
+    ).toBe(false);
+  });
+
+  test("the give-up transition is claimed by exactly one caller", async () => {
+    const { askId } = await orphanedOutcomeStream("C_GIVEUP_ONCE");
+    const first = await abandonSlackOutcomeDelivery(askId, "x");
+    const second = await abandonSlackOutcomeDelivery(askId, "x");
+    expect(first?.deliveryAbandonedAt).toBeDefined();
+    expect(second).toBeNull();
+  });
+
+  test("a delivery that fails before any stream exists still persists its give-up", async () => {
+    const lead = await createAgent({ name: "No Row Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_GIVEUP_NO_ROW");
+    const ask = await createTaskExtended("answer", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    await startTask(ask.id);
+    await ensureSlackThreadTree([ask.id]);
+    await completeTask(ask.id, "The answer.");
+    calls.length = 0;
+    startStreamFailuresRemaining = 1;
+    postMessageErrorCode = "channel_not_found";
+
+    await processSlackRenderV2();
+
+    const card = await getSlackOutcomeMessage(ask.id);
+    expect(card?.ts.startsWith("pending:")).toBe(true);
+    expect(card?.deliveryAbandonedAt).toBeDefined();
+    expect(
+      calls.filter(
+        (c) => c.method === "chat.postMessage" && String(c.payload.text ?? "").startsWith("⚠️"),
+      ),
+    ).toHaveLength(1);
+
+    calls.length = 0;
+    _resetSlackRenderV2ForTests();
+    await processSlackRenderV2();
+    expect(calls.some((c) => c.method === "chat.startStream")).toBe(false);
+  });
+
+  test("a delivery failure logs Slack's code and response messages, scrubbed", async () => {
+    const { ts } = await orphanedOutcomeStream("C_GIVEUP_LOG");
+    rejectedUpdateTs = ts;
+    rejectedUpdateCode = "msg_too_long";
+    rejectedUpdateMessages = ["[ERROR] text too long", "token xoxb-1234567890-abcdefghij"];
+    const logged = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await processSlackRenderV2();
+      const joined = logged.mock.calls.map((call) => call.map(String).join(" ")).join("\n");
+      expect(joined).toContain(`"code":"msg_too_long"`);
+      expect(joined).toContain("text too long");
+      expect(joined).not.toContain("xoxb-1234567890");
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  test("a non-terminal failure waits before the next attempt", async () => {
+    const { ts } = await orphanedOutcomeStream("C_GIVEUP_BACKOFF");
+    updateFailuresRemaining = 100;
+
+    await processSlackRenderV2();
+    await processSlackRenderV2();
+
+    expect(calls.filter((c) => c.method === "chat.update" && c.payload.ts === ts)).toHaveLength(1);
+  });
+
+  test("recovers a card crashed between the attempts ceiling and the abandon transition", async () => {
+    const { askId } = await orphanedOutcomeStream("C_GIVEUP_STUCK");
+    // Simulate a crash: delivery_attempts reached the ceiling via
+    // noteSlackOutcomeDeliveryFailure, but abandonSlackOutcomeDelivery never
+    // ran, leaving delivery_abandoned_at NULL. Without the fix,
+    // outcomeDeliveryGate's attempts check would block this card forever.
+    for (let i = 0; i < 4; i++) {
+      await noteSlackOutcomeDeliveryFailure(askId, "boom");
+    }
+    let card = await getSlackOutcomeMessage(askId);
+    expect(card?.deliveryAttempts).toBe(5);
+    expect(card?.deliveryAbandonedAt).toBeUndefined();
+
+    calls.length = 0;
+    await processSlackRenderV2();
+
+    card = await getSlackOutcomeMessage(askId);
+    expect(card?.deliveryAbandonedAt).toBeDefined();
+    expect(card?.deliveryAttempts).toBe(5);
+    expect(calls.some((c) => c.method === "chat.startStream")).toBe(false);
+    const warnings = calls.filter(
+      (c) => c.method === "chat.postMessage" && String(c.payload.text ?? "").startsWith("⚠️"),
+    );
+    expect(warnings).toHaveLength(1);
+
+    calls.length = 0;
+    await processSlackRenderV2();
+    await processSlackRenderV2();
+    expect(
+      calls.filter(
+        (c) => c.method === "chat.postMessage" && String(c.payload.text ?? "").startsWith("⚠️"),
+      ),
+    ).toHaveLength(0);
+  });
+
+  test("scrubs a secret-shaped error from the persisted give-up and its Slack warning", async () => {
+    const { askId, ts } = await orphanedOutcomeStream("C_GIVEUP_SCRUB_PERSIST");
+    rejectedUpdateTs = ts;
+    rejectedUpdateCode = "msg_too_long";
+    rejectedUpdateMessages = ["token xoxb-1234567890-abcdefghij"];
+
+    await processSlackRenderV2();
+
+    const card = await getSlackOutcomeMessage(askId);
+    expect(card?.deliveryAbandonedAt).toBeDefined();
+    expect(card?.deliveryLastError).not.toContain("xoxb-1234567890");
+    const warning = calls.find(
+      (c) => c.method === "chat.postMessage" && String(c.payload.text ?? "").startsWith("⚠️"),
+    );
+    expect(warning).toBeDefined();
+    expect(String(warning?.payload.text)).not.toContain("xoxb-1234567890");
+  });
+
+  test("a reservation from the failure path is not reconciled against an identical older message", async () => {
+    const lead = await createAgent({ name: "Recon Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_RECON");
+    const contextKey = slackContextKey({ channelId, threadTs });
+
+    // taskA posts first and settles normally; its outcome text will be
+    // identical to taskB's, since both complete with the same output.
+    const taskA = await createTaskExtended("answer", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey,
+    });
+    await startTask(taskA.id);
+    await ensureSlackThreadTree([taskA.id]);
+    await completeTask(taskA.id, "The answer.");
+    await processSlackRenderV2();
+    const cardA = await getSlackOutcomeMessage(taskA.id);
+    expect(cardA?.finalizedAt).toBeDefined();
+
+    const taskB0 = await createTaskExtended("answer", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey,
+    });
+    await startTask(taskB0.id);
+    await completeTask(taskB0.id, "The answer.");
+    const taskB = (await getTaskById(taskB0.id))!;
+
+    const tree = (await getSlackTreeMessageByThread(channelId, threadTs))!;
+    // Simulate a failure before streamOutcomeCard's own reservation (e.g. a
+    // DB read throwing while building content) — noteOutcomeDeliveryFailure
+    // eagerly reserves a row with no Slack call ever attempted.
+    await _noteOutcomeDeliveryFailureForTests(taskB, tree, new Error("content build blew up"));
+    const reservedB = await getSlackOutcomeMessage(taskB.id);
+    expect(reservedB?.ts.startsWith("pending:")).toBe(true);
+    expect(reservedB?.deliveryAttempts).toBe(1);
+
+    calls.length = 0;
+    const outcome = await streamOutcomeCard(taskB, tree);
+
+    // Without the fix, this reconciles by presentation text against taskA's
+    // identical, unrelated message instead of posting a fresh one.
+    expect(calls.some((c) => c.method === "conversations.replies")).toBe(false);
+    expect(calls.some((c) => c.method === "chat.startStream")).toBe(true);
+    expect(outcome?.finalizedAt).toBeDefined();
+    expect(outcome?.ts).not.toBe(cardA?.ts);
+  });
+
+  test("a restart-cleared reservation marker is still not reconciled against an identical older message", async () => {
+    const lead = await createAgent({ name: "Recon Restart Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_RECON_RESTART");
+    const contextKey = slackContextKey({ channelId, threadTs });
+
+    const taskA = await createTaskExtended("answer", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey,
+    });
+    await startTask(taskA.id);
+    await ensureSlackThreadTree([taskA.id]);
+    await completeTask(taskA.id, "The answer.");
+    await processSlackRenderV2();
+    const cardA = await getSlackOutcomeMessage(taskA.id);
+    expect(cardA?.finalizedAt).toBeDefined();
+
+    const taskB0 = await createTaskExtended("answer", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey,
+    });
+    await startTask(taskB0.id);
+    await completeTask(taskB0.id, "The answer.");
+    const taskB = (await getTaskById(taskB0.id))!;
+
+    const tree = (await getSlackTreeMessageByThread(channelId, threadTs))!;
+    await _noteOutcomeDeliveryFailureForTests(taskB, tree, new Error("content build blew up"));
+
+    calls.length = 0;
+    // A process restart clears the in-memory `outcomeReservedWithoutAttempt`
+    // marker, so the reconciliation search runs and finds taskA's identical
+    // message. The DB-truth ownership check must still reject binding onto
+    // it — without it, this throws `UNIQUE constraint failed:
+    // slack_messages.channel_id, slack_messages.ts` at bindSlackMessageTimestamp.
+    _resetSlackRenderV2ForTests();
+    const outcome = await streamOutcomeCard(taskB, tree);
+
+    expect(calls.some((c) => c.method === "conversations.replies")).toBe(true);
+    expect(calls.some((c) => c.method === "chat.startStream")).toBe(true);
+    expect(outcome?.finalizedAt).toBeDefined();
+    expect(outcome?.ts).not.toBe(cardA?.ts);
   });
 });
 

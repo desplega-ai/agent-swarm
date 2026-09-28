@@ -13,13 +13,20 @@ import {
   getSessionCostsFiltered,
   getSessionLogsByTaskId,
   getTaskById,
+  getUsageDataVersion,
 } from "../be/db";
 import { recordSessionCost } from "../otel";
 import { incrementServerSessionsProcessed } from "../server-runtime-counters";
 import type { SessionCost } from "../types";
-import { SessionCostModelBreakdownSchema, SessionCostSchema, SessionLogSchema } from "../types";
+import {
+  PricingProviderSchema,
+  SessionCostModelBreakdownSchema,
+  SessionCostSchema,
+  SessionLogSchema,
+} from "../types";
 import { route } from "./route-def";
 import { recomputeSessionCost } from "./session-cost-recompute";
+import { cachedUsageReport } from "./usage-cache";
 import { jsonError } from "./utils";
 
 // ─── Response Schemas ────────────────────────────────────────────────────────
@@ -38,6 +45,7 @@ const SessionCostSummaryTotalsSchema = z.object({
   attributableCostUsd: z.number(),
   excludedCostUsd: z.number(),
   excludedTaskCount: z.number().int(),
+  subscriptionCostUsd: z.number(),
 });
 
 /** Mirrors `SessionCostDailyRow` in src/be/db.ts. */
@@ -47,6 +55,7 @@ const SessionCostDailyRowSchema = z.object({
   inputTokens: z.number().int(),
   outputTokens: z.number().int(),
   sessions: z.number().int(),
+  subscriptionCostUsd: z.number(),
 });
 
 /** Mirrors `SessionCostByAgentRow` in src/be/db.ts. */
@@ -69,12 +78,30 @@ const SessionCostByUserRowSchema = z.object({
   durationMs: z.number().int(),
 });
 
+/** Mirrors `SessionCostByCredentialRow` in src/be/db.ts. */
+const SessionCostByCredentialRowSchema = z.object({
+  keyType: z.string().nullable(),
+  keySuffix: z.string().nullable(),
+  name: z.string().nullable(),
+  subscription: z.boolean(),
+  plan: z.string().nullable(),
+  planSource: z.enum(["manual", "detected", "estimated"]).nullable(),
+  costUsd: z.number(),
+  inputTokens: z.number().int(),
+  outputTokens: z.number().int(),
+  sessions: z.number().int(),
+  firstSessionAt: z.string(),
+  lastSessionAt: z.string(),
+});
+
 /** Mirrors the return type of `getSessionCostSummary` in src/be/db.ts. */
 const SessionCostSummarySchema = z.object({
   totals: SessionCostSummaryTotalsSchema,
   daily: z.array(SessionCostDailyRowSchema),
   byAgent: z.array(SessionCostByAgentRowSchema),
   byUser: z.array(SessionCostByUserRowSchema),
+  /** Filled for `groupBy=both` only. */
+  byCredential: z.array(SessionCostByCredentialRowSchema),
 });
 
 /** Mirrors `DashboardCostSummary` in src/be/db.ts. */
@@ -183,9 +210,9 @@ const createSessionCostRoute = route({
     // its own billing and the adapter reports `totalCostUsd: 0`, so the row
     // lands as `costSource: 'unpriced'`. It still has to be accepted here or
     // every ACP session's cost POST 400s and the row is silently dropped.
-    provider: z
-      .enum(["claude", "claude-managed", "codex", "pi", "opencode", "devin", "gemini", "acp"])
-      .optional(),
+    // Reuses PricingProviderSchema so this list can't drift from it again
+    // (#1636: it previously forgot `dsh`).
+    provider: PricingProviderSchema.optional(),
     /**
      * Phase 6: epoch-ms timestamp used as the "active price at time T" lookup
      * basis. Defaults to `Date.now()` when omitted. Including it lets
@@ -423,13 +450,17 @@ export async function handleSessionData(
   if (getSessionCostSummaryRoute.match(req.method, pathSegments)) {
     const parsed = await getSessionCostSummaryRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const summary = await getSessionCostSummary({
+    const opts = {
       startDate: parsed.query.startDate || undefined,
       endDate: parsed.query.endDate || undefined,
       agentId: parsed.query.agentId || undefined,
       userId: parsed.query.userId || undefined,
       groupBy: parsed.query.groupBy || "both",
-    });
+    } as const;
+    const version = await getUsageDataVersion();
+    const summary = await cachedUsageReport(`summary:${version}:${JSON.stringify(opts)}`, () =>
+      getSessionCostSummary(opts),
+    );
     getSessionCostSummaryRoute.respond(res, 200, summary);
     return true;
   }
@@ -443,10 +474,14 @@ export async function handleSessionData(
   if (getAttributionByPersonRoute.match(req.method, pathSegments)) {
     const parsed = await getAttributionByPersonRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const rows = await getAttributionByPerson({
+    const opts = {
       startDate: parsed.query.startDate || undefined,
       endDate: parsed.query.endDate || undefined,
-    });
+    };
+    const version = await getUsageDataVersion();
+    const rows = await cachedUsageReport(`attribution:${version}:${JSON.stringify(opts)}`, () =>
+      getAttributionByPerson(opts),
+    );
     getAttributionByPersonRoute.respond(res, 200, { rows });
     return true;
   }

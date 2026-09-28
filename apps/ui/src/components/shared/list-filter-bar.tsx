@@ -12,6 +12,8 @@ interface ListFilterBarProps {
   hasActiveFilters?: boolean;
   onClear?: () => void;
   className?: string;
+  /** Override the search box sizing, e.g. to share a phone row with a Filters button. */
+  searchClassName?: string;
 }
 
 /**
@@ -28,6 +30,7 @@ export function ListFilterBar({
   hasActiveFilters = false,
   onClear,
   className,
+  searchClassName = "w-full sm:max-w-sm sm:flex-1",
 }: ListFilterBarProps) {
   return (
     <div className={cn("flex shrink-0 flex-wrap items-center gap-3", className)}>
@@ -35,7 +38,7 @@ export function ListFilterBar({
         value={searchValue}
         onChange={onSearchChange}
         placeholder={searchPlaceholder}
-        className="w-full sm:max-w-sm sm:flex-1"
+        className={searchClassName}
       />
       {children}
       {hasActiveFilters && onClear ? (

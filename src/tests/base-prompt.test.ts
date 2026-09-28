@@ -251,6 +251,13 @@ describe("getBasePrompt: composite selection", () => {
     expect(result).not.toContain("## Secrets");
   });
 
+  test("citation guidance reaches local agents only", async () => {
+    const local = await getBasePrompt({ ...minimalArgs, traits: localTraits });
+    const remote = await getBasePrompt({ ...minimalArgs, traits: remoteTraits });
+    expect(local).toContain("Skip citations on delegation, routing, acks, and status replies.");
+    expect(remote).not.toContain("citation");
+  });
+
   test("a lead without MCP still gets the remote worker composite", async () => {
     const result = await getBasePrompt({ ...minimalArgs, role: "lead", traits: remoteTraits });
     expect(result).not.toContain("## How you lead");
@@ -986,21 +993,21 @@ describe("truncateRepoClaudeMd", () => {
 // ---------------------------------------------------------------------------
 
 describe("getBasePrompt: size budget", () => {
-  // Include task-output budget, exceptions, and the two citation guidance lines.
+  // Include task-output budget, exceptions, and the two citation-scoping lines (when to cite, when not to).
   // Keep tight role-specific ceilings to catch unrelated prompt growth.
-  test("a fresh claude worker stays under 5,700 characters", async () => {
+  test("a fresh claude worker stays under 5,750 characters", async () => {
     const result = await getBasePrompt({ ...minimalArgs, name: "Ada", traits: localTraits });
-    expect(result.length).toBeLessThan(5_700);
+    expect(result.length).toBeLessThan(5_750);
   });
 
-  test("a fresh claude lead stays under 5,800 characters", async () => {
+  test("a fresh claude lead stays under 5,900 characters", async () => {
     const result = await getBasePrompt({
       ...minimalArgs,
       role: "lead",
       name: "Cora",
       traits: localTraits,
     });
-    expect(result.length).toBeLessThan(5_800);
+    expect(result.length).toBeLessThan(5_900);
   });
 
   test("Picateclas spawn-OOM hardening: the kitchen sink stays below MAX_ARG_STRLEN", async () => {

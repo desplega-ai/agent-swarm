@@ -7,6 +7,7 @@ import {
   useUpsertOAuthApp,
 } from "@/api/hooks/use-script-connections";
 import type { OAuthAppSummary, OAuthAuthorizationSummary } from "@/api/types";
+import { SecretInput } from "@/components/shared/secret-input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -59,11 +60,17 @@ export function OAuthInlineConnect({
   value,
   onChange,
   suggestedPresetId,
+  scopes,
 }: {
   oauthApps: OAuthAppSummary[];
   value: string;
   onChange: (authorizationId: string) => void;
   suggestedPresetId?: string;
+  /**
+   * Scopes for an app created from `suggestedPresetId`, instead of that
+   * preset's defaults. Other presets keep their defaults.
+   */
+  scopes?: string[];
 }) {
   const queryClient = useQueryClient();
   const { data: presets = [] } = useOAuthPresets();
@@ -167,6 +174,7 @@ export function OAuthInlineConnect({
         presetId,
         clientId: clientId.trim(),
         ...(clientSecret.trim() ? { clientSecret: clientSecret.trim() } : {}),
+        ...(scopes && presetId === suggestedPresetId ? { scopes } : {}),
       })) as { oauthApp?: OAuthAppSummary };
       const created = result.oauthApp;
       if (created?.id) {
@@ -290,12 +298,12 @@ export function OAuthInlineConnect({
             </div>
             <div className="space-y-2">
               <Label className="text-xs">Client Secret</Label>
-              <Input
-                type="password"
+              <SecretInput
                 value={clientSecret}
-                onChange={(event) => setClientSecret(event.target.value)}
+                onChange={setClientSecret}
                 placeholder="Stored write-only"
                 autoComplete="new-password"
+                aria-label="Client Secret"
               />
             </div>
           </div>

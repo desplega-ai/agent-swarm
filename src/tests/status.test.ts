@@ -37,8 +37,10 @@ import {
   _resetTestConnectionCache,
   buildStatusPayload,
   computeHealth,
+  rollupCredStatusForProvider,
   type SetupMilestone,
 } from "../http/status";
+import { setSlackConnectionState } from "../slack/connection-state";
 import type { AgentCredStatus } from "../types";
 
 // Helper for tests: stamp an agent row with a cred_status snapshot so the
@@ -169,6 +171,7 @@ beforeEach(async () => {
   clearEnv();
   await clearTables();
   _resetTestConnectionCache();
+  setSlackConnectionState("disconnected");
 });
 
 afterEach(() => {
@@ -280,6 +283,41 @@ describe("setup milestones", () => {
 
     const payload = await buildStatusPayload();
     expect(getMilestone(payload, "harness").state).toBe("verified");
+  });
+
+  test("provider rollup counts every agent with a fresh passing report in verifiedWorkers", async () => {
+    const verified = await createAgent({
+      name: "w-verified",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+    const configured = await createAgent({
+      name: "w-configured",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+    const lead = await createAgent({
+      name: "lead-verified",
+      isLead: true,
+      status: "idle",
+      capabilities: [],
+    });
+    await seedCredStatus(verified.id, "claude", {
+      liveTest: { ok: true, error: null, latency_ms: 10, testedAt: Date.now() },
+    });
+    await seedCredStatus(configured.id, "claude", { liveTest: null });
+    await seedCredStatus(lead.id, "claude", {
+      liveTest: { ok: true, error: null, latency_ms: 10, testedAt: Date.now() },
+    });
+
+    expect(await rollupCredStatusForProvider("claude")).toMatchObject({
+      state: "verified",
+      workers: 3,
+      verifiedWorkers: 2,
+      reports: 3,
+    });
   });
 
   test("harness stays `unverified` on an empty fleet (no agents registered)", async () => {
@@ -419,7 +457,7 @@ describe("setup milestones", () => {
     process.env.SLACK_APP_TOKEN = "xapp-test";
     const b = await buildStatusPayload();
     expect(getMilestone(b, "slack").state).toBe("configured");
-    expect(getMilestone(b, "slack").hint).toContain("not been verified");
+    expect(getMilestone(b, "slack").hint).toContain("not connected");
 
     process.env.SLACK_MODE = "http";
     delete process.env.SLACK_APP_TOKEN;
@@ -431,6 +469,26 @@ describe("setup milestones", () => {
     process.env.SLACK_DISABLE = "true";
     const c = await buildStatusPayload();
     expect(getMilestone(c, "slack").state).toBe("unverified");
+  });
+
+  test("slack: a live Socket Mode connection reports verified; a dropped one does not", async () => {
+    process.env.SLACK_BOT_TOKEN = "xoxb-test";
+    process.env.SLACK_APP_TOKEN = "xapp-test";
+
+    setSlackConnectionState("connected");
+    const live = getMilestone(await buildStatusPayload(), "slack");
+    expect(live.state).toBe("verified");
+    expect(live.hint).toBeUndefined();
+
+    setSlackConnectionState("connecting");
+    const reconnecting = getMilestone(await buildStatusPayload(), "slack");
+    expect(reconnecting.state).toBe("configured");
+    expect(reconnecting.hint).toContain("not connected");
+
+    // A stale "connected" never verifies credentials that are now missing.
+    setSlackConnectionState("connected");
+    delete process.env.SLACK_APP_TOKEN;
+    expect(getMilestone(await buildStatusPayload(), "slack").state).toBe("unverified");
   });
 
   test("slack: invalid mode fails closed with a specific hint", async () => {
@@ -800,6 +858,32 @@ describe("validateProviderCredentials — error scrubbing", () => {
     expect(fetchCalled).toBe(false);
   });
 
+  test("codex with a codex_oauth_<N> pool slot passes via presence check (no upstream call)", async () => {
+    // The dashboard device login stores slots, not CODEX_OAUTH. The presence
+    // check (`checkCodexCredentials`) already accepts them; the live test must
+    // too, or the provider stays `configured` and onboarding never verifies.
+    delete process.env.CODEX_OAUTH;
+    delete process.env.OPENAI_API_KEY;
+    process.env.codex_oauth_0 = JSON.stringify({
+      access: "oai-access-token-from-device-login",
+      refresh: "oai-refresh",
+      expires: Date.now() + 3600_000,
+      accountId: "acct_123",
+    });
+    let fetchCalled = false;
+    globalThis.fetch = (async () => {
+      fetchCalled = true;
+      return new Response("{}", { status: 200 });
+    }) as typeof fetch;
+    try {
+      const result = await validateProviderCredentials("codex");
+      expect(result.ok).toBe(true);
+      expect(fetchCalled).toBe(false);
+    } finally {
+      delete process.env.codex_oauth_0;
+    }
+  });
+
   test("codex with ~/.codex/auth.json on disk passes via presence check (no env creds)", async () => {
     // Reproduces the prod scenario: agent boots from a credential pool that
     // pre-materialised auth.json (or ran `codex login` in a prior boot), so
@@ -1000,6 +1084,19 @@ describe("computeHealth (Phase 2)", () => {
       { id: "first_task", label: "First task", state: "verified" },
     ];
     expect(computeHealth(synthetic)).toBe("degraded");
+  });
+
+  test("`ok` when a connected Slack reports `verified` next to other connected integrations", () => {
+    const synthetic: SetupMilestone[] = [
+      { id: "harness", label: "Harness", state: "verified" },
+      { id: "slack", label: "Slack", state: "verified" },
+      { id: "github", label: "GitHub", state: "verified" },
+      { id: "linear", label: "Linear", state: "verified" },
+      { id: "jira", label: "Jira", state: "unverified" },
+      { id: "workers", label: "Workers", state: "verified" },
+      { id: "first_task", label: "First task", state: "verified" },
+    ];
+    expect(computeHealth(synthetic)).toBe("ok");
   });
 
   test("integrations in `unverified` alone do NOT degrade health", () => {

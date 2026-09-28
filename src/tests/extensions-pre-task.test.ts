@@ -20,6 +20,7 @@ import {
 import * as dbClient from "../be/db-client";
 import type { InstallExtensionArgs as ExtensionInstallBody } from "../be/extensions/db";
 import { installExtension, listExtensionRuns } from "../be/extensions/db";
+import { getCatalogEntry } from "../extensions/catalog";
 import { disableExtension, enableExtension, stopExtensionRuntime } from "../extensions/lifecycle";
 import { handleTasks } from "../http/tasks";
 import { dispatchScheduleTarget } from "../scheduler/scheduler";
@@ -166,6 +167,112 @@ describe("extension task boundaries", () => {
     await disableExtension(blocker.id);
     const retried = await postTask({ task: "block this task" });
     expect(retried.status).toBe(201);
+  });
+
+  test("GitHub sender allowlist separates internal and external senders", async () => {
+    const template = getCatalogEntry("github-sender-allowlist");
+    if (!template) throw new Error("github-sender-allowlist is missing from the catalog");
+    const installed = await installExtension({
+      manifest: template.manifest,
+      files: template.files,
+      config: {
+        internal: ["tarasyarema", "harlequinetcie"],
+        external: ["fuvidani", "capchase-bot"],
+        reviewBots: ["review-bot"],
+      },
+    });
+    await enableExtension(installed.extension.id);
+
+    const createFromGitHub = (
+      description: string,
+      vcsAuthor: string,
+      taskType: string,
+      vcsUrl: string,
+      source: "github" | "api" = "github",
+    ) =>
+      createTaskWithSiblingAwareness(
+        description,
+        { source, vcsAuthor, taskType, vcsUrl },
+        { origin: "webhook" },
+      );
+
+    await createFromGitHub(
+      "internal sender issue",
+      "HARLEQUINETCIE",
+      "github-issue",
+      "https://github.com/acme/project/issues/1",
+    );
+    await createFromGitHub(
+      "internal sender review",
+      "tarasyarema",
+      "github-review",
+      "https://github.com/acme/project/pull/2",
+    );
+    await createFromGitHub(
+      "external sender PR comment",
+      "FuViDaNi",
+      "github-comment",
+      "https://github.com/acme/project/pull/2",
+    );
+    await createFromGitHub(
+      "external sender PR assignment",
+      "capchase-bot",
+      "github-pr",
+      "https://github.com/acme/project/pull/3",
+    );
+    await createFromGitHub(
+      "external sender PR review",
+      "fuvidani",
+      "github-review",
+      "https://github.com/acme/project/pull/4",
+    );
+
+    await expect(
+      createFromGitHub(
+        "external sender issue comment",
+        "fuvidani",
+        "github-comment",
+        "https://github.com/acme/project/issues/5",
+      ),
+    ).rejects.toThrow('GitHub sender "fuvidani" is blocked: external senders are allowed only');
+    await expect(
+      createFromGitHub(
+        "unknown sender issue",
+        "unknown-user",
+        "github-issue",
+        "https://github.com/acme/project/issues/6",
+      ),
+    ).rejects.toThrow('GitHub sender "unknown-user" is blocked: sender is not on the internal');
+
+    await expect(
+      createFromGitHub(
+        "unknown sender review",
+        "unknown-user",
+        "github-review",
+        "https://github.com/acme/project/pull/7",
+      ),
+    ).rejects.toThrow('GitHub sender "unknown-user" is blocked: sender is not on the internal');
+    await createFromGitHub(
+      "review bot review",
+      "REVIEW-BOT",
+      "github-review",
+      "https://github.com/acme/project/pull/8",
+    );
+    await expect(
+      createFromGitHub(
+        "review bot PR comment",
+        "review-bot",
+        "github-comment",
+        "https://github.com/acme/project/pull/9",
+      ),
+    ).rejects.toThrow('GitHub sender "review-bot" is blocked: review bots are allowed only');
+    await createFromGitHub(
+      "non-GitHub source",
+      "unknown-user",
+      "github-issue",
+      "https://github.com/acme/project/issues/10",
+      "api",
+    );
   });
 
   test("scheduler and workflow executor provide their task creation origins", async () => {

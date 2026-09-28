@@ -1,14 +1,10 @@
-import type { ColDef, RowClickedEvent } from "ag-grid-community";
 import { ClipboardCheck } from "lucide-react";
-import { useCallback, useMemo } from "react";
+import { type ReactNode, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useApprovalRequests } from "@/api/hooks/use-approval-requests";
-import type { ApprovalRequest, ApprovalRequestStatus } from "@/api/types";
-import { DataGrid } from "@/components/shared/data-grid";
 import { EmptyState } from "@/components/shared/empty-state";
+import { FilterField, FiltersPopover } from "@/components/shared/filters-popover";
 import { ListFilterBar } from "@/components/shared/list-filter-bar";
-import { StatusBadge } from "@/components/shared/status-badge";
-import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/ui/page-header";
 import {
   Select,
@@ -17,8 +13,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
-import { formatSmartTime } from "@/lib/utils";
+import { useUserName } from "@/hooks/use-user-name";
+import { approvalRequestSource, sortApprovalRequests } from "@/lib/approval-format";
+import { RequestList } from "./components/request-list";
 
 const STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: "all", label: "All Statuses" },
@@ -38,14 +37,21 @@ const AGE_FILTER_MS: Record<Exclude<(typeof AGE_FILTERS)[number], "all">, number
   "30d": 30 * 24 * 60 * 60 * 1000,
 };
 
+/** A facet with its label inside the mobile Filters popover, bare inline on desktop. */
+function FacetField({
+  label,
+  labelled,
+  children,
+}: {
+  label: string;
+  labelled: boolean;
+  children: ReactNode;
+}) {
+  return labelled ? <FilterField label={label}>{children}</FilterField> : children;
+}
+
 // The endpoint defaults to 100 rows; use a stable, explicit client-filter window.
 const APPROVAL_REQUESTS_LIST_LIMIT = 500;
-
-function approvalRequestSource(request: ApprovalRequest): "workflow" | "agent" | "manual" {
-  if (request.workflowRunId) return "workflow";
-  if (request.sourceTaskId) return "agent";
-  return "manual";
-}
 
 export default function ApprovalRequestsPage() {
   const { searchParams, setParam, setParams } = useUrlSearchState();
@@ -81,97 +87,27 @@ export default function ApprovalRequestsPage() {
     });
   }, [ageFilter, requests, sourceFilter, statusFilter]);
 
-  const columnDefs = useMemo<ColDef<ApprovalRequest>[]>(
-    () => [
-      {
-        field: "title",
-        headerName: "Request",
-        flex: 1,
-        minWidth: 250,
-        getQuickFilterText: (params) =>
-          params.data ? `${params.data.title} ${params.data.id}` : "",
-      },
-      {
-        field: "status",
-        headerName: "Status",
-        width: 130,
-        getQuickFilterText: () => "",
-        cellRenderer: (params: { value: ApprovalRequestStatus }) => (
-          <StatusBadge status={params.value} />
-        ),
-      },
-      {
-        field: "questions",
-        headerName: "Questions",
-        width: 110,
-        getQuickFilterText: () => "",
-        valueGetter: (params) => params.data?.questions?.length ?? 0,
-        cellRenderer: (params: { value: number }) => (
-          <Badge
-            variant="outline"
-            className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center"
-          >
-            {params.value} {params.value === 1 ? "question" : "questions"}
-          </Badge>
-        ),
-      },
-      {
-        field: "workflowRunId",
-        headerName: "Source",
-        width: 120,
-        getQuickFilterText: (params) => {
-          const request = params.data;
-          if (!request) return "";
-          return [request.workflowRunId, request.workflowRunStepId, request.sourceTaskId]
+  const userName = useUserName();
+  const rows = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    const matched = query
+      ? filteredRequests.filter((request) =>
+          [
+            request.title,
+            request.id,
+            request.resolvedBy,
+            request.resolvedBy ? userName(request.resolvedBy) : null,
+            request.workflowRunId,
+            request.workflowRunStepId,
+            request.sourceTaskId,
+          ]
             .filter(Boolean)
-            .join(" ");
-        },
-        cellRenderer: (params: { data: ApprovalRequest | undefined }) => {
-          if (params.data?.workflowRunId) {
-            return (
-              <Badge variant="outline" size="tag">
-                Workflow
-              </Badge>
-            );
-          }
-          if (params.data?.sourceTaskId) {
-            return (
-              <Badge variant="outline" size="tag">
-                Agent
-              </Badge>
-            );
-          }
-          return (
-            <Badge variant="outline" size="tag">
-              Manual
-            </Badge>
-          );
-        },
-      },
-      {
-        field: "resolvedBy",
-        headerName: "Resolved By",
-        width: 130,
-        valueFormatter: (params) => params.value || "—",
-      },
-      {
-        field: "createdAt",
-        headerName: "Created",
-        width: 150,
-        sort: "desc",
-        getQuickFilterText: () => "",
-        valueFormatter: (params) => formatSmartTime(params.value),
-      },
-    ],
-    [],
-  );
+            .some((value) => String(value).toLowerCase().includes(query)),
+        )
+      : filteredRequests;
+    return sortApprovalRequests(matched);
+  }, [filteredRequests, search, userName]);
 
-  const onRowClicked = useCallback(
-    (event: RowClickedEvent<ApprovalRequest>) => {
-      if (event.data) void navigate(`/approval-requests/${event.data.id}`);
-    },
-    [navigate],
-  );
   const hasActiveFilters =
     search !== "" || statusFilter !== "all" || sourceFilter !== "all" || ageFilter !== "all";
   // First-run only: the status filter is applied SERVER-side, so an empty
@@ -190,6 +126,84 @@ export default function ApprovalRequestsPage() {
     );
   }, [setParams]);
 
+  const isMobile = useIsMobile();
+  // Below `md` the three facets fold into one "Filters (n)" popover so the
+  // first request is on screen instead of three rows of selects.
+  const activeFacetCount = [statusFilter, sourceFilter, ageFilter].filter(
+    (v) => v !== "all",
+  ).length;
+  const facets = (
+    <>
+      <FacetField label="Status" labelled={isMobile}>
+        <Select
+          value={statusFilter}
+          onValueChange={(value) =>
+            setParam("status", value, {
+              defaultValue: "all",
+              replace: false,
+              reset: ["approvalRequestsPage"],
+            })
+          }
+        >
+          <SelectTrigger className={isMobile ? "w-full" : "w-[150px]"}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {STATUS_OPTIONS.map((opt) => (
+              <SelectItem key={opt.value} value={opt.value}>
+                {opt.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </FacetField>
+      <FacetField label="Source" labelled={isMobile}>
+        <Select
+          value={sourceFilter}
+          onValueChange={(value) =>
+            setParam("source", value, {
+              defaultValue: "all",
+              replace: false,
+              reset: ["approvalRequestsPage"],
+            })
+          }
+        >
+          <SelectTrigger className={isMobile ? "w-full" : "w-[150px]"}>
+            <SelectValue placeholder="Source" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All sources</SelectItem>
+            <SelectItem value="workflow">Workflow</SelectItem>
+            <SelectItem value="agent">Agent</SelectItem>
+            <SelectItem value="manual">Manual</SelectItem>
+          </SelectContent>
+        </Select>
+      </FacetField>
+      <FacetField label="Age" labelled={isMobile}>
+        <Select
+          value={ageFilter}
+          onValueChange={(value) =>
+            setParam("age", value, {
+              defaultValue: "all",
+              replace: false,
+              reset: ["approvalRequestsPage"],
+            })
+          }
+        >
+          <SelectTrigger className={isMobile ? "w-full" : "w-[150px]"}>
+            <SelectValue placeholder="Age" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All ages</SelectItem>
+            <SelectItem value="24h">Last 24 hours</SelectItem>
+            <SelectItem value="7d">Last 7 days</SelectItem>
+            <SelectItem value="30d">Last 30 days</SelectItem>
+          </SelectContent>
+        </Select>
+      </FacetField>
+    </>
+  );
+
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
       <PageHeader title="Approval Requests" />
@@ -205,70 +219,15 @@ export default function ApprovalRequestsPage() {
             })
           }
           searchPlaceholder="Search title, ID, resolver, or source ID…"
+          searchClassName={isMobile ? "min-w-0 flex-1" : undefined}
           hasActiveFilters={hasActiveFilters}
           onClear={clearFilters}
         >
-          <Select
-            value={statusFilter}
-            onValueChange={(value) =>
-              setParam("status", value, {
-                defaultValue: "all",
-                replace: false,
-                reset: ["approvalRequestsPage"],
-              })
-            }
-          >
-            <SelectTrigger className="w-[150px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {STATUS_OPTIONS.map((opt) => (
-                <SelectItem key={opt.value} value={opt.value}>
-                  {opt.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select
-            value={sourceFilter}
-            onValueChange={(value) =>
-              setParam("source", value, {
-                defaultValue: "all",
-                replace: false,
-                reset: ["approvalRequestsPage"],
-              })
-            }
-          >
-            <SelectTrigger className="w-[150px]">
-              <SelectValue placeholder="Source" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All sources</SelectItem>
-              <SelectItem value="workflow">Workflow</SelectItem>
-              <SelectItem value="agent">Agent</SelectItem>
-              <SelectItem value="manual">Manual</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select
-            value={ageFilter}
-            onValueChange={(value) =>
-              setParam("age", value, {
-                defaultValue: "all",
-                replace: false,
-                reset: ["approvalRequestsPage"],
-              })
-            }
-          >
-            <SelectTrigger className="w-[150px]">
-              <SelectValue placeholder="Age" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All ages</SelectItem>
-              <SelectItem value="24h">Last 24 hours</SelectItem>
-              <SelectItem value="7d">Last 7 days</SelectItem>
-              <SelectItem value="30d">Last 30 days</SelectItem>
-            </SelectContent>
-          </Select>
+          {isMobile ? (
+            <FiltersPopover activeCount={activeFacetCount}>{facets}</FiltersPopover>
+          ) : (
+            facets
+          )}
         </ListFilterBar>
       )}
 
@@ -281,14 +240,11 @@ export default function ApprovalRequestsPage() {
           fullPage
         />
       ) : (
-        <DataGrid
-          rowData={filteredRequests}
-          columnDefs={columnDefs}
-          quickFilterText={search}
-          onRowClicked={onRowClicked}
+        <RequestList
+          key={`${statusFilter}:${sourceFilter}:${ageFilter}:${search}`}
+          rows={rows}
           loading={isLoading}
-          emptyMessage="No approval requests match the current filters"
-          paginationQueryKey="approvalRequests"
+          onOpen={(request) => void navigate(`/approval-requests/${request.id}`)}
         />
       )}
     </div>

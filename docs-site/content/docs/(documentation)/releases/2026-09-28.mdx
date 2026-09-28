@@ -1,0 +1,76 @@
+---
+title: "Release Notes — Week of September 21 to September 28, 2026"
+description: "Browser-first setup, catalog-only extensions that ship scripts and schedules, and per-credential usage plans, across 62 commits and 7 releases (v1.152.1 to v1.156.0)."
+---
+
+This week the swarm gets easier to start, safer to extend, and cheaper to run. A fresh install now reaches a working swarm from the browser, extensions package real automation without arbitrary-code installs, and every credential shows what it costs.
+
+## Highlights
+
+### Set up a swarm from the browser at /setup
+
+A new install no longer starts with an env file. The first-run onboarding flow at `/setup` takes you from an empty deployment to your first task in one guided pass:
+
+- **Live API state checks.** Each step confirms the API is reachable and configured before you move on, so misconfiguration surfaces at setup instead of on the first failed task.
+- **Codex device login.** Sign in with a device code instead of pasting keys into config.
+- **Model dial.** Pick where each agent sits between cost and capability.
+- **Integrations, memory and a first task.** Connect Slack, GitHub, Linear, Jira and other integrations, name your swarm, then send a first message to your agents from the same flow.
+- **Opt-in telemetry.** Telemetry is off unless you turn it on during setup.
+
+For solopreneurs this cuts time-to-first-task to minutes. For CTOs rolling the swarm out to a team, it removes the setup handoff. [#1604](https://github.com/desplega-ai/agent-swarm/pull/1604)
+
+### Extensions ship scripts and schedules, from a trusted catalog
+
+Extensions can now bundle scripts, schedules, skills and workflows alongside their hooks, so one install delivers a complete piece of automation. Installs come only from the predefined catalog, and every manifest (YAML or JSON) is validated against a published JSON Schema before it lands. Agents can also author and own **inert extension drafts** that do nothing until they are installed, so an agent can propose automation without executing it. [#1595](https://github.com/desplega-ai/agent-swarm/pull/1595), [#1567](https://github.com/desplega-ai/agent-swarm/pull/1567)
+
+### See what every credential costs
+
+- **Subscription plan per credential.** Tag each API key or OAuth credential with its plan, and read spend against it on a reworked usage page with daily spend, ranked spend and subscription cards. Usage queries are faster thanks to a new covering index. [#1617](https://github.com/desplega-ai/agent-swarm/pull/1617)
+- **Model-scoped weekly windows in the Claude OAuth pool.** The pool now tracks weekly limits per model. Exhausting one model no longer benches the credential for every other model, so more of your paid capacity stays usable. [#1609](https://github.com/desplega-ai/agent-swarm/pull/1609)
+
+### New models and providers
+
+- **Opus 5.5** is available and is now the Opus default. [#1575](https://github.com/desplega-ai/agent-swarm/pull/1575)
+- **GPT-6 Sol and Luna** join the model registries. [#1580](https://github.com/desplega-ai/agent-swarm/pull/1580)
+- **DeepSeek** is available through the new `dsh` harness provider. [#1570](https://github.com/desplega-ai/agent-swarm/pull/1570)
+
+## Improvements
+
+- **Dynamic human-in-the-loop questions.** Workflow approval nodes now build their questions from upstream output, so reviewers are asked about the actual result instead of static text. [#1611](https://github.com/desplega-ai/agent-swarm/pull/1611)
+- **Accurate, visible task citations.** Citations render on the task page and in Slack outcome cards, and Slack input attachments are no longer counted as sources. [#1607](https://github.com/desplega-ai/agent-swarm/pull/1607), [#1594](https://github.com/desplega-ai/agent-swarm/pull/1594)
+- **Typed configuration controls.** Configuration values are edited with toggles, selects and number inputs instead of raw strings. [#1587](https://github.com/desplega-ai/agent-swarm/pull/1587)
+- **UI audit closed, mobile included.** The new surfaces (sessions, approvals, schedules, usage and setup) work on a phone, and iOS Return now inserts a newline in the session prompt instead of submitting it. [#1623](https://github.com/desplega-ai/agent-swarm/pull/1623), [#1624](https://github.com/desplega-ai/agent-swarm/pull/1624), [#1627](https://github.com/desplega-ai/agent-swarm/pull/1627), [#1628](https://github.com/desplega-ai/agent-swarm/pull/1628)
+- **Richer session view.** Sessions show delegated progress and follow-up output, model labels resolve from the live catalog, and lazy inline images render in task log results. [#1598](https://github.com/desplega-ai/agent-swarm/pull/1598), [#1582](https://github.com/desplega-ai/agent-swarm/pull/1582), [#1564](https://github.com/desplega-ai/agent-swarm/pull/1564)
+- **Hive field Open Graph card.** Shared dashboard links now unfurl with a proper preview card. [#1591](https://github.com/desplega-ai/agent-swarm/pull/1591)
+- **Slack transport groundwork.** Transport selection is in place while socket ingress keeps working unchanged. [#1543](https://github.com/desplega-ai/agent-swarm/pull/1543)
+- **Tighter daily digests.** Scheduled daily digests stay brief and actionable. [#1581](https://github.com/desplega-ai/agent-swarm/pull/1581)
+
+## Bug Fixes
+
+### Slack
+
+- A deferred task now renders as waiting and closes its card in place, and the internal wake-up time is no longer posted to the thread. [#1569](https://github.com/desplega-ai/agent-swarm/pull/1569), [#1615](https://github.com/desplega-ai/agent-swarm/pull/1615)
+- Outcome delivery give-ups are persisted and orphaned streams stop, so an abandoned delivery stays abandoned instead of leaving a stream open. [#1618](https://github.com/desplega-ai/agent-swarm/pull/1618)
+- Buffered steering keeps human attribution, and steering messages name their sender in agent messages and the UI. [#1592](https://github.com/desplega-ai/agent-swarm/pull/1592), [#1590](https://github.com/desplega-ai/agent-swarm/pull/1590)
+- The outcome card's status icon sits on the same line as its text, and the bot's own mention resolves correctly in DM task text. [#1586](https://github.com/desplega-ai/agent-swarm/pull/1586), [#1562](https://github.com/desplega-ai/agent-swarm/pull/1562)
+
+### Scheduling and tasks
+
+- Spent `defer-task` wake-up schedules are reaped after 30 days instead of accumulating. [#1629](https://github.com/desplega-ai/agent-swarm/pull/1629)
+- A settlement that wakes a deferred waiter skips the redundant lead follow-up. [#1620](https://github.com/desplega-ai/agent-swarm/pull/1620)
+
+### Workflows, routing and workers
+
+- Workflow heartbeat recovery no longer touches live graph walks, and interrupted recovery preserves selected ports. [#1584](https://github.com/desplega-ai/agent-swarm/pull/1584), [#1600](https://github.com/desplega-ai/agent-swarm/pull/1600)
+- Capability-only routing affinity now matches on capabilities. [#1602](https://github.com/desplega-ai/agent-swarm/pull/1602)
+- Extension identities are hidden from agent listings and cannot be assigned tasks. [#1583](https://github.com/desplega-ai/agent-swarm/pull/1583)
+- Workers verify the ACP target binary at boot, so a missing binary fails fast instead of mid-task. [#1619](https://github.com/desplega-ai/agent-swarm/pull/1619)
+- Memory preset defaults apply at runtime, and worker Claude settings are hardened. [#1585](https://github.com/desplega-ai/agent-swarm/pull/1585), [#1608](https://github.com/desplega-ai/agent-swarm/pull/1608)
+
+## Migration Notes
+
+There are no breaking API changes this week. These default shifts are worth knowing before you upgrade:
+
+- **Extensions install only from the predefined catalog.** Ad-hoc extension installs are no longer accepted. [#1595](https://github.com/desplega-ai/agent-swarm/pull/1595)
+- **New model defaults.** The Opus default moves to Opus 5.5, and the retired Codex default is replaced (Pi bumped to 0.87.1). Pin a model explicitly if you need the previous behavior. [#1575](https://github.com/desplega-ai/agent-swarm/pull/1575), [#1579](https://github.com/desplega-ai/agent-swarm/pull/1579)
+- **Memory raters default.** When `MEMORY_RATERS` is unset, it now defaults to `implicit-citation,explicit-self`. [#1588](https://github.com/desplega-ai/agent-swarm/pull/1588)

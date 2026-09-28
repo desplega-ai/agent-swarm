@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "1.154.0",
+    "version": "1.157.0",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -3128,7 +3128,8 @@
               "opencode",
               "devin",
               "gemini",
-              "acp"
+              "acp",
+              "dsh"
             ]
           },
           "model": {
@@ -4150,6 +4151,9 @@
               "task_authorization_rejected",
               "task_recovery_authorization",
               "task_released",
+              "task_deferred_wait_woke",
+              "task_follow_up_suppressed",
+              "task_citation_check_refused",
               "channel_message",
               "service_registered",
               "service_unregistered",
@@ -10522,6 +10526,85 @@
         }
       }
     },
+    "/api/agents/{id}/task-activity": {
+      "get": {
+        "summary": "Daily task counts for an agent",
+        "description": "Number of tasks created for the agent per UTC day over the last `days` days (default 365, max 730), oldest first. Days with no tasks are omitted. Backs the activity heatmap on the agent page.",
+        "tags": [
+          "Agents"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 730
+            },
+            "required": false,
+            "name": "days",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Daily task counts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "days": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "date": {
+                            "type": "string"
+                          },
+                          "count": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "date",
+                          "count"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "days"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Agent not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/agents/{id}/profile": {
       "put": {
         "summary": "Update agent profile (role, description, capabilities, etc.)",
@@ -11442,7 +11525,8 @@
                   },
                   "timeoutSeconds": {
                     "type": "integer",
-                    "minimum": 1
+                    "minimum": 1,
+                    "description": "Seconds until the request expires. After that the request becomes 'timeout' and you get a hitl-follow-up task. A request with no timeout is cancelled after APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS days (default 7)."
                   },
                   "notifications": {
                     "type": "array",
@@ -12720,6 +12804,353 @@
         }
       }
     },
+    "/api/approval-requests/{id}/cancel": {
+      "post": {
+        "summary": "Cancel a pending approval request",
+        "tags": [
+          "ApprovalRequests"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "maxLength": 500
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Request cancelled, or already cancelled. A request that gates a running or waiting workflow run cancels that run too.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "approvalRequest": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "questions": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "approval",
+                                  "text",
+                                  "single-select",
+                                  "multi-select",
+                                  "boolean"
+                                ]
+                              },
+                              "label": {
+                                "type": "string"
+                              },
+                              "required": {
+                                "type": "boolean"
+                              },
+                              "description": {
+                                "type": "string"
+                              },
+                              "placeholder": {
+                                "type": "string"
+                              },
+                              "multiline": {
+                                "type": "boolean"
+                              },
+                              "options": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "value": {
+                                      "type": "string"
+                                    },
+                                    "label": {
+                                      "type": "string"
+                                    },
+                                    "description": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "value",
+                                    "label"
+                                  ]
+                                }
+                              },
+                              "minSelections": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "maxSelections": {
+                                "type": "integer",
+                                "minimum": 1
+                              },
+                              "defaultValue": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "type",
+                              "label"
+                            ]
+                          }
+                        },
+                        "workflowRunId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "workflowRunStepId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "sourceTaskId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "approvers": {
+                          "type": "object",
+                          "properties": {
+                            "users": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "roles": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "policy": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "enum": [
+                                    "any"
+                                  ]
+                                },
+                                {
+                                  "type": "string",
+                                  "enum": [
+                                    "all"
+                                  ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "min": {
+                                      "type": "integer",
+                                      "minimum": 1
+                                    }
+                                  },
+                                  "required": [
+                                    "min"
+                                  ]
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "policy"
+                          ]
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "approved",
+                            "rejected",
+                            "timeout",
+                            "cancelled"
+                          ]
+                        },
+                        "responses": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "additionalProperties": {}
+                        },
+                        "resolvedBy": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "resolvedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "resolutionReason": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "timeoutSeconds": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "expiresAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "notificationChannels": {
+                          "type": [
+                            "array",
+                            "null"
+                          ],
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "channel": {
+                                "type": "string",
+                                "enum": [
+                                  "slack",
+                                  "email"
+                                ]
+                              },
+                              "target": {
+                                "type": "string"
+                              },
+                              "messageTs": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "channel",
+                              "target"
+                            ]
+                          }
+                        },
+                        "createdBy": {
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "updatedAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "title",
+                        "questions",
+                        "workflowRunId",
+                        "workflowRunStepId",
+                        "sourceTaskId",
+                        "approvers",
+                        "status",
+                        "responses",
+                        "resolvedBy",
+                        "resolvedAt",
+                        "resolutionReason",
+                        "timeoutSeconds",
+                        "expiresAt",
+                        "notificationChannels",
+                        "createdAt",
+                        "updatedAt"
+                      ]
+                    },
+                    "alreadyCancelled": {
+                      "type": "boolean"
+                    },
+                    "runCancelled": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "approvalRequest",
+                    "alreadyCancelled",
+                    "runCancelled"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller may not cancel this request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Already resolved with approved, rejected, or timeout, or its expiresAt passed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/assets/key-audit": {
       "get": {
         "summary": "Audit asset namespace invariants",
@@ -13664,154 +14095,6 @@
         }
       }
     },
-    "/api/oauth/keep-warm/codex": {
-      "post": {
-        "summary": "Locked keep-warm refresh sweep across all Codex OAuth pool slots",
-        "description": "Enumerates codex_oauth_* slots and refreshes any older than ~7 days through the same locked getValidCodexOAuth path used at task time. Skips slots already benched by codex-auth-expiry-watch.",
-        "tags": [
-          "OAuth"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Per-slot keep-warm outcomes",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "results": {
-                      "type": "array",
-                      "items": {
-                        "oneOf": [
-                          {
-                            "type": "object",
-                            "properties": {
-                              "slot": {
-                                "type": "number"
-                              },
-                              "keySuffix": {
-                                "type": "string"
-                              },
-                              "outcome": {
-                                "type": "string",
-                                "enum": [
-                                  "warm"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "slot",
-                              "keySuffix",
-                              "outcome"
-                            ]
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "slot": {
-                                "type": "number"
-                              },
-                              "keySuffix": {
-                                "type": "string"
-                              },
-                              "outcome": {
-                                "type": "string",
-                                "enum": [
-                                  "refreshed"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "slot",
-                              "keySuffix",
-                              "outcome"
-                            ]
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "slot": {
-                                "type": "number"
-                              },
-                              "keySuffix": {
-                                "type": "string"
-                              },
-                              "outcome": {
-                                "type": "string",
-                                "enum": [
-                                  "skipped-benched"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "slot",
-                              "keySuffix",
-                              "outcome"
-                            ]
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "slot": {
-                                "type": "number"
-                              },
-                              "outcome": {
-                                "type": "string",
-                                "enum": [
-                                  "no-credentials"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "slot",
-                              "outcome"
-                            ]
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "slot": {
-                                "type": "number"
-                              },
-                              "keySuffix": {
-                                "type": "string"
-                              },
-                              "outcome": {
-                                "type": "string",
-                                "enum": [
-                                  "failed"
-                                ]
-                              },
-                              "reason": {
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "slot",
-                              "keySuffix",
-                              "outcome",
-                              "reason"
-                            ]
-                          }
-                        ]
-                      }
-                    }
-                  },
-                  "required": [
-                    "results"
-                  ]
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/config/resolved": {
       "get": {
         "summary": "Get resolved config (merged global + agent + repo scopes)",
@@ -14286,6 +14569,315 @@
         }
       }
     },
+    "/api/codex-oauth/device": {
+      "post": {
+        "summary": "Start a Codex ChatGPT device login",
+        "tags": [
+          "Codex OAuth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Device login started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "flowId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "userCode": {
+                      "type": "string"
+                    },
+                    "verificationUrl": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "intervalSeconds": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "flowId",
+                    "userCode",
+                    "verificationUrl",
+                    "intervalSeconds",
+                    "expiresAt"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Device login is not enabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to store device login state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "OpenAI device login request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/codex-oauth/device/{flowId}/poll": {
+      "post": {
+        "summary": "Poll a Codex ChatGPT device login",
+        "tags": [
+          "Codex OAuth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "flowId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Current device login status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "complete",
+                        "failed",
+                        "expired"
+                      ]
+                    },
+                    "slot": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/oauth/keep-warm/codex": {
+      "post": {
+        "summary": "Locked keep-warm refresh sweep across all Codex OAuth pool slots",
+        "description": "Enumerates codex_oauth_* slots and refreshes any older than ~7 days through the same locked getValidCodexOAuth path used at task time. Skips slots already benched by codex-auth-expiry-watch.",
+        "tags": [
+          "OAuth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Per-slot keep-warm outcomes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "slot": {
+                                "type": "number"
+                              },
+                              "keySuffix": {
+                                "type": "string"
+                              },
+                              "outcome": {
+                                "type": "string",
+                                "enum": [
+                                  "warm"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "slot",
+                              "keySuffix",
+                              "outcome"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "slot": {
+                                "type": "number"
+                              },
+                              "keySuffix": {
+                                "type": "string"
+                              },
+                              "outcome": {
+                                "type": "string",
+                                "enum": [
+                                  "refreshed"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "slot",
+                              "keySuffix",
+                              "outcome"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "slot": {
+                                "type": "number"
+                              },
+                              "keySuffix": {
+                                "type": "string"
+                              },
+                              "outcome": {
+                                "type": "string",
+                                "enum": [
+                                  "skipped-benched"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "slot",
+                              "keySuffix",
+                              "outcome"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "slot": {
+                                "type": "number"
+                              },
+                              "outcome": {
+                                "type": "string",
+                                "enum": [
+                                  "no-credentials"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "slot",
+                              "outcome"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "slot": {
+                                "type": "number"
+                              },
+                              "keySuffix": {
+                                "type": "string"
+                              },
+                              "outcome": {
+                                "type": "string",
+                                "enum": [
+                                  "failed"
+                                ]
+                              },
+                              "reason": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "slot",
+                              "keySuffix",
+                              "outcome",
+                              "reason"
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "results"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/tasks/{id}/context": {
       "post": {
         "summary": "Record a context usage snapshot for a task",
@@ -14650,6 +15242,10 @@
                   },
                   "scopeId": {
                     "type": "string"
+                  },
+                  "plan": {
+                    "type": "string",
+                    "maxLength": 40
                   }
                 },
                 "required": [
@@ -14979,6 +15575,20 @@
             "required": false,
             "name": "scopeId",
             "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "fable",
+                "opus",
+                "sonnet",
+                "haiku"
+              ]
+            },
+            "required": false,
+            "name": "model",
+            "in": "query"
           }
         ],
         "responses": {
@@ -15003,6 +15613,18 @@
                     },
                     "totalKeys": {
                       "type": "integer"
+                    },
+                    "modelBlockedIndices": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer"
+                      }
+                    },
+                    "earliestModelResetAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     }
                   },
                   "required": [
@@ -15181,6 +15803,54 @@
                               ]
                             }
                           },
+                          "plan": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "planSource": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "enum": [
+                              "manual",
+                              "detected",
+                              "estimated",
+                              null
+                            ]
+                          },
+                          "modelLimits": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "model": {
+                                  "type": "string"
+                                },
+                                "window": {
+                                  "type": "string"
+                                },
+                                "resetsAt": {
+                                  "type": "number"
+                                },
+                                "resetsAtIso": {
+                                  "type": "string"
+                                },
+                                "active": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "model",
+                                "window",
+                                "resetsAt",
+                                "resetsAtIso",
+                                "active"
+                              ]
+                            }
+                          },
                           "createdAt": {
                             "type": "string"
                           },
@@ -15204,6 +15874,9 @@
                           "name",
                           "provider",
                           "rateLimitWindows",
+                          "plan",
+                          "planSource",
+                          "modelLimits",
                           "createdAt",
                           "updatedAt"
                         ]
@@ -15527,6 +16200,179 @@
           },
           "401": {
             "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/keys/plans": {
+      "get": {
+        "summary": "List subscription plans and their monthly list prices",
+        "tags": [
+          "API Keys"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Plan catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "checkedAt": {
+                      "type": "string"
+                    },
+                    "plans": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "keyType": {
+                            "type": "string"
+                          },
+                          "monthlyUsd": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "label",
+                          "keyType",
+                          "monthlyUsd"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "checkedAt",
+                    "plans"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/keys/plan": {
+      "patch": {
+        "summary": "Set or clear the subscription plan of a pooled credential",
+        "tags": [
+          "API Keys"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "keyType": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "keySuffix": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 10
+                  },
+                  "plan": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 40
+                  }
+                },
+                "required": [
+                  "keyType",
+                  "keySuffix",
+                  "plan"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Plan updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "keyType": {
+                      "type": "string"
+                    },
+                    "keySuffix": {
+                      "type": "string"
+                    },
+                    "plan": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "keyType",
+                    "keySuffix",
+                    "plan"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown plan, or a plan for another credential type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Key not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -18358,6 +19204,42 @@
                     "mcpBaseUrl",
                     "mcpUserUrl"
                   ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/integrations/slack/manifest": {
+      "get": {
+        "summary": "Build a Slack app manifest for this swarm",
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "name",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Slack app manifest",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {}
                 }
               }
             }
@@ -22928,6 +23810,2230 @@
         }
       }
     },
+    "/status": {
+      "get": {
+        "summary": "Identity + setup readiness + live activity for the swarm dashboard",
+        "description": "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set.",
+        "tags": [
+          "Status"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Status payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "identity": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "logo_url": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "brand_color": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "is_cloud": {
+                          "type": "boolean"
+                        },
+                        "marketing_url": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "hide_cloud_promo": {
+                          "type": "boolean"
+                        },
+                        "org_id": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "name",
+                        "logo_url",
+                        "brand_color",
+                        "is_cloud",
+                        "marketing_url",
+                        "hide_cloud_promo",
+                        "org_id"
+                      ]
+                    },
+                    "setup": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "enum": [
+                              "harness",
+                              "embeddings",
+                              "slack",
+                              "github",
+                              "linear",
+                              "jira",
+                              "gsc",
+                              "agentmail",
+                              "agentfs",
+                              "workers",
+                              "first_task"
+                            ]
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "unverified",
+                              "configured",
+                              "verified"
+                            ]
+                          },
+                          "hint": {
+                            "type": "string"
+                          },
+                          "action_url": {
+                            "type": "string"
+                          },
+                          "provider": {
+                            "type": "string",
+                            "enum": [
+                              "claude",
+                              "codex",
+                              "pi",
+                              "devin",
+                              "claude-managed",
+                              "opencode",
+                              "acp",
+                              "dsh"
+                            ]
+                          },
+                          "providers": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "provider": {
+                                  "type": "string",
+                                  "enum": [
+                                    "claude",
+                                    "codex",
+                                    "pi",
+                                    "devin",
+                                    "claude-managed",
+                                    "opencode",
+                                    "acp",
+                                    "dsh"
+                                  ]
+                                },
+                                "state": {
+                                  "type": "string",
+                                  "enum": [
+                                    "unverified",
+                                    "configured",
+                                    "verified"
+                                  ]
+                                },
+                                "workers": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "provider",
+                                "state",
+                                "workers"
+                              ]
+                            }
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "label",
+                          "state"
+                        ]
+                      }
+                    },
+                    "activity": {
+                      "type": "object",
+                      "properties": {
+                        "agents_online": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "leads_online": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "recent_tasks_count": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "agents_online",
+                        "leads_online",
+                        "recent_tasks_count"
+                      ]
+                    },
+                    "agent_fs": {
+                      "type": "object",
+                      "properties": {
+                        "configured": {
+                          "type": "boolean"
+                        },
+                        "base_url": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "provider_id": {
+                          "type": "string"
+                        },
+                        "capabilities": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "configured",
+                        "base_url",
+                        "provider_id",
+                        "capabilities"
+                      ]
+                    },
+                    "automations": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "schedule",
+                              "workflow"
+                            ]
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "running",
+                              "needs_setup"
+                            ]
+                          },
+                          "missing": {
+                            "type": "object",
+                            "properties": {
+                              "params": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "integrations": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "enum": [
+                                    "slack",
+                                    "github",
+                                    "linear",
+                                    "jira",
+                                    "gsc",
+                                    "agentmail",
+                                    "agentfs"
+                                  ]
+                                }
+                              }
+                            },
+                            "required": [
+                              "params",
+                              "integrations"
+                            ]
+                          },
+                          "fixes": {
+                            "type": "array",
+                            "items": {
+                              "oneOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "enum": [
+                                        "param"
+                                      ]
+                                    },
+                                    "key": {
+                                      "type": "string"
+                                    },
+                                    "url": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "type",
+                                    "key",
+                                    "url"
+                                  ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "enum": [
+                                        "integration"
+                                      ]
+                                    },
+                                    "key": {
+                                      "type": "string",
+                                      "enum": [
+                                        "slack",
+                                        "github",
+                                        "linear",
+                                        "jira",
+                                        "gsc",
+                                        "agentmail",
+                                        "agentfs"
+                                      ]
+                                    },
+                                    "url": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "type",
+                                    "key",
+                                    "url"
+                                  ]
+                                }
+                              ]
+                            }
+                          },
+                          "fixUrl": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "kind",
+                          "state",
+                          "missing",
+                          "fixes",
+                          "fixUrl"
+                        ]
+                      }
+                    },
+                    "health": {
+                      "type": "string",
+                      "enum": [
+                        "ok",
+                        "degraded",
+                        "broken"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "identity",
+                    "setup",
+                    "activity",
+                    "agent_fs",
+                    "automations",
+                    "health"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/status/test-connection": {
+      "post": {
+        "summary": "Read worker-reported harness credential status",
+        "description": "Reads worker-reported credential checks from agent rows. This route makes no upstream request and returns a reported live-test result when one exists.",
+        "tags": [
+          "Status"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "claude",
+                      "codex",
+                      "pi",
+                      "devin",
+                      "claude-managed",
+                      "opencode",
+                      "acp",
+                      "dsh"
+                    ]
+                  }
+                },
+                "required": [
+                  "provider"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Live-test result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "latency_ms": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "latency_ms"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/onboarding": {
+      "get": {
+        "summary": "Get first-run onboarding state and live setup signals",
+        "tags": [
+          "Onboarding"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Onboarding state and signals",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "number",
+                          "enum": [
+                            1
+                          ]
+                        },
+                        "startedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "currentStep": {
+                          "type": "string",
+                          "enum": [
+                            "connect",
+                            "name",
+                            "ai",
+                            "agents",
+                            "memory",
+                            "integrations",
+                            "first_task"
+                          ]
+                        },
+                        "minimizedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "format": "date-time"
+                        },
+                        "dismissedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "format": "date-time"
+                        },
+                        "completedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "format": "date-time"
+                        },
+                        "autoCompleted": {
+                          "type": "boolean"
+                        },
+                        "firstTaskId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "steps": {
+                          "type": "object",
+                          "properties": {
+                            "connect": {
+                              "type": "object",
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "todo",
+                                    "done",
+                                    "skipped",
+                                    "failed"
+                                  ]
+                                },
+                                "at": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "format": "date-time"
+                                },
+                                "method": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "enum": [
+                                    "api_key",
+                                    null
+                                  ]
+                                },
+                                "errorClass": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "enum": [
+                                    "auth",
+                                    "network",
+                                    "timeout",
+                                    "dimension",
+                                    "model",
+                                    "not_enabled",
+                                    "expired",
+                                    "unknown",
+                                    null
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "status",
+                                "at",
+                                "method",
+                                "errorClass"
+                              ]
+                            },
+                            "name": {
+                              "type": "object",
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "todo",
+                                    "done",
+                                    "skipped",
+                                    "failed"
+                                  ]
+                                },
+                                "at": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "format": "date-time"
+                                },
+                                "method": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "enum": [
+                                    "custom_name",
+                                    "default_name",
+                                    null
+                                  ]
+                                },
+                                "errorClass": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "enum": [
+                                    "auth",
+                                    "network",
+                                    "timeout",
+                                    "dimension",
+                                    "model",
+                                    "not_enabled",
+                                    "expired",
+                                    "unknown",
+                                    null
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "status",
+                                "at",
+                                "method",
+                                "errorClass"
+                              ]
+                            },
+                            "ai": {
+                              "type": "object",
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "todo",
+                                    "done",
+                                    "skipped",
+                                    "failed"
+                                  ]
+                                },
+                                "at": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "format": "date-time"
+                                },
+                                "method": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "enum": [
+                                    "claude_setup_token",
+                                    "claude_api_key",
+                                    "codex_device",
+                                    "codex_cli",
+                                    "openrouter",
+                                    "openai_gateway",
+                                    "deepseek",
+                                    "devin",
+                                    null
+                                  ]
+                                },
+                                "errorClass": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "enum": [
+                                    "auth",
+                                    "network",
+                                    "timeout",
+                                    "dimension",
+                                    "model",
+                                    "not_enabled",
+                                    "expired",
+                                    "unknown",
+                                    null
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "status",
+                                "at",
+                                "method",
+                                "errorClass"
+                              ]
+                            },
+                            "agents": {
+                              "type": "object",
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "todo",
+                                    "done",
+                                    "skipped",
+                                    "failed"
+                                  ]
+                                },
+                                "at": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "format": "date-time"
+                                },
+                                "method": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "enum": [
+                                    "cheap",
+                                    "optimal",
+                                    "max",
+                                    "mixed",
+                                    null
+                                  ]
+                                },
+                                "errorClass": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "enum": [
+                                    "auth",
+                                    "network",
+                                    "timeout",
+                                    "dimension",
+                                    "model",
+                                    "not_enabled",
+                                    "expired",
+                                    "unknown",
+                                    null
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "status",
+                                "at",
+                                "method",
+                                "errorClass"
+                              ]
+                            },
+                            "memory": {
+                              "type": "object",
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "todo",
+                                    "done",
+                                    "skipped",
+                                    "failed"
+                                  ]
+                                },
+                                "at": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "format": "date-time"
+                                },
+                                "method": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "enum": [
+                                    "openai",
+                                    "openrouter",
+                                    "vercel",
+                                    "custom",
+                                    "existing",
+                                    null
+                                  ]
+                                },
+                                "errorClass": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "enum": [
+                                    "auth",
+                                    "network",
+                                    "timeout",
+                                    "dimension",
+                                    "model",
+                                    "not_enabled",
+                                    "expired",
+                                    "unknown",
+                                    null
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "status",
+                                "at",
+                                "method",
+                                "errorClass"
+                              ]
+                            },
+                            "integrations": {
+                              "type": "object",
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "todo",
+                                    "done",
+                                    "skipped",
+                                    "failed"
+                                  ]
+                                },
+                                "at": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "format": "date-time"
+                                },
+                                "method": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "enum": [
+                                    "slack",
+                                    "github",
+                                    "gitlab",
+                                    "linear_oauth",
+                                    "jira_oauth",
+                                    null
+                                  ]
+                                },
+                                "errorClass": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "enum": [
+                                    "auth",
+                                    "network",
+                                    "timeout",
+                                    "dimension",
+                                    "model",
+                                    "not_enabled",
+                                    "expired",
+                                    "unknown",
+                                    null
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "status",
+                                "at",
+                                "method",
+                                "errorClass"
+                              ]
+                            },
+                            "first_task": {
+                              "type": "object",
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "todo",
+                                    "done",
+                                    "skipped",
+                                    "failed"
+                                  ]
+                                },
+                                "at": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "format": "date-time"
+                                },
+                                "method": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "enum": [
+                                    "suggestion",
+                                    "free_form",
+                                    null
+                                  ]
+                                },
+                                "errorClass": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "enum": [
+                                    "auth",
+                                    "network",
+                                    "timeout",
+                                    "dimension",
+                                    "model",
+                                    "not_enabled",
+                                    "expired",
+                                    "unknown",
+                                    null
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "status",
+                                "at",
+                                "method",
+                                "errorClass"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "connect",
+                            "name",
+                            "ai",
+                            "agents",
+                            "memory",
+                            "integrations",
+                            "first_task"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "version",
+                        "startedAt",
+                        "currentStep",
+                        "minimizedAt",
+                        "dismissedAt",
+                        "completedAt",
+                        "autoCompleted",
+                        "firstTaskId",
+                        "steps"
+                      ]
+                    },
+                    "signals": {
+                      "type": "object",
+                      "properties": {
+                        "providers": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "provider": {
+                                "type": "string",
+                                "enum": [
+                                  "claude",
+                                  "codex",
+                                  "pi",
+                                  "devin",
+                                  "claude-managed",
+                                  "opencode",
+                                  "acp",
+                                  "dsh"
+                                ]
+                              },
+                              "state": {
+                                "type": "string",
+                                "enum": [
+                                  "unverified",
+                                  "configured",
+                                  "verified"
+                                ]
+                              },
+                              "workers": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "verifiedWorkers": {
+                                "type": "integer",
+                                "minimum": 0
+                              }
+                            },
+                            "required": [
+                              "provider",
+                              "state",
+                              "workers",
+                              "verifiedWorkers"
+                            ]
+                          }
+                        },
+                        "embeddings": {
+                          "type": "object",
+                          "properties": {
+                            "configured": {
+                              "type": "boolean"
+                            },
+                            "dimensions": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0
+                            }
+                          },
+                          "required": [
+                            "configured",
+                            "dimensions"
+                          ]
+                        },
+                        "integrations": {
+                          "type": "object",
+                          "properties": {
+                            "slack": {
+                              "type": "boolean"
+                            },
+                            "github": {
+                              "type": "boolean"
+                            },
+                            "gitlab": {
+                              "type": "boolean"
+                            },
+                            "linear": {
+                              "type": "boolean"
+                            },
+                            "jira": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "slack",
+                            "github",
+                            "gitlab",
+                            "linear",
+                            "jira"
+                          ]
+                        },
+                        "agents": {
+                          "type": "object",
+                          "properties": {
+                            "leadsOnline": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "workersOnline": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
+                          "required": [
+                            "leadsOnline",
+                            "workersOnline"
+                          ]
+                        },
+                        "firstTask": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "status": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "status"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "providers",
+                        "embeddings",
+                        "integrations",
+                        "agents",
+                        "firstTask"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "state",
+                    "signals"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Apply a first-run onboarding state transition",
+        "tags": [
+          "Onboarding"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "enum": [
+                          "view"
+                        ]
+                      },
+                      "step": {
+                        "type": "string",
+                        "enum": [
+                          "connect",
+                          "name",
+                          "ai",
+                          "agents",
+                          "memory",
+                          "integrations",
+                          "first_task"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "action",
+                      "step"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "enum": [
+                          "complete"
+                        ]
+                      },
+                      "step": {
+                        "type": "string",
+                        "enum": [
+                          "connect"
+                        ]
+                      },
+                      "method": {
+                        "type": "string",
+                        "enum": [
+                          "api_key"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "action",
+                      "step",
+                      "method"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "enum": [
+                          "complete"
+                        ]
+                      },
+                      "step": {
+                        "type": "string",
+                        "enum": [
+                          "name"
+                        ]
+                      },
+                      "method": {
+                        "type": "string",
+                        "enum": [
+                          "custom_name",
+                          "default_name"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "action",
+                      "step",
+                      "method"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "enum": [
+                          "complete"
+                        ]
+                      },
+                      "step": {
+                        "type": "string",
+                        "enum": [
+                          "ai"
+                        ]
+                      },
+                      "method": {
+                        "type": "string",
+                        "enum": [
+                          "claude_setup_token",
+                          "claude_api_key",
+                          "codex_device",
+                          "codex_cli",
+                          "openrouter",
+                          "openai_gateway",
+                          "deepseek",
+                          "devin"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "action",
+                      "step",
+                      "method"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "enum": [
+                          "complete"
+                        ]
+                      },
+                      "step": {
+                        "type": "string",
+                        "enum": [
+                          "agents"
+                        ]
+                      },
+                      "method": {
+                        "type": "string",
+                        "enum": [
+                          "cheap",
+                          "optimal",
+                          "max",
+                          "mixed"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "action",
+                      "step",
+                      "method"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "enum": [
+                          "complete"
+                        ]
+                      },
+                      "step": {
+                        "type": "string",
+                        "enum": [
+                          "integrations"
+                        ]
+                      },
+                      "method": {
+                        "type": "string",
+                        "enum": [
+                          "slack",
+                          "github",
+                          "gitlab",
+                          "linear_oauth",
+                          "jira_oauth"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "action",
+                      "step",
+                      "method"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "enum": [
+                          "skip"
+                        ]
+                      },
+                      "step": {
+                        "type": "string",
+                        "enum": [
+                          "name",
+                          "ai",
+                          "agents",
+                          "memory",
+                          "integrations",
+                          "first_task"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "action",
+                      "step"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "enum": [
+                          "fail"
+                        ]
+                      },
+                      "step": {
+                        "type": "string",
+                        "enum": [
+                          "connect",
+                          "name",
+                          "ai",
+                          "agents",
+                          "memory",
+                          "integrations",
+                          "first_task"
+                        ]
+                      },
+                      "errorClass": {
+                        "type": "string",
+                        "enum": [
+                          "auth",
+                          "network",
+                          "timeout",
+                          "dimension",
+                          "model",
+                          "not_enabled",
+                          "expired",
+                          "unknown"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "action",
+                      "step",
+                      "errorClass"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "enum": [
+                          "first_task"
+                        ]
+                      },
+                      "taskId": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "method": {
+                        "type": "string",
+                        "enum": [
+                          "suggestion",
+                          "free_form"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "action",
+                      "taskId",
+                      "method"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "enum": [
+                          "minimize"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "action"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "enum": [
+                          "resume"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "action"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "enum": [
+                          "dismiss"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "action"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated onboarding state and signals",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "number",
+                          "enum": [
+                            1
+                          ]
+                        },
+                        "startedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "currentStep": {
+                          "type": "string",
+                          "enum": [
+                            "connect",
+                            "name",
+                            "ai",
+                            "agents",
+                            "memory",
+                            "integrations",
+                            "first_task"
+                          ]
+                        },
+                        "minimizedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "format": "date-time"
+                        },
+                        "dismissedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "format": "date-time"
+                        },
+                        "completedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "format": "date-time"
+                        },
+                        "autoCompleted": {
+                          "type": "boolean"
+                        },
+                        "firstTaskId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "steps": {
+                          "type": "object",
+                          "properties": {
+                            "connect": {
+                              "type": "object",
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "todo",
+                                    "done",
+                                    "skipped",
+                                    "failed"
+                                  ]
+                                },
+                                "at": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "format": "date-time"
+                                },
+                                "method": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "enum": [
+                                    "api_key",
+                                    null
+                                  ]
+                                },
+                                "errorClass": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "enum": [
+                                    "auth",
+                                    "network",
+                                    "timeout",
+                                    "dimension",
+                                    "model",
+                                    "not_enabled",
+                                    "expired",
+                                    "unknown",
+                                    null
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "status",
+                                "at",
+                                "method",
+                                "errorClass"
+                              ]
+                            },
+                            "name": {
+                              "type": "object",
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "todo",
+                                    "done",
+                                    "skipped",
+                                    "failed"
+                                  ]
+                                },
+                                "at": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "format": "date-time"
+                                },
+                                "method": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "enum": [
+                                    "custom_name",
+                                    "default_name",
+                                    null
+                                  ]
+                                },
+                                "errorClass": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "enum": [
+                                    "auth",
+                                    "network",
+                                    "timeout",
+                                    "dimension",
+                                    "model",
+                                    "not_enabled",
+                                    "expired",
+                                    "unknown",
+                                    null
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "status",
+                                "at",
+                                "method",
+                                "errorClass"
+                              ]
+                            },
+                            "ai": {
+                              "type": "object",
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "todo",
+                                    "done",
+                                    "skipped",
+                                    "failed"
+                                  ]
+                                },
+                                "at": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "format": "date-time"
+                                },
+                                "method": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "enum": [
+                                    "claude_setup_token",
+                                    "claude_api_key",
+                                    "codex_device",
+                                    "codex_cli",
+                                    "openrouter",
+                                    "openai_gateway",
+                                    "deepseek",
+                                    "devin",
+                                    null
+                                  ]
+                                },
+                                "errorClass": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "enum": [
+                                    "auth",
+                                    "network",
+                                    "timeout",
+                                    "dimension",
+                                    "model",
+                                    "not_enabled",
+                                    "expired",
+                                    "unknown",
+                                    null
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "status",
+                                "at",
+                                "method",
+                                "errorClass"
+                              ]
+                            },
+                            "agents": {
+                              "type": "object",
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "todo",
+                                    "done",
+                                    "skipped",
+                                    "failed"
+                                  ]
+                                },
+                                "at": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "format": "date-time"
+                                },
+                                "method": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "enum": [
+                                    "cheap",
+                                    "optimal",
+                                    "max",
+                                    "mixed",
+                                    null
+                                  ]
+                                },
+                                "errorClass": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "enum": [
+                                    "auth",
+                                    "network",
+                                    "timeout",
+                                    "dimension",
+                                    "model",
+                                    "not_enabled",
+                                    "expired",
+                                    "unknown",
+                                    null
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "status",
+                                "at",
+                                "method",
+                                "errorClass"
+                              ]
+                            },
+                            "memory": {
+                              "type": "object",
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "todo",
+                                    "done",
+                                    "skipped",
+                                    "failed"
+                                  ]
+                                },
+                                "at": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "format": "date-time"
+                                },
+                                "method": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "enum": [
+                                    "openai",
+                                    "openrouter",
+                                    "vercel",
+                                    "custom",
+                                    "existing",
+                                    null
+                                  ]
+                                },
+                                "errorClass": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "enum": [
+                                    "auth",
+                                    "network",
+                                    "timeout",
+                                    "dimension",
+                                    "model",
+                                    "not_enabled",
+                                    "expired",
+                                    "unknown",
+                                    null
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "status",
+                                "at",
+                                "method",
+                                "errorClass"
+                              ]
+                            },
+                            "integrations": {
+                              "type": "object",
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "todo",
+                                    "done",
+                                    "skipped",
+                                    "failed"
+                                  ]
+                                },
+                                "at": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "format": "date-time"
+                                },
+                                "method": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "enum": [
+                                    "slack",
+                                    "github",
+                                    "gitlab",
+                                    "linear_oauth",
+                                    "jira_oauth",
+                                    null
+                                  ]
+                                },
+                                "errorClass": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "enum": [
+                                    "auth",
+                                    "network",
+                                    "timeout",
+                                    "dimension",
+                                    "model",
+                                    "not_enabled",
+                                    "expired",
+                                    "unknown",
+                                    null
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "status",
+                                "at",
+                                "method",
+                                "errorClass"
+                              ]
+                            },
+                            "first_task": {
+                              "type": "object",
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "todo",
+                                    "done",
+                                    "skipped",
+                                    "failed"
+                                  ]
+                                },
+                                "at": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "format": "date-time"
+                                },
+                                "method": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "enum": [
+                                    "suggestion",
+                                    "free_form",
+                                    null
+                                  ]
+                                },
+                                "errorClass": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "enum": [
+                                    "auth",
+                                    "network",
+                                    "timeout",
+                                    "dimension",
+                                    "model",
+                                    "not_enabled",
+                                    "expired",
+                                    "unknown",
+                                    null
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "status",
+                                "at",
+                                "method",
+                                "errorClass"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "connect",
+                            "name",
+                            "ai",
+                            "agents",
+                            "memory",
+                            "integrations",
+                            "first_task"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "version",
+                        "startedAt",
+                        "currentStep",
+                        "minimizedAt",
+                        "dismissedAt",
+                        "completedAt",
+                        "autoCompleted",
+                        "firstTaskId",
+                        "steps"
+                      ]
+                    },
+                    "signals": {
+                      "type": "object",
+                      "properties": {
+                        "providers": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "provider": {
+                                "type": "string",
+                                "enum": [
+                                  "claude",
+                                  "codex",
+                                  "pi",
+                                  "devin",
+                                  "claude-managed",
+                                  "opencode",
+                                  "acp",
+                                  "dsh"
+                                ]
+                              },
+                              "state": {
+                                "type": "string",
+                                "enum": [
+                                  "unverified",
+                                  "configured",
+                                  "verified"
+                                ]
+                              },
+                              "workers": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "verifiedWorkers": {
+                                "type": "integer",
+                                "minimum": 0
+                              }
+                            },
+                            "required": [
+                              "provider",
+                              "state",
+                              "workers",
+                              "verifiedWorkers"
+                            ]
+                          }
+                        },
+                        "embeddings": {
+                          "type": "object",
+                          "properties": {
+                            "configured": {
+                              "type": "boolean"
+                            },
+                            "dimensions": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0
+                            }
+                          },
+                          "required": [
+                            "configured",
+                            "dimensions"
+                          ]
+                        },
+                        "integrations": {
+                          "type": "object",
+                          "properties": {
+                            "slack": {
+                              "type": "boolean"
+                            },
+                            "github": {
+                              "type": "boolean"
+                            },
+                            "gitlab": {
+                              "type": "boolean"
+                            },
+                            "linear": {
+                              "type": "boolean"
+                            },
+                            "jira": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "slack",
+                            "github",
+                            "gitlab",
+                            "linear",
+                            "jira"
+                          ]
+                        },
+                        "agents": {
+                          "type": "object",
+                          "properties": {
+                            "leadsOnline": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "workersOnline": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
+                          "required": [
+                            "leadsOnline",
+                            "workersOnline"
+                          ]
+                        },
+                        "firstTask": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "status": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "status"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "providers",
+                        "embeddings",
+                        "integrations",
+                        "agents",
+                        "firstTask"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "state",
+                    "signals"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid transition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "First task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/onboarding/memory": {
+      "post": {
+        "summary": "Test and save an embeddings configuration for onboarding",
+        "tags": [
+          "Onboarding"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "preset": {
+                    "type": "string",
+                    "enum": [
+                      "openai",
+                      "openrouter",
+                      "vercel",
+                      "custom",
+                      "existing"
+                    ]
+                  },
+                  "baseUrl": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "model": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "apiKey": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "reuseKey": {
+                    "type": "string",
+                    "enum": [
+                      "OPENAI_API_KEY",
+                      "OPENROUTER_API_KEY"
+                    ]
+                  }
+                },
+                "required": [
+                  "preset"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Embedding probe result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "dimensions": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0
+                    },
+                    "latencyMs": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "errorClass": {
+                      "type": "string",
+                      "enum": [
+                        "auth",
+                        "network",
+                        "timeout",
+                        "dimension",
+                        "model",
+                        "not_enabled",
+                        "expired",
+                        "unknown"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "latencyMs"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid memory configuration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/@swarm/api/{path}": {
       "get": {
         "summary": "Cookie-gated proxy to the swarm API (used by db-backed page iframes)",
@@ -25360,7 +28466,8 @@
                 "opencode",
                 "devin",
                 "gemini",
-                "acp"
+                "acp",
+                "dsh"
               ]
             },
             "required": true,
@@ -25441,7 +28548,8 @@
                 "opencode",
                 "devin",
                 "gemini",
-                "acp"
+                "acp",
+                "dsh"
               ]
             },
             "required": true,
@@ -25555,7 +28663,8 @@
                 "opencode",
                 "devin",
                 "gemini",
-                "acp"
+                "acp",
+                "dsh"
               ]
             },
             "required": true,
@@ -25637,7 +28746,8 @@
                 "opencode",
                 "devin",
                 "gemini",
-                "acp"
+                "acp",
+                "dsh"
               ]
             },
             "required": true,
@@ -35441,7 +38551,8 @@
                       "opencode",
                       "devin",
                       "gemini",
-                      "acp"
+                      "acp",
+                      "dsh"
                     ]
                   },
                   "createdAt": {
@@ -35679,6 +38790,9 @@
                         },
                         "excludedTaskCount": {
                           "type": "integer"
+                        },
+                        "subscriptionCostUsd": {
+                          "type": "number"
                         }
                       },
                       "required": [
@@ -35693,7 +38807,8 @@
                         "attributedCostUsd",
                         "attributableCostUsd",
                         "excludedCostUsd",
-                        "excludedTaskCount"
+                        "excludedTaskCount",
+                        "subscriptionCostUsd"
                       ]
                     },
                     "daily": {
@@ -35715,6 +38830,9 @@
                           },
                           "sessions": {
                             "type": "integer"
+                          },
+                          "subscriptionCostUsd": {
+                            "type": "number"
                           }
                         },
                         "required": [
@@ -35722,7 +38840,8 @@
                           "costUsd",
                           "inputTokens",
                           "outputTokens",
-                          "sessions"
+                          "sessions",
+                          "subscriptionCostUsd"
                         ]
                       }
                     },
@@ -35796,13 +38915,93 @@
                           "durationMs"
                         ]
                       }
+                    },
+                    "byCredential": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "keyType": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "keySuffix": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "name": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "subscription": {
+                            "type": "boolean"
+                          },
+                          "plan": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "planSource": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "enum": [
+                              "manual",
+                              "detected",
+                              "estimated",
+                              null
+                            ]
+                          },
+                          "costUsd": {
+                            "type": "number"
+                          },
+                          "inputTokens": {
+                            "type": "integer"
+                          },
+                          "outputTokens": {
+                            "type": "integer"
+                          },
+                          "sessions": {
+                            "type": "integer"
+                          },
+                          "firstSessionAt": {
+                            "type": "string"
+                          },
+                          "lastSessionAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "keyType",
+                          "keySuffix",
+                          "name",
+                          "subscription",
+                          "plan",
+                          "planSource",
+                          "costUsd",
+                          "inputTokens",
+                          "outputTokens",
+                          "sessions",
+                          "firstSessionAt",
+                          "lastSessionAt"
+                        ]
+                      }
                     }
                   },
                   "required": [
                     "totals",
                     "daily",
                     "byAgent",
-                    "byUser"
+                    "byUser",
+                    "byCredential"
                   ]
                 }
               }
@@ -36478,6 +39677,9 @@
                                       "null"
                                     ]
                                   },
+                                  "general": {
+                                    "type": "boolean"
+                                  },
                                   "resolvedUrl": {
                                     "type": [
                                       "string",
@@ -36571,6 +39773,9 @@
                                         "string",
                                         "null"
                                       ]
+                                    },
+                                    "general": {
+                                      "type": "boolean"
                                     },
                                     "resolvedUrl": {
                                       "type": [
@@ -41021,472 +44226,6 @@
         }
       }
     },
-    "/status": {
-      "get": {
-        "summary": "Identity + setup readiness + live activity for the swarm dashboard",
-        "description": "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set.",
-        "tags": [
-          "Status"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Status payload",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "identity": {
-                      "type": "object",
-                      "properties": {
-                        "name": {
-                          "type": "string"
-                        },
-                        "logo_url": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
-                        },
-                        "brand_color": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
-                        },
-                        "is_cloud": {
-                          "type": "boolean"
-                        },
-                        "marketing_url": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
-                        },
-                        "hide_cloud_promo": {
-                          "type": "boolean"
-                        },
-                        "org_id": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
-                        }
-                      },
-                      "required": [
-                        "name",
-                        "logo_url",
-                        "brand_color",
-                        "is_cloud",
-                        "marketing_url",
-                        "hide_cloud_promo",
-                        "org_id"
-                      ]
-                    },
-                    "setup": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "string",
-                            "enum": [
-                              "harness",
-                              "embeddings",
-                              "slack",
-                              "github",
-                              "linear",
-                              "jira",
-                              "gsc",
-                              "agentmail",
-                              "agentfs",
-                              "workers",
-                              "first_task"
-                            ]
-                          },
-                          "label": {
-                            "type": "string"
-                          },
-                          "state": {
-                            "type": "string",
-                            "enum": [
-                              "unverified",
-                              "configured",
-                              "verified"
-                            ]
-                          },
-                          "hint": {
-                            "type": "string"
-                          },
-                          "action_url": {
-                            "type": "string"
-                          },
-                          "provider": {
-                            "type": "string",
-                            "enum": [
-                              "claude",
-                              "codex",
-                              "pi",
-                              "devin",
-                              "claude-managed",
-                              "opencode",
-                              "acp",
-                              "dsh"
-                            ]
-                          },
-                          "providers": {
-                            "type": "array",
-                            "items": {
-                              "type": "object",
-                              "properties": {
-                                "provider": {
-                                  "type": "string",
-                                  "enum": [
-                                    "claude",
-                                    "codex",
-                                    "pi",
-                                    "devin",
-                                    "claude-managed",
-                                    "opencode",
-                                    "acp",
-                                    "dsh"
-                                  ]
-                                },
-                                "state": {
-                                  "type": "string",
-                                  "enum": [
-                                    "unverified",
-                                    "configured",
-                                    "verified"
-                                  ]
-                                },
-                                "workers": {
-                                  "type": "integer",
-                                  "minimum": 0
-                                }
-                              },
-                              "required": [
-                                "provider",
-                                "state",
-                                "workers"
-                              ]
-                            }
-                          }
-                        },
-                        "required": [
-                          "id",
-                          "label",
-                          "state"
-                        ]
-                      }
-                    },
-                    "activity": {
-                      "type": "object",
-                      "properties": {
-                        "agents_online": {
-                          "type": "integer",
-                          "minimum": 0
-                        },
-                        "leads_online": {
-                          "type": "integer",
-                          "minimum": 0
-                        },
-                        "recent_tasks_count": {
-                          "type": "integer",
-                          "minimum": 0
-                        }
-                      },
-                      "required": [
-                        "agents_online",
-                        "leads_online",
-                        "recent_tasks_count"
-                      ]
-                    },
-                    "agent_fs": {
-                      "type": "object",
-                      "properties": {
-                        "configured": {
-                          "type": "boolean"
-                        },
-                        "base_url": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
-                        },
-                        "provider_id": {
-                          "type": "string"
-                        },
-                        "capabilities": {
-                          "type": "object",
-                          "additionalProperties": {}
-                        }
-                      },
-                      "required": [
-                        "configured",
-                        "base_url",
-                        "provider_id",
-                        "capabilities"
-                      ]
-                    },
-                    "automations": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "string"
-                          },
-                          "name": {
-                            "type": "string"
-                          },
-                          "kind": {
-                            "type": "string",
-                            "enum": [
-                              "schedule",
-                              "workflow"
-                            ]
-                          },
-                          "state": {
-                            "type": "string",
-                            "enum": [
-                              "running",
-                              "needs_setup"
-                            ]
-                          },
-                          "missing": {
-                            "type": "object",
-                            "properties": {
-                              "params": {
-                                "type": "array",
-                                "items": {
-                                  "type": "string"
-                                }
-                              },
-                              "integrations": {
-                                "type": "array",
-                                "items": {
-                                  "type": "string",
-                                  "enum": [
-                                    "slack",
-                                    "github",
-                                    "linear",
-                                    "jira",
-                                    "gsc",
-                                    "agentmail",
-                                    "agentfs"
-                                  ]
-                                }
-                              }
-                            },
-                            "required": [
-                              "params",
-                              "integrations"
-                            ]
-                          },
-                          "fixes": {
-                            "type": "array",
-                            "items": {
-                              "oneOf": [
-                                {
-                                  "type": "object",
-                                  "properties": {
-                                    "type": {
-                                      "type": "string",
-                                      "enum": [
-                                        "param"
-                                      ]
-                                    },
-                                    "key": {
-                                      "type": "string"
-                                    },
-                                    "url": {
-                                      "type": "string"
-                                    }
-                                  },
-                                  "required": [
-                                    "type",
-                                    "key",
-                                    "url"
-                                  ]
-                                },
-                                {
-                                  "type": "object",
-                                  "properties": {
-                                    "type": {
-                                      "type": "string",
-                                      "enum": [
-                                        "integration"
-                                      ]
-                                    },
-                                    "key": {
-                                      "type": "string",
-                                      "enum": [
-                                        "slack",
-                                        "github",
-                                        "linear",
-                                        "jira",
-                                        "gsc",
-                                        "agentmail",
-                                        "agentfs"
-                                      ]
-                                    },
-                                    "url": {
-                                      "type": "string"
-                                    }
-                                  },
-                                  "required": [
-                                    "type",
-                                    "key",
-                                    "url"
-                                  ]
-                                }
-                              ]
-                            }
-                          },
-                          "fixUrl": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "id",
-                          "name",
-                          "kind",
-                          "state",
-                          "missing",
-                          "fixes",
-                          "fixUrl"
-                        ]
-                      }
-                    },
-                    "health": {
-                      "type": "string",
-                      "enum": [
-                        "ok",
-                        "degraded",
-                        "broken"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "identity",
-                    "setup",
-                    "activity",
-                    "agent_fs",
-                    "automations",
-                    "health"
-                  ]
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/status/test-connection": {
-      "post": {
-        "summary": "Live-test the harness provider's credentials",
-        "description": "Issues a real upstream call (Anthropic /v1/models, OpenAI /v1/models, etc.) for the given provider. Updates an in-memory cache so the next GET /status reports `harness.state = 'verified'` for SWARM_VERIFY_TTL_MS (default 1h).",
-        "tags": [
-          "Status"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "provider": {
-                    "type": "string",
-                    "enum": [
-                      "claude",
-                      "codex",
-                      "pi",
-                      "devin",
-                      "claude-managed",
-                      "opencode",
-                      "acp",
-                      "dsh"
-                    ]
-                  }
-                },
-                "required": [
-                  "provider"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Live-test result",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
-                    },
-                    "error": {
-                      "type": "string"
-                    },
-                    "latency_ms": {
-                      "type": "integer",
-                      "minimum": 0
-                    }
-                  },
-                  "required": [
-                    "ok",
-                    "latency_ms"
-                  ]
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/tasks": {
       "get": {
         "summary": "List tasks with filters",
@@ -42942,6 +45681,9 @@
                                   "null"
                                 ]
                               },
+                              "general": {
+                                "type": "boolean"
+                              },
                               "resolvedUrl": {
                                 "type": [
                                   "string",
@@ -43832,6 +46574,16 @@
         "tags": [
           "Trackers"
         ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "redirect",
+            "in": "query"
+          }
+        ],
         "responses": {
           "302": {
             "description": "Redirect to Atlassian OAuth"
@@ -44504,6 +47256,16 @@
         "summary": "Redirect to Linear OAuth consent screen",
         "tags": [
           "Trackers"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "redirect",
+            "in": "query"
+          }
         ],
         "responses": {
           "302": {
@@ -47135,6 +49897,27 @@
                         },
                         "taskId": {
                           "type": "string"
+                        },
+                        "skipped": {
+                          "type": "boolean"
+                        },
+                        "reason": {
+                          "type": "string"
+                        },
+                        "extension": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "name"
+                          ]
                         }
                       },
                       "required": [
@@ -47188,6 +49971,27 @@
                     },
                     "taskId": {
                       "type": "string"
+                    },
+                    "skipped": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "extension": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name"
+                      ]
                     }
                   },
                   "required": [

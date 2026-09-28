@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, setSystemTime, test } from "bun:test";
 import {
   isRateLimitMessage,
   MAX_RATE_LIMIT_RESET_MS,
@@ -7,6 +7,7 @@ import {
   SessionErrorTracker,
   trackErrorFromJson,
 } from "../utils/error-tracker";
+import { parseModelLimitMessage } from "../utils/model-rate-limit-windows";
 
 // Verbatim fixture from Linear CAI-1279 (session logs for task b7fbbdb9-4922-41d9-88ec-21febd6c4fec)
 const FIXTURE_REJECTED = {
@@ -21,6 +22,28 @@ const FIXTURE_REJECTED = {
   },
   uuid: "ff6e5299-429c-4fcb-ab34-0ce4e8fa6202",
   session_id: "69dbe5a1-1130-45eb-983f-58a7a13c9c3c",
+};
+
+// Verbatim fixture from task fe35598c-8973-4728-a691-6d039d983101, session_logs line 0,
+// 2026-09-24T02:05:41.040Z. The Fable weekly limit arrives as
+// rateLimitType: "seven_day_overage_included".
+const FIXTURE_FABLE_REJECTED = {
+  type: "rate_limit_event",
+  rate_limit_info: {
+    status: "rejected",
+    resetsAt: 1790467200, // seconds since epoch — 2026-09-27T00:00:00Z
+    rateLimitType: "seven_day_overage_included",
+    overageStatus: "rejected",
+    overageDisabledReason: "group_zero_credit_limit",
+    isUsingOverage: false,
+    unifiedWindows: {
+      five_hour: { utilization: 0.05, resetsAt: 1790217000 },
+      seven_day: { utilization: 0.77, resetsAt: 1790467200 },
+      seven_day_overage_included: { utilization: 1, resetsAt: 1790467200 },
+    },
+  },
+  uuid: "347bea29-f868-47b4-a070-5a9ba117989e",
+  session_id: "0a7b672e-3cd1-4fe6-a5fd-12dd8698f121",
 };
 
 describe("SessionErrorTracker — rate_limit_event processing", () => {
@@ -257,6 +280,175 @@ describe("SessionErrorTracker — rate_limit_event processing", () => {
   });
 });
 
+describe("SessionErrorTracker — model-scoped rejection (Fable weekly window)", () => {
+  afterEach(() => {
+    setSystemTime();
+  });
+
+  test("Fable rejection sets getModelRateLimit and never sets getRateLimitResetAt", () => {
+    setSystemTime(new Date("2026-09-24T02:05:41.040Z"));
+    const tracker = new SessionErrorTracker();
+    tracker.processRateLimitEvent(FIXTURE_FABLE_REJECTED);
+
+    expect(tracker.getRateLimitResetAt()).toBeUndefined();
+    expect(tracker.getModelRateLimit()).toEqual({
+      window: "seven_day_overage_included",
+      model: "fable",
+      resetAt: "2026-09-27T00:00:00.000Z",
+      observedAt: "2026-09-24T02:05:41.040Z",
+    });
+    // The telemetry entry for the same event carries the same observation time.
+    expect(tracker.getRateLimitWindows()?.seven_day_overage_included?.lastSeenAt).toBe(
+      "2026-09-24T02:05:41.040Z",
+    );
+  });
+
+  test("Fable rejection still records the 3-key unified window telemetry", () => {
+    setSystemTime(new Date("2026-09-24T02:05:41.040Z"));
+    const tracker = new SessionErrorTracker();
+    tracker.processRateLimitEvent(FIXTURE_FABLE_REJECTED);
+
+    const windows = tracker.getRateLimitWindows();
+    expect(windows).toBeDefined();
+    expect(Object.keys(windows!)).toHaveLength(3);
+    expect(windows!.five_hour?.utilization).toBe(0.05);
+    expect(windows!.seven_day?.utilization).toBe(0.77);
+    expect(windows!.seven_day_overage_included?.status).toBe("rejected");
+    // The top-level entry (written for the same rateLimitType) has no
+    // utilization of its own — it must merge over the unified entry's
+    // utilization: 1 rather than overwrite it away.
+    expect(windows!.seven_day_overage_included?.utilization).toBe(1);
+    expect(windows!.seven_day_overage_included?.resetsAt).toBe(1790467200);
+  });
+
+  test("a five_hour rejected fixture still sets getRateLimitResetAt (legacy key-wide path)", () => {
+    const tracker = new SessionErrorTracker();
+    tracker.processRateLimitEvent(FIXTURE_REJECTED);
+
+    expect(tracker.getRateLimitResetAt()).toBeDefined();
+    expect(tracker.getModelRateLimit()).toBeUndefined();
+  });
+
+  test("rateLimitType 'toString' is not model-scoped (own-property check, not `in`) — falls back to key-wide", () => {
+    const tracker = new SessionErrorTracker();
+    const futureResetsAtSec = Math.floor(Date.now() / 1000) + 3600;
+    tracker.processRateLimitEvent({
+      type: "rate_limit_event",
+      rate_limit_info: {
+        status: "rejected",
+        resetsAt: futureResetsAtSec,
+        rateLimitType: "toString",
+      },
+    });
+
+    expect(tracker.getModelRateLimit()).toBeUndefined();
+    expect(tracker.getRateLimitResetAt()).toBeDefined();
+  });
+
+  test("a model-scoped rejection followed by a key-wide rejection keeps both blocks", () => {
+    const tracker = new SessionErrorTracker();
+    const resetsAtSec = Math.floor(Date.now() / 1000) + 3600;
+    tracker.processRateLimitEvent({
+      type: "rate_limit_event",
+      rate_limit_info: {
+        status: "rejected",
+        resetsAt: resetsAtSec,
+        rateLimitType: "seven_day_overage_included",
+      },
+    });
+    expect(tracker.getModelRateLimit()).toBeDefined();
+
+    tracker.processRateLimitEvent({
+      type: "rate_limit_event",
+      rate_limit_info: { status: "rejected", resetsAt: resetsAtSec, rateLimitType: "five_hour" },
+    });
+
+    expect(tracker.getModelRateLimit()?.window).toBe("seven_day_overage_included");
+    expect(tracker.getRateLimitResetAt()).toBe(new Date(resetsAtSec * 1000).toISOString());
+  });
+
+  test("a key-wide rejection followed by a model-scoped rejection keeps the key-wide block", () => {
+    const tracker = new SessionErrorTracker();
+    const resetsAtSec = Math.floor(Date.now() / 1000) + 3600;
+    tracker.processRateLimitEvent({
+      type: "rate_limit_event",
+      rate_limit_info: { status: "rejected", resetsAt: resetsAtSec, rateLimitType: "five_hour" },
+    });
+    expect(tracker.getRateLimitResetAt()).toBeDefined();
+
+    tracker.processRateLimitEvent({
+      type: "rate_limit_event",
+      rate_limit_info: {
+        status: "rejected",
+        resetsAt: resetsAtSec,
+        rateLimitType: "seven_day_overage_included",
+      },
+    });
+
+    // Independent windows: the Fable rejection is no evidence that the
+    // five-hour window recovered, so both constraints stay effective.
+    expect(tracker.getRateLimitResetAt()).toBe(new Date(resetsAtSec * 1000).toISOString());
+    expect(tracker.getModelRateLimit()?.window).toBe("seven_day_overage_included");
+  });
+
+  test("two rejected key-wide windows → the later reset wins (the key waits for both)", () => {
+    const tracker = new SessionErrorTracker();
+    const fiveHourSec = Math.floor(Date.now() / 1000) + 3600;
+    const sevenDaySec = Math.floor(Date.now() / 1000) + 2 * 24 * 3600;
+    tracker.processRateLimitEvent({
+      type: "rate_limit_event",
+      rate_limit_info: { status: "rejected", resetsAt: sevenDaySec, rateLimitType: "seven_day" },
+    });
+    tracker.processRateLimitEvent({
+      type: "rate_limit_event",
+      rate_limit_info: { status: "rejected", resetsAt: fiveHourSec, rateLimitType: "five_hour" },
+    });
+
+    expect(tracker.getRateLimitResetAt()).toBe(new Date(sevenDaySec * 1000).toISOString());
+  });
+
+  test("a non-rejected event for the same window is its explicit recovery", () => {
+    const tracker = new SessionErrorTracker();
+    const resetsAtSec = Math.floor(Date.now() / 1000) + 3600;
+    tracker.processRateLimitEvent({
+      type: "rate_limit_event",
+      rate_limit_info: { status: "rejected", resetsAt: resetsAtSec, rateLimitType: "five_hour" },
+    });
+    tracker.processRateLimitEvent({
+      type: "rate_limit_event",
+      rate_limit_info: {
+        status: "rejected",
+        resetsAt: resetsAtSec,
+        rateLimitType: "seven_day_overage_included",
+      },
+    });
+
+    // Recovery of another window leaves the five-hour block in place.
+    tracker.processRateLimitEvent({
+      type: "rate_limit_event",
+      rate_limit_info: { status: "allowed", resetsAt: resetsAtSec, rateLimitType: "seven_day" },
+    });
+    expect(tracker.getRateLimitResetAt()).toBeDefined();
+
+    tracker.processRateLimitEvent({
+      type: "rate_limit_event",
+      rate_limit_info: { status: "allowed", resetsAt: resetsAtSec, rateLimitType: "five_hour" },
+    });
+    expect(tracker.getRateLimitResetAt()).toBeUndefined();
+    expect(tracker.getModelRateLimit()).toBeDefined();
+
+    tracker.processRateLimitEvent({
+      type: "rate_limit_event",
+      rate_limit_info: {
+        status: "allowed",
+        resetsAt: resetsAtSec,
+        rateLimitType: "seven_day_overage_included",
+      },
+    });
+    expect(tracker.getModelRateLimit()).toBeUndefined();
+  });
+});
+
 describe("trackErrorFromJson — rate_limit_event routing", () => {
   test("routes rate_limit_event to processRateLimitEvent, stashes reset time", () => {
     const tracker = new SessionErrorTracker();
@@ -388,5 +580,23 @@ describe("isRateLimitMessage — shared matcher (runner gate + stderr parser)", 
     const tracker = new SessionErrorTracker();
     parseStderrForErrors("HTTP 429 returned by upstream", tracker);
     expect(tracker.hasErrors()).toBe(true);
+  });
+
+  test("a stderr-only Fable limit message is captured, so failureReason carries the model-limit signal", () => {
+    const tracker = new SessionErrorTracker();
+    parseStderrForErrors(
+      "You've reached your Fable limit. Switch to another model to continue.",
+      tracker,
+    );
+
+    // Not classified as a generic rate-limit signal — must never widen the
+    // key-wide matcher for this text.
+    expect(isRateLimitMessage("You've reached your Fable limit. Switch to another model")).toBe(
+      false,
+    );
+    expect(tracker.hasErrors()).toBe(true);
+
+    const failureReason = tracker.buildFailureReason(1);
+    expect(parseModelLimitMessage(failureReason)).toBe("fable");
   });
 });

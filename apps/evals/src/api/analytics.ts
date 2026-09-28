@@ -31,6 +31,7 @@
  */
 
 import { resolveClaudeAlias } from "../cost/model-alias.ts";
+import { legacyAliasModel } from "../cost/resolve-alias.ts";
 import type { Registry } from "../runner/index.ts";
 import { cleanVersion } from "../swarm/version.ts";
 import type {
@@ -59,6 +60,10 @@ export interface AnalyticsSourceRow {
   costSource: string | null;
   judgeCostUsd: number | null;
   durationMs: number | null;
+  /** attempts.resolved_model — the concrete model the attempt ran on (null on old rows). */
+  resolvedModel?: string | null;
+  /** eval_run_configs.resolved_model — the run's pin for an alias config. */
+  pinnedModel?: string | null;
   /** json_extract(tokens_json, '$.model') — dominant observed model id. */
   tokenModel: string | null;
   /** json_extract(tokens_json, '$.inputTokens') — null on rows without token capture (v7 §6.1). */
@@ -113,8 +118,9 @@ function tokenValue(v: number | null): number {
 }
 
 /**
- * Model key precedence (§1.2, unchanged): tokens.model → registry config.model
- * → "(configId)". v7 §7.1/§8: bare claude aliases in the resolved key
+ * Model key precedence: attempts.resolved_model → the run's alias pin →
+ * tokens.model → registry config.model → the bare family of a
+ * `latest:anthropic/<family>` alias → "(configId)". v7 §7.1/§8: bare claude aliases in the resolved key
  * ("fable" from historical token models, "haiku" from config fallbacks) map to
  * the latest concrete family id so old and new rows group together; concrete
  * ids and the parenthesized fallback pass through untouched.
@@ -125,10 +131,16 @@ function modelKey(
   aliasMap: Record<string, string>,
 ): string {
   let key: string | null = null;
-  if (row.tokenModel && row.tokenModel.trim().length > 0) {
-    key = row.tokenModel;
-  } else {
-    const configModel = registry.configs.get(row.configId)?.model;
+  for (const candidate of [row.resolvedModel, row.pinnedModel, row.tokenModel]) {
+    if (candidate && candidate.trim().length > 0) {
+      key = candidate;
+      break;
+    }
+  }
+  if (key === null) {
+    const config = registry.configs.get(row.configId);
+    const configModel =
+      config?.model ?? (config?.modelAlias ? legacyAliasModel(config.modelAlias) : null);
     if (configModel && configModel.length > 0) key = configModel;
   }
   if (key === null) return `(${row.configId})`;
@@ -258,6 +270,8 @@ interface RunAcc extends MetricAcc {
 }
 
 interface CellAcc extends MetricAcc {
+  /** Model keys the cell's attempts ran on (an alias config can span several). */
+  models: Set<string>;
   scenarioId: string;
   configId: string;
   lastRunAt: string | null;
@@ -405,10 +419,13 @@ export function buildAnalytics(
         configId: row.configId,
         lastRunAt: null,
         runs: new Map(),
+        models: new Set(),
       };
       cells.set(cellKey, cell);
     }
     accumulate(cell, row);
+    const model = modelKey(row, registry, aliasMap);
+    cell.models.add(model);
     if (cell.lastRunAt === null || row.runCreatedAt > cell.lastRunAt) {
       cell.lastRunAt = row.runCreatedAt;
     }
@@ -435,7 +452,6 @@ export function buildAnalytics(
     }
 
     // ---- model rollup ----
-    const model = modelKey(row, registry, aliasMap);
     const harness = harnessKey(row.configId, registry);
     let modelAcc = models.get(model);
     if (!modelAcc) {
@@ -493,6 +509,7 @@ export function buildAnalytics(
       minCostUsd: minOrNull(cell.costs),
       maxCostUsd: maxOrNull(cell.costs),
       tokens: tokenSums(cell),
+      models: [...cell.models].sort(),
     };
   });
 

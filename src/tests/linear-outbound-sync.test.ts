@@ -2,7 +2,12 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, mock, tes
 import { unlink } from "node:fs/promises";
 import { closeDb, initDb } from "../be/db";
 import { createTrackerSync, getTrackerSync, updateTrackerSync } from "../be/db-queries/tracker";
-import { initLinearOutboundSync, teardownLinearOutboundSync } from "../linear/outbound";
+import {
+  formatLinearOutcomeBody,
+  initLinearOutboundSync,
+  LINEAR_BODY_MAX,
+  teardownLinearOutboundSync,
+} from "../linear/outbound";
 import { taskSessionMap } from "../linear/sync";
 import { workflowEventBus } from "../workflows/event-bus";
 
@@ -79,8 +84,8 @@ describe("Linear Outbound Sync", () => {
     const callArgs = mockCreateComment.mock.calls[0] as unknown[];
     const arg = callArgs[0] as { issueId: string; body: string };
     expect(arg.issueId).toBe("LIN-OUT-COMPLETED");
-    expect(arg.body).toContain("Task completed");
-    expect(arg.body).toContain("All done!");
+    // The output is the whole comment: no boilerplate, no collapsed `+++` section.
+    expect(arg.body).toBe("All done!");
 
     // Verify sync record updated
     const updated = await getTrackerSync("linear", "task", "outbound-task-completed");
@@ -107,8 +112,118 @@ describe("Linear Outbound Sync", () => {
     const callArgs = mockCreateComment.mock.calls[0] as unknown[];
     const arg = callArgs[0] as { issueId: string; body: string };
     expect(arg.issueId).toBe("LIN-OUT-FAILED");
-    expect(arg.body).toContain("Task failed");
-    expect(arg.body).toContain("Build error in module X");
+    expect(arg.body).toBe("Task failed.\n\nBuild error in module X");
+  });
+
+  test("task.completed with an AgentSession posts ONE response activity carrying the full output", async () => {
+    const taskId = "outbound-session-completed";
+    await createTrackerSync({
+      provider: "linear",
+      entityType: "task",
+      swarmId: taskId,
+      externalId: "LIN-OUT-SESSION-COMPLETED",
+      syncDirection: "bidirectional",
+    });
+    taskSessionMap.set(taskId, "session-completed");
+    // Longer than the old 2000-char cut, shorter than the Linear body cap.
+    const output = `## Answer\n\n${"x".repeat(5000)}`;
+
+    workflowEventBus.emit("task.completed", { taskId, output });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(mockEndAgentSession).toHaveBeenCalledTimes(1);
+    expect(mockEndAgentSession.mock.calls[0] as unknown[]).toEqual([
+      "session-completed",
+      output,
+      "response",
+    ]);
+    expect(mockCreateComment).not.toHaveBeenCalled();
+    expect(taskSessionMap.has(taskId)).toBe(false);
+  });
+
+  test("task.failed with an AgentSession posts ONE error activity with the plain reason", async () => {
+    const taskId = "outbound-session-failed";
+    await createTrackerSync({
+      provider: "linear",
+      entityType: "task",
+      swarmId: taskId,
+      externalId: "LIN-OUT-SESSION-FAILED",
+      syncDirection: "bidirectional",
+    });
+    taskSessionMap.set(taskId, "session-failed");
+
+    workflowEventBus.emit("task.failed", { taskId, failureReason: "tsc:check failed" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(mockEndAgentSession).toHaveBeenCalledTimes(1);
+    expect(mockEndAgentSession.mock.calls[0] as unknown[]).toEqual([
+      "session-failed",
+      "Task failed.\n\ntsc:check failed",
+      "error",
+    ]);
+    expect(mockCreateComment).not.toHaveBeenCalled();
+  });
+
+  test("task.completed with no output still ends the session with a short body", async () => {
+    const taskId = "outbound-session-empty";
+    await createTrackerSync({
+      provider: "linear",
+      entityType: "task",
+      swarmId: taskId,
+      externalId: "LIN-OUT-SESSION-EMPTY",
+      syncDirection: "bidirectional",
+    });
+    taskSessionMap.set(taskId, "session-empty");
+
+    workflowEventBus.emit("task.completed", { taskId, output: "  " });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(mockEndAgentSession.mock.calls[0] as unknown[]).toEqual([
+      "session-empty",
+      "Task completed.",
+      "response",
+    ]);
+  });
+
+  describe("formatLinearOutcomeBody", () => {
+    const savedDashboard = process.env.SWARM_DASHBOARD_URL;
+    const savedApp = process.env.APP_URL;
+
+    afterEach(() => {
+      if (savedDashboard === undefined) delete process.env.SWARM_DASHBOARD_URL;
+      else process.env.SWARM_DASHBOARD_URL = savedDashboard;
+      if (savedApp === undefined) delete process.env.APP_URL;
+      else process.env.APP_URL = savedApp;
+    });
+
+    test("returns text at the cap unchanged", () => {
+      const text = "a".repeat(LINEAR_BODY_MAX);
+      expect(formatLinearOutcomeBody(text, "t1")).toBe(text);
+    });
+
+    test("caps oversized text with a visible note linking the swarm task", () => {
+      delete process.env.SWARM_DASHBOARD_URL;
+      process.env.APP_URL = "https://swarm.example.com/";
+      const text = "b".repeat(LINEAR_BODY_MAX + 500);
+
+      const body = formatLinearOutcomeBody(text, "task-123");
+
+      expect(body.length).toBeLessThanOrEqual(LINEAR_BODY_MAX);
+      expect(body.startsWith("b".repeat(1000))).toBe(true);
+      expect(body).toContain(`of ${text.length} characters`);
+      expect(body.endsWith("Full text: https://swarm.example.com/tasks/task-123_")).toBe(true);
+      expect(body).not.toContain("+++");
+    });
+
+    test("names the task id when no dashboard URL is configured", () => {
+      delete process.env.SWARM_DASHBOARD_URL;
+      delete process.env.APP_URL;
+
+      const body = formatLinearOutcomeBody("c".repeat(LINEAR_BODY_MAX + 1), "task-456");
+
+      expect(body.length).toBeLessThanOrEqual(LINEAR_BODY_MAX);
+      expect(body.endsWith("Full text: swarm task `task-456`_")).toBe(true);
+    });
   });
 
   test("no-op when no tracker_sync mapping exists", async () => {

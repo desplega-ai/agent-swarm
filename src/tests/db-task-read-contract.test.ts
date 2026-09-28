@@ -43,6 +43,7 @@ type:AppVersion
 type:ApprovalRequest
 type:AssetSummaryFilters
 type:AttributionByPersonRow
+type:AvailableKeyIndicesResult
 type:CascadeFailResult
 type:ChannelActivityCursor
 type:ConcurrentContext
@@ -67,11 +68,13 @@ type:McpServerFilters
 type:McpServerInsert
 type:MentionPreview
 type:PageListOptions
+type:PlanSource
 type:RecordBudgetRefusalNotificationInput
 type:ScheduledTaskFilters
 type:ScriptRunPatch
 type:ServiceFilters
 type:SessionCostByAgentRow
+type:SessionCostByCredentialRow
 type:SessionCostByUserRow
 type:SessionCostDailyRow
 type:SessionCostSummaryTotals
@@ -103,12 +106,14 @@ value:ReservedAgentRoleError
 value:SKILL_FILE_LIMITS
 value:UNATTRIBUTED_USER_ID
 value:__resetSqliteVecExtensionPathCacheForTests
+value:abandonSlackOutcomeDelivery
 value:acceptTask
 value:assignUnassignedTaskPending
 value:autoEncryptLegacyPlaintextSecrets
 value:backfillSupersedeTaskResumeTaskId
 value:bindSlackMessageTimestamp
 value:buildRoutingAffinityFromAgent
+value:cancelApprovalRequestById
 value:cancelPendingApprovalRequestsForRun
 value:cancelPendingSteeringForTask
 value:cancelTask
@@ -219,6 +224,7 @@ value:getActiveSessions
 value:getActiveTaskCount
 value:getAgentById
 value:getAgentCurrentTask
+value:getAgentDailyTaskCounts
 value:getAgentHarnessProviders
 value:getAgentMailInboxMapping
 value:getAgentMailInboxMappingsByAgent
@@ -297,6 +303,7 @@ value:getLiveAgentCounts
 value:getLogsByAgentId
 value:getLogsByEventType
 value:getLogsByTaskId
+value:getLogsByTaskIdAndEventType
 value:getLogsByTaskIdChronological
 value:getMcpServerById
 value:getMcpServerByName
@@ -324,6 +331,7 @@ value:getPricingRows
 value:getPromptTemplateById
 value:getPromptTemplateHistory
 value:getPromptTemplates
+value:getReadyAgentCounts
 value:getRecentBudgetRefusalNotifications
 value:getRecentCompletedCount
 value:getRecentFailedCount
@@ -364,6 +372,7 @@ value:getSlackTasksMissingTree
 value:getSlackTreeMessage
 value:getSlackTreeMessageByThread
 value:getSlackTreeMessages
+value:getStaleApprovalRequests
 value:getStalePinnedResumes
 value:getStaleUnassignedAffinityTasks
 value:getStalledInProgressTasks
@@ -396,6 +405,7 @@ value:getUnassignedTaskIdsForAgent
 value:getUnassignedTasksCount
 value:getUnreadInboxMessages
 value:getUnreadMessages
+value:getUsageDataVersion
 value:getUserById
 value:getWaitStateById
 value:getWaitStateByStepId
@@ -427,6 +437,7 @@ value:isAgentEligibleForTask
 value:isExtensionAgent
 value:isPendingSlackMessage
 value:isPoolAffinityEnforcementEnabled
+value:isSettledSlackMessage
 value:isSqliteVecAvailable
 value:listAgentsWithCredStatusByProvider
 value:listAllMetrics
@@ -470,6 +481,7 @@ value:moveAssetKey
 value:moveTaskFromBacklog
 value:moveTaskToBacklog
 value:normalizeSkillFilePath
+value:noteSlackOutcomeDeliveryFailure
 value:overwriteTerminalTaskResultText
 value:pauseTask
 value:postMessage
@@ -506,6 +518,7 @@ value:resumeTask
 value:searchSkills
 value:setAgentHarnessProvider
 value:setApiKeyName
+value:setApiKeyPlan
 value:setBudgetRefusalFollowUpTaskId
 value:setFavorite
 value:setSlackMessageTracking

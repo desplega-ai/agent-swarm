@@ -39,6 +39,7 @@ interface ParsedArgs {
   preset: string;
   maxConcurrentTasks: string | undefined;
   pullPolicy: string | undefined;
+  containerEngine: string | undefined;
   open: boolean;
   showHelp: boolean;
   dbPath: string;
@@ -60,6 +61,7 @@ function parseArgs(args: string[]): ParsedArgs {
   let preset = "";
   let maxConcurrentTasks: string | undefined;
   let pullPolicy: string | undefined;
+  let containerEngine: string | undefined;
   let open = false;
   let showHelp = false;
   let dbPath = "";
@@ -113,6 +115,12 @@ function parseArgs(args: string[]): ParsedArgs {
       if (value && !value.startsWith("-")) i++;
     } else if (arg?.startsWith("--pull-policy=")) {
       pullPolicy = arg.slice("--pull-policy=".length);
+    } else if (arg === "--container-engine") {
+      const value = mainArgs[i + 1];
+      containerEngine = value && !value.startsWith("-") ? value : "";
+      if (value && !value.startsWith("-")) i++;
+    } else if (arg?.startsWith("--container-engine=")) {
+      containerEngine = arg.slice("--container-engine=".length);
     } else if (arg === "--open") {
       open = true;
     } else if (arg === "--help" || arg === "-h") {
@@ -139,6 +147,7 @@ function parseArgs(args: string[]): ParsedArgs {
     preset,
     maxConcurrentTasks,
     pullPolicy,
+    containerEngine,
     open,
     showHelp,
     dbPath,
@@ -154,13 +163,14 @@ const COMMAND_HELP: Record<
   onboard: {
     usage: `${binName} onboard [options]`,
     description:
-      "Set up a new swarm from scratch using Docker Compose.\nInteractive wizard that collects credentials, generates docker-compose.yml + .env,\nstarts the stack, and verifies health.",
+      "Set up a new swarm from scratch using Docker Compose (or Podman with a Compose provider).\nInteractive wizard that collects credentials, generates docker-compose.yml + .env,\nstarts the stack, and verifies health.",
     options: [
       "  --dry-run              Preview what would be generated without writing",
       "  -y, --yes              Non-interactive mode (reads from env vars)",
       "  --preset <name>        Preset: full, dev, content, research, solo (required with --yes)",
       "  --max-concurrent-tasks <n>  Tasks per agent (1-100; default: lead 2, worker 1)",
       "  --pull-policy <policy> Pull policy: always, missing, never (default: always)",
+      "  --container-engine <engine>  auto, docker, podman (default: $AGENT_SWARM_CONTAINER_ENGINE, else auto; auto prefers Docker)",
       "  -h, --help             Show this help",
     ].join("\n"),
     examples: [
@@ -168,6 +178,7 @@ const COMMAND_HELP: Record<
       `  ${binName} onboard --dry-run`,
       `  ${binName} onboard --yes --preset=full`,
       `  ${binName} onboard --yes --preset=dev`,
+      `  ${binName} onboard --container-engine=podman`,
       `  ANTHROPIC_API_KEY=sk-... ${binName} onboard --yes --preset=solo`,
     ].join("\n"),
   },
@@ -647,6 +658,7 @@ function App({ args }: { args: ParsedArgs }) {
     preset,
     maxConcurrentTasks,
     pullPolicy,
+    containerEngine,
   } = args;
 
   switch (command) {
@@ -660,6 +672,7 @@ function App({ args }: { args: ParsedArgs }) {
             preset: preset || undefined,
             maxConcurrentTasks,
             pullPolicy,
+            containerEngine,
           }}
         />
       );

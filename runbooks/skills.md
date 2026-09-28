@@ -23,6 +23,8 @@ Keep `skills/agent-swarm/SKILL.md` valid and `skills/` nonempty. If priority dis
 
 Keep `swarm-local-e2e` canonical in `.claude/internal-skills/swarm-local-e2e/`. Symlinks in `.claude/skills/` and `.agents/skills/` preserve harness access without exposing it to the installer. Do not replace those symlinks with directories.
 
+`dashboard-ui` (UI rules for `apps/ui`) follows the same layout: canonical in `.claude/internal-skills/dashboard-ui/`, with the same two symlinks.
+
 Public skills use absolute GitHub blob or documentation URLs because installed copies exist outside the repository. The skill must instruct agents to re-fetch current files from `main` before acting. Place long procedures in `references/*.md`.
 
 The same skill is exposed as a harness plugin through the descriptor files at the repository root: `.claude-plugin/plugin.json` + `marketplace.json` (Claude Code), `.codex-plugin/`, `.cursor-plugin/`, `.devin-plugin/`, `.kimi-plugin/`, `gemini-extension.json`, and `.agents/plugins/marketplace.json` (Antigravity / Factory Droid). Every descriptor points at `./skills/`, so the plugin contains exactly the operator skill and nothing from `plugin/`. Their `version` fields must equal `package.json`; `bun run prepare-release` rewrites them and `bun run check:plugin-versions` gates drift in the Operator Skill Check job.

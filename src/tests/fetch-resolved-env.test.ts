@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import {
   applyResolvedEnvToProcessEnv,
   fetchRepoConfig,
@@ -25,6 +25,8 @@ const defaultMockResponse: MockResponse = {
 };
 const mockResponsesByAgentId = new Map<string, MockResponse>();
 const requestedRepoIds = new Map<string, string | null>();
+/** Every `GET /api/keys/available` query string observed by the mock server, most recent last. */
+const keysAvailableRequests: string[] = [];
 
 beforeAll(() => {
   server = Bun.serve({
@@ -40,6 +42,13 @@ beforeAll(() => {
           status: mockResponse.status,
           headers: { "Content-Type": "application/json" },
         });
+      }
+
+      if (url.pathname === "/api/keys/available") {
+        keysAvailableRequests.push(url.search);
+        const totalKeys = Number(url.searchParams.get("totalKeys") ?? "1");
+        const availableIndices = Array.from({ length: totalKeys }, (_, i) => i);
+        return Response.json({ success: true, availableIndices, totalKeys });
       }
 
       return new Response("Not found", { status: 404 });
@@ -174,6 +183,62 @@ describe("fetchResolvedEnv", () => {
       "CLAUDE_CODE_OAUTH_TOKEN",
       "ANTHROPIC_API_KEY",
     ]);
+  });
+
+  describe("model-scoped window filter — GET /api/keys/available?model=<family>", () => {
+    beforeEach(() => {
+      keysAvailableRequests.length = 0;
+    });
+
+    function envWithOauthPool(totalKeys: number): Record<string, string> {
+      return {
+        CLAUDE_CODE_OAUTH_TOKEN: Array.from({ length: totalKeys }, (_, i) => `tok-${i}`).join(","),
+      };
+    }
+
+    test("modelTier: 'ultra' and no model issues model=fable", async () => {
+      const agentId = "agent-model-ultra";
+      mockResponsesByAgentId.set(agentId, { status: 200, body: { configs: [] } });
+      await fetchResolvedEnv(testUrl, "key", agentId, envWithOauthPool(32), undefined, {
+        provider: "claude",
+        modelTier: "ultra",
+      });
+      expect(keysAvailableRequests).toEqual([
+        "?keyType=CLAUDE_CODE_OAUTH_TOKEN&totalKeys=32&model=fable",
+      ]);
+    });
+
+    test("model: 'claude-fable-5-1' issues the same model=fable", async () => {
+      const agentId = "agent-model-fable-explicit";
+      mockResponsesByAgentId.set(agentId, { status: 200, body: { configs: [] } });
+      await fetchResolvedEnv(testUrl, "key", agentId, envWithOauthPool(32), "claude-fable-5-1", {
+        provider: "claude",
+      });
+      expect(keysAvailableRequests).toEqual([
+        "?keyType=CLAUDE_CODE_OAUTH_TOKEN&totalKeys=32&model=fable",
+      ]);
+    });
+
+    test("model: 'claude-sonnet-5' issues model=sonnet", async () => {
+      const agentId = "agent-model-sonnet";
+      mockResponsesByAgentId.set(agentId, { status: 200, body: { configs: [] } });
+      await fetchResolvedEnv(testUrl, "key", agentId, envWithOauthPool(32), "claude-sonnet-5", {
+        provider: "claude",
+      });
+      expect(keysAvailableRequests).toEqual([
+        "?keyType=CLAUDE_CODE_OAUTH_TOKEN&totalKeys=32&model=sonnet",
+      ]);
+    });
+
+    test("modelTier: 'smol' issues no model param (haiku has no weekly window)", async () => {
+      const agentId = "agent-model-smol";
+      mockResponsesByAgentId.set(agentId, { status: 200, body: { configs: [] } });
+      await fetchResolvedEnv(testUrl, "key", agentId, envWithOauthPool(32), undefined, {
+        provider: "claude",
+        modelTier: "smol",
+      });
+      expect(keysAvailableRequests).toEqual(["?keyType=CLAUDE_CODE_OAUTH_TOKEN&totalKeys=32"]);
+    });
   });
 
   test("returns baseEnv when apiUrl is empty", async () => {

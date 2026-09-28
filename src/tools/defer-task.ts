@@ -125,9 +125,9 @@ function renderWhen(nextRunAt: string, tz: string, isFallbackTz: boolean): strin
 }
 
 /**
- * Human-facing deferral text for tasks without an outputSchema — this is what
- * lands verbatim in a human's Slack thread as the task's terminal output, and
- * in the UI's task-detail output row.
+ * Human-facing deferral text for tasks without an outputSchema — the task's
+ * terminal output, shown in the UI's task-detail output row. Slack reads it
+ * through `slackTaskOutput`, which drops the wake-up time.
  *
  * It answers one question — when does this come back — in the two shapes a
  * deferral actually has:
@@ -191,7 +191,7 @@ export const registerDeferTaskTool = (server: McpServer) => {
           })
           .optional()
           .describe(
-            "Wake early on a task event. Provide taskId or nonempty, unique taskIds. mode defaults to all (every member must match); any wakes on the first match. settled covers completed, failed, or cancelled. Deferred and superseded members follow their continuations; a superseded member without a resume child holds to the ceiling. Any already-terminal member rejects the request; one delayMs/runAt ceiling is still required for the whole set.",
+            "Wake early on a task event. Provide taskId or nonempty, unique taskIds. mode defaults to all (every member must match); any wakes on the first match. settled covers completed, failed, or cancelled. Deferred and superseded members follow their continuations; a superseded member without a resume child holds to the ceiling. Any already-terminal member rejects the request; one delayMs/runAt ceiling is still required for the whole set. The member whose settlement wakes you creates no separate lead follow-up for your agent unless its followUpConfig sets onCompleted/onFailed; an all-mode member that settles while others are pending still does.",
           ),
         summary: z
           .string()

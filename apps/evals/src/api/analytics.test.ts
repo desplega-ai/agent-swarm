@@ -13,6 +13,8 @@ const registry: Registry = {
     ["claude-tier", { id: "claude-tier", provider: "claude", modelTier: "regular" }],
     // Bare-alias config model (the real claude-haiku catalog entry shape).
     ["claude-haiku", { id: "claude-haiku", provider: "claude", model: "haiku" }],
+    // Moving-alias config (the converted claude-opus entry shape).
+    ["claude-opus", { id: "claude-opus", provider: "claude", modelAlias: "latest:anthropic/opus" }],
   ]),
 };
 
@@ -495,6 +497,23 @@ describe("buildAnalytics — claude alias resolution (v7 §8)", () => {
     expect(fable.attempts).toBe(2); // alias + concrete merged into one key
     expect(fable.vendor).toBe("anthropic");
     expect(res.vendors!.map((v) => v.group)).toEqual(["anthropic"]);
+  });
+
+  test("resolved_model and the run pin win; old alias-config rows fall back to the alias map", () => {
+    const res = buildAnalytics(
+      [
+        row({ configId: "claude-opus", resolvedModel: "claude-opus-5-5", tokenModel: "opus" }),
+        row({ configId: "claude-opus", pinnedModel: "claude-opus-5-5" }),
+        row({ configId: "claude-opus" }), // pre-pinning row → "opus" → alias map
+      ],
+      registry,
+      ALIASES,
+    );
+    expect(res.models.map((m) => [m.model, m.attempts]).sort()).toEqual([
+      ["claude-opus-4-8", 1],
+      ["claude-opus-5-5", 2],
+    ]);
+    expect(res.matrix[0]?.models).toEqual(["claude-opus-4-8", "claude-opus-5-5"]);
   });
 
   test("no alias map (pre-v7 callers) degrades to raw keys", () => {

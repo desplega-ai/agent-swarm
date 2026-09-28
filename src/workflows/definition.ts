@@ -174,6 +174,17 @@ export function validateDefinition(
     if (node.id.includes("#") && !options.legacyNodeIds?.has(node.id)) {
       errors.push(`Node "${node.id}" contains reserved character "#"`);
     }
+    if (
+      node.type === "human-in-the-loop" &&
+      typeof node.config.questions === "string" &&
+      !/^\{\{[^}]+\}\}$/.test(node.config.questions.trim())
+    ) {
+      // Dynamic questions must be ONE exact token so the engine injects the raw
+      // array. Surrounding text would JSON-stringify it into an unusable string.
+      errors.push(
+        `Node "${node.id}" human-in-the-loop config.questions must be an array or one exact {{interpolation}} token`,
+      );
+    }
     if (node.type === "foreach") {
       validateForeachNode(node, errors);
       // A legacy `#` id may stay editable as a NORMAL node, but never as a foreach

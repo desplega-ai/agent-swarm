@@ -81,24 +81,22 @@ function spendBarColor(ratio: number): string {
 }
 
 function SpendBar({ spend, budget }: { spend: number; budget: number | null }) {
+  // No limit set: no bar to fill, so draw none. Spend and the label keep an
+  // explicit gap; inside a grid cell `justify-between` alone collapsed them
+  // into "$342.32no budget".
   if (!budget || budget <= 0) {
     return (
-      <div className="space-y-1">
-        <div className="flex justify-between text-xs">
-          <span className="font-mono">{formatUsd(spend)}</span>
-          <span className="text-muted-foreground">no budget</span>
-        </div>
-        <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-          <div className="h-full w-0" />
-        </div>
+      <div className="flex w-full items-baseline gap-2 text-xs">
+        <span className="font-mono">{formatUsd(spend)}</span>
+        <span className="text-muted-foreground">No limit</span>
       </div>
     );
   }
   const ratio = spend / budget;
   const pct = Math.min(100, Math.round(ratio * 100));
   return (
-    <div className="space-y-1">
-      <div className="flex justify-between text-xs">
+    <div className="w-full space-y-1">
+      <div className="flex justify-between gap-2 text-xs">
         <span className="font-mono">
           {formatUsd(spend)} / {formatUsd(budget)}
         </span>
@@ -467,7 +465,7 @@ export default function BudgetsPage() {
               onClick={(e) => e.stopPropagation()}
             >
               {row.agent.name}
-              {row.agent.isLead ? " (Lead)" : ""}
+              {row.agent.isLead && row.agent.name.trim().toLowerCase() !== "lead" ? " (Lead)" : ""}
             </Link>
           );
         },

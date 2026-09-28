@@ -54,6 +54,9 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
         model: this.model,
         input: cleaned,
         dimensions: this.dimensions,
+        // Without it the SDK asks for base64 and decodes any reply as base64. A
+        // gateway that answers with plain floats would then yield garbage.
+        encoding_format: "float",
       });
 
       const values = response.data[0]?.embedding;
@@ -95,6 +98,7 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
         model: this.model,
         input: nonEmptyTexts,
         dimensions: this.dimensions,
+        encoding_format: "float",
       });
 
       const results: (Float32Array | null)[] = texts.map(() => null);

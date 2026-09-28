@@ -1,6 +1,7 @@
 import { Select, Spinner } from "@inkjs/ui";
 import { Box, Text } from "ink";
 import { useEffect, useRef, useState } from "react";
+import { composeCommandText, engineForCommands } from "../container-engine.ts";
 import type { StepProps } from "../types.ts";
 
 type HealthStatus = "waiting_api" | "waiting_agents" | "healthy" | "timeout";
@@ -148,7 +149,9 @@ export function HealthCheckStep({ state, addLog, goToNext }: StepProps) {
   return (
     <Box flexDirection="column" padding={1}>
       <Text color="red">{"✗"} API health check timed out after 60s</Text>
-      <Text dimColor>Try: docker compose logs --tail 50</Text>
+      <Text dimColor>
+        Try: {composeCommandText(engineForCommands(state.containerEngine), "logs --tail 50")}
+      </Text>
       <Box marginTop={1}>
         <Select
           options={[

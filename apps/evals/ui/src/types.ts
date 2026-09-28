@@ -506,9 +506,13 @@ export interface ConfigJson {
   label: string | null;
   provider: string;
   model: string | null;
+  /** Moving alias (`latest:anthropic/opus`); resolved per run at creation. */
+  modelAlias?: string | null;
   modelTier: string | null;
   envKeys: string[];
   isDefault: boolean;
+  /** "seed" = follows configs/index.ts; "user" = created or edited through the API. */
+  source?: "seed" | "user";
   /** v7.6 item D: AA benchmark block; null/absent = unmatched config (render nothing). */
   aa?: AaBenchmarkJson | null;
 }

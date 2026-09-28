@@ -24,6 +24,7 @@ import {
 } from "../providers/codex-oauth/flow.js";
 import { generatePKCE } from "../providers/codex-oauth/pkce.js";
 import type { CodexOAuthCredentials } from "../providers/codex-oauth/types.js";
+import { codexPlanFromClaim } from "../utils/subscription-plans.js";
 
 describe("generatePKCE", () => {
   it("produces distinct verifier/challenge pairs", async () => {
@@ -455,6 +456,36 @@ describe("authJsonToCredentialSelection", () => {
     expect(selection.keyType).toBe("CODEX_OAUTH");
     expect(selection.keySuffix).toBe("8c965");
     expect(selection.selected).toBe(creds.accountId);
+    expect(selection.plan).toBeNull();
+  });
+
+  it("reads the ChatGPT plan from the chatgpt_plan_type claim", () => {
+    const creds: CodexOAuthCredentials = {
+      access: tokenFor({
+        "https://api.openai.com/auth": {
+          chatgpt_account_id: "acc-plan",
+          chatgpt_user_id: "user-plan-12345",
+          chatgpt_plan_type: "plus",
+        },
+      }),
+      refresh: "rt_plan",
+      expires: Date.now() + 3600000,
+      accountId: "acc-plan",
+    };
+    expect(authJsonToCredentialSelection(credentialsToAuthJson(creds)).plan).toBe("chatgpt_plus");
+  });
+});
+
+describe("codexPlanFromClaim", () => {
+  it("maps paid ChatGPT plans and drops plans without a list price", () => {
+    expect(codexPlanFromClaim("pro")).toBe("chatgpt_pro");
+    expect(codexPlanFromClaim("Plus")).toBe("chatgpt_plus");
+    expect(codexPlanFromClaim("team")).toBe("chatgpt_business");
+    expect(codexPlanFromClaim("business")).toBe("chatgpt_business");
+    expect(codexPlanFromClaim("go")).toBe("chatgpt_go");
+    expect(codexPlanFromClaim("free")).toBeNull();
+    expect(codexPlanFromClaim("enterprise")).toBeNull();
+    expect(codexPlanFromClaim(null)).toBeNull();
   });
 });
 
