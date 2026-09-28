@@ -167,6 +167,7 @@ export async function updateAttempt(
     judgeCostUsd: number | null;
     /** Pre-serialized JSON strings — callers JSON.stringify, stored as-is. */
     tokensJson: string | null;
+    resolvedModel: string | null;
     sandboxJson: string | null;
     workersJson: string | null;
     timingsJson: string | null;
@@ -190,6 +191,7 @@ export async function updateAttempt(
     costSource: "cost_source",
     judgeCostUsd: "judge_cost_usd",
     tokensJson: "tokens_json",
+    resolvedModel: "resolved_model",
     sandboxJson: "sandbox_json",
     workersJson: "workers_json",
     timingsJson: "timings_json",

@@ -65,6 +65,25 @@ export async function getSnapshotCatalog(): Promise<ModelsDevCatalog> {
   return (await loadSnapshot()).catalog;
 }
 
+/**
+ * The catalog that model aliases resolve against: every section keeps only the
+ * committed snapshot's IDs (the reviewed allowlist), with live metadata such as
+ * `release_date` layered over each one. An alias therefore never selects a
+ * model the picker would refuse.
+ */
+export async function getResolutionCatalog(): Promise<ModelsDevCatalog> {
+  const snapshot = await getSnapshotCatalog();
+  const live = (await getCatalog()).catalog;
+  const out: ModelsDevCatalog = {};
+  for (const [key, section] of Object.entries(snapshot)) {
+    const liveModels = live[key]?.models ?? {};
+    const models: Record<string, ModelsDevModel> = {};
+    for (const [id, m] of Object.entries(section.models)) models[id] = liveModels[id] ?? m;
+    out[key] = { ...section, models };
+  }
+  return out;
+}
+
 /** Current catalog: newest live/DB payload in memory, else the committed snapshot. */
 export async function getCatalog(): Promise<CatalogState> {
   return current ?? (await loadSnapshot());

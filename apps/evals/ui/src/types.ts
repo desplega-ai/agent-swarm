@@ -506,6 +506,8 @@ export interface ConfigJson {
   label: string | null;
   provider: string;
   model: string | null;
+  /** Moving alias (`latest:anthropic/opus`); resolved per run at creation. */
+  modelAlias?: string | null;
   modelTier: string | null;
   envKeys: string[];
   isDefault: boolean;

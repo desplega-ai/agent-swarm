@@ -7,6 +7,7 @@ import { createRun, getRun, listAttempts, listRuns, resetErrorAttempts } from ".
 import { loadRegistry } from "./registry.ts";
 import { type CellSummary, summarizeRun } from "./results.ts";
 import { executeRun, killAllActiveStacks } from "./runner/index.ts";
+import { assertRunConfigsResolve, ensureRunConfigPins } from "./runner/run-configs.ts";
 import { DEFAULT_PASS_THRESHOLD } from "./scoring.ts";
 
 /**
@@ -116,6 +117,7 @@ async function cmdRun(argv: string[]): Promise<void> {
       throw new Error(`unknown config "${id}" (see: bun src/cli.ts registry)`);
   }
 
+  await assertRunConfigsResolve(registry, scenarioIds, configIds);
   const db = await initDb();
   const runId = `run-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, "").replace("-", "").replace("-", "")}-${crypto.randomUUID().slice(0, 6)}`;
   await createRun(db, {
@@ -127,6 +129,7 @@ async function cmdRun(argv: string[]): Promise<void> {
     concurrency: Math.max(1, Number(values.concurrency)),
     judgeModel: values["judge-model"],
   });
+  await ensureRunConfigPins(db, runId, registry, scenarioIds, configIds);
   console.log(
     `created ${runId}: ${scenarioIds.length} scenario(s) x ${configIds.length} config(s) x ${values.attempts} attempt(s)`,
   );

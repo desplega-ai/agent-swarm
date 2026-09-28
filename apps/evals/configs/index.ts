@@ -20,19 +20,19 @@ export const configs: HarnessConfig[] = [
     id: "claude-haiku",
     label: "Claude Code / haiku",
     provider: "claude",
-    model: "haiku",
+    modelAlias: "latest:anthropic/haiku",
   },
   {
     id: "claude-sonnet",
     label: "Claude Code / sonnet",
     provider: "claude",
-    model: "sonnet",
+    modelAlias: "latest:anthropic/sonnet",
   },
   {
     id: "claude-opus",
     label: "Claude Code / opus (latest)",
     provider: "claude",
-    model: "opus",
+    modelAlias: "latest:anthropic/opus",
   },
   {
     id: "claude-opus-4.6",
@@ -348,6 +348,13 @@ export const configs: HarnessConfig[] = [
   // Round-12 September 2026 refresh: newest tool-capable family members on the
   // live OpenRouter list (2026-09-28), all present in the models.dev snapshot.
   // Paid slugs only. Skipped premium variants: glm-5.3-prime, qwen3.8-max-prime.
+  // Moving alias: each run pins the newest reviewed DeepSeek V4.x Flash at creation.
+  {
+    id: "pi-latest-deepseek-v4",
+    label: "pi-mono / latest DeepSeek V4.x Flash (OpenRouter)",
+    provider: "pi",
+    modelAlias: "latest:openrouter/deepseek/deepseek-v4*-flash",
+  },
   {
     id: "pi-deepseek-v4.1-flash",
     label: "pi-mono / DeepSeek V4.1 Flash (OpenRouter)",

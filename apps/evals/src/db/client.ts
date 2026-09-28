@@ -139,6 +139,18 @@ CREATE TABLE IF NOT EXISTS model_catalog_cache (
   payload TEXT NOT NULL
 );
 
+-- Alias configs pinned to a concrete model once per run, at creation. See
+-- src/runner/run-configs.ts.
+CREATE TABLE IF NOT EXISTS eval_run_configs (
+  run_id TEXT NOT NULL REFERENCES eval_runs(id),
+  config_id TEXT NOT NULL,
+  model_alias TEXT NOT NULL,
+  resolved_model TEXT NOT NULL,
+  catalog_fetched_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  PRIMARY KEY (run_id, config_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_attempts_run ON attempts(run_id);
 CREATE INDEX IF NOT EXISTS idx_judgments_attempt ON judgments(attempt_id);
 CREATE INDEX IF NOT EXISTS idx_artifacts_attempt ON artifacts(attempt_id);
@@ -195,4 +207,6 @@ const COLUMN_MIGRATIONS = [
   // gate rows and all pre-v2 rows read back NULL on both.
   "ALTER TABLE judgments ADD COLUMN dimension TEXT",
   "ALTER TABLE judgments ADD COLUMN weight REAL",
+  // Concrete model an attempt ran on (harness-reported, else the run's pin).
+  "ALTER TABLE attempts ADD COLUMN resolved_model TEXT",
 ];

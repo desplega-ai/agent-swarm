@@ -72,6 +72,7 @@ import {
   type WorkerRosterEntry,
   type WorkerSpec,
 } from "../types.ts";
+import { applyRunConfigPins, ensureRunConfigPins } from "./run-configs.ts";
 import { topoOrder } from "./topo.ts";
 
 const DEFAULT_TASK_TIMEOUT_MS = 10 * 60 * 1000;
@@ -1846,6 +1847,8 @@ async function runAttemptOnce(opts: {
       costSource,
       judgeCostUsd,
       tokensJson: tokens ? JSON.stringify(tokens) : null,
+      // Harness-reported model wins; the config's (pinned) model is the fallback.
+      resolvedModel: tokens?.model ?? config.model ?? null,
       timingsJson: JSON.stringify(timings),
       durationMs: Date.now() - startedAt,
       finishedAt: new Date().toISOString(),
@@ -2005,10 +2008,17 @@ export async function executeRun(opts: {
   signal?: AbortSignal;
   log?: (msg: string) => void;
 }): Promise<void> {
-  const { db, runId, registry, signal } = opts;
+  const { db, runId, signal } = opts;
   const baseLog = opts.log ?? ((msg: string) => console.log(msg));
   const run = await getRun(db, runId);
   if (!run) throw new Error(`run ${runId} not found`);
+  // Alias configs grade the model pinned at run creation (pinned here too for
+  // runs created before pinning existed), never the catalog of the moment.
+  const pins = await ensureRunConfigPins(db, runId, opts.registry, run.scenarioIds, run.configIds);
+  const registry = applyRunConfigPins(opts.registry, pins);
+  for (const pin of pins.values()) {
+    baseLog(`config ${pin.configId}: ${pin.modelAlias} → ${pin.resolvedModel}`);
+  }
 
   await ensureAttemptRows(db, runId);
   await setRunStatus(db, runId, "running");

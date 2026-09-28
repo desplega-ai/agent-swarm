@@ -396,6 +396,7 @@ export const CONFIG_AA_ROWS: Record<string, { sourceRow: string; matchedVariant:
  */
 export const AA_UNMATCHED_CONFIG_IDS: Record<string, string> = {
   "claude-opus-4.6": "no Claude Opus 4.6 row in the 2026-06-12 snapshot",
+  "pi-latest-deepseek-v4": "moving alias; its resolved model changes per run",
   "claude-sonnet-5": "no Claude Sonnet 5 row in the 2026-06-12 snapshot",
   "pi-glm-flash": "TSV has only GLM-5.x rows — no GLM 4.7 Flash",
   "opencode-glm-flash": "TSV has only GLM-5.x rows — no GLM 4.7 Flash",

@@ -1,6 +1,7 @@
 import { getAaForConfig } from "../configs/aa.ts";
 import { configs } from "../configs/index.ts";
 import { scenarios } from "../scenarios/index.ts";
+import { validateConfigModel } from "./cost/resolve-alias.ts";
 import { normalizeOutcome } from "./normalize-outcome.ts";
 import type { Registry } from "./runner/index.ts";
 import { findDependencyCycles } from "./runner/topo.ts";
@@ -287,9 +288,14 @@ export function loadRegistry(): Registry {
       violations.push(`scenario "${scenario.id}": ${error}`);
     }
   }
+  for (const config of configs) {
+    for (const error of validateConfigModel(config)) {
+      violations.push(`config "${config.id}": ${error}`);
+    }
+  }
   if (violations.length > 0) {
     throw new Error(
-      `invalid scenario definitions:\n${violations.map((v) => `  - ${v}`).join("\n")}`,
+      `invalid registry definitions:\n${violations.map((v) => `  - ${v}`).join("\n")}`,
     );
   }
   return {
@@ -419,6 +425,7 @@ export function serializeConfig(c: HarnessConfig) {
     label: c.label ?? null,
     provider: c.provider,
     model: c.model ?? null,
+    modelAlias: c.modelAlias ?? null,
     modelTier: c.modelTier ?? null,
     envKeys: c.env ? Object.keys(c.env) : [],
     /** v7.6 item D: AA benchmark block; null = unmatched (UI renders nothing). */
