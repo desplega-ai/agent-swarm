@@ -556,7 +556,10 @@ async function remediateCrashedWorkerTask(
   if (!task.agentId) return; // Type guard — caller already checked.
 
   if (decision.action === "fail") {
-    const failed = await failTask(task.id, decision.reason);
+    // CAS on the lastUpdatedAt this sweep read: progress since then wins.
+    const failed = await failTask(task.id, decision.reason, {
+      expectedLastUpdatedAt: task.lastUpdatedAt,
+    });
     if (failed) {
       findings.autoFailedTasks.push({
         taskId: task.id,
@@ -578,6 +581,8 @@ async function remediateCrashedWorkerTask(
   const superseded = await supersedeTask(task.id, {
     reason: decision.reason,
     resumeTaskId: null,
+    // CAS on the lastUpdatedAt this sweep read: progress since then wins.
+    expectedLastUpdatedAt: task.lastUpdatedAt,
   });
   if (!superseded) {
     return;

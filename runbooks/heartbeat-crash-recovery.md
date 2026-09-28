@@ -190,13 +190,15 @@ if proposed.action == record:
     stalledTasks += task
     continue
 if proposed.action == fail:
-    failTask(task.id, proposed.reason)
+    failTask(task.id, proposed.reason, expectedLastUpdatedAt = task.lastUpdatedAt)
     clean a stale active session when classification == stale-session
     restore agent state
     continue
 
+# fail and supersede both compare-and-swap on the lastUpdatedAt this sweep read:
+# a progress write between the candidate read and the write cancels remediation.
 # proposed.action == supersede-resume:
-supersedeTask(parent)                      # frees the agent's in_progress slot
+supersedeTask(parent, expectedLastUpdatedAt = task.lastUpdatedAt)   # frees the agent's in_progress slot
 promotePendingSteeringForTask(parent)       # pending rows → follow-up tasks, exactly once
 resume = createResumeFollowUp(parent, reason = crash_recovery | graceful_shutdown):
     preferredAgentId = undefined
