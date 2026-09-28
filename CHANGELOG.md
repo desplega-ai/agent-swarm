@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.157.0] - 2026-09-28
+
+### Added
+- UI audit closed out: one pager under every list, a Filters popover and labelled "New task" on Tasks, approvals sorted by the soonest live deadline, approver and resolver shown as user chips, compact Usage KPI cards, and a tab strip for the Usage and Settings subnavs on phones (#1627).
+
+### Changed
+- Worker image bumps `@anthropic-ai/claude-code` 2.1.280 -> 2.1.283 and `@openai/codex` 0.156.1 -> 0.157.1 (#1630).
+- agent-fs 0.13.10 is pinned in the UI e2e workflow and the all-workers Helm example (#1626).
+
+### Fixed
+- Spent `defer-task` wake-up schedules are deleted 30 days after they fire instead of piling up forever (#1629).
+- On touch devices, Return inserts a newline in the session and chat composers; the send button submits (#1628).
+
 ## [1.156.0] - 2026-09-26
 
 ### Added
