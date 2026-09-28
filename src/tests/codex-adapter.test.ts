@@ -7,7 +7,7 @@
  */
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, rmSync } from "node:fs";
+import { lstatSync, mkdirSync, readFileSync, readlinkSync, rmSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import type {
   AgentMessageItem,
@@ -1238,6 +1238,83 @@ stale
     const after = await Bun.file(agentsMd).text();
     expect(after).not.toContain("<swarm_system_prompt>");
     expect(after).toContain("# Project instructions");
+  });
+
+  test("cleanup restores a plain AGENTS.md byte-identically", async () => {
+    const dir = join(tmpDir, "byte-identical");
+    mkdirSync(dir, { recursive: true });
+    const original = "# Project instructions\n\nDo things.\n";
+    await Bun.write(join(dir, "AGENTS.md"), original);
+
+    const handle = await writeCodexAgentsMd(dir, "swarm prompt");
+    await handle.cleanup();
+
+    expect(readFileSync(join(dir, "AGENTS.md"), "utf8")).toBe(original);
+  });
+
+  test("never writes through an AGENTS.md -> CLAUDE.md symlink", async () => {
+    const dir = join(tmpDir, "symlink");
+    mkdirSync(dir, { recursive: true });
+    const original = "# Repo rules\n\nDo things.\n";
+    const claudeMd = join(dir, "CLAUDE.md");
+    const agentsMd = join(dir, "AGENTS.md");
+    await Bun.write(claudeMd, original);
+    symlinkSync("CLAUDE.md", agentsMd);
+
+    const handle = await writeCodexAgentsMd(dir, "swarm prompt");
+
+    // During the session: AGENTS.md is a real file, CLAUDE.md is untouched.
+    expect(lstatSync(agentsMd).isSymbolicLink()).toBe(false);
+    const during = readFileSync(agentsMd, "utf8");
+    expect(during).toContain("swarm prompt");
+    expect(during).toContain("# Repo rules");
+    expect(readFileSync(claudeMd, "utf8")).toBe(original);
+
+    await handle.cleanup();
+
+    expect(lstatSync(agentsMd).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(agentsMd)).toBe("CLAUDE.md");
+    expect(readFileSync(claudeMd, "utf8")).toBe(original);
+  });
+
+  test("carries agent edits to a symlinked AGENTS.md over to the link target", async () => {
+    const dir = join(tmpDir, "symlink-edit");
+    mkdirSync(dir, { recursive: true });
+    const claudeMd = join(dir, "CLAUDE.md");
+    const agentsMd = join(dir, "AGENTS.md");
+    await Bun.write(claudeMd, "# Repo rules\n");
+    symlinkSync("CLAUDE.md", agentsMd);
+
+    const handle = await writeCodexAgentsMd(dir, "swarm prompt");
+    await Bun.write(agentsMd, `${readFileSync(agentsMd, "utf8")}- new rule\n`);
+    await handle.cleanup();
+
+    expect(lstatSync(agentsMd).isSymbolicLink()).toBe(true);
+    expect(readFileSync(claudeMd, "utf8")).toBe("# Repo rules\n- new rule\n");
+  });
+
+  test("restores a symlink left swapped out by a crashed session", async () => {
+    const dir = join(tmpDir, "symlink-crash");
+    mkdirSync(dir, { recursive: true });
+    const original = "# Repo rules\n";
+    const claudeMd = join(dir, "CLAUDE.md");
+    const agentsMd = join(dir, "AGENTS.md");
+    await Bun.write(claudeMd, original);
+    symlinkSync("CLAUDE.md", agentsMd);
+
+    // First session never runs cleanup (crash).
+    await writeCodexAgentsMd(dir, "first prompt");
+    expect(lstatSync(agentsMd).isSymbolicLink()).toBe(false);
+
+    const handle = await writeCodexAgentsMd(dir, "second prompt");
+    const during = readFileSync(agentsMd, "utf8");
+    expect(during).toContain("second prompt");
+    expect(during).not.toContain("first prompt");
+    expect(readFileSync(claudeMd, "utf8")).toBe(original);
+
+    await handle.cleanup();
+    expect(lstatSync(agentsMd).isSymbolicLink()).toBe(true);
+    expect(readFileSync(claudeMd, "utf8")).toBe(original);
   });
 });
 

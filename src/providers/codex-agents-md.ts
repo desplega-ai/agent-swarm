@@ -21,23 +21,31 @@
  *       instructions.
  *     - Otherwise, write just the block.
  *     - Mark `createdFresh: true` so cleanup removes the file entirely.
+ * - `AGENTS.md` is a symlink (many repos ship `AGENTS.md -> CLAUDE.md`):
+ *     never write through it. Swap in a real file holding the block plus the
+ *     link target's contents, and restore the symlink on cleanup. The open tag
+ *     records the link target (`<swarm_system_prompt symlink="...">`) so the
+ *     next session can restore the link if this one crashed before cleanup.
  * - Existing `AGENTS.md` already contains the block: replace the block with
  *   the fresh contents.
  * - Existing `AGENTS.md` without the block: prepend the block.
  *
  * Cleanup mirrors the creation logic — if we created the file fresh, delete
- * it; otherwise re-read the current AGENTS.md and strip just the managed
- * block so anything the agent appended during the session is preserved.
+ * it; if we swapped out a symlink, restore it; otherwise re-read the current
+ * AGENTS.md and strip just the managed block so anything the agent appended
+ * during the session is preserved.
  *
  * The helper is deliberately isolated from the adapter so it can be
  * unit-tested without pulling in the Codex SDK.
  */
 
-import { join } from "node:path";
+import { lstat, readlink, symlink, unlink } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 
 const BLOCK_OPEN = "<swarm_system_prompt>";
 const BLOCK_CLOSE = "</swarm_system_prompt>";
-const BLOCK_REGEX = /<swarm_system_prompt>[\s\S]*?<\/swarm_system_prompt>\n?/;
+const BLOCK_REGEX = /<swarm_system_prompt(?: symlink="[^"]*")?>[\s\S]*?<\/swarm_system_prompt>\n?/;
+const SYMLINK_MARKER_REGEX = /<swarm_system_prompt symlink="([^"]*)">/;
 
 export interface CodexAgentsMdHandle {
   cleanup(): Promise<void>;
@@ -46,6 +54,32 @@ export interface CodexAgentsMdHandle {
 const NOOP_HANDLE: CodexAgentsMdHandle = {
   cleanup: async () => {},
 };
+
+async function readIfExists(path: string): Promise<string | null> {
+  const file = Bun.file(path);
+  return (await file.exists()) ? await file.text() : null;
+}
+
+/**
+ * Put the `AGENTS.md -> linkTarget` symlink back in place of our swapped-in
+ * real file. Edits the agent made to AGENTS.md during the session would have
+ * landed in the link target had the link been in place, so carry them over
+ * (block stripped) when they differ from the target's current contents.
+ */
+async function restoreSymlink(agentsMdPath: string, linkTarget: string): Promise<void> {
+  const current = await readIfExists(agentsMdPath);
+  const targetPath = resolve(dirname(agentsMdPath), linkTarget);
+  const targetContent = await readIfExists(targetPath);
+  await unlink(agentsMdPath).catch(() => {});
+  await symlink(linkTarget, agentsMdPath);
+  if (current === null || targetContent === null) {
+    return;
+  }
+  const stripped = current.replace(BLOCK_REGEX, "");
+  if (stripped !== targetContent) {
+    await Bun.write(targetPath, stripped);
+  }
+}
 
 /**
  * Write (or refresh) a managed `<swarm_system_prompt>` block inside
@@ -63,33 +97,57 @@ export async function writeCodexAgentsMd(
 
   const agentsMdPath = join(cwd, "AGENTS.md");
   const claudeMdPath = join(cwd, "CLAUDE.md");
+
+  let stat = await lstat(agentsMdPath).catch(() => null);
+
+  // A previous session swapped a symlink out and crashed before cleanup:
+  // restore the link first, then proceed as a normal symlink session.
+  if (stat?.isFile()) {
+    const marker = (await Bun.file(agentsMdPath).text()).match(SYMLINK_MARKER_REGEX);
+    if (marker?.[1] !== undefined) {
+      await restoreSymlink(agentsMdPath, decodeURIComponent(marker[1]));
+      stat = await lstat(agentsMdPath);
+    }
+  }
+
+  if (stat?.isSymbolicLink()) {
+    const linkTarget = await readlink(agentsMdPath);
+    const targetContent = (await readIfExists(resolve(dirname(agentsMdPath), linkTarget))) ?? "";
+    const block = `<swarm_system_prompt symlink="${encodeURIComponent(linkTarget)}">\n${systemPrompt}\n${BLOCK_CLOSE}`;
+    // Never write through the link: replace it with a real file for the session.
+    await unlink(agentsMdPath);
+    await Bun.write(agentsMdPath, `${block}\n${targetContent.replace(BLOCK_REGEX, "")}`);
+
+    return {
+      async cleanup(): Promise<void> {
+        try {
+          await restoreSymlink(agentsMdPath, linkTarget);
+        } catch {
+          // Cleanup is best-effort; the symlink marker lets the next session
+          // finish the restore.
+        }
+      },
+    };
+  }
+
   const block = `${BLOCK_OPEN}\n${systemPrompt}\n${BLOCK_CLOSE}`;
-
-  const agentsMdFile = Bun.file(agentsMdPath);
-  const existingAgentsMdExists = await agentsMdFile.exists();
-
   let createdFresh = false;
   let newContent: string;
 
-  if (!existingAgentsMdExists) {
+  if (!stat) {
     // No AGENTS.md yet — prefer CLAUDE.md content as a base if present.
-    const claudeMdFile = Bun.file(claudeMdPath);
-    const claudeMdExists = await claudeMdFile.exists();
-    if (claudeMdExists) {
-      const claudeContent = await claudeMdFile.text();
-      newContent = `${block}\n\n${claudeContent}`;
-    } else {
-      newContent = `${block}\n`;
-    }
+    const claudeContent = await readIfExists(claudeMdPath);
+    newContent = claudeContent !== null ? `${block}\n\n${claudeContent}` : `${block}\n`;
     createdFresh = true;
   } else {
-    const existingContent = await agentsMdFile.text();
+    const existingContent = await Bun.file(agentsMdPath).text();
     if (BLOCK_REGEX.test(existingContent)) {
       // Replace the stale block in place.
       newContent = existingContent.replace(BLOCK_REGEX, `${block}\n`);
     } else {
-      // Prepend the block, keeping existing content intact.
-      newContent = `${block}\n\n${existingContent}`;
+      // Prepend the block with a single newline so cleanup's strip restores
+      // the original bytes exactly.
+      newContent = `${block}\n${existingContent}`;
     }
   }
 
