@@ -268,6 +268,7 @@ value:getContextSnapshotsByTaskId
 value:getContextSummaryByTaskId
 value:getContextVersion
 value:getContextVersionHistory
+value:getCurrentStepForNode
 value:getDailySpendForAgent
 value:getDailySpendForUser
 value:getDailySpendGlobal

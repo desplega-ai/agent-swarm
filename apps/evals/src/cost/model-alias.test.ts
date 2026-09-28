@@ -86,7 +86,10 @@ describe("against the committed models.dev snapshot", () => {
     const haiku = await lookupModelCost("claude", "haiku");
     expect(haiku?.id).toBe("claude-haiku-4-5");
     const sonnet = await lookupModelCost("claude", "sonnet");
-    expect(sonnet?.id).toBe("claude-sonnet-5");
+    expect(sonnet?.id).toBe("claude-sonnet-5-5");
     expect(sonnet?.inputPerM).toBe(2);
+    const sonnet55 = await lookupModelCost("claude", "claude-sonnet-5-5");
+    expect(sonnet55?.id).toBe("claude-sonnet-5-5");
+    expect(sonnet55?.outputPerM).toBe(10);
   });
 });

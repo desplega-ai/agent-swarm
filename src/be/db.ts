@@ -8058,11 +8058,13 @@ export async function getLastRunStart(workflowId: string): Promise<WorkflowRun |
 export async function getRetryableSteps(): Promise<WorkflowRunStep[]> {
   const now = new Date().toISOString();
   const rows = await getDbClient().query<WorkflowRunStepRow>(
-    `SELECT * FROM workflow_run_steps
-       WHERE status = 'failed'
-         AND nextRetryAt IS NOT NULL
-         AND nextRetryAt <= ?
-       ORDER BY nextRetryAt ASC`,
+    `SELECT s.* FROM workflow_run_steps s
+       JOIN workflow_runs r ON r.id = s.runId
+       WHERE s.status = 'failed'
+         AND s.nextRetryAt IS NOT NULL
+         AND s.nextRetryAt <= ?
+         AND r.status IN ('running', 'waiting', 'failed')
+       ORDER BY s.nextRetryAt ASC`,
     [now],
   );
   return rows.map(rowToWorkflowRunStep);
@@ -8114,6 +8116,37 @@ export async function getLatestStepForNode(
     [runId, nodeId],
   );
   return row ? rowToWorkflowRunStep(row) : null;
+}
+
+/**
+ * The node's latest step when it already covers the current predecessor
+ * completions: it is running, waiting or completed, and no predecessor has
+ * completed a step inserted after it. A loop iteration always has a newer
+ * predecessor completion, so it never matches. Ordered by rowid, which
+ * follows insert order; startedAt can tie within a millisecond.
+ */
+export async function getCurrentStepForNode(
+  runId: string,
+  nodeId: string,
+  predecessorIds: string[],
+): Promise<WorkflowRunStep | null> {
+  const row = await getDbClient().get<WorkflowRunStepRow>(
+    "SELECT * FROM workflow_run_steps WHERE runId = ? AND nodeId = ? ORDER BY rowid DESC LIMIT 1",
+    [runId, nodeId],
+  );
+  if (!row || !["running", "waiting", "completed"].includes(row.status)) return null;
+  if (predecessorIds.length > 0) {
+    const newer = await getDbClient().get<{ found: number }>(
+      `SELECT 1 AS found FROM workflow_run_steps
+         WHERE runId = ? AND status = 'completed'
+           AND nodeId IN (${predecessorIds.map(() => "?").join(", ")})
+           AND rowid > (SELECT rowid FROM workflow_run_steps WHERE id = ?)
+         LIMIT 1`,
+      [runId, ...predecessorIds, row.id],
+    );
+    if (newer) return null;
+  }
+  return rowToWorkflowRunStep(row);
 }
 
 // --- Workflow Version History ---

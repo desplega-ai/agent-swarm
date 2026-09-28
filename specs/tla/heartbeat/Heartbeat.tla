@@ -1,7 +1,7 @@
 ---------------------------- MODULE Heartbeat ----------------------------
 (***************************************************************************)
 (* Server-side heartbeat + the task lifecycle it races with, as the code   *)
-(* behaves on main @ 2180cd40. Every action maps to file:line and the SQL  *)
+(* behaves on main @ f031fa8e. Every action maps to file:line and the SQL  *)
 (* guard it models in ACTIONS.md. Time is abstracted: `stale[t]` means     *)
 (* "lastUpdatedAt older than the stall threshold", and `Age` sets it.     *)
 (*                                                                         *)
@@ -20,7 +20,8 @@ CONSTANTS
     G_CLAIM_STATUS,   \* claimTask:  WHERE status = 'unassigned'
     G_TERMINAL_CAS,   \* supersede/fail/complete: WHERE status NOT IN terminal
     G_REBOOT_TOUCHED, \* runRebootSweep: skip tasks claimed after boot
-    FIX_STALL_CAS,    \* proposed: supersede/fail also WHERE lastUpdatedAt = observed
+    G_STALL_CAS,      \* supersede/fail also WHERE lastUpdatedAt = observed (#1668)
+    G_REBOOT_HB_AGE,  \* runRebootSweep: skip sessions younger than 15 min (#1669)
     FIX_ORPHAN_REPAIR,\* proposed: sweep re-creates a missing resume
     FIX_NO_REBOOT,    \* proposed: delete runRebootSweep, rely on the classifier
     HYPO_REOFFER      \* hypothetical path that re-offers an unassigned task
@@ -250,11 +251,12 @@ HbRead(t) ==
     /\ UNCHANGED <<st, own, offTo, par, gen, pin, ver, stale, sess, touched,
                    running, alive, cl, acc, rb, apiUp, wc, ac, liveKill, badAcc>>
 
-\* supersedeTask / failTask: WHERE id = ? AND status NOT IN terminal.
+\* supersedeTask / failTask: WHERE id = ? AND status NOT IN terminal
+\* AND lastUpdatedAt = <observed> (expectedLastUpdatedAt, #1668).
 HbWrite ==
     LET t == hb.t IN
     /\ apiUp /\ hb.pc = "decided"
-    /\ IF (~G_TERMINAL_CAS \/ st[t] \notin Terminal) /\ (FIX_STALL_CAS => ver[t] = hb.snap)
+    /\ IF (~G_TERMINAL_CAS \/ st[t] \notin Terminal) /\ (G_STALL_CAS => ver[t] = hb.snap)
          THEN /\ st' = [st EXCEPT ![t] = IF hb.act = "fail" THEN "failed" ELSE "superseded"]
               /\ liveKill' = (liveKill \/ LiveNow(t))
               /\ sess' = [sess EXCEPT ![t] = IF @ = "dead" THEN "none" ELSE @]
@@ -338,15 +340,23 @@ ApiBoot ==
     /\ UNCHANGED <<st, own, offTo, par, gen, pin, ver, stale, running,
                    alive, cl, acc, hb, wc, ac, liveKill, badAcc>>
 
-\* runRebootSweep: skip if claimed after boot or live session; else failTask.
+\* runRebootSweep: skip if claimed after boot, if the session heartbeated
+\* since boot, or (#1669) if its heartbeat is younger than the classifier's
+\* 15 min stale-heartbeat threshold; else failTask. Session age is not a
+\* variable: `hbOld` picks it per step. Worker lastUpdatedAt writes come with
+\* a tool-call heartbeat, so an old heartbeat implies stale lastUpdatedAt
+\* (hbOld => stale[t]); a stale task may still have a recent heartbeat.
 RebootFail(t) ==
     /\ apiUp /\ rb.pc = "idle" /\ t \in rb.todo
-    /\ IF st[t] = "in_progress" /\ ~(G_REBOOT_TOUCHED /\ touched[t]) /\ sess[t] # "live"
-         THEN /\ st' = [st EXCEPT ![t] = "failed"]
-              /\ liveKill' = (liveKill \/ LiveNow(t))
-              /\ rb' = [rb EXCEPT !.todo = @ \ {t}, !.pc = "retry", !.t = t]
-         ELSE /\ rb' = [rb EXCEPT !.todo = @ \ {t}]
-              /\ UNCHANGED <<st, liveKill>>
+    /\ \E hbOld \in {b \in BOOLEAN : b => stale[t]} :
+       IF /\ st[t] = "in_progress" /\ ~(G_REBOOT_TOUCHED /\ touched[t])
+          /\ \/ sess[t] = "none"
+             \/ sess[t] \in {"prelive", "dead"} /\ (G_REBOOT_HB_AGE => hbOld)
+       THEN /\ st' = [st EXCEPT ![t] = "failed"]
+            /\ liveKill' = (liveKill \/ LiveNow(t))
+            /\ rb' = [rb EXCEPT !.todo = @ \ {t}, !.pc = "retry", !.t = t]
+       ELSE /\ rb' = [rb EXCEPT !.todo = @ \ {t}]
+            /\ UNCHANGED <<st, liveKill>>
     /\ UNCHANGED <<own, offTo, par, gen, pin, ver, stale, sess, touched, running,
                    alive, cl, acc, hb, apiUp, wc, ac, badAcc>>
 

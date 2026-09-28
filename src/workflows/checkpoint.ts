@@ -1,4 +1,4 @@
-import { getDbClient, updateWorkflowRun, updateWorkflowRunStep } from "../be/db";
+import { getDbClient, getWorkflowRun, updateWorkflowRun, updateWorkflowRunStep } from "../be/db";
 import type { RetryPolicy } from "../types";
 
 /**
@@ -66,10 +66,15 @@ export async function checkpointStepFailure(
 
   const markRunFailed = options?.markRunFailed ?? true;
   if (markRunFailed) {
-    await updateWorkflowRun(runId, {
-      status: "failed",
-      error: `Step failed: ${error}`,
-      finishedAt: now,
+    // A cancel or finalization that committed while the step ran wins.
+    await getDbClient().transaction(async () => {
+      const run = await getWorkflowRun(runId);
+      if (run?.status !== "running" && run?.status !== "waiting") return;
+      await updateWorkflowRun(runId, {
+        status: "failed",
+        error: `Step failed: ${error}`,
+        finishedAt: now,
+      });
     });
   }
 
