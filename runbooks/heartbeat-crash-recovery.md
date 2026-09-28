@@ -16,7 +16,8 @@ Queue-pickup liveness alarm: `src/queue-stall-alarm.ts`.
 flowchart TD
   tick["Heartbeat tick (~90s)<br/>codeLevelTriage()"] --> expire["expireStaleRuntimeInstances() (§1a)<br/>multi-runtime only"]
   expire --> detect["detectAndRemediateStalledTasks()"]
-  detect --> health["checkWorkerHealth()<br/>busy ↔ idle (skips offline)"]
+  detect --> repair["repairSupersededWithoutResume()<br/>superseded, no resume child,<br/>finished 1m-24h ago → create resume"]
+  repair --> health["checkWorkerHealth()<br/>busy ↔ idle (skips offline)"]
   health --> cleanup["cleanupStaleResources()<br/>stale sessions (30m), reviewing,<br/>inbox, mentions, workflow runs,<br/>+ approval timeout + auto-cancel sweeps<br/>+ reaper: escalate unreclaimed pinned resumes (§3)<br/>+ escalateStarvedPoolTasks: zero-eligible-agent pool tasks (§4)"]
   cleanup --> assign["autoAssignPoolTasks()<br/>per-task: first idle worker satisfying<br/>isAgentEligibleForTask (§4) — else leave queued"]
 
@@ -25,7 +26,7 @@ flowchart TD
 
 - **Reboot sweep liveness predicate** (`runRebootSweep`, boot epoch parsed from `globalThis.__runId` = `run_<epochMs>`), evaluated per `in_progress` task in this order:
   1. **Claimed after boot → skip.** A task with `lastUpdatedAt >= bootEpoch - 5s` is skipped before any session lookup. `claimTask` / `startTask` stamp `lastUpdatedAt` at the `in_progress` transition and the API is the sole DB writer, so a post-boot value proves the claim (or a live worker's write) happened after this process started. It cannot be a pre-boot orphan. This is what keeps a task alive when its worker is still inside a slow provider spawn (opencode cold start exceeds the 5s sweep delay). If the task later goes quiet, the regular stalled-task sweep still covers it.
-  2. **Session live → skip.** A session is considered "live, skip" only if `lastHeartbeatAt >= bootEpoch - 5s`. Sessions with pre-boot heartbeats are stale artifacts that survived the WAL-mode SQLite restart and are treated as absent → auto-fail + retry child. This is **concurrency-safe**: a worker with N concurrent tasks keeps fresh (post-boot) heartbeats on its live sessions; only genuinely stale ones get classified.
+  2. **Session live → skip.** A session is "live, skip" if `lastHeartbeatAt >= bootEpoch - 5s`, **or** if its heartbeat is younger than `STALL_THRESHOLD_STALE_HEARTBEAT_MIN` (15 min). Workers run in their own containers and outlive an API restart, and sessions heartbeat on tool calls only, so a live worker inside a long model call has no post-boot heartbeat in the first 5s. Only a session stale by the classifier's own threshold is treated as dead → auto-fail + retry child; fresher ones are left to the stalled-task sweep.
   3. If `__runId` is missing/unparseable, both checks fall back to the legacy behavior (session exists → skip, no claim-time check). Never more aggressive than before.
 - **Worker side** (`src/commands/runner.ts`): the worker registers its active session (POST `/api/active-sessions`, keyed on the per-task runner session id) *before* it starts the provider spawn, and fills in the provider session id on `session_init`. So the window in which an `in_progress` task has no session row is one HTTP round trip, not the whole spawn. On spawn failure the worker fails the task and then removes the row.
 - The **boot-triage seed script** (`src/be/seed-scripts/catalog/boot-triage.ts`) mirrors this logic: it flags `in_progress` tasks that are on an offline agent OR whose session's `lastHeartbeatAt` is older than `stuckMinutes` ago (no fresh session heartbeat).
@@ -228,13 +229,15 @@ if proposed.action == record:
     stalledTasks += task
     continue
 if proposed.action == fail:
-    failTask(task.id, proposed.reason)
+    failTask(task.id, proposed.reason, expectedLastUpdatedAt = task.lastUpdatedAt)
     clean a stale active session when classification == stale-session
     restore agent state
     continue
 
+# fail and supersede both compare-and-swap on the lastUpdatedAt this sweep read:
+# a progress write between the candidate read and the write cancels remediation.
 # proposed.action == supersede-resume:
-supersedeTask(parent)                      # frees the agent's in_progress slot
+supersedeTask(parent, expectedLastUpdatedAt = task.lastUpdatedAt)   # frees the agent's in_progress slot
 promotePendingSteeringForTask(parent)       # pending rows → follow-up tasks, exactly once
 resume = createResumeFollowUp(parent, reason = crash_recovery | graceful_shutdown):
     preferredAgentId = undefined
@@ -252,6 +255,15 @@ resume = createResumeFollowUp(parent, reason = crash_recovery | graceful_shutdow
     createTaskExtended(resume, agentId = preferredAgentId, tags = tags)
     #   agentId set  → status = pending  (PINNED to the original agent)
     #   agentId none → status = unassigned (pool — only genuinely-gone / rollback)
+
+# every sweep, after the stalled-task detector:
+repairSupersededWithoutResume():
+    # supersede and resume creation are separate writes; a crash between them
+    # leaves a superseded task with no resume and nothing else reads it
+    for t in superseded tasks, not workflow steps, finishedAt in [now-24h, now-1m],
+             with no child where taskType = 'resume':
+        if resume budget exhausted: continue
+        createResumeFollowUp(t, crash_recovery); backfill the supersede log entry
 
 # every sweep, inside cleanupStaleResources:
 escalateUnreclaimedResumes():
@@ -350,6 +362,7 @@ bootEpoch = parse(globalThis.__runId)                        # run_<epochMs>; nu
 if bootEpoch and task.lastUpdatedAt >= bootEpoch - 5s: skip   # claimed after boot: not an orphan
 session = getActiveSessionForTask(task.id)
 if session and (bootEpoch is null or session.lastHeartbeatAt >= bootEpoch - 5s): skip
+if session and now - session.lastHeartbeatAt < STALL_THRESHOLD_STALE_HEARTBEAT_MIN: skip
 failTask(task.id)                                             # then create the retry child below
 
 # reboot-sweep retry child (on each auto-failed in_progress task):

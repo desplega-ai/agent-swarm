@@ -125,7 +125,7 @@ Checking the proposed fixes together surfaced three gaps in the *fixes*, each co
 spec before the fix PRs:
 
 - Excluding retry-pending nodes from recovery (`FixRecoveryRetry`) exposes recovery's blind
-  `run -> completed` when nothing is ready (`recovery.ts:88-94`). The fix must finalize through a
+  `run -> completed` when nothing is ready (`recovery.ts:89-95`). The fix must finalize through a
   guarded transaction.
 - Waiting on predecessors with a live step is not enough for CX3: a branch that was routed to
   but has not inserted its row yet must also hold the join (`Awaited` in the spec).

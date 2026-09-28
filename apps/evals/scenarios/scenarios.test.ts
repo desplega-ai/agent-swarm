@@ -265,8 +265,9 @@ describe("spec'd scenario shapes (v9 orchestration substrate)", () => {
       "dispatch-order",
       "correctness",
     ]);
-    expect(`${s.tasks[0]?.description}`).toMatch(/KV/);
-    expect(`${s.tasks[0]?.description}`).toMatch(/Avoid raw curl/);
+    // v2: the prompt names goals, not tools; the conventions live in memory.
+    expect((s.seed?.memories ?? []).join("\n")).toMatch(/alpha\/checkpoint/);
+    expect(`${s.tasks[0]?.description}`).toMatch(/raw curl/);
   });
 
   test("tool-routing forwards an outputSchema and gates on it", () => {

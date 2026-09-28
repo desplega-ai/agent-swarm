@@ -33,6 +33,7 @@ const CONTEXT_WINDOW_DEFAULTS: Record<string, number> = {
   "claude-opus-5": 1_000_000,
   "claude-fable-5": 1_000_000,
   "claude-mythos-5": 1_000_000,
+  "claude-sonnet-5-5": 1_000_000,
   "claude-sonnet-5": 1_000_000,
   // Anthropic 4.x family
   "claude-opus-4-8": 1_000_000,

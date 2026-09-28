@@ -12,7 +12,7 @@ TLC needs Java 21 and `tla2tools.jar` (no root: Temurin JRE tarball + the jar in
 ```bash
 export TLC_HOME=/path/with/jre-and-jar
 ./run-props.sh Heartbeat Heartbeat.cfg                 # current code: one TLC run per property
-./run-props.sh Heartbeat Heartbeat.cfg FIX_STALL_CAS=TRUE FIX_ORPHAN_REPAIR=TRUE FIX_NO_REBOOT=TRUE
+./run-props.sh Heartbeat Heartbeat.cfg FIX_ORPHAN_REPAIR=TRUE FIX_NO_REBOOT=TRUE
 ./run-props.sh HeartbeatSimple HeartbeatSimple.cfg
 ./trace.sh Heartbeat Heartbeat.cfg INVARIANT NoLiveKill   # action names of a counterexample
 ./long-run.sh                                          # larger constants + -simulate

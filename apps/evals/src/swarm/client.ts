@@ -228,6 +228,35 @@ export class SwarmClient {
   }
 
   /**
+   * Poll until every task matching `relevant` is terminal (quiescence), or the
+   * deadline passes. Returns the last snapshot plus the ids still open. Used by
+   * scenarios whose lead delegates or defers: the upfront task can go terminal
+   * (e.g. completed via defer-task) while the work it spawned is still running.
+   */
+  async waitForQuiescence(
+    relevant: (task: SwarmTask) => boolean,
+    opts: { deadline: number; intervalMs?: number; signal?: AbortSignal },
+  ): Promise<{ tasks: SwarmTask[]; open: string[] }> {
+    const interval = opts.intervalMs ?? 5_000;
+    let tasks: SwarmTask[] = [];
+    let open: string[] = [];
+    while (true) {
+      if (opts.signal?.aborted) throw new Error("aborted");
+      try {
+        tasks = await this.listAllTasks();
+        open = tasks
+          .filter((t) => relevant(t) && !TERMINAL_STATUSES.has(t.status))
+          .map((t) => t.id);
+        if (open.length === 0) return { tasks, open };
+      } catch {
+        // transient API blip — keep polling until the deadline
+      }
+      if (Date.now() >= opts.deadline) return { tasks, open };
+      await Bun.sleep(interval);
+    }
+  }
+
+  /**
    * Full task set of the attempt's stack (`?fields=full`). Because each attempt
    * boots a fresh DB, this returns exactly THIS attempt's tasks — the scenario's
    * upfront tasks PLUS anything the agents spawned at runtime (lead-delegated

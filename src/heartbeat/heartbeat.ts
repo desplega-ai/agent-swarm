@@ -25,6 +25,7 @@ import {
   getStalePinnedResumes,
   getStaleUnassignedAffinityTasks,
   getStalledInProgressTasks,
+  getSupersededTasksWithoutResume,
   getTaskById,
   getTaskStats,
   getTasksByStatus,
@@ -360,6 +361,10 @@ export async function codeLevelTriage(): Promise<HeartbeatFindings> {
   // 1. Detect and remediate stalled tasks (tiered: auto-fail dead workers)
   await detectAndRemediateStalledTasks(findings);
 
+  // 1.5. Give a resume to any task superseded without one (crash between
+  // the supersede write and the resume write).
+  await repairSupersededWithoutResume(findings);
+
   // 2. Check and fix worker health
   await checkWorkerHealth(findings);
 
@@ -506,6 +511,40 @@ async function detectAndRemediateStalledTasks(findings: HeartbeatFindings): Prom
   }
 }
 
+/** Repair window: skip in-flight supersedes, stop at a day of history. */
+const ORPHAN_SUPERSEDE_MIN_AGE_MS = 60 * 1000;
+const ORPHAN_SUPERSEDE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Supersede and resume creation are separate writes. If the API process dies
+ * between them, the task stays `superseded` with no resume and nothing else
+ * picks it up (the stall classifier only reads `in_progress`). This creates
+ * the missing resume. Found by the TLA+ model (specs/tla/heartbeat/).
+ */
+async function repairSupersededWithoutResume(findings: HeartbeatFindings): Promise<void> {
+  const now = Date.now();
+  const orphans = await getSupersededTasksWithoutResume(
+    new Date(now - ORPHAN_SUPERSEDE_MIN_AGE_MS).toISOString(),
+    new Date(now - ORPHAN_SUPERSEDE_MAX_AGE_MS).toISOString(),
+  );
+  for (const task of orphans) {
+    if (!task.agentId) continue;
+    if (getNextResumeGeneration(task) > maxResumeGenerations()) continue;
+    const resume = await createResumeFollowUp({ parentId: task.id, reason: "crash_recovery" });
+    if (resume.kind !== "created") continue;
+    await backfillSupersedeTaskResumeTaskId(task.id, resume.task.id);
+    findings.autoResumedTasks.push({
+      taskId: task.id,
+      resumeTaskId: resume.task.id,
+      agentId: task.agentId,
+      reason: "repaired superseded task without resume",
+    });
+    console.log(
+      `[Heartbeat] Created missing resume ${resume.task.id.slice(0, 8)} for superseded task ${task.id.slice(0, 8)}`,
+    );
+  }
+}
+
 function isRemediationAction(value: unknown): value is RemediationAction {
   return typeof value === "string" && REMEDIATION_ACTIONS.has(value as RemediationAction);
 }
@@ -564,7 +603,10 @@ async function remediateCrashedWorkerTask(
   if (!task.agentId) return; // Type guard — caller already checked.
 
   if (decision.action === "fail") {
-    const failed = await failTask(task.id, decision.reason);
+    // CAS on the lastUpdatedAt this sweep read: progress since then wins.
+    const failed = await failTask(task.id, decision.reason, {
+      expectedLastUpdatedAt: task.lastUpdatedAt,
+    });
     if (failed) {
       findings.autoFailedTasks.push({
         taskId: task.id,
@@ -586,6 +628,8 @@ async function remediateCrashedWorkerTask(
   const superseded = await supersedeTask(task.id, {
     reason: decision.reason,
     resumeTaskId: null,
+    // CAS on the lastUpdatedAt this sweep read: progress since then wins.
+    expectedLastUpdatedAt: task.lastUpdatedAt,
   });
   if (!superseded) {
     return;
@@ -745,7 +789,16 @@ export async function runRebootSweep(): Promise<void> {
           // Heartbeated after (or within skew of) this boot → genuinely live, skip
           continue;
         }
-        // Pre-boot stale session → fall through to auto-fail + reboot-retry child
+        // Workers run in their own containers and outlive an API restart, and
+        // sessions heartbeat on tool calls only. A pre-boot heartbeat is
+        // therefore not evidence of a dead worker: a live one inside a long
+        // model call has none in the first seconds after boot. Only a session
+        // stale by the classifier's own threshold counts as dead; anything
+        // fresher is left to the regular stalled-task sweep.
+        if (Date.now() - sessionLastSeen < stallThresholdStaleHeartbeatMin() * 60 * 1000) {
+          continue;
+        }
+        // Stale session → fall through to auto-fail + reboot-retry child
       }
 
       // Clean up pre-boot stale session before failing (if it existed)
