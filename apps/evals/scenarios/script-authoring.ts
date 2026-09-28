@@ -128,7 +128,7 @@ const scriptCorrectnessCheck: DeterministicCheck = {
     const runs = tools
       .filter((u) => /script[-_]run/.test(u.toolName) && !u.isError && runsScript(u.input, name))
       .map((u) => parseScriptRunResult(u.result))
-      .filter((r): r is ScriptRunResult => r !== null && r.ok && r.output != null);
+      .filter((r): r is ScriptRunResult => r?.ok === true && r.output != null);
     const completed = runs.at(-1);
     const text = safeStringify(completed?.output);
     const hasTotal = /total|count/i.test(text);

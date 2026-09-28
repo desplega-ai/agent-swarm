@@ -14,7 +14,6 @@ import {
   type SequenceStage,
   safeStringify,
   scoreResult,
-  stageOrderScore,
   taskToolUses,
 } from "./orchestration-utils.ts";
 
