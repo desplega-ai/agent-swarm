@@ -146,9 +146,12 @@ const routingCorrectnessCheck: DeterministicCheck = {
     const checkpoint = kvEntries.find((e) => e.key === "alpha/checkpoint");
     const checkpointText = safeStringify(checkpoint?.value);
     const followUps = ctx.tasks.filter(
-      (t) => t.id !== root?.id && (t.parentTaskId === root?.id || t.creatorAgentId === root?.agentId),
+      (t) =>
+        t.id !== root?.id && (t.parentTaskId === root?.id || t.creatorAgentId === root?.agentId),
     );
-    const followUpText = followUps.map((t) => `${t.title ?? ""}\n${t.description ?? ""}`).join("\n");
+    const followUpText = followUps
+      .map((t) => `${t.title ?? ""}\n${t.description ?? ""}`)
+      .join("\n");
     const output = root?.result ?? "";
     const parts = {
       outputCount: COMPLETED_COUNT.test(output),

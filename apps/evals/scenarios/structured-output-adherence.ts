@@ -83,7 +83,9 @@ function answerScore(obj: Record<string, unknown> | null): { score: number; deta
         ? blockers.length === 0
         : want.blockers.every((re) => blockers.some((b) => re.test(b)));
     points += (decisionOk ? 1 : 0) + (decisionOk && blockersOk ? 0.5 : 0);
-    parts.push(`${name}=${got ? `${String(got.decision)}${blockersOk ? "" : "/blockers?"}` : "missing"}`);
+    parts.push(
+      `${name}=${got ? `${String(got.decision)}${blockersOk ? "" : "/blockers?"}` : "missing"}`,
+    );
   }
   const countOk = obj.shippableCount === RELEASE_SHIPPABLE;
   const extra = services.length !== Object.keys(EXPECTED).length;

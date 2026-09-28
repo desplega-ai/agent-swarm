@@ -231,7 +231,9 @@ export class SwarmClient {
       if (opts.signal?.aborted) throw new Error("aborted");
       try {
         tasks = await this.listAllTasks();
-        open = tasks.filter((t) => relevant(t) && !TERMINAL_STATUSES.has(t.status)).map((t) => t.id);
+        open = tasks
+          .filter((t) => relevant(t) && !TERMINAL_STATUSES.has(t.status))
+          .map((t) => t.id);
         if (open.length === 0) return { tasks, open };
       } catch {
         // transient API blip — keep polling until the deadline

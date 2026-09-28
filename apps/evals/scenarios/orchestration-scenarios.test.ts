@@ -167,7 +167,9 @@ describe("orchestration substrate scenario rubrics", () => {
       });
     expect((await workflows.workflowDagCheck.fn(wf(nodes))).score).toBe(1);
     // A placeholder with no matching inputs key still fails the inputs criterion.
-    const unmapped = nodes.map((n) => (n.id === "verdict" ? { ...n, inputs: { snapshot: "check" } } : n));
+    const unmapped = nodes.map((n) =>
+      n.id === "verdict" ? { ...n, inputs: { snapshot: "check" } } : n,
+    );
     expect((await workflows.workflowDagCheck.fn(wf(unmapped))).score).toBeCloseTo(7 / 9);
   });
 
@@ -481,10 +483,30 @@ describe("orchestration substrate scenario rubrics", () => {
     });
     const answer = {
       services: [
-        { name: "billing", decision: "ship", blockers: [], risks: [risk("migration", "high", true)] },
-        { name: "search", decision: "hold", blockers: ["ranking-regression tests failing"], risks: [] },
-        { name: "notifications", decision: "hold", blockers: ["owner approval missing; waiver expired"], risks: [] },
-        { name: "checkout", decision: "needs-review", blockers: ["cache invalidation (high)"], risks: [risk("cache", "high", false)] },
+        {
+          name: "billing",
+          decision: "ship",
+          blockers: [],
+          risks: [risk("migration", "high", true)],
+        },
+        {
+          name: "search",
+          decision: "hold",
+          blockers: ["ranking-regression tests failing"],
+          risks: [],
+        },
+        {
+          name: "notifications",
+          decision: "hold",
+          blockers: ["owner approval missing; waiver expired"],
+          risks: [],
+        },
+        {
+          name: "checkout",
+          decision: "needs-review",
+          blockers: ["cache invalidation (high)"],
+          risks: [risk("cache", "high", false)],
+        },
       ],
       shippableCount: 1,
       confidence: 0.8,
