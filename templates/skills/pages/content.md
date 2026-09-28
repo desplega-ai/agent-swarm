@@ -523,6 +523,7 @@ Operator launches and password pages show guest names. Never accept a viewer ide
 <div id="status"></div>
 <button id="add">Add card</button>
 <ul id="cards"></ul>
+<swarm-cursors room="match-42"></swarm-cursors>
 <script type="module">
   const lobby = await swarmSdk.room('lobby', { schemaVersion: 1 });
   const board = await swarmSdk.room('match-42', { schemaVersion: 1 });
@@ -548,9 +549,6 @@ Operator launches and password pages show guest names. Never accept a viewer ide
       state.cards[crypto.randomUUID()] = { title: 'New card', done: false };
     });
   };
-  document.addEventListener('pointermove', event => {
-    board.presence.set({ x: event.clientX, y: event.clientY });
-  });
   await lobby.change(state => { state.activeMatch = 'match-42'; });
 </script>
 ```
@@ -574,9 +572,23 @@ Array insertion takes `path`, `index`, and `values`. Text editing takes `path`, 
 
 `room.state` returns the current JSON state. `room.me` contains `{userId, name, kind}`.
 `room.on(event, handler)` returns an unsubscribe function. Events include `change`, `presence`, `reset`, and `error`.
-`room.presence.peers` contains `{userId, name, kind, data}` entries. Cursor data belongs in `peer.data`.
+`room.presence.peers` contains `{userId, name, kind, data}` entries. Cursor data is stored at `peer.data.__cursor`.
 Presence updates default to one transmission per 50 milliseconds. Presence never enters the persisted document.
 Use `await room.close()` when the page no longer needs a room.
+
+### `<swarm-cursors>` — shared page pointers
+
+Add this element to opt a page into named cursors for an existing room:
+
+```html
+<swarm-cursors room="board"></swarm-cursors>
+```
+
+It publishes document-normalized coordinates, so pointers line up across different viewport sizes. Each pointer uses a stable color and the peer's name, smooths incoming updates, and hides after three seconds without movement or when the peer leaves the page. Agent peers are hidden by default; add `include-agents` to show them.
+
+The element uses the room already opened by page code when available. If it opens the room itself, it waits until page scripts have run and defaults to schema version 1. Set `schema-version` when using a newer version, such as `<swarm-cursors room="board" schema-version="2"></swarm-cursors>`.
+
+The cursor uses the existing room presence API. It merges its reserved `__cursor` field with object data already written through `room.presence.set`, preserving fields such as a selected card. Keep page presence data as an object and treat `__cursor` as reserved for the cursor element.
 
 ### Schema changes and persistence
 
