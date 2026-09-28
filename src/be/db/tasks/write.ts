@@ -436,7 +436,16 @@ export async function completeTask(
   return row ? rowToAgentTask(row) : null;
 }
 
-export async function failTask(id: string, reason: string): Promise<AgentTask | null> {
+/**
+ * `cascadeDependents: false` skips the dependent cascade. Only for a caller
+ * that settles the dependents itself — the reboot sweep re-points them to the
+ * retry child, then cascades whatever is left.
+ */
+export async function failTask(
+  id: string,
+  reason: string,
+  opts?: { cascadeDependents?: boolean },
+): Promise<AgentTask | null> {
   const oldTask = await getTaskById(id);
   if (!oldTask) return null;
 
@@ -511,10 +520,12 @@ export async function failTask(id: string, reason: string): Promise<AgentTask | 
 
     // Cascade-fail any non-terminal tasks that depend on this one.
     // The cascade is recursive (transitive closure) and cycle-safe.
-    try {
-      await dependencies.cascadeFailDependents(id, "failed");
-    } catch (err) {
-      console.error("[failTask] cascade-fail dependents error:", err);
+    if (opts?.cascadeDependents !== false) {
+      try {
+        await dependencies.cascadeFailDependents(id, "failed");
+      } catch (err) {
+        console.error("[failTask] cascade-fail dependents error:", err);
+      }
     }
   }
   return row ? rowToAgentTask(row) : null;

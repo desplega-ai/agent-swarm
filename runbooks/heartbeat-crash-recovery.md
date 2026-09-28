@@ -20,13 +20,14 @@ flowchart TD
   health --> cleanup["cleanupStaleResources()<br/>stale sessions (30m), reviewing,<br/>inbox, mentions, workflow runs,<br/>+ reaper: escalate unreclaimed pinned resumes (§3)<br/>+ escalateStarvedPoolTasks: zero-eligible-agent pool tasks (§4)"]
   cleanup --> assign["autoAssignPoolTasks()<br/>per-task: first idle worker satisfying<br/>isAgentEligibleForTask (§4) — else leave queued"]
 
-  boot["Server boot (once)"] --> reboot["runRebootSweep()<br/>in_progress claimed after boot → skip<br/>else: no session OR pre-boot stale session<br/>→ failTask + retry child<br/>(pinned to original agent when recoverable, §4)"]
+  boot["Server boot (once)"] --> reboot["runRebootSweep()<br/>in_progress claimed after boot → skip<br/>else: no session OR pre-boot stale session<br/>→ failTask + retry child<br/>(pinned to original agent when recoverable, §4)<br/>never-started dependents re-pointed to the retry"]
 ```
 
 - **Reboot sweep liveness predicate** (`runRebootSweep`, boot epoch parsed from `globalThis.__runId` = `run_<epochMs>`), evaluated per `in_progress` task in this order:
   1. **Claimed after boot → skip.** A task with `lastUpdatedAt >= bootEpoch - 5s` is skipped before any session lookup. `claimTask` / `startTask` stamp `lastUpdatedAt` at the `in_progress` transition and the API is the sole DB writer, so a post-boot value proves the claim (or a live worker's write) happened after this process started. It cannot be a pre-boot orphan. This is what keeps a task alive when its worker is still inside a slow provider spawn (opencode cold start exceeds the 5s sweep delay). If the task later goes quiet, the regular stalled-task sweep still covers it.
   2. **Session live → skip.** A session is considered "live, skip" only if `lastHeartbeatAt >= bootEpoch - 5s`. Sessions with pre-boot heartbeats are stale artifacts that survived the WAL-mode SQLite restart and are treated as absent → auto-fail + retry child. This is **concurrency-safe**: a worker with N concurrent tasks keeps fresh (post-boot) heartbeats on its live sessions; only genuinely stale ones get classified.
   3. If `__runId` is missing/unparseable, both checks fall back to the legacy behavior (session exists → skip, no claim-time check). Never more aggressive than before.
+- **Reboot sweep dependents.** `failTask` normally cascade-fails every non-terminal task whose `dependsOn` names the failed task (`cascadeFailDependents`, reason `Blocked dependency <id8> was failed`). The reboot sweep calls it with `cascadeDependents: false` and settles the dependents itself once the retry decision is made: each never-started dependent (`draft`/`backlog`/`unassigned`/`offered`/`reviewing`/`pending`) has the swept id in `dependsOn` replaced by the retry child's id and waits on the retry (`task_dependency_repointed` log row). The dependent keeps its row, so agent, Slack fields, `followUpConfig`, priority and parent are unchanged. Anything still depending on the swept task afterwards — no retry was created (skip-type task, invalid affinity, a non-terminal child already existed, retry creation threw), or a dependent that already started — cascade-fails exactly as before. Already-terminal dependents are never touched. Every other `failTask` caller cascades as today.
 - **Worker side** (`src/commands/runner.ts`): the worker registers its active session (POST `/api/active-sessions`, keyed on the per-task runner session id) *before* it starts the provider spawn, and fills in the provider session id on `session_init`. So the window in which an `in_progress` task has no session row is one HTTP round trip, not the whole spawn. On spawn failure the worker fails the task and then removes the row.
 - The **boot-triage seed script** (`src/be/seed-scripts/catalog/boot-triage.ts`) mirrors this logic: it flags `in_progress` tasks that are on an offline agent OR whose session's `lastHeartbeatAt` is older than `stuckMinutes` ago (no fresh session heartbeat).
 - `autoAssignPoolTasks` and `claimTask`/`assignUnassignedTaskPending` are gated by the **routing-affinity eligibility check** (§4, `isAgentEligibleForTask`) — a pooled task tagged with a `routingAffinity` snapshot (from a resume/retry, or an explicit `requiredCapabilities` on a fresh `send-task`) can only go to a role/capability-matching agent. Untagged tasks are unaffected — assignment stays open to any idle (non-lead) worker, exactly as before. `autoAssignPoolTasks` **does** skip idle workers whose `emptyPollCount >= MAX_EMPTY_POLLS` (the poll gate) — assigning to them would just have them exit on their next poll. The filter reads `emptyPollCount` off the rows `getIdleWorkersWithCapacity()` already returns (no per-worker re-query). Note the poll gate is cleared on a genuine `waiting_for_credentials -> ready` recovery (`updateAgentCredentialState`) and on re-register, but **not** by routine post-task `ready:true` credential reports.
@@ -312,7 +313,7 @@ bootEpoch = parse(globalThis.__runId)                        # run_<epochMs>; nu
 if bootEpoch and task.lastUpdatedAt >= bootEpoch - 5s: skip   # claimed after boot: not an orphan
 session = getActiveSessionForTask(task.id)
 if session and (bootEpoch is null or session.lastHeartbeatAt >= bootEpoch - 5s): skip
-failTask(task.id)                                             # then create the retry child below
+failTask(task.id, cascadeDependents=false)                    # then create the retry child below
 
 # reboot-sweep retry child (on each auto-failed in_progress task):
 preferredAgentId = undefined
@@ -324,6 +325,15 @@ createTaskExtended(task.task, parentTaskId=task.id, agentId=preferredAgentId,
                     routingAffinity=buildRoutingAffinityFromAgent(task.agentId))
 #   agentId set  → status = pending  (PINNED — never enters the pool)
 #   agentId none → status = unassigned (pool — but still routingAffinity-gated)
+
+# dependents of the swept task (settleRebootSweptDependents, in a finally, so
+# every exit path above settles them — no retry included):
+if retryTaskId:
+    for dep in getDependentTasks(task.id) where dep.status in
+            {draft, backlog, unassigned, offered, reviewing, pending}:   # never started
+        dep.dependsOn = dep.dependsOn with task.id → retryTaskId       # same row, same id
+        log task_dependency_repointed(dep, old=task.id, new=retryTaskId)
+cascadeFailDependents(task.id, "failed")   # whatever still depends on the swept task
 
 # autoAssignPoolTasks, per heartbeat sweep — paginated pool scan (PR #954 fix):
 assignedCount, offset = 0, 0
