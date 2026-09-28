@@ -11,22 +11,13 @@ import type { Client } from "@libsql/client";
  * catalog only ever moves forward to a validated payload.
  */
 
-export interface ModelsDevModel {
-  name?: string;
-  reasoning?: boolean;
-  tool_call?: boolean;
-  release_date?: string;
-  limit?: { context?: number };
-  cost?: { input?: number; output?: number; cache_read?: number; cache_write?: number };
-}
+import type { ModelsDevCatalog, ModelsDevModel } from "@desplega/model-catalog";
 
-export interface ModelsDevSection {
-  id: string;
-  name: string;
-  models: Record<string, ModelsDevModel>;
-}
-
-export type ModelsDevCatalog = Record<string, ModelsDevSection>;
+export type {
+  ModelsDevCatalog,
+  ModelsDevModel,
+  ModelsDevSection,
+} from "@desplega/model-catalog";
 
 export type CatalogSource = "live" | "db" | "snapshot";
 

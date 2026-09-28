@@ -13,6 +13,7 @@
         "@aws-sdk/client-bedrock": "3.1048.0",
         "@desplega.ai/business-use": "^0.4.2",
         "@desplega.ai/localtunnel": "^2.2.0",
+        "@desplega/model-catalog": "workspace:*",
         "@earendil-works/pi-agent-core": "^0.87.1",
         "@earendil-works/pi-ai": "^0.87.1",
         "@earendil-works/pi-coding-agent": "^0.87.1",
@@ -73,6 +74,7 @@
       "name": "@agent-swarm/evals",
       "version": "0.1.0",
       "dependencies": {
+        "@desplega/model-catalog": "workspace:*",
         "@libsql/client": "^0.15.0",
         "@openrouter/ai-sdk-provider": "^2.9.1",
         "ai": "^6.0.116",
@@ -179,6 +181,14 @@
         "satori": "^0.33.5",
         "typescript": "~5.9.3",
         "vite": "^7.3.5",
+      },
+    },
+    "packages/model-catalog": {
+      "name": "@desplega/model-catalog",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@types/bun": "^1.2.0",
+        "typescript": "^5.9.0",
       },
     },
     "packages/ui-e2e": {
@@ -365,6 +375,8 @@
     "@desplega.ai/localtunnel": ["@desplega.ai/localtunnel@2.2.0", "", { "dependencies": { "axios": "0.21.4", "debug": "4.3.2", "openurl": "1.1.1", "yargs": "17.1.1" }, "bin": { "lt": "bin/lt.js" } }, "sha512-HK+ML28ey2FzIxutyQEhiJzkKSViGGNzlUV82Zov8SIXS/jAL+yt0O1fW/FV5v2BJGNINifOttP2JYN67bf9qA=="],
 
     "@desplega.ai/slack-mock": ["@desplega.ai/slack-mock@0.4.0", "", { "bin": { "slack-mock": "dist/cli.js" } }, "sha512-2wGXzipl94S4+czfLLjyoNmOEwmhE4XgX7QflU+mTqHoJL9c8eKciygeoQLYhfgpfa2DyfCR+mhbmsV8s8khhQ=="],
+
+    "@desplega/model-catalog": ["@desplega/model-catalog@workspace:packages/model-catalog"],
 
     "@dnd-kit/accessibility": ["@dnd-kit/accessibility@3.1.1", "", { "dependencies": { "tslib": "^2.0.0" }, "peerDependencies": { "react": ">=16.8.0" } }, "sha512-2P+YgaXF+gRsIihwwY1gCsQSYnu9Zyj2py8kY5fFvUM1qm2WA2u639R6YNVfU4GWr+ZM5mqEsfHZZLoRONbemw=="],
 
