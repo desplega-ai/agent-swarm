@@ -257,6 +257,7 @@ export {
   getPendingSlackRelayTasks,
   getRecentlyFinishedWorkerTasks,
   getSlackTasksMissingTree,
+  getSupersededTasksWithoutResume,
   getTaskById,
   getTaskStats,
   getTasksByAgentId,

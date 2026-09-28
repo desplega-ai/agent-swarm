@@ -21,6 +21,7 @@ import {
   getStalePinnedResumes,
   getStaleUnassignedAffinityTasks,
   getStalledInProgressTasks,
+  getSupersededTasksWithoutResume,
   getTaskById,
   getTaskStats,
   getTasksByStatus,
@@ -352,6 +353,10 @@ export async function codeLevelTriage(): Promise<HeartbeatFindings> {
   // 1. Detect and remediate stalled tasks (tiered: auto-fail dead workers)
   await detectAndRemediateStalledTasks(findings);
 
+  // 1.5. Give a resume to any task superseded without one (crash between
+  // the supersede write and the resume write).
+  await repairSupersededWithoutResume(findings);
+
   // 2. Check and fix worker health
   await checkWorkerHealth(findings);
 
@@ -495,6 +500,40 @@ async function detectAndRemediateStalledTasks(findings: HeartbeatFindings): Prom
     }
 
     await remediateCrashedWorkerTask(findings, task, remediationOpts, proposed);
+  }
+}
+
+/** Repair window: skip in-flight supersedes, stop at a day of history. */
+const ORPHAN_SUPERSEDE_MIN_AGE_MS = 60 * 1000;
+const ORPHAN_SUPERSEDE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Supersede and resume creation are separate writes. If the API process dies
+ * between them, the task stays `superseded` with no resume and nothing else
+ * picks it up (the stall classifier only reads `in_progress`). This creates
+ * the missing resume. Found by the TLA+ model (specs/tla/heartbeat/).
+ */
+async function repairSupersededWithoutResume(findings: HeartbeatFindings): Promise<void> {
+  const now = Date.now();
+  const orphans = await getSupersededTasksWithoutResume(
+    new Date(now - ORPHAN_SUPERSEDE_MIN_AGE_MS).toISOString(),
+    new Date(now - ORPHAN_SUPERSEDE_MAX_AGE_MS).toISOString(),
+  );
+  for (const task of orphans) {
+    if (!task.agentId) continue;
+    if (getNextResumeGeneration(task) > maxResumeGenerations()) continue;
+    const resume = await createResumeFollowUp({ parentId: task.id, reason: "crash_recovery" });
+    if (resume.kind !== "created") continue;
+    await backfillSupersedeTaskResumeTaskId(task.id, resume.task.id);
+    findings.autoResumedTasks.push({
+      taskId: task.id,
+      resumeTaskId: resume.task.id,
+      agentId: task.agentId,
+      reason: "repaired superseded task without resume",
+    });
+    console.log(
+      `[Heartbeat] Created missing resume ${resume.task.id.slice(0, 8)} for superseded task ${task.id.slice(0, 8)}`,
+    );
   }
 }
 
