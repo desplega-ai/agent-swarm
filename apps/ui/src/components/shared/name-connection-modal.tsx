@@ -1,5 +1,5 @@
-import { Loader2 } from "lucide-react";
 import { useState } from "react";
+import { Spinner } from "@/components/kibo-ui/spinner";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -85,7 +85,7 @@ export function NameConnectionModal() {
           >
             {status === "saving" ? (
               <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                <Spinner className="mr-2 size-4" />
                 Saving...
               </>
             ) : (

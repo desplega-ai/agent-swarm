@@ -10,7 +10,6 @@ import {
   Copy,
   Gauge,
   Image as ImageIcon,
-  Loader2,
   Scissors,
   Search,
   Sparkles,
@@ -31,6 +30,7 @@ import {
   useState,
 } from "react";
 import { Streamdown } from "streamdown";
+import { Spinner } from "@/components/kibo-ui/spinner";
 import "streamdown/styles.css";
 
 import type { ContextSnapshot, SessionLog, SteeringMessage } from "@/api/types";
@@ -1818,7 +1818,7 @@ function GenericMetaBubble({ block }: { block: ProviderMetaBlock }) {
 // Type icon leads; a still-running item shows a spinner instead so a grouped
 // started/completed row reads as one row moving through its lifecycle.
 function unknownItemIcon(itemType: string | undefined, status: string | undefined) {
-  if (status === "running") return <Loader2 className="size-3 animate-spin" />;
+  if (status === "running") return <Spinner className="size-3" />;
   switch (itemType) {
     case "sleep":
       return <Clock className="size-3" />;

@@ -1,7 +1,8 @@
-import { CheckCircle, Loader2, Wrench } from "lucide-react";
+import { CheckCircle, Wrench } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { useInstallRemoteSkill } from "@/api/hooks/use-skills";
+import { Spinner } from "@/components/kibo-ui/spinner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -248,7 +249,7 @@ function InstallOnRoleButton({
       aria-label={`Install ${skillName} on ${role}`}
     >
       {isLoading ? (
-        <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+        <Spinner className="size-3.5" aria-hidden="true" />
       ) : (
         <Wrench className="h-3.5 w-3.5" aria-hidden="true" />
       )}

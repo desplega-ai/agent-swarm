@@ -1,4 +1,4 @@
-import { Loader2, Send } from "lucide-react";
+import { Send } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -46,7 +46,7 @@ export function SubmitBar({
 }) {
   const blocked = progress.blockedReason;
   const pct = progress.total ? (progress.answered / progress.total) * 100 : 0;
-  const label = submitting ? "Submitting…" : progress.rejects ? "Submit · reject" : "Submit";
+  const label = progress.rejects ? "Submit · reject" : "Submit";
   return (
     <motion.div
       initial={{ y: "100%", opacity: 0 }}
@@ -92,8 +92,10 @@ export function SubmitBar({
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
-                onClick={blocked || submitting ? undefined : onSubmit}
-                aria-disabled={blocked || submitting ? true : undefined}
+                // The loading status ignores presses on its own.
+                status={submitting ? "loading" : "idle"}
+                onClick={blocked ? undefined : onSubmit}
+                aria-disabled={blocked ? true : undefined}
                 aria-keyshortcuts="Control+Enter Meta+Enter"
                 variant={progress.rejects ? "destructive" : "default"}
                 className={cn(
@@ -101,7 +103,7 @@ export function SubmitBar({
                   "aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:active:scale-100",
                 )}
               >
-                {submitting ? <Loader2 className="animate-spin" /> : <Send />}
+                <Send />
                 {label}
                 <span className="ml-0.5 hidden gap-0.5 [@media(hover:hover)_and_(pointer:fine)]:inline-flex">
                   <KeyHint tone="inverted">{MOD}</KeyHint>

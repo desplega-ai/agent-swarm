@@ -91,6 +91,7 @@ import {
 import { InfoTip } from "@/components/ui/info-tip";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { MiddleTruncation } from "@/components/ui/middle-truncation";
 import { PageHeader } from "@/components/ui/page-header";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
@@ -946,7 +947,9 @@ function McpGuidancePanel({
       <div className="flex items-center gap-2 rounded-md border bg-background p-2">
         <div className="min-w-0 flex-1">
           <div className="text-xs font-medium">MCP server URL</div>
-          <div className="truncate font-mono text-xs text-muted-foreground">{mcpSurface.url}</div>
+          <MiddleTruncation className="font-mono text-xs text-muted-foreground">
+            {mcpSurface.url}
+          </MiddleTruncation>
         </div>
         <CopyButton value={mcpSurface.url} label="Copy MCP server URL" />
         <Button asChild type="button" size="xs" variant="outline">
@@ -2327,11 +2330,11 @@ function OAuthAppsSection({
         flex: 1,
         cellRenderer: (params: ICellRendererParams<OAuthAppSummary>) =>
           params.data ? (
-            <span className="flex min-w-0 items-center gap-1.5">
+            <span className="flex min-w-0 flex-1 items-center gap-1.5">
               <LegacyCallbackWarning app={params.data} staticCallback={staticCallback} />
-              <span className="truncate text-xs text-muted-foreground">
+              <MiddleTruncation className="text-xs text-muted-foreground">
                 {params.data.redirectUri}
-              </span>
+              </MiddleTruncation>
               <span onClick={(event) => event.stopPropagation()}>
                 <CopyButton value={params.data.redirectUri} />
               </span>
@@ -2668,8 +2671,8 @@ export function OAuthAppDialog({
               Redirect URI
             </FieldLabel>
             <div className="flex min-w-0 items-center gap-2">
-              <code className="min-w-0 flex-1 truncate rounded bg-muted px-2 py-1 font-mono text-xs">
-                {redirectUri ?? "Loading…"}
+              <code className="min-w-0 flex-1 rounded bg-muted px-2 py-1 font-mono text-xs">
+                <MiddleTruncation>{redirectUri ?? "Loading…"}</MiddleTruncation>
               </code>
               {redirectUri ? <CopyButton value={redirectUri} /> : null}
             </div>
@@ -2984,9 +2987,9 @@ export default function ConnectionsPage() {
         flex: 1,
         valueGetter: (params) => params.data?.baseUrl ?? params.data?.mcpServerId ?? "",
         cellRenderer: (params: ICellRendererParams<ScriptConnection>) => (
-          <span className="truncate text-muted-foreground">
+          <MiddleTruncation className="text-muted-foreground">
             {params.data?.baseUrl ?? params.data?.mcpServerId ?? "—"}
-          </span>
+          </MiddleTruncation>
         ),
       },
       {

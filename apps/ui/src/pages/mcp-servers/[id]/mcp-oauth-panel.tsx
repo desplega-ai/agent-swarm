@@ -1,4 +1,4 @@
-import { AlertCircle, CheckCircle2, Loader2, RefreshCw, XCircle } from "lucide-react";
+import { AlertCircle, CheckCircle2, RefreshCw, XCircle } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -354,27 +354,22 @@ export function McpOAuthPanel({ server }: { server: McpServer }) {
           <Button
             size="sm"
             onClick={handleConnect}
-            disabled={refresh.isPending || disconnect.isPending || startConnect.isPending}
+            disabled={refresh.isPending || disconnect.isPending}
+            // Stays loading after success while the browser leaves for the provider.
+            status={startConnect.isPending || startConnect.isSuccess ? "loading" : "idle"}
           >
-            {startConnect.isPending ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : connected ? (
-              "Reconnect"
-            ) : (
-              "Connect"
-            )}
+            {connected ? "Reconnect" : "Connect"}
           </Button>
           <Button
             size="sm"
             variant="outline"
             onClick={handleRefresh}
-            disabled={!token?.hasRefreshToken || refresh.isPending}
+            disabled={!token?.hasRefreshToken}
+            status={refresh.isPending ? "loading" : refresh.isSuccess ? "success" : "idle"}
+            successLabel="Refreshed"
+            onStatusChange={refresh.reset}
           >
-            {refresh.isPending ? (
-              <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-            ) : (
-              <RefreshCw className="h-3.5 w-3.5 mr-1" />
-            )}
+            <RefreshCw className="h-3.5 w-3.5 mr-1" />
             Refresh now
           </Button>
           {token && (

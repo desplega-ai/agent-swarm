@@ -1,6 +1,7 @@
-import { ArrowLeft, ArrowRight, Loader2 } from "lucide-react";
+import { ArrowLeft, ArrowRight } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Spinner } from "@/components/kibo-ui/spinner";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -9,6 +10,9 @@ import { SETUP_COLUMN } from "./setup-layout";
 
 /** A blocked action stays focusable and hoverable, so its tooltip can say why. */
 const ARIA_DISABLED = "aria-disabled:opacity-50 aria-disabled:active:scale-100";
+
+/** The control whose work is in flight. */
+export type SetupBusyAction = "primary" | "skip" | "minimize";
 
 interface SetupFooterProps {
   /** Omit to disable Back (step 1). */
@@ -29,6 +33,8 @@ interface SetupFooterProps {
    */
   primary: { label: string; onClick: () => void; blockedBy: string | null; enterKey?: boolean };
   busy?: boolean;
+  /** Skip or the primary action shows a spinner on its own button while it runs. */
+  busyAction?: SetupBusyAction | null;
 }
 
 /**
@@ -36,7 +42,14 @@ interface SetupFooterProps {
  * the primary action on the right. Enter, S, and Escape run Continue, Skip,
  * and Back while focus is outside a field or an open overlay.
  */
-export function SetupFooter({ onBack, pending, skip, primary, busy }: SetupFooterProps) {
+export function SetupFooter({
+  onBack,
+  pending,
+  skip,
+  primary,
+  busy,
+  busyAction,
+}: SetupFooterProps) {
   const back = onBack && !busy ? onBack : undefined;
   const skipNow = skip && !skip.blockedBy && !busy ? skip.onSkip : undefined;
   const next = primary.enterKey && !primary.blockedBy && !busy ? primary.onClick : undefined;
@@ -71,7 +84,7 @@ export function SetupFooter({ onBack, pending, skip, primary, busy }: SetupFoote
               className="mr-1 flex"
             >
               <Hint content={pending}>
-                <Loader2 className="size-[18px] animate-spin text-muted-foreground" />
+                <Spinner className="size-[18px] text-muted-foreground" />
               </Hint>
             </motion.span>
           ) : null}
@@ -82,7 +95,8 @@ export function SetupFooter({ onBack, pending, skip, primary, busy }: SetupFoote
               variant="ghost"
               onClick={skip.blockedBy ? undefined : skip.onSkip}
               aria-disabled={skip.blockedBy ? true : undefined}
-              disabled={busy}
+              disabled={busy && busyAction !== "skip"}
+              status={busyAction === "skip" ? "loading" : "idle"}
               aria-keyshortcuts="S"
               className={cn(ARIA_DISABLED, "aria-disabled:hover:bg-transparent")}
             >
@@ -97,7 +111,8 @@ export function SetupFooter({ onBack, pending, skip, primary, busy }: SetupFoote
           <Button
             onClick={primary.blockedBy ? undefined : primary.onClick}
             aria-disabled={primary.blockedBy ? true : undefined}
-            disabled={busy}
+            disabled={busy && busyAction !== "primary"}
+            status={busyAction === "primary" ? "loading" : "idle"}
             aria-keyshortcuts={primary.enterKey ? "Enter" : undefined}
             className={cn(ARIA_DISABLED, "aria-disabled:hover:bg-primary")}
           >

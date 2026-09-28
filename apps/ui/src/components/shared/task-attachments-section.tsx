@@ -9,7 +9,6 @@ import {
   File,
   FileText,
   Image as ImageIcon,
-  Loader2,
   Paperclip,
   Star,
   Trash2,
@@ -17,6 +16,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchTaskAttachmentBlob, useDeleteAttachment, useTaskAttachments } from "@/api/fs";
 import type { TaskAttachment, TaskAttachmentKind } from "@/api/types";
+import { Spinner } from "@/components/kibo-ui/spinner";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { AttachmentName, buildAgentFsLiveUrl } from "@/components/shared/task-attachment-link";
 import { Badge } from "@/components/ui/badge";
@@ -28,6 +28,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { MiddleTruncation } from "@/components/ui/middle-truncation";
 import { cn } from "@/lib/utils";
 
 /**
@@ -334,7 +335,7 @@ function AttachmentRow({
             ) : (
               <span className="flex h-full w-full items-center justify-center text-muted-foreground">
                 {preview.kind === "loading" ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <Spinner className="size-4" />
                 ) : (
                   <ImageIcon className="h-5 w-5" />
                 )}
@@ -342,19 +343,21 @@ function AttachmentRow({
             )}
             <span className="absolute inset-x-0 bottom-0 flex items-center gap-1 bg-background/80 px-2 py-1 text-[10px] text-foreground opacity-0 backdrop-blur-sm transition group-hover:opacity-100">
               <ImageIcon className="h-3 w-3 shrink-0" />
-              <span className="truncate">{attachment.name}</span>
+              <MiddleTruncation>{attachment.name}</MiddleTruncation>
             </span>
           </button>
 
           <Dialog open={lightboxOpen} onOpenChange={setLightboxOpen}>
             <DialogContent className="max-h-[92vh] overflow-hidden p-4 sm:max-w-4xl">
               <DialogHeader className="pr-8">
-                <DialogTitle className="truncate text-base">{attachment.name}</DialogTitle>
+                <DialogTitle className="text-base">
+                  <MiddleTruncation>{attachment.name}</MiddleTruncation>
+                </DialogTitle>
                 <DialogDescription>{previewKindLabel(previewKind)}</DialogDescription>
               </DialogHeader>
               {preview.kind === "loading" ? (
                 <div className="flex h-48 items-center justify-center gap-2 rounded-md border border-dashed border-border bg-muted/20 text-sm text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <Spinner className="size-4" />
                   Loading preview
                 </div>
               ) : preview.kind === "error" ? (
@@ -408,9 +411,9 @@ function AttachmentRow({
               </span>
               {metadata && <span className="block text-xs text-muted-foreground">{metadata}</span>}
               {!attachment.mimeType && filename && filename !== attachment.name && (
-                <span className="hidden truncate font-mono text-xs text-muted-foreground sm:block">
+                <MiddleTruncation className="hidden font-mono text-xs text-muted-foreground sm:block">
                   {filename}
-                </span>
+                </MiddleTruncation>
               )}
             </span>
             <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground group-hover:text-primary" />
@@ -449,7 +452,9 @@ function AttachmentRow({
             <PreviewIcon kind={previewKind} />
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block truncate font-medium text-foreground">{attachment.name}</span>
+            <MiddleTruncation className="font-medium text-foreground">
+              {attachment.name}
+            </MiddleTruncation>
             <span className="block truncate font-mono text-[10px] uppercase text-muted-foreground">
               {label}
               {attachment.sizeBytes != null ? ` · ${formatSize(attachment.sizeBytes)}` : ""}
@@ -465,14 +470,16 @@ function AttachmentRow({
         <Dialog open={lightboxOpen} onOpenChange={setLightboxOpen}>
           <DialogContent className="max-h-[92vh] overflow-hidden p-4 sm:max-w-4xl">
             <DialogHeader className="pr-8">
-              <DialogTitle className="truncate text-base">{attachment.name}</DialogTitle>
+              <DialogTitle className="text-base">
+                <MiddleTruncation>{attachment.name}</MiddleTruncation>
+              </DialogTitle>
               <DialogDescription>
                 {previewKind ? previewKindLabel(previewKind) : ""}
               </DialogDescription>
             </DialogHeader>
             {preview.kind === "loading" ? (
               <div className="flex h-48 items-center justify-center gap-2 rounded-md border border-dashed border-border bg-muted/20 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <Spinner className="size-4" />
                 Loading preview
               </div>
             ) : preview.kind === "error" ? (
@@ -541,8 +548,9 @@ function AttachmentRow({
           )}
           {pathDisplay && (
             <div className="flex items-center gap-1.5">
-              <code className="truncate rounded bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
-                {pathDisplay}
+              {/* flex-1: a middle-truncated value needs a definite width to fit. */}
+              <code className="min-w-0 flex-1 rounded bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
+                <MiddleTruncation>{pathDisplay}</MiddleTruncation>
               </code>
               <CopyPathButton value={attachment.path ?? ""} />
             </div>
@@ -610,11 +618,7 @@ function AttachmentRow({
             aria-label={`Delete ${attachment.name}`}
             title="Delete"
           >
-            {deleting ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Trash2 className="h-3.5 w-3.5" />
-            )}
+            {deleting ? <Spinner className="size-3.5" /> : <Trash2 className="h-3.5 w-3.5" />}
           </Button>
         </div>
       </div>
@@ -623,7 +627,7 @@ function AttachmentRow({
         <div className="border-t border-border bg-muted/20 p-3">
           {preview.kind === "loading" ? (
             <div className="flex h-28 items-center justify-center gap-2 rounded-md border border-dashed border-border bg-background text-xs text-muted-foreground">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <Spinner className="size-3.5" />
               Loading preview
             </div>
           ) : preview.kind === "error" ? (
@@ -656,14 +660,16 @@ function AttachmentRow({
       <Dialog open={lightboxOpen} onOpenChange={setLightboxOpen}>
         <DialogContent className="max-h-[92vh] overflow-hidden p-4 sm:max-w-4xl">
           <DialogHeader className="pr-8">
-            <DialogTitle className="truncate text-base">{attachment.name}</DialogTitle>
+            <DialogTitle className="text-base">
+              <MiddleTruncation>{attachment.name}</MiddleTruncation>
+            </DialogTitle>
             <DialogDescription>
               {previewKind ? previewKindLabel(previewKind) : ""}
             </DialogDescription>
           </DialogHeader>
           {preview.kind === "loading" ? (
             <div className="flex h-48 items-center justify-center gap-2 rounded-md border border-dashed border-border bg-muted/20 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <Spinner className="size-4" />
               Loading preview
             </div>
           ) : preview.kind === "error" ? (
