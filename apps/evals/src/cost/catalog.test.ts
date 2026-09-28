@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { getDb, initDb, resetDbForTests } from "../db/client.ts";
 import {
   getCatalog,
+  getSnapshotCatalog,
   loadCatalogFromDb,
   MAX_CATALOG_BYTES,
   type ModelsDevCatalog,
@@ -10,6 +11,9 @@ import {
   sanitizeCatalog,
 } from "./catalog.ts";
 import { getClaudeAliasMap, listOpenrouterModels, lookupModelCost } from "./pricing.ts";
+
+// A model present in the committed snapshot (the reviewed allowlist).
+const ALLOWED_ID = "qwen/qwen3.7-max";
 
 const FIXTURE: ModelsDevCatalog = {
   anthropic: {
@@ -27,7 +31,10 @@ const FIXTURE: ModelsDevCatalog = {
   openrouter: {
     id: "openrouter",
     name: "OpenRouter",
-    models: { "acme/fixture-1": { name: "Fixture 1", cost: { input: 3, output: 4 } } },
+    models: {
+      [ALLOWED_ID]: { name: "Fixture 1", cost: { input: 3, output: 4 } },
+      "acme/unreviewed-1": { name: "Unreviewed", cost: { input: 0, output: 0 } },
+    },
   },
 };
 
@@ -77,8 +84,18 @@ describe("model catalog", () => {
     const r = await refreshCatalog({ db, fetchImpl: fakeFetch([ok]) });
     expect(r.status).toBe("updated");
     expect((await getCatalog()).source).toBe("live");
-    expect((await listOpenrouterModels()).map((m) => m.id)).toEqual(["acme/fixture-1"]);
+    expect((await listOpenrouterModels()).find((m) => m.id === ALLOWED_ID)?.inputPerM).toBe(3);
     expect((await getClaudeAliasMap()).opus).toBe("claude-opus-9-9");
+  });
+
+  test("live-only model IDs never become selectable", async () => {
+    await refreshCatalog({ db: getDb(), fetchImpl: fakeFetch([ok]) });
+    const ids = (await listOpenrouterModels()).map((m) => m.id);
+    expect(ids).not.toContain("acme/unreviewed-1");
+    expect(ids).toContain(ALLOWED_ID);
+    expect(ids.sort()).toEqual(
+      Object.keys((await getSnapshotCatalog()).openrouter?.models ?? {}).sort(),
+    );
     expect((await lookupModelCost("claude", "opus"))?.inputPerM).toBe(1);
   });
 
@@ -95,7 +112,7 @@ describe("model catalog", () => {
     });
     expect(boom).toEqual({ status: "error", error: "network down" });
     expect((await getCatalog()).source).toBe("live");
-    expect((await listOpenrouterModels()).map((m) => m.id)).toEqual(["acme/fixture-1"]);
+    expect((await listOpenrouterModels()).find((m) => m.id === ALLOWED_ID)?.inputPerM).toBe(3);
   });
 
   test("fetch failure on a cold cache falls back to the snapshot", async () => {
@@ -164,6 +181,6 @@ describe("model catalog", () => {
     const state = await getCatalog();
     expect(state.source).toBe("db");
     expect(state.etag).toBe('"v1"');
-    expect((await listOpenrouterModels()).map((m) => m.id)).toEqual(["acme/fixture-1"]);
+    expect((await listOpenrouterModels()).find((m) => m.id === ALLOWED_ID)?.inputPerM).toBe(3);
   });
 });

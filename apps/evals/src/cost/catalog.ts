@@ -56,6 +56,15 @@ function loadSnapshot(): Promise<CatalogState> {
   return snapshotPromise;
 }
 
+/**
+ * The committed snapshot, regardless of any live payload. It is the reviewed
+ * allowlist of selectable model IDs: live refreshes may update pricing and
+ * metadata but never add a model to the picker.
+ */
+export async function getSnapshotCatalog(): Promise<ModelsDevCatalog> {
+  return (await loadSnapshot()).catalog;
+}
+
 /** Current catalog: newest live/DB payload in memory, else the committed snapshot. */
 export async function getCatalog(): Promise<CatalogState> {
   return current ?? (await loadSnapshot());

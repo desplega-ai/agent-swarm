@@ -2,6 +2,7 @@ import type { HarnessProvider, TokenTotals } from "../types.ts";
 import {
   getCatalog,
   getCatalogVersion,
+  getSnapshotCatalog,
   type ModelsDevCatalog,
   type ModelsDevModel,
 } from "./catalog.ts";
@@ -38,13 +39,17 @@ function toPriced(id: string, m: ModelsDevModel): PricedModel {
   };
 }
 
-/** All models of the models.dev `openrouter` section, sorted by name. */
+/**
+ * Selectable `openrouter` models, sorted by name. IDs come only from the
+ * committed snapshot (the reviewed allowlist); the live catalog only refreshes
+ * their pricing and metadata, so an unreviewed upstream entry never reaches
+ * the picker.
+ */
 export async function listOpenrouterModels(): Promise<PricedModel[]> {
-  const cache = await loadCache();
-  const section = cache.openrouter;
-  if (!section) return [];
-  return Object.entries(section.models)
-    .map(([id, m]) => toPriced(id, m))
+  const allowed = (await getSnapshotCatalog()).openrouter?.models ?? {};
+  const live = (await loadCache()).openrouter?.models ?? {};
+  return Object.entries(allowed)
+    .map(([id, m]) => toPriced(id, live[id] ?? m))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
