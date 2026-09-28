@@ -1,0 +1,137 @@
+---
+title: Rootless Podman
+description: Run the Compose deployment under rootless Podman with a Compose provider, including SELinux labels and the TLS port caveat
+---
+
+Agent Swarm ships OCI images and a Compose file, so it can run under rootless Podman instead of Docker. Docker Compose stays the default and the best-tested path. Use this page when a host has Podman and no Docker daemon.
+
+<Callout type="info">
+Rootless Podman support is new. The engine detection is unit-tested, but end-to-end validation on a rootless, SELinux-enforcing host is tracked in [issue #1655](https://github.com/desplega-ai/agent-swarm/issues/1655). Report anything that differs from this page there.
+</Callout>
+
+## Prerequisites
+
+- **Podman 4.7 or newer.** `podman compose` was added in 4.7.
+- **A Compose provider.** `podman compose` is a thin wrapper and runs an external provider. Install one of:
+  - `docker-compose` v2 (recommended; v2.23.1 or newer if you use the `tls` profile, which needs inline `configs.content`)
+  - `podman-compose` 1.1 or newer (`dnf install podman-compose`, `apt install podman-compose`, or `pipx install podman-compose`)
+- **The rootless Podman socket**, when the provider is `docker-compose`. It talks to Podman through the Docker API:
+
+```bash
+systemctl --user enable --now podman.socket
+```
+
+To pick a provider explicitly, set `PODMAN_COMPOSE_PROVIDER` to its path, for example `export PODMAN_COMPOSE_PROVIDER=$(command -v docker-compose)`.
+
+Check the setup before you start:
+
+```bash
+podman --version
+podman compose version
+```
+
+If the second command prints `looking up compose provider failed` or `no compose provider found`, the provider is missing. Install one of the providers above.
+
+## Option A: the onboard wizard
+
+The wizard asks which engine to use on its first screen. Pick **Local (Podman Compose, rootless)**, or pass the engine on the command line:
+
+```bash
+bunx @desplega.ai/agent-swarm onboard --container-engine=podman
+```
+
+`--container-engine` accepts `auto`, `docker`, or `podman`:
+
+| Value | Behavior |
+|-------|----------|
+| `auto` (default) | Docker when the `docker` binary exists, Podman only when Docker is absent. Existing Docker hosts behave as before. |
+| `docker` | Docker only. Fails if Docker or Docker Compose v2 is missing. |
+| `podman` | Podman only. Fails if Podman is missing or `podman compose` has no working provider. |
+
+An explicit engine never falls back to the other one. The prerequisite check prints the failing piece, for example `podman compose has no working Compose provider`, with install hints.
+
+With Podman, the wizard runs `podman compose --env-file .env up -d`, prints `podman compose` in its log and help hints, and generates the optional AWS profile mount with a shared SELinux label (`${HOME}/.aws:/home/worker/.aws:ro,z`).
+
+Non-interactive mode works the same way:
+
+```bash
+ANTHROPIC_API_KEY=sk-... bunx @desplega.ai/agent-swarm onboard --yes --preset=dev --container-engine=podman
+```
+
+## Option B: the Compose example file
+
+Follow [Deployment](/docs/guides/deployment) and replace `docker compose` with `podman compose`:
+
+```bash
+curl -O https://raw.githubusercontent.com/desplega-ai/agent-swarm/main/docker-compose.example.yml
+mv docker-compose.example.yml docker-compose.yml
+openssl rand -base64 32 > ./encryption_key
+chmod 600 ./encryption_key
+# create .env as described in the deployment guide, then:
+podman compose --env-file .env up -d
+```
+
+Workers reach the API over the Compose network at `http://api:3013`, so keep `MCP_BASE_URL` at that value. Host aliases such as `host.docker.internal` or `host.containers.internal` differ between engines and setups; do not rely on them.
+
+## SELinux bind-mount labels
+
+On an SELinux-enforcing host (Fedora, RHEL, CentOS Stream), a container cannot read a host file unless the file carries a container label. Named volumes are labeled automatically. Bind mounts and file-backed secrets are not.
+
+**File-backed encryption key.** The example file mounts `./encryption_key` through a Compose `secrets:` entry, which accepts no mount options. Label the file once:
+
+```bash
+chcon -t container_file_t ./encryption_key
+```
+
+`chcon` does not survive a filesystem relabel. To make it permanent, use `semanage fcontext -a -t container_file_t "$(realpath ./encryption_key)" && restorecon -v ./encryption_key`. Alternatively, drop the `secrets:` entry for the API and bind-mount the file with a private label:
+
+```yaml
+    volumes:
+      - ./encryption_key:/run/secrets/encryption_key:ro,Z
+```
+
+**Optional AWS profile mount.** Bedrock with `AWS_PROFILE` mounts `~/.aws` into every worker. Several containers share it, so use the shared label `z`, not the private `Z`:
+
+```yaml
+    volumes:
+      - ${HOME}/.aws:/home/worker/.aws:ro,z
+```
+
+The wizard adds `,z` for you when the engine is Podman. Both `z` and `Z` relabel the host path, so point them only at directories dedicated to the swarm or your AWS config. Never label `$HOME` itself.
+
+## TLS profile and privileged ports
+
+Rootless Podman cannot bind host ports below `net.ipv4.ip_unprivileged_port_start`, which defaults to 1024. The `tls` profile's Caddy service publishes 80 and 443 by default, so it fails to start rootless. Remap the host ports in `.env`:
+
+```bash
+CADDY_HTTP_PORT=8080
+CADDY_HTTPS_PORT=8443
+```
+
+Docker keeps 80/443 when these are unset. Let's Encrypt still validates on public ports 80 and 443, so forward them to the remapped ports, for example with firewalld:
+
+```bash
+sudo firewall-cmd --permanent --add-forward-port=port=80:proto=tcp:toport=8080
+sudo firewall-cmd --permanent --add-forward-port=port=443:proto=tcp:toport=8443
+sudo firewall-cmd --permanent --add-forward-port=port=443:proto=udp:toport=8443
+sudo firewall-cmd --reload
+```
+
+The other option is to lower the unprivileged port floor (`sysctl net.ipv4.ip_unprivileged_port_start=80`). It applies host-wide, so prefer the port forward.
+
+Then start the profile:
+
+```bash
+podman compose --profile tls up -d
+curl -fsS https://swarm-api.example.com/health
+```
+
+## Verify
+
+```bash
+podman compose ps
+curl -fsS http://localhost:3013/health
+podman compose logs --tail 50
+```
+
+The API reports `healthy` in `podman compose ps` once its health check passes, and workers start after it.

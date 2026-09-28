@@ -43,7 +43,8 @@
 #  Let's Encrypt certificates automatically for SWARM_API_DOMAIN (-> api)
 #  and AGENT_FS_DOMAIN (-> agent-fs UI/API and MinIO signed previews).
 #  Set both domains and point their DNS at this host. Open ports 80/443,
-#  and set PUBLIC_MCP_BASE_URL=https://<api domain>.
+#  and set PUBLIC_MCP_BASE_URL=https://<api domain>. Host ports are
+#  configurable via CADDY_HTTP_PORT / CADDY_HTTPS_PORT (rootless Podman).
 #  Requires Docker Compose v2.23.1+ (inline `configs.content`).
 #
 # Provider mapping: claude -> claude, openai -> codex, openrouter -> pi,
@@ -994,10 +995,15 @@ services:
     environment:
       - SWARM_API_DOMAIN=${SWARM_API_DOMAIN:-}
       - AGENT_FS_DOMAIN=${AGENT_FS_DOMAIN:-}
+    # Host ports default to 80/443. Rootless Podman cannot bind ports below
+    # net.ipv4.ip_unprivileged_port_start (1024 by default), so set e.g.
+    # CADDY_HTTP_PORT=8080 and CADDY_HTTPS_PORT=8443 in .env there. Let's
+    # Encrypt still validates on public 80/443, so forward those to the
+    # remapped ports. See docs: guides/podman-rootless.
     ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
+      - "${CADDY_HTTP_PORT:-80}:80"
+      - "${CADDY_HTTPS_PORT:-443}:443"
+      - "${CADDY_HTTPS_PORT:-443}:443/udp"
     configs:
       - source: caddyfile
         target: /etc/caddy/Caddyfile

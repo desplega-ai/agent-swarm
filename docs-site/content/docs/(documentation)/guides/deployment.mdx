@@ -13,7 +13,7 @@ The easiest way to deploy a full swarm with API, workers, and lead agent. You ca
 
 Before you start, make sure you have:
 
-- **Docker & Docker Compose** installed ([install guide](https://docs.docker.com/get-docker/))
+- **Docker & Docker Compose** installed ([install guide](https://docs.docker.com/get-docker/)). Rootless Podman with a Compose provider also works; see [Rootless Podman](/docs/guides/podman-rootless).
 - **A Claude Code OAuth token** — run `claude setup-token` in your terminal to get one
 - **An API key** — any secret string you choose (all services share this key for authentication)
 
@@ -165,7 +165,7 @@ docker compose --profile tls up -d
 curl -fsS https://swarm-api.example.com/health
 ```
 
-Caddy proxies the API domain to `api:3013`. On the agent-fs domain, `/agentfs/*` goes to `minio:9000` for signed image/PDF/video previews and downloads; all other paths go to `agent-fs:7433`. The bucket path and `Host` header are preserved for S3 signature validation, so previews use the existing file domain without another DNS record. Once it runs, stop exposing ports 3013 and 7433 on a public interface (firewall them or remove the `ports` entries). Certificates persist in the `caddy_data` volume. Requires Docker Compose v2.23.1 or newer for the inline Caddyfile.
+Caddy proxies the API domain to `api:3013`. On the agent-fs domain, `/agentfs/*` goes to `minio:9000` for signed image/PDF/video previews and downloads; all other paths go to `agent-fs:7433`. The bucket path and `Host` header are preserved for S3 signature validation, so previews use the existing file domain without another DNS record. Once it runs, stop exposing ports 3013 and 7433 on a public interface (firewall them or remove the `ports` entries). Certificates persist in the `caddy_data` volume. Requires Docker Compose v2.23.1 or newer for the inline Caddyfile. Caddy publishes host ports 80/443 by default; set `CADDY_HTTP_PORT` / `CADDY_HTTPS_PORT` to remap them, for example under [rootless Podman](/docs/guides/podman-rootless#tls-profile-and-privileged-ports).
 
 Signed URLs default to `https://${AGENT_FS_DOMAIN}` when `AGENT_FS_DOMAIN` is set, or `http://localhost:9000` otherwise. A non-empty `AGENT_FS_S3_PUBLIC_ENDPOINT` overrides either default and must be an origin browsers can reach over HTTPS for TLS deployments.
 

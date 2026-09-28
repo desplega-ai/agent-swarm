@@ -18,6 +18,7 @@ export function generateManifest(state: OnboardState): object {
     providerLabel: PROVIDER_LABELS[state.provider],
     providerNotice: state.provider === "bedrock" ? BEDROCK_ALPHA_NOTICE : undefined,
     harness: state.harness,
+    containerEngine: state.containerEngine,
     services: expanded.map((svc) => ({
       name: svc.name,
       templateId: svc.entry.template,

@@ -1,4 +1,5 @@
 import type { SlackMode } from "../../slack/config";
+import type { ContainerEnginePreference } from "./container-engine.ts";
 
 export type OnboardStep =
   | "welcome"
@@ -90,6 +91,8 @@ export interface OnboardState {
   apiPort: number;
   maxConcurrentTasks: number | null;
   pullPolicy: PullPolicy;
+  /** `auto` until the prereq check resolves it to the engine that passed. */
+  containerEngine: ContainerEnginePreference;
   outputDir: string;
   nonInteractive: boolean;
   error: string | null;
@@ -110,6 +113,7 @@ export interface OnboardProps {
   preset?: string;
   maxConcurrentTasks?: string;
   pullPolicy?: string;
+  containerEngine?: string;
 }
 
 export type PullPolicy = "always" | "missing" | "never";
@@ -137,7 +141,7 @@ export const STEP_LABELS: { step: OnboardStep; label: string }[] = [
   { step: "integration_menu", label: "Integrations" },
   { step: "review", label: "Review" },
   { step: "generate", label: "Generate" },
-  { step: "prereq_check", label: "Docker" },
+  { step: "prereq_check", label: "Engine" },
   { step: "start", label: "Start" },
   { step: "health_check", label: "Health" },
   { step: "post_connect", label: "Connect" },
@@ -205,6 +209,7 @@ export const INITIAL_STATE: OnboardState = {
   apiPort: 0,
   maxConcurrentTasks: null,
   pullPolicy: "always",
+  containerEngine: "auto",
   outputDir: process.cwd(),
   nonInteractive: false,
   error: null,
@@ -293,7 +298,7 @@ export function nextStep(current: OnboardStep, state: OnboardState): OnboardStep
       return "generate";
 
     case "prereq_check":
-      // If Docker is missing and user chose "files only", skip to done
+      // If the container engine is missing and user chose "files only", skip to done
       // Default: proceed to start
       return "start";
 
