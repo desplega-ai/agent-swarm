@@ -7,6 +7,7 @@ import {
   deleteSwarmConfigByKey,
   EXTENSION_AGENT_ROLE,
   getAgentById,
+  getAgentDailyTaskCounts,
   getAgentWithTasks,
   getAllAgents,
   getAllAgentsWithTasks,
@@ -27,7 +28,6 @@ import {
   updateAgentStatus,
   upsertSwarmConfig,
 } from "../be/db";
-import { getAgentDailyTaskCounts } from "../be/db/agents";
 import { createEvent } from "../be/events";
 import {
   getRuntimeInstanceById,

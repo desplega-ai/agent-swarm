@@ -184,6 +184,7 @@ export {
   extensionAgentAssignmentError,
   getActiveTaskCount,
   getAgentById,
+  getAgentDailyTaskCounts,
   getAgentHarnessProviders,
   getAllAgents,
   getLeadAgent,

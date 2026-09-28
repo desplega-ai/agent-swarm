@@ -223,6 +223,7 @@ value:getActiveSessions
 value:getActiveTaskCount
 value:getAgentById
 value:getAgentCurrentTask
+value:getAgentDailyTaskCounts
 value:getAgentHarnessProviders
 value:getAgentMailInboxMapping
 value:getAgentMailInboxMappingsByAgent
