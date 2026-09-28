@@ -4,16 +4,14 @@ import { resolveTaskAuditUserId } from "../be/audit-user";
 import {
   type ApprovalRequest,
   createApprovalRequest,
-  createTaskExtended,
   getApprovalRequestById,
-  getTaskById,
   getWorkflowRun,
   getWorkflowRunStep,
   listApprovalRequests,
   resolveApprovalRequest,
 } from "../be/db";
-import { resolveTemplate } from "../prompts/resolver";
 import { getRequestAuth } from "../utils/request-auth-context";
+import { createApprovalFollowUpTask } from "../workflows/approval-notifications";
 import { workflowEventBus } from "../workflows/event-bus";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
@@ -374,39 +372,7 @@ export async function handleApprovalRequests(
 
     // For standalone (non-workflow) requests, create a follow-up task
     // so the requesting agent is notified of the human's response
-    if (!updated.workflowRunId && updated.sourceTaskId) {
-      const sourceTask = await getTaskById(updated.sourceTaskId);
-      if (sourceTask) {
-        // Format responses for the template
-        const formattedResponses = formatResponses(
-          updated.questions as Array<{ id: string; type: string; label: string }>,
-          updated.responses as Record<string, unknown>,
-        );
-
-        const { text: taskText } = resolveTemplate("hitl.follow_up", {
-          request_id: updated.id,
-          title: updated.title,
-          status: updated.status,
-          responses: formattedResponses,
-        });
-
-        await createTaskExtended(taskText, {
-          agentId: sourceTask.agentId,
-          routingReason: sourceTask.agentId ? "continuity" : undefined,
-          routingSource: sourceTask.agentId ? "engine_default" : undefined,
-          parentTaskId: updated.sourceTaskId,
-          source: "system",
-          taskType: "hitl-follow-up",
-          tags: ["hitl", "follow-up"],
-          // Explicit Slack metadata — parentTaskId auto-inherits too,
-          // but being explicit ensures the follow-up task always gets
-          // the right thread context even if inheritance logic changes.
-          slackChannelId: sourceTask.slackChannelId ?? undefined,
-          slackThreadTs: sourceTask.slackThreadTs ?? undefined,
-          slackUserId: sourceTask.slackUserId ?? undefined,
-        });
-      }
-    }
+    await createApprovalFollowUpTask(updated, "hitl.follow_up");
 
     respondRoute.respond(res, 200, { approvalRequest: toApprovalRequestResponse(updated) });
     return true;
@@ -477,30 +443,4 @@ export async function handleApprovalRequests(
   }
 
   return false;
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function formatResponses(
-  questions: Array<{ id: string; type: string; label: string }>,
-  responses: Record<string, unknown>,
-): string {
-  return questions
-    .map((q) => {
-      const answer = responses[q.id];
-      let answerText: string;
-      if (answer == null) {
-        answerText = "(no answer)";
-      } else if (q.type === "approval") {
-        const a = answer as { approved?: boolean; comment?: string };
-        answerText = a.approved ? "Approved" : "Rejected";
-        if (a.comment) answerText += ` — ${a.comment}`;
-      } else if (typeof answer === "object") {
-        answerText = JSON.stringify(answer);
-      } else {
-        answerText = String(answer);
-      }
-      return `- ${q.label}: ${answerText}`;
-    })
-    .join("\n");
 }
