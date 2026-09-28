@@ -35,19 +35,28 @@ Line numbers are for `main` @ `f031fa8e`, before Reclaim replaced supersede/resu
 
 ## HeartbeatSimple.tla (current code)
 
+A model `Worker` is one runtime (worker process). `own[t]` is the runtime that started the current attempt: in code, the row's `agentId` plus `attemptRuntimeId`.
+
 | TLA+ action | Code | Guard |
 |---|---|---|
-| `ClaimRead`/`ClaimWrite`, `AcceptRead`/`AcceptWrite`, `Reject`, `PollStart`, `RegisterSession` | unchanged, see the table above | unchanged |
-| `Progress`, `Complete` (fence) | `store-progress` `src/tools/store-progress.ts` | On a row with `attempt > 0`, a write from an agent that is not the current `in_progress` holder is refused and the worker is told to stop. |
-| `AbortStale(w,t,g)` | the refused `store-progress` above; runner keeps an already-running copy instead of starting a second (`src/commands/runner.ts`) | |
-| `Reclaim(t)` | `detectAndRemediateStalledTasks` → `remediateStalledTask` `src/heartbeat/heartbeat.ts` → `reclaimTask` `src/be/db/tasks/write.ts` | One transaction: `UPDATE agent_tasks SET status='pending', attempt=attempt+1 WHERE id=? AND status='in_progress' AND attempt=? AND lastUpdatedAt=? AND NOT EXISTS (fresher active_sessions row)` + `DELETE FROM active_sessions WHERE taskId=?`. Budget spent (`attempt+1 > MAX_RESUME_GENERATIONS`) → `failTask` with the same guards. |
+| `ClaimRead`/`ClaimWrite`, `AcceptRead`/`AcceptWrite`, `Reject` | unchanged, see the table above; `claimTask` also stamps `attemptRuntimeId` | unchanged |
+| `PollStart(w,t)` / `Start` | `/api/poll` and `poll-task` → `startTask(id, { runtimeInstanceId })`; paused resume → `resumeTask`; pool claim → `claimTask` | Stamps `attemptRuntimeId` = caller's `X-Runtime-Instance-ID`. `FreeFor(w,t)`: a runtime whose only work is an earlier copy of `t` may start it; the runner then keeps that process (`src/commands/runner.ts` `activeTasks` keep-branch), which `Start` models by replacing the old `<<t, g>>`. |
+| `RegisterSession` | runner POST `/api/active-sessions` before provider spawn | `UNIQUE(taskId)` |
+| `Progress`, `Complete` (`Fenced`) | `staleAttemptWriteReason` `src/tasks/attempt-fence.ts`, called on a fresh read inside the write's transaction by `store-progress`, `defer-task`, `/finish`, `/pause`, `/supersede`, `task-action release` | Reject unless `status='in_progress'`, `agentId` = caller agent and `attemptRuntimeId` = caller runtime. On a reclaimed row (`attempt > 0`) any non-lead write that is not the `in_progress` holder's is rejected too. |
+| `AbortStale(w,t,g)` | the refused writes above tell the process to stop | |
+| `Complete` session delete | `DELETE /api/active-sessions/by-task/:id` → `deleteActiveSession(taskId, { agentId, runtimeInstanceId })` | Deletes only the caller's own row, never a replacement's. |
+| `Reclaim(t)` | `reclaimStalledTasks` → `remediateStalledTask` `src/heartbeat/heartbeat.ts` → `reclaimTask` `src/be/db/tasks/write.ts` | One transaction: `UPDATE agent_tasks SET status='pending', attempt=attempt+1 WHERE id=? AND status='in_progress' AND attempt=? AND lastUpdatedAt=? AND NOT EXISTS (fresher active_sessions row)` + `DELETE FROM active_sessions WHERE taskId=?`. Budget spent (`attempt+1 > MAX_RESUME_GENERATIONS`) → `failTask` with the same guards, `attempt` unchanged (model: `att + 1 > MaxGen`). |
 | `Unpin(t)` | `unpinUnclaimedTasks` `src/heartbeat/heartbeat.ts` → `getUnclaimedPins` + `unpinTask` | `UPDATE … SET status='unassigned', agentId=NULL, routingAffinity=COALESCE(routingAffinity, snapshot) WHERE id=? AND status='pending' AND lastUpdatedAt=?`, for reclaimed rows idle past `HEARTBEAT_RESUME_PIN_GRACE_MIN`. |
-| `ApiCrash`/`ApiBoot` | API restart | No boot sweep. The normal sweep reclaims what the crash left. |
+| `ApiCrash`/`ApiBoot` | API restart | No boot sweep. The normal sweep reclaims what the crash left. Graceful/context-limit/manual supersede writes `supersedeTask` + resume child + backfill in one transaction, so an API crash leaves no half-written supersede. |
+
+TLC (`HeartbeatSimple.cfg`): every invariant and property holds. With `FENCE = FALSE`, `NoZombieWrite` is violated, so the runtime fence is what keeps stale attempts out.
 
 ### Deviations from the model
 
-- **Fence by holder, not attempt number.** The worker does not send `attempt`. The fence refuses writes from any agent that is not the current `in_progress` holder of a reclaimed row. A stale run on the SAME agent that restarts the row is not fenced by the API; the runner guard (one copy per task id per runner) covers it instead.
+- **Fence by runtime, not attempt number.** A process never sends `attempt`; the fence compares the caller's runtime with `attemptRuntimeId`. This equals the model's `Current` check because a runtime runs at most one process per task id (`FreeFor` + `Start` above). A caller or starter without `X-Runtime-Instance-ID` (remote harnesses such as `claude-managed` and `devin`, pre-fence workers) falls back to the status + agent check, which the model does not cover.
+- **Unfenced worker writes outside the model:** the runner's `/api/tasks/:id/progress` and the session heartbeat. They can refresh progress text or `lastHeartbeatAt`, never status.
 - **Unpin covers pins, not offers** (`UNPIN_OFFERED = FALSE`). Offers keep `releaseStaleOfferedTasksForOfflineAgents`, modeled by `Reject`. `acceptTask` still checks `offeredTo` in JS, not SQL.
 - **Unpin skips Lead-held pins.** Not modeled (the model has no Lead).
 - **Fail instead of Reclaim** for workflow steps (the workflow engine's retry owns them), control-plane task types, and an extension that proposes `fail`. This is Reclaim's budget branch taken early, so it adds no new state.
-- **Kept outside the model:** `autoAssignPoolTasks`, the steering grace and the `pre.heartbeat.remediate` hook (both only skip or pick a branch).
+- **Extension override on a fresh session is NOT covered.** `pre.heartbeat.remediate` may modify a `fresh-stalled` classification to `supersede-resume` (tested in `extensions-heartbeat.test.ts`). That Reclaim runs while `sess = live`, which the model's `Reclaim` forbids, so `NoLiveKill` does not hold for an extension that chooses it. The default policy never does.
+- **Other status writers kept outside the model:** `autoAssignPoolTasks` (`unassigned → pending`), `releaseStaleReviewingTasks`, `promoteAbandonedDraftTasks`, approval auto-cancel of linked workflow tasks, the steering grace (only skips), and worker-side `resetOrphanedInProgressTasksForAgent` (`in_progress → pending` at runner boot, without `attempt + 1`; the next start re-stamps `attemptRuntimeId`).

@@ -15,10 +15,11 @@ Queue-pickup liveness alarm: `src/queue-stall-alarm.ts`.
 ```mermaid
 flowchart TD
   tick["Heartbeat tick (~90s)<br/>codeLevelTriage()"] --> expire["expireStaleRuntimeInstances() (§1a)<br/>multi-runtime only"]
-  expire --> detect["reclaimStalledTasks() (§2)"]
+  expire --> offers["releaseStaleOfferedTasksForOfflineAgents()<br/>offers on offline/deleted offerees → pool"]
+  offers --> detect["reclaimStalledTasks() (§2)"]
   detect --> health["checkWorkerHealth()<br/>busy ↔ idle (skips offline)"]
-  health --> cleanup["cleanupStaleResources()<br/>stale sessions (30m), reviewing,<br/>inbox, mentions, workflow runs,<br/>+ approval timeout + auto-cancel sweeps<br/>+ unpinUnclaimedTasks: unstarted pins back to pool (§3)<br/>+ escalateStarvedPoolTasks: zero-eligible-agent pool tasks (§4)"]
-  cleanup --> assign["autoAssignPoolTasks()<br/>per-task: first idle worker satisfying<br/>isAgentEligibleForTask (§4) — else leave queued"]
+  health --> assign["autoAssignPoolTasks()<br/>per-task: first idle worker satisfying<br/>isAgentEligibleForTask (§4) — else leave queued"]
+  assign --> cleanup["cleanupStaleResources()<br/>stale sessions (30m), reviewing,<br/>inbox, mentions, workflow runs,<br/>+ approval timeout + auto-cancel sweeps<br/>+ unpinUnclaimedTasks: unstarted pins back to pool (§3)<br/>+ escalateStarvedPoolTasks: zero-eligible-agent pool tasks (§4)"]
 ```
 
 - **No boot-time sweep.** The API does not scan `in_progress` tasks at boot. After an API restart, an orphaned `in_progress` task is handled by the normal sweep: once its thresholds pass, §2 reclaims it. Workers run in their own containers and outlive an API restart, so a live worker keeps its task.
@@ -172,7 +173,7 @@ flowchart TD
 ```
 
 - Candidate set = `getStalledInProgressTasks(STALL_THRESHOLD_NO_SESSION_MIN)` → `status='in_progress' AND lastUpdatedAt > 5m`. Tasks in `pending`/`offered` are **not** seen by this sweep. A candidate with a pending steering message newer than `STEERING_STALL_GRACE_MIN` is deferred for that sweep; once the bounded grace expires, normal classification and remediation resume.
-- An **active_session** = one worker-*run* process for a task (`active_sessions`, `UNIQUE(taskId)`), created lazily *after* the provider process spawns, heartbeated by **tool activity** (throttled ~5s; no wall-clock ping between tool calls). "No active session" is AND-gated with `lastUpdatedAt > 5m`, so it means *"no live run **and** no task progress in 5 min."* It can false-positive on a long-but-quiet live worker; the reclaim budget (`HEARTBEAT_MAX_RESUME_GENERATIONS`, compared against `attempt`) bounds the blast radius.
+- An **active_session** = one worker-*run* process for a task (`active_sessions`, `UNIQUE(taskId)`), registered by the runner *before* it spawns the provider process (§1), heartbeated by **tool activity** (throttled ~5s; no wall-clock ping between tool calls). "No active session" is AND-gated with `lastUpdatedAt > 5m`, so it means *"no live run **and** no task progress in 5 min."* It can false-positive on a long-but-quiet live worker; the reclaim budget (`HEARTBEAT_MAX_RESUME_GENERATIONS`, compared against `attempt`) bounds the blast radius.
 - The classifier emits `no-session`, `stale-session`, or `fresh-stalled` only after a task crosses its existing threshold. Extensions cannot change thresholds or classify a healthy task as stalled.
 - `defaultRemediationDecision` keeps the default recovery policy. It selects `fail` for workflow steps (reason `superseded_workflow_task`; the workflow engine's retry policy owns them), for control-plane task types (`SKIP_RECLAIM_TYPES`: heartbeat-checklist, boot-triage, heartbeat, ...), and when `attempt + 1 > HEARTBEAT_MAX_RESUME_GENERATIONS` (reason `resume_budget_exhausted`). It otherwise selects `supersede-resume`, the extension-contract name for Reclaim. A fresh-session stall defaults to `record`.
 - `pre.heartbeat.remediate` receives the task, optional session, classification, proposed action, reason, and age values before any remediation write. An extension can select `supersede-resume` (Reclaim), `fail`, or `record`. The action name is kept for contract compatibility. A block records the stalled task and an `extensionSkipped` finding, then performs no remediation during that sweep. An invalid action logs a scrubbed warning and keeps the original proposal.
@@ -197,13 +198,20 @@ flowchart TD
 
 **Reclaim.** `reclaimTask` is one compare-and-swap `UPDATE` on the task row. It sets `status = pending` and `attempt = attempt + 1`. It matches only when the row is still `in_progress`, `attempt` and `lastUpdatedAt` equal the values the sweep read, and no `active_sessions` row has a heartbeat newer than the one the sweep saw. The same transaction deletes the task's `active_sessions` row. The row keeps its `agentId`, so the same agent picks it up on its next poll. No new task row is created. Pending steering stays on the same row; nothing is promoted.
 
-**Fence.** `store-progress` refuses a worker write on a non-terminal row with `attempt > 0` unless the row is `in_progress` on that worker (spec predicate `Fenced`). Leads are exempt. An old run of an earlier attempt cannot revive or finish the reclaimed row.
+**Fence.** Every start of an attempt (`startTask` from `/api/poll` or `poll-task`, `claimTask`, `resumeTask`) stamps the starting runtime's `X-Runtime-Instance-ID` as `attemptRuntimeId`. `staleAttemptWriteReason` (`src/tasks/attempt-fence.ts`, spec predicate `Fenced`) is evaluated on a fresh read inside the same transaction as each worker write, and rejects:
+
+- any non-lead write to a non-terminal row with `attempt > 0` that is not `in_progress` on the caller's agent (reclaimed and not yet restarted, back in the pool, or started by another agent);
+- a write to an `in_progress` row owned by the caller's agent from a runtime other than `attemptRuntimeId` (the replacement attempt runs in another runtime of the same agent).
+
+It guards `store-progress`, `defer-task` (before the schedule insert and the terminal write, in one transaction), the runner's `/finish`, `/pause` and `/supersede`, and `task-action release`. `DELETE /api/active-sessions/by-task/:id` deletes only the row the calling agent and runtime registered, so an old run's cleanup cannot remove the replacement's session. Leads keep their override on rows they do not own.
+
+Residual gaps: a caller that sends no `X-Runtime-Instance-ID` (remote harnesses such as `claude-managed` and `devin`, pre-fence workers), and an attempt started without one (`attemptRuntimeId` NULL), fall back to the status + agent check alone. The runner's own `/progress` and session heartbeat calls are not fenced; they can refresh progress text or `lastHeartbeatAt` but cannot change status.
 
 **Runner.** When the reclaimed row comes back to an agent that still runs the earlier attempt, the runner keeps the running copy and does not start a second one. When it starts a row with `attempt > 0`, it injects a resume preamble built from the task's own id (its earlier attempts' session logs).
 
 **Unpin.** `unpinUnclaimedTasks` runs inside `cleanupStaleResources` on every sweep. `getUnclaimedPins` returns `pending` rows with an `agentId` whose `lastUpdatedAt` is older than `HEARTBEAT_RESUME_PIN_GRACE_MIN`, limited to reclaimed rows (`attempt > 0`) and legacy resume pins (`crash-recovery-pin`, `graceful-shutdown-pin`, `reboot-retry-pin` tags). Lead-held pins are skipped. For each other pin, `unpinTask` does a CAS on `status = pending AND lastUpdatedAt = read` and sets `status = unassigned`, `agentId = NULL`. It keeps an existing `routingAffinity`, or stamps a snapshot of the previous holder. The task then routes through the affinity-gated pool and starvation escalation (§4). Grace `0` disables Unpin.
 
-**Graceful shutdown.** A worker that shuts down calls the supersede route (`POST /api/tasks/:id/supersede`). It still uses `supersedeTask` plus `createResumeFollowUp(graceful_shutdown | context_limits | manual_supersede)`. `createResumeFollowUp` pins the resume child to the same agent when its row exists, it is not `offline`, and it has capacity (`HEARTBEAT_PIN_GRACEFUL_RESUME`, default on). A `leadOnly` parent may only pin to a Lead. Otherwise the child goes to the pool with a `routingAffinity` snapshot. An unstarted graceful-shutdown pin is returned to the pool by Unpin.
+**Graceful shutdown.** A worker that shuts down calls the supersede route (`POST /api/tasks/:id/supersede`). It still uses `supersedeTask` plus `createResumeFollowUp(graceful_shutdown | context_limits | manual_supersede)`, and both run with `backfillSupersedeTaskResumeTaskId` in ONE transaction: a crash or throw before the resume child is written rolls the supersede back, the task stays `in_progress`, and §2 reclaims it. A superseded row therefore always has its resume child, except when `createResumeFollowUp` returns `skipped` (no eligible agent or Lead), which is logged. `createResumeFollowUp` pins the resume child to the same agent when its row exists, it is not `offline`, and it has capacity (`HEARTBEAT_PIN_GRACEFUL_RESUME`, default on). A `leadOnly` parent may only pin to a Lead. Otherwise the child goes to the pool with a `routingAffinity` snapshot. An unstarted graceful-shutdown pin is returned to the pool by Unpin.
 
 ### Pseudocode (current)
 
@@ -261,10 +269,20 @@ unpinUnclaimedTasks():
         unpinTask(t.id, expectedLastUpdatedAt = t.lastUpdatedAt, affinity)
         #   status = unassigned, agentId = NULL → affinity-gated pool (§4)
 
-# store-progress fence:
-if task.attempt > 0 and caller is not Lead and task is not terminal
-   and not (task.status == in_progress and task.agentId == caller):
-    reject                                      # old run cannot revive a reclaimed row
+# attempt fence (src/tasks/attempt-fence.ts), same transaction as the write:
+# store-progress, defer-task, /finish, /pause, /supersede, task-action release
+start (poll / claim / resume):  task.attemptRuntimeId = caller X-Runtime-Instance-ID (or NULL)
+worker write (caller agent, caller runtime):
+    if task is terminal: fall through to the terminal-result guard
+    if task.attempt > 0 and caller is not Lead
+       and not (task.status == in_progress and task.agentId == caller):
+        reject                                  # reclaimed, not restarted by this agent
+    if task.agentId == caller and task.status == in_progress
+       and task.attemptRuntimeId and caller runtime and they differ:
+        reject                                  # replacement attempt runs in another runtime
+# session cleanup:
+DELETE /api/active-sessions/by-task/:id  →  WHERE taskId AND agentId = caller
+                                             AND (runtime unknown OR row runtime = caller runtime)
 ```
 
 ## 4. Routing affinity — producer/consumer contract
