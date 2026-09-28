@@ -70,9 +70,12 @@ x-agent-entrypoint: &agent-entrypoint
   - --
 
 services:
-  # Use quay.io because MinIO's Docker Hub repositories were removed.
+  # MinIO stopped publishing images: minio/minio is archived upstream and its
+  # Docker Hub and quay.io repositories no longer allow anonymous pulls.
+  # pgsty/minio is a community-maintained build of the same server, pinned by
+  # digest. It also ships `mc`, so minio-init reuses the same image.
   minio:
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -90,7 +93,7 @@ services:
     restart: unless-stopped
 
   minio-init:
-    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
     depends_on:
       minio:
         condition: service_healthy
@@ -205,7 +208,7 @@ services:
       # - SECRETS_ENCRYPTION_KEY=${SECRETS_ENCRYPTION_KEY:-}
 
       - MCP_BASE_URL=${MCP_BASE_URL}
-      - APP_URL=${APP_URL}
+      - APP_URL=${APP_URL:-}
       # Browser/externally reachable API origin (OAuth redirects, webhooks,
       # dashboard). Required when the API is behind HTTPS (see `--profile tls`).
       - PUBLIC_MCP_BASE_URL=${PUBLIC_MCP_BASE_URL:-}
