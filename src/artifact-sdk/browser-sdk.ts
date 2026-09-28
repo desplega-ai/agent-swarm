@@ -152,8 +152,9 @@ window.swarmSdk = new SwarmSDK();
 //
 // Auto-injected alongside the SDK. Exposes a tiny set of declarative web
 // components agents can drop into HTML pages without bundling anything. v1:
-// only \`<swarm-diff>\` (unified-diff renderer) + \`<swarm-diff-jumps>\` (a
-// sibling-anchor jump list). All zero-dep, pure DOM — Tailwind utility
+// \`<swarm-diff>\` (unified-diff renderer), \`<swarm-diff-jumps>\` (a
+// sibling-anchor jump list), and \`<swarm-cursors>\` (shared page pointers).
+// All zero-dep, pure DOM — Tailwind utility
 // classes are used freely since the Play CDN is already loaded by
 // PAGE_HEAD_DEFAULTS, but every visual aspect has inline-style fallbacks so
 // the component is still legible if Tailwind fails to load.
