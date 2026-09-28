@@ -121,3 +121,44 @@ export function legacyAliasModel(alias: string): string | null {
   const parsed = parseAlias(alias);
   return parsed?.kind === "anthropic" ? parsed.family : null;
 }
+
+/** models.dev section each harness provider's `model` ids come from. */
+const PROVIDER_SECTION: Record<HarnessConfig["provider"], string> = {
+  claude: "anthropic",
+  codex: "openai",
+  pi: "openrouter",
+  opencode: "openrouter",
+};
+
+/**
+ * Save-time check for configs created or edited through the API: the pinned
+ * `model` must be an id in the provider's catalog section, and a `modelAlias`
+ * must resolve to something today. Pass getResolutionCatalog(), so both checks
+ * use the same reviewed ID set as run-time alias resolution. Returns errors.
+ */
+export function validateConfigResolves(config: HarnessConfig, catalog: ModelsDevCatalog): string[] {
+  const errors = validateConfigModel(config);
+  if (errors.length > 0) return errors;
+  if (config.model === undefined && config.modelAlias === undefined) {
+    return ["set either model or modelAlias"];
+  }
+  if (config.modelAlias !== undefined) {
+    if (!resolveAlias(config.modelAlias, catalog)) {
+      errors.push(`modelAlias "${config.modelAlias}" matches no model in the catalog`);
+    }
+    return errors;
+  }
+  const model = config.model ?? "";
+  const section = PROVIDER_SECTION[config.provider];
+  let id = model;
+  if (section === "openrouter") {
+    if (!model.startsWith("openrouter/")) {
+      return [`model "${model}" must start with "openrouter/" for provider ${config.provider}`];
+    }
+    id = model.slice("openrouter/".length);
+  }
+  if (!catalog[section]?.models?.[id]) {
+    errors.push(`model "${model}" is not in the ${section} catalog`);
+  }
+  return errors;
+}

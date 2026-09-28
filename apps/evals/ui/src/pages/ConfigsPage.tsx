@@ -1,5 +1,5 @@
-import { type ReactNode, useMemo } from "react";
-import { listConfigs, listRuns } from "../api.ts";
+import { type FormEvent, type ReactNode, useMemo, useState } from "react";
+import { createConfig, listConfigs, listRuns } from "../api.ts";
 import { ConfigChip } from "../components/ConfigChip.tsx";
 import { type Column, DataTable } from "../components/DataTable.tsx";
 import { EntityLink } from "../components/EntityLink.tsx";
@@ -9,7 +9,7 @@ import { ModelChip } from "../components/ModelChip.tsx";
 import { PrettyView } from "../components/PrettyView.tsx";
 import { Spinner } from "../components/Spinner.tsx";
 import { InfoTip, Tooltip } from "../components/Tooltip.tsx";
-import { navigate, usePoll } from "../hooks.ts";
+import { invalidateConfigsCache, navigate, usePoll } from "../hooks.ts";
 import type { AaBenchmarkJson, ConfigJson, RunListItem } from "../types.ts";
 import "./configs.css";
 
@@ -251,11 +251,94 @@ const configColumns: Column<ConfigJson>[] = [
   },
 ];
 
+const PROVIDERS = ["claude", "pi", "opencode", "codex"] as const;
+
+/**
+ * "New config" form: provider, a pinned model id or a `latest:` alias, and a
+ * label. The server derives the id and rejects models the catalog can't resolve.
+ */
+function NewConfigForm(props: { onCreated: () => void }): ReactNode {
+  const [open, setOpen] = useState(false);
+  const [provider, setProvider] = useState<string>("pi");
+  const [target, setTarget] = useState("");
+  const [label, setLabel] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  if (!open) {
+    return (
+      <button type="button" className="btn" onClick={() => setOpen(true)}>
+        New config
+      </button>
+    );
+  }
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    const value = target.trim();
+    if (!value) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const isAlias = value.startsWith("latest:");
+      const created = await createConfig({
+        provider,
+        label: label.trim() || undefined,
+        ...(isAlias ? { modelAlias: value } : { model: value }),
+      });
+      invalidateConfigsCache();
+      props.onCreated();
+      setOpen(false);
+      setTarget("");
+      setLabel("");
+      navigate(`#/configs/${created.id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <form className="cfg-new" onSubmit={submit}>
+      <select value={provider} onChange={(e) => setProvider(e.target.value)} aria-label="Provider">
+        {PROVIDERS.map((p) => (
+          <option key={p} value={p}>
+            {HARNESS_LABELS[p] ?? p}
+          </option>
+        ))}
+      </select>
+      <input
+        value={target}
+        onChange={(e) => setTarget(e.target.value)}
+        placeholder="Model id or latest:… alias"
+        aria-label="Model or alias"
+      />
+      <input
+        value={label}
+        onChange={(e) => setLabel(e.target.value)}
+        placeholder="Label (optional)"
+        aria-label="Label"
+      />
+      <button type="submit" className="btn btn-primary" disabled={saving || !target.trim()}>
+        {saving ? "Saving…" : "Create"}
+      </button>
+      <button type="button" className="btn" onClick={() => setOpen(false)}>
+        Cancel
+      </button>
+      {error ? <div className="cfg-error">{error}</div> : null}
+    </form>
+  );
+}
+
 function ConfigList(): ReactNode {
-  const { data, error, loading } = usePoll(listConfigs, null, []);
+  const { data, error, loading, refresh } = usePoll(listConfigs, null, []);
   return (
     <div className="panel">
-      <h3 className="panel-title">Configs{data ? ` · ${data.length}` : ""}</h3>
+      <div className="cfg-header">
+        <h3 className="panel-title">Configs{data ? ` · ${data.length}` : ""}</h3>
+        <NewConfigForm onCreated={refresh} />
+      </div>
       {error ? <div className="cfg-error">{error}</div> : null}
       {loading && !data ? <Spinner label="Loading configs…" /> : null}
       {data ? (

@@ -67,3 +67,16 @@
   font-size: 10px;
   margin-top: 6px;
 }
+
+/* "New config" form on the configs list. */
+.cfg-new {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.cfg-new input {
+  min-width: 220px;
+}
