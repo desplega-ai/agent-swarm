@@ -36,9 +36,7 @@ const extension: SwarmExtension<typeof manifest> = (api) => {
 
     const isPullRequest = options.vcsUrl?.includes("/pull/") ?? false;
     const isExternalPullRequestTask =
-      (taskType === "github-comment" ||
-        taskType === "github-pr" ||
-        taskType === "github-review") &&
+      (taskType === "github-comment" || taskType === "github-pr" || taskType === "github-review") &&
       isPullRequest;
     const isExternalSender = includesLogin(ctx.config.external, login);
     if (!isReviewBot && isExternalSender && isExternalPullRequestTask) return;
