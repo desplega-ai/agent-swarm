@@ -130,6 +130,7 @@ export async function expandCandidatesWithGraph(
     neighbors.set(row.id, {
       ...rowToCandidate(row, similarity),
       retrievalSource: "graph",
+      graphParentId: parent.id,
       // The neighbor's own decay is applied exactly once by rerank().
       recencyDecayApplied: false,
     });
