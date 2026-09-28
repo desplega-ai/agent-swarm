@@ -61,14 +61,14 @@ All nodes are non-loop, so every node has one logical iteration.
 
 | Action | Code | Guard |
 |---|---|---|
-| `H1` | `getRunIdsByStatus('running')` `recovery.ts:63`, `isWorkflowRunActive` `:68` | `GuardActiveWalk` (bf12ab53 / #1584) |
-| `H2` | re-read run `:69`, completed steps, routing, `findReadyNodes` `:85` | `findReadyNodes` excludes only nodes with a **completed** step |
-| `H3` | second `isWorkflowRunActive` `:87`, then complete or `walkGraph` | `GuardActiveWalk` |
-| `H4` | `recovery.ts:88-94` `readyNodes.length === 0` | blind `run -> completed`, no transaction |
+| `H1` | `getRunIdsByStatus('running')` `recovery.ts:64`, `isWorkflowRunActive` `:69` | `GuardActiveWalk` (bf12ab53 / #1584) |
+| `H2` | re-read run `:70`, completed steps, routing, `findReadyNodes` `:86` | `findReadyNodes` excludes only nodes with a **completed** step |
+| `H3` | second `isWorkflowRunActive` `:88`, then complete or `walkGraph` | `GuardActiveWalk` |
+| `H4` | `recovery.ts:89-95` `readyNodes.length === 0` | blind `run -> completed`, no transaction |
 | `H5` | `getStuckWorkflowRuns` (waiting steps whose task is terminal) | `run.status = 'waiting'` |
 | `H6` | per stuck row, re-read run | `run.status = 'waiting'` |
 | `H7` | `failStepAndRunIfWaiting` `task-step-routing.ts:24-45` | CAS on `step.status='waiting'` |
-| `H8` | `completeTaskStepAndResolveSuccessors` `recovery.ts:155` -> `task-step-routing.ts:96-143`, then `walkGraph(successors)` | CAS on `step.status='waiting'` inside the transaction; sets `run -> running` |
+| `H8` | `completeTaskStepAndResolveSuccessors` `recovery.ts:156` -> `task-step-routing.ts:96-143`, then `walkGraph(successors)` | CAS on `step.status='waiting'` inside the transaction; sets `run -> running` |
 
 ## Task events (`src/workflows/resume.ts`)
 
@@ -84,7 +84,7 @@ All nodes are non-loop, so every node has one logical iteration.
 
 | Action | Code | Guard |
 |---|---|---|
-| `Cancel` | `cancelWorkflowRun` `resume.ts:370-418` | one transaction; skips steps whose status is terminal, **including `failed` rows that still carry `nextRetryAt`** |
+| `Cancel` | `cancelWorkflowRun` `resume.ts:417-440` -> `cancelWorkflowRunRows` `:371-410` | one transaction; skips steps whose status is terminal, **including `failed` rows that still carry `nextRetryAt`** |
 | `U1` | `retryFailedRun` reads `resume.ts:309-335` (`findReadyNodes` at `:354`) | reads outside the transaction |
 | `U2` | claim transaction `resume.ts:341-350`, then `walkGraph(nodesToRun)` `:363` | `run.status = 'failed'`; no check for a live walk or live step |
 
