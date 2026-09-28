@@ -13,6 +13,7 @@
     "test": "bun test"
   },
   "dependencies": {
+    "@desplega/model-catalog": "workspace:*",
     "@libsql/client": "^0.15.0",
     "@openrouter/ai-sdk-provider": "^2.9.1",
     "ai": "^6.0.116",
