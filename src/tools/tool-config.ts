@@ -143,8 +143,9 @@ export const DEFERRED_TOOLS = new Set([
   // Metrics (1)
   "create_metric",
 
-  // Approval Requests (1)
+  // Approval Requests (2)
   "request-human-input",
+  "cancel-approval-request",
 
   // Skills (12)
   "skill-create",
