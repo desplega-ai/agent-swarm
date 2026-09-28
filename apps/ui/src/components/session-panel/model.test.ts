@@ -1,3 +1,4 @@
+import { sessionDisplayTitle } from "../../lib/utils";
 import {
   buildContextFooter,
   contextKeyPrefix,
@@ -65,5 +66,19 @@ describe("sessionLabel", () => {
 
   test("uses the list's slim taskPreview when present, and truncates", () => {
     expect(sessionLabel({ task: "", taskPreview: "x".repeat(100) }, 10)).toBe(`${"x".repeat(9)}…`);
+  });
+});
+
+describe("sessionDisplayTitle", () => {
+  test("drops the panel's page-context footer, keeps a custom title", () => {
+    const task = withContextFooter(
+      "legend is wrong",
+      buildContextFooter([["URL", "u"]], "swarm UI"),
+    );
+    expect(sessionDisplayTitle({ task })).toBe("legend is wrong");
+    expect(sessionDisplayTitle({ task, title: "Renamed" })).toBe("Renamed");
+    expect(sessionDisplayTitle({ task: "plain\n---\nnot a footer" })).toBe(
+      "plain\n---\nnot a footer",
+    );
   });
 });

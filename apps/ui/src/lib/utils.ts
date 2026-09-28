@@ -1,5 +1,6 @@
 import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { stripContextFooter } from "../components/session-panel/model";
 import { formatCost } from "./cost-format";
 
 /**
@@ -51,7 +52,8 @@ export function formatRelativeTime(date: string | Date): string {
  * root task's prompt text. Renders identically to today when no title is set.
  */
 export function sessionDisplayTitle(root: { task: string; title?: string }): string {
-  return root.title?.trim() || root.task;
+  // Sessions started from the contextual panel carry a page-context footer for the lead.
+  return root.title?.trim() || stripContextFooter(root.task);
 }
 
 /**

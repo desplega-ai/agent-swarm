@@ -237,7 +237,6 @@ function NewSession({
         {...composerProps}
         placeholder={userId ? "Message the swarm…" : "Pick an identity to send messages."}
         sendLabel="Start session"
-        autoFocus
       />
     </>
   );
