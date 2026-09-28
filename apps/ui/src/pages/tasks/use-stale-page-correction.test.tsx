@@ -9,10 +9,10 @@ import { MemoryRouter, useLocation, useNavigationType, useSearchParams } from "r
 // The test runner cannot resolve ui's `@/` alias (see review-ack.test.tsx), so
 // each aliased module in this graph maps to its real file. The API client is
 // real too; only its base URL and `fetch` are fixtures.
-mock.module("@/components/shared/list-pager", () => import("../../components/shared/list-pager"));
-mock.module("@/components/ui/button", () => import("../../components/ui/button"));
-mock.module("@/components/ui/select", () => import("../../components/ui/select"));
-mock.module("@/lib/utils", () => import("../../lib/utils"));
+mock.module("@/components/shared/list-pager", () => require("../../components/shared/list-pager"));
+mock.module("@/components/ui/button", () => require("../../components/ui/button"));
+mock.module("@/components/ui/select", () => require("../../components/ui/select"));
+mock.module("@/lib/utils", () => require("../../lib/utils"));
 mock.module("@/lib/config", () => ({
   getConfig: () => ({ apiUrl: "https://api.example.test", apiKey: "" }),
 }));

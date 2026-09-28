@@ -3,9 +3,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 // The test runner cannot resolve ui's `@/` alias (see review-ack.test.tsx), so
 // each aliased module in this component's graph maps to its real file.
-mock.module("@/components/ui/button", () => import("../ui/button"));
-mock.module("@/components/ui/select", () => import("../ui/select"));
-mock.module("@/lib/utils", () => import("../../lib/utils"));
+mock.module("@/components/ui/button", () => require("../ui/button"));
+mock.module("@/components/ui/select", () => require("../ui/select"));
+mock.module("@/lib/utils", () => require("../../lib/utils"));
 
 const { ListPager, formatPagerRange, resolveListPage } = await import("./list-pager");
 

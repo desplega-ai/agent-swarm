@@ -3,14 +3,16 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 // The test runner cannot resolve ui's `@/` alias, so each aliased module in
 // this component's graph maps to its real file.
-mock.module("@/lib/utils", () => import("../../../lib/utils"));
+// Factories use require, not `() => import()`: Bun hangs when a later test
+// file in the same run re-registers an alias with an async factory.
+mock.module("@/lib/utils", () => require("../../../lib/utils"));
 
-mock.module("@/components/ui/alert-dialog", () => import("../../../components/ui/alert-dialog"));
-mock.module("@/components/ui/button", () => import("../../../components/ui/button"));
-mock.module("@/components/ui/tooltip", () => import("../../../components/ui/tooltip"));
-mock.module("@/components/ui/dialog", () => import("../../../components/ui/dialog"));
-mock.module("@/components/ui/kbd", () => import("../../../components/ui/kbd"));
-mock.module("@/lib/approval-shortcuts", () => import("../../../lib/approval-shortcuts"));
+mock.module("@/components/ui/alert-dialog", () => require("../../../components/ui/alert-dialog"));
+mock.module("@/components/ui/button", () => require("../../../components/ui/button"));
+mock.module("@/components/ui/tooltip", () => require("../../../components/ui/tooltip"));
+mock.module("@/components/ui/dialog", () => require("../../../components/ui/dialog"));
+mock.module("@/components/ui/kbd", () => require("../../../components/ui/kbd"));
+mock.module("@/lib/approval-shortcuts", () => require("../../../lib/approval-shortcuts"));
 const { DISCARD_DIALOG_TITLE, DISCARD_REASON, SubmitBar, discardDialogLines } = await import(
   "./submit-bar"
 );

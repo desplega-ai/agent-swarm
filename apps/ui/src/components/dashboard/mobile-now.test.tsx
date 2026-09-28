@@ -6,21 +6,20 @@ import type { MobileNowViewProps, SectionQuery } from "./mobile-now";
 
 // The test runner cannot resolve ui's `@/` alias (see review-ack.test.tsx), so
 // each aliased module in this component's graph maps to its real file.
-mock.module("@/api/hooks/use-agents", () => import("../../api/hooks/use-agents"));
-mock.module(
-  "@/api/hooks/use-approval-requests",
-  () => import("../../api/hooks/use-approval-requests"),
+mock.module("@/api/hooks/use-agents", () => require("../../api/hooks/use-agents"));
+mock.module("@/api/hooks/use-approval-requests", () =>
+  require("../../api/hooks/use-approval-requests"),
 );
-mock.module("@/api/hooks/use-tasks", () => import("../../api/hooks/use-tasks"));
-mock.module("@/components/shared/mobile-list", () => import("../shared/mobile-list"));
-mock.module("@/components/shared/status-badge", () => import("../shared/status-badge"));
-mock.module("@/components/ui/badge", () => import("../ui/badge"));
-mock.module("@/components/ui/button", () => import("../ui/button"));
-mock.module("@/components/ui/skeleton", () => import("../ui/skeleton"));
-mock.module("@/lib/config", () => import("../../lib/config"));
-mock.module("@/lib/recent-failures", () => import("../../lib/recent-failures"));
-mock.module("@/lib/task-title", () => import("../../lib/task-title"));
-mock.module("@/lib/utils", () => import("../../lib/utils"));
+mock.module("@/api/hooks/use-tasks", () => require("../../api/hooks/use-tasks"));
+mock.module("@/components/shared/mobile-list", () => require("../shared/mobile-list"));
+mock.module("@/components/shared/status-badge", () => require("../shared/status-badge"));
+mock.module("@/components/ui/badge", () => require("../ui/badge"));
+mock.module("@/components/ui/button", () => require("../ui/button"));
+mock.module("@/components/ui/skeleton", () => require("../ui/skeleton"));
+mock.module("@/lib/config", () => require("../../lib/config"));
+mock.module("@/lib/recent-failures", () => require("../../lib/recent-failures"));
+mock.module("@/lib/task-title", () => require("../../lib/task-title"));
+mock.module("@/lib/utils", () => require("../../lib/utils"));
 
 const { MobileNowView } = await import("./mobile-now");
 

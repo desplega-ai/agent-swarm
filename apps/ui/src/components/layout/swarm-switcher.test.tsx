@@ -4,9 +4,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 // The test runner cannot resolve ui's `@/` alias (see review-ack.test.tsx), so
 // each aliased module in this component's graph maps to a real file or a stub.
-mock.module("@/lib/utils", () => import("../../lib/utils"));
-mock.module("@/components/ui/tooltip", () => import("../ui/tooltip"));
-mock.module("@/components/ui/dropdown-menu", () => import("../ui/dropdown-menu"));
+mock.module("@/lib/utils", () => require("../../lib/utils"));
+mock.module("@/components/ui/tooltip", () => require("../ui/tooltip"));
+mock.module("@/components/ui/dropdown-menu", () => require("../ui/dropdown-menu"));
 mock.module("@/components/ui/sidebar", () => ({
   SidebarMenu: ({ children }: { children: ReactNode }) => <ul>{children}</ul>,
   SidebarMenuItem: ({ children }: { children: ReactNode }) => <li>{children}</li>,

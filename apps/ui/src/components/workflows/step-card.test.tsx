@@ -5,17 +5,19 @@ import type { WorkflowRunStep } from "../../api/types";
 
 // The test runner cannot resolve ui's `@/` alias, so each aliased module in
 // this component's graph maps to its real file.
-mock.module("@/lib/utils", () => import("../../lib/utils"));
+// Factories use require, not `() => import()`: Bun hangs when a later test
+// file in the same run re-registers an alias with an async factory.
+mock.module("@/lib/utils", () => require("../../lib/utils"));
 
-mock.module("@/components/shared/agent-link", () => import("../shared/agent-link"));
-mock.module("@/components/shared/status-badge", () => import("../shared/status-badge"));
-mock.module("@/components/ui/alert", () => import("../ui/alert"));
-mock.module("@/components/ui/badge", () => import("../ui/badge"));
-mock.module("@/components/workflows/graph-utils", () => import("./graph-utils"));
-mock.module("@/components/workflows/json-tree", () => import("./json-tree"));
-mock.module("@/lib/synthetic-step-id", () => import("../../lib/synthetic-step-id"));
-mock.module("@/api/hooks/use-agents", () => import("../../api/hooks/use-agents"));
-mock.module("@/lib/config", () => import("../../lib/config"));
+mock.module("@/components/shared/agent-link", () => require("../shared/agent-link"));
+mock.module("@/components/shared/status-badge", () => require("../shared/status-badge"));
+mock.module("@/components/ui/alert", () => require("../ui/alert"));
+mock.module("@/components/ui/badge", () => require("../ui/badge"));
+mock.module("@/components/workflows/graph-utils", () => require("./graph-utils"));
+mock.module("@/components/workflows/json-tree", () => require("./json-tree"));
+mock.module("@/lib/synthetic-step-id", () => require("../../lib/synthetic-step-id"));
+mock.module("@/api/hooks/use-agents", () => require("../../api/hooks/use-agents"));
+mock.module("@/lib/config", () => require("../../lib/config"));
 const { HitlOutput } = await import("./step-card");
 
 function step(status: string): WorkflowRunStep {

@@ -6,23 +6,23 @@ import type { ConfigCatalogEntry } from "../../lib/configuration-catalog";
 
 // The test runner cannot resolve ui's `@/` alias (see review-ack.test.tsx), so
 // each aliased module in this component's graph maps to its real file.
-mock.module("@/api/hooks/use-agents", () => import("../../api/hooks/use-agents"));
-mock.module("@/api/hooks/use-config-api", () => import("../../api/hooks/use-config-api"));
-mock.module("@/components/ui/badge", () => import("../ui/badge"));
-mock.module("@/components/ui/button", () => import("../ui/button"));
-mock.module("@/components/ui/dropdown-menu", () => import("../ui/dropdown-menu"));
-mock.module("@/components/ui/input", () => import("../ui/input"));
-mock.module("@/components/ui/label", () => import("../ui/label"));
-mock.module("@/components/ui/select", () => import("../ui/select"));
-mock.module("@/components/ui/switch", () => import("../ui/switch"));
-mock.module("@/components/ui/textarea", () => import("../ui/textarea"));
-mock.module("@/components/ui/tooltip", () => import("../ui/tooltip"));
-mock.module("@/hooks/use-swarm-config", () => import("../../hooks/use-swarm-config"));
-mock.module("@/hooks/use-url-search-state", () => import("../../hooks/use-url-search-state"));
-mock.module("@/lib/agent-color", () => import("../../lib/agent-color"));
-mock.module("@/lib/config", () => import("../../lib/config"));
-mock.module("@/lib/configuration-values", () => import("../../lib/configuration-values"));
-mock.module("@/lib/utils", () => import("../../lib/utils"));
+mock.module("@/api/hooks/use-agents", () => require("../../api/hooks/use-agents"));
+mock.module("@/api/hooks/use-config-api", () => require("../../api/hooks/use-config-api"));
+mock.module("@/components/ui/badge", () => require("../ui/badge"));
+mock.module("@/components/ui/button", () => require("../ui/button"));
+mock.module("@/components/ui/dropdown-menu", () => require("../ui/dropdown-menu"));
+mock.module("@/components/ui/input", () => require("../ui/input"));
+mock.module("@/components/ui/label", () => require("../ui/label"));
+mock.module("@/components/ui/select", () => require("../ui/select"));
+mock.module("@/components/ui/switch", () => require("../ui/switch"));
+mock.module("@/components/ui/textarea", () => require("../ui/textarea"));
+mock.module("@/components/ui/tooltip", () => require("../ui/tooltip"));
+mock.module("@/hooks/use-swarm-config", () => require("../../hooks/use-swarm-config"));
+mock.module("@/hooks/use-url-search-state", () => require("../../hooks/use-url-search-state"));
+mock.module("@/lib/agent-color", () => require("../../lib/agent-color"));
+mock.module("@/lib/config", () => require("../../lib/config"));
+mock.module("@/lib/configuration-values", () => require("../../lib/configuration-values"));
+mock.module("@/lib/utils", () => require("../../lib/utils"));
 
 const { TooltipProvider } = await import("../ui/tooltip");
 const { ConfigurationRow } = await import("./configuration-row");
