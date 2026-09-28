@@ -11,8 +11,12 @@ import { Slot } from "radix-ui";
 import type * as React from "react";
 import { useEffect } from "react";
 
-import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
+
+// Relative on purpose: the root `bun test` run cannot resolve ui's `@/` alias,
+// so ui tests mock each aliased module they reach. A relative import keeps
+// every test that renders Button from needing its own Spinner mock.
+import { Spinner } from "./spinner";
 
 const buttonVariants = cva(
   // Transitions live in globals.css ("Button motion", keyed on
