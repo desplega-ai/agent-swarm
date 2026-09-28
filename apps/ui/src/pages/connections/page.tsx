@@ -2330,9 +2330,9 @@ function OAuthAppsSection({
         flex: 1,
         cellRenderer: (params: ICellRendererParams<OAuthAppSummary>) =>
           params.data ? (
-            <span className="flex min-w-0 items-center gap-1.5">
+            <span className="flex min-w-0 flex-1 items-center gap-1.5">
               <LegacyCallbackWarning app={params.data} staticCallback={staticCallback} />
-              <MiddleTruncation className="min-w-0 flex-1 text-xs text-muted-foreground">
+              <MiddleTruncation className="text-xs text-muted-foreground">
                 {params.data.redirectUri}
               </MiddleTruncation>
               <span onClick={(event) => event.stopPropagation()}>

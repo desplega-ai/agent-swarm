@@ -155,7 +155,7 @@ function computeTruncated(
     }
 
     const startStr = text.slice(0, startLen);
-    const endStr = text.slice(-endLen);
+    const endStr = text.slice(text.length - endLen);
     const combinedW = measureText(startStr + endStr, font);
 
     if (combinedW <= availableForText) lo = mid;
@@ -173,7 +173,7 @@ function computeTruncated(
     endLen = Math.ceil(lo / 2);
   }
 
-  return text.slice(0, startLen) + ellipsis + text.slice(-endLen);
+  return text.slice(0, startLen) + ellipsis + text.slice(text.length - endLen);
 }
 
 type BaseProps = React.ComponentPropsWithoutRef<"span"> & {
@@ -237,7 +237,9 @@ export function MiddleTruncation({
   return (
     <span
       ref={containerRef}
-      className={cn("block truncate", className)}
+      // Local change: flex-1/min-w-0 make it fill a flex parent. Sized to its own
+      // (already truncated) text it could never grow back on resize.
+      className={cn("block min-w-0 flex-1 truncate", className)}
       title={children}
       {...props}
     >

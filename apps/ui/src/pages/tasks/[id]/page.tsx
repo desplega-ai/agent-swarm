@@ -799,7 +799,7 @@ export default function TaskDetailPage() {
                   className="flex items-center gap-1.5 text-xs text-primary hover:underline font-mono truncate"
                 >
                   <Link2 className="h-3.5 w-3.5 shrink-0" />
-                  <MiddleTruncation className="min-w-0 flex-1">{task.vcsUrl}</MiddleTruncation>
+                  <MiddleTruncation>{task.vcsUrl}</MiddleTruncation>
                   <ExternalLink className="h-3 w-3 shrink-0 text-muted-foreground" />
                 </a>
               )}
