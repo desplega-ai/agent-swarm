@@ -4,7 +4,6 @@ import {
   BarChart3,
   Brain,
   FileText,
-  Loader2,
   Quote,
   Search,
   Target,
@@ -17,6 +16,7 @@ import { useAgents } from "@/api/hooks/use-agents";
 import { useDeleteMemory, useMemoryList } from "@/api/hooks/use-memory";
 import { useMemoryUsefulness } from "@/api/hooks/use-memory-usefulness";
 import type { MemoryEntry, MemoryListRequest, MemoryScopeFilter, MemorySource } from "@/api/types";
+import { Spinner } from "@/components/kibo-ui/spinner";
 import { SharedBarChart } from "@/components/shared/charts/nivo-charts";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { DataGrid } from "@/components/shared/data-grid";
@@ -434,11 +434,7 @@ export default function MemoryPage() {
           onClick={submit}
           disabled={isFetching}
         >
-          {isFetching ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Search className="h-3.5 w-3.5" />
-          )}
+          {isFetching ? <Spinner className="size-3.5" /> : <Search className="h-3.5 w-3.5" />}
           Search
         </Button>
         <Button size="sm" variant="outline" onClick={clear}>

@@ -34,20 +34,13 @@ import type {
   FullWidthCellKeyDownEvent,
   ICellRendererParams,
 } from "ag-grid-community";
-import {
-  AlertCircle,
-  AlertTriangle,
-  ArrowRight,
-  CheckCircle,
-  Info,
-  Loader2,
-  X,
-} from "lucide-react";
+import { AlertCircle, AlertTriangle, ArrowRight, CheckCircle, Info, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { Children, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Streamdown } from "streamdown";
+import { Spinner } from "@/components/kibo-ui/spinner";
 import { DataGrid } from "@/components/shared/data-grid";
 import { SearchBox } from "@/components/shared/search-box";
 import { AlertCallout } from "@/components/ui/alert-callout";
@@ -1108,11 +1101,7 @@ function ActionButtonComponent({
       onClick={() => emit("press")}
     >
       {props.label}
-      {busy ? (
-        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-      ) : (
-        <ArrowRight className="h-3.5 w-3.5" />
-      )}
+      {busy ? <Spinner className="size-3.5" /> : <ArrowRight className="h-3.5 w-3.5" />}
     </Button>
   );
 }
@@ -1288,7 +1277,7 @@ function FormComponent({ props }: { props: FormProps }) {
       ) : null}
       <div>
         <Button type="submit" disabled={submitting}>
-          {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+          {submitting ? <Spinner className="size-3.5" /> : null}
           {props.submitLabel ?? "Submit"}
         </Button>
       </div>

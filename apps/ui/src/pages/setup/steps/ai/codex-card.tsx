@@ -1,9 +1,10 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, ExternalLink, Loader2 } from "lucide-react";
+import { AlertCircle, ExternalLink } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "@/api/client";
 import { ONBOARDING_QUERY_KEY } from "@/api/hooks/use-onboarding";
 import type { CodexDeviceStartResponse } from "@/api/types";
+import { Spinner } from "@/components/kibo-ui/spinner";
 import { BrandLogo } from "@/components/shared/brand-logo";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { StatusLine } from "@/components/shared/status-icon";
@@ -142,7 +143,7 @@ export function CodexCard({
 
       {flow.phase === "starting" ? (
         <Button type="button" disabled>
-          <Loader2 className="animate-spin" />
+          <Spinner className="size-4" />
           Requesting a code
         </Button>
       ) : null}

@@ -1,4 +1,3 @@
-import { Loader2 } from "lucide-react";
 import type {
   AgentStatus,
   AgentTaskStatus,
@@ -8,6 +7,7 @@ import type {
   WorkflowRunStatus,
   WorkflowRunStepStatus,
 } from "@/api/types";
+import { Spinner } from "@/components/kibo-ui/spinner";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
@@ -140,7 +140,7 @@ export function StatusBadge({ status, size = "sm", className }: StatusBadgeProps
       )}
     >
       {config.spinner ? (
-        <Loader2 className={cn("h-3 w-3 shrink-0 animate-spin", config.text)} />
+        <Spinner className={cn("size-3 shrink-0", config.text)} />
       ) : (
         <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", config.dot)} />
       )}

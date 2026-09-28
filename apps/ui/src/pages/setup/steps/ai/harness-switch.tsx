@@ -1,11 +1,11 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { Loader2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { resolvedConfigsQuery } from "@/api/hooks/use-config-api";
 import { ONBOARDING_QUERY_KEY } from "@/api/hooks/use-onboarding";
 import type { AgentWithTasks, ProviderName } from "@/api/types";
+import { Spinner } from "@/components/kibo-ui/spinner";
 import { SetupChip } from "@/components/onboarding/setup-card";
 import { HarnessIcon } from "@/components/shared/harness-icon";
 import { StatusLine } from "@/components/shared/status-icon";
@@ -161,7 +161,7 @@ export function HarnessSwitch({
           disabled={count === 0 || busy}
           onClick={switchAgents}
         >
-          {busy ? <Loader2 className="animate-spin" /> : null}
+          {busy ? <Spinner className="size-4" /> : null}
           Switch {count} agent{count === 1 ? "" : "s"} to {targetName}
         </Button>
       </div>
