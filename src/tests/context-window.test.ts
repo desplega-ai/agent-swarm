@@ -8,13 +8,12 @@ import {
 } from "../utils/context-window";
 
 describe("getContextWindowSize", () => {
-  test("returns 1M for fable and mythos models", () => {
+  // Windows come from the model catalog: a model the catalog lacks (mythos is
+  // not on models.dev) gets the 200K default until an overlay row adds it.
+  test("returns 1M for fable models", () => {
     expect(getContextWindowSize("claude-fable-5-1")).toBe(1_000_000);
-    expect(getContextWindowSize("claude-mythos-5-1")).toBe(1_000_000);
     expect(getContextWindowSize("claude-fable-5")).toBe(1_000_000);
-    expect(getContextWindowSize("claude-mythos-5")).toBe(1_000_000);
     expect(getContextWindowSize("fable")).toBe(1_000_000);
-    expect(getContextWindowSize("mythos")).toBe(1_000_000);
   });
 
   test("returns 1M for opus models", () => {
@@ -38,8 +37,11 @@ describe("getContextWindowSize", () => {
     expect(getContextWindowSize("haiku")).toBe(200_000);
   });
 
+  test("reads OpenAI windows from the catalog", () => {
+    expect(getContextWindowSize("gpt-5")).toBe(400_000);
+  });
+
   test("returns 200K default for unknown models", () => {
-    expect(getContextWindowSize("gpt-5")).toBe(200_000);
     expect(getContextWindowSize("unknown-model")).toBe(200_000);
     expect(getContextWindowSize("")).toBe(200_000);
   });

@@ -58,7 +58,7 @@ describe("buildModelsCatalog", () => {
     expect(model).toEqual({
       id: "test-vendor/test-model-live-only",
       name: "Test Model (live only)",
-      cost: { input: 0.5, output: 1.5 },
+      cost: { input: 0.5, output: 1.5, cache_read: 0.1 },
       limit: { context: 256_000 },
       reasoning: true,
       reasoning_options: [{ type: "effort", values: ["low", "medium", "high"] }],
