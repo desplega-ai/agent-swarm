@@ -114,6 +114,7 @@ value:autoEncryptLegacyPlaintextSecrets
 value:backfillSupersedeTaskResumeTaskId
 value:bindSlackMessageTimestamp
 value:buildRoutingAffinityFromAgent
+value:cancelApprovalRequestById
 value:cancelPendingApprovalRequestsForRun
 value:cancelPendingSteeringForTask
 value:cancelTask
@@ -371,6 +372,7 @@ value:getSlackTasksMissingTree
 value:getSlackTreeMessage
 value:getSlackTreeMessageByThread
 value:getSlackTreeMessages
+value:getStaleApprovalRequests
 value:getStalePinnedResumes
 value:getStaleUnassignedAffinityTasks
 value:getStalledInProgressTasks

@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { createServer as createHttpServer, type Server } from "node:http";
 import {
+  cancelApprovalRequestById,
   cancelPendingApprovalRequestsForRun,
   claimApprovalCancellationNotification,
   closeDb,
@@ -368,6 +369,26 @@ describe("Approval Requests", () => {
       expect(result!.responses).toEqual({ q1: { approved: true } });
       expect(result!.resolvedBy).toBe("user-1");
       expect(result!.resolvedAt).toBeTruthy();
+    });
+
+    test("stores a resolutionReason when given", async () => {
+      const data = makeApprovalData();
+      await createApprovalRequest(data);
+
+      const result = await resolveApprovalRequest(data.id, {
+        status: "timeout",
+        resolutionReason: "x",
+      });
+      expect(result!.status).toBe("timeout");
+      expect(result!.resolutionReason).toBe("x");
+    });
+
+    test("leaves resolutionReason NULL when absent", async () => {
+      const data = makeApprovalData();
+      await createApprovalRequest(data);
+
+      const result = await resolveApprovalRequest(data.id, { status: "approved" });
+      expect(result!.resolutionReason).toBeNull();
     });
 
     test("resolves a pending request to rejected", async () => {
@@ -737,6 +758,78 @@ describe("Approval Requests", () => {
     test("respects limit", async () => {
       const results = await listApprovalRequests({ limit: 1 });
       expect(results).toHaveLength(1);
+    });
+  });
+
+  describe("DB: cancelApprovalRequestById", () => {
+    test("cancels a pending request with reason and actor", async () => {
+      const data = makeApprovalData();
+      await createApprovalRequest(data);
+
+      const result = await cancelApprovalRequestById(data.id, {
+        reason: "not needed",
+        resolvedBy: "user-1",
+      });
+      expect(result).not.toBeNull();
+      expect(result!.status).toBe("cancelled");
+      expect(result!.resolutionReason).toBe("not needed");
+      expect(result!.resolvedBy).toBe("user-1");
+      expect(result!.resolvedAt).toBeTruthy();
+    });
+
+    test("leaves resolvedBy NULL when no actor is given", async () => {
+      const data = makeApprovalData();
+      await createApprovalRequest(data);
+
+      const result = await cancelApprovalRequestById(data.id, {
+        reason: "sweep",
+        resolvedBy: null,
+      });
+      expect(result!.status).toBe("cancelled");
+      expect(result!.resolvedBy).toBeNull();
+    });
+
+    test("a second call returns null and changes nothing", async () => {
+      const data = makeApprovalData();
+      await createApprovalRequest(data);
+      const first = await cancelApprovalRequestById(data.id, { reason: "first", resolvedBy: null });
+
+      const second = await cancelApprovalRequestById(data.id, {
+        reason: "second",
+        resolvedBy: "user-2",
+      });
+      expect(second).toBeNull();
+      const row = await getApprovalRequestById(data.id);
+      expect(row!.resolutionReason).toBe("first");
+      expect(row!.resolvedBy).toBeNull();
+      expect(row!.resolvedAt).toBe(first!.resolvedAt);
+    });
+
+    test("returns null for approved and timeout requests", async () => {
+      const approved = makeApprovalData();
+      await createApprovalRequest(approved);
+      await resolveApprovalRequest(approved.id, { status: "approved" });
+      const timedOut = makeApprovalData();
+      await createApprovalRequest(timedOut);
+      await resolveApprovalRequest(timedOut.id, { status: "timeout" });
+
+      expect(
+        await cancelApprovalRequestById(approved.id, { reason: "x", resolvedBy: null }),
+      ).toBeNull();
+      expect(
+        await cancelApprovalRequestById(timedOut.id, { reason: "x", resolvedBy: null }),
+      ).toBeNull();
+      expect((await getApprovalRequestById(approved.id))!.status).toBe("approved");
+      expect((await getApprovalRequestById(timedOut.id))!.status).toBe("timeout");
+    });
+
+    test("a cancelled row matches the Slack cancellation claim", async () => {
+      const data = makeApprovalData();
+      await createApprovalRequest(data);
+      await cancelApprovalRequestById(data.id, { reason: "gone", resolvedBy: null });
+
+      const claim = await claimApprovalCancellationNotification(data.id, "slack:C1:1.0");
+      expect(claim).not.toBeNull();
     });
   });
 
