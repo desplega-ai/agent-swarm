@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { newSessionContextKey } from "../components/session-panel/model";
 import {
-  buildContextFooter,
+  buildPageContextFooter,
   getPageContext,
   isPanelHiddenOn,
-  newSessionContextKey,
   pageContextLabel,
 } from "./page-context";
 
@@ -97,14 +97,14 @@ describe("hidden routes", () => {
   });
 });
 
-describe("buildContextFooter", () => {
+describe("buildPageContextFooter", () => {
   test("entity pages carry URL, route, entity and title", () => {
     const c = getPageContext({
       pathname: "/workflows/abc",
       url: "https://ui.example/workflows/abc?tab=runs",
       title: "Workflow abc",
     });
-    expect(c && buildContextFooter(c)).toBe(
+    expect(c && buildPageContextFooter(c)).toBe(
       [
         "---",
         "Page context (swarm UI)",
@@ -117,7 +117,7 @@ describe("buildContextFooter", () => {
   });
 
   test("route pages omit the entity line, and an empty title is dropped", () => {
-    const footer = buildContextFooter(ctx("/settings/configuration"));
+    const footer = buildPageContextFooter(ctx("/settings/configuration"));
     expect(footer).not.toContain("- Entity:");
     expect(footer).not.toContain("- Title:");
     expect(footer).toContain("- Route: /settings/configuration");

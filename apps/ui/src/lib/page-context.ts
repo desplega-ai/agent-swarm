@@ -14,6 +14,7 @@
  */
 
 import { matchPath } from "react-router-dom";
+import { buildContextFooter } from "../components/session-panel/model";
 
 export interface PageContext {
   /** `task:ui:{kind}:{ref}` — never contains a nonce. */
@@ -111,26 +112,21 @@ export function getPageContext(input: {
   };
 }
 
-/** A new, per-session context key under the page key. */
-export function newSessionContextKey(pageKey: string): string {
-  return `${pageKey}:${crypto.randomUUID()}`;
-}
-
 /**
  * Footer appended to the root task text only. Follow-ups get it through the
  * parent-chain preamble. It sits at the end so session titles and previews
  * still start with what the user typed.
  */
-export function buildContextFooter(ctx: PageContext): string {
-  const lines = [
-    "---",
-    "Page context (swarm UI)",
-    `- URL: ${ctx.url}`,
-    `- Route: ${ctx.routePattern}`,
-  ];
-  if (ctx.kind !== "route") lines.push(`- Entity: ${ctx.kind} ${ctx.ref}`);
-  if (ctx.title) lines.push(`- Title: ${ctx.title}`);
-  return lines.join("\n");
+export function buildPageContextFooter(ctx: PageContext): string {
+  return buildContextFooter(
+    [
+      ["URL", ctx.url],
+      ["Route", ctx.routePattern],
+      ["Entity", ctx.kind !== "route" ? `${ctx.kind} ${ctx.ref}` : undefined],
+      ["Title", ctx.title],
+    ],
+    "swarm UI",
+  );
 }
 
 /** Human label for the panel header. */

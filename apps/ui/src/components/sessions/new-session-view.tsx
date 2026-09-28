@@ -2,11 +2,6 @@
  * Sessions surface — empty `/sessions` view: header strip + suggestion chips +
  * composer dock. Submitting creates a root task and navigates to the new
  * session detail page.
- *
- * Embedded mode (`onCreated` set — the contextual session panel): the root is
- * tagged with `contextKey`, `contextFooter` is appended to its text, the
- * `?seed` / `?prefill` URL params are ignored (they belong to the host page),
- * and the new root id goes to `onCreated` instead of a navigation.
  */
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -30,17 +25,7 @@ export const SUGGESTIONS = [
   "Draft a tech-spec for a feature idea",
 ];
 
-export interface NewSessionViewProps {
-  /** Context key for the new root task (children inherit it server-side). */
-  contextKey?: string;
-  /** Appended to the root task text after a blank line. */
-  contextFooter?: string;
-  /** Embedded mode: receives the new root id instead of navigating to it. */
-  onCreated?: (rootTaskId: string) => void;
-}
-
-export function NewSessionView({ contextKey, contextFooter, onCreated }: NewSessionViewProps = {}) {
-  const embedded = onCreated !== undefined;
+export function NewSessionView() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { userId } = useCurrentUser();
@@ -55,25 +40,25 @@ export function NewSessionView({ contextKey, contextFooter, onCreated }: NewSess
   // ?seed=<text> — home page's "what do you have in mind?" shortcut forwards
   // typed text directly. Strip the param so refreshing doesn't re-seed.
   useEffect(() => {
-    if (embedded || !seedText) return;
+    if (!seedText) return;
     setDraft(seedText);
     const next = new URLSearchParams(searchParams);
     next.delete("seed");
     setSearchParams(next, { replace: true });
-  }, [embedded, seedText, searchParams, setSearchParams]);
+  }, [seedText, searchParams, setSearchParams]);
 
   // ?prefill=<templateId> — dashboard "To start" bucket. Look up the template
   // and seed the composer with its prompt.
   const templatesQ = useTaskTemplates({ kind: "task" });
   useEffect(() => {
-    if (embedded || !prefillTemplateId || !templatesQ.data) return;
+    if (!prefillTemplateId || !templatesQ.data) return;
     const tmpl = templatesQ.data.find((t) => t.id === prefillTemplateId);
     if (!tmpl) return;
     setDraft(tmpl.prompt);
     const next = new URLSearchParams(searchParams);
     next.delete("prefill");
     setSearchParams(next, { replace: true });
-  }, [embedded, prefillTemplateId, templatesQ.data, searchParams, setSearchParams]);
+  }, [prefillTemplateId, templatesQ.data, searchParams, setSearchParams]);
 
   const create = useMutation({
     mutationFn: async (input: {
@@ -89,11 +74,10 @@ export function NewSessionView({ contextKey, contextFooter, onCreated }: NewSess
       // attachments means nothing to race, so skip the extra round trip.
       const isDraft = input.attachments.length > 0;
       const created = await api.createTask({
-        task: contextFooter ? `${input.task}\n\n${contextFooter}` : input.task,
+        task: input.task,
         requestedByUserId: input.requestedByUserId,
         source: "ui",
         draft: isDraft,
-        contextKey,
       });
       try {
         const uploadResult = await uploadComposeAttachments({
@@ -117,8 +101,7 @@ export function NewSessionView({ contextKey, contextFooter, onCreated }: NewSess
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
       queryClient.invalidateQueries({ queryKey: ["task", created.id] });
       queryClient.invalidateQueries({ queryKey: ["task", created.id, "attachments"] });
-      if (onCreated) onCreated(created.id);
-      else void navigate(`/sessions/${created.id}`);
+      void navigate(`/sessions/${created.id}`);
     },
   });
 
@@ -142,31 +125,22 @@ export function NewSessionView({ contextKey, contextFooter, onCreated }: NewSess
   return (
     <>
       {/* Empty hero — centered, generous, suggestion chips. */}
-      {embedded ? (
-        <div className="flex-1 min-h-0 overflow-auto flex items-center justify-center px-6">
-          <p className="text-sm text-muted-foreground max-w-xs text-center">
-            Ask about this page or leave feedback. The lead picks it up with this page's context
-            attached.
+      <div className="flex-1 min-h-0 overflow-auto flex items-center justify-center px-6">
+        <div className="flex flex-col items-center gap-6 max-w-xl text-center py-10">
+          <h1 className="text-2xl md:text-3xl font-semibold tracking-tight text-foreground">
+            What would you like the swarm to do?
+          </h1>
+          <p className="text-sm text-muted-foreground max-w-md">
+            Describe a goal. The lead agent picks it up, spawns the right crew, and chains the
+            follow-ups under one session.
           </p>
+          <SuggestionChips
+            suggestions={SUGGESTIONS}
+            onPick={setDraft}
+            disabled={!userId || create.isPending}
+          />
         </div>
-      ) : (
-        <div className="flex-1 min-h-0 overflow-auto flex items-center justify-center px-6">
-          <div className="flex flex-col items-center gap-6 max-w-xl text-center py-10">
-            <h1 className="text-2xl md:text-3xl font-semibold tracking-tight text-foreground">
-              What would you like the swarm to do?
-            </h1>
-            <p className="text-sm text-muted-foreground max-w-md">
-              Describe a goal. The lead agent picks it up, spawns the right crew, and chains the
-              follow-ups under one session.
-            </p>
-            <SuggestionChips
-              suggestions={SUGGESTIONS}
-              onPick={setDraft}
-              disabled={!userId || create.isPending}
-            />
-          </div>
-        </div>
-      )}
+      </div>
 
       <ComposerDock
         value={draft}

@@ -2842,8 +2842,6 @@ class ApiClient {
     q?: string;
     /** When set, restrict results to sessions owned by this user. NULL rows are excluded. */
     requestedByUserId?: string;
-    /** Literal `contextKey` prefix (contextual session panel: `<pageKey>:`). */
-    contextKeyPrefix?: string;
   }): Promise<SessionListItem[]> {
     const params = new URLSearchParams();
     if (opts?.limit != null) params.set("limit", String(opts.limit));
@@ -2851,7 +2849,6 @@ class ApiClient {
     if (opts?.source && opts.source.length > 0) params.set("source", opts.source.join(","));
     if (opts?.q && opts.q.length > 0) params.set("q", opts.q);
     if (opts?.requestedByUserId) params.set("requestedByUserId", opts.requestedByUserId);
-    if (opts?.contextKeyPrefix) params.set("contextKeyPrefix", opts.contextKeyPrefix);
     const qs = params.toString();
     const url = `${this.getBaseUrl()}/api/sessions${qs ? `?${qs}` : ""}`;
     const res = await fetch(url, { headers: this.getHeaders() });

@@ -25,8 +25,6 @@ export interface UseSessionsOptions {
   q?: string;
   /** When set, restrict results to sessions owned by this user. */
   requestedByUserId?: string;
-  /** Literal `contextKey` prefix; the contextual session panel passes `<pageKey>:`. */
-  contextKeyPrefix?: string;
   /** Disable the query entirely (e.g. when user identity is not yet resolved). */
   enabled?: boolean;
 }
@@ -37,12 +35,10 @@ export function useSessions(options?: UseSessionsOptions) {
   const source = options?.source;
   const q = options?.q;
   const requestedByUserId = options?.requestedByUserId;
-  const contextKeyPrefix = options?.contextKeyPrefix;
   const enabled = options?.enabled ?? true;
   return useQuery({
-    queryKey: ["sessions", { limit, offset, source, q, requestedByUserId, contextKeyPrefix }],
-    queryFn: () =>
-      api.listSessions({ limit, offset, source, q, requestedByUserId, contextKeyPrefix }),
+    queryKey: ["sessions", { limit, offset, source, q, requestedByUserId }],
+    queryFn: () => api.listSessions({ limit, offset, source, q, requestedByUserId }),
     enabled,
   });
 }
