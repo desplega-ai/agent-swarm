@@ -23,9 +23,11 @@
  *     - Mark `createdFresh: true` so cleanup removes the file entirely.
  * - `AGENTS.md` is a symlink (many repos ship `AGENTS.md -> CLAUDE.md`):
  *     never write through it. Swap in a real file holding the block plus the
- *     link target's contents, and restore the symlink on cleanup. The open tag
- *     records the link target (`<swarm_system_prompt symlink="...">`) so the
- *     next session can restore the link if this one crashed before cleanup.
+ *     link target's contents, and restore the symlink on cleanup. The target is
+ *     only read, and edits only carried back to it, when its real path is a
+ *     regular file inside the cwd. A crash-recovery record (cwd + link target)
+ *     is kept OUTSIDE the repo, so the next session can restore the link if
+ *     this one crashed before cleanup. Repo content never names a path.
  * - Existing `AGENTS.md` already contains the block: replace the block with
  *   the fresh contents.
  * - Existing `AGENTS.md` without the block: prepend the block.
@@ -39,16 +41,27 @@
  * unit-tested without pulling in the Codex SDK.
  */
 
-import { lstat, readlink, symlink, unlink } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { lstat, mkdir, readlink, realpath, symlink, unlink } from "node:fs/promises";
+import { homedir } from "node:os";
+import { dirname, join, resolve, sep } from "node:path";
 
 const BLOCK_OPEN = "<swarm_system_prompt>";
 const BLOCK_CLOSE = "</swarm_system_prompt>";
-const BLOCK_REGEX = /<swarm_system_prompt(?: symlink="[^"]*")?>[\s\S]*?<\/swarm_system_prompt>\n?/;
-const SYMLINK_MARKER_REGEX = /<swarm_system_prompt symlink="([^"]*)">/;
+const BLOCK_REGEX = /<swarm_system_prompt>[\s\S]*?<\/swarm_system_prompt>\n?/;
+const DEFAULT_STATE_DIR = join(homedir(), ".cache", "agent-swarm", "codex-agents-md");
 
 export interface CodexAgentsMdHandle {
   cleanup(): Promise<void>;
+}
+
+export interface CodexAgentsMdOptions {
+  /** Where symlink crash-recovery records live. Must be outside any repo. */
+  stateDir?: string;
+}
+
+interface SymlinkRecord {
+  cwd: string;
+  linkTarget: string;
 }
 
 const NOOP_HANDLE: CodexAgentsMdHandle = {
@@ -60,24 +73,66 @@ async function readIfExists(path: string): Promise<string | null> {
   return (await file.exists()) ? await file.text() : null;
 }
 
+function recordPathFor(stateDir: string, realCwd: string): string {
+  const key = new Bun.CryptoHasher("sha256").update(realCwd).digest("hex");
+  return join(stateDir, `${key}.json`);
+}
+
+async function readRecord(recordPath: string, realCwd: string): Promise<SymlinkRecord | null> {
+  try {
+    const record = JSON.parse(await Bun.file(recordPath).text()) as Partial<SymlinkRecord>;
+    if (record.cwd === realCwd && typeof record.linkTarget === "string") {
+      return { cwd: record.cwd, linkTarget: record.linkTarget };
+    }
+  } catch {
+    // Missing or unreadable record: nothing to recover.
+  }
+  return null;
+}
+
+/**
+ * Real path of the symlink target when it is a regular file inside the cwd,
+ * otherwise null. Out-of-tree and dangling targets are never read or written.
+ */
+async function inTreeTarget(
+  realCwd: string,
+  agentsMdPath: string,
+  linkTarget: string,
+): Promise<string | null> {
+  const target = await realpath(resolve(dirname(agentsMdPath), linkTarget)).catch(() => null);
+  const prefix = realCwd.endsWith(sep) ? realCwd : `${realCwd}${sep}`;
+  if (target === null || !target.startsWith(prefix)) {
+    return null;
+  }
+  const stat = await lstat(target).catch(() => null);
+  return stat?.isFile() ? target : null;
+}
+
 /**
  * Put the `AGENTS.md -> linkTarget` symlink back in place of our swapped-in
  * real file. Edits the agent made to AGENTS.md during the session would have
  * landed in the link target had the link been in place, so carry them over
- * (block stripped) when they differ from the target's current contents.
+ * (block stripped) when the target is in-tree and its contents differ.
  */
-async function restoreSymlink(agentsMdPath: string, linkTarget: string): Promise<void> {
-  const current = await readIfExists(agentsMdPath);
-  const targetPath = resolve(dirname(agentsMdPath), linkTarget);
-  const targetContent = await readIfExists(targetPath);
+async function restoreSymlink(
+  agentsMdPath: string,
+  realCwd: string,
+  linkTarget: string,
+): Promise<void> {
+  const stat = await lstat(agentsMdPath).catch(() => null);
+  const current = stat?.isFile() ? await Bun.file(agentsMdPath).text() : null;
   await unlink(agentsMdPath).catch(() => {});
   await symlink(linkTarget, agentsMdPath);
-  if (current === null || targetContent === null) {
+  if (current === null) {
+    return;
+  }
+  const target = await inTreeTarget(realCwd, agentsMdPath, linkTarget);
+  if (target === null) {
     return;
   }
   const stripped = current.replace(BLOCK_REGEX, "");
-  if (stripped !== targetContent) {
-    await Bun.write(targetPath, stripped);
+  if (stripped !== (await Bun.file(target).text())) {
+    await Bun.write(target, stripped);
   }
 }
 
@@ -90,6 +145,7 @@ async function restoreSymlink(agentsMdPath: string, linkTarget: string): Promise
 export async function writeCodexAgentsMd(
   cwd: string | undefined,
   systemPrompt: string | undefined,
+  options: CodexAgentsMdOptions = {},
 ): Promise<CodexAgentsMdHandle> {
   if (!cwd || !systemPrompt) {
     return NOOP_HANDLE;
@@ -97,23 +153,32 @@ export async function writeCodexAgentsMd(
 
   const agentsMdPath = join(cwd, "AGENTS.md");
   const claudeMdPath = join(cwd, "CLAUDE.md");
+  const stateDir = options.stateDir ?? DEFAULT_STATE_DIR;
+  const realCwd = await realpath(cwd).catch(() => resolve(cwd));
+  const recordPath = recordPathFor(stateDir, realCwd);
+  const block = `${BLOCK_OPEN}\n${systemPrompt}\n${BLOCK_CLOSE}`;
 
   let stat = await lstat(agentsMdPath).catch(() => null);
 
-  // A previous session swapped a symlink out and crashed before cleanup:
-  // restore the link first, then proceed as a normal symlink session.
-  if (stat?.isFile()) {
-    const marker = (await Bun.file(agentsMdPath).text()).match(SYMLINK_MARKER_REGEX);
-    if (marker?.[1] !== undefined) {
-      await restoreSymlink(agentsMdPath, decodeURIComponent(marker[1]));
+  // A previous session swapped a symlink out and crashed before cleanup. Only
+  // our own out-of-repo record can trigger a restore, and only while AGENTS.md
+  // is still the real file holding our block.
+  const record = await readRecord(recordPath, realCwd);
+  if (record) {
+    if (stat?.isFile() && BLOCK_REGEX.test(await Bun.file(agentsMdPath).text())) {
+      await restoreSymlink(agentsMdPath, realCwd, record.linkTarget);
       stat = await lstat(agentsMdPath);
     }
+    await unlink(recordPath).catch(() => {});
   }
 
   if (stat?.isSymbolicLink()) {
     const linkTarget = await readlink(agentsMdPath);
-    const targetContent = (await readIfExists(resolve(dirname(agentsMdPath), linkTarget))) ?? "";
-    const block = `<swarm_system_prompt symlink="${encodeURIComponent(linkTarget)}">\n${systemPrompt}\n${BLOCK_CLOSE}`;
+    const target = await inTreeTarget(realCwd, agentsMdPath, linkTarget);
+    const targetContent = target !== null ? await Bun.file(target).text() : "";
+    // Record before swapping, so a crash at any later point stays recoverable.
+    await mkdir(stateDir, { recursive: true });
+    await Bun.write(recordPath, JSON.stringify({ cwd: realCwd, linkTarget }));
     // Never write through the link: replace it with a real file for the session.
     await unlink(agentsMdPath);
     await Bun.write(agentsMdPath, `${block}\n${targetContent.replace(BLOCK_REGEX, "")}`);
@@ -121,16 +186,16 @@ export async function writeCodexAgentsMd(
     return {
       async cleanup(): Promise<void> {
         try {
-          await restoreSymlink(agentsMdPath, linkTarget);
+          await restoreSymlink(agentsMdPath, realCwd, linkTarget);
+          await unlink(recordPath).catch(() => {});
         } catch {
-          // Cleanup is best-effort; the symlink marker lets the next session
-          // finish the restore.
+          // Cleanup is best-effort; the record lets the next session finish
+          // the restore.
         }
       },
     };
   }
 
-  const block = `${BLOCK_OPEN}\n${systemPrompt}\n${BLOCK_CLOSE}`;
   let createdFresh = false;
   let newContent: string;
 
