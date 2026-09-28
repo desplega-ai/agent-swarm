@@ -19,6 +19,42 @@ function toolUseRow(taskId: string, toolName: string, input: unknown): Record<st
   };
 }
 
+/** A tool_use row followed by its tool_result row (Claude stream-json shape). */
+function toolCallRows(
+  taskId: string,
+  toolName: string,
+  input: unknown,
+  result: unknown,
+  callId: string,
+): Record<string, unknown>[] {
+  return [
+    {
+      id: `${callId}-use`,
+      taskId,
+      content: JSON.stringify({
+        type: "assistant",
+        message: { content: [{ type: "tool_use", id: callId, name: toolName, input }] },
+      }),
+    },
+    {
+      id: `${callId}-result`,
+      taskId,
+      content: JSON.stringify({
+        type: "user",
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: callId,
+              content: typeof result === "string" ? result : JSON.stringify(result),
+            },
+          ],
+        },
+      }),
+    },
+  ];
+}
+
 function ctx(opts: {
   tasks?: SwarmTask[];
   api?: Record<string, unknown>;
@@ -105,14 +141,26 @@ describe("orchestration substrate scenario rubrics", () => {
 
   test("script-authoring rewards script-upsert plus named script-run using ctx.swarm", async () => {
     const c = ctx({
-      tasks: [{ id: "seed", title: "t", description: "d", status: "completed" }],
+      tasks: [
+        { id: "seed", title: "t", description: "d", status: "completed", agentId: "worker-0" },
+      ],
       logs: {
         seed: [
           toolUseRow("seed", "mcp__agent-swarm__script-upsert", { name: "task-summary" }),
-          toolUseRow("seed", "mcp__agent-swarm__script-run", {
-            name: "task-summary",
-            args: { taskIds: ["seed"] },
-          }),
+          ...toolCallRows(
+            "seed",
+            "mcp__agent-swarm__script-run",
+            { name: "task-summary", args: { taskIds: ["seed"] } },
+            {
+              success: true,
+              status: 200,
+              data: {
+                result: { total: 1, completionRate: 1, highestPriorityCompletedTitle: "t" },
+                exitCode: 0,
+              },
+            },
+            "toolu_run1",
+          ),
           toolUseRow("seed", "mcp__agent-swarm__script-run", {
             name: "task-summary",
             args: { taskIds: [] },
@@ -121,7 +169,17 @@ describe("orchestration substrate scenario rubrics", () => {
       },
       api: {
         "/api/scripts?includeScratch=false": {
-          scripts: [{ id: "script-id", name: "task-summary", typeChecked: true, isScratch: false }],
+          scripts: [
+            {
+              id: "script-id",
+              name: "task-summary",
+              scope: "agent",
+              scopeId: "worker-0",
+              createdByAgentId: "worker-0",
+              typeChecked: true,
+              isScratch: false,
+            },
+          ],
         },
         "/api/scripts/script-id": {
           script: {
@@ -131,17 +189,9 @@ describe("orchestration substrate scenario rubrics", () => {
               "export default async function main(args, ctx) { const task = await ctx.swarm.task_getDetails({ taskId: args.taskIds[0] }); return { total: 1, completionRate: 1, highestPriorityCompletedTitle: task.task.title }; }",
           },
         },
-        "/api/script-runs?limit=25": {
-          runs: [
-            {
-              scriptName: "task-summary",
-              status: "completed",
-              output: { total: 1, completionRate: 1, highestPriorityCompletedTitle: "t" },
-            },
-          ],
-        },
       },
     });
+    expect((await scripts.scriptCreatedGate.fn(c)).pass).toBe(true);
     expect((await scripts.sdkUsageCheck.fn(c)).score).toBe(1);
     expect((await scripts.scriptCorrectnessCheck.fn(c)).score).toBe(1);
     expect((await scripts.reusabilityCheck.fn(c)).score).toBe(1);
@@ -322,6 +372,7 @@ describe("orchestration substrate scenario rubrics", () => {
           description: "Project Alpha",
           status: "completed",
           result: '{"alphaSummary":"ok"}',
+          agentId: "worker-0",
         },
         {
           id: "follow",
@@ -343,7 +394,11 @@ describe("orchestration substrate scenario rubrics", () => {
           toolUseRow("seed", "mcp__agent-swarm__store-progress", { output: "{}" }),
         ],
       },
-      api: { "/api/kv": { entries: [{ key: "alpha/checkpoint", value: { ok: true } }] } },
+      api: {
+        "/api/kv/_/task%3Aagent%3Aworker-0": {
+          entries: [{ key: "alpha/checkpoint", value: { ok: true } }],
+        },
+      },
     });
     expect((await routing.routingCheck.fn(c)).score).toBe(1);
     expect((await routing.routingCorrectnessCheck.fn(c)).score).toBe(1);
@@ -410,5 +465,220 @@ describe("orchestration substrate scenario rubrics", () => {
     });
     expect((await structured.schemaAdherenceCheck.fn(good)).score).toBe(1);
     expect((await structured.schemaAdherenceCheck.fn(bad)).score).toBe(0);
+  });
+});
+
+// Phase 1 regression tests: each fixture reproduces a real stored failure from
+// the evals replica (2026-09-28 audit) and pins the corrected score.
+describe("phase 1 broken-check regressions", () => {
+  const seededGlobals = Array.from({ length: 19 }, (_, i) => ({
+    id: `global-${i}`,
+    name: `seeded-${i}`,
+    scope: "global",
+    scopeId: null,
+    createdByAgentId: null,
+    typeChecked: true,
+    isScratch: false,
+  }));
+
+  test("script-created ignores the 19 seeded global scripts (was '20 saved scripts')", async () => {
+    const c = ctx({
+      tasks: [{ id: "t", title: "t", description: "d", status: "completed", agentId: "worker-0" }],
+      api: {
+        "/api/scripts?includeScratch=false": {
+          scripts: [
+            ...seededGlobals,
+            {
+              id: "mine",
+              name: "task-summary",
+              scope: "agent",
+              scopeId: "worker-0",
+              createdByAgentId: "worker-0",
+              typeChecked: true,
+              isScratch: false,
+            },
+          ],
+        },
+      },
+    });
+    const gate = await scripts.scriptCreatedGate.fn(c);
+    expect(gate.pass).toBe(true);
+    expect(gate.detail).toBe("1 saved scripts");
+  });
+
+  test("script-created still fails when the worker saved nothing", async () => {
+    const c = ctx({
+      tasks: [{ id: "t", title: "t", description: "d", status: "completed", agentId: "worker-0" }],
+      api: { "/api/scripts?includeScratch=false": { scripts: seededGlobals } },
+    });
+    expect((await scripts.scriptCreatedGate.fn(c)).pass).toBe(false);
+  });
+
+  test("script-run-output reads the script-run tool result, not /api/script-runs", async () => {
+    // Real Codex shape: the MCP result nests the payload under structured_content,
+    // and /api/script-runs (durable Script Workflows) is empty for this task.
+    const c = ctx({
+      tasks: [{ id: "t", title: "t", description: "d", status: "completed", agentId: "worker-0" }],
+      logs: {
+        t: [
+          {
+            id: "codex-run",
+            taskId: "t",
+            content: JSON.stringify({
+              type: "item.completed",
+              item: {
+                type: "mcp_tool_call",
+                server: "agent-swarm",
+                tool: "script-run",
+                arguments: { name: "task-summary", args: { taskIds: ["t"] } },
+                status: "completed",
+                result: {
+                  content: [{ type: "text", text: "Script run completed." }],
+                  structured_content: {
+                    success: true,
+                    status: 200,
+                    data: {
+                      result: { totalCount: 2, completionRate: 0.5, topPriorityTitle: "x" },
+                      exitCode: 0,
+                    },
+                  },
+                },
+              },
+            }),
+          },
+        ],
+      },
+      api: {
+        "/api/scripts?includeScratch=false": {
+          scripts: [
+            {
+              id: "mine",
+              name: "task-summary",
+              scope: "agent",
+              createdByAgentId: "worker-0",
+              isScratch: false,
+            },
+          ],
+        },
+        "/api/script-runs?limit=25": { runs: [] },
+      },
+    });
+    expect((await scripts.scriptCorrectnessCheck.fn(c)).score).toBe(1);
+  });
+
+  test("script-run-output does not credit a failed run", async () => {
+    const c = ctx({
+      tasks: [{ id: "t", title: "t", description: "d", status: "completed", agentId: "worker-0" }],
+      logs: {
+        t: toolCallRows(
+          "t",
+          "mcp__agent-swarm__script-run",
+          { name: "task-summary" },
+          {
+            success: true,
+            data: { result: null, exitCode: 1, stderr: "TypeError" },
+          },
+          "toolu_fail",
+        ),
+      },
+    });
+    expect((await scripts.scriptCorrectnessCheck.fn(c)).score).toBe(0);
+  });
+
+  test("delegation-chain no longer zeroes a lead that polls its active children", async () => {
+    const tasks: SwarmTask[] = [
+      { id: "lead-task", title: "lead", description: "d", status: "completed", agentId: "lead" },
+    ];
+    const logs = {
+      "lead-task": [
+        toolUseRow("lead-task", "mcp__agent-swarm__get-tasks", { status: "in_progress" }),
+        toolUseRow("lead-task", "get-tasks", {
+          server: "agent-swarm",
+          tool: "get-tasks",
+          arguments: { tags: ["delegation-chain"] },
+        }),
+      ],
+    };
+    const detail = (await chain.chainStructureCheck.fn(ctx({ tasks, logs }))).detail;
+    expect(detail).not.toContain("zeroed");
+  });
+
+  test("delegation-chain still zeroes a lead that reads the seeded history", async () => {
+    for (const input of [{ status: "completed", limit: 100 }, { limit: 50 }]) {
+      const tasks: SwarmTask[] = [
+        { id: "lead-task", title: "lead", description: "d", status: "completed", agentId: "lead" },
+      ];
+      const logs = {
+        "lead-task": [toolUseRow("lead-task", "mcp__agent-swarm__get-tasks", input)],
+      };
+      const res = await chain.chainStructureCheck.fn(ctx({ tasks, logs }));
+      expect(res.score).toBe(0);
+      expect(res.detail).toContain("zeroed");
+    }
+    const dbQuery = chain.readsSeededHistory({ toolName: "db-query", input: {} });
+    expect(dbQuery).toBe(true);
+  });
+
+  test("tool-routing reads the worker's KV namespace, not the judge's (was kv=0)", async () => {
+    const c = ctx({
+      tasks: [
+        {
+          id: "t",
+          title: "alpha",
+          description: "Project Alpha",
+          status: "completed",
+          result: "Project Alpha summary",
+          agentId: "worker-0",
+          contextKey: "task:agent:worker-0",
+        },
+        { id: "f", title: "n", description: "follow-up", status: "pending", parentTaskId: "t" },
+      ],
+      api: {
+        // The judge's header-resolved namespace is empty; the worker's has the entry.
+        "/api/kv": { entries: [] },
+        "/api/kv/_/task%3Aagent%3Aworker-0": {
+          entries: [{ key: "alpha/checkpoint", value: { phase: 1 } }],
+        },
+      },
+    });
+    const res = await routing.routingCorrectnessCheck.fn(c);
+    expect(res.score).toBe(1);
+    expect(res.detail).toContain("kv=1");
+  });
+
+  test("workflow-exists ignores seeded or leaked workflows (was '6 workflows found')", async () => {
+    const seeded = Array.from({ length: 5 }, (_, i) => ({
+      id: `seed-${i}`,
+      name: `seeded-${i}`,
+      createdByAgentId: "someone-else",
+      createdAt: "2026-09-01T00:00:00.000Z",
+    }));
+    const c = ctx({
+      tasks: [
+        {
+          id: "t",
+          title: "t",
+          description: "d",
+          status: "completed",
+          agentId: "worker-0",
+          createdAt: "2026-09-28T10:00:00.000Z",
+        },
+      ],
+      api: {
+        "/api/workflows?fields=full": [
+          ...seeded,
+          { id: "old-anon", name: "leaked", createdAt: "2026-09-27T00:00:00.000Z" },
+          {
+            id: "mine",
+            name: "PR review",
+            createdByAgentId: "worker-0",
+            createdAt: "2026-09-28T10:01:00.000Z",
+          },
+        ],
+      },
+    });
+    const gate = await workflows.workflowExistsGate.fn(c);
+    expect(gate.pass).toBe(true);
+    expect(gate.detail).toBe("1 workflows found");
   });
 });

@@ -1,3 +1,4 @@
+import { type ToolUse, toolUseMatches } from "../src/judge/session-log-parse.ts";
 import type {
   CheckResult,
   DeterministicCheck,
@@ -7,7 +8,7 @@ import type {
 } from "../src/types.ts";
 import {
   fetchSessionLogs,
-  hasTool,
+  safeStringify,
   scoreResult,
   taskToolUses,
   workerTasks,
@@ -35,6 +36,46 @@ function leadAgent(ctx: JudgeContext): string | undefined {
   return ctx.workers.find((w) => w.isLead)?.agentId;
 }
 
+/** Statuses the seeded audit history carries (fixtures/generate-sql-audit-history.ts). */
+const SEEDED_STATUSES = new Set(["completed", "failed", "cancelled"]);
+/** get-tasks args that narrow the list away from the seeded history. */
+const NARROWING_ARGS = [
+  "tags",
+  "search",
+  "mineOnly",
+  "unassigned",
+  "offeredToMe",
+  "readyOnly",
+  "taskType",
+  "key",
+  "keyPrefix",
+  "scheduleId",
+];
+
+/** Tool args, unwrapping the `{server, tool, arguments}` envelope some harnesses log. */
+function toolArgs(input: unknown): Record<string, unknown> {
+  const obj = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+  const inner = obj.arguments;
+  return inner && typeof inner === "object" ? (inner as Record<string, unknown>) : obj;
+}
+
+/**
+ * True when a lead tool call reads the seeded audit history instead of
+ * delegating: any db-query, or a get-tasks/list-tasks call that is unfiltered
+ * or lists a terminal status without a narrowing filter. Polling active work
+ * (`status: "in_progress"`, `tags`, `search`, ...) is normal lead behavior.
+ */
+function readsSeededHistory(use: ToolUse): boolean {
+  if (toolUseMatches(use.toolName, ["db-query", "db_query"])) return true;
+  if (!toolUseMatches(use.toolName, ["get-tasks", "get_tasks", "list-tasks", "list_tasks"]))
+    return false;
+  const args = toolArgs(use.input);
+  const narrowed = NARROWING_ARGS.some((k) => args[k] !== undefined && args[k] !== false);
+  if (narrowed) return false;
+  const status = typeof args.status === "string" ? args.status : undefined;
+  return status === undefined || SEEDED_STATUSES.has(status);
+}
+
 function dependsOnChild(child: SwarmTask, children: SwarmTask[]): boolean {
   const deps = Array.isArray(child.dependsOn) ? (child.dependsOn as string[]) : [];
   return deps.some((dep) => children.some((candidate) => candidate.id === dep));
@@ -59,11 +100,12 @@ const chainStructureCheck: DeterministicCheck = {
       (t) => t.agentId === leadId && (t.parentTaskId ?? null) == null,
     );
     const leadTools = await taskToolUses(ctx, leadTask);
-    if (hasTool(leadTools, ["get-tasks", "list-tasks", "db-query", "db_query"])) {
+    const historyReads = leadTools.filter(readsSeededHistory);
+    if (historyReads.length > 0) {
       return {
         pass: false,
         score: 0,
-        detail: "lead queried task history directly — chain dimension zeroed",
+        detail: `lead queried task history directly (${historyReads[0]?.toolName} ${safeStringify(toolArgs(historyReads[0]?.input))}) — chain dimension zeroed`,
       };
     }
 
@@ -267,4 +309,5 @@ export const __test__ = {
   PHASE_TOPICS,
   REPORT_FILE,
   LEAD_WORKER,
+  readsSeededHistory,
 };

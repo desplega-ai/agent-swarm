@@ -2061,6 +2061,24 @@ class ApiClient {
     return res.json();
   }
 
+  async cancelApprovalRequest(
+    id: string,
+    reason?: string,
+  ): Promise<{
+    approvalRequest: ApprovalRequest;
+    alreadyCancelled: boolean;
+    runCancelled: boolean;
+  }> {
+    const url = `${this.getBaseUrl()}/api/approval-requests/${id}/cancel`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify({ reason }),
+    });
+    if (!res.ok) throw new Error(`Failed to cancel approval request: ${res.status}`);
+    return res.json();
+  }
+
   // Skills
   async fetchSkills(filters?: {
     type?: string;

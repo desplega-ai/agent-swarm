@@ -48,6 +48,14 @@ bunx @desplega.ai/agent-swarm onboard --container-engine=podman
 | `docker` | Docker only. Fails if Docker or Docker Compose v2 is missing. |
 | `podman` | Podman only. Fails if Podman is missing or `podman compose` has no working provider. |
 
+To set the engine without the flag, export `AGENT_SWARM_CONTAINER_ENGINE` with the same values:
+
+```bash
+AGENT_SWARM_CONTAINER_ENGINE=podman bunx @desplega.ai/agent-swarm onboard
+```
+
+The flag wins over the env var, and the env var wins over the `auto` default. An empty value counts as unset. Any other value outside `auto`, `docker`, and `podman` stops the wizard with an error that names the variable.
+
 An explicit engine never falls back to the other one. The prerequisite check prints the failing piece, for example `podman compose has no working Compose provider`, with install hints.
 
 With Podman, the wizard runs `podman compose --env-file .env up -d`, prints `podman compose` in its log and help hints, and generates the optional AWS profile mount with a shared SELinux label (`${HOME}/.aws:/home/worker/.aws:ro,z`).
@@ -56,6 +64,8 @@ Non-interactive mode works the same way:
 
 ```bash
 ANTHROPIC_API_KEY=sk-... bunx @desplega.ai/agent-swarm onboard --yes --preset=dev --container-engine=podman
+# or, reading the engine from env like the rest of --yes mode:
+AGENT_SWARM_CONTAINER_ENGINE=podman ANTHROPIC_API_KEY=sk-... bunx @desplega.ai/agent-swarm onboard --yes --preset=dev
 ```
 
 ## Option B: the Compose example file

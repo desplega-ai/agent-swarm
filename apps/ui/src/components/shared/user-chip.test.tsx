@@ -2,9 +2,9 @@ import { describe, expect, mock, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { User } from "../../api/types";
 
-mock.module("@/components/ui/tooltip", () => import("../ui/tooltip"));
-mock.module("@/lib/utils", () => import("../../lib/utils"));
-mock.module("@/hooks/use-copy-to-clipboard", () => import("../../hooks/use-copy-to-clipboard"));
+mock.module("@/components/ui/tooltip", () => require("../ui/tooltip"));
+mock.module("@/lib/utils", () => require("../../lib/utils"));
+mock.module("@/hooks/use-copy-to-clipboard", () => require("../../hooks/use-copy-to-clipboard"));
 
 const { TooltipProvider } = await import("../ui/tooltip");
 const { UserChip, userInitials } = await import("./user-chip");

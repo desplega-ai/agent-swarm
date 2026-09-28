@@ -13,19 +13,32 @@ type ScriptListItem = {
   id: string;
   name: string;
   scope?: string;
+  scopeId?: string | null;
+  createdByAgentId?: string | null;
   typeChecked?: boolean;
   isScratch?: boolean;
 };
 type ScriptDetail = ScriptListItem & { source?: string };
-type ScriptRun = {
-  scriptName?: string | null;
-  status?: string;
-  output?: unknown;
-  error?: string | null;
-};
+/** The agent under test: the task's assignee, else worker 0. */
+function workerAgentId(ctx: JudgeContext): string | undefined {
+  const assignee = ctx.tasks[0]?.agentId;
+  return typeof assignee === "string" && assignee ? assignee : ctx.workers[0]?.agentId;
+}
 
+/**
+ * Agent-scoped, non-scratch scripts the worker saved during the attempt. The
+ * sandbox swarm ships 19-28 seeded global scripts, so a bare list count can
+ * never be 1.
+ */
 async function savedScripts(ctx: JudgeContext): Promise<ScriptListItem[]> {
-  return apiList<ScriptListItem>(ctx, "/api/scripts?includeScratch=false", ["scripts"]);
+  const agentId = workerAgentId(ctx);
+  const rows = await apiList<ScriptListItem>(ctx, "/api/scripts?includeScratch=false", ["scripts"]);
+  return rows.filter(
+    (s) =>
+      !s.isScratch &&
+      s.scope === "agent" &&
+      (agentId === undefined || s.createdByAgentId === agentId || s.scopeId === agentId),
+  );
 }
 
 async function scriptDetail(
@@ -44,14 +57,37 @@ async function scriptDetail(
   }
 }
 
-async function scriptRuns(ctx: JudgeContext): Promise<ScriptRun[]> {
-  return apiList<ScriptRun>(ctx, "/api/script-runs?limit=25", ["runs", "scriptRuns"]);
+type ScriptRunResult = { ok: boolean; output: unknown };
+
+/**
+ * Parse a `script-run` tool result. The MCP payload is
+ * `{success, data: {result, exitCode, ...}}`; Codex wraps it in
+ * `structured_content`. `GET /api/script-runs` lists durable Script Workflow
+ * runs, not script-run tool executions, so the session log is the only record.
+ */
+function parseScriptRunResult(text: string | undefined): ScriptRunResult | null {
+  const parsed = parseJson(text);
+  if (!parsed || typeof parsed !== "object") return null;
+  const obj = parsed as Record<string, unknown>;
+  const payload = (obj.structured_content ?? obj.structuredContent ?? obj) as Record<
+    string,
+    unknown
+  >;
+  const data = payload.data as Record<string, unknown> | undefined;
+  if (!data || typeof data !== "object" || !("result" in data)) return null;
+  const exitCode = typeof data.exitCode === "number" ? data.exitCode : 0;
+  return { ok: payload.success !== false && exitCode === 0, output: data.result };
+}
+
+function runsScript(input: unknown, name: string | undefined): boolean {
+  if (!name) return true;
+  return safeStringify(input).includes(name);
 }
 
 const scriptCreatedGate: DeterministicCheck = {
   name: "script-created",
   fn: async (ctx) => {
-    const scripts = (await savedScripts(ctx)).filter((s) => !s.isScratch);
+    const scripts = await savedScripts(ctx);
     return {
       pass: scripts.length === 1 && scripts[0]?.typeChecked !== false,
       detail: `${scripts.length} saved scripts`,
@@ -62,7 +98,7 @@ const scriptCreatedGate: DeterministicCheck = {
 const sdkUsageCheck: DeterministicCheck = {
   name: "script-sdk-usage",
   fn: async (ctx): Promise<CheckResult> => {
-    const script = (await savedScripts(ctx)).find((s) => !s.isScratch);
+    const script = (await savedScripts(ctx))[0];
     const detail = await scriptDetail(ctx, script);
     const source = detail?.source ?? "";
     const tools = await taskToolUses(ctx, ctx.tasks[0]);
@@ -87,10 +123,14 @@ const sdkUsageCheck: DeterministicCheck = {
 const scriptCorrectnessCheck: DeterministicCheck = {
   name: "script-run-output",
   fn: async (ctx): Promise<CheckResult> => {
-    const runs = await scriptRuns(ctx);
-    const completed = runs.find((r) => r.status === "completed" && r.output != null);
-    const output = parseJson(completed?.output);
-    const text = safeStringify(output);
+    const name = (await savedScripts(ctx))[0]?.name;
+    const tools = await taskToolUses(ctx, ctx.tasks[0]);
+    const runs = tools
+      .filter((u) => /script[-_]run/.test(u.toolName) && !u.isError && runsScript(u.input, name))
+      .map((u) => parseScriptRunResult(u.result))
+      .filter((r): r is ScriptRunResult => r !== null && r.ok && r.output != null);
+    const completed = runs.at(-1);
+    const text = safeStringify(completed?.output);
     const hasTotal = /total|count/i.test(text);
     const hasRate = /completionRate|completion_rate|rate/i.test(text);
     const hasTop = /highestPriority|topPriority|top-priority|title/i.test(text);

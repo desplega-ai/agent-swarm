@@ -3,7 +3,11 @@ import { ChevronRight } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { useApprovalRequest, useRespondToApprovalRequest } from "@/api/hooks/use-approval-requests";
+import {
+  useApprovalRequest,
+  useCancelApprovalRequest,
+  useRespondToApprovalRequest,
+} from "@/api/hooks/use-approval-requests";
 import type { ApprovalQuestion, ApprovalRequest } from "@/api/types";
 import { FadeIn } from "@/components/onboarding/fade-in";
 import type { StatusTone } from "@/components/shared/status-icon";
@@ -39,7 +43,7 @@ import {
 import { QuestionCard } from "../components/question-card";
 import { optionValues, QuestionField } from "../components/question-field";
 import { RequestHeader } from "../components/request-header";
-import { SubmitBar } from "../components/submit-bar";
+import { DISCARD_REASON, SubmitBar } from "../components/submit-bar";
 
 /** Above this many questions, answered cards fold to one line. */
 const COMPACT_AFTER = 5;
@@ -95,6 +99,7 @@ function ApprovalRequestView({ request }: { request: ApprovalRequest }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const respondMutation = useRespondToApprovalRequest();
+  const cancelMutation = useCancelApprovalRequest();
   const { user } = useCurrentUser();
   const lookupUser = useUserLookup();
   const reduceMotion = useReducedMotion();
@@ -144,7 +149,8 @@ function ApprovalRequestView({ request }: { request: ApprovalRequest }) {
   };
 
   const handleSubmit = async () => {
-    if (!isPending || submitting) return;
+    // The ⌘/Ctrl+Enter shortcut reaches here too, so a discard in flight blocks it.
+    if (!isPending || submitting || cancelMutation.isPending) return;
     if (progress.blockedReason) {
       setAttempted(true);
       const firstBlocked = questions.findIndex((question) =>
@@ -167,6 +173,20 @@ function ApprovalRequestView({ request }: { request: ApprovalRequest }) {
       top.current?.scrollIntoView({ block: "start", behavior: reduceMotion ? "auto" : "smooth" });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to submit response");
+    }
+  };
+
+  const handleDiscard = async () => {
+    if (!isPending || submitting || cancelMutation.isPending) return;
+    setError(null);
+    try {
+      const result = await cancelMutation.mutateAsync({ id: request.id, reason: DISCARD_REASON });
+      queryClient.setQueryData(["approval-request", request.id], {
+        approvalRequest: result.approvalRequest,
+      });
+      setActiveIndex(-1);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to discard request");
     }
   };
 
@@ -380,10 +400,13 @@ function ApprovalRequestView({ request }: { request: ApprovalRequest }) {
         {isPending ? <div aria-hidden className="h-28 md:hidden" /> : null}
         {isPending ? (
           <SubmitBar
+            request={request}
             progress={progress}
             submitting={submitting}
+            discarding={cancelMutation.isPending}
             error={error}
             onSubmit={() => void handleSubmit()}
+            onDiscard={() => void handleDiscard()}
           />
         ) : null}
       </motion.div>

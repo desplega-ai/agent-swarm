@@ -2,7 +2,7 @@ import { describe, expect, mock, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 
-mock.module("@/lib/utils", () => import("../../lib/utils"));
+mock.module("@/lib/utils", () => require("../../lib/utils"));
 
 const { SectionTabs } = await import("./section-tabs");
 
