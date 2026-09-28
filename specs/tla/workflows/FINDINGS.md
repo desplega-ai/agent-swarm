@@ -141,9 +141,13 @@ spec before the fix PRs:
 | Calibration bf12ab53 | `Cal-bf12ab53.cfg` | found | 371 | 19 | <1 s |
 | Calibration d4753302 | `Cal-d4753302.cfg` | found | 4,375 | 33 | 1 s |
 | All proposed fixes, 2 branches | `Workflows.cfg` + all `Fix*` | fix-model gap (3rd bullet above) | 47,935,264 | 53 | 8 min 30 s |
-| Long run, simulation | `Long.cfg` (3 branches, maxRetries 2, 2 sweeps, 1 crash), `-simulate -depth 120 -continue`, 16 workers | see below | n/a | 120 | 20 min |
+| Long run, simulation | `Long.cfg` (3 branches, maxRetries 2, 2 sweeps, 1 crash), `-simulate -depth 120 -continue`, 16 workers | 1,456 violating traces | 310,647,742 states generated (simulation does not dedupe) | ≤120 | 19 min 30 s |
+| Long run, BFS | `Long.cfg` | CX1 | 5,385 | 19 | 4 s |
 
-LONG_RUN_RESULTS
+The long simulation on current `main` with 3 branches produced 1,456 violating traces: 1,438
+`TerminalRunStaysQuiet`, 11 `JoinWaitsForAll`, 3 `ExecutesOnce`, 2 `AtMostOneExecuting`,
+2 `CompletedRunQuiescent`. No new property failed. Individual simulation traces were not triaged
+one by one; the BFS traces above are the ones mapped to code and tests.
 
 Liveness (`EventuallySettles`, Inv5) is defined but not checked in these configs; the safety
 bugs above make it moot until they are fixed.
