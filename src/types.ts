@@ -3321,6 +3321,7 @@ export const PricingProviderSchema = z.enum([
   // adapter reports `totalCostUsd: 0`, so these rows settle at
   // `costSource: 'unpriced'`. Accepted here so the row is recorded at all.
   "acp",
+  "dsh",
 ]);
 export type PricingProvider = z.infer<typeof PricingProviderSchema>;
 

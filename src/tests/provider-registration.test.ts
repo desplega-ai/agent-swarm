@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildPricingSeedRows } from "../be/seed-pricing";
 import { CREDENTIAL_PROVIDER_CHECKERS } from "../commands/provider-credentials";
-import { ProviderNameSchema } from "../types";
+import { PricingProviderSchema, ProviderNameSchema } from "../types";
 
 const entrypoint = await Bun.file(new URL("../../docker-entrypoint.sh", import.meta.url)).text();
 
@@ -70,6 +70,12 @@ describe("provider registration synchronization", () => {
     expect(Object.keys(CREDENTIAL_PROVIDER_CHECKERS).sort()).toEqual(
       [...ProviderNameSchema.options].sort(),
     );
+  });
+
+  test("PricingProviderSchema accepts every ProviderNameSchema provider (#1636)", () => {
+    for (const provider of ProviderNameSchema.options) {
+      expect(PricingProviderSchema.safeParse(provider).success).toBe(true);
+    }
   });
 
   test("pricing seeder emits rows for providers with cost reporting", () => {

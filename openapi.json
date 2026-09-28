@@ -3128,7 +3128,8 @@
               "opencode",
               "devin",
               "gemini",
-              "acp"
+              "acp",
+              "dsh"
             ]
           },
           "model": {
@@ -28038,7 +28039,8 @@
                 "opencode",
                 "devin",
                 "gemini",
-                "acp"
+                "acp",
+                "dsh"
               ]
             },
             "required": true,
@@ -28119,7 +28121,8 @@
                 "opencode",
                 "devin",
                 "gemini",
-                "acp"
+                "acp",
+                "dsh"
               ]
             },
             "required": true,
@@ -28233,7 +28236,8 @@
                 "opencode",
                 "devin",
                 "gemini",
-                "acp"
+                "acp",
+                "dsh"
               ]
             },
             "required": true,
@@ -28315,7 +28319,8 @@
                 "opencode",
                 "devin",
                 "gemini",
-                "acp"
+                "acp",
+                "dsh"
               ]
             },
             "required": true,
@@ -38119,7 +38124,8 @@
                       "opencode",
                       "devin",
                       "gemini",
-                      "acp"
+                      "acp",
+                      "dsh"
                     ]
                   },
                   "createdAt": {
