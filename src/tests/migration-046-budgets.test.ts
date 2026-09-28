@@ -3,7 +3,7 @@ import { unlink } from "node:fs/promises";
 import { closeDb, getDbClient, initDb } from "../be/db";
 import { loadModelsDevCache } from "../be/modelsdev-cache";
 import { seedPricingFromModelsDev } from "../be/seed-pricing";
-import { CODEX_MODEL_PRICING } from "../providers/codex-models";
+import { codexModelPricingTable } from "../providers/codex-models";
 
 const TEST_DB_PATH = "./test-migration-046.sqlite";
 
@@ -133,7 +133,7 @@ describe("migration 046 — budgets and pricing", () => {
   });
 
   test("pricing seed includes every known Codex model/token class at effective_from=0", async () => {
-    const minimumCodexRows = Object.keys(CODEX_MODEL_PRICING).length * 3;
+    const minimumCodexRows = Object.keys(codexModelPricingTable()).length * 3;
 
     const seedRows = await getDbClient().get<CountRow>(
       "SELECT COUNT(*) as cnt FROM pricing WHERE provider = 'codex' AND effective_from = 0",
@@ -151,7 +151,7 @@ describe("migration 046 — budgets and pricing", () => {
     // time comes from newer effective_from rows (runtime refresh); the
     // worker-local table is advisory and agentswarm.cost.drift.usd is the
     // watchdog. This test pins seed COVERAGE, not rate sync.
-    for (const model of Object.keys(CODEX_MODEL_PRICING)) {
+    for (const model of Object.keys(codexModelPricingTable())) {
       for (const tokenClass of ["input", "cached_input", "output"] as const) {
         const row = await client.get<PricingRow>(
           "SELECT * FROM pricing WHERE provider = 'codex' AND model = ? AND token_class = ? AND effective_from = ?",

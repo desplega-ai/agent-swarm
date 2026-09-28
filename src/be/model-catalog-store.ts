@@ -12,6 +12,8 @@
  * by `reloadModelsCatalog()` and invalidated on every refresh / overlay write.
  * See runbooks/model-catalog.md.
  */
+
+import { type RuntimeCatalog, setRuntimeModelCatalog } from "../utils/runtime-model-catalog";
 import {
   getActivePricingRow,
   getDbClient,
@@ -461,7 +463,16 @@ export async function applyOverlayPricingRows(now = Date.now()): Promise<number>
 function toCatalogModel(modelId: string, facts: ModelCatalogFacts): CatalogModel {
   const cost =
     facts.pricing && (facts.pricing.input !== undefined || facts.pricing.output !== undefined)
-      ? { input: facts.pricing.input, output: facts.pricing.output }
+      ? {
+          input: facts.pricing.input,
+          output: facts.pricing.output,
+          ...(facts.pricing.cache_read !== undefined
+            ? { cache_read: facts.pricing.cache_read }
+            : {}),
+          ...(facts.pricing.cache_write !== undefined
+            ? { cache_write: facts.pricing.cache_write }
+            : {}),
+        }
       : undefined;
   const reasoning =
     facts.reasoning ?? (facts.reasoningOptions && facts.reasoningOptions.length > 0 ? true : null);
@@ -470,6 +481,8 @@ function toCatalogModel(modelId: string, facts: ModelCatalogFacts): CatalogModel
     ...(facts.name ? { name: facts.name } : {}),
     ...(cost ? { cost } : {}),
     ...(facts.contextWindow != null ? { limit: { context: facts.contextWindow } } : {}),
+    ...(facts.releaseDate ? { release_date: facts.releaseDate } : {}),
+    ...(facts.status ? { status: facts.status } : {}),
     ...(reasoning != null ? { reasoning } : {}),
     ...(facts.reasoningOptions && facts.reasoningOptions.length > 0
       ? { reasoning_options: facts.reasoningOptions }
@@ -512,6 +525,8 @@ function catalogModelToFacts(model: CatalogModel): ModelCatalogFacts {
   return {
     name: model.name ?? null,
     contextWindow: model.limit?.context ?? null,
+    releaseDate: model.release_date ?? null,
+    status: model.status ?? null,
     reasoning: model.reasoning ?? null,
     reasoningOptions: model.reasoning_options ?? null,
     pricing: model.cost ? { ...model.cost } : null,
@@ -545,7 +560,7 @@ export async function reloadModelsCatalog(): Promise<ModelsCatalogResult> {
       setSnapshotOverlayCatalog(snapshot);
     }
     catalogLoaded = true;
-    return getModelsCatalog();
+    return publishRuntimeCatalog(getModelsCatalog());
   }
 
   const catalog: ModelsCatalog = {};
@@ -563,7 +578,13 @@ export async function reloadModelsCatalog(): Promise<ModelsCatalogResult> {
   applyOverlays(catalog, baseFacts, overlays);
   setLiveModelsCatalog(catalog, meta.lastFetchAt);
   catalogLoaded = true;
-  return getModelsCatalog();
+  return publishRuntimeCatalog(getModelsCatalog());
+}
+
+/** Hand the served projection to in-process consumers (adapters, context math). */
+function publishRuntimeCatalog(result: ModelsCatalogResult): ModelsCatalogResult {
+  setRuntimeModelCatalog(result.providers as RuntimeCatalog, Date.now(), result.source);
+  return result;
 }
 
 /** Mark the cached projection stale; the next `loadModelsCatalog()` rebuilds it. */

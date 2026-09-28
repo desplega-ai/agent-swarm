@@ -103,11 +103,8 @@ describe("agents list model display", () => {
       provider: "Anthropic",
       providerId: "anthropic",
     });
-    expect(getAgentModelPresentation("claude-mythos-5-1")).toMatchObject({
-      label: "Claude Mythos 5.1",
-      provider: "Anthropic",
-      providerId: "anthropic",
-    });
+    // claude-mythos-5-1 is invite-only and absent from models.dev: it is
+    // listed once an overlay row exists, not from a hard-coded entry.
     expect(getAgentModelPresentation("claude-opus-5-5")).toMatchObject({
       label: "Claude Opus 5.5",
       provider: "Anthropic",
@@ -148,8 +145,9 @@ describe("agents list model display", () => {
       provider: "Anthropic",
       providerId: "anthropic",
     });
+    // Newest catalogued mythos (5.1 needs an overlay row; see above).
     expect(getAgentModelPresentation("mythos")).toMatchObject({
-      label: "Claude Mythos 5.1",
+      label: "Claude Mythos 5",
       provider: "Anthropic",
       providerId: "anthropic",
     });

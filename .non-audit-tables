@@ -40,3 +40,4 @@ tracker_sync
 user_identity_events
 wait_states
 model_alias_resolutions
+harness_model_support

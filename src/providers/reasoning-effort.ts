@@ -2,17 +2,18 @@
  * Normalized per-agent reasoning/effort control, shared across the four
  * local harnesses (`claude`, `codex`, `pi`, `opencode`).
  *
- * Pure module — no DB import, no network I/O at runtime. Capability data is
- * read from the slim, checked-in `modelsdev-reasoning.json` snapshot (derived
- * from the canonical `src/be/modelsdev-cache.json` by
- * `scripts/refresh-modelsdev-pricing.ts`), layered with a small
- * harness-specific override table for quirks the cache can't encode. See
+ * Pure module — no DB import, no network I/O of its own. Capability data is
+ * read from the model catalog (`src/utils/runtime-model-catalog.ts`: live
+ * `model_catalog` + overlay rows, vendored models.dev snapshot offline),
+ * layered with a small harness-specific override table for quirks the
+ * catalog can't encode. A new model's reasoning levels arrive with its
+ * catalog row (model-catalog phase 4). See
  * `thoughts/taras/plans/2026-07-01-agent-reasoning-effort-runtime-control.md`
  * (Phase 1) and `thoughts/taras/research/2026-05-26-agent-reasoning-effort-runtime-control.md`
  * for the design rationale.
  */
 
-import reasoningSnapshotJson from "./modelsdev-reasoning.json";
+import { runtimeCatalogModel } from "../utils/runtime-model-catalog";
 
 /** Closed, normalized enum. `minimal` remains out of scope; GPT-5.6 Codex adds `max`. */
 export const REASONING_EFFORT_LEVELS = ["off", "low", "medium", "high", "xhigh", "max"] as const;
@@ -58,19 +59,6 @@ interface SlimModelEntry {
   reasoningOptions?: SlimReasoningOption[];
 }
 
-/**
- * Providers the snapshot covers — mirrors `SNAPSHOT_ORDER` +
- * `BEDROCK_SNAPSHOT_ID` in `apps/ui/src/lib/agent-runtime-models.ts`. Direct
- * `claude`/`codex` model strings (no provider prefix) resolve against
- * `anthropic`/`openai` respectively; `pi`/`opencode` model strings are always
- * `<providerId>/<model-id>` (see `splitProviderModel`).
- */
-type SnapshotProviderId = "anthropic" | "openai" | "openrouter" | "amazon-bedrock";
-
-type ReasoningSnapshot = Partial<Record<SnapshotProviderId, Record<string, SlimModelEntry>>>;
-
-const SNAPSHOT = reasoningSnapshotJson as ReasoningSnapshot;
-
 /** Shared-safe subset accepted by all four harnesses on at least their default models (see research doc). */
 const FALLBACK_LEVELS: ReasoningEffort[] = ["low", "medium", "high"];
 
@@ -90,16 +78,33 @@ function splitProviderModel(model: string): { providerId: string; modelId: strin
   return { providerId: model.slice(0, slash), modelId: model.slice(slash + 1) };
 }
 
+function catalogEntry(providerId: string, modelId: string): SlimModelEntry | undefined {
+  const model = runtimeCatalogModel(providerId, modelId);
+  if (!model) return undefined;
+  return {
+    id: modelId,
+    reasoning: model.reasoning === true,
+    reasoningOptions: model.reasoning_options?.filter(
+      (o): o is SlimReasoningOption => typeof o.type === "string",
+    ),
+  };
+}
+
+/**
+ * Direct `claude`/`codex` model strings (no provider prefix) resolve against
+ * `anthropic`/`openai`; `pi`/`opencode` model strings are always
+ * `<providerId>/<model-id>` (see `splitProviderModel`).
+ */
 function lookupModelEntry(harness: ReasoningHarness, model: string): SlimModelEntry | undefined {
   if (!model) return undefined;
-  if (harness === "claude") return SNAPSHOT.anthropic?.[model];
-  if (harness === "codex") return SNAPSHOT.openai?.[model];
+  if (harness === "claude") return catalogEntry("anthropic", model);
+  if (harness === "codex") return catalogEntry("openai", model);
   // pi / opencode model strings are always "<provider>/<model-id...>" — the
   // model id itself may contain further slashes (e.g. openrouter's
   // "google/gemini-3-flash-preview"), so split on the FIRST slash only.
   const { providerId, modelId } = splitProviderModel(model);
   if (!providerId) return undefined;
-  return SNAPSHOT[providerId as SnapshotProviderId]?.[modelId];
+  return catalogEntry(providerId, modelId);
 }
 
 function levelsFromReasoningOptions(options: SlimReasoningOption[] | undefined): ReasoningEffort[] {

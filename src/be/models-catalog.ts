@@ -60,8 +60,12 @@ export interface CatalogReasoningOption {
 export interface CatalogModel {
   id: string;
   name?: string;
-  cost?: { input?: number; output?: number };
+  cost?: { input?: number; output?: number; cache_read?: number; cache_write?: number };
   limit?: { context?: number };
+  /** models.dev `release_date` (ISO date). Drives newest-first ordering in harness lists. */
+  release_date?: string;
+  /** models.dev `status` (e.g. "deprecated"). Deprecated models drop out of harness lists. */
+  status?: string;
   reasoning?: boolean;
   reasoning_options?: CatalogReasoningOption[];
 }
@@ -94,9 +98,20 @@ function slimModel(modelKey: string, model: ModelsDevModel): CatalogModel {
     id: model.id ?? modelKey,
     ...(model.name !== undefined ? { name: model.name } : {}),
     ...(model.cost !== undefined
-      ? { cost: { input: model.cost.input, output: model.cost.output } }
+      ? {
+          cost: {
+            input: model.cost.input,
+            output: model.cost.output,
+            ...(model.cost.cache_read !== undefined ? { cache_read: model.cost.cache_read } : {}),
+            ...(model.cost.cache_write !== undefined
+              ? { cache_write: model.cost.cache_write }
+              : {}),
+          },
+        }
       : {}),
     ...(model.limit?.context !== undefined ? { limit: { context: model.limit.context } } : {}),
+    ...(typeof model.release_date === "string" ? { release_date: model.release_date } : {}),
+    ...(typeof model.status === "string" ? { status: model.status } : {}),
     ...(model.reasoning !== undefined ? { reasoning: model.reasoning } : {}),
     ...(reasoningOptions.length > 0 ? { reasoning_options: reasoningOptions } : {}),
   };

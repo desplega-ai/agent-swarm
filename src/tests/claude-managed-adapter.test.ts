@@ -9,8 +9,8 @@ import {
   normalizeRepoUrl,
 } from "../providers/claude-managed-adapter";
 import {
-  CLAUDE_MANAGED_MODEL_PRICING,
   computeClaudeManagedCostUsd,
+  getClaudeManagedModelPricing,
 } from "../providers/claude-managed-models";
 import type { ProviderEvent, ProviderSessionConfig } from "../providers/types";
 
@@ -885,58 +885,52 @@ describe("ClaudeManagedAdapter (Phase 4) — repo provisioning + cost data", () 
     expect(cost2).toBe(0);
   });
 
-  test("CLAUDE_MANAGED_MODEL_PRICING covers sonnet, opus, haiku at minimum", () => {
-    expect(CLAUDE_MANAGED_MODEL_PRICING["claude-fable-5-1"]).toEqual({
+  test("catalog prices managed models: covers sonnet, opus, haiku at minimum", () => {
+    expect(getClaudeManagedModelPricing("claude-fable-5-1")).toEqual({
       inputPerMillion: 10.0,
       outputPerMillion: 50.0,
       cacheReadPerMillion: 0.25,
       cacheWritePerMillion: 12.5,
     });
-    expect(CLAUDE_MANAGED_MODEL_PRICING["claude-mythos-5-1"]).toEqual({
-      inputPerMillion: 10.0,
-      outputPerMillion: 50.0,
-      cacheReadPerMillion: 0.25,
-      cacheWritePerMillion: 12.5,
-    });
-    expect(CLAUDE_MANAGED_MODEL_PRICING["claude-opus-5-5"]).toEqual({
+    expect(getClaudeManagedModelPricing("claude-opus-5-5")).toEqual({
       inputPerMillion: 4.0,
       outputPerMillion: 20.0,
       cacheReadPerMillion: 0.2,
       cacheWritePerMillion: 5.0,
     });
-    expect(CLAUDE_MANAGED_MODEL_PRICING["claude-opus-5"]).toEqual({
+    expect(getClaudeManagedModelPricing("claude-opus-5")).toEqual({
       inputPerMillion: 5.0,
       outputPerMillion: 25.0,
       cacheReadPerMillion: 0.5,
       cacheWritePerMillion: 6.25,
     });
-    expect(CLAUDE_MANAGED_MODEL_PRICING["claude-fable-5"]).toEqual({
+    expect(getClaudeManagedModelPricing("claude-fable-5")).toEqual({
       inputPerMillion: 10.0,
       outputPerMillion: 50.0,
       cacheReadPerMillion: 1.0,
       cacheWritePerMillion: 12.5,
     });
-    expect(CLAUDE_MANAGED_MODEL_PRICING["claude-mythos-5"]).toEqual({
+    expect(getClaudeManagedModelPricing("claude-mythos-5")).toEqual({
       inputPerMillion: 10.0,
       outputPerMillion: 50.0,
       cacheReadPerMillion: 1.0,
       cacheWritePerMillion: 12.5,
     });
-    expect(CLAUDE_MANAGED_MODEL_PRICING["claude-sonnet-5-5"]).toEqual({
+    expect(getClaudeManagedModelPricing("claude-sonnet-5-5")).toEqual({
       inputPerMillion: 2.0,
       outputPerMillion: 10.0,
       cacheReadPerMillion: 0.2,
       cacheWritePerMillion: 2.5,
     });
-    expect(CLAUDE_MANAGED_MODEL_PRICING["claude-sonnet-5"]).toEqual({
+    expect(getClaudeManagedModelPricing("claude-sonnet-5")).toEqual({
       inputPerMillion: 2.0,
       outputPerMillion: 10.0,
       cacheReadPerMillion: 0.2,
       cacheWritePerMillion: 2.5,
     });
-    expect(CLAUDE_MANAGED_MODEL_PRICING["claude-sonnet-4-6"]).toBeDefined();
-    expect(CLAUDE_MANAGED_MODEL_PRICING["claude-opus-4-7"]).toBeDefined();
-    expect(CLAUDE_MANAGED_MODEL_PRICING["claude-haiku-4-5"]).toBeDefined();
+    expect(getClaudeManagedModelPricing("claude-sonnet-4-6")).toBeDefined();
+    expect(getClaudeManagedModelPricing("claude-opus-4-7")).toBeDefined();
+    expect(getClaudeManagedModelPricing("claude-haiku-4-5")).toBeDefined();
   });
 
   test("session totalCostUsd = token cost + (durationMs/3.6e6) × $0.08 runtime fee", async () => {

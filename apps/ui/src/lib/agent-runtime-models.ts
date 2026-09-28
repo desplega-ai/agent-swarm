@@ -1,3 +1,4 @@
+import { buildClaudeShortnameMap, harnessModelIds } from "@desplega/model-catalog";
 import type { ProviderName, ReasoningEffortLevel, SwarmConfig } from "@/api/types";
 import modelsCache from "./modelsdev-cache.json";
 
@@ -86,6 +87,8 @@ interface CachedModel {
   name?: string;
   cost?: { input?: number; output?: number };
   limit?: { context?: number };
+  release_date?: string;
+  status?: string;
   reasoning?: boolean;
   reasoning_options?: CachedReasoningOption[];
 }
@@ -228,52 +231,38 @@ const OPENAI_META = {
   requiredKey: "OPENAI_API_KEY",
 };
 
-/** Builds a direct-registry `ModelOption`, populating `reasoningLevels` from the same cache snapshot the picker's `cost`/`contextWindow` already read. */
+/** Builds a direct-registry `ModelOption` from one catalog row (live or snapshot). */
 function directModel(
   harness: "claude" | "codex",
-  id: string,
-  label: string,
+  model: CachedModel,
   meta: typeof ANTHROPIC_META | typeof OPENAI_META,
 ): ModelOption {
-  const snapshotProviderId: SnapshotProviderId = harness === "claude" ? "anthropic" : "openai";
   return {
-    id,
-    label,
+    id: model.id,
+    label: model.name ?? humanizeModelId(model.id),
     ...meta,
-    reasoningLevels: reasoningLevelsFromCache(harness, id, CACHE[snapshotProviderId]?.models[id]),
+    cost: model.cost,
+    contextWindow: model.limit?.context,
+    reasoningLevels: reasoningLevelsFromCache(harness, model.id, model),
   };
 }
 
-const DIRECT_MODELS: Record<"claude" | "codex", ModelOption[]> = {
-  claude: [
-    directModel("claude", "claude-fable-5-1", "Claude Fable 5.1", ANTHROPIC_META),
-    directModel("claude", "claude-mythos-5-1", "Claude Mythos 5.1", ANTHROPIC_META),
-    directModel("claude", "claude-opus-5-5", "Claude Opus 5.5", ANTHROPIC_META),
-    directModel("claude", "claude-opus-5", "Claude Opus 5", ANTHROPIC_META),
-    directModel("claude", "claude-fable-5", "Claude Fable 5", ANTHROPIC_META),
-    directModel("claude", "claude-mythos-5", "Claude Mythos 5", ANTHROPIC_META),
-    directModel("claude", "claude-sonnet-5-5", "Claude Sonnet 5.5", ANTHROPIC_META),
-    directModel("claude", "claude-sonnet-5", "Claude Sonnet 5", ANTHROPIC_META),
-    directModel("claude", "claude-opus-4-8", "Claude Opus 4.8", ANTHROPIC_META),
-    directModel("claude", "claude-opus-4-7", "Claude Opus 4.7", ANTHROPIC_META),
-    directModel("claude", "claude-opus-4-6", "Claude Opus 4.6", ANTHROPIC_META),
-    directModel("claude", "claude-sonnet-4-6", "Claude Sonnet 4.6", ANTHROPIC_META),
-    directModel("claude", "claude-haiku-4-5", "Claude Haiku 4.5", ANTHROPIC_META),
-  ],
-  codex: [
-    directModel("codex", "gpt-6-astra", "GPT-6 Astra", OPENAI_META),
-    directModel("codex", "gpt-6-sol", "GPT-6 Sol", OPENAI_META),
-    directModel("codex", "gpt-6-luna", "GPT-6 Luna", OPENAI_META),
-    directModel("codex", "gpt-5.6-sol", "GPT-5.6 Sol", OPENAI_META),
-    directModel("codex", "gpt-5.6-terra", "GPT-5.6 Terra", OPENAI_META),
-    directModel("codex", "gpt-5.6-luna", "GPT-5.6 Luna", OPENAI_META),
-    directModel("codex", "gpt-5.5", "GPT-5.5", OPENAI_META),
-    directModel("codex", "gpt-5.4", "GPT-5.4", OPENAI_META),
-    directModel("codex", "gpt-5.4-mini", "GPT-5.4 Mini", OPENAI_META),
-    directModel("codex", "gpt-5.3-codex", "GPT-5.3 Codex", OPENAI_META),
-    directModel("codex", "gpt-5.2-codex", "GPT-5.2 Codex", OPENAI_META),
-  ],
-};
+/**
+ * Direct-harness picker options, derived from the catalog (newest first). No
+ * hand-maintained list: a model added to the API's `model_catalog` (refresh
+ * or overlay row) shows up here on the next catalog fetch.
+ */
+function directModels(
+  harness: "claude" | "codex",
+  liveCatalog?: LiveModelsCatalog | null,
+): ModelOption[] {
+  const section: SnapshotProviderId = harness === "claude" ? "anthropic" : "openai";
+  const models = (liveCatalog?.[section] ?? CACHE[section])?.models ?? {};
+  const meta = harness === "claude" ? ANTHROPIC_META : OPENAI_META;
+  return harnessModelIds(harness, models).map((id) =>
+    directModel(harness, { ...models[id], id }, meta),
+  );
+}
 
 // Mirrors the any-of credential checks in the harness adapters:
 // `claude-adapter.ts` accepts `CLAUDE_CODE_OAUTH_TOKEN` OR `ANTHROPIC_API_KEY`;
@@ -313,9 +302,10 @@ const SNAPSHOT_META: Record<
   },
 };
 
+/** Preferred picker default per harness; empty = the newest catalog model. */
 const FALLBACK_MODEL: Record<LocalHarnessProvider, string> = {
-  claude: "claude-opus-5-5",
-  codex: "gpt-5.6-terra",
+  claude: "",
+  codex: "",
   pi: "openrouter/google/gemini-3-flash-preview",
   opencode: "openrouter/qwen/qwen3-coder-flash",
   acp: "",
@@ -372,7 +362,7 @@ export function modelGroupsForHarness(
     liveCatalog?.[providerId] ?? CACHE[providerId];
 
   if (harness === "claude" || harness === "codex") {
-    const models = DIRECT_MODELS[harness];
+    const models = directModels(harness, liveCatalog);
     const requiredKey = models[0]?.requiredKey ?? "";
     const acceptedKeys = DIRECT_HARNESS_ACCEPTED_KEYS[harness];
     return [
@@ -525,15 +515,11 @@ export function findModelOption(
 }
 
 // CLI shortnames Anthropic ships in their tools (`--model opus`, etc.). Workers
-// may report these verbatim — we map them to the canonical id so the row reads
-// "Claude Sonnet 5.5" instead of a bare "sonnet".
-const ANTHROPIC_SHORTNAME_TO_ID: Record<string, string> = {
-  fable: "claude-fable-5-1",
-  mythos: "claude-mythos-5-1",
-  opus: "claude-opus-5-5",
-  sonnet: "claude-sonnet-5-5",
-  haiku: "claude-haiku-4-5",
-};
+// may report these verbatim — map them to the newest canonical id in the
+// catalog so the row reads "Claude Sonnet 5.5" instead of a bare "sonnet".
+function anthropicShortnameToId(liveCatalog?: LiveModelsCatalog | null): Record<string, string> {
+  return buildClaudeShortnameMap((liveCatalog?.anthropic ?? CACHE.anthropic)?.models);
+}
 
 /**
  * Lookup across the live catalog first, then every known harness/snapshot — for
@@ -547,9 +533,9 @@ export function findKnownModel(
   if (!model) return null;
   const live = findLiveModel(model, liveCatalog);
   if (live) return live;
-  const aliased = ANTHROPIC_SHORTNAME_TO_ID[model] ?? model;
-  for (const arr of Object.values(DIRECT_MODELS)) {
-    const found = arr.find((m) => m.id === aliased);
+  const aliased = anthropicShortnameToId(liveCatalog)[model] ?? model;
+  for (const harness of ["claude", "codex"] as const) {
+    const found = directModels(harness, liveCatalog).find((m) => m.id === aliased);
     if (found) return found;
   }
   for (const providerId of SNAPSHOT_ORDER) {
@@ -686,7 +672,8 @@ export function pickDefaultModelForHarness(
   harness: LocalHarnessProvider,
   groups: ModelGroup[],
 ): string {
-  const fallback = FALLBACK_MODEL[harness];
+  const fallback =
+    FALLBACK_MODEL[harness] || (harness === "claude" ? (anthropicShortnameToId().opus ?? "") : "");
   const fallbackGroup = groups.find((g) => g.enabled && g.models.some((m) => m.id === fallback));
   if (fallbackGroup) return fallback;
   return groups.find((g) => g.enabled)?.models[0]?.id ?? fallback;

@@ -1,3 +1,13 @@
+export {
+  buildClaudeShortnameMap,
+  compareNewestFirst,
+  HARNESS_CATALOG_SECTION,
+  type HarnessCatalogModel,
+  harnessCatalogSection,
+  harnessModelIds,
+  isHarnessCatalogModel,
+  modelFamilyKey,
+} from "./harness-models.ts";
 export { type ModelsDevOverlay, mergeCatalog } from "./merge.ts";
 export { type AliasSourceModel, buildClaudeAliasMap, resolveClaudeAlias } from "./model-alias.ts";
 export {
