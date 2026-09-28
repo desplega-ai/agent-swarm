@@ -196,7 +196,14 @@ const createRoute = route({
     workflowRunId: z.string().uuid().optional(),
     workflowRunStepId: z.string().uuid().optional(),
     sourceTaskId: z.string().uuid().optional(),
-    timeoutSeconds: z.number().int().min(1).optional(),
+    timeoutSeconds: z
+      .number()
+      .int()
+      .min(1)
+      .optional()
+      .describe(
+        "Seconds until the request expires. After that the request becomes 'timeout' and you get a hitl-follow-up task. A request with no timeout is cancelled after APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS days (default 7).",
+      ),
     notifications: z
       .array(
         z.object({
