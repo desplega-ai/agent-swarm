@@ -12,11 +12,13 @@ mock.module(
   () => import("../../api/hooks/use-approval-requests"),
 );
 mock.module("@/api/hooks/use-tasks", () => import("../../api/hooks/use-tasks"));
+mock.module("@/components/kibo-ui/spinner", () => import("../kibo-ui/spinner"));
 mock.module("@/components/shared/mobile-list", () => import("../shared/mobile-list"));
 mock.module("@/components/shared/status-badge", () => import("../shared/status-badge"));
 mock.module("@/components/ui/badge", () => import("../ui/badge"));
 mock.module("@/components/ui/button", () => import("../ui/button"));
 mock.module("@/components/ui/skeleton", () => import("../ui/skeleton"));
+mock.module("@/components/ui/spinner", () => import("../ui/spinner"));
 mock.module("@/lib/config", () => import("../../lib/config"));
 mock.module("@/lib/recent-failures", () => import("../../lib/recent-failures"));
 mock.module("@/lib/task-title", () => import("../../lib/task-title"));

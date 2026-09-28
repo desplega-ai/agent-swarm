@@ -80,7 +80,9 @@ jobs:
 
           # tests: src/ + scripts that tests import + lockfile/tsconfig + bunfig ([test]
           # preload + pathIgnorePatterns) + member manifests (root frozen install).
-          TEST=$(match '^(src/|scripts/|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|apps/(ui|templates-ui|evals)/package\.json$)')
+          # apps/ui/src/: the root run also globs apps/ui/**/*.test.tsx, so a ui-only
+          # change can break it (a new `@/` import the root runner cannot resolve).
+          TEST=$(match '^(src/|scripts/|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|apps/ui/src/|apps/(ui|templates-ui|evals)/package\.json$)')
 
           # pi-skills freshness: generator inputs + outputs.
           PI_SKILLS=$(match '^(plugin/commands/|plugin/pi-skills/|plugin/build-pi-skills\.ts$)')
