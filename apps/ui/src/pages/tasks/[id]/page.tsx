@@ -104,6 +104,7 @@ import { modelTierLabel } from "@/lib/model-tiers";
 import { progressBarTone } from "@/lib/percent-progress-tone";
 import { statusTextClass } from "@/lib/status-tone";
 import { taskIsRunning } from "@/lib/task-activity";
+import { describeModelResolution, taskDisplayModel } from "@/lib/task-model-resolution";
 import { cn, formatRelativeTime, formatSmartTime } from "@/lib/utils";
 
 const TASK_DETAIL_TABS = new Set(["details", "outcome", "logs"]);
@@ -1089,20 +1090,31 @@ export default function TaskDetailPage() {
           </Badge>
         )}
         {(() => {
-          // Prefer the model recorded on the task row (set at task creation
-          // when explicitly requested), but fall back to whatever the
-          // session_costs entries report — codex tasks don't carry a
-          // task-level model today, so the cost record is the source of
-          // truth for what was actually used.
-          const displayModel = task.model ?? costs?.[0]?.model;
+          // The server records the model it resolved when the task was claimed
+          // (`resolvedModel`, with the layer in `modelSource`). Older tasks and
+          // unclaimed ones fall back to the requested `model`, then to whatever
+          // the session_costs entries report.
+          const displayModel = taskDisplayModel(task) ?? costs?.[0]?.model;
           if (displayModel) {
-            return (
+            const badge = (
               <Badge
                 variant="outline"
                 className="text-[9px] px-1.5 py-0 h-5 font-mono leading-none items-center"
               >
                 {displayModel}
               </Badge>
+            );
+            const lines = describeModelResolution(task);
+            if (lines.length === 0) return badge;
+            return (
+              <Tooltip>
+                <TooltipTrigger asChild>{badge}</TooltipTrigger>
+                <TooltipContent side="bottom" align="start">
+                  {lines.map((line) => (
+                    <div key={line}>{line}</div>
+                  ))}
+                </TooltipContent>
+              </Tooltip>
             );
           }
           return task.modelTier ? (

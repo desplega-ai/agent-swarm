@@ -36,6 +36,7 @@ import {
 import { z } from "zod";
 import {
   DEFAULT_MODEL_TIER_MAP,
+  MODEL_TIERS,
   type ModelTier,
   type ModelTierOverrides,
   type ProviderName,
@@ -239,6 +240,7 @@ async function lastAliasResolution(alias: string): Promise<string | null> {
 export async function resolveLatestAlias(
   alias: string,
   now: Date = new Date(),
+  opts: { record?: boolean } = {},
 ): Promise<string | null> {
   const parsed = parseAlias(alias);
   if (!parsed) return null;
@@ -255,7 +257,7 @@ export async function resolveLatestAlias(
   });
   if (!resolved) return null;
 
-  if (resolved !== previous) {
+  if (resolved !== previous && opts.record !== false) {
     await getDbClient().run(
       "INSERT INTO model_alias_resolutions (alias, previousModel, newModel, changedAt) VALUES (?, ?, ?, ?)",
       [key, previous, resolved, now.getTime()],
@@ -279,6 +281,8 @@ export interface ResolveTaskModelInput {
   /** Where tier-config values are read from. Default `process.env` (global swarm_config is hydrated into it). */
   env?: Record<string, string | undefined>;
   now?: Date;
+  /** Default true. False resolves `latest:` aliases without writing `model_alias_resolutions` (previews). */
+  record?: boolean;
 }
 
 /** Ordered candidates by precedence; no IO. */
@@ -310,7 +314,9 @@ export async function resolveTaskModel(
     if (!isAlias(candidate.value)) {
       return { resolvedModel: candidate.value, modelSource: candidate.source, modelAlias: null };
     }
-    const resolved = await resolveLatestAlias(candidate.value, input.now);
+    const resolved = await resolveLatestAlias(candidate.value, input.now, {
+      record: input.record,
+    });
     if (resolved) {
       return {
         resolvedModel: resolved,
@@ -323,6 +329,65 @@ export async function resolveTaskModel(
     );
   }
   return null;
+}
+
+// ─── Tier preview ────────────────────────────────────────────────────────────
+
+export interface ModelTierPreview {
+  provider: ProviderName;
+  tier: ModelTier;
+  /** swarm_config / env key that overrides this tier globally. */
+  key: string;
+  /** The built-in DEFAULT_MODEL_TIER_MAP value. */
+  defaultValue: string;
+  /** The value stored for `key`, or null when unset. */
+  configured: string | null;
+  /** Layer that wins today: the configured value, else the built-in default. */
+  source: "tier-config" | "tier-default";
+  /** What that layer resolves to right now (`latest:` aliases resolved). Null when nothing qualifies. */
+  resolvedModel: string | null;
+  /** The `latest:` alias behind `resolvedModel`, when any. */
+  alias: string | null;
+}
+
+/**
+ * Every provider x tier with its default, configured value and the model it
+ * resolves to now. Read-only: `latest:` aliases resolve without writing
+ * `model_alias_resolutions`. Ignores per-worker overrides and per-task models,
+ * so it answers "what does a `modelTier=<tier>` task get on a fresh <provider>
+ * worker".
+ */
+export async function previewModelTiers(
+  opts: { env?: Record<string, string | undefined>; now?: Date } = {},
+): Promise<ModelTierPreview[]> {
+  const env = opts.env ?? process.env;
+  const rows: ModelTierPreview[] = [];
+  for (const provider of ProviderNameSchema.options) {
+    // A provider with no portable tier mapping (acp) has nothing to preview.
+    if (MODEL_TIERS.every((tier) => !DEFAULT_MODEL_TIER_MAP[provider][tier])) continue;
+    for (const tier of MODEL_TIERS) {
+      const key = tierConfigKey(provider, tier);
+      const configured = env[key]?.trim() || null;
+      const resolution = await resolveTaskModel({
+        modelTier: tier,
+        harnessProvider: provider,
+        env,
+        now: opts.now,
+        record: false,
+      });
+      rows.push({
+        provider,
+        tier,
+        key,
+        defaultValue: DEFAULT_MODEL_TIER_MAP[provider][tier],
+        configured,
+        source: resolution?.modelSource === "tier-config" ? "tier-config" : "tier-default",
+        resolvedModel: resolution?.resolvedModel ?? null,
+        alias: resolution?.modelAlias ?? null,
+      });
+    }
+  }
+  return rows;
 }
 
 /**

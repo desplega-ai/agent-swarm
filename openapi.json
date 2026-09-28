@@ -22706,6 +22706,108 @@
         }
       }
     },
+    "/api/models-catalog/tiers": {
+      "get": {
+        "summary": "Preview what each model tier resolves to per harness provider",
+        "description": "One row per provider and tier: the built-in default, the `MODEL_TIER_<PROVIDER>_<TIER>` value stored in swarm config (if any), which layer wins, and the concrete model it resolves to against the current catalog (`latest:` aliases resolved with the same soak and auto-upgrade rules as claim time, without recording a resolution). Ignores per-worker `MODEL_TIER_*` overrides and per-task models.",
+        "tags": [
+          "Pricing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tier previews",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "tiers": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "provider": {
+                            "type": "string",
+                            "enum": [
+                              "claude",
+                              "codex",
+                              "pi",
+                              "devin",
+                              "claude-managed",
+                              "opencode",
+                              "acp",
+                              "dsh"
+                            ]
+                          },
+                          "tier": {
+                            "type": "string",
+                            "enum": [
+                              "smol",
+                              "regular",
+                              "smart",
+                              "ultra"
+                            ]
+                          },
+                          "key": {
+                            "type": "string"
+                          },
+                          "defaultValue": {
+                            "type": "string"
+                          },
+                          "configured": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "source": {
+                            "type": "string",
+                            "enum": [
+                              "tier-config",
+                              "tier-default"
+                            ]
+                          },
+                          "resolvedModel": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "alias": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "provider",
+                          "tier",
+                          "key",
+                          "defaultValue",
+                          "configured",
+                          "source",
+                          "resolvedModel",
+                          "alias"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "tiers"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/models-catalog/refresh": {
       "post": {
         "summary": "Refresh the model catalog from models.dev",

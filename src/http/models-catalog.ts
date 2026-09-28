@@ -15,8 +15,10 @@ import {
   loadModelsCatalog,
   upsertModelCatalogOverlay,
 } from "../be/model-catalog-store";
+import { previewModelTiers } from "../be/model-tier-resolution";
 import { refreshModelCatalog } from "../be/pricing-refresh";
 import { can, type RbacPrincipal } from "../rbac";
+import { MODEL_TIERS, ProviderNameSchema } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
@@ -116,6 +118,33 @@ const getCatalog = route({
         updatedAt: z.number().nullable(),
         providers: z.record(z.string(), CatalogProviderSchema),
       }),
+    },
+  },
+});
+
+const ModelTierPreviewSchema = z.object({
+  provider: ProviderNameSchema,
+  tier: z.enum(MODEL_TIERS),
+  key: z.string(),
+  defaultValue: z.string(),
+  configured: z.string().nullable(),
+  source: z.enum(["tier-config", "tier-default"]),
+  resolvedModel: z.string().nullable(),
+  alias: z.string().nullable(),
+});
+
+const getTiers = route({
+  method: "get",
+  path: "/api/models-catalog/tiers",
+  pattern: ["api", "models-catalog", "tiers"],
+  summary: "Preview what each model tier resolves to per harness provider",
+  description:
+    "One row per provider and tier: the built-in default, the `MODEL_TIER_<PROVIDER>_<TIER>` value stored in swarm config (if any), which layer wins, and the concrete model it resolves to against the current catalog (`latest:` aliases resolved with the same soak and auto-upgrade rules as claim time, without recording a resolution). Ignores per-worker `MODEL_TIER_*` overrides and per-task models.",
+  tags: ["Pricing"],
+  responses: {
+    200: {
+      description: "Tier previews",
+      schema: z.object({ tiers: z.array(ModelTierPreviewSchema) }),
     },
   },
 });
@@ -255,6 +284,13 @@ export async function handleModelsCatalog(
     const parsed = await getCatalog.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     getCatalog.respond(res, 200, await loadModelsCatalog());
+    return true;
+  }
+
+  if (getTiers.match(req.method, pathSegments)) {
+    const parsed = await getTiers.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    getTiers.respond(res, 200, { tiers: await previewModelTiers() });
     return true;
   }
 

@@ -19,6 +19,7 @@ import {
   Cpu,
   Database,
   HeartPulse,
+  Layers,
   type LucideIcon,
   Palette,
   Plug,
@@ -26,6 +27,7 @@ import {
   Workflow,
 } from "lucide-react";
 
+import type { ModelTierPreview } from "@/api/types";
 import type { DurationUnit } from "./configuration-values";
 
 const DOCS = "https://docs.agent-swarm.dev/docs/";
@@ -58,6 +60,15 @@ export interface ConfigCatalogEntry {
   /** Read once at boot — saving is not enough, the server must restart. */
   restartRequired?: boolean;
   placeholder?: string;
+  /**
+   * Model tier rows only: what the value resolves to on the server right now
+   * (from `GET /api/models-catalog/tiers`), shown under the description.
+   */
+  resolvesTo?: {
+    model: string | null;
+    alias: string | null;
+    source: "tier-config" | "tier-default";
+  };
 }
 
 export interface ConfigCatalogGroup {
@@ -69,32 +80,47 @@ export interface ConfigCatalogGroup {
 }
 
 /**
- * Global tier defaults (MODEL_TIER_<PROVIDER>_<TIER>), resolved on the server
- * when a task is claimed. Mirrors DEFAULT_MODEL_TIER_MAP for the placeholders.
- * Other providers accept the same key shape through the config API.
+ * The Model tiers group is not in `CONFIGURATION_GROUPS`: its rows (one per
+ * provider and tier), their defaults and what they resolve to come from
+ * `GET /api/models-catalog/tiers`, so the dashboard has no copy of the
+ * server's tier defaults. Merged into the page by `withModelTierGroup`.
  */
-const MODEL_TIER_DEFAULTS: Record<string, Record<string, string>> = {
-  claude: { smol: "haiku", regular: "sonnet", smart: "opus", ultra: "fable" },
-  codex: {
-    smol: "gpt-5.6-luna",
-    regular: "gpt-5.6-terra",
-    smart: "gpt-5.6-sol",
-    ultra: "gpt-5.6-sol",
-  },
-};
-
-const MODEL_TIER_CONFIG_ENTRIES: ConfigCatalogEntry[] = Object.entries(MODEL_TIER_DEFAULTS).flatMap(
-  ([provider, tiers]) =>
-    Object.entries(tiers).map(([tier, fallback]) => ({
-      key: `MODEL_TIER_${provider.toUpperCase()}_${tier.toUpperCase()}`,
-      label: `${provider} ${tier} tier model`,
-      description: `Model a ${provider} worker runs for modelTier=${tier} tasks. A model id, a CLI alias, or latest:<anthropic|openai|openrouter>/<target>[@stable|@any]. A task's explicit model and the worker's own MODEL_TIER_${tier.toUpperCase()} env still win.`,
+export function modelTierConfigGroup(tiers: ModelTierPreview[]): ConfigCatalogGroup | null {
+  if (tiers.length === 0) return null;
+  return {
+    id: "model-tiers",
+    title: "Model tiers",
+    description:
+      "Which model a modelTier task runs on each harness provider. Values are a model id, a CLI alias, or a latest: alias; the resolved model below is what the API picks from the live catalog today. A task's explicit model and a worker's own MODEL_TIER_* env still win.",
+    icon: Layers,
+    entries: tiers.map((row) => ({
+      key: row.key,
+      label: `${row.provider} ${row.tier} tier model`,
+      description: `Model a ${row.provider} worker runs for modelTier=${row.tier} tasks. A model id, a CLI alias, or latest:<anthropic|openai|openrouter>/<target>[@stable|@any].`,
       kind: "string" as const,
-      placeholder: fallback,
-      defaultValue: fallback,
+      placeholder: row.defaultValue,
+      defaultValue: row.defaultValue,
       docsUrl: `${DOCS}ui/configuration`,
+      resolvesTo: {
+        model: row.resolvedModel,
+        alias: row.alias,
+        source: row.source,
+      },
     })),
-);
+  };
+}
+
+/** Insert the live Model tiers group right after the Harness group. */
+export function withModelTierGroup(
+  groups: ConfigCatalogGroup[],
+  tiers: ModelTierPreview[] | undefined,
+): ConfigCatalogGroup[] {
+  const tierGroup = tiers ? modelTierConfigGroup(tiers) : null;
+  if (!tierGroup) return groups;
+  const at = groups.findIndex((group) => group.id === "harness");
+  if (at === -1) return [...groups, tierGroup];
+  return [...groups.slice(0, at + 1), tierGroup, ...groups.slice(at + 1)];
+}
 
 export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
   {
@@ -438,7 +464,6 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         restartRequired: false,
         docsUrl: `${DOCS}ui/configuration`,
       },
-      ...MODEL_TIER_CONFIG_ENTRIES,
       {
         key: "MODEL_LATEST_SOAK_DAYS",
         label: "latest: alias soak",

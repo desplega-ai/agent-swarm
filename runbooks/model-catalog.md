@@ -31,5 +31,6 @@ The watcher script and its verify brief live in the scripts catalog, not in this
 ## Checks
 
 - Catalog content: `GET /api/models-catalog`.
-- Why a task ran a model: `agent_tasks.resolvedModel`, `modelSource`, `modelAlias`.
+- What each tier resolves to now, per provider: `GET /api/models-catalog/tiers`. The dashboard Configuration page reads it for the `MODEL_TIER_*` rows. Read-only, so previewing never records an alias resolution.
+- Why a task ran a model: `agent_tasks.resolvedModel`, `modelSource`, `modelAlias`. The task detail page and the tasks table show them.
 - Alias moves: `model_alias_resolutions`.

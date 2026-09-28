@@ -30,6 +30,29 @@ export type AgentTaskSource =
 export type RoutingReason = "skill" | "continuity" | "overflow" | "human_pinned" | "reroute_fault";
 export type ChannelType = "public" | "dm";
 export type ModelTier = "smol" | "regular" | "smart" | "ultra";
+/** Mirrors `ModelSource` in `src/be/model-tier-resolution.ts` (backend). */
+export type ModelSource =
+  | "model"
+  | "worker-env"
+  | "tier-config"
+  | "tier-default"
+  | "fallback:cli-unsupported";
+/** One row of `GET /api/models-catalog/tiers`: what a tier resolves to for a provider. */
+export interface ModelTierPreview {
+  provider: string;
+  tier: ModelTier;
+  /** swarm_config / env key that overrides the tier globally. */
+  key: string;
+  /** The built-in default for the tier. */
+  defaultValue: string;
+  /** The stored `key` value, or null when unset. */
+  configured: string | null;
+  /** Layer that wins today. */
+  source: "tier-config" | "tier-default";
+  /** Concrete model that layer resolves to now (`latest:` aliases resolved). */
+  resolvedModel: string | null;
+  alias: string | null;
+}
 /** Mirrors `REASONING_EFFORT_LEVELS` in `src/providers/reasoning-effort.ts` (backend). */
 export const REASONING_EFFORT_LEVELS = ["off", "low", "medium", "high", "xhigh", "max"] as const;
 export type ReasoningEffortLevel = (typeof REASONING_EFFORT_LEVELS)[number];
@@ -248,6 +271,12 @@ export interface AgentTask {
   progress?: string;
   model?: string;
   modelTier?: ModelTier;
+  /** Concrete model the server resolved when a worker claimed the task. */
+  resolvedModel?: string;
+  /** Which layer chose `resolvedModel`. */
+  modelSource?: ModelSource;
+  /** The `latest:` alias `resolvedModel` came from, when any. */
+  modelAlias?: string;
   effort?: ReasoningEffortLevel;
   scheduleId?: string;
   parentTaskId?: string;

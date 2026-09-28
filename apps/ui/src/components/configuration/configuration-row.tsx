@@ -230,6 +230,23 @@ export function ConfigurationRow({ entry, inEnv }: ConfigurationRowProps) {
           )}
         </div>
         <p className="text-xs text-muted-foreground">{entry.description}</p>
+        {entry.resolvesTo && (
+          <p className="text-[11px] text-muted-foreground" data-testid={`resolves-to-${entry.key}`}>
+            Resolves to{" "}
+            {entry.resolvesTo.model ? (
+              <code className="font-mono text-foreground">{entry.resolvesTo.model}</code>
+            ) : (
+              <span>nothing in the catalog</span>
+            )}
+            {entry.resolvesTo.alias && (
+              <>
+                {" "}
+                via <code className="font-mono">{entry.resolvesTo.alias}</code>
+              </>
+            )}{" "}
+            ({entry.resolvesTo.source === "tier-config" ? "configured" : "built-in default"})
+          </p>
+        )}
         {entry.defaultValue && (
           <p className="text-[11px] text-muted-foreground">
             Default:{" "}

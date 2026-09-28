@@ -13,10 +13,12 @@ import {
   invalidateTierResolutionCatalog,
   isTierConfigKey,
   parseModelTierOverridesHeader,
+  previewModelTiers,
   resolveTaskModel,
   tierConfigKey,
 } from "../be/model-tier-resolution";
 import { validateConfigValue } from "../be/swarm-config-guard";
+import { handleModelsCatalog } from "../http/models-catalog";
 import { handlePoll } from "../http/poll";
 import { parseWorkerModelTierOverrides } from "../types";
 
@@ -319,6 +321,106 @@ describe("latest: guardrails", () => {
       resolvedModel: "opus",
       modelSource: "tier-default",
       modelAlias: null,
+    });
+  });
+});
+
+describe("previewModelTiers", () => {
+  test("lists every provider tier with its default, config value and resolution", async () => {
+    const rows = await previewModelTiers({
+      env: {
+        MODEL_TIER_CLAUDE_SMART: "latest:anthropic/opus",
+        MODEL_TIER_CODEX_SMOL: "gpt-5.6-luna",
+      },
+    });
+
+    const claudeSmart = rows.find((r) => r.provider === "claude" && r.tier === "smart");
+    expect(claudeSmart).toEqual({
+      provider: "claude",
+      tier: "smart",
+      key: "MODEL_TIER_CLAUDE_SMART",
+      defaultValue: "opus",
+      configured: "latest:anthropic/opus",
+      source: "tier-config",
+      resolvedModel: "claude-opus-5-5",
+      alias: "latest:anthropic/opus",
+    });
+
+    const claudeSmol = rows.find((r) => r.provider === "claude" && r.tier === "smol");
+    expect(claudeSmol).toMatchObject({
+      configured: null,
+      source: "tier-default",
+      resolvedModel: "haiku",
+      alias: null,
+    });
+
+    const codexSmol = rows.find((r) => r.provider === "codex" && r.tier === "smol");
+    expect(codexSmol).toMatchObject({ source: "tier-config", resolvedModel: "gpt-5.6-luna" });
+
+    // acp has no portable tier mapping, so it has nothing to preview.
+    expect(rows.some((r) => r.provider === "acp")).toBe(false);
+    expect(new Set(rows.map((r) => r.provider)).size).toBe(7);
+    expect(rows).toHaveLength(28);
+  });
+
+  test("an alias that resolves to nothing reports the default it falls back to", async () => {
+    const rows = await previewModelTiers({
+      env: { MODEL_TIER_CLAUDE_SMART: "latest:anthropic/nosuchfamily" },
+    });
+    const row = rows.find((r) => r.provider === "claude" && r.tier === "smart");
+    expect(row).toMatchObject({
+      configured: "latest:anthropic/nosuchfamily",
+      source: "tier-default",
+      resolvedModel: "opus",
+      alias: null,
+    });
+  });
+
+  test("previewing does not record alias resolutions", async () => {
+    await previewModelTiers({ env: { MODEL_TIER_CLAUDE_SMART: "latest:anthropic/opus" } });
+    const count = await getDbClient().get<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM model_alias_resolutions",
+    );
+    expect(count?.n).toBe(0);
+  });
+});
+
+describe("GET /api/models-catalog/tiers", () => {
+  test("serves the preview with the process env layered over the defaults", async () => {
+    process.env.MODEL_TIER_CLAUDE_SMART = "latest:anthropic/opus";
+    let status = 0;
+    let bodyStr = "";
+    const req = {
+      method: "GET",
+      url: "/api/models-catalog/tiers",
+      headers: {},
+    } as unknown as Parameters<typeof handleModelsCatalog>[0];
+    const res = {
+      setHeader() {},
+      writeHead(code: number) {
+        status = code;
+      },
+      end(body?: string) {
+        bodyStr = body ?? "";
+      },
+    } as unknown as Parameters<typeof handleModelsCatalog>[1];
+
+    const handled = await handleModelsCatalog(
+      req,
+      res,
+      ["api", "models-catalog", "tiers"],
+      new URLSearchParams(),
+    );
+
+    expect(handled).toBe(true);
+    expect(status).toBe(200);
+    const body = JSON.parse(bodyStr) as { tiers: { provider: string; tier: string }[] };
+    expect(body.tiers).toHaveLength(28);
+    expect(body.tiers.find((t) => t.provider === "claude" && t.tier === "smart")).toMatchObject({
+      key: "MODEL_TIER_CLAUDE_SMART",
+      source: "tier-config",
+      resolvedModel: "claude-opus-5-5",
+      alias: "latest:anthropic/opus",
     });
   });
 });

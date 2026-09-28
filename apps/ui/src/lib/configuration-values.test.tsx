@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { CONFIGURATION_GROUPS } from "./configuration-catalog";
+import { CONFIGURATION_GROUPS, withModelTierGroup } from "./configuration-catalog";
 import {
   convertDuration,
   DURATION_UNITS,
@@ -65,4 +65,56 @@ test("CSV empty selections and unknown entries survive editing", () => {
 test("manifest editor accepts objects, rejects malformed JSON and scalar/array roots", () => {
   expect(isJsonObject('{"taskTypes":{"review":["get-task-details"]}}')).toBe(true);
   for (const value of ["", "{", "null", "[]", '"string"']) expect(isJsonObject(value)).toBe(false);
+});
+
+describe("model tier rows come from the API, not the static catalog", () => {
+  const tiers = [
+    {
+      provider: "claude",
+      tier: "smart" as const,
+      key: "MODEL_TIER_CLAUDE_SMART",
+      defaultValue: "opus",
+      configured: null,
+      source: "tier-default" as const,
+      resolvedModel: "opus",
+      alias: null,
+    },
+    {
+      provider: "claude-managed",
+      tier: "smol" as const,
+      key: "MODEL_TIER_CLAUDE_MANAGED_SMOL",
+      defaultValue: "claude-haiku-4-5",
+      configured: "latest:anthropic/haiku",
+      source: "tier-config" as const,
+      resolvedModel: "claude-haiku-4-5",
+      alias: "latest:anthropic/haiku",
+    },
+  ];
+
+  test("the static catalog carries no MODEL_TIER_<PROVIDER>_<TIER> rows", () => {
+    const keys = CONFIGURATION_GROUPS.flatMap((group) => group.entries.map((entry) => entry.key));
+    expect(
+      keys.filter((key) => /^MODEL_TIER_[A-Z_]+_(SMOL|REGULAR|SMART|ULTRA)$/.test(key)),
+    ).toEqual([]);
+  });
+
+  test("the live group follows Harness and takes defaults and resolutions from the API", () => {
+    const groups = withModelTierGroup(CONFIGURATION_GROUPS, tiers);
+    const ids = groups.map((group) => group.id);
+    expect(ids.indexOf("model-tiers")).toBe(ids.indexOf("harness") + 1);
+    const group = groups.find((g) => g.id === "model-tiers");
+    expect(group?.entries.map((entry) => entry.key)).toEqual([
+      "MODEL_TIER_CLAUDE_SMART",
+      "MODEL_TIER_CLAUDE_MANAGED_SMOL",
+    ]);
+    expect(group?.entries[1]).toMatchObject({
+      defaultValue: "claude-haiku-4-5",
+      resolvesTo: { model: "claude-haiku-4-5", alias: "latest:anthropic/haiku" },
+    });
+  });
+
+  test("no tiers yet (loading, error, empty) leaves the catalog untouched", () => {
+    expect(withModelTierGroup(CONFIGURATION_GROUPS, undefined)).toBe(CONFIGURATION_GROUPS);
+    expect(withModelTierGroup(CONFIGURATION_GROUPS, [])).toBe(CONFIGURATION_GROUPS);
+  });
 });

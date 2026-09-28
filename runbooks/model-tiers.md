@@ -89,7 +89,9 @@ The API server resolves the model when a worker claims the task (`/api/poll`, bo
 3. `swarm_config` `MODEL_TIER_<PROVIDER>_<TIER>` → `tier-config`.
 4. `DEFAULT_MODEL_TIER_MAP` → `tier-default`.
 
-It writes `resolvedModel`, `modelSource` and `modelAlias` (the `latest:` alias, when any) on `agent_tasks` and returns them on the trigger. A task with neither `model` nor `modelTier` records nothing. `fallback:cli-unsupported` is reserved for phase 4.
+It writes `resolvedModel`, `modelSource` and `modelAlias` (the `latest:` alias, when any) on `agent_tasks` and returns them on the trigger. A task with neither `model` nor `modelTier` records nothing. `modelSource = fallback:cli-unsupported` means the claiming worker's CLI version rejected the resolved alias or tier model, so the newest supported model in the family ran instead (see `runbooks/model-catalog.md`).
+
+`GET /api/models-catalog/tiers` previews layers 3 and 4 for every provider and tier, with `latest:` aliases resolved against the current catalog and without recording a resolution. It ignores per-worker overrides and per-task models. The dashboard Configuration page uses it for the `MODEL_TIER_*` rows.
 
 The worker still runs `resolveTaskModelSelection` locally. When the server sent a `resolvedModel`, the worker uses it; if its local result differs (for example a stale override sent before a restart, or a tier-config value the worker does not read), it logs `model resolution mismatch ... using server value`. Without a server value (older API) the worker keeps the local order: task `model`, `modelTier` with its env overrides, `MODEL_OVERRIDE`, then the adapter default.
 

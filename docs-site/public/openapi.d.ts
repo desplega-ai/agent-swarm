@@ -9101,6 +9101,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/models-catalog/tiers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview what each model tier resolves to per harness provider
+         * @description One row per provider and tier: the built-in default, the `MODEL_TIER_<PROVIDER>_<TIER>` value stored in swarm config (if any), which layer wins, and the concrete model it resolves to against the current catalog (`latest:` aliases resolved with the same soak and auto-upgrade rules as claim time, without recording a resolution). Ignores per-worker `MODEL_TIER_*` overrides and per-task models.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Tier previews */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            tiers: {
+                                /** @enum {string} */
+                                provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh";
+                                /** @enum {string} */
+                                tier: "smol" | "regular" | "smart" | "ultra";
+                                key: string;
+                                defaultValue: string;
+                                configured: string | null;
+                                /** @enum {string} */
+                                source: "tier-config" | "tier-default";
+                                resolvedModel: string | null;
+                                alias: string | null;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/models-catalog/refresh": {
         parameters: {
             query?: never;
