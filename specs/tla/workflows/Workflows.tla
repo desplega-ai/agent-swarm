@@ -32,8 +32,8 @@ CONSTANTS
   \* --- fixes for the bugs found by this model (FINDINGS.md) ---
   FixPollerRunGuard, \* F1: retry poller claims the step only while the run is live
   FixPendingRetryGate, \* F2: a predecessor that is still running or pending retry keeps its edge active
-  FixConcurrentJoin, \* F3: convergence step creation is keyed per iteration, not per row count
-  FixUserRetryLive,  \* F5: user retry does not re-walk a node whose step is still live
+  FixConcurrentJoin, \* F3: step insert skips a node already completed, waiting, or running in this process
+  FixUserRetryLive,  \* F5: user retry skips a node whose step is running or waiting (resume.ts retryFailedRun)
   FixRecoveryRetry   \* F4: recovery does not re-walk a node that is pending retry / held by the poller
 
 ASSUME MaxRetries >= 1 /\ BranchOutcomes \subseteq {"ok", "fail", "async"}
@@ -86,6 +86,14 @@ Awaited(p, edges) ==
   FixPendingRetryGate /\
   \/ \E q \in Nodes : <<q, p>> \in edges
   \/ p \in NodesWith("running") \cup NodesWith("pending") \cup NodesWith("waiting") \cup RetryNodes
+
+\* F3: step rows an executeStep call still owns (engine.ts executingSteps,
+\* process-local, cleared by a crash). The retry poller's rows are not owned.
+Owned == {thr[t].sid : t \in {u \in Threads : thr[u].pc \in {"xRun", "xCkOk", "xFail", "xCkWait"}}}
+\* F3: nodes whose step already covers the current predecessor completions
+\* (no loops in this graph): completed, waiting, or running and owned.
+CurrentNodes == NodesWith("completed") \cup NodesWith("waiting")
+                \cup {steps[i].node : i \in {j \in Owned \cap StepIds : steps[j].st = "running"}}
 
 \* The node the retry poller currently holds (step flipped to running, not yet checkpointed).
 PollerHeld == IF thr[TPoll].pc \in {"p5", "p6", "p7", "p8", "p9", "p10"}
@@ -152,11 +160,12 @@ XDedup(t) ==
      THEN \* halted -> reported as completed with no successors
           /\ SetT(t, [thr[t] EXCEPT !.pc = "wPick", !.done = @ \cup {n}, !.ex = @ \cup {n}])
           /\ UNCHANGED <<steps, execLive>>
-     ELSE IF FixConcurrentJoin /\ n \in NodesWith("completed") \cup NodesWith("waiting")
-                                         \cup NodesWith("running")
-     THEN \* F3: the iteration key is already taken by a live/finished row -> memoized
+     ELSE IF FixConcurrentJoin /\ n \in CurrentNodes
+     THEN \* F3 engine.ts getCurrentStepForNode: memoized. A completed node is
+          \* rehydrated without routing; a live one pauses this walk.
           /\ SetT(t, [thr[t] EXCEPT !.pc = "wPick", !.ex = @ \cup {n},
-                       !.hasW = @ \/ n \in NodesWith("waiting") \cup NodesWith("running")])
+                       !.done = IF n \in NodesWith("completed") THEN @ \cup {n} ELSE @,
+                       !.hasW = @ \/ n \notin NodesWith("completed")])
           /\ UNCHANGED <<steps, execLive>>
      ELSE /\ steps' = Append(steps, [node |-> n, st |-> "running", rc |-> 0,
                                       nra |-> FALSE, task |-> "none"])
@@ -592,7 +601,7 @@ U1 ==
 \* U2 resume.ts:341-363 — claim transaction, then walkGraph.
 U2 ==
   /\ thr[TRetry].pc = "u2"
-  /\ IF run = "failed" /\ ~(FixUserRetryLive /\ active > 0)
+  /\ IF run = "failed"
      THEN /\ steps' = [steps EXCEPT ![thr[TRetry].sid].st = "pending"]
           /\ run' = "running"
           /\ Call(TRetry, thr[TRetry].pend, "uDone")

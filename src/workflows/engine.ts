@@ -10,6 +10,7 @@ import {
   createWorkflowRun,
   createWorkflowRunStep,
   getCompletedStepNodeIds,
+  getCurrentStepForNode,
   getDbClient,
   getLatestStepForNode,
   getStepByIdempotencyKey,
@@ -201,6 +202,11 @@ interface StepResult {
 // A run may have overlapping resume walks. Keep ownership until the last walk
 // settles, including checkpointing and routing between executor calls.
 const activeWalks = new Map<string, number>();
+
+// Step rows an executeStep call in this process inserted and has not finished
+// yet. Process-local like activeWalks: a crash clears it, so a `running` row
+// left behind is not mistaken for a live execution.
+const executingSteps = new Set<string>();
 
 export function isWorkflowRunActive(runId: string): boolean {
   return activeWalks.has(runId);
@@ -541,10 +547,26 @@ async function executeStep(
   // rides the INSERT itself — so the UNIQUE(idempotencyKey) index arbitrates
   // concurrent executions of the same node instead of an orphan step row
   // committing before a follow-up key UPDATE throws.
-  const dedup = await getDbClient().transaction(async () => {
+  let claimedStepId: string | undefined;
+  const claimStep = async () => {
     const run = await getWorkflowRun(runId);
     if (!run || (run.status !== "running" && run.status !== "waiting")) {
       return { halted: true as const };
+    }
+
+    // Another walker already started or finished this node for the same
+    // predecessor completions (two branch completions both walking the join,
+    // or a user retry reaching a branch the live walk is running). The
+    // row-count key below is always new, so only this read, inside the insert
+    // transaction, stops a second execution. Foreach re-enters its own
+    // non-terminal row below and keeps that path.
+    if (node.type !== "foreach") {
+      const current = await getCurrentStepForNode(runId, node.id, getAllPredecessors(def, node.id));
+      // A `running` row this process is not executing was orphaned by a
+      // crash; recovery must be able to run the node again.
+      if (current && (current.status !== "running" || executingSteps.has(current.id))) {
+        return { current };
+      }
     }
 
     // Count existing steps for this node to determine the current iteration.
@@ -584,10 +606,27 @@ async function executeStep(
         idempotencyKey,
       });
     }
+    // Registered before the transaction commits, so no other walker can see
+    // this `running` row without also seeing it owned.
+    claimedStepId = stepId;
+    executingSteps.add(stepId);
     return { existingStep, stepId, deduped: false };
-  });
+  };
+  const dedup = await getDbClient()
+    .transaction(claimStep)
+    .catch((err) => {
+      if (claimedStepId) executingSteps.delete(claimedStepId);
+      throw err;
+    });
 
   if ("halted" in dedup) return { outcome: "completed", successors: [] };
+  if ("current" in dedup && dedup.current) {
+    // The walker that owns the step routes its successors and finalizes the
+    // run; this one must not route them again.
+    if (dedup.current.status !== "completed") return { outcome: "waiting", successors: [] };
+    ctx[node.id] = dedup.current.output;
+    return { outcome: "completed", successors: [] };
+  }
 
   if (dedup.deduped && dedup.existingStep) {
     if (dedup.existingStep.status === "completed") {
@@ -601,9 +640,35 @@ async function executeStep(
     // Don't create a duplicate — just report as waiting.
     return { outcome: "waiting", successors: [] };
   }
-  const existingStep = dedup.existingStep;
-  const stepId = dedup.stepId;
+  try {
+    return await runClaimedStep(
+      def,
+      runId,
+      ctx,
+      node,
+      registry,
+      dedup.existingStep,
+      dedup.stepId,
+      workflowId,
+      options,
+    );
+  } finally {
+    executingSteps.delete(dedup.stepId);
+  }
+}
 
+/** Steps 3-10 of executeStep, for a step row this call inserted and owns. */
+async function runClaimedStep(
+  def: WorkflowDefinition,
+  runId: string,
+  ctx: Record<string, unknown>,
+  node: WorkflowNode,
+  registry: ExecutorRegistry,
+  existingStep: WorkflowRunStep | null | undefined,
+  stepId: string,
+  workflowId?: string,
+  options: WorkflowExecutionOptions = {},
+): Promise<StepResult> {
   // 3. Get executor
   const executor = registry.get(node.type);
 

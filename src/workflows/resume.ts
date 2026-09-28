@@ -351,7 +351,15 @@ export async function retryFailedRun(runId: string, registry: ExecutorRegistry):
   if (!claimed) throw new Error("Run is not in failed state");
 
   // Resume from the failed node — use findReadyNodes for convergence safety.
-  const readyNodes = findReadyNodes(workflow.definition, completedNodeIds, activeEdges);
+  // findReadyNodes returns every node without a completed step, including a
+  // branch whose step is still running or waiting on its task. That branch is
+  // not the retry's to run: walking it again executes it twice.
+  const liveNodeIds = new Set(
+    steps.filter((s) => s.status === "running" || s.status === "waiting").map((s) => s.nodeId),
+  );
+  const readyNodes = findReadyNodes(workflow.definition, completedNodeIds, activeEdges).filter(
+    (n) => n.id === failedNode.id || !liveNodeIds.has(n.id),
+  );
 
   // Loop and foreach retry targets can be absent from readyNodes even when
   // active; include them explicitly, but never revive an untaken branch.

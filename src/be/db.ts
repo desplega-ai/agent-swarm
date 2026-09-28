@@ -8117,6 +8117,37 @@ export async function getLatestStepForNode(
   return row ? rowToWorkflowRunStep(row) : null;
 }
 
+/**
+ * The node's latest step when it already covers the current predecessor
+ * completions: it is running, waiting or completed, and no predecessor has
+ * completed a step inserted after it. A loop iteration always has a newer
+ * predecessor completion, so it never matches. Ordered by rowid, which
+ * follows insert order; startedAt can tie within a millisecond.
+ */
+export async function getCurrentStepForNode(
+  runId: string,
+  nodeId: string,
+  predecessorIds: string[],
+): Promise<WorkflowRunStep | null> {
+  const row = await getDbClient().get<WorkflowRunStepRow>(
+    "SELECT * FROM workflow_run_steps WHERE runId = ? AND nodeId = ? ORDER BY rowid DESC LIMIT 1",
+    [runId, nodeId],
+  );
+  if (!row || !["running", "waiting", "completed"].includes(row.status)) return null;
+  if (predecessorIds.length > 0) {
+    const newer = await getDbClient().get<{ found: number }>(
+      `SELECT 1 AS found FROM workflow_run_steps
+         WHERE runId = ? AND status = 'completed'
+           AND nodeId IN (${predecessorIds.map(() => "?").join(", ")})
+           AND rowid > (SELECT rowid FROM workflow_run_steps WHERE id = ?)
+         LIMIT 1`,
+      [runId, ...predecessorIds, row.id],
+    );
+    if (newer) return null;
+  }
+  return rowToWorkflowRunStep(row);
+}
+
 // --- Workflow Version History ---
 
 type WorkflowVersionRow = {
