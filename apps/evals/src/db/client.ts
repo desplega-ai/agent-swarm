@@ -131,6 +131,14 @@ CREATE TABLE IF NOT EXISTS artifacts (
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 
+-- Last good models.dev payload (single row, id = 1). See src/cost/catalog.ts.
+CREATE TABLE IF NOT EXISTS model_catalog_cache (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  fetched_at TEXT NOT NULL,
+  etag TEXT,
+  payload TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_attempts_run ON attempts(run_id);
 CREATE INDEX IF NOT EXISTS idx_judgments_attempt ON judgments(attempt_id);
 CREATE INDEX IF NOT EXISTS idx_artifacts_attempt ON artifacts(attempt_id);

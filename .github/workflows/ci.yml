@@ -11,6 +11,8 @@ on:
       - "bun.lock*"
       - "bunfig.toml"
       - "apps/ui/package.json"
+      # The root test run also covers apps/ui/**/*.test.tsx.
+      - "apps/ui/src/**"
       - "apps/templates-ui/package.json"
       - "apps/evals/package.json"
       - "konsistent.json"

@@ -1,4 +1,10 @@
 import type { HarnessProvider, TokenTotals } from "../types.ts";
+import {
+  getCatalog,
+  getCatalogVersion,
+  type ModelsDevCatalog,
+  type ModelsDevModel,
+} from "./catalog.ts";
 import { buildClaudeAliasMap, resolveClaudeAlias } from "./model-alias.ts";
 
 export interface PricedModel {
@@ -13,32 +19,9 @@ export interface PricedModel {
   cacheWritePerM: number | null;
 }
 
-interface ModelsDevModel {
-  name?: string;
-  reasoning?: boolean;
-  tool_call?: boolean;
-  release_date?: string;
-  limit?: { context?: number };
-  cost?: { input?: number; output?: number; cache_read?: number; cache_write?: number };
-}
-
-interface ModelsDevSection {
-  id: string;
-  name: string;
-  models: Record<string, ModelsDevModel>;
-}
-
-type ModelsDevCache = Record<string, ModelsDevSection>;
-
-let cachePromise: Promise<ModelsDevCache> | null = null;
-
-/** Repo-root models.dev snapshot — in-repo and offline-safe. Loaded once per process. */
-function loadCache(): Promise<ModelsDevCache> {
-  if (!cachePromise) {
-    const url = new URL("../../../../src/be/modelsdev-cache.json", import.meta.url);
-    cachePromise = Bun.file(url).json() as Promise<ModelsDevCache>;
-  }
-  return cachePromise;
+/** Current models.dev catalog (live, persisted, or committed snapshot). See catalog.ts. */
+async function loadCache(): Promise<ModelsDevCatalog> {
+  return (await getCatalog()).catalog;
 }
 
 function toPriced(id: string, m: ModelsDevModel): PricedModel {
@@ -55,7 +38,7 @@ function toPriced(id: string, m: ModelsDevModel): PricedModel {
   };
 }
 
-/** All models of the models.dev `openrouter` section, sorted by name. Cached after first load. */
+/** All models of the models.dev `openrouter` section, sorted by name. */
 export async function listOpenrouterModels(): Promise<PricedModel[]> {
   const cache = await loadCache();
   const section = cache.openrouter;
@@ -73,14 +56,19 @@ const PROVIDER_SECTION: Record<HarnessProvider, string> = {
 };
 
 let claudeAliasPromise: Promise<Record<string, string>> | null = null;
+let claudeAliasVersion = -1;
 
 /**
- * Frozen bare-alias map (v7 §8): "fable" → "claude-fable-5", "opus" → the
- * latest opus, … — computed once per process from the snapshot's `anthropic`
+ * Bare-alias map (v7 §8): "fable" → "claude-fable-5", "opus" → the
+ * latest opus, … — recomputed whenever the catalog changes, from its `anthropic`
  * section via the pure rule in model-alias.ts. Shared by claude pricing
  * lookups here and shipped to the UI on GET /api/models (`aliases`).
  */
 export function getClaudeAliasMap(): Promise<Record<string, string>> {
+  if (claudeAliasVersion !== getCatalogVersion()) {
+    claudeAliasPromise = null;
+    claudeAliasVersion = getCatalogVersion();
+  }
   claudeAliasPromise ??= loadCache().then((cache) => {
     const section = cache.anthropic;
     if (!section) return {};
