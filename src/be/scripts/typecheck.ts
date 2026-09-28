@@ -262,6 +262,21 @@ export interface SwarmSdk {
   config_set(args: { key: string; value: unknown; scope?: "global" | "agent" | "repo"; scopeId?: string; isSecret?: boolean }): Promise<unknown>;
   config_delete(args: { id: string }): Promise<unknown>;
 
+  // --- write: model catalog ---
+  modelCatalog_refresh(args?: { force?: boolean }): Promise<unknown>;
+  modelCatalog_overlayUpsert(args: {
+    provider: string;
+    modelId: string;
+    name?: string;
+    releaseDate?: string;
+    contextWindow?: number;
+    maxOutput?: number;
+    reasoningOptions?: Array<{ type: string; values?: string[] }>;
+    pricing?: { input?: number; output?: number; cache_read?: number; cache_write?: number };
+    reason: string;
+    verifiedBy?: string;
+  }): Promise<unknown>;
+
   // --- write: slack ---
   slack_post(args: { channelId: string; message: string; blocks?: unknown }): Promise<unknown>;
   slack_reply(args: { channelId?: string; threadTs?: string; message: string; taskId?: string; blocks?: unknown }): Promise<unknown>;

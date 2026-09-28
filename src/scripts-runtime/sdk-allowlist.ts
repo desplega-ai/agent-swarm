@@ -80,6 +80,10 @@ export const SDK_TOOL_NAME_MAP = {
   config_set: "set-config",
   config_delete: "delete-config", // destructive
 
+  // ── model catalog ──
+  modelCatalog_refresh: "model-catalog-refresh", // external: fetches models.dev
+  modelCatalog_overlayUpsert: "model-catalog-overlay-upsert",
+
   // ── slack ──
   slack_read: "slack-read",
   slack_listChannels: "slack-list-channels",

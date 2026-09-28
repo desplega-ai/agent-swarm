@@ -151,6 +151,10 @@ import { registerSlackUpdateTool } from "./tools/slack-update";
 import { registerSlackUploadFileTool } from "./tools/slack-upload-file";
 import { registerSteerTaskTool } from "./tools/steer-task";
 import { registerStoreProgressTool } from "./tools/store-progress";
+import {
+  registerModelCatalogOverlayUpsertTool,
+  registerModelCatalogRefreshTool,
+} from "./tools/model-catalog";
 // Swarm config tools
 import {
   registerDeleteConfigTool,
@@ -410,6 +414,8 @@ export async function createServer(
     registerListConfigTool(server);
     registerDeleteConfigTool(server);
     registerCredentialBindingsTool(server);
+    registerModelCatalogRefreshTool(server);
+    registerModelCatalogOverlayUpsertTool(server);
   }
 
   // Scripts capability - reusable script catalog (HTTP MCP only in v1)

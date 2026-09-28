@@ -78,12 +78,14 @@ export const DEFERRED_TOOLS = new Set([
   "list-services",
   "update-service-status",
 
-  // Config (5)
+  // Config (7)
   "set-config",
   "list-config",
   "delete-config",
   "credential-bindings",
   "script-connections",
+  "model-catalog-refresh",
+  "model-catalog-overlay-upsert",
 
   // Repos (1)
   "update-repo",
