@@ -6,6 +6,7 @@ import {
   createApprovalRequest,
   getAgentById,
   getApprovalRequestById,
+  getDbClient,
   getWorkflowRun,
   getWorkflowRunStep,
   listApprovalRequests,
@@ -343,13 +344,16 @@ export async function handleApprovalRequests(
     // A workflow run then routes on its timeout port on the next heartbeat
     // tick through getStuckApprovalRuns, so no approval.resolved is emitted.
     if (existing.expiresAt && new Date(existing.expiresAt) < new Date()) {
-      const timedOut = await resolveApprovalRequest(existing.id, {
-        status: "timeout",
-        resolutionReason: `Timed out: the answer arrived after the deadline ${existing.expiresAt}`,
+      // The status change and the follow-up task commit together.
+      await getDbClient().transaction(async () => {
+        const timedOut = await resolveApprovalRequest(existing.id, {
+          status: "timeout",
+          resolutionReason: `Timed out: the answer arrived after the deadline ${existing.expiresAt}`,
+        });
+        if (timedOut && !existing.workflowRunId) {
+          await createApprovalFollowUpTask(timedOut, "hitl.timeout");
+        }
       });
-      if (timedOut && !existing.workflowRunId) {
-        await createApprovalFollowUpTask(timedOut, "hitl.timeout");
-      }
       jsonError(res, `Approval request expired at ${existing.expiresAt}`, 409);
       return true;
     }

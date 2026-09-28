@@ -83,14 +83,23 @@ export async function timeoutExpiredApprovalRequests(
   const expired = await getExpiredPendingApprovals({ now: now.toISOString() });
   const timedOut: ApprovalRequest[] = [];
   for (const row of expired) {
-    const updated = await resolveApprovalRequest(row.id, {
-      status: "timeout",
-      resolutionReason: `Timed out by the approval sweep: no answer before ${row.expiresAt}`,
-    });
-    if (updated) timedOut.push(updated);
-  }
-  for (const row of timedOut) {
-    await createApprovalFollowUpTask(row, "hitl.timeout");
+    // The status change and the follow-up task commit together: a crash
+    // between them cannot leave a timeout with no follow-up task.
+    try {
+      const updated = await getDbClient().transaction(async () => {
+        const request = await resolveApprovalRequest(row.id, {
+          status: "timeout",
+          resolutionReason: `Timed out by the approval sweep: no answer before ${row.expiresAt}`,
+        });
+        if (request) await createApprovalFollowUpTask(request, "hitl.timeout");
+        return request;
+      });
+      if (updated) timedOut.push(updated);
+    } catch (err) {
+      console.error(
+        `[approval-sweep] could not time out approval request ${row.id}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   if (timedOut.length > 0) {

@@ -439,6 +439,24 @@ describe("approval sweeps", () => {
       expect(followUps[0]!.task).toContain(id);
     });
 
+    test("a failed follow-up insert rolls the timeout back; the next tick retries", async () => {
+      const sourceTaskId = await makeSourceTask("in_progress");
+      const id = await makeRequest({ ageDays: 0, expiresInMs: -60_000, sourceTaskId });
+      await getDbClient().run(
+        `CREATE TRIGGER fail_follow_up BEFORE INSERT ON agent_tasks
+           WHEN NEW.taskType = 'hitl-follow-up' BEGIN SELECT RAISE(ABORT, 'insert failed'); END`,
+      );
+      try {
+        expect((await timeoutExpiredApprovalRequests()).timedOut).toEqual([]);
+        expect((await getApprovalRequestById(id))!.status).toBe("pending");
+      } finally {
+        await getDbClient().run("DROP TRIGGER fail_follow_up");
+      }
+
+      expect((await timeoutExpiredApprovalRequests()).timedOut.map((r) => r.id)).toEqual([id]);
+      expect(await followUpsFor(sourceTaskId)).toHaveLength(1);
+    });
+
     for (const status of ["completed", "failed", "cancelled", "superseded"]) {
       test(`does not notify when the source task is ${status}`, async () => {
         const sourceTaskId = await makeSourceTask(status);
