@@ -511,6 +511,8 @@ export interface ConfigJson {
   modelTier: string | null;
   envKeys: string[];
   isDefault: boolean;
+  /** "seed" = follows configs/index.ts; "user" = created or edited through the API. */
+  source?: "seed" | "user";
   /** v7.6 item D: AA benchmark block; null/absent = unmatched config (render nothing). */
   aa?: AaBenchmarkJson | null;
 }

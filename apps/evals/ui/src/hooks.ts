@@ -223,6 +223,12 @@ function refreshConfigsCache(): Promise<ConfigJson[]> {
   return configsPromise;
 }
 
+/** Drop the configs cache after a mutation so every useConfigs() consumer refetches. */
+export function invalidateConfigsCache(): void {
+  configsFetchedAt = 0;
+  void refreshConfigsCache().catch(() => {});
+}
+
 function revalidateConfigsCache(): void {
   if (configsCache !== null && !isCatalogCacheStale(configsFetchedAt)) return;
   void refreshConfigsCache().catch(() => {

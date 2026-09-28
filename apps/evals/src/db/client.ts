@@ -151,6 +151,22 @@ CREATE TABLE IF NOT EXISTS eval_run_configs (
   PRIMARY KEY (run_id, config_id)
 );
 
+-- Harness configs: configs/index.ts seeds (source='seed') plus configs made or
+-- edited through the API (source='user'). See src/db/harness-configs.ts.
+CREATE TABLE IF NOT EXISTS harness_configs (
+  id TEXT PRIMARY KEY,
+  label TEXT,
+  provider TEXT NOT NULL,
+  model TEXT,
+  model_alias TEXT,
+  model_tier TEXT,
+  env_json TEXT,
+  source TEXT NOT NULL DEFAULT 'seed' CHECK (source IN ('seed', 'user')),
+  archived INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_attempts_run ON attempts(run_id);
 CREATE INDEX IF NOT EXISTS idx_judgments_attempt ON judgments(attempt_id);
 CREATE INDEX IF NOT EXISTS idx_artifacts_attempt ON artifacts(attempt_id);

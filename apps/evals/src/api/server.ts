@@ -5,6 +5,7 @@ import { CONFIG_PRESETS } from "../../configs/presets.ts";
 import { getCatalog, refreshCatalog, startCatalogRefresh } from "../cost/catalog.ts";
 import { getClaudeAliasMap, listOpenrouterModels } from "../cost/pricing.ts";
 import { getDb, initDb } from "../db/client.ts";
+import { listHarnessConfigs } from "../db/harness-configs.ts";
 import {
   createRun,
   getArtifact,
@@ -44,6 +45,7 @@ import {
   type SandboxInfo,
 } from "../types.ts";
 import { type AnalyticsSourceRow, buildAnalytics } from "./analytics.ts";
+import { createConfig, initHarnessConfigs, patchConfig } from "./configs-routes.ts";
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data, null, 2), {
@@ -518,6 +520,7 @@ export async function startServer(
 ) {
   await initDb();
   const db = getDb();
+  await initHarnessConfigs(db);
   const reconcile = opts.reconcileOrphanedRuns ?? reconcileOrphanedRuns;
   const forceCancel = opts.forceCancelInactiveRun ?? forceCancelInactiveRun;
   const reconciled = await reconcile(db, (msg) => console.log(`[orphan-reconcile] ${msg}`));
@@ -804,15 +807,36 @@ export async function startServer(
         }
         return json({ scenario: serializeScenario(scenario), recentAttempts });
       },
-      "/api/configs": async (req) => {
-        if (!(await isAuthorized(req))) return unauthorized();
-        const registry = loadRegistry();
-        return json(
-          [...registry.configs.values()].map((c) => ({
-            ...serializeConfig(c),
-            isDefault: DEFAULT_CONFIG_IDS.includes(c.id),
-          })),
-        );
+      /** Harness configs from the harness_configs table (code seeds + API-created rows). */
+      "/api/configs": {
+        GET: async (req) => {
+          if (!(await isAuthorized(req))) return unauthorized();
+          const registry = loadRegistry();
+          const sources = new Map(
+            (await listHarnessConfigs(db)).map((r) => [r.config.id, r.source]),
+          );
+          return json(
+            [...registry.configs.values()].map((c) => ({
+              ...serializeConfig(c),
+              isDefault: DEFAULT_CONFIG_IDS.includes(c.id),
+              source: sources.get(c.id) ?? "seed",
+            })),
+          );
+        },
+        POST: async (req) => {
+          if (!(await isAuthorized(req))) return unauthorized();
+          const result = await createConfig(db, await req.json().catch(() => null));
+          if (!result.ok) return json({ error: result.error }, result.status);
+          return json(serializeConfig(result.config), result.status);
+        },
+      },
+      "/api/configs/:id": {
+        PATCH: async (req) => {
+          if (!(await isAuthorized(req))) return unauthorized();
+          const result = await patchConfig(db, req.params.id, await req.json().catch(() => null));
+          if (!result.ok) return json({ error: result.error }, result.status);
+          return json(serializeConfig(result.config), result.status);
+        },
       },
       /** Quick-run config presets (v7.7 item 1) — static catalog data, validated by registry.test.ts. */
       "/api/presets": async (req) => {

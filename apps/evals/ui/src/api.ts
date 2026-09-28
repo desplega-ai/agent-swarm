@@ -177,6 +177,21 @@ export function listConfigs(): Promise<ConfigJson[]> {
 }
 
 /** Quick-run config presets (v7.7 item 1 — frozen contract, see PresetJson). */
+export interface NewConfigBody {
+  provider: string;
+  label?: string;
+  model?: string;
+  modelAlias?: string;
+}
+
+export function createConfig(body: NewConfigBody): Promise<ConfigJson> {
+  return request("/api/configs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
 export function listPresets(): Promise<PresetJson[]> {
   return request("/api/presets");
 }
