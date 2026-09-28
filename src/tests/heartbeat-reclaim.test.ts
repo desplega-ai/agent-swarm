@@ -9,7 +9,9 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import {
+  checkDependencies,
   closeDb,
+  completeTask,
   createAgent,
   createTaskExtended,
   getActiveSessionForTask,
@@ -147,6 +149,28 @@ describe("Heartbeat Reclaim (HeartbeatSimple.tla)", () => {
     expect(restarted?.status).toBe("in_progress");
     expect(restarted?.id).toBe(task.id);
     expect(restarted?.attempt).toBe(1);
+  });
+
+  test("a never-started dependent of a reclaimed task stays pending and runs after it", async () => {
+    const { agent, task } = await stalledTask();
+    const dependent = await createTaskExtended("Runs after the long work", {
+      agentId: agent.id,
+      dependsOn: [task.id],
+    });
+
+    await codeLevelTriage();
+
+    // Same id, so the dependency edge still points at live work: nothing
+    // cascades and nothing needs re-pointing.
+    expect((await getTaskById(task.id))?.status).toBe("pending");
+    expect((await getTaskById(dependent.id))?.status).toBe("pending");
+    expect((await checkDependencies(dependent.id)).ready).toBe(false);
+
+    await startTask(task.id);
+    await completeTask(task.id, "done on attempt 1");
+
+    expect((await getTaskById(dependent.id))?.status).toBe("pending");
+    expect((await checkDependencies(dependent.id)).ready).toBe(true);
   });
 
   test("a reclaimed pending row is not reclaimed again and creates nothing on re-sweep", async () => {
