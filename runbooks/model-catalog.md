@@ -6,13 +6,13 @@ A model released for Claude Code or Codex becomes usable by tasks with no code c
 
 | Piece | Where | Role |
 |---|---|---|
-| `model_catalog` | SQLite, migration `168` | models.dev facts per provider and model: family, release date, context window, max output, reasoning efforts, pricing. |
-| `model_catalog_overlay` | SQLite, migration `168` | Hand-verified rows for models models.dev lacks or has incomplete. Overlay wins over models.dev. A row with `expiresWhenUpstreamMatches` is dropped once models.dev agrees. |
+| `model_catalog` | SQLite, migration `172` | models.dev facts per provider and model: family, release date, context window, max output, reasoning efforts, pricing. |
+| `model_catalog_overlay` | SQLite, migration `172` | Hand-verified rows for models models.dev lacks or has incomplete. Overlay wins over models.dev. A row with `expiresWhenUpstreamMatches` is dropped once models.dev agrees. |
 | Catalog refresh | `src/be/pricing-refresh.ts` | Boot plus every 12h, and on demand. ETag-aware. Upserts `model_catalog`; pricing rows follow it. |
 | Forced refresh | `POST /api/models-catalog/refresh { force, providers }`, MCP `model-catalog-refresh` | Same as `pi update --models`. |
 | Overlay write | MCP `model-catalog-overlay-upsert` | Used by the verify task when models.dev lags. |
 | Shared resolver | `packages/model-catalog` | Overlay merge, family parsing, `latest:` grammar, soak and preview rules. Used by the API, workers, the UI and evals. |
-| `harness_model_support` | SQLite, migration `170` | Whether a model runs on a given `claude`/`codex` CLI version. Workers report their CLI version on register and the outcome of a model's first run. |
+| `harness_model_support` | SQLite, migration `172` | Whether a model runs on a given `claude`/`codex` CLI version. Workers report their CLI version on register and the outcome of a model's first run. |
 
 Offline or with an empty table, every reader falls back to the committed `src/be/modelsdev-cache.json` snapshot.
 

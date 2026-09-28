@@ -579,10 +579,9 @@ describe("script connections", () => {
       // which this migration-112-only fixture creates.
       markMigrationApplied(database, "164_usage_cover_index_and_key_plans.sql");
       markMigrationApplied(database, "166_approval_request_auto_cancellation.sql");
-      // 169 alters agents, which this migration-112-only fixture does not create.
-      markMigrationApplied(database, "169_model_tier_resolution.sql");
-      // 170 alters agents, which this migration-112-only fixture does not create.
-      markMigrationApplied(database, "170_harness_model_support.sql");
+      // 172 alters agents and agent_tasks, which this migration-112-only fixture
+      // does not create.
+      markMigrationApplied(database, "172_model_catalog.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
