@@ -10,9 +10,9 @@ handlers, user cancel, user retry, crash). Code map: `ACTIONS.md`. Calibration: 
 | | Count |
 |---|---|
 | Calibration bugs rediscovered | **2 / 2** (bf12ab53 / #1584, d4753302) |
-| Counterexamples on current `main` | **6** |
-| Confirmed by a bun test that fails on `main` | **6** |
-| Dropped as model drift | **0** (false-positive rate 0 / 6) |
+| Counterexamples on current `main` | **7** |
+| Confirmed by a bun test that fails on `main` | **7** |
+| Dropped as model drift | **0** (false-positive rate 0 / 7) |
 
 Every counterexample has a repro in `src/tests/workflow-tla-races.test.ts`. The tests call the
 production functions in trace order against a temp SQLite DB; a barrier executor holds a node
@@ -93,6 +93,17 @@ own walk then runs it again.
 - Trace: `IStart → H1 → H2 → H3 → IWalk → WStart → WStart → WPick → XDedup (T) → WPick → XDedup (second T)`
 - Test: `CX6: heartbeat recovery does not walk a run whose trigger is still resolving inputs`.
 
+### CX7: the walk finalizer completes a run while the retry poller is executing a step
+
+Branch `A` fails with a retry pending while branch `B` is still executing. The poller claims `A`
+(`running`, `nextRetryAt` cleared). `B` finishes and the walk's finalization transaction checks
+only for `waiting` steps and retry-pending `failed` steps, so it marks the run `completed` with
+`A` running. Found by TLC while checking the CX1 fix (`Fix-CX1.cfg` with the fix on).
+
+- Invariant: `CompletedRunQuiescent` (Inv4). 1,015 distinct states, 22-state trace.
+- Trace: `… XFail (A retry pending) → P1 → P2 → P3 → P4 (A running) → WPick → XDedup (B) → XRun → XCkOk → WBatchEnd → WFinal (run completed, A running)`
+- Test: `CX7: the walk finalizer does not complete a run while the retry poller is executing a step`.
+
 ## Root causes
 
 1. **Dead dedup.** `executeStep` keys the step on `COUNT(*)` of the node's rows, so the key is
@@ -105,6 +116,8 @@ own walk then runs it again.
    running, waiting on a retry, or not yet reached (CX2, CX3, CX5).
 4. **Retry-pending rows look terminal.** `failed` with `nextRetryAt` is terminal for cancel, live
    for the poller (CX1).
+5. **Finalizers that ignore `running` rows.** The walkGraph finalizer and recovery treat a step
+   the poller is executing as settled (CX7).
 
 ## Fix-model iterations (not bugs on main)
 

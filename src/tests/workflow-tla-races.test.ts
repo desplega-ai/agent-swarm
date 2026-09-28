@@ -312,4 +312,37 @@ describe("TLA+ workflow counterexamples", () => {
     expect(callsOf("T")).toBe(1);
     expect(await stepsOf(runId, "T")).toHaveLength(1);
   });
+
+  test.failing("CX7: the walk finalizer does not complete a run while the retry poller is executing a step", async () => {
+    plans.clear();
+    calls.length = 0;
+    const def = fanOut(false);
+    const holdB = barrier();
+    const holdA = barrier();
+    plans.set("A", ["fail", holdA.behavior]);
+    plans.set("B", [holdB.behavior]);
+    const { runId, walk } = await newRun(def);
+
+    // XFail: A fails with a retry pending while B is still executing.
+    const initial = walk(["T"]);
+    await holdB.entered;
+    await untilStatus(runId, "A", "failed");
+    await sleep(5);
+
+    // P1..P5: the poller claims A and is executing it.
+    startRetryPoller(registry, 1);
+    try {
+      await holdA.entered;
+      // XCkOk/WFinal: B finishes and the walk finalizes with A running.
+      holdB.release();
+      await initial;
+      const statusWhileARuns = (await getWorkflowRun(runId))?.status;
+      holdA.release();
+      await sleep(20);
+      expect(statusWhileARuns).not.toBe("completed");
+    } finally {
+      holdA.release();
+      stopRetryPoller();
+    }
+  });
 });
