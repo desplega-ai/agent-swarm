@@ -72,7 +72,7 @@ function isConnected(nodes: WorkflowNode[]): boolean {
 function interpolationInputsCovered(nodes: WorkflowNode[]): boolean {
   for (const node of nodes) {
     const text = safeStringify(node.config);
-    const refs = [...text.matchAll(/\{\{\s*([a-zA-Z0-9_-]+)\./g)].map((m) => m[1]);
+    const refs = [...text.matchAll(/\{\{\s*([a-zA-Z0-9_-]+)\./g)].map((m) => m[1] ?? "");
     const external = refs.filter((r) => r !== "trigger" && r !== "input");
     for (const ref of external) {
       // A {{ref.x}} placeholder resolves against the node's own inputs KEYS
