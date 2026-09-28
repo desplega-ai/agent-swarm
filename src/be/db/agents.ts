@@ -636,3 +636,23 @@ export function isAgentEligibleForTask(
 
   return hasRequiredCapabilities();
 }
+
+/**
+ * Tasks created per UTC day for one agent, oldest first, over the last `days`
+ * days. Days with no tasks are omitted; the caller fills the gaps. Backs the
+ * dashboard activity heatmap on /agents/:id.
+ */
+export async function getAgentDailyTaskCounts(
+  agentId: string,
+  days: number,
+): Promise<{ date: string; count: number }[]> {
+  const since = new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
+  return getDbClient().query<{ date: string; count: number }>(
+    `SELECT substr(createdAt, 1, 10) AS date, COUNT(*) AS count
+       FROM agent_tasks
+      WHERE agentId = ? AND createdAt >= ?
+      GROUP BY date
+      ORDER BY date`,
+    [agentId, since],
+  );
+}

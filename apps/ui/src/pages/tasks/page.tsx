@@ -1,4 +1,4 @@
-import { Clock, Plus, Search, X } from "lucide-react";
+import { Clock, KanbanSquare, Plus, Search, Table2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
@@ -12,6 +12,7 @@ import { FilterField, FiltersPopover } from "@/components/shared/filters-popover
 import { ListPager } from "@/components/shared/list-pager";
 import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
 import { StatusBadge } from "@/components/shared/status-badge";
+import { TasksKanban } from "@/components/shared/tasks-kanban";
 import {
   ignoreRowClickFromInteractives,
   TasksColumnsMenu,
@@ -328,6 +329,7 @@ export default function TasksPage() {
   const scheduleFilter = searchParams.get("schedule") ?? "all";
   const requesterFilter = searchParams.get("requester") ?? "all";
   const searchParam = searchParams.get("search") ?? "";
+  const view = searchParams.get("view") === "board" ? "board" : "table";
   const includeHeartbeat = searchParams.get("heartbeat") === "true";
   const page = searchParams.has("page") ? Number(searchParams.get("page")) : 0;
   // Page size is URL-driven so it survives reload / sharing. Falls back to the
@@ -349,6 +351,7 @@ export default function TasksPage() {
           schedule: "all",
           requester: "all",
           search: "",
+          view: "table",
           page: "0",
           pageSize: String(DEFAULT_PAGE_SIZE),
         };
@@ -665,7 +668,34 @@ export default function TasksPage() {
           </Button>
         )}
         <div className="ml-auto flex items-center gap-2">
-          {isMobile ? null : <TasksColumnsMenu state={tasksColumns} />}
+          {isMobile ? null : (
+            <fieldset
+              className="m-0 flex items-center rounded-md border p-0"
+              aria-label="Tasks view"
+            >
+              <Button
+                variant={view === "table" ? "secondary" : "ghost"}
+                size="sm"
+                className="rounded-r-none"
+                aria-pressed={view === "table"}
+                aria-label="Table view"
+                onClick={() => setParam("view", "table", false)}
+              >
+                <Table2 className="h-4 w-4" />
+              </Button>
+              <Button
+                variant={view === "board" ? "secondary" : "ghost"}
+                size="sm"
+                className="rounded-l-none"
+                aria-pressed={view === "board"}
+                aria-label="Board view"
+                onClick={() => setParam("view", "board", false)}
+              >
+                <KanbanSquare className="h-4 w-4" />
+              </Button>
+            </fieldset>
+          )}
+          {isMobile || view === "board" ? null : <TasksColumnsMenu state={tasksColumns} />}
           <Button size="sm" onClick={() => setDialogOpen(true)}>
             <Plus className="h-4 w-4" />
             New task
@@ -695,6 +725,12 @@ export default function TasksPage() {
             />
           ))}
         </MobileList>
+      ) : view === "board" ? (
+        <TasksKanban
+          tasks={tasksData?.tasks ?? []}
+          loading={isLoading || pageStale}
+          agentNameById={agentMapRef.current}
+        />
       ) : (
         <TasksTable
           rowData={tasksData?.tasks ?? []}
