@@ -147,7 +147,7 @@ async function makeWorkflow(def: WorkflowDefinition): Promise<Workflow> {
  * Returns the run ID and step details for verification.
  */
 async function runHITLWorkflow(
-  approvalStatus: "approved" | "rejected" | "timeout",
+  approvalStatus: "approved" | "rejected" | "timeout" | "cancelled",
   eventBus: InProcessEventBus,
   registry: ExecutorRegistry,
 ) {
@@ -285,6 +285,27 @@ describe("HITL port-based routing", () => {
     // Should NOT have the approved or timeout paths
     expect(stepNodeIds).not.toContain("deploy");
     expect(stepNodeIds).not.toContain("notify-timeout");
+  });
+
+  test("cancelled → routes to no port; the step stays waiting", async () => {
+    const eventBus = new InProcessEventBus();
+    const registry = new ExecutorRegistry();
+    registry.register(new MockHITLExecutor({ ...mockDeps, eventBus }));
+    registry.register(new EchoExecutor({ ...mockDeps, eventBus }));
+    setupWorkflowResumeListener(eventBus, registry);
+
+    const { runId } = await runHITLWorkflow("cancelled", eventBus, registry);
+
+    const run = await getWorkflowRun(runId);
+    expect(run!.status).toBe("waiting");
+
+    const steps = await getWorkflowRunStepsByRunId(runId);
+    expect(steps.find((s) => s.nodeId === "review")!.status).toBe("waiting");
+    expect(steps.map((s) => s.nodeId).sort()).toEqual(["review", "start"]);
+    const tasks = await db
+      .getDbClient()
+      .query<{ id: string }>("SELECT id FROM agent_tasks WHERE workflowRunId = ?", [runId]);
+    expect(tasks).toHaveLength(0);
   });
 
   test("timeout → routes to 'timeout' port successor (notify-timeout)", async () => {

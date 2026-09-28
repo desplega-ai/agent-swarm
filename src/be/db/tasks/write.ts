@@ -436,15 +436,23 @@ export async function completeTask(
   return row ? rowToAgentTask(row) : null;
 }
 
-/**
- * `cascadeDependents: false` skips the dependent cascade. Only for a caller
- * that settles the dependents itself — the reboot sweep re-points them to the
- * retry child, then cascades whatever is left.
- */
 export async function failTask(
   id: string,
   reason: string,
-  opts?: { cascadeDependents?: boolean },
+  opts: {
+    /**
+     * Compare-and-swap on the `lastUpdatedAt` the caller observed. The
+     * heartbeat passes it so a progress write that lands after its read
+     * cancels the remediation instead of being overwritten.
+     */
+    expectedLastUpdatedAt?: string;
+    /**
+     * `false` skips the dependent cascade. Only for a caller that settles the
+     * dependents itself — the reboot sweep re-points them to the retry child,
+     * then cascades whatever is left.
+     */
+    cascadeDependents?: boolean;
+  } = {},
 ): Promise<AgentTask | null> {
   const oldTask = await getTaskById(id);
   if (!oldTask) return null;
@@ -462,8 +470,15 @@ export async function failTask(
   // terminal transition can land during the await above).
   const row = await getDbClient().get<AgentTaskRow>(
     `UPDATE agent_tasks SET status = 'failed', failureReason = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded') RETURNING *`,
-    [scrubbedReason, finishedAt, id],
+       WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
+         AND (? IS NULL OR lastUpdatedAt = ?) RETURNING *`,
+    [
+      scrubbedReason,
+      finishedAt,
+      id,
+      opts.expectedLastUpdatedAt ?? null,
+      opts.expectedLastUpdatedAt ?? null,
+    ],
   );
   if (row && oldTask) {
     dependencies.emitTaskLifecycleTelemetryAfterCommit(
@@ -520,7 +535,7 @@ export async function failTask(
 
     // Cascade-fail any non-terminal tasks that depend on this one.
     // The cascade is recursive (transitive closure) and cycle-safe.
-    if (opts?.cascadeDependents !== false) {
+    if (opts.cascadeDependents !== false) {
       try {
         await dependencies.cascadeFailDependents(id, "failed");
       } catch (err) {
@@ -664,7 +679,12 @@ export async function cancelTask(id: string, reason?: string): Promise<AgentTask
  */
 export async function supersedeTask(
   id: string,
-  args: { reason: string; resumeTaskId: string | null },
+  args: {
+    reason: string;
+    resumeTaskId: string | null;
+    /** Compare-and-swap on the observed `lastUpdatedAt`; see `failTask`. */
+    expectedLastUpdatedAt?: string;
+  },
 ): Promise<AgentTask | null> {
   const oldTask = await getTaskById(id);
   if (!oldTask) return null;
@@ -681,8 +701,9 @@ export async function supersedeTask(
            finishedAt = ?,
            lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
+         AND (? IS NULL OR lastUpdatedAt = ?)
        RETURNING *`,
-    [finishedAt, id],
+    [finishedAt, id, args.expectedLastUpdatedAt ?? null, args.expectedLastUpdatedAt ?? null],
   );
 
   if (row && oldTask) {

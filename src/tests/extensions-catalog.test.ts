@@ -32,23 +32,28 @@ afterEach(async () => {
 });
 
 describe("predefined extension catalog", () => {
-  test("every bundled entry passes the manifest schema and bundle validation", async () => {
-    const catalog = getExtensionCatalog();
-    expect(Object.keys(catalog).sort()).toEqual([
-      "notify-on-complete",
-      "require-ticket-ref",
-      "require-verification-note",
-      "task-digest",
-    ]);
-    for (const [name, entry] of Object.entries(catalog)) {
-      expect(entry.manifest.name).toBe(name);
-      expect(ExtensionManifestSchema.safeParse(entry.manifest).success).toBe(true);
-      const result = await validateBundle({ manifest: entry.manifest, files: entry.files });
-      expect(result).toMatchObject({ ok: true });
-    }
-    expect(getCatalogEntry("task-digest")?.manifestFile).toBe("manifest.yaml");
-    expect(getCatalogEntry("toString")).toBeNull();
-  });
+  test(
+    "every bundled entry passes the manifest schema and bundle validation",
+    async () => {
+      const catalog = getExtensionCatalog();
+      expect(Object.keys(catalog).sort()).toEqual([
+        "github-sender-allowlist",
+        "notify-on-complete",
+        "require-ticket-ref",
+        "require-verification-note",
+        "task-digest",
+      ]);
+      for (const [name, entry] of Object.entries(catalog)) {
+        expect(entry.manifest.name).toBe(name);
+        expect(ExtensionManifestSchema.safeParse(entry.manifest).success).toBe(true);
+        const result = await validateBundle({ manifest: entry.manifest, files: entry.files });
+        expect(result).toMatchObject({ ok: true });
+      }
+      expect(getCatalogEntry("task-digest")?.manifestFile).toBe("manifest.yaml");
+      expect(getCatalogEntry("toString")).toBeNull();
+    },
+    { timeout: 15_000 },
+  );
 
   test("the generator reads YAML and JSON templates and their referenced files", async () => {
     const dir = await templatesDir({

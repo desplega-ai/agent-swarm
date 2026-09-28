@@ -4,16 +4,18 @@ import { resolveTaskAuditUserId } from "../be/audit-user";
 import {
   type ApprovalRequest,
   createApprovalRequest,
-  createTaskExtended,
+  getAgentById,
   getApprovalRequestById,
-  getTaskById,
+  getDbClient,
   getWorkflowRun,
   getWorkflowRunStep,
   listApprovalRequests,
   resolveApprovalRequest,
 } from "../be/db";
-import { resolveTemplate } from "../prompts/resolver";
+import type { RbacPrincipal } from "../rbac";
 import { getRequestAuth } from "../utils/request-auth-context";
+import { cancelApprovalRequest } from "../workflows/approval-cancel";
+import { createApprovalFollowUpTask } from "../workflows/approval-notifications";
 import { workflowEventBus } from "../workflows/event-bus";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
@@ -196,7 +198,14 @@ const createRoute = route({
     workflowRunId: z.string().uuid().optional(),
     workflowRunStepId: z.string().uuid().optional(),
     sourceTaskId: z.string().uuid().optional(),
-    timeoutSeconds: z.number().int().min(1).optional(),
+    timeoutSeconds: z
+      .number()
+      .int()
+      .min(1)
+      .optional()
+      .describe(
+        "Seconds until the request expires. After that the request becomes 'timeout' and you get a hitl-follow-up task. A request with no timeout is cancelled after APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS days (default 7).",
+      ),
     notifications: z
       .array(
         z.object({
@@ -256,6 +265,34 @@ const respondRoute = route({
   auth: { apiKey: true },
 });
 
+const cancelRoute = route({
+  method: "post",
+  path: "/api/approval-requests/{id}/cancel",
+  pattern: ["api", "approval-requests", null, "cancel"],
+  summary: "Cancel a pending approval request",
+  tags: ["ApprovalRequests"],
+  params: z.object({ id: z.string().uuid() }),
+  body: z.object({ reason: z.string().max(500).optional() }),
+  responses: {
+    200: {
+      description:
+        "Request cancelled, or already cancelled. A request that gates a running or waiting workflow run cancels that run too.",
+      schema: z.object({
+        approvalRequest: ApprovalRequestSchema,
+        alreadyCancelled: z.boolean(),
+        runCancelled: z.boolean(),
+      }),
+    },
+    403: { description: "Caller may not cancel this request" },
+    404: { description: "Not found" },
+    409: {
+      description: "Already resolved with approved, rejected, or timeout, or its expiresAt passed",
+    },
+  },
+  auth: { apiKey: true },
+  rbac: { permission: "approval.cancel.any" },
+});
+
 const listRoute = route({
   method: "get",
   path: "/api/approval-requests",
@@ -302,6 +339,24 @@ export async function handleApprovalRequests(
         `Approval request already resolved with status: ${existing.status}${reason}`,
         409,
       );
+      return true;
+    }
+
+    // A late answer never resolves the request: it becomes timeout at once.
+    // A workflow run then routes on its timeout port on the next heartbeat
+    // tick through getStuckApprovalRuns, so no approval.resolved is emitted.
+    if (existing.expiresAt && new Date(existing.expiresAt) < new Date()) {
+      // The status change and the follow-up task commit together.
+      await getDbClient().transaction(async () => {
+        const timedOut = await resolveApprovalRequest(existing.id, {
+          status: "timeout",
+          resolutionReason: `Timed out: the answer arrived after the deadline ${existing.expiresAt}`,
+        });
+        if (timedOut && !existing.workflowRunId) {
+          await createApprovalFollowUpTask(timedOut, "hitl.timeout");
+        }
+      });
+      jsonError(res, `Approval request expired at ${existing.expiresAt}`, 409);
       return true;
     }
 
@@ -367,41 +422,33 @@ export async function handleApprovalRequests(
 
     // For standalone (non-workflow) requests, create a follow-up task
     // so the requesting agent is notified of the human's response
-    if (!updated.workflowRunId && updated.sourceTaskId) {
-      const sourceTask = await getTaskById(updated.sourceTaskId);
-      if (sourceTask) {
-        // Format responses for the template
-        const formattedResponses = formatResponses(
-          updated.questions as Array<{ id: string; type: string; label: string }>,
-          updated.responses as Record<string, unknown>,
-        );
-
-        const { text: taskText } = resolveTemplate("hitl.follow_up", {
-          request_id: updated.id,
-          title: updated.title,
-          status: updated.status,
-          responses: formattedResponses,
-        });
-
-        await createTaskExtended(taskText, {
-          agentId: sourceTask.agentId,
-          routingReason: sourceTask.agentId ? "continuity" : undefined,
-          routingSource: sourceTask.agentId ? "engine_default" : undefined,
-          parentTaskId: updated.sourceTaskId,
-          source: "system",
-          taskType: "hitl-follow-up",
-          tags: ["hitl", "follow-up"],
-          // Explicit Slack metadata — parentTaskId auto-inherits too,
-          // but being explicit ensures the follow-up task always gets
-          // the right thread context even if inheritance logic changes.
-          slackChannelId: sourceTask.slackChannelId ?? undefined,
-          slackThreadTs: sourceTask.slackThreadTs ?? undefined,
-          slackUserId: sourceTask.slackUserId ?? undefined,
-        });
-      }
-    }
+    await createApprovalFollowUpTask(updated, "hitl.follow_up");
 
     respondRoute.respond(res, 200, { approvalRequest: toApprovalRequestResponse(updated) });
+    return true;
+  }
+
+  // 4-segment: POST /api/approval-requests/{id}/cancel
+  if (cancelRoute.match(req.method, pathSegments)) {
+    const parsed = await cancelRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+
+    const { principal, resolvedBy } = await approvalCancelPrincipal(req);
+    const result = await cancelApprovalRequest({
+      id: parsed.params.id,
+      reason: parsed.body.reason,
+      principal,
+      resolvedBy,
+    });
+    if (!result.ok) {
+      jsonError(res, result.message, result.status);
+      return true;
+    }
+    cancelRoute.respond(res, 200, {
+      approvalRequest: toApprovalRequestResponse(result.request),
+      alreadyCancelled: result.alreadyCancelled,
+      runCancelled: result.runCancelled,
+    });
     return true;
   }
 
@@ -472,28 +519,26 @@ export async function handleApprovalRequests(
   return false;
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function formatResponses(
-  questions: Array<{ id: string; type: string; label: string }>,
-  responses: Record<string, unknown>,
-): string {
-  return questions
-    .map((q) => {
-      const answer = responses[q.id];
-      let answerText: string;
-      if (answer == null) {
-        answerText = "(no answer)";
-      } else if (q.type === "approval") {
-        const a = answer as { approved?: boolean; comment?: string };
-        answerText = a.approved ? "Approved" : "Rejected";
-        if (a.comment) answerText += ` — ${a.comment}`;
-      } else if (typeof answer === "object") {
-        answerText = JSON.stringify(answer);
-      } else {
-        answerText = String(answer);
-      }
-      return `- ${q.label}: ${answerText}`;
-    })
-    .join("\n");
+/**
+ * The caller of the cancel route. The shared API key with an `X-Agent-ID`
+ * header identifies that agent, as on the create route.
+ */
+async function approvalCancelPrincipal(
+  req: IncomingMessage,
+): Promise<{ principal: RbacPrincipal; resolvedBy: string | null }> {
+  const auth = getRequestAuth(req);
+  if (auth?.kind === "user") {
+    return { principal: { kind: "user", userId: auth.userId }, resolvedBy: auth.userId };
+  }
+  const rawAgentId = req.headers["x-agent-id"];
+  const agentId =
+    auth?.kind === "agent" ? auth.agentId : Array.isArray(rawAgentId) ? rawAgentId[0] : rawAgentId;
+  if (agentId) {
+    const agent = await getAgentById(agentId);
+    return {
+      principal: { kind: "agent", agentId, isLead: agent?.isLead ?? false },
+      resolvedBy: agentId,
+    };
+  }
+  return { principal: { kind: "operator" }, resolvedBy: "operator" };
 }

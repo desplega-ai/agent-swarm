@@ -126,6 +126,15 @@ function bridgeRequestFor(name: string, args: unknown): BridgeRequest | null {
       if (!taskId) throw new Error("task_cancel requires string `taskId`");
       return { method: "POST", path: `/api/tasks/${encodeURIComponent(taskId)}/cancel` };
     }
+    case "approval_cancel": {
+      const requestId = typeof body.requestId === "string" ? body.requestId : undefined;
+      if (!requestId) throw new Error("approval_cancel requires string `requestId`");
+      return {
+        method: "POST",
+        path: `/api/approval-requests/${encodeURIComponent(requestId)}/cancel`,
+        body: { reason: body.reason },
+      };
+    }
 
     // ── kv ──
     case "kv_get":

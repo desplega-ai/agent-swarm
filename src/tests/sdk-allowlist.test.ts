@@ -98,6 +98,45 @@ describe("script SDK allowlist", () => {
     }
   });
 
+  test("approval_cancel posts to the cancel route with the reason", async () => {
+    let request: { method: string; path: string; body: unknown } | undefined;
+    const httpServer = Bun.serve({
+      port: 0,
+      async fetch(req) {
+        request = {
+          method: req.method,
+          path: new URL(req.url).pathname,
+          body: await req.json(),
+        };
+        return Response.json({ alreadyCancelled: false, runCancelled: false });
+      },
+    });
+    const config = new SwarmConfig({
+      system: {
+        apiKey: { value: "sdk-test-key", isSecret: true },
+        agentId: { value: "sdk-test-agent", isSecret: false },
+        mcpBaseUrl: { value: `http://127.0.0.1:${httpServer.port}`, isSecret: false },
+      },
+      user: {},
+    });
+    const sdk = createSwarmSdk(config);
+
+    try {
+      const requestId = crypto.randomUUID();
+      await sdk.approval_cancel({ requestId, reason: "done" });
+      expect(request).toEqual({
+        method: "POST",
+        path: `/api/approval-requests/${requestId}/cancel`,
+        body: { reason: "done" },
+      });
+      await expect(sdk.approval_cancel({} as { requestId: string })).rejects.toThrow(
+        "approval_cancel requires string `requestId`",
+      );
+    } finally {
+      httpServer.stop(true);
+    }
+  });
+
   test("schedule_list maps includeFull to the full HTTP field and keeps the default slim", async () => {
     const requestUrls: URL[] = [];
     const httpServer = Bun.serve({

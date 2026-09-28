@@ -37,7 +37,7 @@ export const registerRequestHumanInputTool = (server: McpServer) => {
       title: "Request human input",
       annotations: { destructiveHint: false },
       description:
-        "Create an approval request that pauses until a human responds. " +
+        "Create an approval request and return at once with the request id and URL. The answer arrives later as a hitl-follow-up task. " +
         "Supports multiple question types: approval (yes/no), text, single-select, " +
         "multi-select, and boolean. Returns the request ID and URL for the human to respond.",
       inputSchema: z.object({
@@ -48,7 +48,9 @@ export const registerRequestHumanInputTool = (server: McpServer) => {
           .int()
           .min(1)
           .optional()
-          .describe("Timeout in seconds (auto-rejects on timeout)"),
+          .describe(
+            "Seconds until the request expires. After that the request becomes 'timeout' and you get a hitl-follow-up task. A request with no timeout is cancelled after APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS days (default 7).",
+          ),
       }),
       outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
