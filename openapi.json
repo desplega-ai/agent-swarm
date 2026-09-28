@@ -45277,6 +45277,15 @@
                                   "ultra"
                                 ]
                               },
+                              "resolvedModel": {
+                                "type": "string"
+                              },
+                              "modelSource": {
+                                "type": "string"
+                              },
+                              "modelAlias": {
+                                "type": "string"
+                              },
                               "effort": {
                                 "type": "string",
                                 "enum": [

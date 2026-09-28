@@ -17303,6 +17303,9 @@ export interface paths {
                                 model?: string;
                                 /** @enum {string} */
                                 modelTier?: "smol" | "regular" | "smart" | "ultra";
+                                resolvedModel?: string;
+                                modelSource?: string;
+                                modelAlias?: string;
                                 /** @enum {string} */
                                 effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
                                 /** @enum {string} */

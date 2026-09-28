@@ -7,6 +7,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { closeDb, createAgent, createTaskExtended, getDbClient, initDb } from "../be/db";
+import { type AgentTaskRow, rowToAgentTaskSummary } from "../be/db/tasks/read";
 import { type ModelCatalogEntry, replaceModelCatalog } from "../be/model-catalog-store";
 import {
   getAgentModelTierOverrides,
@@ -257,6 +258,31 @@ describe("claim-time resolution via /api/poll", () => {
       modelSource: null,
       modelAlias: null,
     });
+  });
+});
+
+describe("task list summaries", () => {
+  test("carry the claim-time resolution the dashboard table shows", async () => {
+    const worker = await createAgent({
+      name: "w-summary",
+      isLead: false,
+      status: "idle",
+      maxTasks: 1,
+      harnessProvider: "claude",
+    });
+    process.env.MODEL_TIER_CLAUDE_SMART = "latest:anthropic/opus";
+    const task = await createTaskExtended("smart work", { agentId: worker.id, modelTier: "smart" });
+    await callPoll(worker.id);
+
+    const row = await getDbClient().get<AgentTaskRow>("SELECT * FROM agent_tasks WHERE id = ?", [
+      task.id,
+    ]);
+    expect(row).not.toBeNull();
+    const summary = rowToAgentTaskSummary(row as AgentTaskRow);
+    expect(summary.modelTier).toBe("smart");
+    expect(summary.resolvedModel).toBe("claude-opus-5-5");
+    expect(summary.modelSource).toBe("tier-config");
+    expect(summary.modelAlias).toBe("latest:anthropic/opus");
   });
 });
 
