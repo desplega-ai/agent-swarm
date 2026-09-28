@@ -205,6 +205,11 @@ export const workflowAuthoring: Scenario = {
       { name: "trigger-schema", weight: 2, checks: [triggerSchemaCheck] },
       { name: "correctness", weight: 1, checks: [workflowCorrectnessCheck] },
     ],
+    // v2 (2026-09-28): at the default 0.75 a workflow with no reusable
+    // swarm-script node (the scenario's core ask, 3/9 of the DAG check) still
+    // aggregated ~0.81 and passed, so every Claude model scored 5/5. 0.9 makes
+    // the DAG requirements binding.
+    passThreshold: 0.9,
   },
   timeoutMs: 10 * 60_000,
 };

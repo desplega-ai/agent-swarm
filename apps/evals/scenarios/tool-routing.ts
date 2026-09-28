@@ -129,28 +129,42 @@ async function workerKvEntries(ctx: JudgeContext, tools: ToolUse[]): Promise<KvE
   return [];
 }
 
+// v2 (2026-09-28): v1 graded "correctness" as "the word alpha appears in the
+// output, a KV entry exists, a follow-up exists" — satisfiable without reading a
+// single task, and the seeded history holds no alpha tasks at all. v2 grades an
+// answer key that lives only in the seeded history (same fixture as sql-audit):
+// the completed count and the highest-priority completed task, plus a KV
+// checkpoint and a follow-up task that carry those facts.
+const COMPLETED_COUNT = /(?<![\d.])21(?![\d.])/;
+const TOP_TASK = /rotate[\s\S]{0,40}payments[\s\S]{0,40}api[\s\S]{0,20}keys/i;
+
 const routingCorrectnessCheck: DeterministicCheck = {
   name: "routing-artifacts",
   fn: async (ctx): Promise<CheckResult> => {
-    const kvEntries = await workerKvEntries(ctx, await taskToolUses(ctx, ctx.tasks[0]));
-    const alphaTasks = ctx.tasks.filter((t: SwarmTask) =>
-      /alpha/i.test(`${t.title}\n${t.description}\n${safeStringify(t.tags)}`),
-    );
+    const root = ctx.tasks[0];
+    const kvEntries = await workerKvEntries(ctx, await taskToolUses(ctx, root));
+    const checkpoint = kvEntries.find((e) => e.key === "alpha/checkpoint");
+    const checkpointText = safeStringify(checkpoint?.value);
     const followUps = ctx.tasks.filter(
-      (t) => t.parentTaskId === ctx.tasks[0]?.id || /next phase|follow.?up/i.test(t.description),
+      (t) => t.id !== root?.id && (t.parentTaskId === root?.id || t.creatorAgentId === root?.agentId),
     );
-    const output = ctx.tasks[0]?.result ?? "";
-    const mentionsAlpha = /project alpha|alpha/i.test(output);
-    const score =
-      ((kvEntries.length > 0 ? 1 : 0) +
-        (alphaTasks.length > 0 ? 1 : 0) +
-        (followUps.length > 0 ? 1 : 0) +
-        (mentionsAlpha ? 1 : 0)) /
-      4;
+    const followUpText = followUps.map((t) => `${t.title ?? ""}\n${t.description ?? ""}`).join("\n");
+    const output = root?.result ?? "";
+    const parts = {
+      outputCount: COMPLETED_COUNT.test(output),
+      outputTop: TOP_TASK.test(output),
+      checkpoint: Boolean(checkpoint) && COMPLETED_COUNT.test(checkpointText),
+      followUpTop: TOP_TASK.test(followUpText),
+      oneFollowUp: followUps.length === 1,
+    };
+    const score = Object.values(parts).filter(Boolean).length / Object.keys(parts).length;
     return {
       pass: score >= 1,
       score,
-      detail: `kv=${kvEntries.length}, alphaTasks=${alphaTasks.length}, followups=${followUps.length}, outputAlpha=${mentionsAlpha}`,
+      detail: Object.entries(parts)
+        .map(([k, v]) => `${k}=${v ? "yes" : "no"}`)
+        .concat(`followups=${followUps.length}`, `kv=${kvEntries.length}`)
+        .join(", "),
     };
   },
 };
@@ -170,12 +184,12 @@ export const toolRouting: Scenario = {
   id: "tool-routing",
   name: "Tool routing",
   description:
-    "Behavioral scenario that grades whether a worker uses swarm MCP tools for memory, KV state, task lookup, delegation, and structured completion instead of raw shell/API workarounds.",
+    "Behavioral scenario: a worker must discover the handoff conventions from memory, read the seeded task history through swarm tools, and carry the right facts into KV and a follow-up task.",
   workers: 1,
   seed: {
     memories: [
-      "Project Alpha handoff: deployment readiness lives in the swarm task history, and checkpoint state belongs in KV under alpha/checkpoint.",
-      "Project Alpha requires a follow-up task for phase two after completed alpha tasks are summarized.",
+      "Project Alpha handoff: Alpha's phase-one scope is every task in the swarm task history that finished with status completed. Checkpoint state belongs in KV under the exact key alpha/checkpoint and must record how many phase-one tasks completed.",
+      "Project Alpha phase two starts from the single highest-priority completed phase-one task: the phase-two follow-up task must name that task's title.",
     ],
     sqlDump: "sql-audit-history.sql",
   },
@@ -183,11 +197,10 @@ export const toolRouting: Scenario = {
     {
       title: "Route Project Alpha through the swarm tools",
       description: [
-        "Start by recalling memories about Project Alpha.",
-        "Store a checkpoint in the swarm KV store under key alpha/checkpoint.",
-        "Use the swarm task-listing tool to find relevant completed tasks and summarize what you found.",
-        "Create one follow-up task for the next Alpha phase using the task/delegation tool. Avoid raw curl/fetch against /api endpoints.",
-        "Complete through store-progress with JSON including alphaSummary, checkpointKey, and followUpCreated.",
+        "Hand Project Alpha from phase one to phase two. The handoff conventions are in swarm memory; follow them exactly.",
+        "Use the swarm's own MCP tools for every step. Do not use raw curl/fetch against /api endpoints and do not use db-query.",
+        "Create exactly one follow-up task for phase two.",
+        "Complete through store-progress with JSON including alphaSummary (with the completed count and the top task title), checkpointKey, and followUpCreated.",
       ].join("\n"),
     },
   ],
@@ -196,7 +209,7 @@ export const toolRouting: Scenario = {
     dimensions: [
       { name: "tool-selection", weight: 5, checks: [routingCheck] },
       { name: "dispatch-order", weight: 2, checks: [routingSequenceCheck] },
-      { name: "correctness", weight: 1, checks: [routingCorrectnessCheck] },
+      { name: "correctness", weight: 4, checks: [routingCorrectnessCheck] },
     ],
   },
   timeoutMs: 8 * 60_000,

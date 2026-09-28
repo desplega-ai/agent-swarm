@@ -371,13 +371,13 @@ describe("orchestration substrate scenario rubrics", () => {
           title: "alpha",
           description: "Project Alpha",
           status: "completed",
-          result: '{"alphaSummary":"ok"}',
+          result: '{"alphaSummary":"21 completed; top: Rotate the payments service API keys"}',
           agentId: "worker-0",
         },
         {
           id: "follow",
           title: "next",
-          description: "next phase follow-up",
+          description: "Phase two, starting from: Rotate the payments service API keys",
           status: "completed",
           parentTaskId: "seed",
         },
@@ -396,7 +396,7 @@ describe("orchestration substrate scenario rubrics", () => {
       },
       api: {
         "/api/kv/_/task%3Aagent%3Aworker-0": {
-          entries: [{ key: "alpha/checkpoint", value: { ok: true } }],
+          entries: [{ key: "alpha/checkpoint", value: { completed: 21 } }],
         },
       },
     });
@@ -441,30 +441,43 @@ describe("orchestration substrate scenario rubrics", () => {
     expect(result.score).toBeCloseTo(0.7, 5);
   });
 
-  test("structured-output-adherence distinguishes JSON schema match from prose", async () => {
-    const good = ctx({
-      tasks: [
-        {
-          id: "seed",
-          title: "t",
-          description: "d",
-          status: "completed",
-          result: JSON.stringify({
-            summary: "Hold for approval",
-            risks: ["owner approval missing"],
-            nextAction: "needs-review",
-            confidence: 0.82,
-          }),
-        },
-      ],
+  test("structured-output-adherence grades shape and the rule-derived answer key", async () => {
+    const risk = (description: string, severity: string, mitigated: boolean) => ({
+      description,
+      severity,
+      mitigated,
     });
-    const bad = ctx({
-      tasks: [
-        { id: "seed", title: "t", description: "d", status: "completed", result: "Done: hold" },
+    const answer = {
+      services: [
+        { name: "billing", decision: "ship", blockers: [], risks: [risk("migration", "high", true)] },
+        { name: "search", decision: "hold", blockers: ["ranking-regression tests failing"], risks: [] },
+        { name: "notifications", decision: "hold", blockers: ["owner approval missing; waiver expired"], risks: [] },
+        { name: "checkout", decision: "needs-review", blockers: ["cache invalidation (high)"], risks: [risk("cache", "high", false)] },
       ],
-    });
+      shippableCount: 1,
+      confidence: 0.8,
+    };
+    const task = (result: string) =>
+      ctx({ tasks: [{ id: "seed", title: "t", description: "d", status: "completed", result }] });
+    const good = task(JSON.stringify(answer));
+    // Well-formed but wrong: trusts the expired waiver and ignores the unmitigated risk.
+    const wrong = task(
+      JSON.stringify({
+        ...answer,
+        services: answer.services.map((s) =>
+          s.name === "notifications" || s.name === "checkout"
+            ? { ...s, decision: "ship", blockers: [] }
+            : s,
+        ),
+        shippableCount: 3,
+      }),
+    );
+    const prose = task("Done: hold");
     expect((await structured.schemaAdherenceCheck.fn(good)).score).toBe(1);
-    expect((await structured.schemaAdherenceCheck.fn(bad)).score).toBe(0);
+    expect((await structured.decisionAnswerCheck.fn(good)).score).toBe(1);
+    expect((await structured.schemaAdherenceCheck.fn(wrong)).score).toBe(1);
+    expect((await structured.decisionAnswerCheck.fn(wrong)).pass).toBe(false);
+    expect((await structured.schemaAdherenceCheck.fn(prose)).score).toBe(0);
   });
 });
 
@@ -627,17 +640,23 @@ describe("phase 1 broken-check regressions", () => {
           title: "alpha",
           description: "Project Alpha",
           status: "completed",
-          result: "Project Alpha summary",
+          result: "Project Alpha: 21 completed, top is Rotate the payments service API keys",
           agentId: "worker-0",
           contextKey: "task:agent:worker-0",
         },
-        { id: "f", title: "n", description: "follow-up", status: "pending", parentTaskId: "t" },
+        {
+          id: "f",
+          title: "n",
+          description: "phase two from Rotate the payments service API keys",
+          status: "pending",
+          parentTaskId: "t",
+        },
       ],
       api: {
         // The judge's header-resolved namespace is empty; the worker's has the entry.
         "/api/kv": { entries: [] },
         "/api/kv/_/task%3Aagent%3Aworker-0": {
-          entries: [{ key: "alpha/checkpoint", value: { phase: 1 } }],
+          entries: [{ key: "alpha/checkpoint", value: { phase: 1, completed: 21 } }],
         },
       },
     });

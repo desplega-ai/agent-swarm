@@ -322,6 +322,13 @@ export interface Scenario {
   /** Per-attempt wall clock budget. Default 10 minutes. */
   timeoutMs?: number;
   /**
+   * After the upfront tasks go terminal, keep waiting (inside the same
+   * `timeoutMs` budget) until every runtime-spawned run task is terminal too.
+   * Needed when the lead delegates and defers: defer-task completes the upfront
+   * task at once, so grading it then sees the chain half done.
+   */
+  awaitSpawnedTasks?: boolean;
+  /**
    * Cost budget in USD for the deterministic `efficiency` dimension (v8.0 §5).
    * When set (> 0, validated), an `efficiency` dimension with no checks/judge is
    * scored 1.0 at observed cost ≤ budget, decaying linearly to 0 at N× budget
