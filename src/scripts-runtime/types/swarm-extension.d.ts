@@ -233,6 +233,7 @@ declare module "swarm-extension" {
         }
       | undefined;
     routingAffinityInvalid?: boolean | undefined;
+    attempt?: number | undefined;
   };
 
   export type ActiveSession = {

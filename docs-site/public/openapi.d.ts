@@ -21844,6 +21844,7 @@ export interface components {
             totalCostUsd?: number;
             routingAffinity?: components["schemas"]["RoutingAffinity"];
             routingAffinityInvalid?: boolean;
+            attempt?: number;
         };
         FollowUpConfig: {
             disabled?: boolean;
