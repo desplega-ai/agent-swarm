@@ -36,7 +36,9 @@ import {
 import type { SteerDeliveryResult } from "../providers/types.ts";
 import { initTelemetry, telemetry } from "../telemetry.ts";
 import {
+  type ModelTierOverrides,
   type ProviderName,
+  parseWorkerModelTierOverrides,
   type ReasoningEffort,
   type RepoGuidelines,
   resolveTaskModelSelection,
@@ -2911,6 +2913,16 @@ interface PollOptions {
   pollInterval: number;
   pollTimeout: number;
   since?: string; // Optional: for filtering finished tasks
+  /** Live harness provider; keys the MODEL_TIER_* overrides sent with the poll. */
+  harnessProvider?: ProviderName;
+}
+
+/**
+ * The worker's own MODEL_TIER_* overrides, parsed from its process env (not
+ * the swarm_config-merged env: global config is already visible server-side).
+ */
+function workerModelTierOverrides(provider: ProviderName): ModelTierOverrides {
+  return parseWorkerModelTierOverrides(process.env, provider);
 }
 
 type RequesterProfile = NonNullable<Trigger["requestedBy"]>;
@@ -2992,6 +3004,7 @@ export async function registerAgent(opts: {
       provider,
       harness_provider: harnessProvider,
       runtimeInstanceId: opts.runtimeInstanceId,
+      modelTierOverrides: workerModelTierOverrides(harnessProvider),
     }),
   });
 
@@ -3047,6 +3060,11 @@ async function pollForTriggerOnce(opts: PollOptions): Promise<Trigger | null> {
     headers.Authorization = `Bearer ${opts.apiKey}`;
   }
   injectTraceContext(headers);
+  if (opts.harnessProvider) {
+    headers["X-Model-Tier-Overrides"] = encodeURIComponent(
+      JSON.stringify(workerModelTierOverrides(opts.harnessProvider)),
+    );
+  }
 
   while (Date.now() - startTime < opts.pollTimeout) {
     try {
@@ -3523,6 +3541,9 @@ async function spawnProviderProcess(
     taskId?: string;
     model?: string;
     modelTier?: string;
+    /** Server claim-time resolution (task.resolvedModel); wins over the local one. */
+    resolvedModel?: string;
+    modelSource?: string;
     effort?: ReasoningEffort;
     resumeSessionId?: string;
     harnessProvider: ProviderName;
@@ -3558,7 +3579,7 @@ async function spawnProviderProcess(
       opts.apiKey,
       opts.agentId,
       process.env,
-      opts.model,
+      opts.resolvedModel || opts.model,
       {
         repoId: sessionRepo?.id,
         provider: adapter.name as ProviderName,
@@ -3615,7 +3636,20 @@ async function spawnProviderProcess(
     harnessProvider: opts.harnessProvider,
     env: freshEnv,
   });
-  const taskModel = taskModelSelection.model || "";
+  // The server resolves the model at claim time (worker-env > tier-config >
+  // tier-default, `latest:` aliases, guardrails) and records it on the task.
+  // The local resolution stays as a check: a difference usually means the
+  // server saw a stale MODEL_TIER_* override or a swarm_config tier value.
+  if (
+    opts.resolvedModel &&
+    taskModelSelection.model &&
+    taskModelSelection.model !== opts.resolvedModel
+  ) {
+    console.log(
+      `[${opts.role}] model resolution mismatch for task ${opts.taskId ?? "?"}: server=${opts.resolvedModel} (${opts.modelSource ?? "?"}) local=${taskModelSelection.model}; using server value`,
+    );
+  }
+  const taskModel = opts.resolvedModel || taskModelSelection.model || "";
   const model = taskModel || configModel || "";
 
   // Resolve Codex OAuth pool slot BEFORE building ProviderSessionConfig so we
@@ -5907,6 +5941,8 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               taskId: task.id,
               model: (task as { model?: string }).model,
               modelTier: (task as { modelTier?: string }).modelTier,
+              resolvedModel: (task as { resolvedModel?: string }).resolvedModel,
+              modelSource: (task as { modelSource?: string }).modelSource,
               effort: (task as { effort?: ReasoningEffort }).effort,
               harnessProvider: state.harnessProvider,
               cwd: resumeCwd,
@@ -6123,6 +6159,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         pollInterval: PollIntervalMs,
         runtimeInstanceId,
         pollTimeout: effectiveTimeout,
+        harnessProvider: state.harnessProvider,
       });
 
       if (trigger) {
@@ -6468,6 +6505,9 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               taskId: trigger.taskId,
               model: taskModel,
               modelTier: taskModelTier,
+              resolvedModel: (trigger.task as { resolvedModel?: string } | undefined)
+                ?.resolvedModel,
+              modelSource: (trigger.task as { modelSource?: string } | undefined)?.modelSource,
               effort: taskEffort,
               harnessProvider: state.harnessProvider,
               cwd: effectiveCwd,

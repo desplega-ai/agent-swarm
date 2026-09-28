@@ -2268,6 +2268,11 @@ export interface paths {
                         /** @enum {string} */
                         harness_provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh";
                         runtimeInstanceId?: string;
+                        modelTierOverrides?: {
+                            [key: string]: {
+                                [key: string]: string;
+                            };
+                        };
                     };
                 };
             };
@@ -11963,6 +11968,8 @@ export interface paths {
                 header?: {
                     /** @description Identifies the concrete runtime instance (worker process) making the call, as generated at its boot. Required to poll for work when multi-runtime mode (MULTI_RUNTIME_ENABLED) is on; ignored otherwise. */
                     "X-Runtime-Instance-ID"?: string;
+                    /** @description URL-encoded JSON {provider: {tier: model}} of the worker's MODEL_TIER_* env overrides. Stored on the agent row and applied at claim time (modelSource=worker-env). */
+                    "X-Model-Tier-Overrides"?: string;
                 };
                 path?: never;
                 cookie?: never;
@@ -22009,6 +22016,9 @@ export interface components {
             modelTier?: "smol" | "regular" | "smart" | "ultra";
             /** @enum {string} */
             effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
+            resolvedModel?: string;
+            modelSource?: string;
+            modelAlias?: string;
             scheduleId?: string;
             /** Format: uuid */
             workflowRunId?: string | null;

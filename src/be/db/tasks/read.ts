@@ -85,6 +85,9 @@ export type AgentTaskRow = {
   model: string | null;
   modelTier: string | null;
   effort: string | null;
+  resolvedModel?: string | null;
+  modelSource?: string | null;
+  modelAlias?: string | null;
   scheduleId: string | null;
   workflowRunId: string | null;
   workflowRunStepId: string | null;
@@ -208,6 +211,9 @@ export function rowToAgentTask(row: AgentTaskRow): AgentTask {
     claudeSessionId: row.claudeSessionId ?? undefined,
     model: row.model ?? undefined,
     modelTier: parseModelTier(row.modelTier) ?? undefined,
+    resolvedModel: row.resolvedModel ?? undefined,
+    modelSource: row.modelSource ?? undefined,
+    modelAlias: row.modelAlias ?? undefined,
     effort: ReasoningEffortSchema.safeParse(row.effort).success
       ? (row.effort as ReasoningEffort)
       : undefined,

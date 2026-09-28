@@ -360,6 +360,15 @@
               "max"
             ]
           },
+          "resolvedModel": {
+            "type": "string"
+          },
+          "modelSource": {
+            "type": "string"
+          },
+          "modelAlias": {
+            "type": "string"
+          },
           "scheduleId": {
             "type": "string"
           },
@@ -9590,6 +9599,15 @@
                   "runtimeInstanceId": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "modelTierOverrides": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    }
                   }
                 },
                 "required": [
@@ -28453,6 +28471,16 @@
             "required": false,
             "description": "Identifies the concrete runtime instance (worker process) making the call, as generated at its boot. Required to poll for work when multi-runtime mode (MULTI_RUNTIME_ENABLED) is on; ignored otherwise.",
             "name": "X-Runtime-Instance-ID",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "URL-encoded JSON {provider: {tier: model}} of the worker's MODEL_TIER_* env overrides. Stored on the agent row and applied at claim time (modelSource=worker-env)."
+            },
+            "required": false,
+            "description": "URL-encoded JSON {provider: {tier: model}} of the worker's MODEL_TIER_* env overrides. Stored on the agent row and applied at claim time (modelSource=worker-env).",
+            "name": "X-Model-Tier-Overrides",
             "in": "header"
           }
         ],

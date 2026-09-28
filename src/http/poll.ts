@@ -28,6 +28,11 @@ import {
   upsertChannelActivityCursor,
 } from "../be/db";
 import { renderIdentity, resolveIdentity } from "../be/identity";
+import {
+  parseModelTierOverridesHeader,
+  recordClaimModelResolution,
+  setAgentModelTierOverrides,
+} from "../be/model-tier-resolution";
 import { touchRuntimeInstance } from "../be/multi-runtime";
 import { hasCapability } from "../server";
 import { fetchChannelActivity } from "../slack/channel-activity";
@@ -168,7 +173,15 @@ const pollTriggers = route({
   summary: "Poll for triggers (tasks, mentions)",
   tags: ["Poll"],
   auth: { apiKey: true, agentId: true },
-  headers: runtimeInstanceHeader("poll for work"),
+  headers: runtimeInstanceHeader("poll for work").extend({
+    "X-Model-Tier-Overrides": z
+      .string()
+      .optional()
+      .describe(
+        "URL-encoded JSON {provider: {tier: model}} of the worker's MODEL_TIER_* env overrides. " +
+          "Stored on the agent row and applied at claim time (modelSource=worker-env).",
+      ),
+  }),
   responses: {
     200: { description: "Trigger data or null", schema: pollResponseSchema },
     400: { description: "Missing X-Agent-ID" },
@@ -230,6 +243,22 @@ async function attachmentsForTrigger(
   }));
 }
 
+/**
+ * Claim-time model resolution (runbooks/model-tiers.md). Never blocks a claim:
+ * a resolution failure leaves the worker on its own local resolution.
+ */
+async function claimModelFields(
+  task: { id: string; model?: string | null; modelTier?: string | null },
+  agent: Parameters<typeof recordClaimModelResolution>[1],
+): Promise<Awaited<ReturnType<typeof recordClaimModelResolution>>> {
+  try {
+    return await recordClaimModelResolution(task, agent);
+  } catch (error) {
+    console.warn(`[/api/poll] model resolution failed for task ${task.id}:`, error);
+    return {};
+  }
+}
+
 // ─── Cursor Commit Endpoint ─────────────────────────────────────────────────
 
 const commitCursorsRoute = route({
@@ -267,6 +296,9 @@ export async function handlePoll(
 ): Promise<boolean> {
   const runtimeInstanceId = ((h) => (Array.isArray(h) ? h[0] : h))(
     req.headers["x-runtime-instance-id"],
+  );
+  const modelTierOverrides = parseModelTierOverridesHeader(
+    ((h) => (Array.isArray(h) ? h[0] : h))(req.headers["x-model-tier-overrides"]),
   );
   // Handle cursor commit endpoint
   if (commitCursorsRoute.match(req.method, pathSegments)) {
@@ -309,6 +341,12 @@ export async function handlePoll(
         const agent = await getAgentById(myAgentId);
         if (!agent) {
           return { error: "Agent not found", status: 404 };
+        }
+
+        // The worker's parsed MODEL_TIER_* env overrides ride on every poll so
+        // claim-time resolution can honor them (no write when unchanged).
+        if (modelTierOverrides) {
+          await setAgentModelTierOverrides(agent.id, modelTierOverrides);
         }
 
         // Extension identities authenticate to the API but never execute
@@ -448,6 +486,7 @@ export async function handlePoll(
                 taskId: pendingTask.id,
                 task: {
                   ...pendingTask,
+                  ...(await claimModelFields(pendingTask, agent)),
                   status: "in_progress",
                   attachments: await attachmentsForTrigger(pendingTask.id),
                 },
@@ -576,7 +615,11 @@ export async function handlePoll(
                   trigger: {
                     type: "task_assigned",
                     taskId: claimed.id,
-                    task: { ...claimed, attachments: await attachmentsForTrigger(claimed.id) },
+                    task: {
+                      ...claimed,
+                      ...(await claimModelFields(claimed, agent)),
+                      attachments: await attachmentsForTrigger(claimed.id),
+                    },
                     ...(claimedRequestedBy && { requestedBy: claimedRequestedBy }),
                   },
                 };

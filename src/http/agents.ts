@@ -30,6 +30,10 @@ import {
 } from "../be/db";
 import { createEvent } from "../be/events";
 import {
+  sanitizeModelTierOverrides,
+  setAgentModelTierOverrides,
+} from "../be/model-tier-resolution";
+import {
   getRuntimeInstanceById,
   listRuntimeInstancesForAgent,
   reconcileAgentMaxTasksPolicy,
@@ -150,6 +154,12 @@ const registerAgent = route({
      * enforcing the mode-dependent requirement.
      */
     runtimeInstanceId: z.string().min(1).optional(),
+    /**
+     * The worker's parsed MODEL_TIER_* env overrides, {provider: {tier: model}}.
+     * Values only. Stored on the agent row for claim-time resolution; `{}`
+     * clears, omitted leaves the stored value unchanged.
+     */
+    modelTierOverrides: z.record(z.string(), z.record(z.string(), z.string())).optional(),
   }),
   responses: {
     200: {
@@ -707,6 +717,13 @@ export async function handleAgentRegister(
 
       return { agent, created: true };
     });
+
+    if (parsed.body.modelTierOverrides) {
+      await setAgentModelTierOverrides(
+        agentId,
+        sanitizeModelTierOverrides(parsed.body.modelTierOverrides),
+      );
+    }
 
     telemetry.agent("registered", {
       role: parsed.body.role,
