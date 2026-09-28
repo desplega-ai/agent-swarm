@@ -29,6 +29,7 @@ import {
   upsertSwarmConfig,
 } from "../be/db";
 import { createEvent } from "../be/events";
+import { setAgentHarnessCliVersion } from "../be/harness-model-support";
 import {
   sanitizeModelTierOverrides,
   setAgentModelTierOverrides,
@@ -160,6 +161,8 @@ const registerAgent = route({
      * clears, omitted leaves the stored value unchanged.
      */
     modelTierOverrides: z.record(z.string(), z.record(z.string(), z.string())).optional(),
+    /** The worker's harness CLI version (`claude --version` / `codex --version`). */
+    harnessCliVersion: z.string().max(64).optional(),
   }),
   responses: {
     200: {
@@ -717,6 +720,10 @@ export async function handleAgentRegister(
 
       return { agent, created: true };
     });
+
+    if (parsed.body.harnessCliVersion !== undefined) {
+      await setAgentHarnessCliVersion(agentId, parsed.body.harnessCliVersion.trim() || null);
+    }
 
     if (parsed.body.modelTierOverrides) {
       await setAgentModelTierOverrides(

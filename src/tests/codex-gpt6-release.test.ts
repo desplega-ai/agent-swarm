@@ -5,10 +5,10 @@ import cache from "../be/modelsdev-cache.json";
 import { buildModelsDevSeedRows } from "../be/seed-pricing";
 import {
   CODEX_DEFAULT_MODEL,
-  CODEX_MODELS,
   computeCodexCostUsd,
-  FALLBACK_CODEX_MODEL_PRICING,
   getCodexContextWindow,
+  getCodexModelPricing,
+  listCodexModels,
   resolveCodexModel,
 } from "../providers/codex-models";
 import { applyReasoningEffort, reasoningCapability } from "../providers/reasoning-effort";
@@ -21,11 +21,11 @@ const releases = [
 for (const release of releases) {
   describe(release.id, () => {
     test("uses the exact bare CLI ID with verified context and base costs", () => {
-      expect(CODEX_MODELS).toContain(release.id);
+      expect(listCodexModels()).toContain(release.id);
       expect(resolveCodexModel(release.id.toUpperCase())).toBe(release.id);
       expect(getCodexContextWindow(release.id)).toBe(1_050_000);
       expect(cache.openai.models[release.id].limit.output).toBe(128_000);
-      expect(FALLBACK_CODEX_MODEL_PRICING[release.id]).toEqual({
+      expect(getCodexModelPricing(release.id)).toEqual({
         inputPerMillion: release.input,
         cachedInputPerMillion: release.read,
         outputPerMillion: release.output,
@@ -79,7 +79,7 @@ for (const release of releases) {
     test("is available through the catalog and direct UI selector", () => {
       const model = buildModelsCatalog(cache).openai?.models[release.id];
       expect(model?.limit?.context).toBe(1_050_000);
-      expect(model?.cost).toEqual({ input: release.input, output: release.output });
+      expect(model?.cost).toMatchObject({ input: release.input, output: release.output });
       const option = modelGroupsForHarness("codex", undefined, undefined)
         .flatMap((group) => group.models)
         .find((entry) => entry.id === release.id);

@@ -9,6 +9,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { getAgentById } from "../be/db";
+import { listHarnessModelSupport, recordHarnessModelSupport } from "../be/harness-model-support";
 import {
   deleteModelCatalogOverlay,
   loadModelsCatalog,
@@ -23,8 +24,17 @@ import { jsonError } from "./utils";
 const CatalogModelSchema = z.object({
   id: z.string(),
   name: z.string().optional(),
-  cost: z.object({ input: z.number().optional(), output: z.number().optional() }).optional(),
+  cost: z
+    .object({
+      input: z.number().optional(),
+      output: z.number().optional(),
+      cache_read: z.number().optional(),
+      cache_write: z.number().optional(),
+    })
+    .optional(),
   limit: z.object({ context: z.number().optional() }).optional(),
+  release_date: z.string().optional(),
+  status: z.string().optional(),
   reasoning: z.boolean().optional(),
   reasoning_options: z
     .array(z.object({ type: z.string(), values: z.array(z.string()).optional() }))
@@ -156,6 +166,54 @@ const deleteOverlay = route({
   },
 });
 
+const HarnessSupportRowSchema = z.object({
+  harness: z.string(),
+  cliVersion: z.string(),
+  modelId: z.string(),
+  status: z.enum(["ok", "unsupported", "unknown"]),
+  checkedAt: z.number(),
+  error: z.string().nullable(),
+});
+
+const listHarnessSupport = route({
+  method: "get",
+  path: "/api/models-catalog/harness-support",
+  pattern: ["api", "models-catalog", "harness-support"],
+  summary: "List harness CLI model support rows",
+  description:
+    "Whether a catalog model runs on a given `claude` / `codex` CLI version, as recorded by workers after a model's first run. No row means unknown (allowed at claim).",
+  tags: ["Pricing"],
+  query: z.object({ harness: z.string().optional(), cliVersion: z.string().optional() }),
+  responses: {
+    200: {
+      description: "Support rows, newest first",
+      schema: z.object({ rows: z.array(HarnessSupportRowSchema) }),
+    },
+  },
+});
+
+const recordHarnessSupport = route({
+  method: "put",
+  path: "/api/models-catalog/harness-support",
+  pattern: ["api", "models-catalog", "harness-support"],
+  summary: "Record whether a harness CLI version accepts a model",
+  description:
+    "Written by workers: `ok` after a model's first successful run, `unsupported` when the CLI rejects the model id. Claim-time resolution falls back (alias/tier) or fails fast (explicit model) on `unsupported`.",
+  tags: ["Pricing"],
+  rbac: { permission: "models.catalog.write" },
+  body: z.object({
+    harness: z.string().min(1),
+    cliVersion: z.string().min(1).max(64),
+    modelId: z.string().min(1),
+    status: z.enum(["ok", "unsupported", "unknown"]),
+    error: z.string().optional(),
+  }),
+  responses: {
+    200: { description: "Support row upserted", schema: HarnessSupportRowSchema },
+    403: { description: "Forbidden" },
+  },
+});
+
 /** Resolve the caller and gate on `models.catalog.write`; writes a 403 on denial. */
 async function ensureCatalogWriter(
   req: IncomingMessage,
@@ -224,6 +282,21 @@ export async function handleModelsCatalog(
     if (!(await ensureCatalogWriter(req, res))) return true;
     const deleted = await deleteModelCatalogOverlay(parsed.body.provider, parsed.body.modelId);
     deleteOverlay.respond(res, 200, { deleted });
+    return true;
+  }
+
+  if (listHarnessSupport.match(req.method, pathSegments)) {
+    const parsed = await listHarnessSupport.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    listHarnessSupport.respond(res, 200, { rows: await listHarnessModelSupport(parsed.query) });
+    return true;
+  }
+
+  if (recordHarnessSupport.match(req.method, pathSegments)) {
+    const parsed = await recordHarnessSupport.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    if (!(await ensureCatalogWriter(req, res))) return true;
+    recordHarnessSupport.respond(res, 200, await recordHarnessModelSupport(parsed.body));
     return true;
   }
 

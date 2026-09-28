@@ -57,9 +57,11 @@ import {
   type RateLimitWindowTelemetry,
   resolveCodexCreditsExhaustedCooldownMs,
 } from "../utils/error-tracker.ts";
+import { probeHarnessCliVersion, reportHarnessModelOutcome } from "../utils/harness-cli-version.ts";
 import { resolveHarnessProvider } from "../utils/harness-provider.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
 import { terminateRegisteredProcessGroups } from "../utils/process-group.ts";
+import { refreshRuntimeModelCatalog } from "../utils/runtime-model-catalog.ts";
 import { resolveScriptsOnlyMode } from "../utils/scripts-only-mode.ts";
 import { scrubSecrets } from "../utils/secret-scrubber.ts";
 import { refreshSkillsIfChanged } from "../utils/skills-refresh.ts";
@@ -3005,6 +3007,7 @@ export async function registerAgent(opts: {
       harness_provider: harnessProvider,
       runtimeInstanceId: opts.runtimeInstanceId,
       modelTierOverrides: workerModelTierOverrides(harnessProvider),
+      harnessCliVersion: (await probeHarnessCliVersion(harnessProvider)) ?? undefined,
     }),
   });
 
@@ -3050,6 +3053,14 @@ async function pollForTrigger(opts: PollOptions): Promise<Trigger | null> {
 
 async function pollForTriggerOnce(opts: PollOptions): Promise<Trigger | null> {
   const startTime = Date.now();
+  // Keep the process-wide model catalog fresh (TTL-cached, never throws) so
+  // context windows, pricing and reasoning levels cover models added to the
+  // API's catalog after this worker booted.
+  void refreshRuntimeModelCatalog({
+    apiUrl: opts.apiUrl,
+    apiKey: opts.apiKey,
+    agentId: opts.agentId,
+  });
   const headers: Record<string, string> = {
     "X-Agent-ID": opts.agentId,
   };
@@ -4546,6 +4557,17 @@ async function checkCompletedProcesses(
         failureReason = result.failureReason;
         console.log(`[${role}] Detected error for task ${taskId.slice(0, 8)}: ${failureReason}`);
       }
+
+      // Record whether this worker's CLI accepts the model (harness_model_support).
+      void reportHarnessModelOutcome({
+        apiUrl: apiConfig.apiUrl,
+        apiKey: apiConfig.apiKey,
+        agentId: apiConfig.agentId,
+        harness: harnessProvider,
+        model,
+        exitCode: result.exitCode,
+        failureReason,
+      });
 
       // If rate-limited and we know which key was used, report it.
       // Codex adapter prefixes failure reasons with `[rate-limit]` /
@@ -6439,6 +6461,16 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           .filter((part): part is string => Boolean(part))
           .join("\n\n");
         const taskSystemPrompt = taskPromptParts + cwdWarning;
+
+        // The server refused the task's explicit model for this worker's CLI
+        // version (harness_model_support = unsupported): fail fast, no spawn.
+        const modelUnsupported = (trigger.task as { modelUnsupported?: string } | undefined)
+          ?.modelUnsupported;
+        if (trigger.taskId && modelUnsupported) {
+          console.log(`[${role}] ${modelUnsupported}`);
+          await ensureTaskFinished(apiConfig, role, trigger.taskId, 1, modelUnsupported);
+          continue;
+        }
 
         iteration++;
         const timestamp = new Date().toISOString().replace(/[:.]/g, "-");

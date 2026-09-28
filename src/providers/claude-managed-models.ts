@@ -1,48 +1,32 @@
 /**
- * Pricing table for Anthropic-managed Claude models, mirroring the layout of
- * `src/providers/codex-models.ts`. Rates are USD per million tokens (Mtok)
- * sourced from https://platform.claude.com/docs/en/about-claude/pricing
- * (verified 2026-09-02).
+ * Anthropic-managed Claude model facts, read from the model catalog
+ * (model-catalog phase 4). Rates are USD per million tokens (Mtok).
  *
- * The managed-agents API does NOT report dollar cost on the `span.model_request_end`
- * event — only token counts (`input_tokens`, `output_tokens`,
- * `cache_read_input_tokens`, `cache_creation_input_tokens`). Phase 4 of the
- * provider plan computes USD locally via {@link computeClaudeManagedCostUsd},
- * then folds in Anthropic's $0.08/session-hour runtime fee inside the adapter.
+ * There is no hand-maintained model list or price table any more: both come
+ * from the runtime catalog (`src/utils/runtime-model-catalog.ts` — the API's
+ * `model_catalog` + overlay rows, pulled over HTTP; the vendored models.dev
+ * snapshot offline). A new Claude model is listed and priced as soon as it
+ * lands in `model_catalog`, with no code change and no redeploy.
  *
- * Bump this file when Anthropic publishes new rates or new models.
+ * The managed-agents API does NOT report dollar cost on the
+ * `span.model_request_end` event — only token counts. The adapter computes
+ * USD locally via {@link computeClaudeManagedCostUsd}, then folds in
+ * Anthropic's $0.08/session-hour runtime fee. The API server recomputes the
+ * canonical price against the pricing table.
  *
  * Cache nomenclature mapping:
- * - `cache_read_input_tokens`        → "cache hit" rate     (cheapest)
- * - `cache_creation_input_tokens`    → "cache write" rate   (input × 1.25 for 5m TTL)
- * - regular `input_tokens` (uncached) → standard input rate
- *
- * Anthropic's pricing page lists 5-minute and 1-hour cache TTLs separately;
- * managed-agents currently uses the 5-minute breakpoint by default, which is
- * the rate captured here. If a future SDK release surfaces TTL on the usage
- * payload, refine these by TTL.
+ * - `cache_read_input_tokens`        → catalog `cache_read`
+ * - `cache_creation_input_tokens`    → catalog `cache_write` (5-minute TTL)
+ * - regular `input_tokens` (uncached) → catalog `input`
  */
+import { harnessModelIds } from "@desplega/model-catalog";
+import { runtimeCatalogModel, runtimeCatalogSection } from "../utils/runtime-model-catalog";
 
-/** Models supported by the managed-agents surface for the swarm worker. */
-export const CLAUDE_MANAGED_MODELS = [
-  "claude-fable-5-1",
-  "claude-mythos-5-1",
-  "claude-opus-5-5",
-  "claude-opus-5",
-  "claude-fable-5",
-  "claude-mythos-5",
-  "claude-sonnet-5-5",
-  "claude-sonnet-5",
-  "claude-sonnet-4-6",
-  "claude-opus-4-8",
-  "claude-opus-4-7",
-  "claude-opus-4-6",
-  "claude-haiku-4-5",
-] as const;
+/** Managed-agents-selectable Claude models from the catalog, newest first. */
+export function listClaudeManagedModels(): string[] {
+  return harnessModelIds("claude-managed", runtimeCatalogSection("anthropic"));
+}
 
-export type ClaudeManagedModel = (typeof CLAUDE_MANAGED_MODELS)[number];
-
-/** Token rates per million tokens (USD). */
 export interface ClaudeManagedTokenPricing {
   /** USD per million uncached input tokens. */
   inputPerMillion: number;
@@ -54,131 +38,39 @@ export interface ClaudeManagedTokenPricing {
   cacheWritePerMillion: number;
 }
 
-/** Pricing per million tokens (USD), including an optional scheduled rate change. */
-export interface ClaudeManagedModelPricing extends ClaudeManagedTokenPricing {
-  scheduledChange?: {
-    /** ISO timestamp at which the replacement rates take effect. */
-    effectiveAt: string;
-    pricing: ClaudeManagedTokenPricing;
+export type ClaudeManagedModelPricing = ClaudeManagedTokenPricing;
+
+/**
+ * Catalog pricing for a managed model. Dated ids fall back to their undated
+ * family id. Missing cache rates follow Anthropic's published multipliers
+ * (read = 0.1 × input, 5-minute write = 1.25 × input).
+ */
+export function getClaudeManagedModelPricing(model: string): ClaudeManagedModelPricing | undefined {
+  const cost =
+    runtimeCatalogModel("anthropic", model)?.cost ??
+    runtimeCatalogModel("anthropic", model.replace(/-\d{8}$/, ""))?.cost;
+  if (typeof cost?.input !== "number" || typeof cost.output !== "number") return undefined;
+  return {
+    inputPerMillion: cost.input,
+    outputPerMillion: cost.output,
+    cacheReadPerMillion: typeof cost.cache_read === "number" ? cost.cache_read : cost.input * 0.1,
+    cacheWritePerMillion:
+      typeof cost.cache_write === "number" ? cost.cache_write : cost.input * 1.25,
   };
 }
 
-/**
- * Anthropic public list pricing. Source:
- * https://platform.claude.com/docs/en/about-claude/pricing
- *
- * - claude-fable-5-1:  $10 / $50 / $0.25 / $12.50  (verified 2026-09-02)
- * - claude-mythos-5-1: $10 / $50 / $0.25 / $12.50  (invite only, verified 2026-09-02)
- * - claude-fable-5:   $10 / $50 / $1.00 / $12.50   (verified 2026-06-10)
- * - claude-mythos-5:  $10 / $50 / $1.00 / $12.50   (limited availability, verified 2026-06-10)
- * - claude-opus-5-5:  $4 / $20 / $0.20 / $5.00     (verified 2026-09-22)
- * - claude-opus-5:    $5 / $25 / $0.50 / $6.25     (verified 2026-07-25)
- * - claude-sonnet-5-5: $2 / $10 / $0.20 / $2.50    (verified 2026-09-28)
- * - claude-sonnet-5:  $2 / $10 / $0.20 / $2.50     (standard rate, verified 2026-08-29)
- * - claude-sonnet-4-6: $3 / $15 / $0.30 / $3.75    (in / out / cache-read / cache-write)
- * - claude-opus-4-8:   $5 / $25 / $0.50 / $6.25    (verified 2026-05-28)
- * - claude-opus-4-7:   $15 / $75 / $1.50 / $18.75  (STALE — was correct at launch, Anthropic has since dropped Opus to $5/$25)
- * - claude-opus-4-6:   $5 / $25 / $0.50 / $6.25    (verified 2026-05-28)
- * - claude-haiku-4-5:  $1 / $5 / $0.10 / $1.25
- */
-export const CLAUDE_MANAGED_MODEL_PRICING: Record<ClaudeManagedModel, ClaudeManagedModelPricing> = {
-  "claude-fable-5-1": {
-    inputPerMillion: 10.0,
-    outputPerMillion: 50.0,
-    cacheReadPerMillion: 0.25,
-    cacheWritePerMillion: 12.5,
-  },
-  "claude-mythos-5-1": {
-    inputPerMillion: 10.0,
-    outputPerMillion: 50.0,
-    cacheReadPerMillion: 0.25,
-    cacheWritePerMillion: 12.5,
-  },
-  "claude-opus-5-5": {
-    inputPerMillion: 4.0,
-    outputPerMillion: 20.0,
-    cacheReadPerMillion: 0.2,
-    cacheWritePerMillion: 5.0,
-  },
-  "claude-opus-5": {
-    inputPerMillion: 5.0,
-    outputPerMillion: 25.0,
-    cacheReadPerMillion: 0.5,
-    cacheWritePerMillion: 6.25,
-  },
-  "claude-fable-5": {
-    inputPerMillion: 10.0,
-    outputPerMillion: 50.0,
-    cacheReadPerMillion: 1.0,
-    cacheWritePerMillion: 12.5,
-  },
-  "claude-mythos-5": {
-    inputPerMillion: 10.0,
-    outputPerMillion: 50.0,
-    cacheReadPerMillion: 1.0,
-    cacheWritePerMillion: 12.5,
-  },
-  "claude-sonnet-5-5": {
-    inputPerMillion: 2.0,
-    outputPerMillion: 10.0,
-    cacheReadPerMillion: 0.2,
-    cacheWritePerMillion: 2.5,
-  },
-  "claude-sonnet-5": {
-    inputPerMillion: 2.0,
-    outputPerMillion: 10.0,
-    cacheReadPerMillion: 0.2,
-    cacheWritePerMillion: 2.5,
-  },
-  "claude-sonnet-4-6": {
-    inputPerMillion: 3.0,
-    outputPerMillion: 15.0,
-    cacheReadPerMillion: 0.3,
-    cacheWritePerMillion: 3.75,
-  },
-  "claude-opus-4-8": {
-    inputPerMillion: 5.0,
-    outputPerMillion: 25.0,
-    cacheReadPerMillion: 0.5,
-    cacheWritePerMillion: 6.25,
-  },
-  "claude-opus-4-7": {
-    inputPerMillion: 15.0,
-    outputPerMillion: 75.0,
-    cacheReadPerMillion: 1.5,
-    cacheWritePerMillion: 18.75,
-  },
-  "claude-opus-4-6": {
-    inputPerMillion: 5.0,
-    outputPerMillion: 25.0,
-    cacheReadPerMillion: 0.5,
-    cacheWritePerMillion: 6.25,
-  },
-  "claude-haiku-4-5": {
-    inputPerMillion: 1.0,
-    outputPerMillion: 5.0,
-    cacheReadPerMillion: 0.1,
-    cacheWritePerMillion: 1.25,
-  },
-};
-
-/**
- * Models we've already warned about — keeps `console.warn` from spamming the
- * worker logs when an old session keeps replaying through `span.model_request_end`
- * events with an unrecognized model string.
- */
+/** One warning per model per process for unpriced models. */
 const warnedUnknownModels = new Set<string>();
 
 /**
  * Compute USD cost for one Claude managed-agents session, given the SDK's
  * accumulated token counts.
  *
- * Returns `0` (with a deduplicated `console.warn`) for unknown model strings —
- * we'd rather under-report than make up a number on a typo.
+ * Returns `0` (with a deduplicated `console.warn`) for models the catalog does
+ * not price — we'd rather under-report than make up a number on a typo.
  *
- * Note: the runtime $0.08/session-hour fee is NOT folded in here. The adapter
- * computes that separately because it depends on the session's wallclock
- * `durationMs`, which is provider-state, not token-state.
+ * Note: the runtime $0.08/session-hour fee is NOT folded in here; the adapter
+ * computes it from the session's wallclock.
  */
 export function computeClaudeManagedCostUsd(
   model: string,
@@ -186,24 +78,18 @@ export function computeClaudeManagedCostUsd(
   outputTokens: number,
   cacheReadTokens: number,
   cacheWriteTokens: number,
-  pricedAtMs: number = Date.now(),
 ): number {
-  const configuredPricing = CLAUDE_MANAGED_MODEL_PRICING[model as ClaudeManagedModel];
-  if (!configuredPricing) {
+  const pricing = getClaudeManagedModelPricing(model);
+  if (!pricing) {
     if (!warnedUnknownModels.has(model)) {
       warnedUnknownModels.add(model);
       console.warn(
-        `[claude-managed-models] Unknown model "${model}" — returning $0 cost. ` +
-          `Add it to CLAUDE_MANAGED_MODEL_PRICING in src/providers/claude-managed-models.ts.`,
+        `[claude-managed-models] Unpriced model "${model}" — returning $0 cost. ` +
+          "Add it to the model catalog (refresh or overlay row).",
       );
     }
     return 0;
   }
-  const pricing =
-    configuredPricing.scheduledChange &&
-    pricedAtMs >= Date.parse(configuredPricing.scheduledChange.effectiveAt)
-      ? configuredPricing.scheduledChange.pricing
-      : configuredPricing;
   const inputCost = (inputTokens / 1_000_000) * pricing.inputPerMillion;
   const outputCost = (outputTokens / 1_000_000) * pricing.outputPerMillion;
   const cacheReadCost = (cacheReadTokens / 1_000_000) * pricing.cacheReadPerMillion;

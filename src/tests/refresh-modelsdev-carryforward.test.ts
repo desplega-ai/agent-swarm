@@ -5,7 +5,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { carryForwardDelistedModels } from "../../scripts/refresh-modelsdev-pricing";
-import { FALLBACK_CODEX_MODEL_PRICING } from "../providers/codex-models";
+import { getCodexModelPricing } from "../providers/codex-models";
 
 describe("carryForwardDelistedModels", () => {
   test("models missing from the fresh fetch are carried forward; fresh data wins otherwise", () => {
@@ -42,12 +42,12 @@ describe("carryForwardDelistedModels", () => {
 
 describe("FALLBACK_CODEX_MODEL_PRICING (advisory table)", () => {
   test("gpt-6 Astra and gpt-5.6 Sol carry the published rates", () => {
-    expect(FALLBACK_CODEX_MODEL_PRICING["gpt-6-astra"]).toEqual({
+    expect(getCodexModelPricing("gpt-6-astra")).toEqual({
       inputPerMillion: 10,
       cachedInputPerMillion: 1,
       outputPerMillion: 50,
     });
-    expect(FALLBACK_CODEX_MODEL_PRICING["gpt-5.6-sol"]).toEqual({
+    expect(getCodexModelPricing("gpt-5.6-sol")).toEqual({
       inputPerMillion: 4,
       cachedInputPerMillion: 0.4,
       outputPerMillion: 20,
@@ -57,12 +57,12 @@ describe("FALLBACK_CODEX_MODEL_PRICING (advisory table)", () => {
   test("gpt-5.6 terra/luna carry the published rates", () => {
     // Direct assertions: through computeCodexCostUsd the models.dev snapshot
     // shadows this table, so drift here would otherwise go unnoticed.
-    expect(FALLBACK_CODEX_MODEL_PRICING["gpt-5.6-terra"]).toEqual({
+    expect(getCodexModelPricing("gpt-5.6-terra")).toEqual({
       inputPerMillion: 2.0,
       cachedInputPerMillion: 0.2,
       outputPerMillion: 12.0,
     });
-    expect(FALLBACK_CODEX_MODEL_PRICING["gpt-5.6-luna"]).toEqual({
+    expect(getCodexModelPricing("gpt-5.6-luna")).toEqual({
       inputPerMillion: 0.2,
       cachedInputPerMillion: 0.02,
       outputPerMillion: 1.2,

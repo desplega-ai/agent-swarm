@@ -9608,6 +9608,10 @@
                         "type": "string"
                       }
                     }
+                  },
+                  "harnessCliVersion": {
+                    "type": "string",
+                    "maxLength": 64
                   }
                 },
                 "required": [
@@ -22630,6 +22634,12 @@
                                     },
                                     "output": {
                                       "type": "number"
+                                    },
+                                    "cache_read": {
+                                      "type": "number"
+                                    },
+                                    "cache_write": {
+                                      "type": "number"
                                     }
                                   }
                                 },
@@ -22640,6 +22650,12 @@
                                       "type": "number"
                                     }
                                   }
+                                },
+                                "release_date": {
+                                  "type": "string"
+                                },
+                                "status": {
+                                  "type": "string"
                                 },
                                 "reasoning": {
                                   "type": "boolean"
@@ -23081,6 +23097,208 @@
                   },
                   "required": [
                     "deleted"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models-catalog/harness-support": {
+      "get": {
+        "summary": "List harness CLI model support rows",
+        "description": "Whether a catalog model runs on a given `claude` / `codex` CLI version, as recorded by workers after a model's first run. No row means unknown (allowed at claim).",
+        "tags": [
+          "Pricing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "harness",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "cliVersion",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Support rows, newest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "rows": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "harness": {
+                            "type": "string"
+                          },
+                          "cliVersion": {
+                            "type": "string"
+                          },
+                          "modelId": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "ok",
+                              "unsupported",
+                              "unknown"
+                            ]
+                          },
+                          "checkedAt": {
+                            "type": "number"
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "harness",
+                          "cliVersion",
+                          "modelId",
+                          "status",
+                          "checkedAt",
+                          "error"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "rows"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Record whether a harness CLI version accepts a model",
+        "description": "Written by workers: `ok` after a model's first successful run, `unsupported` when the CLI rejects the model id. Claim-time resolution falls back (alias/tier) or fails fast (explicit model) on `unsupported`.",
+        "tags": [
+          "Pricing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "harness": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "cliVersion": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  },
+                  "modelId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "ok",
+                      "unsupported",
+                      "unknown"
+                    ]
+                  },
+                  "error": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "harness",
+                  "cliVersion",
+                  "modelId",
+                  "status"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Support row upserted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "harness": {
+                      "type": "string"
+                    },
+                    "cliVersion": {
+                      "type": "string"
+                    },
+                    "modelId": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ok",
+                        "unsupported",
+                        "unknown"
+                      ]
+                    },
+                    "checkedAt": {
+                      "type": "number"
+                    },
+                    "error": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "harness",
+                    "cliVersion",
+                    "modelId",
+                    "status",
+                    "checkedAt",
+                    "error"
                   ]
                 }
               }

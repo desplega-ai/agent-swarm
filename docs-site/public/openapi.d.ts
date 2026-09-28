@@ -2273,6 +2273,7 @@ export interface paths {
                                 [key: string]: string;
                             };
                         };
+                        harnessCliVersion?: string;
                     };
                 };
             };
@@ -9070,10 +9071,14 @@ export interface paths {
                                             cost?: {
                                                 input?: number;
                                                 output?: number;
+                                                cache_read?: number;
+                                                cache_write?: number;
                                             };
                                             limit?: {
                                                 context?: number;
                                             };
+                                            release_date?: string;
+                                            status?: string;
                                             reasoning?: boolean;
                                             reasoning_options?: {
                                                 type: string;
@@ -9290,6 +9295,109 @@ export interface paths {
                 };
             };
         };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/models-catalog/harness-support": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List harness CLI model support rows
+         * @description Whether a catalog model runs on a given `claude` / `codex` CLI version, as recorded by workers after a model's first run. No row means unknown (allowed at claim).
+         */
+        get: {
+            parameters: {
+                query?: {
+                    harness?: string;
+                    cliVersion?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Support rows, newest first */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            rows: {
+                                harness: string;
+                                cliVersion: string;
+                                modelId: string;
+                                /** @enum {string} */
+                                status: "ok" | "unsupported" | "unknown";
+                                checkedAt: number;
+                                error: string | null;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        /**
+         * Record whether a harness CLI version accepts a model
+         * @description Written by workers: `ok` after a model's first successful run, `unsupported` when the CLI rejects the model id. Claim-time resolution falls back (alias/tier) or fails fast (explicit model) on `unsupported`.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        harness: string;
+                        cliVersion: string;
+                        modelId: string;
+                        /** @enum {string} */
+                        status: "ok" | "unsupported" | "unknown";
+                        error?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Support row upserted */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            harness: string;
+                            cliVersion: string;
+                            modelId: string;
+                            /** @enum {string} */
+                            status: "ok" | "unsupported" | "unknown";
+                            checkedAt: number;
+                            error: string | null;
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;

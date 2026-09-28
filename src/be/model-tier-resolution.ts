@@ -26,6 +26,7 @@
  * See runbooks/model-tiers.md.
  */
 import {
+  harnessCatalogSection,
   isAlias,
   type ModelsDevCatalog,
   type ModelsDevModel,
@@ -43,6 +44,14 @@ import {
 } from "../types";
 import { getDbClient } from "./db";
 import {
+  CLI_PINNED_HARNESSES,
+  fallbackForUnsupportedModel,
+  getAgentHarnessCliVersion,
+  getHarnessModelSupport,
+  noticeCliUnsupported,
+  unsupportedModelMessage,
+} from "./harness-model-support";
+import {
   buildCatalogEntries,
   listModelCatalog,
   listModelCatalogOverlay,
@@ -54,7 +63,12 @@ import { loadModelsDevCache } from "./modelsdev-cache";
 
 export { isTierConfigKey, tierConfigKey, validateTierConfigValue } from "./model-tier-keys";
 
-export type ModelSource = "model" | "worker-env" | "tier-config" | "tier-default";
+export type ModelSource =
+  | "model"
+  | "worker-env"
+  | "tier-config"
+  | "tier-default"
+  | "fallback:cli-unsupported";
 
 export interface TaskModelResolution {
   resolvedModel: string;
@@ -312,21 +326,64 @@ export async function resolveTaskModel(
 }
 
 /**
+ * Apply the claiming worker's CLI support (harness_model_support). Returns the
+ * resolution to use, or `{ unsupported }` when an explicit task `model` is
+ * rejected by this CLI and must fail fast.
+ */
+async function applyCliSupport(
+  resolution: TaskModelResolution,
+  harness: string | null,
+  cliVersion: string | null,
+): Promise<TaskModelResolution | { unsupported: string }> {
+  if (!harness || !cliVersion || !CLI_PINNED_HARNESSES.has(harness)) return resolution;
+  const status = await getHarnessModelSupport(harness, cliVersion, resolution.resolvedModel);
+  if (status !== "unsupported") return resolution;
+  if (resolution.modelSource === "model") {
+    return { unsupported: unsupportedModelMessage(harness, cliVersion, resolution.resolvedModel) };
+  }
+  const section = harnessCatalogSection(harness);
+  const { catalog } = await loadResolutionCatalog();
+  const fallback = await fallbackForUnsupportedModel(
+    harness,
+    cliVersion,
+    resolution.resolvedModel,
+    (section && catalog[section]?.models) || {},
+  );
+  if (!fallback) return resolution;
+  noticeCliUnsupported(harness, cliVersion, resolution.resolvedModel, fallback);
+  return { ...resolution, resolvedModel: fallback, modelSource: "fallback:cli-unsupported" };
+}
+
+export type ClaimModelFields = Partial<TaskModelResolution> & {
+  /** Set when the task's explicit model is rejected by this worker's CLI; the worker fails the task. */
+  modelUnsupported?: string;
+};
+
+/**
  * Resolve and record the model for a task the given agent is claiming. Runs
  * inside the claim transaction. Returns the fields to merge into the trigger.
  */
 export async function recordClaimModelResolution(
   task: { id: string; model?: string | null; modelTier?: string | null },
   agent: { id: string; harnessProvider?: ProviderName | null; provider?: ProviderName | null },
-): Promise<Partial<TaskModelResolution>> {
+): Promise<ClaimModelFields> {
   const harnessProvider = agent.harnessProvider ?? agent.provider ?? null;
-  const resolution = await resolveTaskModel({
+  const resolved = await resolveTaskModel({
     model: task.model,
     modelTier: task.modelTier,
     harnessProvider,
     workerOverrides: await getAgentModelTierOverrides(agent.id),
   });
-  if (!resolution) return {};
+  if (!resolved) return {};
+  const checked = await applyCliSupport(
+    resolved,
+    harnessProvider,
+    await getAgentHarnessCliVersion(agent.id),
+  );
+  if ("unsupported" in checked) {
+    return { modelUnsupported: checked.unsupported };
+  }
+  const resolution = checked;
   await getDbClient().run(
     "UPDATE agent_tasks SET resolvedModel = ?, modelSource = ?, modelAlias = ? WHERE id = ?",
     [resolution.resolvedModel, resolution.modelSource, resolution.modelAlias, task.id],
