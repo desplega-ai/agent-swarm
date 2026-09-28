@@ -75,11 +75,9 @@ function interpolationInputsCovered(nodes: WorkflowNode[]): boolean {
     const refs = [...text.matchAll(/\{\{\s*([a-zA-Z0-9_-]+)\./g)].map((m) => m[1]);
     const external = refs.filter((r) => r !== "trigger" && r !== "input");
     for (const ref of external) {
-      if (
-        !Object.values(node.inputs ?? {}).some(
-          (source) => source.startsWith(`${ref}.`) || source === ref,
-        )
-      ) {
+      // A {{ref.x}} placeholder resolves against the node's own inputs KEYS
+      // (inputs: { ref: "<upstream>.<path>" }), not against the source paths.
+      if (!Object.hasOwn(node.inputs ?? {}, ref)) {
         return false;
       }
     }
@@ -117,7 +115,8 @@ const workflowDagCheck: DeterministicCheck = {
     const usedTool = hasTool(tools, ["create-workflow", "create_workflow"]);
     if (!usedTool) return { pass: false, score: 0, detail: "create-workflow tool was not used" };
 
-    const nodeScore = nodes.length >= 4 ? 1 : nodes.length === 3 ? 0.5 : 0;
+    // The prompt asks for script -> agent-task -> final node: three nodes is complete.
+    const nodeScore = nodes.length >= 3 ? 1 : nodes.length === 2 ? 0.5 : 0;
     const hasSwarmScript = nodes.some((n) => n.type === "swarm-script" && n.config?.scriptName);
     const hasAgentTaskWithSchema = nodes.some(
       (n) => n.type === "agent-task" && n.config && "outputSchema" in n.config,

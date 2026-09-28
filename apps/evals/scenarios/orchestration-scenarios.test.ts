@@ -139,6 +139,38 @@ describe("orchestration substrate scenario rubrics", () => {
     expect((await workflows.triggerSchemaCheck.fn(c)).score).toBe(1);
   });
 
+  test("workflow-authoring resolves {{ref.x}} against inputs keys, not source paths", async () => {
+    // Shape Sonnet 5 and 5.5 both produced in the 2026-09-28 pilot: renamed
+    // input keys (pr <- trigger.pullRequest) and a three-node DAG.
+    const nodes = [
+      {
+        id: "check",
+        type: "swarm-script",
+        next: "verdict",
+        inputs: { pr: "trigger.pullRequest" },
+        config: { scriptName: "gh-pr-snapshot", args: { number: "{{pr.number}}" } },
+      },
+      {
+        id: "verdict",
+        type: "agent-task",
+        next: "notify",
+        inputs: { snapshot: "check", pr: "trigger.pullRequest" },
+        config: { template: "{{pr.number}} {{snapshot}}", outputSchema: { type: "object" } },
+      },
+      { id: "notify", type: "agent-task", inputs: { verdict: "verdict" }, config: {} },
+    ];
+    const wf = (n: unknown[]) =>
+      ctx({
+        tasks: [{ id: "seed", title: "t", description: "d", status: "completed" }],
+        logs: { seed: [toolUseRow("seed", "mcp__agent-swarm__create-workflow", {})] },
+        api: { "/api/workflows?fields=full": [{ id: "wf", name: "w", definition: { nodes: n } }] },
+      });
+    expect((await workflows.workflowDagCheck.fn(wf(nodes))).score).toBe(1);
+    // A placeholder with no matching inputs key still fails the inputs criterion.
+    const unmapped = nodes.map((n) => (n.id === "verdict" ? { ...n, inputs: { snapshot: "check" } } : n));
+    expect((await workflows.workflowDagCheck.fn(wf(unmapped))).score).toBeCloseTo(7 / 9);
+  });
+
   test("script-authoring rewards script-upsert plus named script-run using ctx.swarm", async () => {
     const c = ctx({
       tasks: [
