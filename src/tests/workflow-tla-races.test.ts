@@ -166,7 +166,7 @@ afterAll(async () => {
 });
 
 describe("TLA+ workflow counterexamples", () => {
-  test.failing("CX1: the retry poller does not re-execute a failed step of a cancelled run", async () => {
+  test("CX1: the retry poller does not re-execute a failed step of a cancelled run", async () => {
     plans.clear();
     calls.length = 0;
     const def = fanOut(false);

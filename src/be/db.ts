@@ -8057,11 +8057,13 @@ export async function getLastRunStart(workflowId: string): Promise<WorkflowRun |
 export async function getRetryableSteps(): Promise<WorkflowRunStep[]> {
   const now = new Date().toISOString();
   const rows = await getDbClient().query<WorkflowRunStepRow>(
-    `SELECT * FROM workflow_run_steps
-       WHERE status = 'failed'
-         AND nextRetryAt IS NOT NULL
-         AND nextRetryAt <= ?
-       ORDER BY nextRetryAt ASC`,
+    `SELECT s.* FROM workflow_run_steps s
+       JOIN workflow_runs r ON r.id = s.runId
+       WHERE s.status = 'failed'
+         AND s.nextRetryAt IS NOT NULL
+         AND s.nextRetryAt <= ?
+         AND r.status IN ('running', 'waiting', 'failed')
+       ORDER BY s.nextRetryAt ASC`,
     [now],
   );
   return rows.map(rowToWorkflowRunStep);

@@ -1,9 +1,10 @@
 import {
+  getDbClient,
   getRetryableSteps,
   getWorkflow,
   getWorkflowRun,
+  getWorkflowRunStepsByRunId,
   updateWorkflowRun,
-  updateWorkflowRunStep,
 } from "../be/db";
 import type { RetryPolicy } from "../types";
 import { checkpointStep, checkpointStepFailure, checkpointStepWaiting } from "./checkpoint";
@@ -50,20 +51,10 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
             `[workflows] Retrying step ${step.nodeId} (attempt ${step.retryCount}) for run ${step.runId}`,
           );
 
-          // If the run was failed (due to this step), set it back to running
-          if (run.status === "failed") {
-            await updateWorkflowRun(run.id, {
-              status: "running",
-              error: undefined,
-            });
-          }
-
-          // Clear the retry marker so this step isn't picked up again
-          await updateWorkflowRunStep(step.id, {
-            status: "running",
-            error: undefined,
-            nextRetryAt: undefined,
-          });
+          // Claim the retry and revive the run in one transaction. The row and
+          // the run were read outside it: a cancel committing in between must
+          // win, or the step re-executes inside a cancelled run.
+          if (!(await claimRetry(run.id, step.id))) continue;
 
           const ctx = (run.context ?? {}) as Record<string, unknown>;
           // A step can fail before ANY checkpoint persisted the walkGraph-hydrated
@@ -192,12 +183,7 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
                   workflow.id,
                 );
               } else {
-                // No successors — check if run is complete
-                await updateWorkflowRun(run.id, {
-                  status: "completed",
-                  context: ctx,
-                  finishedAt: new Date().toISOString(),
-                });
+                await completeRunIfSettled(run.id, ctx);
               }
             }
           } catch (err) {
@@ -221,6 +207,56 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
   // Start the first tick
   pollerTimeout = setTimeout(poll, intervalMs);
 }
+
+/**
+ * Flip a retry-pending step to `running` only while it is still retry-pending
+ * and its run is live, and revive a run failed by this step.
+ */
+async function claimRetry(runId: string, stepId: string): Promise<boolean> {
+  return getDbClient().transaction(async () => {
+    const run = await getWorkflowRun(runId);
+    if (!run || !RETRYABLE_RUN_STATUSES.has(run.status)) return false;
+    const claimed = await getDbClient().get<{ id: string }>(
+      `UPDATE workflow_run_steps
+          SET status = 'running', nextRetryAt = NULL
+        WHERE id = ? AND runId = ? AND status = 'failed' AND nextRetryAt IS NOT NULL
+        RETURNING id`,
+      [stepId, runId],
+    );
+    if (!claimed) return false;
+    if (run.status === "failed") {
+      await updateWorkflowRun(runId, { status: "running", error: undefined });
+    }
+    return true;
+  });
+}
+
+/**
+ * A retried leaf succeeded. Complete the run only if it is still live and no
+ * other step is running, waiting, or pending a retry — the same rule as the
+ * walkGraph finalizer.
+ */
+async function completeRunIfSettled(runId: string, ctx: Record<string, unknown>): Promise<void> {
+  await getDbClient().transaction(async () => {
+    const run = await getWorkflowRun(runId);
+    if (!run || (run.status !== "running" && run.status !== "waiting")) return;
+    const steps = await getWorkflowRunStepsByRunId(runId);
+    const live = steps.some(
+      (s) =>
+        s.status === "running" ||
+        s.status === "waiting" ||
+        (s.status === "failed" && s.nextRetryAt != null),
+    );
+    if (live) return;
+    await updateWorkflowRun(runId, {
+      status: "completed",
+      context: ctx,
+      finishedAt: new Date().toISOString(),
+    });
+  });
+}
+
+const RETRYABLE_RUN_STATUSES = new Set(["running", "waiting", "failed"]);
 
 /**
  * Stop the retry poller (for clean shutdown).

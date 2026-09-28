@@ -312,8 +312,7 @@ P3 ==
 P4 ==
   /\ thr[TPoll].pc = "p4"
   /\ LET i == thr[TPoll].sid IN
-     IF FixPollerRunGuard /\ ~(PendingRetry(i) /\ run \in {"running", "waiting", "failed"}
-                               /\ (run = "failed" => \A j \in StepIds : ~(steps[j].st = "failed" /\ ~steps[j].nra)))
+     IF FixPollerRunGuard /\ ~(PendingRetry(i) /\ run \in {"running", "waiting", "failed"})
      THEN /\ SetT(TPoll, [thr[TPoll] EXCEPT !.pc = "p2"])
           /\ UNCHANGED <<steps, execLive, run, active>>
      ELSE /\ steps' = [steps EXCEPT ![i].st = "running", ![i].nra = FALSE]
