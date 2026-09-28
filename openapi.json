@@ -4159,6 +4159,7 @@
               "task_dispatch_rejected_affinity",
               "task_authorization_rejected",
               "task_recovery_authorization",
+              "task_dependency_repointed",
               "task_released",
               "task_deferred_wait_woke",
               "task_follow_up_suppressed",
