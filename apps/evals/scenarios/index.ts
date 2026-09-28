@@ -1,9 +1,6 @@
 import type { Scenario } from "../src/types.ts";
 import { delegationChain } from "./delegation-chain.ts";
 import { delegationProbe } from "./delegation-probe.ts";
-import { distributedAudit } from "./distributed-audit.ts";
-import { memoryDistractor } from "./memory-distractor.ts";
-import { relayPipeline } from "./relay-pipeline.ts";
 import { scriptAuthoring } from "./script-authoring.ts";
 import { sqlAudit } from "./sql-audit.ts";
 import { structuredOutputAdherence } from "./structured-output-adherence.ts";
@@ -23,9 +20,6 @@ export const scenarios: Scenario[] = [
   delegationChain,
   toolRouting,
   structuredOutputAdherence,
-  distributedAudit,
-  memoryDistractor,
-  relayPipeline,
 ];
 
 // Cheap smoke default for `--scenarios` when none are passed. sql-audit is the
