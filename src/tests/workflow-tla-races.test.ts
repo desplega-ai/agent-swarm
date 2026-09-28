@@ -252,7 +252,7 @@ describe("TLA+ workflow counterexamples", () => {
     expect(await stepsOf(runId, "A")).toHaveLength(1);
   });
 
-  test.failing("CX3: an async branch completing does not fire the join while a sibling branch is still executing", async () => {
+  test("CX3: an async branch completing does not fire the join while a sibling branch is still executing", async () => {
     plans.clear();
     calls.length = 0;
     const def = fanOut(true);
@@ -354,7 +354,7 @@ describe("TLA+ workflow counterexamples", () => {
     expect(await stepsOf(runId, "T")).toHaveLength(1);
   });
 
-  test.failing("CX7: the walk finalizer does not complete a run while the retry poller is executing a step", async () => {
+  test("CX7: the walk finalizer does not complete a run while the retry poller is executing a step", async () => {
     plans.clear();
     calls.length = 0;
     const def = fanOut(false);

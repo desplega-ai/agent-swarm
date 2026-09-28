@@ -314,6 +314,8 @@ async function walkGraphOwned(
     }
   }
 
+  const awaited = awaitedNodeIds(allSteps, activeEdges);
+
   // Seed with start nodes whose predecessors are all completed (convergence gate).
   // For entry nodes (no predecessors), skip if already completed — these are
   // re-walk/recovery scenarios where memoization should apply.
@@ -327,7 +329,9 @@ async function walkGraphOwned(
     }
     // Non-entry node — allow through even if completed (loop target).
     // Check predecessors are ready.
-    const activePreds = preds.filter((predId) => activeEdges.has(`${predId}→${n.id}`));
+    const activePreds = preds.filter(
+      (predId) => activeEdges.has(`${predId}→${n.id}`) || awaited.has(predId),
+    );
     // If no active edges yet (first walk), check ALL structural predecessors
     const predsToCheck = activePreds.length > 0 ? activePreds : preds;
     return predsToCheck.every((p) => completedNodeIds.has(p));
@@ -397,12 +401,27 @@ async function walkGraphOwned(
     // Use executedInThisWalk (not completedNodeIds) to gate dedup — this
     // allows loop targets from prior walks to re-execute while preventing
     // double execution within the same walk.
+    // A sibling branch another walker is executing has no edge in this walk's
+    // activeEdges, so re-read the steps: a live predecessor holds the join,
+    // and one that completed elsewhere is rehydrated for the join's inputs.
     const readyNext: WorkflowNode[] = [];
+    const batchSteps = nextBatch.size > 0 ? await getWorkflowRunStepsByRunId(runId) : [];
+    const batchAwaited = awaitedNodeIds(batchSteps, activeEdges);
+    const batchLatest = latestStepByNode(batchSteps);
     for (const [nodeId, node] of nextBatch) {
       if (executedInThisWalk.has(nodeId)) continue; // Already done in this walk
 
       const allPreds = getAllPredecessors(def, nodeId);
-      const activePreds = allPreds.filter((predId) => activeEdges.has(`${predId}→${nodeId}`));
+      for (const predId of allPreds) {
+        if (completedNodeIds.has(predId)) continue;
+        const latest = batchLatest.get(predId);
+        if (latest?.status !== "completed") continue;
+        completedNodeIds.add(predId);
+        if (latest.output !== undefined) ctx[predId] = latest.output;
+      }
+      const activePreds = allPreds.filter(
+        (predId) => activeEdges.has(`${predId}→${nodeId}`) || batchAwaited.has(predId),
+      );
       const allActivePredsCompleted = activePreds.every((p) => completedNodeIds.has(p));
 
       if (allActivePredsCompleted) {
@@ -426,6 +445,8 @@ async function walkGraphOwned(
     if (!run || run.status !== "running") return;
 
     const finalSteps = await getWorkflowRunStepsByRunId(runId);
+    // Another walker is still executing a branch; it finalizes the run.
+    if (hasRunningStep(finalSteps)) return;
     const hasWaitingSteps = finalSteps.some((s) => s.status === "waiting");
     const hasPendingRetries = finalSteps.some(
       (s) => s.status === "failed" && s.nextRetryAt != null,
@@ -472,6 +493,42 @@ async function walkGraphOwned(
       }
     }
   });
+}
+
+/** Each node's latest step. Steps arrive in insert order (startedAt ASC). */
+function latestStepByNode(steps: WorkflowRunStep[]): Map<string, WorkflowRunStep> {
+  const latest = new Map<string, WorkflowRunStep>();
+  for (const step of steps) latest.set(step.nodeId, step);
+  return latest;
+}
+
+/**
+ * Nodes a join must wait for even without an active edge to it: the node's
+ * latest step is running or waiting, or a predecessor routed to it and it has
+ * no step yet. A terminally failed node is not awaited, so partial failure
+ * still lets the join run. An older `running` row superseded by a newer one
+ * (crash recovery) and the `pending` row a user retry leaves behind are
+ * ignored because only the latest step counts.
+ */
+function awaitedNodeIds(steps: WorkflowRunStep[], activeEdges: Set<string>): Set<string> {
+  const latest = latestStepByNode(steps);
+  const awaited = new Set<string>();
+  for (const [nodeId, step] of latest) {
+    if (step.status === "running" || step.status === "waiting") awaited.add(nodeId);
+  }
+  for (const edge of activeEdges) {
+    const target = edge.slice(edge.indexOf("→") + 1);
+    if (!latest.has(target)) awaited.add(target);
+  }
+  return awaited;
+}
+
+/** True while some node's latest step is still executing. */
+export function hasRunningStep(steps: WorkflowRunStep[]): boolean {
+  for (const step of latestStepByNode(steps).values()) {
+    if (step.status === "running") return true;
+  }
+  return false;
 }
 
 /**

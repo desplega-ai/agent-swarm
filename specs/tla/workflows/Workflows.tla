@@ -34,7 +34,8 @@ CONSTANTS
   FixPendingRetryGate, \* F2: a predecessor that is still running or pending retry keeps its edge active
   FixConcurrentJoin, \* F3: step insert skips a node already completed, waiting, or running in this process
   FixUserRetryLive,  \* F5: user retry skips a node whose step is running or waiting (resume.ts retryFailedRun)
-  FixRecoveryRetry   \* F4: recovery does not re-walk a node that is pending retry / held by the poller
+  FixRecoveryRetry,  \* F4: recovery does not re-walk a node that is pending retry / held by the poller
+  FixJoinWaitsLive   \* F6: join waits for a branch whose latest step is live or not inserted; finalizers leave a run with a running step to its walker
 
 ASSUME MaxRetries >= 1 /\ BranchOutcomes \subseteq {"ok", "fail", "async"}
 
@@ -82,10 +83,20 @@ RetryNodes == {steps[i].node : i \in {j \in StepIds : PendingRetry(j)}}
 \* F2: a join also waits for a predecessor that was routed to (active
 \* incoming edge) or that has a live / retry-pending step, even though that
 \* predecessor has not produced its own outgoing edge yet.
+\* F6 (engine.ts awaitedNodeIds): only a node's latest row counts, so an
+\* orphaned `pending` row from a user retry does not hold the join, and a
+\* terminally failed branch does not either (partial failure still joins).
+HasRow(n) == \E i \in StepIds : steps[i].node = n
+LatestSt(n) == steps[CHOOSE i \in StepIds : steps[i].node = n
+                        /\ \A j \in StepIds : steps[j].node = n => j <= i].st
+LatestIn(S) == {n \in Nodes : HasRow(n) /\ LatestSt(n) \in S}
 Awaited(p, edges) ==
-  FixPendingRetryGate /\
-  \/ \E q \in Nodes : <<q, p>> \in edges
-  \/ p \in NodesWith("running") \cup NodesWith("pending") \cup NodesWith("waiting") \cup RetryNodes
+  \/ /\ FixPendingRetryGate
+     /\ \/ \E q \in Nodes : <<q, p>> \in edges
+        \/ p \in NodesWith("running") \cup NodesWith("pending") \cup NodesWith("waiting") \cup RetryNodes
+  \/ /\ FixJoinWaitsLive
+     /\ \/ p \in LatestIn({"running", "waiting"})
+        \/ (\E q \in Nodes : <<q, p>> \in edges) /\ ~HasRow(p)
 
 \* F3: step rows an executeStep call still owns (engine.ts executingSteps,
 \* process-local, cleared by a crash). The retry poller's rows are not owned.
@@ -233,18 +244,23 @@ WBatchEnd(t) ==
   /\ IF thr[t].hasW
      THEN SetT(t, [thr[t] EXCEPT !.pc = "wRet"])
      ELSE LET w == thr[t]
+              \* F6: the gate re-reads the steps; a predecessor whose latest
+              \* step completed in another walk joins the completed set.
+              wd == IF FixJoinWaitsLive THEN w.done \cup LatestIn({"completed"}) ELSE w.done
               rn == {n \in w.nxt : n \notin w.ex
                         /\ {p \in Preds(n) : <<p, n>> \in w.edges \/ Awaited(p, w.edges)}
-                             \subseteq w.done}
+                             \subseteq wd}
           IN IF rn # {}
-             THEN SetT(t, [thr[t] EXCEPT !.pend = rn, !.nxt = {}])
-             ELSE SetT(t, [thr[t] EXCEPT !.pc = "wFinal"])
+             THEN SetT(t, [thr[t] EXCEPT !.pend = rn, !.nxt = {}, !.done = wd])
+             ELSE SetT(t, [thr[t] EXCEPT !.pc = "wFinal", !.done = wd])
   /\ UNCHANGED <<run, steps, active, execLive, okCount, hbLeft, crashes>>
 
 \* W4 engine.ts:403-453 — finalization transaction (guarded on running).
+\* F6: a node whose latest step is running belongs to another walker, which
+\* finalizes the run when it settles.
 WFinal(t) ==
   /\ thr[t].pc = "wFinal"
-  /\ IF run = "running"
+  /\ IF run = "running" /\ ~(FixJoinWaitsLive /\ LatestIn({"running"}) # {})
      THEN LET hasW == \E i \in StepIds : steps[i].st = "waiting"
                         \/ (FixPendingRetryGate /\ steps[i].st \in {"running", "pending"})
               hasPR == \E i \in StepIds : PendingRetry(i)
@@ -554,7 +570,10 @@ E2(t) ==
 \* E3 resume.ts:201-218 finalizeOrWait — transaction, but no run-status guard.
 EFin(t) ==
   /\ thr[t].pc = "eFin"
-  /\ run' = IF \E j \in StepIds : steps[j].st = "waiting"
+  /\ run' = IF FixJoinWaitsLive /\ LatestIn({"running"}) # {}
+            THEN \* F6: leave it to the live walk, whose finalizer needs `running`
+                 IF run = "waiting" THEN "running" ELSE run
+            ELSE IF \E j \in StepIds : steps[j].st = "waiting"
                  \/ (FixPendingRetryGate /\ steps[j].st \in {"running", "pending"})
             THEN "waiting" ELSE "completed"
   /\ SetT(t, [thr[t] EXCEPT !.pc = "eDone"])
@@ -678,6 +697,14 @@ CompletedRunQuiescent ==
 JoinWaitsForAll ==
   [][ Len(steps') > Len(steps) /\ steps'[Len(steps')].node = "M"
         => Branches \subseteq NodesWith("completed") ]_vars
+
+\* Inv3c (CX3): the convergence node is only created once every branch has a
+\* step and none is still executing or waiting. Weaker than Inv3b: a branch
+\* that failed for good may still join (partial failure), and a branch pending
+\* retry is F2's concern.
+JoinWaitsForBranches ==
+  [][ Len(steps') > Len(steps) /\ steps'[Len(steps')].node = "M"
+        => \A b \in Branches : HasRow(b) /\ LatestSt(b) \notin {"running", "waiting", "pending"} ]_vars
 
 \* Inv5 (liveness): the run eventually leaves running/waiting.
 EventuallySettles == <>[](run \in RunTerminal)
