@@ -107,6 +107,7 @@ const ANY_AUTHENTICATED_VERBS: PermissionVerb[] = [
   "task.create.own",
   "favorite.write.own",
   "script.search",
+  "models.catalog.write",
 ];
 
 const REQUESTER_OWNS_TASK_VERBS: PermissionVerb[] = [
