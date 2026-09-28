@@ -1,14 +1,10 @@
-import {
-  createApprovalFollowUpTask,
-  postApprovalCancellationUpdates,
-} from "../workflows/approval-notifications";
-import { cancelWorkflowRun } from "../workflows/resume";
+import { cancelApprovalRequestAndRun } from "../workflows/approval-cancel";
+import { createApprovalFollowUpTask } from "../workflows/approval-notifications";
 import {
   type ApprovalRequest,
-  cancelApprovalRequestById,
+  getDbClient,
   getExpiredPendingApprovals,
   getStaleApprovalRequests,
-  getWorkflowRun,
   resolveApprovalRequest,
 } from "./db";
 
@@ -29,8 +25,6 @@ export function approvalRequestAutoCancellationDays(): number {
   return DEFAULT_APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS;
 }
 
-const LIVE_RUN_STATUSES = new Set(["running", "waiting"]);
-
 /**
  * Cancel every pending request with no explicit expiresAt that is older than
  * APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS. A request that gates a live
@@ -47,31 +41,28 @@ export async function autoCancelStaleApprovalRequests(
   const stale = await getStaleApprovalRequests({ cutoff });
   const reason = `Auto-cancelled by the approval sweep after ${days} days with no response`;
 
+  // Each request and its live run cancel in 1 transaction. A failed row
+  // rolls back alone and the next tick retries it.
   const cancelled: ApprovalRequest[] = [];
-  for (const row of stale) {
-    const updated = await cancelApprovalRequestById(row.id, { reason, resolvedBy: null });
-    if (updated) cancelled.push(updated);
-  }
-
-  // Cancel the request first so it keeps the sweep's reason; the run cancel
-  // then skips it because it is no longer pending.
   const runsCancelled: string[] = [];
-  for (const row of cancelled) {
-    const runId = row.workflowRunId;
-    if (!runId || runsCancelled.includes(runId)) continue;
-    const run = await getWorkflowRun(runId);
-    if (!run || !LIVE_RUN_STATUSES.has(run.status)) continue;
+  for (const row of stale) {
     try {
-      await cancelWorkflowRun(runId, reason);
-      runsCancelled.push(runId);
+      const result = await cancelApprovalRequestAndRun(row.id, {
+        reason,
+        resolvedBy: null,
+        slackReason: "auto-cancelled with no response",
+      });
+      if (!result) continue;
+      cancelled.push(result.request);
+      if (result.runCancelled && result.request.workflowRunId) {
+        runsCancelled.push(result.request.workflowRunId);
+      }
     } catch (err) {
       console.error(
-        `[approval-sweep] could not cancel workflow run ${runId}: ${err instanceof Error ? err.message : String(err)}`,
+        `[approval-sweep] could not cancel approval request ${row.id}: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }
-
-  await postApprovalCancellationUpdates(cancelled, "auto-cancelled with no response");
 
   if (cancelled.length > 0) {
     console.log(

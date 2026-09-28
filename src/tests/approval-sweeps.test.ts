@@ -139,6 +139,13 @@ async function makeSourceTask(status: string) {
   return task.id;
 }
 
+// Slack posts run in an afterCommit hook, after the sweep call returns.
+async function waitForSlackPosts(count: number) {
+  for (let i = 0; i < 100 && postMessage.mock.calls.length < count; i++) {
+    await Bun.sleep(10);
+  }
+}
+
 async function followUpsFor(parentTaskId: string) {
   return getDbClient().query<{ id: string; agentId: string | null; task: string }>(
     "SELECT id, agentId, task FROM agent_tasks WHERE taskType = 'hitl-follow-up' AND parentTaskId = ?",
@@ -269,6 +276,29 @@ describe("approval sweeps", () => {
       expect((await getWorkflowRun(runId))!.status).toBe("cancelled");
     });
 
+    test("a failed run cancel rolls the request cancel back", async () => {
+      const { runId, stepId } = await makeRun("waiting");
+      const id = await makeRequest({ ageDays: 8, workflowRunId: runId, workflowRunStepId: stepId });
+      await getDbClient().run(
+        `CREATE TRIGGER fail_run_cancel BEFORE UPDATE OF status ON workflow_runs
+           WHEN NEW.status = 'cancelled' BEGIN SELECT RAISE(ABORT, 'run cancel failed'); END`,
+      );
+      try {
+        const result = await autoCancelStaleApprovalRequests();
+        expect(result.cancelled).toEqual([]);
+        expect((await getApprovalRequestById(id))!.status).toBe("pending");
+        expect((await getWorkflowRun(runId))!.status).toBe("waiting");
+        expect((await getWorkflowRunStepsByRunId(runId))[0]!.status).toBe("waiting");
+      } finally {
+        await getDbClient().run("DROP TRIGGER fail_run_cancel");
+      }
+
+      // The next tick retries the row and cancels both.
+      await autoCancelStaleApprovalRequests();
+      expect((await getApprovalRequestById(id))!.status).toBe("cancelled");
+      expect((await getWorkflowRun(runId))!.status).toBe("cancelled");
+    });
+
     test("leaves a failed run as it is", async () => {
       const { runId, stepId } = await makeRun("failed");
       const id = await makeRequest({ ageDays: 8, workflowRunId: runId, workflowRunStepId: stepId });
@@ -317,6 +347,7 @@ describe("approval sweeps", () => {
       await makeRequest({ ageDays: 8 });
 
       await autoCancelStaleApprovalRequests();
+      await waitForSlackPosts(1);
 
       expect(postMessage).toHaveBeenCalledTimes(1);
       expect(postMessage.mock.calls[0]![0]).toMatchObject({ channel: "C1", thread_ts: "111.222" });

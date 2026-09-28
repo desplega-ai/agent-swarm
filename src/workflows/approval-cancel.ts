@@ -2,12 +2,14 @@ import {
   type ApprovalRequest,
   cancelApprovalRequestById,
   getApprovalRequestById,
+  getDbClient,
   getTaskById,
   getWorkflowRun,
+  listCancelledApprovalRequestsForRun,
 } from "../be/db";
 import { can, type RbacPrincipal } from "../rbac";
 import { postApprovalCancellationUpdates } from "./approval-notifications";
-import { cancelWorkflowRun } from "./resume";
+import { cancelWorkflowRunRows } from "./resume";
 
 export type CancelApprovalRequestResult =
   | { ok: true; request: ApprovalRequest; alreadyCancelled: boolean; runCancelled: boolean }
@@ -59,30 +61,61 @@ export async function cancelApprovalRequest(input: {
       authorized = true;
     }
 
-    const cancelled = await cancelApprovalRequestById(input.id, {
+    const result = await cancelApprovalRequestAndRun(input.id, {
       reason: finalReason,
       resolvedBy: input.resolvedBy,
     });
-    if (!cancelled) continue;
-
-    let runCancelled = false;
-    if (cancelled.workflowRunId) {
-      const run = await getWorkflowRun(cancelled.workflowRunId);
-      if (run && LIVE_RUN_STATUSES.has(run.status)) {
-        try {
-          await cancelWorkflowRun(cancelled.workflowRunId, finalReason);
-          runCancelled = true;
-        } catch (err) {
-          console.error(
-            `[approval-cancel] could not cancel workflow run ${cancelled.workflowRunId}: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
-      }
-    }
-
-    await postApprovalCancellationUpdates([cancelled], finalReason);
-    return { ok: true, request: cancelled, alreadyCancelled: false, runCancelled };
+    if (!result) continue;
+    return {
+      ok: true,
+      request: result.request,
+      alreadyCancelled: false,
+      runCancelled: result.runCancelled,
+    };
   }
 
   return { ok: false, status: 409, message: "Approval request changed during cancellation" };
+}
+
+/**
+ * Cancel 1 pending request and its live workflow run in 1 transaction: both
+ * commit, or neither does. The Slack thread updates run after COMMIT.
+ * Returns null when the request was not pending.
+ */
+export async function cancelApprovalRequestAndRun(
+  id: string,
+  data: { reason: string; resolvedBy: string | null; slackReason?: string },
+): Promise<{ request: ApprovalRequest; runCancelled: boolean } | null> {
+  const client = getDbClient();
+  return await client.transaction(async () => {
+    const request = await cancelApprovalRequestById(id, {
+      reason: data.reason,
+      resolvedBy: data.resolvedBy,
+    });
+    if (!request) return null;
+
+    // The request is cancelled first so it keeps this reason; the run cancel
+    // then skips it because it is no longer pending.
+    let runCancelled = false;
+    const runId = request.workflowRunId;
+    if (runId) {
+      const run = await getWorkflowRun(runId);
+      if (run && LIVE_RUN_STATUSES.has(run.status)) {
+        runCancelled = await cancelWorkflowRunRows(runId, data.reason);
+      }
+    }
+
+    const slackReason = data.slackReason ?? data.reason;
+    client.afterCommit(async () => {
+      await postApprovalCancellationUpdates([request], slackReason);
+      if (runCancelled && runId) {
+        // Other requests the run cancel closed get the run's reason.
+        const others = (await listCancelledApprovalRequestsForRun(runId)).filter(
+          (row) => row.id !== request.id,
+        );
+        await postApprovalCancellationUpdates(others, data.reason);
+      }
+    });
+    return { request, runCancelled };
+  });
 }

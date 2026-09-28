@@ -364,30 +364,21 @@ export async function retryFailedRun(runId: string, registry: ExecutorRegistry):
 }
 
 /**
- * Cancel a workflow run and all its non-terminal steps.
- * Also cancels any in-progress tasks spawned by waiting/running steps.
+ * The DB writes of a run cancel, with no Slack post. Returns false when the
+ * run is missing or already terminal. Called inside a caller's transaction,
+ * the writes join it (as a SAVEPOINT) and commit or roll back with it.
  */
-export async function cancelWorkflowRun(runId: string, reason?: string): Promise<void> {
-  const run = await getWorkflowRun(runId);
-  if (!run) throw new Error("Workflow run not found");
-
+export async function cancelWorkflowRunRows(runId: string, cancelReason: string): Promise<boolean> {
   const terminalStatuses = ["completed", "failed", "cancelled", "skipped"];
-  if (terminalStatuses.includes(run.status) && run.status !== "cancelled") {
-    throw new Error(`Cannot cancel run in '${run.status}' state`);
-  }
-
   const now = new Date().toISOString();
-  const cancelReason = reason ?? "Cancelled by user";
-  let applied = false;
 
   // Step snapshot, task cancels, and both status writes commit together so a
   // step created after the snapshot cannot survive the cancel and a
   // concurrent cancel cannot interleave. Task lifecycle events queue behind
   // this transaction's COMMIT (afterCommit) and drop on rollback.
-  await getDbClient().transaction(async () => {
+  return await getDbClient().transaction(async () => {
     const current = await getWorkflowRun(runId);
-    if (!current || terminalStatuses.includes(current.status)) return;
-    applied = true;
+    if (!current || terminalStatuses.includes(current.status)) return false;
 
     // Cancel non-terminal steps and their associated tasks
     const steps = await getWorkflowRunStepsByRunId(runId);
@@ -415,7 +406,25 @@ export async function cancelWorkflowRun(runId: string, reason?: string): Promise
       error: cancelReason,
       finishedAt: now,
     });
+    return true;
   });
+}
+
+/**
+ * Cancel a workflow run and all its non-terminal steps.
+ * Also cancels any in-progress tasks spawned by waiting/running steps.
+ */
+export async function cancelWorkflowRun(runId: string, reason?: string): Promise<void> {
+  const run = await getWorkflowRun(runId);
+  if (!run) throw new Error("Workflow run not found");
+
+  const terminalStatuses = ["completed", "failed", "cancelled", "skipped"];
+  if (terminalStatuses.includes(run.status) && run.status !== "cancelled") {
+    throw new Error(`Cannot cancel run in '${run.status}' state`);
+  }
+
+  const cancelReason = reason ?? "Cancelled by user";
+  const applied = await cancelWorkflowRunRows(runId, cancelReason);
 
   // The migration trigger also catches direct step cancellation. Re-read after
   // commit so its rows are included alongside the run-wide sweep.
