@@ -25,7 +25,7 @@ flowchart TD
 
 - **Reboot sweep liveness predicate** (`runRebootSweep`, boot epoch parsed from `globalThis.__runId` = `run_<epochMs>`), evaluated per `in_progress` task in this order:
   1. **Claimed after boot → skip.** A task with `lastUpdatedAt >= bootEpoch - 5s` is skipped before any session lookup. `claimTask` / `startTask` stamp `lastUpdatedAt` at the `in_progress` transition and the API is the sole DB writer, so a post-boot value proves the claim (or a live worker's write) happened after this process started. It cannot be a pre-boot orphan. This is what keeps a task alive when its worker is still inside a slow provider spawn (opencode cold start exceeds the 5s sweep delay). If the task later goes quiet, the regular stalled-task sweep still covers it.
-  2. **Session live → skip.** A session is considered "live, skip" only if `lastHeartbeatAt >= bootEpoch - 5s`. Sessions with pre-boot heartbeats are stale artifacts that survived the WAL-mode SQLite restart and are treated as absent → auto-fail + retry child. This is **concurrency-safe**: a worker with N concurrent tasks keeps fresh (post-boot) heartbeats on its live sessions; only genuinely stale ones get classified.
+  2. **Session live → skip.** A session is "live, skip" if `lastHeartbeatAt >= bootEpoch - 5s`, **or** if its heartbeat is younger than `STALL_THRESHOLD_STALE_HEARTBEAT_MIN` (15 min). Workers run in their own containers and outlive an API restart, and sessions heartbeat on tool calls only, so a live worker inside a long model call has no post-boot heartbeat in the first 5s. Only a session stale by the classifier's own threshold is treated as dead → auto-fail + retry child; fresher ones are left to the stalled-task sweep.
   3. If `__runId` is missing/unparseable, both checks fall back to the legacy behavior (session exists → skip, no claim-time check). Never more aggressive than before.
 - **Worker side** (`src/commands/runner.ts`): the worker registers its active session (POST `/api/active-sessions`, keyed on the per-task runner session id) *before* it starts the provider spawn, and fills in the provider session id on `session_init`. So the window in which an `in_progress` task has no session row is one HTTP round trip, not the whole spawn. On spawn failure the worker fails the task and then removes the row.
 - The **boot-triage seed script** (`src/be/seed-scripts/catalog/boot-triage.ts`) mirrors this logic: it flags `in_progress` tasks that are on an offline agent OR whose session's `lastHeartbeatAt` is older than `stuckMinutes` ago (no fresh session heartbeat).
@@ -312,6 +312,7 @@ bootEpoch = parse(globalThis.__runId)                        # run_<epochMs>; nu
 if bootEpoch and task.lastUpdatedAt >= bootEpoch - 5s: skip   # claimed after boot: not an orphan
 session = getActiveSessionForTask(task.id)
 if session and (bootEpoch is null or session.lastHeartbeatAt >= bootEpoch - 5s): skip
+if session and now - session.lastHeartbeatAt < STALL_THRESHOLD_STALE_HEARTBEAT_MIN: skip
 failTask(task.id)                                             # then create the retry child below
 
 # reboot-sweep retry child (on each auto-failed in_progress task):

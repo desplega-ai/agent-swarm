@@ -1083,13 +1083,13 @@ describe("Heartbeat Triage", () => {
           task.id,
         ]);
 
-        // Session with pre-boot heartbeat (stale)
+        // Session with pre-boot heartbeat, stale past the 15 min threshold
         await insertActiveSession({
           agentId: agent.id,
           taskId: task.id,
           triggerType: "task_assigned",
         });
-        const preBootHb = new Date(bootTime - 30_000).toISOString();
+        const preBootHb = new Date(bootTime - 20 * 60_000).toISOString();
         await getDbClient().run("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?", [
           preBootHb,
           task.id,
@@ -1189,7 +1189,7 @@ describe("Heartbeat Triage", () => {
           taskId: staleTask.id,
           triggerType: "task_assigned",
         });
-        const preBootHb = new Date(bootTime - 30_000).toISOString();
+        const preBootHb = new Date(bootTime - 20 * 60_000).toISOString();
         await getDbClient().run("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?", [
           preBootHb,
           staleTask.id,

@@ -737,7 +737,16 @@ export async function runRebootSweep(): Promise<void> {
           // Heartbeated after (or within skew of) this boot → genuinely live, skip
           continue;
         }
-        // Pre-boot stale session → fall through to auto-fail + reboot-retry child
+        // Workers run in their own containers and outlive an API restart, and
+        // sessions heartbeat on tool calls only. A pre-boot heartbeat is
+        // therefore not evidence of a dead worker: a live one inside a long
+        // model call has none in the first seconds after boot. Only a session
+        // stale by the classifier's own threshold counts as dead; anything
+        // fresher is left to the regular stalled-task sweep.
+        if (Date.now() - sessionLastSeen < stallThresholdStaleHeartbeatMin() * 60 * 1000) {
+          continue;
+        }
+        // Stale session → fall through to auto-fail + reboot-retry child
       }
 
       // Clean up pre-boot stale session before failing (if it existed)
