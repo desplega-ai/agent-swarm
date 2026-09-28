@@ -42,6 +42,19 @@ export function Ticker({ value, className }: { value: number; className?: string
 /** The reason the dashboard stores on a request a human discards. */
 export const DISCARD_REASON = "Discarded from the dashboard";
 
+export const DISCARD_DIALOG_TITLE = "Discard this request?";
+
+/** The confirmation text; names the workflow run the discard also cancels. */
+export function discardDialogLines(request: Pick<ApprovalRequest, "workflowRunId">): string[] {
+  const lines = ["The request becomes cancelled. The agent gets no answer."];
+  if (request.workflowRunId) {
+    lines.push(
+      `This request gates workflow run ${request.workflowRunId}. Discard cancels that run too.`,
+    );
+  }
+  return lines;
+}
+
 /**
  * Secondary action that cancels a pending request after a confirmation.
  * The API and the status keep the word `cancelled`; the button says Discard.
@@ -76,16 +89,11 @@ export function DiscardButton({
       </Button>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Discard this request?</AlertDialogTitle>
-          <AlertDialogDescription>
-            The request becomes cancelled. The agent gets no answer.
-            {request.workflowRunId ? (
-              <>
-                <br />
-                This request gates workflow run {request.workflowRunId}. Discard cancels that run
-                too.
-              </>
-            ) : null}
+          <AlertDialogTitle>{DISCARD_DIALOG_TITLE}</AlertDialogTitle>
+          <AlertDialogDescription className="flex flex-col gap-1">
+            {discardDialogLines(request).map((line) => (
+              <span key={line}>{line}</span>
+            ))}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
