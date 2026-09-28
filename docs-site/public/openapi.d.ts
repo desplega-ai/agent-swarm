@@ -17845,7 +17845,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Not assigned to this agent */
+                /** @description Not assigned to this agent, or the current attempt runs in another runtime (attempt fence) */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -17971,7 +17971,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Task belongs to another agent */
+                /** @description Task belongs to another agent, or its current attempt runs in another runtime */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -18124,7 +18124,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Task belongs to another agent */
+                /** @description Task belongs to another agent, or its current attempt runs in another runtime */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -21845,6 +21845,7 @@ export interface components {
             routingAffinity?: components["schemas"]["RoutingAffinity"];
             routingAffinityInvalid?: boolean;
             attempt?: number;
+            attemptRuntimeId?: string;
         };
         FollowUpConfig: {
             disabled?: boolean;

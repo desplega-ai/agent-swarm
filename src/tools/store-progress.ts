@@ -21,6 +21,7 @@ import {
   upsertTaskCitations,
 } from "@/be/task-citations";
 import { AgentFsProvider } from "@/fs/agent-fs-provider";
+import { staleAttemptWriteReason } from "@/tasks/attempt-fence";
 import { runTaskTerminalEffects } from "@/tasks/task-terminal-effects";
 import {
   getTaskOutputValidationError,
@@ -315,20 +316,16 @@ export const registerStoreProgressTool = (server: McpServer) => {
           };
         }
 
-        // Reclaim fence (specs/tla/heartbeat/HeartbeatSimple.tla `Fenced`): once
-        // the heartbeat reclaimed a row, a worker may write it only while the
-        // row is in_progress on that worker. Anything else is the stale attempt
-        // the heartbeat took the row away from; it must stop, not write.
-        if (
-          (existingTask.attempt ?? 0) > 0 &&
-          !agent.isLead &&
-          !isTerminalTaskStatus(existingTask.status) &&
-          (existingTask.status !== "in_progress" || existingTask.agentId !== agent.id)
-        ) {
-          return {
-            success: false,
-            message: `Task ${taskId} was reclaimed by the heartbeat (attempt ${existingTask.attempt}, now ${existingTask.status}) and is no longer yours to write. Stop working on it; it will be re-run.`,
-          };
+        // Attempt fence (src/tasks/attempt-fence.ts): a write from the attempt
+        // the heartbeat reclaimed the row from is rejected here, inside the
+        // same transaction as the write below.
+        const staleAttempt = staleAttemptWriteReason(existingTask, {
+          agentId: agent.id,
+          isLead: agent.isLead,
+          runtimeInstanceId: requestInfo.runtimeInstanceId,
+        });
+        if (staleAttempt) {
+          return { success: false, message: staleAttempt };
         }
 
         let updatedTask = existingTask;

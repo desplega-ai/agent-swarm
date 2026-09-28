@@ -684,6 +684,10 @@ export const AgentTaskSchema = z
     // Times the heartbeat reclaimed this row (in_progress -> pending in place).
     // 0 = never reclaimed. See `reclaimTask` in src/be/db/tasks/write.ts.
     attempt: z.number().int().nonnegative().optional(),
+    // Runtime instance that started the current attempt (the attempt fence,
+    // `src/tasks/attempt-fence.ts`). Unset when the starter sent no
+    // X-Runtime-Instance-ID.
+    attemptRuntimeId: z.string().optional(),
   })
   .openapi("AgentTask");
 

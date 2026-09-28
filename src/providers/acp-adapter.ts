@@ -14,6 +14,7 @@ import pkg from "../../package.json";
 import type { AcpSessionConfigOption } from "../types";
 import { mintAcpSessionToken, revokeAcpSessionToken } from "../utils/acp-session-token";
 import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
+import { swarmRuntimeInstanceId } from "../utils/multi-runtime";
 import {
   detachedProcessGroup,
   registerProcessGroup,
@@ -414,6 +415,7 @@ export class ACPAdapter implements ProviderAdapter {
       // (mcp/connect, mcp/message, mcp/disconnect) instead of a network hop -- the
       // shape for an ACP agent with no network route to the swarm API. Gated on
       // `mcpCapabilities.acp` and UNSTABLE; not adopted here.
+      const runtimeInstanceId = swarmRuntimeInstanceId();
       const newSession = await connection.newSession({
         cwd: config.cwd,
         mcpServers: [
@@ -425,6 +427,11 @@ export class ACPAdapter implements ProviderAdapter {
               { name: "Authorization", value: `Bearer ${ephemeralToken.plaintext}` },
               { name: "X-Agent-ID", value: config.agentId },
               { name: "X-Source-Task-Id", value: config.taskId },
+              // Attempt fence: the server rejects writes from a runtime that
+              // no longer holds the task's current attempt.
+              ...(runtimeInstanceId
+                ? [{ name: "X-Runtime-Instance-ID", value: runtimeInstanceId }]
+                : []),
             ],
           },
           ...toAcpMcpServers(installedServers),

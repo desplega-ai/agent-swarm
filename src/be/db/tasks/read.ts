@@ -116,6 +116,7 @@ export type AgentTaskRow = {
   totalCostUsd?: number | null;
   routingAffinity: string | null;
   attempt?: number | null;
+  attemptRuntimeId?: string | null;
 };
 
 export function rowToAgentTask(row: AgentTaskRow): AgentTask {
@@ -243,6 +244,7 @@ export function rowToAgentTask(row: AgentTaskRow): AgentTask {
     routingAffinity,
     routingAffinityInvalid: routingAffinityInvalid || undefined,
     attempt: row.attempt ?? 0,
+    attemptRuntimeId: row.attemptRuntimeId ?? undefined,
   };
 }
 

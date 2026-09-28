@@ -230,7 +230,16 @@ export async function assignUnassignedTaskPending(
   return row ? rowToAgentTask(row) : null;
 }
 
-export async function startTask(taskId: string): Promise<AgentTask | null> {
+/**
+ * Starts an attempt. `runtimeInstanceId` is the runtime that will execute it;
+ * it is stamped as `attemptRuntimeId` (the attempt fence, see
+ * `src/tasks/attempt-fence.ts`). Omit it when the caller sent none: the stamp
+ * is then cleared, never left pointing at an earlier attempt's runtime.
+ */
+export async function startTask(
+  taskId: string,
+  opts: { runtimeInstanceId?: string | null } = {},
+): Promise<AgentTask | null> {
   const oldTask = await getTaskById(taskId);
   if (!oldTask) return null;
 
@@ -240,9 +249,9 @@ export async function startTask(taskId: string): Promise<AgentTask | null> {
   }
 
   const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET status = 'in_progress', lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    `UPDATE agent_tasks SET status = 'in_progress', attemptRuntimeId = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded') RETURNING *`,
-    [taskId],
+    [opts.runtimeInstanceId ?? null, taskId],
   );
   if (row && oldTask) {
     try {
@@ -846,7 +855,10 @@ export async function pauseTask(id: string): Promise<AgentTask | null> {
  * Resume a paused task - transitions it back to in_progress.
  * Called when worker restarts and picks up paused work.
  */
-export async function resumeTask(taskId: string): Promise<AgentTask | null> {
+export async function resumeTask(
+  taskId: string,
+  opts: { runtimeInstanceId?: string | null } = {},
+): Promise<AgentTask | null> {
   const oldTask = await getTaskById(taskId);
   if (!oldTask || oldTask.status !== "paused") return null;
 
@@ -854,10 +866,11 @@ export async function resumeTask(taskId: string): Promise<AgentTask | null> {
     `UPDATE agent_tasks
        SET status = 'in_progress',
            was_paused = 1,
+           attemptRuntimeId = ?,
            lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ? AND status = 'paused'
        RETURNING *`,
-    [taskId],
+    [opts.runtimeInstanceId ?? null, taskId],
   );
 
   if (row && oldTask) {

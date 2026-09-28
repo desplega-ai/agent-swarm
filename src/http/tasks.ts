@@ -43,6 +43,7 @@ import {
 import { getTaskCitations, TaskCitationSchema } from "../be/task-citations";
 import { findUserById } from "../be/users";
 import { can, type RbacPrincipal, type RbacResource } from "../rbac";
+import { headerRuntimeInstanceId, staleAttemptWriteReason } from "../tasks/attempt-fence";
 import { TaskCreationBlockedError } from "../tasks/errors";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { guardTerminalTaskResultWrite } from "../tasks/terminal-result-guard";
@@ -520,7 +521,10 @@ const finishTask = route({
   responses: {
     200: { description: "Task finished", schema: FinishTaskSuccessSchema },
     400: { description: "Invalid status" },
-    403: { description: "Not assigned to this agent" },
+    403: {
+      description:
+        "Not assigned to this agent, or the current attempt runs in another runtime (attempt fence)",
+    },
     404: { description: "Task not found" },
     409: {
       description: "Differing terminal result text was discarded",
@@ -556,7 +560,9 @@ const pauseTaskRoute = route({
   responses: {
     200: { description: "Task paused", schema: TaskActionResultSchema },
     400: { description: "Task not in_progress" },
-    403: { description: "Task belongs to another agent" },
+    403: {
+      description: "Task belongs to another agent, or its current attempt runs in another runtime",
+    },
     404: { description: "Task not found" },
   },
 });
@@ -593,7 +599,9 @@ const supersedeTaskRoute = route({
       schema: SupersedeTaskResponseSchema,
     },
     400: { description: "Task not in_progress" },
-    403: { description: "Task belongs to another agent" },
+    403: {
+      description: "Task belongs to another agent, or its current attempt runs in another runtime",
+    },
     404: { description: "Task not found" },
   },
 });
@@ -1400,6 +1408,16 @@ export async function handleTasks(
           return { success: true, task, alreadyFinished: true };
         }
 
+        // Attempt fence (src/tasks/attempt-fence.ts): the runner of an attempt
+        // the heartbeat reclaimed must not finish the replacement attempt.
+        if (myAgentId) {
+          const staleAttempt = staleAttemptWriteReason(task, {
+            agentId: myAgentId,
+            runtimeInstanceId: headerRuntimeInstanceId(req),
+          });
+          if (staleAttempt) return { error: staleAttempt, status: 403 };
+        }
+
         const wasPaused = task.wasPaused;
 
         let updatedTask: typeof task;
@@ -1532,6 +1550,19 @@ export async function handleTasks(
       return true;
     }
 
+    // Attempt fence (src/tasks/attempt-fence.ts): a runner shutting down with
+    // an attempt the heartbeat reclaimed must not pause the replacement.
+    if (myAgentId) {
+      const staleAttempt = staleAttemptWriteReason(task, {
+        agentId: myAgentId,
+        runtimeInstanceId: headerRuntimeInstanceId(req),
+      });
+      if (staleAttempt) {
+        jsonError(res, staleAttempt, 403);
+        return true;
+      }
+    }
+
     const pausedTask = await pauseTask(parsed.params.id);
     if (!pausedTask) {
       jsonError(res, "Failed to pause task", 500);
@@ -1602,7 +1633,9 @@ export async function handleTasks(
       return true;
     }
 
-    const resumedTask = await resumeTask(parsed.params.id);
+    const resumedTask = await resumeTask(parsed.params.id, {
+      runtimeInstanceId: headerRuntimeInstanceId(req),
+    });
     if (!resumedTask) {
       jsonError(res, "Failed to resume task", 500);
       return true;
@@ -1661,6 +1694,19 @@ export async function handleTasks(
       return true;
     }
 
+    // Attempt fence (src/tasks/attempt-fence.ts): a runner shutting down with
+    // an attempt the heartbeat reclaimed must not supersede the replacement.
+    if (myAgentId) {
+      const staleAttempt = staleAttemptWriteReason(task, {
+        agentId: myAgentId,
+        runtimeInstanceId: headerRuntimeInstanceId(req),
+      });
+      if (staleAttempt) {
+        jsonError(res, staleAttempt, 403);
+        return true;
+      }
+    }
+
     // Workflow-step tasks: fail back to the engine instead of superseding.
     // Check this BEFORE the supersede UPDATE so we don't leave a workflow
     // step in `superseded` if the engine expects `failed`.
@@ -1686,16 +1732,37 @@ export async function handleTasks(
       return true;
     }
 
-    // Supersede FIRST (atomic + idempotent in db.ts) so we don't orphan a
-    // resume child if a worker races to complete/fail/cancel between the
-    // pre-read status check and the supersede UPDATE.
-    const superseded = await supersedeTask(parsed.params.id, {
-      reason: parsed.body.reason,
-      // resumeTaskId is attached AFTER the child is created. Lost race here
-      // means no child is created at all, so the log entry's null is accurate.
-      resumeTaskId: null,
+    // Supersede, resume child and backfill commit together or not at all. A
+    // crash between separate writes would leave a `superseded` row with no
+    // continuation, and the heartbeat no longer sweeps for those. A throw
+    // rolls the supersede back: the task stays in_progress and the heartbeat
+    // reclaims it like any other stall.
+    const outcome = await getDbClient().transaction(async () => {
+      // Supersede FIRST (atomic + idempotent in db.ts) so we don't create a
+      // resume child if a worker raced to complete/fail/cancel between the
+      // pre-read status check and the supersede UPDATE.
+      const superseded = await supersedeTask(parsed.params.id, {
+        reason: parsed.body.reason,
+        // resumeTaskId is attached AFTER the child is created.
+        resumeTaskId: null,
+      });
+      if (!superseded) return { kind: "lost" as const };
+
+      const followUp = await createResumeFollowUp({
+        parentId: parsed.params.id,
+        reason: parsed.body.reason,
+      });
+      // `workflow-skip` is unreachable here (workflow-step path branched
+      // above). `skipped` covers parent_not_found / lead_not_found: no agent
+      // can take a resume, so the supersede still lands without one.
+      if (followUp.kind !== "created") {
+        return { kind: "skipped" as const, superseded, followUp };
+      }
+      await backfillSupersedeTaskResumeTaskId(parsed.params.id, followUp.task.id);
+      return { kind: "created" as const, superseded, resumeTask: followUp.task };
     });
-    if (!superseded) {
+
+    if (outcome.kind === "lost") {
       // Worker won the race (terminal transition between status check and
       // this UPDATE). Treat as `alreadyFinished` — no resume child is created.
       const fresh = await getTaskById(parsed.params.id);
@@ -1708,33 +1775,22 @@ export async function handleTasks(
       return true;
     }
 
-    // Parent is now superseded. Create the resume child.
-    const followUp = await createResumeFollowUp({
-      parentId: parsed.params.id,
-      reason: parsed.body.reason,
-    });
-
-    // `workflow-skip` is unreachable here (workflow-step path branched above).
-    // `skipped` covers parent_not_found / lead_not_found edge cases — the
-    // supersede already landed, so log + roll forward without a resume task.
-    if (followUp.kind !== "created") {
+    if (outcome.kind === "skipped") {
       console.warn(
         `[Supersede] Task ${parsed.params.id.slice(0, 8)} superseded but resume creation skipped (${
-          followUp.kind === "skipped" ? followUp.reason : followUp.kind
+          outcome.followUp.kind === "skipped" ? outcome.followUp.reason : outcome.followUp.kind
         })`,
       );
       supersedeTaskRoute.respond(res, 200, {
         success: true,
         kind: "resumed",
-        task: superseded,
+        task: outcome.superseded,
         resumeTaskId: null,
       });
       return true;
     }
 
-    const resumeTaskId = followUp.task.id;
-    await backfillSupersedeTaskResumeTaskId(parsed.params.id, resumeTaskId);
-
+    const resumeTaskId = outcome.resumeTask.id;
     ensure({
       id: "task.superseded",
       flow: "task",
@@ -1750,9 +1806,9 @@ export async function handleTasks(
     supersedeTaskRoute.respond(res, 200, {
       success: true,
       kind: "resumed",
-      task: superseded,
+      task: outcome.superseded,
       resumeTaskId,
-      resumeTaskStatus: followUp.task.status,
+      resumeTaskStatus: outcome.resumeTask.status,
     });
     return true;
   }

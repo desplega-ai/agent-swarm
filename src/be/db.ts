@@ -2845,7 +2845,11 @@ export async function createTaskExtended(
   return rowToAgentTask(row);
 }
 
-export async function claimTask(taskId: string, agentId: string): Promise<AgentTask | null> {
+export async function claimTask(
+  taskId: string,
+  agentId: string,
+  opts: { runtimeInstanceId?: string | null } = {},
+): Promise<AgentTask | null> {
   // Static per (agent, task), so this pre-check does not reopen the atomic
   // claim race. It always applies to lead-only authorization.
   {
@@ -2875,9 +2879,9 @@ export async function claimTask(taskId: string, agentId: string): Promise<AgentT
   // already working on the task (prevents duplicate task_assigned triggers).
   const now = new Date().toISOString();
   const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET agentId = ?, status = 'in_progress', lastUpdatedAt = ?
+    `UPDATE agent_tasks SET agentId = ?, status = 'in_progress', attemptRuntimeId = ?, lastUpdatedAt = ?
        WHERE id = ? AND status = 'unassigned' RETURNING *`,
-    [agentId, now, taskId],
+    [agentId, opts.runtimeInstanceId ?? null, now, taskId],
   );
 
   if (row) {
@@ -6997,8 +7001,29 @@ export async function insertActiveSession(session: {
   return row;
 }
 
-export async function deleteActiveSession(taskId: string): Promise<boolean> {
-  const result = await getDbClient().run("DELETE FROM active_sessions WHERE taskId = ?", [taskId]);
+/**
+ * Delete a task's active session. `owner` scopes the delete to the session a
+ * given agent (and, when known, runtime) registered: a runner cleaning up an
+ * attempt the heartbeat reclaimed must not remove the replacement attempt's
+ * session. Omit `owner` for server-side deletes (the heartbeat).
+ */
+export async function deleteActiveSession(
+  taskId: string,
+  owner?: { agentId: string; runtimeInstanceId?: string | null },
+): Promise<boolean> {
+  if (!owner) {
+    const result = await getDbClient().run("DELETE FROM active_sessions WHERE taskId = ?", [
+      taskId,
+    ]);
+    return result.changes > 0;
+  }
+  const runtime = owner.runtimeInstanceId ?? null;
+  const result = await getDbClient().run(
+    `DELETE FROM active_sessions
+       WHERE taskId = ? AND agentId = ?
+         AND (? IS NULL OR runtimeInstanceId IS NULL OR runtimeInstanceId = ?)`,
+    [taskId, owner.agentId, runtime, runtime],
+  );
   return result.changes > 0;
 }
 

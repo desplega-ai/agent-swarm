@@ -1603,6 +1603,11 @@ export async function ensureTaskFinished(
   if (config.apiKey) {
     headers.Authorization = `Bearer ${config.apiKey}`;
   }
+  // Attempt fence: the server refuses to let this runner finish an attempt
+  // another runtime started after the heartbeat reclaimed the task.
+  if (config.runtimeInstanceId) {
+    headers["X-Runtime-Instance-ID"] = config.runtimeInstanceId;
+  }
 
   // Determine status and reason based on exit code
   // Exit code 0 = success, non-zero = failure
@@ -1993,6 +1998,10 @@ async function supersedeTaskViaAPI(
   if (config.apiKey) {
     headers.Authorization = `Bearer ${config.apiKey}`;
   }
+  // Attempt fence: refused when another runtime holds the current attempt.
+  if (config.runtimeInstanceId) {
+    headers["X-Runtime-Instance-ID"] = config.runtimeInstanceId;
+  }
 
   try {
     const response = await fetch(`${config.apiUrl}/api/tasks/${taskId}/supersede`, {
@@ -2062,6 +2071,10 @@ async function pauseTaskViaAPI(config: ApiConfig, role: string, taskId: string):
   };
   if (config.apiKey) {
     headers.Authorization = `Bearer ${config.apiKey}`;
+  }
+  // Attempt fence: refused when another runtime holds the current attempt.
+  if (config.runtimeInstanceId) {
+    headers["X-Runtime-Instance-ID"] = config.runtimeInstanceId;
   }
 
   try {
@@ -2157,6 +2170,10 @@ async function resumeTaskViaAPI(config: ApiConfig, taskId: string): Promise<bool
   };
   if (config.apiKey) {
     headers.Authorization = `Bearer ${config.apiKey}`;
+  }
+  // Stamps this runtime as the one running the resumed attempt.
+  if (config.runtimeInstanceId) {
+    headers["X-Runtime-Instance-ID"] = config.runtimeInstanceId;
   }
 
   try {
@@ -2769,10 +2786,15 @@ async function registerActiveSession(
   }
 }
 
-/** Remove an active session by taskId (fire-and-forget) */
+/**
+ * Remove this runtime's active session for a task (fire-and-forget). The
+ * server deletes only the row this agent + runtime registered, so a late
+ * cleanup never removes the session of a replacement attempt.
+ */
 async function removeActiveSession(config: ApiConfig, taskId: string): Promise<void> {
   const headers: Record<string, string> = { "X-Agent-ID": config.agentId };
   if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`;
+  if (config.runtimeInstanceId) headers["X-Runtime-Instance-ID"] = config.runtimeInstanceId;
   try {
     await fetch(`${config.apiUrl}/api/active-sessions/by-task/${taskId}`, {
       method: "DELETE",

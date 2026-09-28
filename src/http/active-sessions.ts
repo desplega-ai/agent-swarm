@@ -11,6 +11,7 @@ import {
   resetOrphanedInProgressTasksForAgent,
   updateActiveSessionProviderSessionId,
 } from "../be/db";
+import { headerRuntimeInstanceId } from "../tasks/attempt-fence";
 import { ActiveSessionSchema, AgentTaskSchema } from "../types";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
 import { route } from "./route-def";
@@ -177,7 +178,15 @@ export async function handleActiveSessions(
   if (deleteSessionByTask.match(req.method, pathSegments)) {
     const parsed = await deleteSessionByTask.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const deleted = await deleteActiveSession(parsed.params.taskId);
+    // A worker deletes only its own session (src/tasks/attempt-fence.ts): its
+    // cleanup can land after the heartbeat reclaimed the task and another
+    // attempt registered a session for the same task id.
+    const deleted = await deleteActiveSession(
+      parsed.params.taskId,
+      myAgentId
+        ? { agentId: myAgentId, runtimeInstanceId: headerRuntimeInstanceId(req) }
+        : undefined,
+    );
     deleteSessionByTask.respond(res, 200, { deleted });
     return true;
   }
