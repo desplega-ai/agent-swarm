@@ -3,9 +3,11 @@ import { getDb, initDb, resetDbForTests } from "../db/client.ts";
 import {
   getCatalog,
   loadCatalogFromDb,
+  MAX_CATALOG_BYTES,
   type ModelsDevCatalog,
   refreshCatalog,
   resetCatalogForTests,
+  sanitizeCatalog,
 } from "./catalog.ts";
 import { getClaudeAliasMap, listOpenrouterModels, lookupModelCost } from "./pricing.ts";
 
@@ -112,6 +114,33 @@ describe("model catalog", () => {
     });
     expect(r.status).toBe("error");
     expect((await getCatalog()).source).toBe("snapshot");
+  });
+
+  test("an oversized payload is rejected before parsing", async () => {
+    const r = await refreshCatalog({
+      db: getDb(),
+      fetchImpl: fakeFetch([
+        () =>
+          new Response("{}", {
+            headers: { "content-length": String(MAX_CATALOG_BYTES + 1) },
+          }),
+      ]),
+    });
+    expect(r.status).toBe("error");
+    expect((await getCatalog()).source).toBe("snapshot");
+  });
+
+  test("sanitizing drops unknown fields and malformed entries", () => {
+    const section = (models: unknown) => ({ id: "x", name: "X", extra: "drop", models });
+    const good = { name: "M", cost: { input: 1, output: -5, evil: 9 }, junk: { a: 1 } };
+    const out = sanitizeCatalog({
+      anthropic: section({ a: good, bad: "not-an-object" }),
+      openai: section({ o: good }),
+      openrouter: section({ r: good }),
+      rogue: section({ z: good }),
+    });
+    expect(Object.keys(out ?? {}).sort()).toEqual(["anthropic", "openai", "openrouter"]);
+    expect(out?.anthropic?.models).toEqual({ a: { name: "M", cost: { input: 1 } } });
   });
 
   test("revalidates with the stored ETag and handles 304", async () => {
