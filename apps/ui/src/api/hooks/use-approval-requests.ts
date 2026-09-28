@@ -44,3 +44,15 @@ export function useRespondToApprovalRequest() {
     },
   });
 }
+
+export function useCancelApprovalRequest() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason?: string }) =>
+      api.cancelApprovalRequest(id, reason),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["approval-requests"] });
+      queryClient.invalidateQueries({ queryKey: ["approval-request"] });
+    },
+  });
+}

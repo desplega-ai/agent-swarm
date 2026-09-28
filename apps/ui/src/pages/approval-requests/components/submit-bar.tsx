@@ -1,5 +1,17 @@
-import { Loader2, Send } from "lucide-react";
+import { Loader2, Send, Trash2 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
+import { useState } from "react";
+import type { ApprovalRequest } from "@/api/types";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { AnswerProgress } from "@/lib/approval-format";
@@ -27,6 +39,66 @@ export function Ticker({ value, className }: { value: number; className?: string
   );
 }
 
+/** The reason the dashboard stores on a request a human discards. */
+export const DISCARD_REASON = "Discarded from the dashboard";
+
+/**
+ * Secondary action that cancels a pending request after a confirmation.
+ * The API and the status keep the word `cancelled`; the button says Discard.
+ */
+export function DiscardButton({
+  request,
+  disabled,
+  discarding,
+  onDiscard,
+}: {
+  request: Pick<ApprovalRequest, "status" | "workflowRunId">;
+  disabled: boolean;
+  discarding: boolean;
+  onDiscard: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  if (request.status !== "pending") return null;
+  const busy = disabled || discarding;
+  return (
+    <AlertDialog open={open} onOpenChange={setOpen}>
+      <Button
+        variant="outline"
+        onClick={busy ? undefined : () => setOpen(true)}
+        aria-disabled={busy ? true : undefined}
+        className={cn(
+          "h-11 shrink-0 gap-2 px-4 sm:h-9",
+          "aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:active:scale-100",
+        )}
+      >
+        {discarding ? <Loader2 className="animate-spin" /> : <Trash2 />}
+        Discard
+      </Button>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Discard this request?</AlertDialogTitle>
+          <AlertDialogDescription>
+            The request becomes cancelled. The agent gets no answer.
+            {request.workflowRunId ? (
+              <>
+                <br />
+                This request gates workflow run {request.workflowRunId}. Discard cancels that run
+                too.
+              </>
+            ) : null}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Keep</AlertDialogCancel>
+          <AlertDialogAction variant="destructive" onClick={onDiscard}>
+            Discard
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
 /**
  * Bottom bar: live progress, why Submit is blocked, and Submit
  * (⌘/Ctrl+Enter). Fixed to the viewport on phones (above the iOS home
@@ -34,15 +106,21 @@ export function Ticker({ value, className }: { value: number; className?: string
  * A submission that rejects says so on the button.
  */
 export function SubmitBar({
+  request,
   progress,
   submitting,
+  discarding,
   error,
   onSubmit,
+  onDiscard,
 }: {
+  request: Pick<ApprovalRequest, "status" | "workflowRunId">;
   progress: AnswerProgress;
   submitting: boolean;
+  discarding: boolean;
   error: string | null;
   onSubmit: () => void;
+  onDiscard: () => void;
 }) {
   const blocked = progress.blockedReason;
   const pct = progress.total ? (progress.answered / progress.total) * 100 : 0;
@@ -89,11 +167,17 @@ export function SubmitBar({
                 (progress.rejects ? "Submitting rejects the request" : "Ready to submit")}
             </span>
           </div>
+          <DiscardButton
+            request={request}
+            disabled={submitting}
+            discarding={discarding}
+            onDiscard={onDiscard}
+          />
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
-                onClick={blocked || submitting ? undefined : onSubmit}
-                aria-disabled={blocked || submitting ? true : undefined}
+                onClick={blocked || submitting || discarding ? undefined : onSubmit}
+                aria-disabled={blocked || submitting || discarding ? true : undefined}
                 aria-keyshortcuts="Control+Enter Meta+Enter"
                 variant={progress.rejects ? "destructive" : "default"}
                 className={cn(

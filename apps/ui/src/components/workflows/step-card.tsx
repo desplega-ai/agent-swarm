@@ -303,11 +303,11 @@ function AgentTaskOutput({ step }: { step: WorkflowRunStep }) {
   );
 }
 
-function HitlOutput({ step, node }: { step: WorkflowRunStep; node?: WorkflowNode }) {
+export function HitlOutput({ step, node }: { step: WorkflowRunStep; node?: WorkflowNode }) {
   const output = step.output as
     | {
         requestId: string;
-        status: "approved" | "rejected" | "timeout";
+        status: "approved" | "rejected" | "timeout" | "cancelled";
         responses: Record<string, unknown> | null;
       }
     | null
@@ -347,13 +347,17 @@ function HitlOutput({ step, node }: { step: WorkflowRunStep; node?: WorkflowNode
       ? "border-status-success/30 text-status-success-strong"
       : output.status === "rejected"
         ? "border-status-error/30 text-status-error-strong"
-        : "border-status-active/30 text-status-active-strong";
+        : output.status === "cancelled"
+          ? "border-border text-muted-foreground"
+          : "border-status-active/30 text-status-active-strong";
   const statusLabel =
     output.status === "approved"
       ? "Approved"
       : output.status === "rejected"
         ? "Rejected"
-        : "Timed out";
+        : output.status === "cancelled"
+          ? "Cancelled"
+          : "Timed out";
 
   return (
     <div className="space-y-2">
