@@ -55,16 +55,16 @@ All nodes are non-loop, so every node has one logical iteration.
 | `P7` | `checkpointStepFailure` `retry-poller.ts:124-130` | blind step write |
 | `P10` | `checkpoint.ts:67-74` retries exhausted | blind `run -> failed` |
 | `P8` | `checkpointStepWaiting` `retry-poller.ts:138` | CAS (as `XCkWait`) |
-| `PRel` | end of one row (loop continues) | — |
+| `PRel` | end of one row (loop continues) | F4: releases the `holdWorkflowRun` taken before `P3` (`retry-poller.ts:57`, `finally` `:218`) |
 
 ## Heartbeat `recoverIncompleteRuns` (`src/workflows/recovery.ts`)
 
 | Action | Code | Guard |
 |---|---|---|
-| `H1` | `getRunIdsByStatus('running')` `recovery.ts:64`, `isWorkflowRunActive` `:69` | `GuardActiveWalk` (bf12ab53 / #1584) |
-| `H2` | re-read run `:70`, completed steps, routing, `findReadyNodes` `:86` | `findReadyNodes` excludes only nodes with a **completed** step |
-| `H3` | second `isWorkflowRunActive` `:88`, then complete or `walkGraph` | `GuardActiveWalk` |
-| `H4` | `recovery.ts:89-95` `readyNodes.length === 0` | blind `run -> completed`, no transaction |
+| `H1` | `getRunIdsByStatus('running')` `recovery.ts:66`, `isWorkflowRunActive` `:71` | `GuardActiveWalk` (bf12ab53 / #1584) |
+| `H2` | re-read run `:72`, completed steps, routing, `findReadyNodes` `:91` | `findReadyNodes` excludes only nodes with a **completed** step. F4: also drops nodes with a retry-pending row (`recovery.ts:88-93`) |
+| `H3` | second `isWorkflowRunActive` `:95`, then complete or `walkGraph` | `GuardActiveWalk` |
+| `H4` | `recovery.ts:96-99` `readyNodes.length === 0` | blind `run -> completed`, no transaction. F4: `completeIfSettled` `recovery.ts:136-156`, one transaction, only while `running` with no retry-pending row and no live latest row |
 | `H5` | `getStuckWorkflowRuns` (waiting steps whose task is terminal) | `run.status = 'waiting'` |
 | `H6` | per stuck row, re-read run | `run.status = 'waiting'` |
 | `H7` | `failStepAndRunIfWaiting` `task-step-routing.ts:24-45` | CAS on `step.status='waiting'` |

@@ -396,8 +396,9 @@ P8 ==
   /\ SetT(TPoll, [thr[TPoll] EXCEPT !.pc = "pRel"])
   /\ UNCHANGED <<active, execLive, okCount, hbLeft, crashes>>
 
-\* End of one poller row. F4: the poller holds activeWalks for the row it
-\* executes, so recovery's existing isWorkflowRunActive guard covers it.
+\* End of one poller row. F4 retry-poller.ts:57, :218: the poller holds
+\* activeWalks (holdWorkflowRun) for the row it executes, so recovery's
+\* existing isWorkflowRunActive guard covers it.
 PRel ==
   /\ thr[TPoll].pc = "pRel"
   /\ active' = IF FixRecoveryRetry THEN active - 1 ELSE active
@@ -413,9 +414,10 @@ Ready(done, edges) ==
   {n \in Nodes : /\ n \notin done
                  /\ \/ Preds(n) = {}
                     \/ LET ap == {p \in Preds(n) : <<p, n>> \in edges}
-                       IN ap # {} /\ ap \subseteq done
-                 \* F4: a node pending retry belongs to the retry poller.
-                 /\ (FixRecoveryRetry => n \notin RetryNodes)}
+                       IN ap # {} /\ ap \subseteq done}
+
+\* Each node's latest step row (steps are appended in insert order).
+LatestIds == {i \in StepIds : ~\E j \in StepIds : j > i /\ steps[j].node = steps[i].node}
 
 \* H1 recovery.ts:63-68 — running run ids; activeWalks check.
 H1 ==
@@ -427,13 +429,15 @@ H1 ==
   /\ UNCHANGED <<run, steps, active, execLive, okCount, crashes>>
 
 \* H2 recovery.ts:69-85 — re-read run, completed steps, routing; findReadyNodes.
+\* F4 recovery.ts:88-93: a node pending retry belongs to the retry poller.
 H2 ==
   /\ thr[THb].pc = "h2"
   /\ IF run # "running"
      THEN SetT(THb, [thr[THb] EXCEPT !.pc = "h5"])
      ELSE LET done == NodesWith("completed")
           IN SetT(THb, [thr[THb] EXCEPT !.pc = "h3", !.done = done,
-                         !.pend = Ready(done, Edges(done))])
+                         !.pend = {n \in Ready(done, Edges(done)) :
+                                     FixRecoveryRetry => n \notin RetryNodes}])
   /\ UNCHANGED <<run, steps, active, execLive, okCount, hbLeft, crashes>>
 
 \* H3 recovery.ts:87-106 — activeWalks re-check; complete or re-walk.
@@ -449,13 +453,15 @@ H3 ==
   /\ UNCHANGED <<run, steps, execLive, okCount, hbLeft, crashes>>
 
 \* H4 recovery.ts:88-94 — run -> completed (blind write, no transaction).
-\* F4: finalize in one transaction, only while the run is still running and
-\* no step is live or pending retry.
+\* F4 recovery.ts:136-156 completeIfSettled: one transaction, only while the
+\* run is still running, no row is pending retry, and no node's latest row is
+\* live.
 H4 ==
   /\ thr[THb].pc = "h4"
   /\ run' = IF FixRecoveryRetry
-            THEN IF run = "running" /\ ~\E i \in StepIds :
-                      steps[i].st \in {"waiting", "running", "pending"} \/ PendingRetry(i)
+            THEN IF /\ run = "running"
+                    /\ ~\E i \in StepIds : PendingRetry(i)
+                    /\ ~\E i \in LatestIds : steps[i].st \in {"waiting", "running", "pending"}
                  THEN "completed" ELSE run
             ELSE "completed"
   /\ SetT(THb, [thr[THb] EXCEPT !.pc = "h5"])

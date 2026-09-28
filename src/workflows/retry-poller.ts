@@ -11,6 +11,7 @@ import { checkpointStep, checkpointStepFailure, checkpointStepWaiting } from "./
 import { getSuccessors } from "./definition";
 import {
   buildNodeInterpolationCtx,
+  holdWorkflowRun,
   interpolateNodeConfig,
   rehydrateCompletedStepOutputs,
   scriptBodyInterpolationError,
@@ -36,6 +37,7 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
       const retryableSteps = await getRetryableSteps();
 
       for (const step of retryableSteps) {
+        let release: (() => void) | undefined;
         try {
           const run = await getWorkflowRun(step.runId);
           if (!run) continue;
@@ -50,6 +52,10 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
           console.log(
             `[workflows] Retrying step ${step.nodeId} (attempt ${step.retryCount}) for run ${step.runId}`,
           );
+
+          // Own the run while this step executes, so heartbeat recovery does
+          // not walk the same node alongside the retry.
+          release = holdWorkflowRun(run.id);
 
           // Claim the retry and revive the run in one transaction. The row and
           // the run were read outside it: a cancel committing in between must
@@ -194,6 +200,8 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
           }
         } catch (err) {
           console.error(`[workflows] Retry failed for step ${step.id}:`, err);
+        } finally {
+          release?.();
         }
       }
     } catch (err) {

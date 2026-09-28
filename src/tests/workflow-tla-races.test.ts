@@ -306,7 +306,7 @@ describe("TLA+ workflow counterexamples", () => {
     expect(await stepsOf(runId, "M")).toHaveLength(1);
   });
 
-  test.failing("CX5: heartbeat recovery leaves a step that is pending retry to the retry poller", async () => {
+  test("CX5: heartbeat recovery leaves a step that is pending retry to the retry poller", async () => {
     plans.clear();
     calls.length = 0;
     const def = fanOut(false);
@@ -319,6 +319,9 @@ describe("TLA+ workflow counterexamples", () => {
 
     // H1..H3: recovery sees a running, idle run and re-walks A (findReadyNodes).
     await recoverIncompleteRuns(registry);
+    // With A excluded nothing is ready, and recovery must not complete the run
+    // while A's retry is pending.
+    expect((await getWorkflowRun(runId))?.status).toBe("running");
     await sleep(5);
     // P1..P6: the poller retries the original failed A row.
     await runPollerOnce();

@@ -213,6 +213,23 @@ export function isWorkflowRunActive(runId: string): boolean {
 }
 
 /**
+ * Mark the run as owned by this process until the returned release runs.
+ * Recovery skips owned runs, so an executor outside walkGraph (the retry
+ * poller) holds the run for as long as it executes a step.
+ */
+export function holdWorkflowRun(runId: string): () => void {
+  activeWalks.set(runId, (activeWalks.get(runId) ?? 0) + 1);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const remaining = activeWalks.get(runId)! - 1;
+    if (remaining === 0) activeWalks.delete(runId);
+    else activeWalks.set(runId, remaining);
+  };
+}
+
+/**
  * Event-loop style graph walker.
  *
  * Executes start nodes, collects successor nodes from each completed step's
@@ -229,13 +246,11 @@ export async function walkGraph(
   secretKeys: Set<string> = new Set(),
   options: WorkflowExecutionOptions = {},
 ): Promise<void> {
-  activeWalks.set(runId, (activeWalks.get(runId) ?? 0) + 1);
+  const release = holdWorkflowRun(runId);
   try {
     await walkGraphOwned(def, runId, ctx, startNodes, registry, workflowId, secretKeys, options);
   } finally {
-    const remaining = activeWalks.get(runId)! - 1;
-    if (remaining === 0) activeWalks.delete(runId);
-    else activeWalks.set(runId, remaining);
+    release();
   }
 }
 
