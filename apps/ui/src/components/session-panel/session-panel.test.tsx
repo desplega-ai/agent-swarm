@@ -13,24 +13,67 @@ afterAll(async () => {
   await GlobalRegistrator.unregister();
 });
 
-// The test runner cannot resolve ui's `@/` alias; the panel only uses UI
-// primitives, so each maps to its real file. Markdown rendering is out of scope.
+// The test runner cannot resolve ui's `@/` alias. UI primitives, the shared
+// composer dock and the new-session hook map to their real files; the API
+// client, session hooks and the shared conversation are stubbed so the test
+// sees exactly which task the panel creates and which components it renders.
 mock.module("@/lib/utils", () => require("../../lib/utils"));
+mock.module("@/lib/enter-submit", () => require("../../lib/enter-submit"));
 mock.module("@/components/ui/button", () => require("../ui/button"));
-mock.module("@/components/ui/select", () => require("../ui/select"));
-mock.module("@/components/ui/skeleton", () => require("../ui/skeleton"));
-mock.module("@/components/ui/spinner", () => require("../ui/spinner"));
+mock.module("@/components/ui/input", () => require("../ui/input"));
+mock.module("@/components/ui/popover", () => require("../ui/popover"));
+mock.module("@/hooks/use-debounced-value", () => require("../../hooks/use-debounced-value"));
 mock.module("@/components/ui/textarea", () => require("../ui/textarea"));
-mock.module("streamdown", () => ({
-  Streamdown: ({ children }: { children: string }) => <div data-md="">{children}</div>,
+mock.module("@/components/ui/tooltip", () => require("../ui/tooltip"));
+mock.module("@/components/sessions/composer-dock", () => require("../sessions/composer-dock"));
+mock.module("@/components/sessions/use-start-session", () =>
+  require("../sessions/use-start-session"),
+);
+
+type CreateTaskInput = Record<string, unknown>;
+const createdTasks: CreateTaskInput[] = [];
+const listCalls: Array<Record<string, unknown>> = [];
+let sessions: Array<{ root: Record<string, unknown>; lastActivityAt: string }> = [];
+let currentUserId: string | null = "u1";
+
+mock.module("@/api/client", () => ({
+  api: {
+    createTask: async (input: CreateTaskInput) => {
+      createdTasks.push(input);
+      return { id: "new-root", ...input };
+    },
+    promoteDraftTask: async () => ({}),
+  },
+}));
+mock.module("@/api/fs", () => ({ uploadTaskAttachment: async () => ({}) }));
+mock.module("@/contexts/current-user-context", () => ({
+  useCurrentUser: () => ({ userId: currentUserId }),
+}));
+mock.module("@/api/hooks/use-sessions", () => ({
+  useSessions: (opts: Record<string, unknown>) => {
+    listCalls.push(opts);
+    return { data: opts.enabled === false ? undefined : sessions, isLoading: false };
+  },
+  useSession: (id: string | undefined) => ({
+    data: id ? { root: { id, task: `session ${id}` }, chain: [] } : undefined,
+  }),
+}));
+mock.module("@/components/sessions/session-conversation", () => ({
+  SessionConversation: ({ rootTaskId }: { rootTaskId: string }) => (
+    <div data-testid="session-conversation" data-root={rootTaskId} />
+  ),
+}));
+mock.module("@/components/sessions/session-meta", () => ({
+  SessionMeta: () => <div data-testid="session-meta" />,
 }));
 
 // react-dom must load after the DOM exists, or its input-event plumbing
 // never attaches (static imports are hoisted above `register()`).
 const { createRoot } = await import("react-dom/client");
+const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
+const { MemoryRouter } = await import("react-router-dom");
+const { TooltipProvider } = await import("../ui/tooltip");
 const { SessionPanel, NEW_SESSION } = await import("./session-panel");
-type Client = import("./http-client").SessionPanelClient;
-type Detail = import("./model").SessionPanelDetail;
 
 function memoryStorage(initial: Record<string, string> = {}) {
   const data = new Map(Object.entries(initial));
@@ -41,68 +84,29 @@ function memoryStorage(initial: Record<string, string> = {}) {
   };
 }
 
-function fakeClient(sessions: Record<string, Detail>) {
-  const created: Array<{ task: string; contextKey: string; requestedByUserId?: string }> = [];
-  const listed: Array<{ contextKeyPrefix: string; requestedByUserId?: string }> = [];
-  const followUps: Array<{ task: string; parentTaskId: string }> = [];
-  const steered: Array<{ taskId: string; message: string }> = [];
-  const client: Client = {
-    listSessions: async (q) => {
-      listed.push(q);
-      return Object.values(sessions).map((d) => ({
-        root: d.root,
-        lastActivityAt: d.root.createdAt,
-        latestStatus: d.root.status,
-        chainTaskCount: d.chain.length,
-      }));
-    },
-    getSession: async (id) => {
-      const d = sessions[id];
-      if (!d) throw new Error("not found");
-      return d;
-    },
-    createSession: async (input) => {
-      created.push(input);
-      const root = {
-        id: "new-root",
-        task: input.task,
-        status: "pending" as const,
-        isLeadTask: true,
-        source: "ui",
-        createdAt: "2026-09-28 10:10:00",
-      };
-      sessions[root.id] = { root, chain: [root] };
-      return { id: root.id };
-    },
-    createFollowUp: async (input) => {
-      followUps.push(input);
-      return { id: "child" };
-    },
-    steer: async (taskId, input) => {
-      steered.push({ taskId, message: input.message });
-    },
-  };
-  return { client, created, listed, followUps, steered };
+function reset() {
+  createdTasks.length = 0;
+  listCalls.length = 0;
+  sessions = [];
+  currentUserId = "u1";
 }
 
-const existing: Detail = (() => {
-  const root = {
-    id: "s1",
-    task: "chart is wrong\n\n---\nPage context (swarm UI)\n- URL: http://x/workflows/w1",
-    status: "completed" as const,
-    isLeadTask: true,
-    source: "ui",
-    output: "Fixed the chart.",
-    createdAt: "2026-09-28 10:00:00",
-  };
-  return { root, chain: [root] };
-})();
+function withProviders(ui: React.ReactElement): React.ReactElement {
+  const queryClient = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+  return (
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter>
+        <TooltipProvider>{ui}</TooltipProvider>
+      </MemoryRouter>
+    </QueryClientProvider>
+  );
+}
 
 async function mount(ui: React.ReactElement): Promise<{ root: Root; container: HTMLElement }> {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
-  await act(async () => root.render(ui));
+  await act(async () => root.render(withProviders(ui)));
   await act(async () => {}); // flush the first poll
   return { root, container };
 }
@@ -118,109 +122,170 @@ async function type(container: HTMLElement, text: string) {
 }
 
 async function clickSend(container: HTMLElement) {
-  const send = container.querySelector('button[aria-label="Send"]') as HTMLButtonElement | null;
+  const send = container.querySelector(
+    'button[aria-label="Start session"]',
+  ) as HTMLButtonElement | null;
   if (!send) throw new Error("no send button");
   await act(async () => send.click());
   await act(async () => {});
 }
 
+async function waitFor(check: () => boolean) {
+  for (let i = 0; i < 50 && !check(); i++) {
+    await act(async () => new Promise((r) => setTimeout(r, 10)));
+  }
+}
+
+async function openPicker(container: HTMLElement): Promise<HTMLElement> {
+  const trigger = container.querySelector(
+    'button[aria-label="Sessions for this page"]',
+  ) as HTMLButtonElement | null;
+  if (!trigger) throw new Error("no picker");
+  await act(async () => {
+    trigger.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0 }));
+    trigger.click();
+  });
+  const list = document.body.querySelector('ul[aria-label="Sessions"]') as HTMLElement | null;
+  if (!list) throw new Error("picker did not open");
+  return list;
+}
+
 describe("SessionPanel", () => {
-  test("lists only this page's sessions for the viewer and starts a new session with context", async () => {
-    const fake = fakeClient({ s1: existing });
+  test("the picker shows sessions in the API's order, newest first, and searches server-side", async () => {
+    reset();
+    // The endpoint orders by last activity, newest first; the panel keeps that order.
+    sessions = [
+      { root: { id: "newest", task: "legend is wrong" }, lastActivityAt: "2026-09-28T12:00:00Z" },
+      { root: { id: "middle", task: "axis labels" }, lastActivityAt: "2026-09-27T12:00:00Z" },
+      { root: { id: "oldest", task: "colors" }, lastActivityAt: "2026-09-20T12:00:00Z" },
+    ];
+    const { root, container } = await mount(
+      <SessionPanel pageKey="task:ui:workflow:w1" contextLabel="workflow w1" storage={null} />,
+    );
+
+    const list = await openPicker(container);
+    const ids = [...list.querySelectorAll("li[data-session-id]")].map((li) =>
+      li.getAttribute("data-session-id"),
+    );
+    expect(ids).toEqual(["newest", "middle", "oldest"]);
+    expect(list.textContent).toContain("New session");
+
+    const search = document.body.querySelector(
+      'input[aria-label="Search sessions"]',
+    ) as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    await act(async () => {
+      setter?.call(search, "legend");
+      search.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    // Debounced: the keystroke alone does not refetch.
+    expect(listCalls.at(-1)?.q).toBeUndefined();
+    await waitFor(() => listCalls.at(-1)?.q === "legend");
+    expect(listCalls.at(-1)).toMatchObject({
+      q: "legend",
+      contextKeyPrefix: "task:ui:workflow:w1:",
+    });
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  test("lists this page's ui sessions for the viewer", async () => {
+    reset();
+    sessions = [
+      {
+        root: { id: "s1", task: "chart is wrong", title: "" },
+        lastActivityAt: "2026-09-28 10:00:00",
+      },
+    ];
+    const { root, container } = await mount(
+      <SessionPanel pageKey="task:ui:workflow:w1" contextLabel="workflow w1" storage={null} />,
+    );
+    expect(listCalls.at(-1)).toMatchObject({
+      source: ["ui"],
+      contextKeyPrefix: "task:ui:workflow:w1:",
+      requestedByUserId: "u1",
+      enabled: true,
+    });
+    expect(container.textContent).toContain("workflow w1");
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  test("a new session is a source ui root task with no agentId, so the API assigns the Lead", async () => {
+    reset();
     const storage = memoryStorage();
     const { root, container } = await mount(
       <SessionPanel
-        client={fake.client}
         pageKey="task:ui:workflow:w1"
         contextLabel="workflow w1"
         contextFooter={"---\nPage context (swarm UI)\n- URL: http://x/workflows/w1"}
-        userId="u1"
         storage={storage}
       />,
     );
-
-    expect(fake.listed[0]).toEqual({
-      contextKeyPrefix: "task:ui:workflow:w1:",
-      requestedByUserId: "u1",
-      limit: 20,
-    } as never);
-    expect(container.textContent).toContain("workflow w1");
 
     await type(container, "add a legend");
     await clickSend(container);
+    await waitFor(() => createdTasks.length > 0);
 
-    const created = fake.created[0];
+    const created = createdTasks[0];
+    // Same create path as the Sessions page's new-session view.
+    expect(created?.source).toBe("ui");
+    expect(created?.agentId).toBeUndefined();
+    expect(created?.parentTaskId).toBeUndefined();
     expect(created?.requestedByUserId).toBe("u1");
-    expect(created?.contextKey.startsWith("task:ui:workflow:w1:")).toBe(true);
+    expect(String(created?.contextKey).startsWith("task:ui:workflow:w1:")).toBe(true);
     expect(created?.task).toBe(
       "add a legend\n\n---\nPage context (swarm UI)\n- URL: http://x/workflows/w1",
     );
-    // The new session is selected in place and remembered for this page.
+
+    // The new session opens in place, in the Sessions page's conversation.
+    await waitFor(() => !!container.querySelector('[data-testid="session-conversation"]'));
+    expect(
+      container.querySelector('[data-testid="session-conversation"]')?.getAttribute("data-root"),
+    ).toBe("new-root");
     expect(storage.data.get("session-panel:last:task:ui:workflow:w1")).toBe("new-root");
-    await act(async () => {});
-    expect(container.querySelector('[aria-label="Session messages"]')?.textContent).toContain(
-      "add a legend",
-    );
-    // The footer is for the lead, not shown back to the user.
-    expect(container.textContent).not.toContain("Page context");
 
     await act(async () => root.unmount());
     container.remove();
   });
 
-  test("reopens the remembered session and sends follow-ups as child tasks", async () => {
-    const fake = fakeClient({ s1: existing });
+  test("a remembered session renders the shared conversation and links to its task and Sessions view", async () => {
+    reset();
     const storage = memoryStorage({ "session-panel:last:ns:task:ui:workflow:w1": "s1" });
-    const opened: string[] = [];
     const { root, container } = await mount(
       <SessionPanel
-        client={fake.client}
         pageKey="task:ui:workflow:w1"
         contextLabel="workflow w1"
-        userId="u1"
         storage={storage}
         storageNamespace="ns"
-        onOpenSession={(id) => opened.push(id)}
       />,
     );
 
-    const messages = container.querySelector('[aria-label="Session messages"]');
-    expect(messages?.textContent).toContain("chart is wrong");
-    expect(messages?.textContent).toContain("Fixed the chart.");
-    expect(messages?.textContent).not.toContain("Page context");
-
-    await type(container, "thanks, also the axis");
-    await clickSend(container);
-    expect(fake.followUps).toEqual([
-      { task: "thanks, also the axis", parentTaskId: "s1", requestedByUserId: "u1" },
-    ] as never);
-    expect(fake.steered).toEqual([]);
-
-    await act(async () =>
-      (container.querySelector('button[aria-label="Open full view"]') as HTMLButtonElement).click(),
+    expect(
+      container.querySelector('[data-testid="session-conversation"]')?.getAttribute("data-root"),
+    ).toBe("s1");
+    expect(container.querySelector('[data-testid="session-meta"]')).not.toBeNull();
+    expect(container.querySelector('a[aria-label="Open root task"]')?.getAttribute("href")).toBe(
+      "/tasks/s1",
     );
-    expect(opened).toEqual(["s1"]);
+    expect(container.querySelector('a[aria-label="Open in Sessions"]')?.getAttribute("href")).toBe(
+      "/sessions/s1",
+    );
 
     await act(async () => root.unmount());
     container.remove();
   });
 
-  test("a different page key starts from New session with its own list", async () => {
-    const fake = fakeClient({});
+  test("a different page key starts from New session", async () => {
+    reset();
     const storage = memoryStorage({ "session-panel:last:task:ui:workflow:w1": "s1" });
     const { root, container } = await mount(
-      <SessionPanel
-        client={fake.client}
-        pageKey="task:ui:agent:a1"
-        contextLabel="agent a1"
-        userId="u1"
-        storage={storage}
-      />,
+      <SessionPanel pageKey="task:ui:agent:a1" contextLabel="agent a1" storage={storage} />,
     );
-    expect(fake.listed.at(-1)?.contextKeyPrefix).toBe("task:ui:agent:a1:");
-    expect(container.querySelector('[aria-label="Session messages"]')).toBeNull();
+    expect(listCalls.at(-1)?.contextKeyPrefix).toBe("task:ui:agent:a1:");
+    expect(container.querySelector('[data-testid="session-conversation"]')).toBeNull();
     expect(container.textContent).toContain("Ask about this page");
-    expect(storage.getItem("session-panel:last:task:ui:agent:a1")).toBeNull();
     expect(NEW_SESSION).toBe("__new__");
 
     await act(async () => root.unmount());
@@ -228,17 +293,12 @@ describe("SessionPanel", () => {
   });
 
   test("without a user it lists nothing and cannot send", async () => {
-    const fake = fakeClient({ s1: existing });
+    reset();
+    currentUserId = null;
     const { root, container } = await mount(
-      <SessionPanel
-        client={fake.client}
-        pageKey="task:ui:workflow:w1"
-        contextLabel="workflow w1"
-        userId={null}
-        storage={null}
-      />,
+      <SessionPanel pageKey="task:ui:workflow:w1" contextLabel="workflow w1" storage={null} />,
     );
-    expect(fake.listed).toEqual([]);
+    expect(listCalls.at(-1)?.enabled).toBe(false);
     expect((container.querySelector("textarea") as HTMLTextAreaElement).disabled).toBe(true);
     await act(async () => root.unmount());
     container.remove();

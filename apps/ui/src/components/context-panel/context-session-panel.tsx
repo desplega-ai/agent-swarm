@@ -1,20 +1,17 @@
 /**
- * Dashboard adapter for the reusable <SessionPanel>: derives the page key and
- * footer from the current route, builds the API client from the active
- * connection, and docks the panel on the right (full-screen sheet below `lg`).
+ * Dashboard adapter for <SessionPanel>: derives the page key and footer from
+ * the current route and docks the panel on the right (full-screen sheet
+ * below `lg`).
  * Everything else lives in `components/session-panel`.
  */
 
 import { MessageSquarePlus } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
-import { useFeatureGate } from "@/api/hooks/use-feature-gate";
-import { useSteeringEnabled } from "@/api/hooks/use-stats";
-import { createSessionPanelHttpClient, SessionPanel } from "@/components/session-panel";
+import { useLocation } from "react-router-dom";
+import { SessionPanel } from "@/components/session-panel";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useCurrentUser } from "@/contexts/current-user-context";
 import { useConfig } from "@/hooks/use-config";
 import {
   buildPageContextFooter,
@@ -74,36 +71,16 @@ export function ContextSessionPanel() {
   const { open, setOpen } = useContextPanel();
   const pageCtx = usePageContext();
   const isLg = useIsLg();
-  const navigate = useNavigate();
   const { config } = useConfig();
-  const { userId } = useCurrentUser();
-  // Steering (≥1.122.1): same gate as the session detail page.
-  const steerGate = useFeatureGate("1.122.1");
-  const { data: steeringEnabled = true } = useSteeringEnabled();
-
-  const client = useMemo(
-    () =>
-      createSessionPanelHttpClient({
-        // Same-origin in dev: Vite proxies /api to the local server (see ApiClient.getBaseUrl).
-        baseUrl:
-          import.meta.env.DEV && config.apiUrl === "http://localhost:3013" ? "" : config.apiUrl,
-        apiKey: config.apiKey || undefined,
-      }),
-    [config.apiUrl, config.apiKey],
-  );
 
   if (!open || !pageCtx) return null;
 
   const panel = (
     <SessionPanel
-      client={client}
       pageKey={pageCtx.pageKey}
       contextLabel={pageContextLabel(pageCtx)}
       contextFooter={buildPageContextFooter(pageCtx)}
-      userId={userId ?? null}
-      steeringSupported={steerGate.supported && steeringEnabled}
       storageNamespace={config.apiUrl}
-      onOpenSession={(rootTaskId) => void navigate(`/sessions/${rootTaskId}`)}
       onClose={() => setOpen(false)}
     />
   );

@@ -6,6 +6,7 @@ import {
   createAgent,
   createTaskExtended,
   createUser,
+  getDbClient,
   getRootTaskChain,
   initDb,
   listRecentSessions,
@@ -262,6 +263,50 @@ describe("sessions — getRootTaskChain + listRecentSessions", () => {
     expect(await countSessions({ contextKeyPrefix: `${pageKey}:` })).toBe(2);
     expect(rows.find((s) => s.root.id === a.id)?.chainTaskCount).toBe(2);
     expect(rows.some((s) => s.root.id === child.id)).toBe(false);
+  });
+
+  test("contextKeyPrefix + q — server-side search keeps newest-first order, ties break on createdAt", async () => {
+    const pageKey = "task:ui:workflow:ctxsearch";
+    const setTimes = (id: string, createdAt: string, lastUpdatedAt: string) =>
+      getDbClient().run("UPDATE agent_tasks SET createdAt = ?, lastUpdatedAt = ? WHERE id = ?", [
+        createdAt,
+        lastUpdatedAt,
+        id,
+      ]);
+    const oldest = await createTaskExtended("legend overlaps the chart", {
+      contextKey: `${pageKey}:n1`,
+    });
+    const middle = await createTaskExtended("axis labels are cut", { contextKey: `${pageKey}:n2` });
+    const newest = await createTaskExtended("legend colors wrong", { contextKey: `${pageKey}:n3` });
+    // Same last activity as `newest`, created earlier: sorts just below it.
+    const tied = await createTaskExtended("legend font", { contextKey: `${pageKey}:n4` });
+    await setTimes(oldest.id, "2026-09-01T10:00:00.000Z", "2026-09-01T10:05:00.000Z");
+    await setTimes(middle.id, "2026-09-10T10:00:00.000Z", "2026-09-10T10:05:00.000Z");
+    await setTimes(newest.id, "2026-09-20T10:00:00.000Z", "2026-09-20T10:05:00.000Z");
+    await setTimes(tied.id, "2026-09-19T10:00:00.000Z", "2026-09-20T10:05:00.000Z");
+    await updateTaskTitle(middle.id, "Legend position");
+
+    const all = await listRecentSessions({ limit: 50, contextKeyPrefix: `${pageKey}:` });
+    expect(all.map((s) => s.root.id)).toEqual([newest.id, tied.id, middle.id, oldest.id]);
+
+    // `q` filters in SQL on task text and custom title, case-insensitive.
+    const hits = await listRecentSessions({
+      limit: 50,
+      contextKeyPrefix: `${pageKey}:`,
+      q: "LEGEND",
+    });
+    expect(hits.map((s) => s.root.id)).toEqual([newest.id, tied.id, middle.id, oldest.id]);
+    const narrow = await listRecentSessions({
+      limit: 50,
+      contextKeyPrefix: `${pageKey}:`,
+      q: "overlaps",
+    });
+    expect(narrow.map((s) => s.root.id)).toEqual([oldest.id]);
+    expect(await countSessions({ contextKeyPrefix: `${pageKey}:`, q: "colors" })).toBe(1);
+    // A match outside the page is not returned.
+    expect(
+      await listRecentSessions({ limit: 50, contextKeyPrefix: `${pageKey}:`, q: "no such text" }),
+    ).toEqual([]);
   });
 
   test("contextKeyPrefix — LIKE wildcards in the prefix match literally", async () => {

@@ -12595,7 +12595,7 @@ export async function listRecentSessions(
        FROM agent_tasks r
        JOIN agg a ON a.root_id = r.id
        LEFT JOIN latest_status ls ON ls.root_id = r.id
-       ORDER BY a.lastActivityAt DESC
+       ORDER BY a.lastActivityAt DESC, r.createdAt DESC, r.id DESC
        LIMIT ? OFFSET ?`,
     params,
   );
