@@ -56,7 +56,7 @@ Any layer (and a task's `model`) may hold:
 
 ### Default seeds
 
-The defaults stay concrete ids and CLI aliases. Seeding `claude` `smart`/`ultra` and `codex` `regular`/`smart` as `latest:...@stable` waits for phase 4 of the model-catalog plan: until `harness_model_support` exists, the server cannot tell whether the pinned `claude`/`codex` CLI in the worker image accepts the newest catalog model, so an alias could move a whole tier onto a model the CLI rejects. Operators can opt in per tier today with `MODEL_TIER_<PROVIDER>_<TIER>`.
+The defaults stay concrete ids and CLI aliases. `harness_model_support` now guards aliases (an alias skips a model the worker's CLI rejects, see [model-catalog.md](./model-catalog.md)), so an operator can opt a tier into a moving alias with one Settings write: `MODEL_TIER_<PROVIDER>_<TIER>=latest:anthropic/opus@stable`. Shipping `latest:` as the default is a separate decision.
 
 ## Legacy aliases
 

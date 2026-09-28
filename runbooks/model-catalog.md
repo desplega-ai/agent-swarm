@@ -1,0 +1,35 @@
+# Model catalog: how a new model reaches tasks
+
+A model released for Claude Code or Codex becomes usable by tasks with no code change and no redeploy. This runbook covers the flow. Tier resolution details live in [model-tiers.md](./model-tiers.md).
+
+## Pieces
+
+| Piece | Where | Role |
+|---|---|---|
+| `model_catalog` | SQLite, migration `168` | models.dev facts per provider and model: family, release date, context window, max output, reasoning efforts, pricing. |
+| `model_catalog_overlay` | SQLite, migration `168` | Hand-verified rows for models models.dev lacks or has incomplete. Overlay wins over models.dev. A row with `expiresWhenUpstreamMatches` is dropped once models.dev agrees. |
+| Catalog refresh | `src/be/pricing-refresh.ts` | Boot plus every 12h, and on demand. ETag-aware. Upserts `model_catalog`; pricing rows follow it. |
+| Forced refresh | `POST /api/models-catalog/refresh { force, providers }`, MCP `model-catalog-refresh` | Same as `pi update --models`. |
+| Overlay write | MCP `model-catalog-overlay-upsert` | Used by the verify task when models.dev lags. |
+| Shared resolver | `packages/model-catalog` | Overlay merge, family parsing, `latest:` grammar, soak and preview rules. Used by the API, workers, the UI and evals. |
+| `harness_model_support` | SQLite, migration `170` | Whether a model runs on a given `claude`/`codex` CLI version. Workers report their CLI version on register and the outcome of a model's first run. |
+
+Offline or with an empty table, every reader falls back to the committed `src/be/modelsdev-cache.json` snapshot.
+
+## What reads the catalog
+
+Model pickers, codex and Claude model lists, context windows, pricing, reasoning efforts, Claude shortnames (`opus` → newest Opus id) and `latest:` tier aliases. Workers keep a TTL-cached copy fetched from the API, so a model added after a worker booted is visible on its next poll.
+
+## Flow when `model-release-watch` sees a new model
+
+1. Call `model-catalog-refresh` with `force: true` for the vendor. If models.dev has the model with price, context window and reasoning efforts, it is now usable: an explicit task `model`, or a tier set to a `latest:` alias, picks it on the next claim.
+2. If the refreshed catalog lacks the model or a required fact, dispatch one verify task per vendor. It checks the vendor's docs (positive control: a known model id must be found on the same page; check the deprecations page) and writes an overlay row with `model-catalog-overlay-upsert`. No repo, no PR.
+3. If the first real run fails with the CLI's unknown-model error, `harness_model_support` records `unsupported` for that CLI version. Alias tiers fall back to the newest supported model in the family (`modelSource = fallback:cli-unsupported`, one notification). An explicit `model` fails fast at claim. The fix is a CLI bump in `Dockerfile.worker` (`CLAUDE_CODE_VERSION` / `CODEX_VERSION`), the one code change left per model. Automating that bump is deferred.
+
+The watcher script and its verify brief live in the scripts catalog, not in this repo. Switch it to this flow only after the catalog, tier and CLI-support changes are deployed; until then it keeps dispatching the per-model code briefs. The old per-model `anthropic-models-version-monitor` schedule is retired at the same time.
+
+## Checks
+
+- Catalog content: `GET /api/models-catalog`.
+- Why a task ran a model: `agent_tasks.resolvedModel`, `modelSource`, `modelAlias`.
+- Alias moves: `model_alias_resolutions`.
