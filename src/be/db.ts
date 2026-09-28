@@ -320,9 +320,13 @@ type TaskTelemetryContext = {
   harnessVersion?: string;
 };
 
+/** LIKE pattern matching strings that start with `prefix` literally (use with `ESCAPE '\\'`). */
+function literalPrefixPattern(prefix: string): string {
+  return `${prefix.replace(/[\\%_]/g, "\\$&")}%`;
+}
+
 function assetKeyPrefixPattern(input: string): string {
-  const canonical = normalizeAssetKey(input);
-  return `${canonical.replace(/[\\%_]/g, "\\$&")}%`;
+  return literalPrefixPattern(normalizeAssetKey(input));
 }
 
 function emitTaskLifecycleTelemetryAfterCommit(
@@ -12510,6 +12514,12 @@ interface ListRecentSessionsOpts {
   q?: string;
   /** When set, restrict to root tasks where `requestedByUserId` equals this value. NULL rows are excluded. */
   requestedByUserId?: string;
+  /**
+   * When set, restrict to root tasks whose `contextKey` starts with this
+   * literal prefix (`%`, `_` and `\` are escaped). Powers the UI contextual
+   * session panel's per-page dropdown.
+   */
+  contextKeyPrefix?: string;
   /** When true, return slim `SessionListItemSummary` rows (default: full). */
   slim?: boolean;
 }
@@ -12544,6 +12554,10 @@ export async function listRecentSessions(
   if (requestedByUserId) {
     conditions.push("r.requestedByUserId = ?");
     params.push(requestedByUserId);
+  }
+  if (opts?.contextKeyPrefix) {
+    conditions.push(`r.contextKey LIKE ? ESCAPE '\\'`);
+    params.push(literalPrefixPattern(opts.contextKeyPrefix));
   }
   params.push(limit, offset);
 
@@ -12616,7 +12630,7 @@ export async function listRecentSessions(
  * a plain count, no recursive chain walk needed.
  */
 export async function countSessions(
-  opts?: Pick<ListRecentSessionsOpts, "source" | "q" | "requestedByUserId">,
+  opts?: Pick<ListRecentSessionsOpts, "source" | "q" | "requestedByUserId" | "contextKeyPrefix">,
 ): Promise<number> {
   const sources = opts?.source?.filter((s) => s.length > 0) ?? [];
   const q = opts?.q?.trim();
@@ -12637,6 +12651,10 @@ export async function countSessions(
   if (requestedByUserId) {
     conditions.push("requestedByUserId = ?");
     params.push(requestedByUserId);
+  }
+  if (opts?.contextKeyPrefix) {
+    conditions.push(`contextKey LIKE ? ESCAPE '\\'`);
+    params.push(literalPrefixPattern(opts.contextKeyPrefix));
   }
 
   const row = await getDbClient().get<{ count: number }>(

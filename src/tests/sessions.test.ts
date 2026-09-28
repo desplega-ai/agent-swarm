@@ -11,6 +11,7 @@ import {
   listRecentSessions,
   updateTaskTitle,
 } from "../be/db";
+import { withSiblingAwareness } from "../tasks/sibling-awareness";
 
 const TEST_DB_PATH = "./test-sessions.sqlite";
 
@@ -239,5 +240,77 @@ describe("sessions — getRootTaskChain + listRecentSessions", () => {
     expect(cleared?.title).toBeUndefined();
     const afterClear = (await listRecentSessions({ limit: 50 })).find((s) => s.root.id === root.id);
     expect(afterClear?.root.title).toBeUndefined();
+  });
+
+  test("contextKeyPrefix — returns only matching roots, total agrees, children never appear", async () => {
+    const pageKey = "task:ui:workflow:ctxwf1";
+    const a = await createTaskExtended("ctx session a", { contextKey: `${pageKey}:n1` });
+    const b = await createTaskExtended("ctx session b", { contextKey: `${pageKey}:n2` });
+    // Child inherits the parent's contextKey but must not surface as its own row.
+    const child = await createTaskExtended("ctx child", { parentTaskId: a.id });
+    expect(child.contextKey).toBe(`${pageKey}:n1`);
+    // Longer id sharing the textual prefix: excluded by the trailing `:`.
+    const longer = await createTaskExtended("ctx longer id", {
+      contextKey: "task:ui:workflow:ctxwf1x:n1",
+    });
+    // Positive control: without the filter every root is listed.
+    const all = await listRecentSessions({ limit: 500 });
+    expect(all.some((s) => s.root.id === longer.id)).toBe(true);
+
+    const rows = await listRecentSessions({ limit: 50, contextKeyPrefix: `${pageKey}:` });
+    expect(rows.map((s) => s.root.id).sort()).toEqual([a.id, b.id].sort());
+    expect(await countSessions({ contextKeyPrefix: `${pageKey}:` })).toBe(2);
+    expect(rows.find((s) => s.root.id === a.id)?.chainTaskCount).toBe(2);
+    expect(rows.some((s) => s.root.id === child.id)).toBe(false);
+  });
+
+  test("contextKeyPrefix — LIKE wildcards in the prefix match literally", async () => {
+    const literal = await createTaskExtended("literal wildcard", {
+      contextKey: "task:ui:route:a%25_b:n1",
+    });
+    // Would match `a%25_b` under an unescaped LIKE (`_` = any char), must not here.
+    await createTaskExtended("wildcard decoy", { contextKey: "task:ui:route:a%25xb:n1" });
+
+    const rows = await listRecentSessions({
+      limit: 50,
+      contextKeyPrefix: "task:ui:route:a%25_b:",
+    });
+    expect(rows.map((s) => s.root.id)).toEqual([literal.id]);
+    expect(await countSessions({ contextKeyPrefix: "task:ui:route:a%25_b:" })).toBe(1);
+    expect(await countSessions({ contextKeyPrefix: "task:ui:route:%" })).toBe(0);
+  });
+
+  test("per-session keys keep a second session on the same page a root (sibling-awareness trap)", async () => {
+    const pageKey = "task:ui:workflow:ctxwf2";
+    const lead = await createAgent({
+      id: "sessions-test-agent-ctx",
+      name: "Sessions Ctx Lead",
+      isLead: true,
+      status: "idle",
+    });
+    const first = await createTaskExtended("first session", {
+      agentId: lead.id,
+      contextKey: `${pageKey}:n1`,
+    });
+    expect(first.status).toBe("pending");
+
+    // POST /api/tasks defaults agentId to the lead, which is what arms the trap.
+    // Positive control: a shared key WOULD nest the new session under the first.
+    const shared = await withSiblingAwareness("same key", {
+      agentId: lead.id,
+      contextKey: `${pageKey}:n1`,
+    });
+    expect(shared.options.parentTaskId).toBe(first.id);
+
+    const prepared = await withSiblingAwareness("second session", {
+      agentId: lead.id,
+      contextKey: `${pageKey}:n2`,
+    });
+    expect(prepared.options.parentTaskId).toBeUndefined();
+    const second = await createTaskExtended(prepared.description, prepared.options);
+    expect(second.parentTaskId).toBeUndefined();
+
+    const rows = await listRecentSessions({ limit: 50, contextKeyPrefix: `${pageKey}:` });
+    expect(rows.map((s) => s.root.id).sort()).toEqual([first.id, second.id].sort());
   });
 });
