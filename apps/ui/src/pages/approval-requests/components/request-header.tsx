@@ -191,7 +191,7 @@ const RESOLUTION = {
 } as const;
 
 /** The outcome, first thing on a resolved request: who, when, and why. */
-function ResolutionBanner({
+export function ResolutionBanner({
   request,
   resolvedBy,
 }: {

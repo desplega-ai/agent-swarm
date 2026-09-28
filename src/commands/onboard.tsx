@@ -10,6 +10,7 @@ import {
   composeCommandText,
   engineForCommands,
   isContainerEnginePreference,
+  resolveContainerEnginePreference,
 } from "./onboard/container-engine.ts";
 import { buildOnboardDashboardUrl } from "./onboard/dashboard-url.ts";
 import {
@@ -82,14 +83,13 @@ export function Onboard({
       }
       initial.pullPolicy = pullPolicy;
     }
-    if (containerEngine !== undefined) {
-      if (!isContainerEnginePreference(containerEngine)) {
-        initial.step = "error";
-        initial.error = `Invalid container engine "${containerEngine}". Options: auto, docker, podman`;
-        return initial;
-      }
-      initial.containerEngine = containerEngine;
+    const engine = resolveContainerEnginePreference(containerEngine, process.env);
+    if (!engine.ok) {
+      initial.step = "error";
+      initial.error = engine.error;
+      return initial;
     }
+    initial.containerEngine = engine.value;
     return initial;
   });
 

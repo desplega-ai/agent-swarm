@@ -33,6 +33,36 @@ export function isContainerEnginePreference(value: string): value is ContainerEn
   return (CONTAINER_ENGINE_PREFERENCES as readonly string[]).includes(value);
 }
 
+/** Env var that selects the engine when `--container-engine` is not passed. */
+export const CONTAINER_ENGINE_ENV = "AGENT_SWARM_CONTAINER_ENGINE";
+
+/**
+ * Pick the engine preference: the `--container-engine` flag, then
+ * `AGENT_SWARM_CONTAINER_ENGINE`, then `auto`. An empty env var counts as unset.
+ * An invalid value from either source is an error, never a silent `auto`.
+ */
+export function resolveContainerEnginePreference(
+  flag: string | undefined,
+  env: Record<string, string | undefined>,
+): { ok: true; value: ContainerEnginePreference } | { ok: false; error: string } {
+  const options = CONTAINER_ENGINE_PREFERENCES.join(", ");
+  if (flag !== undefined) {
+    if (!isContainerEnginePreference(flag)) {
+      return { ok: false, error: `Invalid container engine "${flag}". Options: ${options}` };
+    }
+    return { ok: true, value: flag };
+  }
+  const fromEnv = env[CONTAINER_ENGINE_ENV];
+  if (fromEnv === undefined || fromEnv === "") return { ok: true, value: "auto" };
+  if (!isContainerEnginePreference(fromEnv)) {
+    return {
+      ok: false,
+      error: `Invalid ${CONTAINER_ENGINE_ENV} "${fromEnv}". Options: ${options}`,
+    };
+  }
+  return { ok: true, value: fromEnv };
+}
+
 /**
  * Engine to use for commands and generated instructions when detection has not
  * run yet. `auto` renders as Docker, matching its preference order.

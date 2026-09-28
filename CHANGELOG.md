@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- Pending approval requests with no explicit timeout are auto-cancelled by the heartbeat after `APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS` days (default 7, `0` disables); a request that gates a running or waiting workflow run cancels that run too.
+- The heartbeat now times out standalone approval requests whose `expiresAt` passed, and notifies the requesting agent with a `hitl.timeout` follow-up task while its source task is still active.
+- Migration 166 adds the `idx_approval_requests_pending_created` index for the auto-cancel sweep.
+- `POST /api/approval-requests/{id}/cancel`, the `cancel-approval-request` MCP tool, the `approval_cancel` scripts SDK method, and a Discard button on the dashboard cancel a pending approval request.
+
+### Changed
+- An answer or a cancel that arrives after an approval request's `expiresAt` gets 409 and the request becomes `timeout`.
+- The `request-human-input` tool text and the workflow Slack card no longer say that a timeout auto-rejects; the request becomes `timeout`.
+
 ## [1.157.0] - 2026-09-28
 
 ### Added

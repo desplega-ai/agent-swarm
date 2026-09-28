@@ -1,4 +1,5 @@
 import {
+  getApprovalRequestById,
   getCompletedStepNodeIds,
   getDbClient,
   getStuckApprovalRuns,
@@ -212,46 +213,59 @@ async function recoverApprovalWaitingRuns(registry: ExecutorRegistry): Promise<n
       const workflow = await getWorkflow(stuck.workflowId);
       if (!run || !workflow) continue;
 
-      let approvalStatus = stuck.approvalStatus;
-      let responses: unknown = stuck.approvalResponses ? JSON.parse(stuck.approvalResponses) : null;
-
-      // If still pending but expired, auto-reject
-      if (approvalStatus === "pending" && stuck.expiresAt) {
-        await resolveApprovalRequest(stuck.approvalId, {
-          status: "timeout",
-        });
-        approvalStatus = "timeout";
-        responses = null;
-      }
-
-      const nextPort =
-        approvalStatus === "timeout"
-          ? "timeout"
-          : approvalStatus === "rejected"
-            ? "rejected"
-            : "approved";
-
       const ctx = (run.context ?? {}) as Record<string, unknown>;
-      const stepOutput = {
-        requestId: stuck.approvalId,
-        status: approvalStatus,
-        responses,
-      };
 
-      // Use port-based routing to determine correct successors. Claimed: the
-      // live approval.resolved bus event may have routed this step between
-      // the sweep snapshot and here — routing it twice would create duplicate
-      // successor steps and duplicate spawned tasks.
-      const routing = await checkpointPortStepAndResolveSuccessors(
-        workflow.definition,
-        stuck.runId,
-        stuck.stepId,
-        stuck.nodeId,
-        stepOutput,
-        nextPort,
-        ctx,
-      );
-      if (!routing.claimed) continue;
+      // The timeout write, the status re-read, and the step claim share 1
+      // transaction. A request cancelled or answered after the sweep snapshot
+      // routes on its current status, or not at all.
+      const routing = await getDbClient().transaction(async () => {
+        // If still pending but expired, mark as timeout
+        if (stuck.approvalStatus === "pending" && stuck.expiresAt) {
+          await resolveApprovalRequest(stuck.approvalId, {
+            status: "timeout",
+            resolutionReason: `Timed out: no answer before ${stuck.expiresAt}`,
+          });
+        }
+
+        const approval = await getApprovalRequestById(stuck.approvalId);
+        const approvalStatus = approval?.status;
+        // A cancelled approval belongs to the run cancel path, never to a port.
+        if (
+          approvalStatus !== "approved" &&
+          approvalStatus !== "rejected" &&
+          approvalStatus !== "timeout"
+        ) {
+          return null;
+        }
+
+        const nextPort =
+          approvalStatus === "timeout"
+            ? "timeout"
+            : approvalStatus === "rejected"
+              ? "rejected"
+              : "approved";
+
+        const stepOutput = {
+          requestId: stuck.approvalId,
+          status: approvalStatus,
+          responses: approval?.responses ?? null,
+        };
+
+        // Use port-based routing to determine correct successors. Claimed: the
+        // live approval.resolved bus event may have routed this step between
+        // the sweep snapshot and here — routing it twice would create duplicate
+        // successor steps and duplicate spawned tasks.
+        return await checkpointPortStepAndResolveSuccessors(
+          workflow.definition,
+          stuck.runId,
+          stuck.stepId,
+          stuck.nodeId,
+          stepOutput,
+          nextPort,
+          ctx,
+        );
+      });
+      if (!routing?.claimed) continue;
 
       if (routing.successors.length > 0) {
         const secretKeys = getSecretInputKeys(workflow.input);

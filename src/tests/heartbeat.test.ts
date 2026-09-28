@@ -280,6 +280,13 @@ describe("Heartbeat Triage", () => {
   // ==========================================================================
 
   describe("Code-Level Triage", () => {
+    test("reports approval sweep counts in staleCleanup", async () => {
+      const findings = await codeLevelTriage();
+
+      expect(typeof findings.staleCleanup.approvalAutoCancelled).toBe("number");
+      expect(typeof findings.staleCleanup.approvalTimedOut).toBe("number");
+    });
+
     test("auto-supersedes stalled task with no active session (DES-523)", async () => {
       const agent = await createAgent({ name: "dead-worker", isLead: false, status: "busy" });
       const task = await createTaskExtended("Stalled task", { agentId: agent.id });

@@ -97,6 +97,8 @@ const LEAD_OR_TASK_CREATOR_VERBS: PermissionVerb[] = ["task.cancel.any", "task.s
 
 const LEAD_OR_OWN_NAMESPACE_VERBS: PermissionVerb[] = ["kv.write.any"];
 
+const HUMAN_OR_LEAD_OR_RESOURCE_OWNER_VERBS: PermissionVerb[] = ["approval.cancel.any"];
+
 const ANY_AUTHENTICATED_VERBS: PermissionVerb[] = [
   "app.manage",
   "app.use",
@@ -171,6 +173,7 @@ describe("verb-group partition", () => {
       ...LEAD_OR_RESOURCE_OWNER_VERBS,
       ...LEAD_OR_TASK_CREATOR_VERBS,
       ...LEAD_OR_OWN_NAMESPACE_VERBS,
+      ...HUMAN_OR_LEAD_OR_RESOURCE_OWNER_VERBS,
       ...ANY_AUTHENTICATED_VERBS,
       ...REQUESTER_OWNS_TASK_VERBS,
       ...COMPOSITE_VERBS,
@@ -307,6 +310,33 @@ describe("lead-or-resource-owner verbs", () => {
     const decision = can({
       principal: PRINCIPALS.ownerWorker,
       verb: "skill.update.any",
+      resource: { kind: "owned", ownerAgentId: null },
+      source: "mcp",
+    });
+    expect(decision.allow).toBe(false);
+  });
+});
+
+describe("human-or-lead-or-resource-owner verbs (approval.cancel.any)", () => {
+  const expected: Expected = {
+    lead: true,
+    worker: false,
+    ownerWorker: true,
+    creatorWorker: false,
+    userRequester: true,
+    foreignUser: true,
+    operator: true,
+  };
+  for (const verb of HUMAN_OR_LEAD_OR_RESOURCE_OWNER_VERBS) {
+    test(`${verb}: humans, lead, or owner allowed`, () => {
+      expectDecisions(verb, OWNED_RESOURCE, expected);
+    });
+  }
+
+  test("ownerless resource denies non-lead agents", () => {
+    const decision = can({
+      principal: PRINCIPALS.ownerWorker,
+      verb: "approval.cancel.any",
       resource: { kind: "owned", ownerAgentId: null },
       source: "mcp",
     });

@@ -109,6 +109,20 @@ const leadOrResourceOwner: LegacyRule = {
   },
 };
 
+const humanOrLeadOrResourceOwner: LegacyRule = {
+  name: "human-or-lead-or-resource-owner",
+  denyReason: "requires a human, the operator, a lead agent, or the resource owner",
+  evaluate: (principal, resource) => {
+    if (principal.kind === "operator" || principal.kind === "user") return true;
+    if (actsAsLead(principal)) return true;
+    return (
+      resource?.kind === "owned" &&
+      resource.ownerAgentId != null &&
+      resource.ownerAgentId === principal.agentId
+    );
+  },
+};
+
 const leadOrOwnNamespace: LegacyRule = {
   name: "lead-or-own-namespace",
   denyReason: "requires lead agent or your own task:agent: namespace",
@@ -188,6 +202,7 @@ export const LEGACY_RULES = {
   "lead-only": leadOnly,
   "lead-or-task-creator": leadOrTaskCreator,
   "lead-or-resource-owner": leadOrResourceOwner,
+  "human-or-lead-or-resource-owner": humanOrLeadOrResourceOwner,
   "lead-or-own-namespace": leadOrOwnNamespace,
   "any-authenticated": anyAuthenticated,
   "requester-owns-task": requesterOwnsTask,
@@ -200,6 +215,7 @@ export const LEGACY_POLICY = {
   "agent.profile.update.any": leadOnly,
   "agent.context.read.any": leadOnly,
   "task.cancel.any": leadOrTaskCreator,
+  "approval.cancel.any": humanOrLeadOrResourceOwner,
   "task.steer.any": leadOrTaskCreator,
   "task.create.own": anyAuthenticated,
   "task.read.own": requesterOwnsTask,

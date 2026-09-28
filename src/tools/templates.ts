@@ -111,6 +111,25 @@ Continue your work based on the human's input.`,
 });
 
 registerTemplate({
+  eventType: "hitl.timeout",
+  header: "",
+  defaultBody: `Your approval request ({{request_id}}) timed out with no answer.
+
+Title: {{title}}
+Deadline: {{expires_at}}
+Reason: {{reason}}
+
+No human responded before the deadline. Decide how to continue without this input.`,
+  variables: [
+    { name: "request_id", description: "The approval request ID" },
+    { name: "title", description: "Title of the approval request" },
+    { name: "expires_at", description: "The deadline that passed, ISO 8601" },
+    { name: "reason", description: "The resolutionReason stored on the request" },
+  ],
+  category: "task_lifecycle",
+});
+
+registerTemplate({
   eventType: "task.worker.failed",
   header: "",
   defaultBody: `Worker task failed \u2014 action needed.

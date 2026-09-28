@@ -20,6 +20,7 @@ import { registerAppQueryTool } from "./tools/app-query";
 import { registerAppRollbackTool } from "./tools/app-rollback";
 import { registerAppSyncTool } from "./tools/app-sync";
 import { registerAppUpsertTool } from "./tools/app-upsert";
+import { registerCancelApprovalRequestTool } from "./tools/cancel-approval-request";
 import { registerCancelTaskTool } from "./tools/cancel-task";
 import { registerContextDiffTool } from "./tools/context-diff";
 import { registerContextHistoryTool } from "./tools/context-history";
@@ -500,6 +501,7 @@ export async function createServer(
     registerRetryWorkflowRunTool(server);
     registerCancelWorkflowRunTool(server);
     registerRequestHumanInputTool(server);
+    registerCancelApprovalRequestTool(server);
   }
 
   // Skills capability - installable skill packages (create, search, install, publish)

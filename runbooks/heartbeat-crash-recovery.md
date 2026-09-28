@@ -17,7 +17,7 @@ flowchart TD
   tick["Heartbeat tick (~90s)<br/>codeLevelTriage()"] --> expire["expireStaleRuntimeInstances() (§1a)<br/>multi-runtime only"]
   expire --> detect["detectAndRemediateStalledTasks()"]
   detect --> health["checkWorkerHealth()<br/>busy ↔ idle (skips offline)"]
-  health --> cleanup["cleanupStaleResources()<br/>stale sessions (30m), reviewing,<br/>inbox, mentions, workflow runs,<br/>+ reaper: escalate unreclaimed pinned resumes (§3)<br/>+ escalateStarvedPoolTasks: zero-eligible-agent pool tasks (§4)"]
+  health --> cleanup["cleanupStaleResources()<br/>stale sessions (30m), reviewing,<br/>inbox, mentions, workflow runs,<br/>+ approval timeout + auto-cancel sweeps<br/>+ reaper: escalate unreclaimed pinned resumes (§3)<br/>+ escalateStarvedPoolTasks: zero-eligible-agent pool tasks (§4)"]
   cleanup --> assign["autoAssignPoolTasks()<br/>per-task: first idle worker satisfying<br/>isAgentEligibleForTask (§4) — else leave queued"]
 
   boot["Server boot (once)"] --> reboot["runRebootSweep()<br/>in_progress claimed after boot → skip<br/>else: no session OR pre-boot stale session<br/>→ failTask + retry child<br/>(pinned to original agent when recoverable, §4)"]
@@ -51,6 +51,44 @@ API workflow engine owns the database; multiple worker runtimes do not create
 multiple API engines. Separate API processes sharing a database would need
 cross-process workflow ownership before recovery could safely distinguish their
 live work from interrupted work.
+
+### Approval request sweeps
+
+After `recoverIncompleteRuns`, every cleanup sweep runs 2 approval sweeps from
+`src/be/approval-sweeps.ts`. Each one guards its write on `status = 'pending'`,
+so a concurrent human answer, the recovery pass, or the other sweep wins cleanly.
+
+```
+# every sweep, inside cleanupStaleResources, after recoverIncompleteRuns:
+timeoutExpiredApprovalRequests():
+  for each pending request with expiresAt < now (any workflow run state):
+    transaction:
+      resolveApprovalRequest(status = timeout, reason = "Timed out by the approval sweep: ...")
+      if standalone and source task not terminal: create hitl.timeout follow-up task
+    # a failed row rolls back alone and stays pending for the next tick
+  # a waiting run whose request became timeout routes on its timeout port
+  # on the next tick through getStuckApprovalRuns
+
+autoCancelStaleApprovalRequests():
+  days = APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS (default 7; 0 = off)
+  for each pending request with expiresAt IS NULL and createdAt < now - days:
+    transaction:
+      cancelApprovalRequestById(reason = "Auto-cancelled by the approval sweep after <days> days ...")
+      if its workflow run is running/waiting:
+        cancelWorkflowRunRows(runId, reason)   # steps, linked tasks, run → cancelled
+      afterCommit: post "no longer actionable" to each recorded Slack thread (claimed once)
+    # a failed row rolls back alone and stays pending for the next tick
+```
+
+`recoverApprovalWaitingRuns` writes `timeout` for an expired pending request,
+re-reads the request, and claims the step in 1 transaction. It routes on the
+re-read status, so a request cancelled after the `getStuckApprovalRuns`
+snapshot never reaches a port.
+
+A request with `expiresAt` is never auto-cancelled. A `cancelled` request never
+routes to a workflow port. The counts land in `staleCleanup.approvalTimedOut`
+and `staleCleanup.approvalAutoCancelled` and add to `stale_cleanup=` in the
+sweep log line.
 
 ## 1a. Runtime liveness (`MULTI_RUNTIME_ENABLED` only)
 

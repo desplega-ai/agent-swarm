@@ -1,4 +1,8 @@
 import {
+  autoCancelStaleApprovalRequests,
+  timeoutExpiredApprovalRequests,
+} from "../be/approval-sweeps";
+import {
   assignUnassignedTaskPending,
   backfillSupersedeTaskResumeTaskId,
   buildRoutingAffinityFromAgent,
@@ -257,6 +261,8 @@ export interface HeartbeatFindings {
     staleRuntimes: number;
     staleOfferedTasks: number;
     abandonedDraftTasks: number;
+    approvalAutoCancelled: number;
+    approvalTimedOut: number;
   };
 }
 
@@ -334,6 +340,8 @@ export async function codeLevelTriage(): Promise<HeartbeatFindings> {
       staleRuntimes: 0,
       staleOfferedTasks: 0,
       abandonedDraftTasks: 0,
+      approvalAutoCancelled: 0,
+      approvalTimedOut: 0,
     },
   };
 
@@ -1187,6 +1195,24 @@ async function cleanupStaleResources(findings: HeartbeatFindings): Promise<void>
     // Workflow engine may not be initialized yet — skip recovery
     findings.staleCleanup.workflowRuns = 0;
   }
+  // Approval sweeps run after the recovery pass, so a waiting run past its
+  // expiresAt is routed on its timeout port before the timeout sweep reads it.
+  try {
+    findings.staleCleanup.approvalTimedOut = (
+      await timeoutExpiredApprovalRequests()
+    ).timedOut.length;
+  } catch (err) {
+    console.error("[heartbeat] approval timeout sweep failed:", err);
+    findings.staleCleanup.approvalTimedOut = 0;
+  }
+  try {
+    findings.staleCleanup.approvalAutoCancelled = (
+      await autoCancelStaleApprovalRequests()
+    ).cancelled.length;
+  } catch (err) {
+    console.error("[heartbeat] approval auto-cancel sweep failed:", err);
+    findings.staleCleanup.approvalAutoCancelled = 0;
+  }
 }
 
 // ============================================================================
@@ -1484,6 +1510,8 @@ export async function runHeartbeatSweep(): Promise<void> {
           staleRuntimes: 0,
           staleOfferedTasks: 0,
           abandonedDraftTasks: 0,
+          approvalAutoCancelled: 0,
+          approvalTimedOut: 0,
         },
       };
       // Expiry runs even on a cleanup-only tick: an idle agent whose runtime
@@ -1553,9 +1581,17 @@ function logFindings(findings: HeartbeatFindings): void {
     workflowRuns,
     staleOfferedTasks,
     abandonedDraftTasks,
+    approvalAutoCancelled,
+    approvalTimedOut,
   } = findings.staleCleanup;
   const totalCleanup =
-    sessions + reviewingTasks + mentionProcessing + inboxProcessing + workflowRuns;
+    sessions +
+    reviewingTasks +
+    mentionProcessing +
+    inboxProcessing +
+    workflowRuns +
+    approvalAutoCancelled +
+    approvalTimedOut;
   if (totalCleanup > 0) {
     parts.push(`stale_cleanup=${totalCleanup}`);
   }

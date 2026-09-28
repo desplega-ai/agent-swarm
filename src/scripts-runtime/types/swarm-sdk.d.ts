@@ -590,6 +590,7 @@ declare module "swarm-sdk" {
 
     // --- human input ---
     request_humanInput(args: Record<string, unknown>): Promise<unknown>;
+    approval_cancel(args: { requestId: string; reason?: string }): Promise<unknown>;
   }
 
   export interface ScriptStdlib {

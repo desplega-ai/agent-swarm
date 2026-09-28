@@ -115,6 +115,7 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [retry-workflow-run](#retry-workflow-run)
   - [cancel-workflow-run](#cancel-workflow-run)
   - [request-human-input](#request-human-input)
+  - [cancel-approval-request](#cancel-approval-request)
 - [Skills Tools](#skills-tools)
   - [skill-create](#skill-create)
   - [skill-update](#skill-update)
@@ -959,8 +960,8 @@ View all scheduled tasks with optional filters. Use this to discover existing sc
 | `keyPrefix` | `unknown` | No | - | Filter by namespace subtree. |
 | `scheduleType` | `recurring \| one_time` | No | - | Filter by schedule type |
 | `hideCompleted` | `boolean` | No | true | Hide completed one-time schedules (default: true) |
-| `consecutiveErrorsMin` | `number` | No | - | Only return schedules with at least this many consecutive errors. |
-| `lastRunStatus` | `failed \| succeeded` | No | - | Filter by derived last run status. `failed` means consecutiveErrors > 0; `succeeded` means lastRunAt is set and consecutiveErrors is 0. |
+| `consecutiveErrorsMin` | `number` | No | - | Only return schedules with at least this many consecutive dispatch errors (the scheduler failed to create the task, workflow run, or script run). Does not count spawned tasks that later failed; for those use get-tasks with scheduleId and status failed. |
+| `lastRunStatus` | `failed \| succeeded` | No | - | Filter by derived last dispatch status. `failed` means consecutiveErrors > 0 (the last dispatch attempt errored); `succeeded` means lastRunAt is set and consecutiveErrors is 0. Reflects dispatch only, not the outcome of spawned tasks; for those use get-tasks with scheduleId and status failed. |
 | `includeFull` | `boolean` | No | - | Return the full `taskTemplate` instead of a short `taskTemplatePreview`. Default false. |
 
 ### create-schedule
@@ -1421,13 +1422,24 @@ Cancel a running or waiting workflow run. Cancels all non-terminal steps and the
 
 **Request human input**
 
-Create an approval request that pauses until a human responds. Supports multiple question types: approval (yes/no), text, single-select, multi-select, and boolean. Returns the request ID and URL for the human to respond.
+Create an approval request and return at once with the request id and URL. The answer arrives later as a hitl-follow-up task. Supports multiple question types: approval (yes/no), text, single-select, multi-select, and boolean. Returns the request ID and URL for the human to respond.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `title` | `string` | Yes | - | Title of the approval request |
 | `questions` | `array` | Yes | - | Questions to ask the human |
-| `timeoutSeconds` | `number` | No | - | Timeout in seconds (auto-rejects on timeout) |
+| `timeoutSeconds` | `number` | No | - | Seconds until the request expires. After that the request becomes 'timeout' and you get a hitl-follow-up task. A request with no timeout is cancelled after APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS days (default 7). |
+
+### cancel-approval-request
+
+**Cancel approval request**
+
+Cancel a pending approval request by id. Allowed for a lead agent, or for the agent that owns the request's source task. If the request gates a running or waiting workflow run, that run is cancelled too. A request whose explicit timeout passed is already 'timeout' and cannot be cancelled.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `requestId` | `uuid` | Yes | - | The ID of the approval request to cancel. |
+| `reason` | `string` | No | - | Reason for cancellation. |
 
 ## Skills Tools
 

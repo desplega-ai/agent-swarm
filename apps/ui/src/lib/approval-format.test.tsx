@@ -176,6 +176,13 @@ describe("time, approvers and ordering", () => {
       { id: "r-old", status: "approved" as const, createdAt: "2026-09-20T10:00:00Z" },
       { id: "p-new", status: "pending" as const, createdAt: "2026-09-24T10:00:00Z" },
       { id: "r-new", status: "rejected" as const, createdAt: "2026-09-23T10:00:00Z" },
+      { id: "r-cancelled", status: "cancelled" as const, createdAt: "2026-09-25T10:00:00Z" },
+      {
+        id: "r-timeout",
+        status: "timeout" as const,
+        createdAt: "2026-09-21T10:00:00Z",
+        expiresAt: "2026-09-22T10:00:00Z",
+      },
       {
         id: "p-march-overdue",
         status: "pending" as const,
@@ -207,7 +214,9 @@ describe("time, approvers and ordering", () => {
       "p-new",
       "p-july-overdue",
       "p-march-overdue",
+      "r-cancelled",
       "r-new",
+      "r-timeout",
       "r-old",
     ]);
   });

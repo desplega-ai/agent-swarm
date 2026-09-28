@@ -9,7 +9,7 @@ import type { AgentTask } from "../../api/types";
 // modules are stubbed so we exercise only ReviewAck's own branching logic —
 // not TaskOutcome's/ChainOfThought's/TaskDetailSheet's internals, which have
 // their own deep `@/` import graphs and their own tests.
-mock.module("@/lib/utils", () => import("../../lib/utils"));
+mock.module("@/lib/utils", () => require("../../lib/utils"));
 mock.module("@/api/hooks/use-agents", () => ({
   useAgent: (id: string) => ({ data: id ? { id, name: "Lead" } : undefined }),
 }));
@@ -29,7 +29,7 @@ mock.module("./task-outcome", () => ({
 mock.module("./task-detail-sheet", () => ({
   TaskDetailSheet: () => null,
 }));
-mock.module("@/lib/task-activity", () => import("../../lib/task-activity"));
+mock.module("@/lib/task-activity", () => require("../../lib/task-activity"));
 
 const { ReviewAck } = await import("./review-ack");
 
