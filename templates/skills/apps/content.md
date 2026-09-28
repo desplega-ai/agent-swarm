@@ -427,7 +427,7 @@ Param `kind` is `string` by default, or `number` / `boolean`; `required` default
 
 Within each page, `root` names one entry in its non-empty `elements` map. Elements are a flat, single-parent tree: ids are map keys, `children` contains ids (not nested elements), all elements must be reachable from `root`, and cycles, missing children, or shared children are invalid. Element and Form/UI ids are page-local. Element keys are `type`, `props`, `children`, `on`, `visible`, `repeat`, and `watch`; only components with a `default` child slot accept `children` (Stack, Grid, Split, Tabs, Container, Card, and Drawer). `watch` maps state paths to an action step or chain.
 
-## Component catalog (all 20)
+## Component catalog (all 23)
 
 Props reject unknown keys. A `{"$state":"..."}` binding may replace a literal prop value at any depth.
 
@@ -453,6 +453,9 @@ Props reject unknown keys. A `{"$state":"..."}` binding may replace a literal pr
 | `Form` | `id`, `fields`, `onSubmit` | `title`, `submitLabel`; see below. |
 | `Drawer` | `param` | `title`, `description`, `side: "right" or "left"`, `size: "sm", "md", "lg", or "xl"`; has the `default` child slot. |
 | `DetailList` | `fields` | `data`, `emptyMessage`, `columns: 1 or 2`, `loading` (bind `/queries/<name>/loading` for skeleton fields while loading); renders one record without edit controls. |
+| `Kanban` | `columnField`, `columns`, `titleField` | `data`, `loading`, `cardFields`, `idField` (default `id`), `onMove`, `onCardClick`; see below. |
+| `Calendar` | `startField`, `titleField` | `data`, `loading`, `endField`, `idField`, `onSelect`; read-only month grid; see below. |
+| `ContributionGraph` | none | `data`, `loading`, `dateField` (default `date`), `countField`, `days` (7-730, default 365); read-only activity heatmap. |
 
 Table details:
 
@@ -461,6 +464,22 @@ Table details:
 - `rowActions[]`: `{ label, variant?, confirm?, actions }`. Variants add `destructive-outline` to the Button variants. `destructive` and `destructive-outline` confirm by default; customize with `{ "title": ..., "description": ..., "confirmLabel": ... }`, or use a bare `confirm` string as the dialog description (use `confirm: false` only for a reversible action).
 - `search`: optional string; case-insensitive substring matching across the listed string and number columns. Bind a SearchInput value for client-side search.
 - `filters`: optional record of per-column string, number, boolean, or null values. Null, empty, or absent values disable one filter. Bind Select values for client-side equality filters.
+
+Kanban details:
+
+- One card per `data` row, grouped by the row's `columnField` value. `columns[]` are plain strings or `{ id, label? }`, in display order; rows matching no column are hidden.
+- `cardFields[]` uses the DetailList field shape (`{ key, label?, kind?, tones? }`) for extra lines under the title.
+- `onMove` is an action chain run when a card is dropped in another column. `$row` is the moved row with `columnField` already set to the new column: `[{ "action": "app.mutate", "params": { "model": "deal", "op": "update", "rowId": { "$row": "id" }, "values": { "stage": { "$row": "stage" } } } }]`. Without `onMove`, cards cannot be dragged.
+- `onCardClick` is an action chain with `$row`; pair it with `app.navigate` and a `Drawer` to open a card.
+
+Calendar details:
+
+- `startField` / `endField` hold ISO dates, ISO datetimes, or epoch ms. An event shows on every day from start to end; without `endField` it shows on its start day.
+- Each Calendar keeps its own visible month (prev/next controls in its header). `onSelect` is an action chain with `$row`, run when an event is clicked.
+
+ContributionGraph details:
+
+- Buckets `data` rows by the calendar day of `dateField` over the trailing `days`. Each row counts 1, or adds its numeric `countField` when set.
 
 Form details:
 
