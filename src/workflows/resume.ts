@@ -50,7 +50,7 @@ interface TaskEvent {
 
 interface ApprovalEvent {
   requestId: string;
-  status: "approved" | "rejected" | "timeout";
+  status: "approved" | "rejected" | "timeout" | "cancelled";
   responses: Record<string, unknown> | null;
   workflowRunId?: string;
   workflowRunStepId?: string;
@@ -487,6 +487,13 @@ async function resumeFromApprovalResolution(
   if (!workflow) return;
 
   const ctx = (run.context ?? {}) as Record<string, unknown>;
+
+  if (event.status === "cancelled") {
+    console.warn(
+      `[workflows] approval ${event.requestId} is cancelled; step ${event.workflowRunStepId} stays waiting for the run cancel path`,
+    );
+    return;
+  }
 
   // Determine output port based on approval status
   const nextPort =

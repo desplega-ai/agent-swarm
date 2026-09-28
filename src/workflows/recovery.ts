@@ -215,14 +215,18 @@ async function recoverApprovalWaitingRuns(registry: ExecutorRegistry): Promise<n
       let approvalStatus = stuck.approvalStatus;
       let responses: unknown = stuck.approvalResponses ? JSON.parse(stuck.approvalResponses) : null;
 
-      // If still pending but expired, auto-reject
+      // If still pending but expired, mark as timeout
       if (approvalStatus === "pending" && stuck.expiresAt) {
         await resolveApprovalRequest(stuck.approvalId, {
           status: "timeout",
+          resolutionReason: `Timed out: no answer before ${stuck.expiresAt}`,
         });
         approvalStatus = "timeout";
         responses = null;
       }
+
+      // A cancelled approval belongs to the run cancel path, never to a port.
+      if (approvalStatus === "cancelled") continue;
 
       const nextPort =
         approvalStatus === "timeout"
