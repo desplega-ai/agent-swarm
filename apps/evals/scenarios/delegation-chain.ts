@@ -36,6 +36,16 @@ function leadAgent(ctx: JudgeContext): string | undefined {
   return ctx.workers.find((w) => w.isLead)?.agentId;
 }
 
+/** Every lead task's result joined. A lead that defers finishes in a later
+ * wake-up task, so the first lead task alone holds only the defer summary. */
+function leadResults(ctx: JudgeContext): string {
+  const leadId = leadAgent(ctx);
+  return ctx.tasks
+    .filter((t) => t.agentId === leadId && typeof t.result === "string")
+    .map((t) => t.result as string)
+    .join("\n");
+}
+
 /** Statuses the seeded audit history carries (fixtures/generate-sql-audit-history.ts). */
 const SEEDED_STATUSES = new Set(["completed", "failed", "cancelled"]);
 /** get-tasks args that narrow the list away from the seeded history. */
@@ -246,7 +256,7 @@ const chainCorrectnessCheck: DeterministicCheck = {
   fn: async (ctx): Promise<CheckResult> => {
     const lead = ctx.workers[LEAD_WORKER];
     const report = lead ? await lead.readFile(REPORT_FILE) : null;
-    const text = report ?? ctx.tasks.find((t) => t.agentId === leadAgent(ctx))?.result ?? "";
+    const text = report ?? leadResults(ctx);
     const matched = FACTS.filter((f) => f.pattern.test(text)).length;
     return {
       pass: matched === FACTS.length,
@@ -261,9 +271,8 @@ const finalReportGate: DeterministicCheck = {
   fn: async (ctx) => {
     const lead = ctx.workers[LEAD_WORKER];
     const report = lead ? await lead.readFile(REPORT_FILE) : null;
-    const leadOutput = ctx.tasks.find((t) => t.agentId === leadAgent(ctx))?.result;
     return {
-      pass: Boolean(report?.trim() || (typeof leadOutput === "string" && leadOutput.trim())),
+      pass: Boolean(report?.trim() || leadResults(ctx).trim()),
       detail: "final report file or lead output present",
     };
   },
@@ -297,6 +306,7 @@ export const delegationChain: Scenario = {
     ],
   },
   timeoutMs: 16 * 60_000,
+  awaitSpawnedTasks: true,
 };
 
 export const __test__ = {

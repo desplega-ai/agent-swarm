@@ -264,8 +264,9 @@ describe("spec'd scenario shapes (v9 orchestration substrate)", () => {
       "dispatch-order",
       "correctness",
     ]);
-    expect(`${s.tasks[0]?.description}`).toMatch(/KV/);
-    expect(`${s.tasks[0]?.description}`).toMatch(/Avoid raw curl/);
+    // v2: the prompt names goals, not tools; the conventions live in memory.
+    expect((s.seed?.memories ?? []).join("\n")).toMatch(/alpha\/checkpoint/);
+    expect(`${s.tasks[0]?.description}`).toMatch(/raw curl/);
   });
 
   test("structured-output-adherence forwards a real task outputSchema", () => {
@@ -275,12 +276,11 @@ describe("spec'd scenario shapes (v9 orchestration substrate)", () => {
     expect(s).toBeDefined();
     expect(s.tasks[0]?.outputSchema).toBeDefined();
     expect(s.tasks[0]?.outputSchema?.required).toEqual([
-      "summary",
-      "risks",
-      "nextAction",
+      "services",
+      "shippableCount",
       "confidence",
     ]);
-    expect(dimensions.map((d) => d.name)).toEqual(["instruction-following"]);
+    expect(dimensions.map((d) => d.name)).toEqual(["instruction-following", "correctness"]);
   });
 });
 
