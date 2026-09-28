@@ -59,7 +59,7 @@ A `taskTemplate` and `scriptArgs` are stored as plain text and replayed on every
 
 ## Repair a failing schedule
 
-`list-schedules` with `lastRunStatus: "failed"` or `consecutiveErrorsMin: 3` lists the failing ones. Fix the cause, then `run-schedule-now` to confirm. A schedule you cannot fix now: `patch-schedule` with `enabled: false` and say so in your task output. A second schedule next to a broken one is not a fix.
+Schedules fail in two places. A schedule whose spawned tasks fail: `get-tasks` with `scheduleId` and `status: "failed"`. A schedule the scheduler could not dispatch at all: `list-schedules` with `lastRunStatus: "failed"` or `consecutiveErrorsMin: 1`; these errors back off and auto-disable after 5. The `list-schedules` filters never see spawned-task failures. Fix the cause, then `run-schedule-now` to confirm. A schedule you cannot fix now: `patch-schedule` with `enabled: false` and say so in your task output. A second schedule next to a broken one is not a fix.
 
 ## Related skills
 
