@@ -6156,6 +6156,26 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
         console.log(`[${role}] Trigger received: ${trigger.type}`);
 
+        // The heartbeat reclaims a task in place (same id, `attempt + 1`). If
+        // this runner still has the earlier attempt running (it was
+        // unresponsive, not dead), keep that one and never run two copies.
+        // Reclaim deleted its session row, so register it again or the next
+        // sweep would reclaim the live process a second time.
+        if (
+          trigger.type === "task_assigned" &&
+          trigger.taskId &&
+          state.activeTasks.has(trigger.taskId)
+        ) {
+          console.warn(
+            `[${role}] Task ${trigger.taskId.slice(0, 8)} is already running here; keeping it, not starting a second copy`,
+          );
+          await registerActiveSession(apiConfig, {
+            taskId: trigger.taskId,
+            triggerType: trigger.type,
+          });
+          continue;
+        }
+
         if (
           trigger.taskId &&
           (trigger.type === "task_assigned" || trigger.type === "task_offered")
@@ -6212,8 +6232,20 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         // acts as a bounded safety net for resumable ones (claude/codex).
         // For taskType="resume" (created by supersedeTaskViaAPI), use the
         // larger resume preamble that includes a session-log tool-call summary.
-        const taskObj = trigger.task as { parentTaskId?: string; taskType?: string } | undefined;
-        if (taskObj?.parentTaskId && apiUrl) {
+        const taskObj = trigger.task as
+          | { id?: string; parentTaskId?: string; taskType?: string; attempt?: number }
+          | undefined;
+        if (taskObj?.id && (taskObj.attempt ?? 0) > 0 && apiUrl) {
+          // Reclaimed by the heartbeat: the same row runs again, so continuity
+          // comes from this row's own earlier attempts (their session logs).
+          const resumePreamble = await buildResumeContextPreamble(apiUrl, apiKey, taskObj.id);
+          if (resumePreamble) {
+            triggerPrompt = prependContextPreamble(triggerPrompt, resumePreamble);
+            console.log(
+              `[${role}] Injected resume preamble for reclaimed task (attempt ${taskObj.attempt})`,
+            );
+          }
+        } else if (taskObj?.parentTaskId && apiUrl) {
           const isResumeTask = taskObj.taskType === "resume";
           const contextPreamble = isResumeTask
             ? await buildResumeContextPreamble(apiUrl, apiKey, taskObj.parentTaskId)

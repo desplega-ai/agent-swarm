@@ -19,7 +19,7 @@ import {
   insertActiveSession,
   startTask,
 } from "../be/db";
-import { runRebootSweep, setBeforeHeartbeatSupersedeForTests } from "../heartbeat/heartbeat";
+import { runHeartbeatSweep, setBeforeHeartbeatReclaimForTests } from "../heartbeat/heartbeat";
 
 const TEST_DB_PATH = "./test-heartbeat-reboot-live.sqlite";
 
@@ -30,7 +30,7 @@ async function backdateTask(taskId: string, isoTime: string): Promise<void> {
   ]);
 }
 
-describe("Reboot sweep live sessions (TLA+ counterexample)", () => {
+describe("First sweep after boot keeps live sessions (TLA+ counterexample)", () => {
   beforeAll(async () => {
     try {
       await unlink(TEST_DB_PATH);
@@ -53,7 +53,7 @@ describe("Reboot sweep live sessions (TLA+ counterexample)", () => {
   });
 
   beforeEach(async () => {
-    setBeforeHeartbeatSupersedeForTests(null);
+    setBeforeHeartbeatReclaimForTests(null);
     const db = getDbClient();
     await db.run("DELETE FROM agent_tasks");
     await db.run("DELETE FROM agents");
@@ -61,6 +61,8 @@ describe("Reboot sweep live sessions (TLA+ counterexample)", () => {
   });
 
   // Trace: PollStart -> RegisterSession -> ApiCrash -> ApiBoot -> RebootFail (NoLiveKill).
+  // There is no reboot sweep any more: the first sweep after boot is the
+  // regular one (startHeartbeat runs it at T+5s), so replay that instead.
   test("reboot sweep does not fail a live worker whose last tool call was shortly before the API restart", async () => {
     const gs = globalThis as typeof globalThis & { __runId?: string };
     const original = gs.__runId;
@@ -84,7 +86,7 @@ describe("Reboot sweep live sessions (TLA+ counterexample)", () => {
         task.id,
       ]);
 
-      await runRebootSweep();
+      await runHeartbeatSweep();
 
       expect((await getTaskById(task.id))?.status).toBe("in_progress");
       expect(await getActiveSessionForTask(task.id)).not.toBeNull();

@@ -288,7 +288,7 @@ export async function getLeadAgent(): Promise<Agent | null> {
   // poll — e.g. an old offline lead must not shadow a live replacement. Falls
   // back to any lead (incl. offline) so existing "is there a lead at all?"
   // semantics are preserved; callers that require a live lead must check
-  // `status` themselves (see escalateUnreclaimedResumes).
+  // `status` themselves (see unpinUnclaimedTasks).
   return leads.find((a) => a.status !== "offline") ?? leads[0] ?? null;
 }
 

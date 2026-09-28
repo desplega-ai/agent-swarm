@@ -681,6 +681,9 @@ export const AgentTaskSchema = z
     // Stored affinity that fails validation is quarantined rather than silently
     // treated as an ordinary, claimable task. Internal read-path signal.
     routingAffinityInvalid: z.boolean().optional(),
+    // Times the heartbeat reclaimed this row (in_progress -> pending in place).
+    // 0 = never reclaimed. See `reclaimTask` in src/be/db/tasks/write.ts.
+    attempt: z.number().int().nonnegative().optional(),
   })
   .openapi("AgentTask");
 

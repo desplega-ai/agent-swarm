@@ -1,6 +1,7 @@
 ------------------------- MODULE HeartbeatSimple -------------------------
 (***************************************************************************)
-(* Proposed heartbeat. NOT implemented; see the proposal doc.              *)
+(* The heartbeat as implemented (Reclaim + Unpin). ACTIONS.md maps each    *)
+(* action to code and lists where the code deviates from this model.     *)
 (*                                                                         *)
 (* One idea replaces supersede + resume child + backfill + reaper + reboot *)
 (* sweep + pool auto-assign: a stalled task is re-queued IN PLACE by one   *)
@@ -22,9 +23,11 @@ EXTENDS Naturals, FiniteSets
 
 CONSTANTS Workers, NTasks, MaxVer, MaxGen, MaxWorkerCrashes, MaxApiCrashes,
     GoneWorkers,  \* workers that never come back after a crash
-    FENCE,        \* ablation: worker writes check attempt (TRUE = proposed)
-    UNPIN,        \* ablation: expired pins return to the pool (TRUE = proposed)
-    RECLAIM_CAS   \* ablation: Reclaim re-checks staleness in its WHERE
+    FENCE,        \* ablation: worker writes check attempt (TRUE = code)
+    UNPIN,        \* ablation: expired pins return to the pool (TRUE = code)
+    RECLAIM_CAS,  \* ablation: Reclaim re-checks staleness in its WHERE
+    UNPIN_OFFERED \* Unpin also returns stale offers (FALSE = code: offers keep
+                  \* the offline-offeree release, modeled here by Reject)
 
 None == "none"
 Tasks == 1..NTasks
@@ -211,7 +214,7 @@ Reclaim(t) ==
 Unpin(t) ==
     /\ UNPIN /\ apiUp /\ stale[t]
     /\ \/ st[t] = "pending" /\ own[t] # None
-       \/ st[t] = "offered"
+       \/ UNPIN_OFFERED /\ st[t] = "offered"
     /\ st' = [st EXCEPT ![t] = "unassigned"]
     /\ own' = [own EXCEPT ![t] = None]
     /\ offTo' = [offTo EXCEPT ![t] = None]

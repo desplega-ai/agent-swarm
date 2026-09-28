@@ -287,10 +287,12 @@ export {
   getRecentlyCancelledTasksForAgent,
   overwriteTerminalTaskResultText,
   pauseTask,
+  reclaimTask,
   resetOrphanedInProgressTasksForAgent,
   resumeTask,
   startTask,
   supersedeTask,
+  unpinTask,
   updateTaskClaudeSessionId,
   updateTaskProgress,
   updateTaskTitle,
@@ -7105,92 +7107,32 @@ export async function getStalledInProgressTasks(
 }
 
 /**
- * Genuine same-agent protected pins — resumes tagged `crash-recovery-pin` /
- * `graceful-shutdown-pin`, OR a reboot-retry child tagged `reboot-retry-pin`
- * (routing-affinity Phase 3) — that are still `pending` `graceMin` minutes
- * after creation. The heartbeat reaper escalates these to a Lead
- * reroute-decision.
- *
- * Scoping clauses, each load-bearing:
- *  - `taskType = 'resume' AND (crash/graceful pin tags)` OR `reboot-retry-pin`
- *    tag alone — restricts to work actually pinned to its original agent on a
- *    protected path. A reboot-retry-pin task is a FRESH task (`taskType`
- *    mirrors the original work, not `'resume'`), so it needs its own
- *    disjunct rather than reusing the `taskType = 'resume'` gate. Without
- *    this, a *pooled* resume that `autoAssignPoolTasks` flips to `pending`
- *    earlier in the SAME sweep (keeping its old `createdAt`) would be reaped
- *    and cancelled before the assigned worker polls; it also keeps
- *    `context_limits` / `manual_supersede` pins from being escalated under
- *    the protected-pin label. (Literals must match the pin tag constants in
- *    src/tasks/worker-follow-up.ts.)
- *  - `status = 'pending'` — the "currently unreclaimed" discriminator: when the
- *    agent reclaims via the normal poll path, `startTask` flips the row to
- *    `in_progress` and it drops out of this set. (A reclaimed resume whose
- *    session later orphans can be flipped back to `pending` by
- *    `resetOrphanedInProgressTasksForAgent`, re-entering this set on a later
- *    sweep — re-escalating genuinely re-stalled work, which is fine.) We do NOT
- *    gate on `lastActivityAt` — it is stale for a returned-but-idle agent.
- *  - `createdAt < cutoff` — `createdAt` is the resume's creation = crash-DETECTION
- *    time, so the grace window is measured from detection.
- *
- * Keys only on reboot-durable columns, so a pending pin survives a server reboot
- * and is caught on the first post-reboot sweep.
+ * Pins nobody picked up (HeartbeatSimple.tla `Unpin`): `pending` rows held by
+ * an agent that did not start them within `graceMin` minutes. Two kinds:
+ *  - rows the heartbeat reclaimed (`attempt > 0`), and
+ *  - resumes pinned to their original agent by the runner's graceful-shutdown
+ *    supersede, or by the pre-Reclaim heartbeat (`crash-recovery-pin`,
+ *    `reboot-retry-pin`). The literals match the tag constants in
+ *    src/tasks/worker-follow-up.ts.
+ * A task assigned directly to a busy agent is not a pin and stays queued.
+ * Grace is measured from `lastUpdatedAt`, the time the row became `pending`.
  */
-export async function getStalePinnedResumes(graceMin: number): Promise<AgentTask[]> {
+export async function getUnclaimedPins(graceMin: number): Promise<AgentTask[]> {
   const cutoff = new Date(Date.now() - graceMin * 60 * 1000).toISOString();
   const rows = await getDbClient().query<AgentTaskRow>(
     `SELECT * FROM agent_tasks
        WHERE status = 'pending'
+         AND agentId IS NOT NULL
+         AND lastUpdatedAt < ?
          AND (
-           (taskType = 'resume' AND (tags LIKE '%"crash-recovery-pin"%' OR tags LIKE '%"graceful-shutdown-pin"%'))
+           attempt > 0
+           OR (taskType = 'resume' AND (tags LIKE '%"crash-recovery-pin"%' OR tags LIKE '%"graceful-shutdown-pin"%'))
            OR tags LIKE '%"reboot-retry-pin"%'
          )
-         AND createdAt < ?
-       ORDER BY createdAt ASC`,
+       ORDER BY lastUpdatedAt ASC`,
     [cutoff],
   );
   return rows.map(rowToAgentTask);
-}
-
-/**
- * Atomically terminalize a pinned resume ONLY if it is still `pending`, in one
- * `UPDATE … RETURNING`. Returns the row when the transition fired, or `null`
- * when it did not (the agent reclaimed it in the gap → `startTask` already
- * flipped it to `in_progress`). The heartbeat reaper escalates to the Lead ONLY
- * when this returns a row, closing the TOCTOU window between reading the resume
- * as `pending` and writing.
- *
- * Deliberately NOT `failTask`: `failTask`'s backing SQL is keyed on `id` with no
- * status precondition, so it would terminalize an `in_progress` resume the
- * worker just started. The `AND status = 'pending'` here is the guard.
- */
-export async function failPendingResumeIfUnclaimed(
-  taskId: string,
-  status: "cancelled" | "failed",
-  failureReason: string,
-): Promise<AgentTask | null> {
-  const now = new Date().toISOString();
-  const scrubbedReason = scrubSecrets(failureReason);
-  const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET status = ?, failureReason = ?, finishedAt = ?, lastUpdatedAt = ?
-       WHERE id = ? AND status = 'pending' RETURNING *`,
-    [status, scrubbedReason, now, now, taskId],
-  );
-
-  if (row) {
-    try {
-      await createLogEntry({
-        eventType: "task_status_change",
-        taskId,
-        agentId: row.agentId ?? undefined,
-        oldValue: "pending",
-        newValue: status,
-        metadata: { reason: scrubbedReason, reaper: "pin_unreclaimed" },
-      });
-    } catch {}
-  }
-
-  return row ? rowToAgentTask(row) : null;
 }
 
 /**

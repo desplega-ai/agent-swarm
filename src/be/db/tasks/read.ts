@@ -115,6 +115,7 @@ export type AgentTaskRow = {
   harnessVariantMeta: string | null;
   totalCostUsd?: number | null;
   routingAffinity: string | null;
+  attempt?: number | null;
 };
 
 export function rowToAgentTask(row: AgentTaskRow): AgentTask {
@@ -241,6 +242,7 @@ export function rowToAgentTask(row: AgentTaskRow): AgentTask {
     totalCostUsd: row.totalCostUsd ?? undefined,
     routingAffinity,
     routingAffinityInvalid: routingAffinityInvalid || undefined,
+    attempt: row.attempt ?? 0,
   };
 }
 

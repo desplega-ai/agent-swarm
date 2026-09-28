@@ -48,13 +48,13 @@ const EXPECTED_INVENTORY: InventoryEntry[] = [
   },
   {
     file: "src/heartbeat/heartbeat.ts",
-    owner: "runRebootSweep",
-    syntax: "ShorthandPropertyAssignment",
+    owner: "unpinUnclaimedTasks",
+    syntax: "PropertyAssignment",
     count: 1,
     kind: "producer",
     dispatchProof: {
-      file: "src/tests/heartbeat.test.ts",
-      text: "falls back to an affinity-stamped pool retry when the agent is at capacity",
+      file: "src/tests/heartbeat-reclaim.test.ts",
+      text: "a reclaimed pin its agent did not start within the grace goes to the pool",
     },
   },
   {
@@ -66,17 +66,6 @@ const EXPECTED_INVENTORY: InventoryEntry[] = [
     dispatchProof: {
       file: "src/tests/pool-affinity.test.ts",
       text: "escalation to Lead does not throw",
-    },
-  },
-  {
-    file: "src/tasks/worker-follow-up.ts",
-    owner: "createRerouteDecisionTask",
-    syntax: "PropertyAssignment",
-    count: 1,
-    kind: "producer",
-    dispatchProof: {
-      file: "src/tests/heartbeat-reroute-decision.test.ts",
-      text: "uses its own Lead authorization instead of the original work requirements",
     },
   },
   {

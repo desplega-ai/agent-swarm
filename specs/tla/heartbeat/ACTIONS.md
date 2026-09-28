@@ -2,7 +2,9 @@
 
 Every TLA+ action maps to the code path it models and the SQL guard it relies on. Line numbers are for `main` @ `f031fa8e`. A counterexample is only acted on if every step in its trace maps to a row here.
 
-## Heartbeat.tla (current code)
+## Heartbeat.tla (before model)
+
+Line numbers are for `main` @ `f031fa8e`, before Reclaim replaced supersede/resume and the reboot sweep. Kept as the "before" model; these rows no longer describe the code.
 
 | TLA+ action | Code | Guard modeled | Abstraction |
 |---|---|---|---|
@@ -31,12 +33,21 @@ Every TLA+ action maps to the code path it models and the SQL guard it relies on
 | `RebootFail(t)` | `runRebootSweep` `src/heartbeat/heartbeat.ts:695` | skip if `lastUpdatedAt >= bootEpoch-5s` (`G_REBOOT_TOUCHED`), session heartbeat `>= bootEpoch-5s`, or session heartbeat younger than `STALL_THRESHOLD_STALE_HEARTBEAT_MIN` (15 min, `heartbeat.ts:759`, `G_REBOOT_HB_AGE`, #1669); else `failTask` (no CAS) | Read and write collapsed into one step (window is milliseconds). Session age is chosen per step (`hbOld`), constrained to `hbOld => stale[t]` because worker `lastUpdatedAt` writes come with a tool-call heartbeat. A task with no session row is still failed. `FIX_NO_REBOOT` removes the sweep. |
 | `RebootRetry` | `runRebootSweep` retry child `src/heartbeat/heartbeat.ts:835` | none; separate write | Generation restarts at 0 (retry children carry no `resume-generation` tag). |
 
-## HeartbeatSimple.tla (proposed, not implemented)
+## HeartbeatSimple.tla (current code)
 
-| TLA+ action | Replaces | Proposed SQL |
+| TLA+ action | Code | Guard |
 |---|---|---|
-| `ClaimRead`/`ClaimWrite`, `AcceptRead`/`AcceptWrite`, `Reject`, `PollStart`, `RegisterSession` | same as above | `acceptTask` adds `AND offeredTo = ?` to its WHERE. |
-| `Progress`, `Complete` | `updateTaskProgress`, `completeTask`, `failTask` (worker) | `WHERE id=? AND status='in_progress' AND agentId=? AND attempt=?` (fence). |
-| `AbortStale(w,t,g)` | `/cancelled-tasks` polling | Any fenced write that matches 0 rows tells the worker to stop. |
-| `Reclaim(t)` | `HbRead`, `HbWrite`, `HbResume`, `HbRepair`, `RebootFail`, `RebootRetry`, `CleanupSession` | One transaction: `UPDATE agent_tasks SET status='pending', attempt=attempt+1 WHERE id=? AND status='in_progress' AND attempt=? AND lastUpdatedAt < :cutoff AND NOT EXISTS (fresh session)` + `DELETE FROM active_sessions WHERE taskId=?`; `status='failed'` once the attempt budget is spent. The same shape already exists worker-side as `resetOrphanedInProgressTasksForAgent` (`src/be/db/tasks/write.ts:897`). |
-| `Unpin(t)` | `Reaper`, `AutoAssign`, `releaseStaleOfferedTasksForOfflineAgents` | `UPDATE … SET status='unassigned', agentId=NULL, offeredTo=NULL WHERE id=? AND status IN ('pending','offered') AND lastUpdatedAt < :pinGrace`. The pool stays affinity-gated, so a role-mismatched worker still cannot claim it. |
+| `ClaimRead`/`ClaimWrite`, `AcceptRead`/`AcceptWrite`, `Reject`, `PollStart`, `RegisterSession` | unchanged, see the table above | unchanged |
+| `Progress`, `Complete` (fence) | `store-progress` `src/tools/store-progress.ts` | On a row with `attempt > 0`, a write from an agent that is not the current `in_progress` holder is refused and the worker is told to stop. |
+| `AbortStale(w,t,g)` | the refused `store-progress` above; runner keeps an already-running copy instead of starting a second (`src/commands/runner.ts`) | |
+| `Reclaim(t)` | `detectAndRemediateStalledTasks` → `remediateStalledTask` `src/heartbeat/heartbeat.ts` → `reclaimTask` `src/be/db/tasks/write.ts` | One transaction: `UPDATE agent_tasks SET status='pending', attempt=attempt+1 WHERE id=? AND status='in_progress' AND attempt=? AND lastUpdatedAt=? AND NOT EXISTS (fresher active_sessions row)` + `DELETE FROM active_sessions WHERE taskId=?`. Budget spent (`attempt+1 > MAX_RESUME_GENERATIONS`) → `failTask` with the same guards. |
+| `Unpin(t)` | `unpinUnclaimedTasks` `src/heartbeat/heartbeat.ts` → `getUnclaimedPins` + `unpinTask` | `UPDATE … SET status='unassigned', agentId=NULL, routingAffinity=COALESCE(routingAffinity, snapshot) WHERE id=? AND status='pending' AND lastUpdatedAt=?`, for reclaimed rows idle past `HEARTBEAT_RESUME_PIN_GRACE_MIN`. |
+| `ApiCrash`/`ApiBoot` | API restart | No boot sweep. The normal sweep reclaims what the crash left. |
+
+### Deviations from the model
+
+- **Fence by holder, not attempt number.** The worker does not send `attempt`. The fence refuses writes from any agent that is not the current `in_progress` holder of a reclaimed row. A stale run on the SAME agent that restarts the row is not fenced by the API; the runner guard (one copy per task id per runner) covers it instead.
+- **Unpin covers pins, not offers** (`UNPIN_OFFERED = FALSE`). Offers keep `releaseStaleOfferedTasksForOfflineAgents`, modeled by `Reject`. `acceptTask` still checks `offeredTo` in JS, not SQL.
+- **Unpin skips Lead-held pins.** Not modeled (the model has no Lead).
+- **Fail instead of Reclaim** for workflow steps (the workflow engine's retry owns them), control-plane task types, and an extension that proposes `fail`. This is Reclaim's budget branch taken early, so it adds no new state.
+- **Kept outside the model:** `autoAssignPoolTasks`, the steering grace and the `pre.heartbeat.remediate` hook (both only skip or pick a branch).
