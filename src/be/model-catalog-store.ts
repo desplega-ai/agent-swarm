@@ -405,7 +405,9 @@ function factEquals(key: (typeof FACT_KEYS)[number], overlay: unknown, upstream:
 export async function expireMatchedOverlays(): Promise<string[]> {
   const overlays = await listModelCatalogOverlay();
   if (overlays.length === 0) return [];
-  const upstream = new Map((await listModelCatalog()).map((e) => [`${e.provider}/${e.modelId}`, e]));
+  const upstream = new Map(
+    (await listModelCatalog()).map((e) => [`${e.provider}/${e.modelId}`, e]),
+  );
   const expired: string[] = [];
   for (const overlay of overlays) {
     if (!overlay.expiresWhenUpstreamMatches) continue;

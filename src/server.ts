@@ -74,6 +74,10 @@ import { registerMemoryGetTool } from "./tools/memory-get";
 import { registerMemoryRateTool } from "./tools/memory-rate";
 import { registerMemorySearchTool } from "./tools/memory-search";
 import { registerMemoryStoreTool } from "./tools/memory-store";
+import {
+  registerModelCatalogOverlayUpsertTool,
+  registerModelCatalogRefreshTool,
+} from "./tools/model-catalog";
 import { registerMyAgentInfoTool } from "./tools/my-agent-info";
 import { registerGetOauthAccessTokenTool } from "./tools/oauth-access-token";
 import { registerPollTaskTool } from "./tools/poll-task";
@@ -151,10 +155,6 @@ import { registerSlackUpdateTool } from "./tools/slack-update";
 import { registerSlackUploadFileTool } from "./tools/slack-upload-file";
 import { registerSteerTaskTool } from "./tools/steer-task";
 import { registerStoreProgressTool } from "./tools/store-progress";
-import {
-  registerModelCatalogOverlayUpsertTool,
-  registerModelCatalogRefreshTool,
-} from "./tools/model-catalog";
 // Swarm config tools
 import {
   registerDeleteConfigTool,
