@@ -1,11 +1,5 @@
 import { type ToolUse, toolUseMatches } from "../src/judge/session-log-parse.ts";
-import type {
-  CheckResult,
-  DeterministicCheck,
-  JudgeContext,
-  Scenario,
-  SwarmTask,
-} from "../src/types.ts";
+import type { CheckResult, DeterministicCheck, JudgeContext, Scenario } from "../src/types.ts";
 import {
   apiList,
   firstStageIndices,
