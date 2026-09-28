@@ -169,7 +169,8 @@ async function ensureCatalogWriter(
     principal = { kind: "user", userId: auth.userId };
   } else {
     const header = req.headers["x-agent-id"];
-    const agentId = auth?.kind === "agent" ? auth.agentId : Array.isArray(header) ? header[0] : header;
+    const agentId =
+      auth?.kind === "agent" ? auth.agentId : Array.isArray(header) ? header[0] : header;
     const agent = agentId ? await getAgentById(agentId) : undefined;
     principal = { kind: "agent", agentId: agentId ?? "", isLead: agent?.isLead ?? false };
   }

@@ -81,8 +81,13 @@ export const registerModelCatalogOverlayUpsertTool = (server: McpServer) => {
         provider: z
           .string()
           .min(1)
-          .describe("models.dev provider id: anthropic, openai, openrouter, amazon-bedrock, opencode."),
-        modelId: z.string().min(1).describe("Model id as models.dev keys it (e.g. claude-opus-5-5)."),
+          .describe(
+            "models.dev provider id: anthropic, openai, openrouter, amazon-bedrock, opencode.",
+          ),
+        modelId: z
+          .string()
+          .min(1)
+          .describe("Model id as models.dev keys it (e.g. claude-opus-5-5)."),
         name: z.string().optional().describe("Display name."),
         releaseDate: z.string().optional().describe("Release date, YYYY-MM-DD."),
         contextWindow: z.number().int().positive().optional().describe("Context window, tokens."),
