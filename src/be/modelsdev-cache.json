@@ -147191,6 +147191,9 @@
             ]
           }
         ],
+        "knowledge": "2026-06",
+        "release_date": "2026-09-28",
+        "last_updated": "2026-09-28",
         "cost": {
           "input": 2,
           "output": 10,
