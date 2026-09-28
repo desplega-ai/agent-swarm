@@ -24,7 +24,7 @@ import { rerank } from "../be/memory/reranker";
 import { getRetrievalsForAgent, hasRetrievalForTask } from "../be/memory/retrieval-store";
 import { getUsefulnessStats } from "../be/memory/usefulness-stats";
 import { shouldPersistAutomaticTaskMemory } from "../memory/automatic-task-gate";
-import { SIMILARITY_THRESHOLD } from "../prompts/memories";
+import { memoryRelevance, SIMILARITY_THRESHOLD } from "../prompts/memories";
 import { can } from "../rbac";
 import { AgentMemorySchema, AgentMemoryScopeSchema, AgentMemorySourceSchema } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
@@ -713,6 +713,7 @@ export async function handleMemory(
             ranked.map((r) => ({
               memoryId: r.id,
               similarity: r.similarity,
+              relevance: r.rawSimilarity,
               retrievalSource: r.retrievalSource,
             })),
             undefined,
@@ -727,7 +728,7 @@ export async function handleMemory(
       if (intent) {
         const consumed =
           consumptionMode === "prompt"
-            ? ranked.filter((r) => r.similarity > SIMILARITY_THRESHOLD)
+            ? ranked.filter((r) => memoryRelevance(r) > SIMILARITY_THRESHOLD)
             : ranked;
         consumedIds = dedupeMemoryDocumentIds(consumed);
         try {

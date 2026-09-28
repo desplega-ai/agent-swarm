@@ -118,6 +118,20 @@ export function computeRrfScore(rank: number, decayFactor: number, k = 60): numb
 }
 
 /**
+ * Hybrid score on the vec arm's [0,1] cosine scale.
+ *
+ * Raw RRF tops out at 2/(k+1) ≈ 0.033 and is rank-based, so the best row of
+ * an unrelated query scores the same as an exact hit. The cosine is the
+ * absolute relevance signal; RRF, normalised to (0,1] by its two-arm maximum,
+ * scales it by keyword/semantic agreement: rank 1 in both arms keeps the full
+ * cosine, rank 1 in one arm keeps 75%, and no factor drops below 50%.
+ */
+export function fusedSimilarity(cosine: number, rrfScore: number, k = 60): number {
+  const agreement = Math.min(1, (rrfScore * (k + 1)) / 2);
+  return cosine * (0.5 + 0.5 * agreement);
+}
+
+/**
  * Compute the next content for a memory edit. Returns the new content string.
  * Throws if validation fails (missing fields, oldString not found, ambiguous match).
  */
@@ -563,36 +577,64 @@ export class SqliteMemoryStore implements MemoryStore {
       ...options,
       limit: overfetchLimit,
     });
-    if (ftsCandidates.length === 0) return vectorCandidates.slice(0, options.limit);
 
     const byId = new Map<string, MemoryCandidate>();
-    const scores = new Map<string, number>();
+    const rrf = new Map<string, number>();
+    const cosines = new Map<string, number>();
     const sources = new Map<string, Set<MemoryRetrievalSource>>();
-    const now = new Date();
     const add = (candidate: MemoryCandidate, rank: number) => {
       byId.set(candidate.id, byId.get(candidate.id) ?? candidate);
       const retrievalSource = candidate.retrievalSource === "fts" ? "fts" : "vec";
       const candidateSources = sources.get(candidate.id) ?? new Set<MemoryRetrievalSource>();
       candidateSources.add(retrievalSource);
       sources.set(candidate.id, candidateSources);
-
-      const decay = recencyDecay(candidate.createdAt, now, candidate.source);
-      scores.set(candidate.id, (scores.get(candidate.id) ?? 0) + computeRrfScore(rank, decay));
+      if (retrievalSource === "vec") cosines.set(candidate.id, candidate.similarity);
+      rrf.set(candidate.id, (rrf.get(candidate.id) ?? 0) + computeRrfScore(rank, 1.0));
     };
 
     vectorCandidates.forEach(add);
     ftsCandidates.forEach(add);
+    await this.fillCosines(queryEmbedding, [...byId.keys()], cosines);
 
+    // Fused score on the same [0,1] scale as the vec arm's cosine, so graph
+    // neighbours (derived from it) and the injection threshold compare
+    // like with like. Recency decay is left to rerank(), as on the vec path.
     return [...byId.values()]
-      .map((candidate) => ({
-        ...candidate,
-        rawSimilarity: candidate.rawSimilarity ?? candidate.similarity,
-        similarity: scores.get(candidate.id) ?? candidate.similarity,
-        retrievalSource: retrievalSourceFor(sources.get(candidate.id) ?? new Set()),
-        recencyDecayApplied: true,
-      }))
+      .map((candidate) => {
+        const similarity = fusedSimilarity(
+          cosines.get(candidate.id) ?? 0,
+          rrf.get(candidate.id) ?? 0,
+        );
+        return {
+          ...candidate,
+          rawSimilarity: similarity,
+          similarity,
+          retrievalSource: retrievalSourceFor(sources.get(candidate.id) ?? new Set()),
+          recencyDecayApplied: false,
+        };
+      })
       .sort((a, b) => b.similarity - a.similarity)
       .slice(0, options.limit);
+  }
+
+  /** Cosine to the query for FTS-only candidates, read from the stored embedding. */
+  private async fillCosines(
+    queryEmbedding: Float32Array,
+    ids: string[],
+    cosines: Map<string, number>,
+  ): Promise<void> {
+    const missing = ids.filter((id) => !cosines.has(id));
+    if (missing.length === 0) return;
+    const rows = await getDbClient().query<{ id: string; embedding: Buffer | null }>(
+      `SELECT id, embedding FROM agent_memory WHERE id IN (${missing.map(() => "?").join(",")})`,
+      missing,
+    );
+    for (const row of rows) {
+      if (!row.embedding) continue;
+      const embedding = deserializeEmbedding(row.embedding);
+      if (embedding.length !== queryEmbedding.length) continue;
+      cosines.set(row.id, Math.max(0, cosineSimilarity(queryEmbedding, embedding)));
+    }
   }
 
   private async searchFts(

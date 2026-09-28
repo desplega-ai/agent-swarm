@@ -59,10 +59,10 @@ Before starting each task, the runner automatically searches for relevant memori
 1. Task description is used as the search query
 2. An embedding is generated via the `EmbeddingProvider`
 3. Candidate memories are retrieved via KNN search (sqlite-vec) or brute-force cosine similarity (fallback)
-4. Reciprocal-rank fusion blends vector matches with a full-text pass before reranking by default; set `MEMORY_HYBRID_SEARCH=0` to use vector-only retrieval
+4. Reciprocal-rank fusion blends vector matches with a full-text pass before reranking by default; set `MEMORY_HYBRID_SEARCH=0` to use vector-only retrieval. The fused score stays on the cosine's `[0,1]` scale: `cosine × (0.5 + 0.5 × normalisedRRF)`, so rank 1 in both arms keeps the full cosine and rank 1 in one arm keeps 75%
 5. The candidate set is expanded with 1-hop memory-link neighbors by default; set `MEMORY_GRAPH_EXPANSION=0` to disable it (see [Graph Expansion](#graph-expansion))
 6. Candidates below the minimum similarity floor are dropped, then the survivors are **reranked** using a composite score
-7. Top matches are included in the task context as "Relevant Past Knowledge"
+7. Top matches whose pre-boost relevance (`rawSimilarity`) exceeds `0.55` are included in the task context as "Relevant Past Knowledge". The gate reads relevance, not the composite score, because the reranker's multipliers can lift a weak match above any fixed composite threshold. Each `memory_retrieval` row records both `similarity` (composite) and `relevance`
 
 Every retrieval row records its provenance (`retrievalSource`: `vec`, `fts`, `hybrid`, `fallback`, or `graph`), so the [usefulness readout](#usefulness-readout) can compare how often each retrieval arm's results actually get cited.
 
@@ -88,7 +88,7 @@ By default, search results gain **1-hop graph neighbors**: after the store retur
 
 Mechanics:
 
-- **Derived score** — `parentRawSimilarity × linkStrength × damping` (damping `0.7`), so neighbors rank below the hit that pulled them in. The parent's *pre-decay* similarity is used; the neighbor's own recency decay is applied exactly once by the reranker.
+- **Derived score** — `parentRawSimilarity × linkStrength × damping` (damping `0.7`), where `parentRawSimilarity` is the parent's `[0,1]` match score from its own arm, so neighbors rank below the hit that pulled them in. The parent's *pre-decay* similarity is used; the neighbor's own recency decay is applied exactly once by the reranker.
 - **Cap** — at most 5 new candidates per search, selected by the reranker's composite score (not raw similarity), so stale low-value links can't crowd out better ones.
 - **ACL + filters** — neighbors respect the caller's scope (`agent`/`swarm`/`all`), lead visibility, `source` filter, and expiry rules; expansion can never widen what a search is allowed to see.
 - **Provenance** — expanded results carry `retrievalSource: "graph"`, so the usefulness readout measures whether graph hits earn citations before the flag is enabled more widely.

@@ -24,6 +24,8 @@ import type { AgentMemory } from "@/types";
 export type RetrievalRecord = {
   memoryId: string;
   similarity: number;
+  /** Pre-boost [0,1] match score (`rawSimilarity`); the injection gate's input. */
+  relevance?: number;
   retrievalSource?: MemoryRetrievalSource;
 };
 
@@ -82,8 +84,8 @@ export async function recordRetrievals(
   if (!taskId || results.length === 0) return;
 
   const insertSql = `INSERT INTO memory_retrieval
-       (id, taskId, agentId, sessionId, memoryId, similarity, retrievedAt, contextKey, intent, eventType, retrievalId, rank, retrievalSource)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+       (id, taskId, agentId, sessionId, memoryId, similarity, retrievedAt, contextKey, intent, eventType, retrievalId, rank, retrievalSource, relevance)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
   const now = new Date().toISOString();
   const retrievalId = crypto.randomUUID();
   const contextKey = extras?.contextKey ?? null;
@@ -106,6 +108,7 @@ export async function recordRetrievals(
         retrievalId,
         rank,
         r.retrievalSource ?? null,
+        r.relevance ?? null,
       ]);
     }
   });

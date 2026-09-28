@@ -118,8 +118,9 @@ export async function expandCandidatesWithGraph(
     const parent = parentById.get(row.fromMemoryId);
     if (!parent) continue;
     const strength = typeof row.linkStrength === "number" ? row.linkStrength : 1.0;
-    // Derive from the parent's RAW (pre-decay) similarity — fts/hybrid arms
-    // ship `similarity` with the parent's recency decay already applied, and
+    // Derive from the parent's pre-decay match score on the shared [0,1]
+    // scale (vec cosine, hybrid fused cosine, fts rank). The fts arm ships
+    // `similarity` with the parent's recency decay already applied, and
     // rerank() will apply the NEIGHBOR's own decay to this candidate. Using
     // the decayed value would stack two decay factors on one score.
     const parentBase = parent.rawSimilarity ?? parent.similarity;
