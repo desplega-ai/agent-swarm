@@ -17,6 +17,10 @@
  *                   `status` is `failed` — discoverable only by cross-referencing
  *                   status against output, never from any single field.
  *
+ * Size: at most 20 rows, so the seeded history plus the worker's own task fits
+ * one default 25-row `/api/tasks` page (a 30-row seed truncated at 25 produced
+ * the "15 completed" wrong answer). Enforced by scenarios.test.ts.
+ *
  * Deterministic: no randomness, so the committed fixture is reproducible. Re-run
  * with `bun scenarios/fixtures/generate-sql-audit-history.ts` after any change to
  * the dataset, then update the answer-key constants in `scenarios/sql-audit.ts`
@@ -109,15 +113,6 @@ const TASKS: AuditTask[] = [
     finishedAt: ts(4, 11),
   },
   {
-    id: id(6),
-    task: "Archive cold S3 buckets to Glacier\n\nMove buckets untouched for 180+ days to cold storage.",
-    status: "completed",
-    priority: 30,
-    output: "Archived 12 buckets (3.4 TB) to Glacier Deep Archive.",
-    createdAt: ts(5, 10),
-    finishedAt: ts(5, 14),
-  },
-  {
     id: id(7),
     task: "Patch the CVE-2026-1188 in the image base\n\nRebuild and republish the base container image.",
     status: "completed",
@@ -125,15 +120,6 @@ const TASKS: AuditTask[] = [
     output: "Base image rebuilt and republished; vuln scan clean.",
     createdAt: ts(6, 6),
     finishedAt: ts(6, 8),
-  },
-  {
-    id: id(8),
-    task: "Generate the Q1 reliability report\n\nCompile the SLO attainment numbers for Q1.",
-    status: "completed",
-    priority: 45,
-    output: "Report generated; 99.94% availability across tracked services.",
-    createdAt: ts(7, 9),
-    finishedAt: ts(7, 10),
   },
   {
     id: id(9),
@@ -145,24 +131,6 @@ const TASKS: AuditTask[] = [
     finishedAt: ts(8, 12),
   },
   {
-    id: id(10),
-    task: "Reindex the product catalog\n\nFull reindex of the catalog into the new ES cluster.",
-    status: "completed",
-    priority: 50,
-    output: "Reindex complete: 2.1M documents, 0 rejected.",
-    createdAt: ts(9, 8),
-    finishedAt: ts(9, 11),
-  },
-  {
-    id: id(11),
-    task: "Decommission the legacy cron host\n\nRetire the old cron box after migrating its jobs.",
-    status: "completed",
-    priority: 35,
-    output: "Host decommissioned; 23 jobs migrated to the scheduler.",
-    createdAt: ts(10, 9),
-    finishedAt: ts(10, 10),
-  },
-  {
     id: id(12),
     task: "Add idempotency keys to the order API\n\nGuard the order-create endpoint against double submits.",
     status: "completed",
@@ -170,15 +138,6 @@ const TASKS: AuditTask[] = [
     output: "Idempotency keys live; duplicate-order rate dropped to 0.",
     createdAt: ts(11, 8),
     finishedAt: ts(11, 13),
-  },
-  {
-    id: id(13),
-    task: "Compress historical metrics in TSDB\n\nApply downsampling to metrics older than 90 days.",
-    status: "completed",
-    priority: 25,
-    output: "Downsampling applied; TSDB footprint cut by 38%.",
-    createdAt: ts(12, 10),
-    finishedAt: ts(12, 12),
   },
   {
     id: id(14),
@@ -233,15 +192,6 @@ const TASKS: AuditTask[] = [
     createdAt: ts(17, 9),
     finishedAt: ts(17, 10),
   },
-  {
-    id: id(19),
-    task: "Enable autoscaling on the ingest tier\n\nConfigure HPA for the ingest deployment.",
-    status: "failed",
-    priority: 50,
-    output: "Failed: metrics-server unavailable, HPA could not read CPU targets.",
-    createdAt: ts(18, 8),
-    finishedAt: ts(18, 9),
-  },
 
   // ---- cancelled tasks (red herrings for the count; never `completed`) ----
   {
@@ -291,33 +241,6 @@ const TASKS: AuditTask[] = [
     createdAt: ts(23, 7),
     finishedAt: ts(23, 9),
   },
-  {
-    id: id(25),
-    task: "Add p99 latency alerts for checkout\n\nWire alerting on the checkout latency SLO.",
-    status: "completed",
-    priority: 58,
-    output: "Alerts deployed; firing threshold set at 800ms p99.",
-    createdAt: ts(24, 8),
-    finishedAt: ts(24, 9),
-  },
-  {
-    id: id(26),
-    task: "Consolidate the duplicate feature flags\n\nMerge the redundant flag definitions.",
-    status: "completed",
-    priority: 33,
-    output: "Consolidated 14 flags down to 6; removed dead branches.",
-    createdAt: ts(25, 9),
-    finishedAt: ts(25, 11),
-  },
-  {
-    id: id(27),
-    task: "Document the incident runbook for region failover\n\nWrite the regional failover runbook.",
-    status: "completed",
-    priority: 48,
-    output: "Runbook published; reviewed by two on-call leads.",
-    createdAt: ts(26, 8),
-    finishedAt: ts(26, 10),
-  },
 
   // ---- a couple of close-but-not-equal priority completed rows, to make Q2
   //      require actually comparing priorities (95 still wins; 92 is a decoy).
@@ -338,15 +261,6 @@ const TASKS: AuditTask[] = [
     output: "Certificate renewed and deployed to all edge nodes.",
     createdAt: ts(28, 9),
     finishedAt: ts(28, 10),
-  },
-  {
-    id: id(30),
-    task: "Throttle the abusive scraper IPs\n\nApply rate limits to the flagged scraper ranges.",
-    status: "completed",
-    priority: 44,
-    output: "Rate limits applied; scraper traffic down 96%.",
-    createdAt: ts(29, 8),
-    finishedAt: ts(29, 9),
   },
 ];
 

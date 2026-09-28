@@ -207,17 +207,17 @@ describe("orchestration substrate scenario rubrics", () => {
         status: "completed",
         agentId: "worker-0",
         creatorAgentId: "lead",
-        result: "completed: 21",
+        result: "completed: 10",
       },
       {
         id: "b",
         title: "b",
-        description: "top priority after completed: 21",
+        description: "top priority after completed: 10",
         status: "completed",
         agentId: "worker-1",
         creatorAgentId: "lead",
         dependsOn: ["a"],
-        result: "Rotate the payments service API keys",
+        result: "Cut over the ledger service to the new region",
       },
       {
         id: "c",
@@ -227,7 +227,7 @@ describe("orchestration substrate scenario rubrics", () => {
         agentId: "worker-2",
         creatorAgentId: "lead",
         dependsOn: ["b"],
-        result: "Deploy the checkout redesign to production is anomalous",
+        result: "Roll out the new pricing engine to EU customers is anomalous",
       },
     ];
     const c = ctx({
@@ -240,7 +240,7 @@ describe("orchestration substrate scenario rubrics", () => {
       },
       files: {
         [`w${chain.LEAD_WORKER}:${chain.REPORT_FILE}`]:
-          "completed: 21\nRotate the payments service API keys\nDeploy the checkout redesign to production",
+          "completed: 10\nCut over the ledger service to the new region\nRoll out the new pricing engine to EU customers",
       },
     });
     expect((await chain.chainStructureCheck.fn(c)).score).toBeGreaterThanOrEqual(0.9);
@@ -298,17 +298,17 @@ describe("orchestration substrate scenario rubrics", () => {
         status: "completed",
         agentId: agentByHop[0],
         creatorAgentId: "lead",
-        result: "completed: 21",
+        result: "completed: 10",
       },
       {
         id: "b",
         title: "b",
-        description: "top priority after completed: 21",
+        description: "top priority after completed: 10",
         status: "completed",
         agentId: agentByHop[1],
         creatorAgentId: "lead",
         dependsOn: ["a"],
-        result: "Rotate the payments service API keys",
+        result: "Cut over the ledger service to the new region",
       },
       {
         id: "c",
@@ -318,7 +318,7 @@ describe("orchestration substrate scenario rubrics", () => {
         agentId: agentByHop[2],
         creatorAgentId: "lead",
         dependsOn: ["b"],
-        result: "Deploy the checkout redesign to production is anomalous",
+        result: "Roll out the new pricing engine to EU customers is anomalous",
       },
     ];
   }
@@ -438,7 +438,45 @@ describe("orchestration substrate scenario rubrics", () => {
       },
     });
     const result = await routing.routingSequenceCheck.fn(c);
-    expect(result.score).toBeCloseTo(0.7, 5);
+    // memory<send-task broken, send-task<store-progress holds.
+    expect(result.score).toBeCloseTo(0.5, 5);
+  });
+
+  test("tool-routing hop-order is a partial order: kv/lookup placement does not matter", async () => {
+    const c = ctx({
+      tasks: [{ id: "seed", title: "alpha", description: "Project Alpha", status: "completed" }],
+      logs: {
+        seed: [
+          toolUseRow("seed", "mcp__agent-swarm__get-tasks", { status: "completed" }),
+          toolUseRow("seed", "mcp__agent-swarm__memory-search", { query: "Project Alpha" }),
+          toolUseRow("seed", "mcp__agent-swarm__send-task", { task: "next phase" }),
+          toolUseRow("seed", "mcp__agent-swarm__kv-set", { key: "alpha/checkpoint" }),
+          toolUseRow("seed", "mcp__agent-swarm__store-progress", { output: "{}" }),
+        ],
+      },
+    });
+    expect((await routing.routingSequenceCheck.fn(c)).score).toBe(1);
+  });
+
+  test("tool-routing structured-output gate requires the outputSchema JSON", async () => {
+    const withResult = (result: string) =>
+      ctx({ tasks: [{ id: "seed", title: "t", description: "d", status: "completed", result }] });
+    const good = JSON.stringify({
+      alphaSummary: "two completed alpha tasks",
+      checkpointKey: "alpha/checkpoint",
+      followUpCreated: true,
+    });
+    expect((await routing.structuredOutputGate.fn(withResult(good))).pass).toBe(true);
+    expect((await routing.structuredOutputGate.fn(withResult("Done, see KV"))).pass).toBe(false);
+    expect(
+      (
+        await routing.structuredOutputGate.fn(
+          withResult(
+            JSON.stringify({ alphaSummary: "x", checkpointKey: "k", followUpCreated: "yes" }),
+          ),
+        )
+      ).pass,
+    ).toBe(false);
   });
 
   test("structured-output-adherence distinguishes JSON schema match from prose", async () => {

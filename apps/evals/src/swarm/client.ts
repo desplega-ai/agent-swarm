@@ -134,6 +134,28 @@ export class SwarmClient {
     );
   }
 
+  /** Upsert an agent-scoped script as `agentId` (the API typechecks + embeds it). */
+  async upsertAgentScript(opts: {
+    agentId: string;
+    name: string;
+    source: string;
+    description: string;
+    intent: string;
+  }): Promise<{ name: string; version: number }> {
+    return this.request<{ name: string; version: number }>(
+      "POST",
+      "/api/scripts/upsert",
+      {
+        name: opts.name,
+        source: opts.source,
+        description: opts.description,
+        intent: opts.intent,
+        scope: "agent",
+      },
+      { "X-Agent-ID": opts.agentId },
+    );
+  }
+
   /**
    * Memory search (readiness probe). The route hard-requires X-Agent-ID —
    * `agentId` is sent as that header, not in the body.

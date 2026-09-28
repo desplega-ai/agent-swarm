@@ -47,7 +47,7 @@ import {
 } from "../components/StatusBadge.tsx";
 import { InfoTip, Tooltip } from "../components/Tooltip.tsx";
 import { type ConfigLookup, navigate, useConfigs, usePoll } from "../hooks.ts";
-import { explainCheck, observedText } from "../lib/check-descriptions.ts";
+import { explainCheck, isScoredJudgment, observedText } from "../lib/check-descriptions.ts";
 import {
   memberLabel,
   type NormalizedSandboxInfo,
@@ -195,16 +195,20 @@ function checksTabInfo(
   judgments: JudgmentJson[],
   judging: boolean,
 ): { node: ReactNode; title: string } {
-  const checks = judgments.filter((j) => j.kind === "deterministic");
+  // Scored checks (graded, feeding a dimension) show their number in the table
+  // and stay out of the pass/fail count: only gates are pass/fail.
+  const gates = judgments.filter((j) => !isScoredJudgment(j));
+  const scoredCount = judgments.length - gates.length;
+  const checks = gates.filter((j) => j.kind === "deterministic");
   const judges = judgments.filter((j) => j.kind !== "deterministic");
   const passed = checks.filter((j) => j.pass).length;
   const label = checks.length > 0 ? `Checks ${passed}/${checks.length}` : "Checks";
-  // Tri-state derived from ALL checks (deterministic + judge + agentic), not just
-  // judges: ✓ all passed, ✗ any failed, ! mixed/pending (incl. while judging).
+  // Tri-state derived from the gates (deterministic + judge + agentic):
+  // ✓ all passed, ✗ any failed, ! mixed/pending (incl. while judging).
   let stateIcon: ReactNode = null;
-  if (judgments.length > 0 || judging) {
-    const anyFail = judgments.some((j) => !j.pass);
-    const allPass = judgments.length > 0 && judgments.every((j) => j.pass);
+  if (gates.length > 0 || judging) {
+    const anyFail = gates.some((j) => !j.pass);
+    const allPass = gates.length > 0 && gates.every((j) => j.pass);
     const [glyph, tone, word] = anyFail
       ? ["✗", "tone-red", "failed"]
       : allPass && !judging
@@ -218,10 +222,11 @@ function checksTabInfo(
   }
   const titleParts: string[] = [
     checks.length > 0
-      ? `${passed} of ${checks.length} checks passed`
+      ? `${passed} of ${checks.length} gate checks passed`
       : judgments.length === 0 && !judging
         ? "Deterministic checks & judge verdicts"
-        : "No deterministic checks",
+        : "No deterministic gate checks",
+    ...(scoredCount > 0 ? [`${scoredCount} scored checks shown as numbers`] : []),
   ];
   let suffix: ReactNode = null;
   if (judging) {
@@ -232,7 +237,7 @@ function checksTabInfo(
     suffix = judges.map((j) => (
       <span
         key={j.id}
-        className={j.pass ? "tone-green" : "tone-red"}
+        className={isScoredJudgment(j) ? "tone-neutral" : j.pass ? "tone-green" : "tone-red"}
         role="img"
         aria-label={j.name}
       >
@@ -241,7 +246,11 @@ function checksTabInfo(
     ));
     for (const j of judges) {
       const score = j.score !== null ? ` (${fmtScore(j.score)})` : "";
-      titleParts.push(`${j.name} — ${j.pass ? "Passed" : "Failed"}${score}`);
+      titleParts.push(
+        isScoredJudgment(j)
+          ? `${j.name} — score ${fmtScore(j.score as number)}`
+          : `${j.name} — ${j.pass ? "Passed" : "Failed"}${score}`,
+      );
     }
   }
   return {
@@ -1883,7 +1892,16 @@ const JUDGMENT_COLUMNS: Column<JudgmentJson>[] = [
     header: "Verdict",
     width: "84px",
     sortValue: (j) => j.score ?? (j.pass ? 1 : 0),
-    render: (j) => <StatusScore status={j.pass ? "pass" : "fail"} score={j.score} />,
+    render: (j) =>
+      isScoredJudgment(j) ? (
+        <Tooltip text={`Scored check · ${fmtScore(j.score as number)} of 1 toward ${j.dimension}`}>
+          <span className="status-score tone-neutral" data-testid="scored-verdict">
+            <span className="status-score-num">{fmtScore(j.score as number)}</span>
+          </span>
+        </Tooltip>
+      ) : (
+        <StatusScore status={j.pass ? "pass" : "fail"} score={j.score} />
+      ),
   },
   {
     key: "duration",
@@ -2091,7 +2109,7 @@ function JudgmentDetail(props: { judgment: JudgmentJson }): ReactNode {
           </div>
           <div>
             <span className="meta-label">Observed</span>
-            <div>{observedText(j.reasoning, j.pass, j.score)}</div>
+            <div>{observedText(j.reasoning, j.pass, j.score, isScoredJudgment(j))}</div>
           </div>
           <div>
             <span className="meta-label">Raw check</span>

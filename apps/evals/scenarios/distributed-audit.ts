@@ -8,7 +8,8 @@ import type { CheckResult, DeterministicCheck, Scenario } from "../src/types.ts"
  * the round-11 sweep (anchors: claude-opus-4.8, codex-5.6-sol vs pi-deepseek-flash,
  * claude-haiku). Ship gate: frontierAvg − budgetAvg ≥ 0.2. Target ~0.25 → 0.75.
  *
- * The same audit history as `sql-audit` (the `sql-audit-history.sql` dump: 30
+ * The frozen 30-row audit history (`distributed-audit-history.sql`, a copy of the
+ * pre-phase-2 `sql-audit-history.sql`; sql-audit now seeds 20 rows): 30
  * terminal `agent_tasks` rows across completed/failed/cancelled with red herrings
  * and one status/output-contradiction anomaly) is seeded into the API DB, but the
  * investigation is SHARDED across two workers and MERGED by a lead into one
@@ -221,7 +222,7 @@ export const distributedAudit: Scenario = {
     { name: "auditor-b", template: "researcher" },
   ],
   lead: { name: "Lead", template: "lead" },
-  seed: { sqlDump: "sql-audit-history.sql" },
+  seed: { sqlDump: "distributed-audit-history.sql" },
   tasks: [
     {
       title: "Audit the completed tasks (shard A)",
