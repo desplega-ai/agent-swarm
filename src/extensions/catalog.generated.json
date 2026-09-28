@@ -1,4 +1,21 @@
 {
+  "github-sender-allowlist": {
+    "manifestFile": "manifest.json",
+    "manifest": {
+      "$schema": "../manifest.schema.json",
+      "name": "github-sender-allowlist",
+      "description": "Blocks GitHub webhook tasks from senders outside configured allowlists",
+      "version": "1.0.0",
+      "runtime": "api",
+      "assets": {
+        "hooks": "hooks.ts"
+      }
+    },
+    "files": {
+      "hooks.ts": "import { block, type SwarmExtension } from \"swarm-extension\";\nimport { z } from \"zod\";\n\nexport const config = z.object({\n  internal: z.array(z.string()).default([]),\n  external: z.array(z.string()).default([]),\n  exemptTaskTypes: z.array(z.string()).default([\"github-review\"]),\n});\n\nconst manifest = {\n  name: \"github-sender-allowlist\",\n  description: \"Blocks GitHub webhook tasks from senders outside configured allowlists\",\n  version: \"1.0.0\",\n  runtime: \"api\",\n  assets: { hooks: \"hooks.ts\" },\n  config,\n} as const;\n\nfunction includesLogin(logins: string[], login: string): boolean {\n  return logins.some((allowed) => allowed.toLowerCase() === login.toLowerCase());\n}\n\nconst extension: SwarmExtension<typeof manifest> = (api) => {\n  api.on(\"pre.task.create\", (event, ctx) => {\n    const { options } = event;\n    if (options.source !== \"github\") return;\n\n    const taskType = options.taskType ?? \"unknown\";\n    if (ctx.config.exemptTaskTypes.includes(taskType)) return;\n\n    const login = options.vcsAuthor ?? \"\";\n    if (includesLogin(ctx.config.internal, login)) return;\n\n    const isPullRequest = options.vcsUrl?.includes(\"/pull/\") ?? false;\n    const isExternalPullRequestTask =\n      (taskType === \"github-comment\" || taskType === \"github-pr\") && isPullRequest;\n    const isExternalSender = includesLogin(ctx.config.external, login);\n    if (isExternalSender && isExternalPullRequestTask) return;\n\n    const rule = isExternalSender\n      ? \"external senders are allowed only for PR comments and github-pr tasks on pull requests\"\n      : \"sender is not on the internal or external allowlist\";\n    const reason = `GitHub sender \"${login || \"unknown\"}\" is blocked: ${rule}.`;\n    ctx.log.warn(reason, { login: login || null, taskType, vcsUrl: options.vcsUrl ?? null });\n    return block(reason);\n  });\n};\n\nexport default extension;\n"
+    },
+    "readme": "# github-sender-allowlist\n\nBlocks GitHub webhook tasks from senders outside the configured allowlists. Login matching is case-insensitive. Tasks from other sources pass through, and `github-review` tasks pass through by default for the PR fix loop.\n\nConfig:\n\n```json\n{\n  \"internal\": [\"tarasyarema\", \"harlequinetcie\"],\n  \"external\": [\"fuvidani\", \"capchase-bot\"],\n  \"exemptTaskTypes\": [\"github-review\"]\n}\n```\n\nInternal senders can create any GitHub task. External senders can create `github-comment` or `github-pr` tasks only when `vcsUrl` contains `/pull/`. The GitHub handler does not pass the action for `github-pr` tasks, so that rule also permits assignment and label events on pull requests.\n"
+  },
   "notify-on-complete": {
     "manifestFile": "manifest.json",
     "manifest": {
