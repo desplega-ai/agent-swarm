@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useUpdateAgentRuntime } from "@/api/hooks/use-agents";
 import { resolvedConfigsQuery } from "@/api/hooks/use-config-api";
 import type { EnvPresenceMap } from "@/api/hooks/use-integrations-meta";
+import { useModelsCatalog } from "@/api/hooks/use-models-catalog";
 import type {
   AgentWithTasks,
   OnboardingAgentsMethod,
@@ -19,7 +20,11 @@ import { SegmentedControl, type SegmentedControlOption } from "@/components/ui/s
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAutosave, useContinueAction, useContinueHold } from "@/hooks/use-autosave";
-import { HARNESS_LABEL, hasRuntimeCredential } from "@/lib/agent-runtime-models";
+import {
+  HARNESS_LABEL,
+  hasRuntimeCredential,
+  type LiveModelsCatalog,
+} from "@/lib/agent-runtime-models";
 import { formatCost } from "@/lib/cost-format";
 import {
   DIAL_LEVEL_LABEL,
@@ -130,8 +135,13 @@ function buildRow(
 }
 
 /** "High effort · $5.00 in, $25.00 out per 1M tokens" for a model. */
-function modelDetails(harness: DialHarness, model: string, effort: string | null): string | null {
-  const price = dialPrice({ harness, model, effort: null, custom: false });
+function modelDetails(
+  harness: DialHarness,
+  model: string,
+  effort: string | null,
+  catalog: LiveModelsCatalog | null,
+): string | null {
+  const price = dialPrice({ harness, model, effort: null, custom: false }, catalog);
   const details = [
     effort ? `${REASONING_EFFORT_LABEL[effort as ReasoningEffortLevel] ?? effort} effort` : null,
     price
@@ -153,7 +163,8 @@ function ModelTip({
   effort: string | null;
   note?: string;
 }) {
-  const details = modelDetails(harness, model, effort);
+  const { data: modelsCatalog } = useModelsCatalog();
+  const details = modelDetails(harness, model, effort, modelsCatalog?.providers ?? null);
   return (
     <span className="flex flex-col gap-0.5">
       <ModelLabel model={model} className="font-medium" />
@@ -211,7 +222,9 @@ export function AgentModels({
     [agents],
   );
   const openrouter = hasRuntimeCredential("OPENROUTER_API_KEY", configs, presence);
-  const context = useMemo<DialContext>(() => ({ openrouter }), [openrouter]);
+  const { data: modelsCatalog } = useModelsCatalog();
+  const catalog = modelsCatalog?.providers ?? null;
+  const context = useMemo<DialContext>(() => ({ openrouter, catalog }), [openrouter, catalog]);
 
   // The call and cache entry of `useResolvedConfigs({ agentId })`, one per agent.
   const resolved = useQueries({

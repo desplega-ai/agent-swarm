@@ -108,6 +108,18 @@ describe("ConfigurationRow model tier resolution", () => {
     expect(html).toContain("(built-in default)");
   });
 
+  test("says so when a configured value matched nothing and the default applies", () => {
+    const html = renderRow(
+      "latest:openai/nope",
+      {
+        ...TIER,
+        resolvesTo: { model: "opus", alias: null, source: "tier-default", fellBack: true },
+      },
+      false,
+    );
+    expect(html).toContain("configured value matched nothing, built-in default");
+  });
+
   test("rows without a resolution render no Resolves to line", () => {
     expect(renderRow(null)).not.toContain("Resolves to");
   });

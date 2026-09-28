@@ -68,6 +68,8 @@ export interface ConfigCatalogEntry {
     model: string | null;
     alias: string | null;
     source: "tier-config" | "tier-default";
+    /** A configured value resolved to nothing, so the built-in default applies. */
+    fellBack?: boolean;
   };
 }
 
@@ -101,11 +103,18 @@ export function modelTierConfigGroup(tiers: ModelTierPreview[]): ConfigCatalogGr
       placeholder: row.defaultValue,
       defaultValue: row.defaultValue,
       docsUrl: `${DOCS}ui/configuration`,
-      resolvesTo: {
-        model: row.resolvedModel,
-        alias: row.alias,
-        source: row.source,
-      },
+      // Only worth a line when it adds something: an alias moved to a concrete
+      // id, or a value the catalog cannot resolve. A plain id or CLI alias that
+      // resolves to itself is already shown as the value / Default.
+      resolvesTo:
+        row.alias || row.resolvedModel !== (row.configured ?? row.defaultValue)
+          ? {
+              model: row.resolvedModel,
+              alias: row.alias,
+              source: row.source,
+              fellBack: row.configured !== null && row.source === "tier-default",
+            }
+          : undefined,
     })),
   };
 }

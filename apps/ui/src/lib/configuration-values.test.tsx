@@ -113,6 +113,29 @@ describe("model tier rows come from the API, not the static catalog", () => {
     });
   });
 
+  test("a value that resolves to itself gets no Resolves to line", () => {
+    const group = withModelTierGroup(CONFIGURATION_GROUPS, tiers).find(
+      (g) => g.id === "model-tiers",
+    );
+    expect(group?.entries[0]?.resolvesTo).toBeUndefined();
+  });
+
+  test("a configured value that matched nothing is flagged as a fallback", () => {
+    const group = withModelTierGroup(CONFIGURATION_GROUPS, [
+      {
+        provider: "codex",
+        tier: "smol" as const,
+        key: "MODEL_TIER_CODEX_SMOL",
+        defaultValue: "gpt-5.6-luna",
+        configured: "latest:openai/nope",
+        source: "tier-default" as const,
+        resolvedModel: "gpt-5.6-luna",
+        alias: null,
+      },
+    ]).find((g) => g.id === "model-tiers");
+    expect(group?.entries[0]?.resolvesTo).toMatchObject({ model: "gpt-5.6-luna", fellBack: true });
+  });
+
   test("no tiers yet (loading, error, empty) leaves the catalog untouched", () => {
     expect(withModelTierGroup(CONFIGURATION_GROUPS, undefined)).toBe(CONFIGURATION_GROUPS);
     expect(withModelTierGroup(CONFIGURATION_GROUPS, [])).toBe(CONFIGURATION_GROUPS);

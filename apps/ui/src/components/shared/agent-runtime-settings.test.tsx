@@ -38,9 +38,11 @@ mock.module("@/api/hooks/use-models-catalog", () => ({
 }));
 mock.module("@/api/types", () => require("../../api/types"));
 mock.module("@/components/shared/harness-icon", () => require("./harness-icon"));
+mock.module("@/components/shared/model-combobox", () => require("./model-combobox"));
 mock.module("@/components/shared/provider-icon", () => require("./provider-icon"));
 mock.module("@/components/shared/reasoning-effort-icon", () => require("./reasoning-effort-icon"));
 mock.module("@/components/ui/alert-callout", () => require("../ui/alert-callout"));
+mock.module("@/components/ui/badge", () => require("../ui/badge"));
 mock.module("@/components/ui/button", () => require("../ui/button"));
 mock.module("@/components/ui/command", () => require("../ui/command"));
 mock.module("@/components/ui/dialog", () => require("../ui/dialog"));

@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useConfigs } from "@/api/hooks/use-config-api";
 import { useEnvPresence } from "@/api/hooks/use-integrations-meta";
+import { useModelsCatalog } from "@/api/hooks/use-models-catalog";
 import type { OnboardingAiMethod } from "@/api/types";
 import { setupExitHref } from "@/components/onboarding/onboarding-redirect";
 import { Button } from "@/components/ui/button";
@@ -35,7 +36,9 @@ export function StepAi({ onboarding, act, setContinueBlocker }: StepProps) {
   const pending = useRef<{ card: AiCardId; method: OnboardingAiMethod } | null>(null);
   const cliRecorded = useRef(false);
   const openrouter = hasRuntimeCredential("OPENROUTER_API_KEY", configs, presence);
-  const dialContext = useMemo<DialContext>(() => ({ openrouter }), [openrouter]);
+  const { data: modelsCatalog } = useModelsCatalog();
+  const catalog = modelsCatalog?.providers ?? null;
+  const dialContext = useMemo<DialContext>(() => ({ openrouter, catalog }), [openrouter, catalog]);
 
   const providers = onboarding.signals.providers;
   const rollups = useMemo(

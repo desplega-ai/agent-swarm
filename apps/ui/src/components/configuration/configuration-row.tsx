@@ -244,7 +244,13 @@ export function ConfigurationRow({ entry, inEnv }: ConfigurationRowProps) {
                 via <code className="font-mono">{entry.resolvesTo.alias}</code>
               </>
             )}{" "}
-            ({entry.resolvesTo.source === "tier-config" ? "configured" : "built-in default"})
+            (
+            {entry.resolvesTo.source === "tier-config"
+              ? "configured"
+              : entry.resolvesTo.fellBack
+                ? "configured value matched nothing, built-in default"
+                : "built-in default"}
+            )
           </p>
         )}
         {entry.defaultValue && (

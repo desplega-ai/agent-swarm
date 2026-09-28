@@ -2,7 +2,9 @@ import type { ReasoningEffortLevel } from "@/api/types";
 import {
   findKnownModel,
   findModelOption,
+  type LiveModelsCatalog,
   type LocalHarnessProvider,
+  type ModelCost,
   type ModelGroup,
   modelGroupsForHarness,
   nearestSupportedLevel,
@@ -83,13 +85,18 @@ export interface DialSetting {
   model: string;
   /** `null` clears `REASONING_EFFORT_OVERRIDE` (dsh, or no effort data for the model). */
   effort: ReasoningEffortLevel | null;
-  /** The bundled catalog does not list the model: the API stores it as a custom model. */
+  /** The catalog does not list the model: the API stores it as a custom model. */
   custom: boolean;
 }
 
 export interface DialContext {
   /** An OpenRouter key is present, so dsh routes through OpenRouter. */
   openrouter: boolean;
+  /**
+   * The live catalog (`GET /api/models-catalog`), so the effort clamp reads what
+   * the API validates against. Absent while it loads: the bundled snapshot.
+   */
+  catalog?: LiveModelsCatalog | null;
 }
 
 export function dialHarness(harness: string | null | undefined): DialHarness | null {
@@ -108,28 +115,50 @@ function clampEffort(
   return levels ? nearestSupportedLevel(level, levels) : null;
 }
 
-// The API validates effort against the bundled snapshot
-// (`src/providers/reasoning-effort.ts`), not the live catalog, so the clamp
-// reads the same snapshot: no live catalog here. Built once per harness.
-const snapshotGroups = new Map<LocalHarnessProvider, ModelGroup[]>();
+// The API validates effort against the runtime catalog (the live `model_catalog`
+// plus overlay rows, the bundled snapshot offline: `src/providers/reasoning-effort.ts`),
+// so the clamp reads the live catalog when the context carries one. The inputs are
+// static per catalog (preset table + catalog), so both caches are keyed by the
+// catalog object: a refetched catalog with new data is a new object, and react-query
+// keeps the same object while the data is unchanged.
+interface CatalogCaches {
+  groups: Map<LocalHarnessProvider, ModelGroup[]>;
+  settings: Map<string, DialSetting>;
+}
 
-function snapshotOption(harness: EffortHarness, model: string) {
-  let groups = snapshotGroups.get(harness);
+const snapshotCaches: CatalogCaches = { groups: new Map(), settings: new Map() };
+const liveCaches = new WeakMap<LiveModelsCatalog, CatalogCaches>();
+
+function cachesFor(catalog: LiveModelsCatalog | null | undefined): CatalogCaches {
+  if (!catalog) return snapshotCaches;
+  let caches = liveCaches.get(catalog);
+  if (!caches) {
+    caches = { groups: new Map(), settings: new Map() };
+    liveCaches.set(catalog, caches);
+  }
+  return caches;
+}
+
+function catalogOption(
+  harness: EffortHarness,
+  model: string,
+  catalog: LiveModelsCatalog | null | undefined,
+) {
+  const { groups: cached } = cachesFor(catalog);
+  let groups = cached.get(harness);
   if (!groups) {
-    groups = modelGroupsForHarness(harness, undefined, undefined, null, null);
-    snapshotGroups.set(harness, groups);
+    groups = modelGroupsForHarness(harness, undefined, undefined, null, catalog);
+    cached.set(harness, groups);
   }
   return findModelOption(model, groups);
 }
-
-// The inputs are static (table + snapshot), so every setting is computed once.
-const settings = new Map<string, DialSetting>();
 
 export function dialSetting(
   harness: DialHarness,
   level: DialLevel,
   context: DialContext,
 ): DialSetting {
+  const { settings } = cachesFor(context.catalog);
   const key = `${harness}:${level}:${harness === "dsh" && context.openrouter}`;
   let setting = settings.get(key);
   if (!setting) {
@@ -145,7 +174,7 @@ function computeSetting(harness: DialHarness, level: DialLevel, context: DialCon
     return { harness, model, effort: null, custom: true };
   }
   const preset = PRESETS[harness][level];
-  const option = snapshotOption(harness, preset.model);
+  const option = catalogOption(harness, preset.model, context.catalog);
   return {
     harness,
     model: preset.model,
@@ -199,15 +228,21 @@ export function dialLevelOfAnyHarness(
   return null;
 }
 
-/** USD per 1M tokens from the bundled catalog. `null` when the catalog has no price. */
-export function dialPrice(setting: DialSetting): { input?: number; output?: number } | null {
-  // Direct models are listed without a provider prefix; the snapshot keys them by provider.
+/**
+ * USD per 1M tokens from the catalog (the live one when passed, else the
+ * bundled snapshot). `null` when the catalog has no price.
+ */
+export function dialPrice(
+  setting: DialSetting,
+  catalog?: LiveModelsCatalog | null,
+): ModelCost | null {
+  // Direct models are listed without a provider prefix; the catalog keys them by provider.
   const id =
     setting.harness === "claude"
       ? `anthropic/${setting.model}`
       : setting.harness === "codex"
         ? `openai/${setting.model}`
         : setting.model;
-  const cost = findKnownModel(id)?.cost;
+  const cost = findKnownModel(id, catalog ?? undefined)?.cost;
   return cost && (cost.input != null || cost.output != null) ? cost : null;
 }

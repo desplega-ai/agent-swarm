@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useFavoriteToggle } from "@/api/hooks/use-favorites";
+import { useModelsCatalog } from "@/api/hooks/use-models-catalog";
 import { useCreateSchedule, useScheduledTasks, useUpdateSchedule } from "@/api/hooks/use-schedules";
 import type { ScheduledTask, ScheduledTaskTargetType } from "@/api/types";
 import { useStatusContext } from "@/app/status-context";
@@ -19,6 +20,8 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { FavoriteButton } from "@/components/shared/favorite-button";
 import { FAVORITE_COLUMN } from "@/components/shared/favorite-column";
 import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
+import { ModelCombobox } from "@/components/shared/model-combobox";
+import { ModelLabel } from "@/components/shared/model-logo";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -43,6 +46,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
+import { findModelOption, modelGroupsForSchedule } from "@/lib/agent-runtime-models";
 import { matchesSearchTerms, searchText } from "@/lib/list-search";
 import { MODEL_TIER_OPTIONS, modelTierLabel } from "@/lib/model-tiers";
 import { cronTimezone, describeCron, formatInterval, scheduleCadence } from "@/lib/schedule-format";
@@ -93,6 +97,11 @@ function ScheduleDialog({
   editData?: ScheduleFormData | null;
 }) {
   const { data: agents } = useAgents();
+  const { data: modelsCatalog } = useModelsCatalog();
+  const modelGroups = useMemo(
+    () => modelGroupsForSchedule(modelsCatalog?.providers),
+    [modelsCatalog?.providers],
+  );
   const [form, setForm] = useState<ScheduleFormData>(editData ?? emptyScheduleForm);
 
   function handleSubmit(e: React.FormEvent) {
@@ -236,20 +245,15 @@ function ScheduleDialog({
               </div>
               <div className="space-y-2">
                 <Label>Model</Label>
-                <Select
+                <ModelCombobox
                   value={form.model}
-                  onValueChange={(v) => setForm({ ...form, model: v === "_none" ? "" : v })}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Default" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="_none">Default</SelectItem>
-                    <SelectItem value="haiku">Haiku</SelectItem>
-                    <SelectItem value="sonnet">Sonnet</SelectItem>
-                    <SelectItem value="opus">Opus</SelectItem>
-                  </SelectContent>
-                </Select>
+                  onChange={(model) => setForm({ ...form, model })}
+                  groups={modelGroups}
+                  selected={findModelOption(form.model, modelGroups)}
+                  placeholder="Default"
+                  clearLabel="Default"
+                  creatable
+                />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
@@ -514,7 +518,9 @@ export default function SchedulesPage() {
           const data = params.data;
           if (!data?.model && !data?.modelTier) return "—";
           return data.model ? (
-            <span className="font-mono text-xs">{data.model}</span>
+            <span className="text-xs" title={data.model}>
+              <ModelLabel model={data.model} />
+            </span>
           ) : (
             <Badge variant="outline" size="tag">
               tier: {modelTierLabel(data.modelTier)}
