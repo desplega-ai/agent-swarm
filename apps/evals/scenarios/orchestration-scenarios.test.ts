@@ -754,4 +754,42 @@ describe("phase 1 broken-check regressions", () => {
     expect(gate.pass).toBe(true);
     expect(gate.detail).toBe("1 workflows found");
   });
+  describe("delegation-chain reads facts from any lead task (defer wake-up)", () => {
+    const facts =
+      "completed: 21\nRotate the payments service API keys\nDeploy the checkout redesign to production";
+    const leadTask = (id: string, result: string): SwarmTask => ({
+      id,
+      title: id,
+      description: "",
+      status: "completed",
+      agentId: "lead",
+      result,
+    });
+
+    test("passes when the facts sit in a later lead wake-up task", async () => {
+      const c = ctx({
+        tasks: [
+          leadTask("lead-1", "Deferred: waiting on the phase chain."),
+          leadTask("lead-2", facts),
+        ],
+      });
+      expect((await chain.finalReportGate.fn(c)).pass).toBe(true);
+      const r = await chain.chainCorrectnessCheck.fn(c);
+      expect(r.pass).toBe(true);
+      expect(r.score).toBe(1);
+    });
+
+    test("fails when no lead task carries the facts", async () => {
+      const c = ctx({
+        tasks: [
+          leadTask("lead-1", "Deferred: waiting on the phase chain."),
+          leadTask("lead-2", "Chain finished."),
+          { ...leadTask("w-1", facts), agentId: "worker-0" },
+        ],
+      });
+      const r = await chain.chainCorrectnessCheck.fn(c);
+      expect(r.pass).toBe(false);
+      expect(r.score).toBe(0);
+    });
+  });
 });
