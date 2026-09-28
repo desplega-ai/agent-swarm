@@ -1,4 +1,4 @@
-import type { Agent, AgentTaskStatus, ProviderName } from "@/api/types";
+import { type Agent, type AgentTaskStatus, isProviderName, type ProviderName } from "../api/types";
 
 export const CREDENTIAL_STATUS_MIN_VERSION = "1.76.0";
 export const SUPPORT_EMAIL = "contact@desplega.sh";
@@ -10,18 +10,6 @@ export interface LeadCredentialIssue {
   provider: ProviderName | null;
   missing: string[];
   hint: string | null;
-}
-
-function isProviderName(value: string | undefined): value is ProviderName {
-  return (
-    value === "claude" ||
-    value === "codex" ||
-    value === "pi" ||
-    value === "devin" ||
-    value === "claude-managed" ||
-    value === "opencode" ||
-    value === "acp"
-  );
 }
 
 export function getLeadCredentialIssue(

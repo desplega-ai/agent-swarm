@@ -7,7 +7,6 @@ import { resolvedConfigsQuery } from "@/api/hooks/use-config-api";
 import { ONBOARDING_QUERY_KEY } from "@/api/hooks/use-onboarding";
 import type { AgentWithTasks, ProviderName } from "@/api/types";
 import { SetupChip } from "@/components/onboarding/setup-card";
-import { BrandLogo } from "@/components/shared/brand-logo";
 import { HarnessIcon } from "@/components/shared/harness-icon";
 import { StatusLine } from "@/components/shared/status-icon";
 import { Button } from "@/components/ui/button";
@@ -25,14 +24,6 @@ import {
   dialLevelOfAnyHarness,
   dialSetting,
 } from "@/lib/model-dial";
-
-/** `HarnessIcon` has no dsh mark; the DeepSeek logo stands in. */
-export function AiHarnessIcon({ harness }: { harness: string | null | undefined }) {
-  if (harness === "dsh") {
-    return <BrandLogo src="/provider-logos/deepseek.svg" className="size-3.5" />;
-  }
-  return <HarnessIcon harness={harness} />;
-}
 
 /**
  * R2: the rollup keys on the worker harness, so a key verifies only when some
@@ -139,7 +130,7 @@ export function HarnessSwitch({
               <span className="min-w-0 truncate font-medium">{agent.name}</span>
               <SetupChip>{agent.isLead ? "Lead" : "Worker"}</SetupChip>
               <span className="ml-auto flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
-                <AiHarnessIcon harness={agent.harnessProvider} />
+                <HarnessIcon harness={agent.harnessProvider} />
                 {agent.harnessProvider
                   ? (HARNESS_LABEL[agent.harnessProvider] ?? agent.harnessProvider)
                   : "unknown"}
@@ -157,7 +148,7 @@ export function HarnessSwitch({
             <SelectContent>
               {targets.map((h) => (
                 <SelectItem key={h} value={h}>
-                  <AiHarnessIcon harness={h} />
+                  <HarnessIcon harness={h} />
                   {HARNESS_LABEL[h] ?? h}
                 </SelectItem>
               ))}

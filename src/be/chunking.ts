@@ -167,8 +167,8 @@ function hardSplit(text: string): string[] {
   while (start < text.length) {
     const end = Math.min(start + MAX_CHUNK_SIZE, text.length);
     chunks.push(text.slice(start, end).trim());
+    if (end === text.length) break;
     start = end - CHUNK_OVERLAP;
-    if (start >= text.length - MIN_CHUNK_SIZE) break;
   }
   return chunks.filter((c) => c.length > 0);
 }
