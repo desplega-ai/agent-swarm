@@ -4,6 +4,7 @@ import { closeDb, initDb } from "../be/db";
 import { getEnabledCapabilities } from "../server";
 import { getSlackApp, startSlackApp, stopSlackApp } from "../slack/app";
 import { getSlackConfiguration, isSlackConfigured } from "../slack/config";
+import { getSlackConnectionState } from "../slack/connection-state";
 
 const SLACK_ENV_KEYS = [
   "NODE_ENV",
@@ -128,6 +129,27 @@ test.each([
     await slack.mock.waitForConnection(10_000);
     expect(slack.mock.connectionCount).toBe(1);
     expect(slack.mock.apiCalls("apps.connections.open")).toHaveLength(1);
+  } finally {
+    await stopSlackApp();
+    await stopSlackMock(slack, false);
+    closeDb();
+  }
+}, 20_000);
+
+test("Socket Mode lifecycle drives the live connection state read by /status", async () => {
+  const slack = await startSlackMock(false);
+  initDb(":memory:");
+  try {
+    Object.assign(process.env, slack.mock.env);
+    expect(getSlackConnectionState()).toBe("disconnected");
+
+    expect(await startSlackApp()).toBe(true);
+    await slack.mock.waitForConnection(10_000);
+    // Bolt resolves start() on Slack's hello, which is what emits `connected`.
+    expect(getSlackConnectionState()).toBe("connected");
+
+    await stopSlackApp();
+    expect(getSlackConnectionState()).toBe("disconnected");
   } finally {
     await stopSlackApp();
     await stopSlackMock(slack, false);

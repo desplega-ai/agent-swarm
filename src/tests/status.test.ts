@@ -40,6 +40,7 @@ import {
   rollupCredStatusForProvider,
   type SetupMilestone,
 } from "../http/status";
+import { setSlackConnectionState } from "../slack/connection-state";
 import type { AgentCredStatus } from "../types";
 
 // Helper for tests: stamp an agent row with a cred_status snapshot so the
@@ -170,6 +171,7 @@ beforeEach(async () => {
   clearEnv();
   await clearTables();
   _resetTestConnectionCache();
+  setSlackConnectionState("disconnected");
 });
 
 afterEach(() => {
@@ -455,7 +457,7 @@ describe("setup milestones", () => {
     process.env.SLACK_APP_TOKEN = "xapp-test";
     const b = await buildStatusPayload();
     expect(getMilestone(b, "slack").state).toBe("configured");
-    expect(getMilestone(b, "slack").hint).toContain("not been verified");
+    expect(getMilestone(b, "slack").hint).toContain("not connected");
 
     process.env.SLACK_MODE = "http";
     delete process.env.SLACK_APP_TOKEN;
@@ -467,6 +469,26 @@ describe("setup milestones", () => {
     process.env.SLACK_DISABLE = "true";
     const c = await buildStatusPayload();
     expect(getMilestone(c, "slack").state).toBe("unverified");
+  });
+
+  test("slack: a live Socket Mode connection reports verified; a dropped one does not", async () => {
+    process.env.SLACK_BOT_TOKEN = "xoxb-test";
+    process.env.SLACK_APP_TOKEN = "xapp-test";
+
+    setSlackConnectionState("connected");
+    const live = getMilestone(await buildStatusPayload(), "slack");
+    expect(live.state).toBe("verified");
+    expect(live.hint).toBeUndefined();
+
+    setSlackConnectionState("connecting");
+    const reconnecting = getMilestone(await buildStatusPayload(), "slack");
+    expect(reconnecting.state).toBe("configured");
+    expect(reconnecting.hint).toContain("not connected");
+
+    // A stale "connected" never verifies credentials that are now missing.
+    setSlackConnectionState("connected");
+    delete process.env.SLACK_APP_TOKEN;
+    expect(getMilestone(await buildStatusPayload(), "slack").state).toBe("unverified");
   });
 
   test("slack: invalid mode fails closed with a specific hint", async () => {
@@ -1062,6 +1084,19 @@ describe("computeHealth (Phase 2)", () => {
       { id: "first_task", label: "First task", state: "verified" },
     ];
     expect(computeHealth(synthetic)).toBe("degraded");
+  });
+
+  test("`ok` when a connected Slack reports `verified` next to other connected integrations", () => {
+    const synthetic: SetupMilestone[] = [
+      { id: "harness", label: "Harness", state: "verified" },
+      { id: "slack", label: "Slack", state: "verified" },
+      { id: "github", label: "GitHub", state: "verified" },
+      { id: "linear", label: "Linear", state: "verified" },
+      { id: "jira", label: "Jira", state: "unverified" },
+      { id: "workers", label: "Workers", state: "verified" },
+      { id: "first_task", label: "First task", state: "verified" },
+    ];
+    expect(computeHealth(synthetic)).toBe("ok");
   });
 
   test("integrations in `unverified` alone do NOT degrade health", () => {

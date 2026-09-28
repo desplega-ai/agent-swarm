@@ -1,11 +1,30 @@
-import { App, LogLevel } from "@slack/bolt";
+import { App, LogLevel, SocketModeReceiver } from "@slack/bolt";
 import { emitBuiltInIntegrationConnectedOnce, ensureSlackRenderV2Activation } from "../be/db";
 import { getSlackConfiguration } from "./config";
+import { type SlackConnectionState, setSlackConnectionState } from "./connection-state";
 import { getSlackSocketModeBlockReason, SLACK_DEV_SOCKET_MODE_OPT_IN } from "./socket-mode-guard";
 import { startTaskWatcher, stopTaskWatcher } from "./watcher";
 
 let app: App | null = null;
+let receiver: SocketModeReceiver | null = null;
 let initialized = false;
+
+const SOCKET_EVENT_STATES: Record<string, SlackConnectionState> = {
+  connecting: "connecting",
+  reconnecting: "connecting",
+  connected: "connected",
+  disconnecting: "disconnected",
+  disconnected: "disconnected",
+};
+
+function trackConnectionState(owner: SocketModeReceiver): void {
+  for (const [event, state] of Object.entries(SOCKET_EVENT_STATES)) {
+    owner.client.on(event, () => {
+      // Ignore late events from a receiver that stopSlackApp() already replaced.
+      if (receiver === owner) setSlackConnectionState(state);
+    });
+  }
+}
 
 export function getSlackApp(): App | null {
   return app;
@@ -59,12 +78,22 @@ export async function initSlackApp(): Promise<App | null> {
 
   // SLACK_API_URL points Bolt (Web API and apps.connections.open) at a mock Slack server for e2e tests.
   const slackApiUrl = process.env.SLACK_API_URL;
+  const clientOptions = slackApiUrl ? { slackApiUrl } : undefined;
+  const logLevel = process.env.NODE_ENV === "development" ? LogLevel.DEBUG : LogLevel.INFO;
+  // Build the receiver ourselves so its SocketModeClient lifecycle events can
+  // feed /status. Bolt would otherwise forward clientOptions via installerOptions.
+  receiver = new SocketModeReceiver({
+    appToken,
+    logLevel,
+    installerOptions: clientOptions ? { clientOptions } : {},
+  });
+  trackConnectionState(receiver);
   app = new App({
     token: botToken,
-    appToken: appToken,
+    receiver,
     socketMode: true,
-    logLevel: process.env.NODE_ENV === "development" ? LogLevel.DEBUG : LogLevel.INFO,
-    ...(slackApiUrl ? { clientOptions: { slackApiUrl } } : {}),
+    logLevel,
+    ...(clientOptions ? { clientOptions } : {}),
   });
 
   // Failed validation must remain retryable without requiring stopSlackApp().
@@ -117,5 +146,7 @@ export async function stopSlackApp(): Promise<void> {
     app = null;
     console.log("[Slack] Bot disconnected");
   }
+  receiver = null;
+  setSlackConnectionState("disconnected");
   initialized = false;
 }
