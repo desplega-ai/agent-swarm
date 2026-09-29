@@ -15,7 +15,12 @@ import { scrubSecrets } from "../../../utils/secret-scrubber";
 import { emitTaskStarted } from "../../task-lifecycle-events";
 import { getAgentById, isAgentEligibleForTask } from "../agents";
 import { getDbClient } from "../runtime";
-import { type AgentTaskRow, getTaskById, rowToAgentTask } from "./read";
+import {
+  type AgentTaskRow,
+  getTaskById,
+  NEVER_STARTED_TASK_STATUSES,
+  rowToAgentTask,
+} from "./read";
 
 type TaskWriteDependencies = {
   createLogEntry: (entry: {
@@ -755,65 +760,65 @@ export async function supersedeTask(
     // Without a resume id the dependents wait: every caller supersedes first,
     // creates the resume, then calls `backfillSupersedeTaskResumeTaskId`, which
     // settles them. Cascading here would fail work the resume is about to carry.
-    if (args.resumeTaskId) await settleSupersededDependents(id, args.resumeTaskId);
+    // A caller whose resume is not created settles with `null`; heartbeat
+    // repair settles whatever a crash left in between.
+    if (args.resumeTaskId) await settleSupersededTaskDependents(id, args.resumeTaskId);
   }
 
   return row ? rowToAgentTask(row) : null;
 }
 
-/** Statuses a dependent can hold before it ever started running. */
-const NEVER_STARTED_STATUSES = [
-  "draft",
-  "backlog",
-  "unassigned",
-  "offered",
-  "reviewing",
-  "pending",
-];
-
 /**
- * Settle the dependents of a superseded task. Every never-started dependent
- * has the superseded id in `dependsOn` replaced by the resume id, so it waits
- * on the resume instead of dying with `Blocked dependency … was superseded`.
- * Anything still depending on the superseded task afterwards (a dependent
- * that already started) cascade-fails as before.
+ * Settle the dependents of a superseded task. With a resume id, every
+ * never-started dependent has the superseded id in `dependsOn` replaced by the
+ * resume id, so it waits on the resume instead of dying with
+ * `Blocked dependency … was superseded`. Anything still depending on the
+ * superseded task afterwards (a dependent that already started, or every
+ * dependent when there is no resume) cascade-fails. Idempotent.
  */
-async function settleSupersededDependents(
+export async function settleSupersededTaskDependents(
   supersededId: string,
-  resumeTaskId: string,
+  resumeTaskId: string | null,
 ): Promise<void> {
   try {
-    const placeholders = NEVER_STARTED_STATUSES.map(() => "?").join(", ");
-    const rows = await getDbClient().query<AgentTaskRow>(
-      `SELECT t.* FROM agent_tasks t, json_each(t.dependsOn) AS dep
-         WHERE dep.value = ? AND t.status IN (${placeholders})`,
-      [supersededId, ...NEVER_STARTED_STATUSES],
-    );
-    for (const dep of rows.map(rowToAgentTask)) {
-      const dependsOn = [
-        ...new Set(dep.dependsOn.map((id) => (id === supersededId ? resumeTaskId : id))),
-      ];
-      // Status + membership predicates make the re-point a no-op if the
-      // dependent was claimed or re-pointed since it was read.
-      const repointed = await getDbClient().get<{ id: string }>(
+    if (resumeTaskId) {
+      const placeholders = NEVER_STARTED_TASK_STATUSES.map(() => "?").join(", ");
+      // One statement: the new array is built from the row's current
+      // `dependsOn`, so settlements of a shared dependent compose, and the
+      // status predicate is evaluated at write time, so a claim into
+      // `in_progress` is skipped while offered -> reviewing/pending is not.
+      const repointed = await getDbClient().query<{ id: string; agentId: string | null }>(
         `UPDATE agent_tasks
-            SET dependsOn = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-          WHERE id = ? AND status = ?
+            SET dependsOn = (
+                  SELECT json_group_array(value ORDER BY k) FROM (
+                    SELECT CASE WHEN j.value = ? THEN ? ELSE j.value END AS value,
+                           MIN(j.key) AS k
+                      FROM json_each(agent_tasks.dependsOn) AS j
+                     GROUP BY 1)),
+                lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+          WHERE status IN (${placeholders})
             AND EXISTS (SELECT 1 FROM json_each(agent_tasks.dependsOn) WHERE value = ?)
-          RETURNING id`,
-        [JSON.stringify(dependsOn), dep.id, dep.status, supersededId],
+          RETURNING id, agentId`,
+        [supersededId, resumeTaskId, ...NEVER_STARTED_TASK_STATUSES, supersededId],
       );
-      if (!repointed) continue;
-      try {
-        await dependencies.createLogEntry({
-          eventType: "task_dependency_repointed",
-          taskId: dep.id,
-          agentId: dep.agentId ?? undefined,
-          oldValue: supersededId,
-          newValue: resumeTaskId,
-          metadata: { reason: "supersede_resume" },
-        });
-      } catch {}
+      for (const dep of repointed) {
+        try {
+          await dependencies.createLogEntry({
+            eventType: "task_dependency_repointed",
+            taskId: dep.id,
+            agentId: dep.agentId ?? undefined,
+            oldValue: supersededId,
+            newValue: resumeTaskId,
+            metadata: { reason: "supersede_resume" },
+          });
+        } catch {}
+      }
+      // Repair can settle onto a resume that already failed; its own cascade
+      // ran before these dependents pointed at it.
+      const resume = await getTaskById(resumeTaskId);
+      if (repointed.length > 0 && (resume?.status === "failed" || resume?.status === "cancelled")) {
+        await dependencies.cascadeFailDependents(resumeTaskId, resume.status);
+      }
     }
     await dependencies.cascadeFailDependents(supersededId, "superseded");
   } catch (err) {
@@ -831,7 +836,7 @@ export async function backfillSupersedeTaskResumeTaskId(
   resumeTaskId: string,
 ): Promise<boolean> {
   if ((await getTaskById(taskId))?.status === "superseded") {
-    await settleSupersededDependents(taskId, resumeTaskId);
+    await settleSupersededTaskDependents(taskId, resumeTaskId);
   }
 
   const row = await getDbClient().get<{ id: string; metadata: string | null }>(

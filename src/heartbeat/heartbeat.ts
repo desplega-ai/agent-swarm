@@ -28,6 +28,7 @@ import {
   getStaleUnassignedAffinityTasks,
   getStalledInProgressTasks,
   getSupersededTasksWithoutResume,
+  getSupersededTasksWithUnsettledDependents,
   getTaskById,
   getTaskStats,
   getTasksByStatus,
@@ -42,6 +43,7 @@ import {
   releaseStaleOfferedTasksForOfflineAgents,
   releaseStaleProcessingInbox,
   releaseStaleReviewingTasks,
+  settleSupersededTaskDependents,
   supersedeTask,
   updateAgentStatus,
 } from "../be/db";
@@ -530,10 +532,15 @@ async function repairSupersededWithoutResume(findings: HeartbeatFindings): Promi
     new Date(now - ORPHAN_SUPERSEDE_MAX_AGE_MS).toISOString(),
   );
   for (const task of orphans) {
-    if (!task.agentId) continue;
-    if (getNextResumeGeneration(task) > maxResumeGenerations()) continue;
-    const resume = await createResumeFollowUp({ parentId: task.id, reason: "crash_recovery" });
-    if (resume.kind !== "created") continue;
+    const resume =
+      task.agentId && getNextResumeGeneration(task) <= maxResumeGenerations()
+        ? await createResumeFollowUp({ parentId: task.id, reason: "crash_recovery" })
+        : null;
+    if (resume?.kind !== "created" || !task.agentId) {
+      // No resume will carry the work: its dependents fail as they would have.
+      await settleSupersededTaskDependents(task.id, null);
+      continue;
+    }
     await backfillSupersedeTaskResumeTaskId(task.id, resume.task.id);
     findings.autoResumedTasks.push({
       taskId: task.id,
@@ -544,6 +551,16 @@ async function repairSupersededWithoutResume(findings: HeartbeatFindings): Promi
     console.log(
       `[Heartbeat] Created missing resume ${resume.task.id.slice(0, 8)} for superseded task ${task.id.slice(0, 8)}`,
     );
+  }
+
+  // A crash after the resume was created but before the backfill leaves
+  // dependents waiting on the superseded task; settle them onto that resume.
+  const unsettled = await getSupersededTasksWithUnsettledDependents(
+    new Date(now - ORPHAN_SUPERSEDE_MIN_AGE_MS).toISOString(),
+    new Date(now - ORPHAN_SUPERSEDE_MAX_AGE_MS).toISOString(),
+  );
+  for (const { taskId, resumeTaskId } of unsettled) {
+    await settleSupersededTaskDependents(taskId, resumeTaskId);
   }
 }
 
@@ -679,6 +696,7 @@ async function remediateCrashedWorkerTask(
       resume.kind === "skipped"
         ? `resume_creation_skipped_${resume.reason}`
         : "resume_creation_skipped_workflow";
+    await settleSupersededTaskDependents(task.id, null);
     const failed = await failTask(task.id, reason);
     if (failed) {
       findings.autoFailedTasks.push({

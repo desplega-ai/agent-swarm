@@ -16,7 +16,7 @@ Queue-pickup liveness alarm: `src/queue-stall-alarm.ts`.
 flowchart TD
   tick["Heartbeat tick (~90s)<br/>codeLevelTriage()"] --> expire["expireStaleRuntimeInstances() (§1a)<br/>multi-runtime only"]
   expire --> detect["detectAndRemediateStalledTasks()"]
-  detect --> repair["repairSupersededWithoutResume()<br/>superseded, no resume child,<br/>finished 1m-24h ago → create resume"]
+  detect --> repair["repairSupersededWithoutResume()<br/>superseded, no resume child,<br/>finished 1m-24h ago → create resume<br/>+ settle dependents left on a superseded task"]
   repair --> health["checkWorkerHealth()<br/>busy ↔ idle (skips offline)"]
   health --> cleanup["cleanupStaleResources()<br/>stale sessions (30m), reviewing,<br/>inbox, mentions, workflow runs,<br/>+ approval timeout + auto-cancel sweeps<br/>+ reaper: escalate unreclaimed pinned resumes (§3)<br/>+ escalateStarvedPoolTasks: zero-eligible-agent pool tasks (§4)"]
   cleanup --> assign["autoAssignPoolTasks()<br/>per-task: first idle worker satisfying<br/>isAgentEligibleForTask (§4) — else leave queued"]
@@ -256,6 +256,19 @@ resume = createResumeFollowUp(parent, reason = crash_recovery | graceful_shutdow
     createTaskExtended(resume, agentId = preferredAgentId, tags = tags)
     #   agentId set  → status = pending  (PINNED to the original agent)
     #   agentId none → status = unassigned (pool — only genuinely-gone / rollback)
+# supersedeTask(resumeTaskId = null) leaves dependents waiting on parent; they settle here:
+if resume created: backfillSupersedeTaskResumeTaskId(parent, resume)   # log entry + settle(parent, resume)
+else:              settleSupersededTaskDependents(parent, null); failTask(parent, resume_creation_skipped_<reason>)
+
+settleSupersededTaskDependents(parent, resume):
+    if resume:
+        # one UPDATE per settlement: rebuilt from the row's current dependsOn,
+        # status checked at write time (concurrent settlements compose; a claim
+        # into in_progress is skipped, offered → reviewing/pending is not)
+        for d with parent in dependsOn and status in never-started:
+            dependsOn(d) = dedupe(replace parent with resume); log task_dependency_repointed
+        if any re-pointed and resume is failed/cancelled: cascadeFailDependents(resume)
+    cascadeFailDependents(parent, "superseded")   # started dependents, or all when no resume
 
 # every sweep, after the stalled-task detector:
 repairSupersededWithoutResume():
@@ -263,8 +276,14 @@ repairSupersededWithoutResume():
     # leaves a superseded task with no resume and nothing else reads it
     for t in superseded tasks, not workflow steps, finishedAt in [now-24h, now-1m],
              with no child where taskType = 'resume':
-        if resume budget exhausted: continue
-        createResumeFollowUp(t, crash_recovery); backfill the supersede log entry
+        if no agent or resume budget exhausted or resume not created:
+            settleSupersededTaskDependents(t, null); continue      # dependents cascade-fail
+        createResumeFollowUp(t, crash_recovery); backfillSupersedeTaskResumeTaskId(t, resume)
+    # a crash after the resume exists but before the backfill leaves dependents
+    # waiting on t, and the loop above no longer sees t
+    for t in superseded tasks, finishedAt in [now-24h, now-1m], with a resume child
+             and a never-started dependent still naming t in dependsOn:
+        settleSupersededTaskDependents(t, latest resume child of t)
 
 # every sweep, inside cleanupStaleResources:
 escalateUnreclaimedResumes():
