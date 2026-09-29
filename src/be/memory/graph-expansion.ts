@@ -155,7 +155,12 @@ export async function expandCandidatesWithGraph(
     if (existingIndex !== undefined) {
       // Dedupe against organic candidates: keep whichever entry the reranker
       // will score higher (same memory, so all non-similarity factors match).
-      if (computeScore(neighbor, now) > computeScore(result[existingIndex]!, now)) {
+      // rerank() caps a graph entry at its parent's composite, so compare the
+      // capped graph score; otherwise a low-quality parent's link replaces a
+      // stronger organic match and rerank() then demotes it below the parent.
+      const parent = parentById.get(neighbor.graphParentId!)!;
+      const graphScore = Math.min(computeScore(neighbor, now), computeScore(parent, now));
+      if (graphScore > computeScore(result[existingIndex]!, now)) {
         result[existingIndex] = neighbor;
       }
       continue;
