@@ -206,12 +206,20 @@ describe("GET /api/sessions/{rootTaskId} batching", () => {
       }
     }
 
-    const src = (await Bun.file(`${import.meta.dir}/../be/db.ts`).text()).match(
-      /export async function getRootTaskChain[\s\S]*?`(WITH RECURSIVE[\s\S]*?)`/,
-    )![1]!;
-    const plan = await getDbClient().query<{ detail: string }>(`EXPLAIN QUERY PLAN ${src}`, [
-      rootId,
-    ]);
+    // Capture the SQL the real call issues, then ask SQLite how it runs it.
+    const client = getDbClient();
+    const query = client.query.bind(client);
+    let issued = "";
+    client.query = ((sql: string, params?: unknown[]) => {
+      issued = sql;
+      return query(sql, params as never);
+    }) as typeof client.query;
+    try {
+      await getRootTaskChain(rootId);
+    } finally {
+      client.query = query;
+    }
+    const plan = await client.query<{ detail: string }>(`EXPLAIN QUERY PLAN ${issued}`, [rootId]);
     expect(plan.map((r) => r.detail)).not.toContain("SCAN t USING INDEX idx_agent_tasks_created");
   });
 
