@@ -42,7 +42,13 @@ import { handleWebhookTrigger, WebhookError } from "../workflows/triggers";
 import { snapshotAndUpdateWorkflow } from "../workflows/version";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
 import { route } from "./route-def";
-import { jsonError, parseBody, triggerSchemaErrorResponse } from "./utils";
+import {
+  jsonError,
+  parseBody,
+  RequestBodyTooLargeError,
+  readRawBodyText,
+  triggerSchemaErrorResponse,
+} from "./utils";
 
 // ─── Response Schemas ────────────────────────────────────────────────────────
 
@@ -360,6 +366,12 @@ const getExecutorTypeRoute = route({
   },
 });
 
+/**
+ * Byte cap on `POST /api/webhooks/{workflowId}` bodies. The route is public
+ * (HMAC is the only gate), so the body is bounded before it is buffered.
+ */
+const MAX_WEBHOOK_BODY_BYTES = 1024 * 1024;
+
 const webhookTriggerRoute = route({
   method: "post",
   path: "/api/webhooks/{workflowId}",
@@ -372,6 +384,7 @@ const webhookTriggerRoute = route({
     201: { description: "Webhook processed", schema: z.object({ runId: z.string() }) },
     401: { description: "Invalid signature" },
     404: { description: "Workflow not found" },
+    413: { description: "Body exceeds 1 MiB" },
   },
 });
 
@@ -439,12 +452,18 @@ export async function handleWorkflows(
   if (webhookTriggerRoute.match(req.method, pathSegments)) {
     const workflowId = pathSegments[2]!;
 
-    // Read raw body for HMAC verification
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) {
-      chunks.push(chunk as Buffer);
+    // Read raw body for HMAC verification. This route is public, so the cap
+    // applies before the signature or the workflow is looked at.
+    let rawBody: string;
+    try {
+      rawBody = await readRawBodyText(req, MAX_WEBHOOK_BODY_BYTES);
+    } catch (err) {
+      if (err instanceof RequestBodyTooLargeError) {
+        jsonError(res, err.message, 413);
+        return true;
+      }
+      throw err;
     }
-    const rawBody = Buffer.concat(chunks).toString();
 
     let result: Awaited<ReturnType<typeof handleWebhookTrigger>>;
     try {

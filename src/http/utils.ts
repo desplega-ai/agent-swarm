@@ -384,6 +384,83 @@ export async function parseBody<T = unknown>(
 }
 
 /**
+ * Read a request body as UTF-8 text with a hard byte cap, for routes that must
+ * verify a signature over the raw bytes before parsing (public webhooks).
+ *
+ * The cap holds for chunked bodies with no `Content-Length` too: the total is
+ * counted as chunks arrive, and once it passes `maxBytes` the buffered chunks
+ * are dropped and the rejection is raised without waiting for the upload. The
+ * rest of the body is drained without buffering so the caller's 413 can still
+ * reach the client. An unauthenticated sender therefore cannot grow server
+ * memory past `maxBytes` per request.
+ */
+export async function readRawBodyText(req: IncomingMessage, maxBytes: number): Promise<string> {
+  const contentLength = requestContentLength(req);
+  if (contentLength !== undefined && contentLength > maxBytes) {
+    req.resume();
+    throw new RequestBodyTooLargeError(maxBytes);
+  }
+
+  return await new Promise<string>((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let totalBytes = 0;
+    let settled = false;
+
+    const cleanup = () => {
+      req.off("data", onData);
+      req.off("end", onEnd);
+      req.off("error", onError);
+      req.off("aborted", onAborted);
+      req.off("close", onClose);
+    };
+
+    const onData = (chunk: Buffer | string) => {
+      if (settled) return;
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      totalBytes += buffer.byteLength;
+      if (totalBytes > maxBytes) {
+        settled = true;
+        chunks.length = 0;
+        reject(new RequestBodyTooLargeError(maxBytes));
+        // Keep the data listener attached: it discards the remainder while the
+        // stream drains, so the connection can still carry the response.
+        req.resume();
+        return;
+      }
+      chunks.push(buffer);
+    };
+
+    const onEnd = () => {
+      cleanup();
+      if (settled) return;
+      settled = true;
+      resolve(Buffer.concat(chunks).toString());
+    };
+
+    const onError = (error: Error) => {
+      cleanup();
+      if (!settled) {
+        settled = true;
+        reject(error);
+      }
+    };
+
+    const onAborted = () => onError(new Error("Request body was aborted"));
+
+    const onClose = () => {
+      if (!req.readableEnded) onError(new Error("Request body closed before completion"));
+    };
+
+    req.on("data", onData);
+    req.on("end", onEnd);
+    req.on("error", onError);
+    req.on("aborted", onAborted);
+    req.on("close", onClose);
+    req.resume();
+  });
+}
+
+/**
  * Sentinel returned by `enforceContentLengthCap` when the request exceeds the
  * provided byte cap. The caller has already received a `413` response — it
  * should stop processing the request immediately.

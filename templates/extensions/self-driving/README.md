@@ -59,7 +59,7 @@ curl -sX POST "$MCP_BASE_URL/api/webhooks/<workflowId>" -H 'Content-Type: applic
 
 The same event (`event_id`, or title when absent) on the same fingerprint inside `cooldownSeconds` is skipped at ingest, so classify, cluster and propose write nothing. The key is `dedupe:<sha256>` in `ext-self-driving`, with a KV TTL. Distinct events on one fingerprint still count toward `threshold`.
 
-There is no server-side body cap or rate limit on `/api/webhooks/{workflowId}`. The signature is the gate against unauthenticated floods; a signed sender can still start runs as fast as it posts.
+`/api/webhooks/{workflowId}` caps the body at 1 MiB before buffering it, so an unsigned or oversized request gets 413 without reaching the signature check or the workflow. There is no rate limit: a signed sender can still start runs as fast as it posts.
 
 ## Run the demo
 

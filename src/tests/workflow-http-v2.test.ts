@@ -959,6 +959,69 @@ describe("Workflow HTTP API v2", () => {
       });
       expect(res.status).toBe(401);
     });
+
+    describe("body cap (1 MiB)", () => {
+      const CAP = 1024 * 1024;
+      const sign = (body: string): string =>
+        `sha256=${crypto.createHmac("sha256", "example-test-secret").update(body).digest("hex")}`;
+
+      test("a body of exactly the cap is accepted", async () => {
+        const workflow = await createTestWorkflow({
+          triggers: [{ type: "webhook", hmacSecret: "example-test-secret" }],
+        });
+        const envelope = JSON.stringify({ pad: "" });
+        const body = JSON.stringify({ pad: "a".repeat(CAP - envelope.length) });
+        expect(Buffer.byteLength(body)).toBe(CAP);
+
+        const res = await fetch(`${baseUrl}/api/webhooks/${workflow.id}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Hub-Signature-256": sign(body) },
+          body,
+        });
+        expect(res.status).toBe(201);
+      });
+
+      test("a Content-Length over the cap gets 413 before the workflow or signature is checked", async () => {
+        const body = JSON.stringify({ pad: "a".repeat(CAP) });
+        // Unknown workflow id and no signature: without the cap this would be a 404.
+        const res = await fetch(`${baseUrl}/api/webhooks/${crypto.randomUUID()}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body,
+        });
+        expect(res.status).toBe(413);
+        expect(((await res.json()) as { error: string }).error).toContain("Payload too large");
+      });
+
+      test("a chunked body with no Content-Length is capped as it streams", async () => {
+        const workflow = await createTestWorkflow({
+          triggers: [{ type: "webhook", hmacSecret: "example-test-secret" }],
+        });
+        const runsBefore = (await listWorkflowRuns(workflow.id)).length;
+        const chunk = new TextEncoder().encode("a".repeat(64 * 1024));
+        let sent = 0;
+        const stream = new ReadableStream<Uint8Array>({
+          pull(controller) {
+            if (sent >= CAP + 4 * chunk.byteLength) {
+              controller.close();
+              return;
+            }
+            sent += chunk.byteLength;
+            controller.enqueue(chunk);
+          },
+        });
+
+        const res = await fetch(`${baseUrl}/api/webhooks/${workflow.id}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: stream,
+          // @ts-expect-error `duplex` is required for a streamed request body
+          duplex: "half",
+        });
+        expect(res.status).toBe(413);
+        expect((await listWorkflowRuns(workflow.id)).length).toBe(runsBefore);
+      });
+    });
   });
 
   // ─── VERSION HISTORY ──────────────────────────────────────
