@@ -1046,6 +1046,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}guides/observability-opentelemetry`,
       },
       {
+        key: "OTEL_EXPORT_API_LOGS",
+        label: "Export API logs",
+        description:
+          "Also send the API server's console output to the OTLP endpoint as log records, scrubbed of secrets. Requires the OTLP endpoint.",
+        kind: "boolean",
+        defaultValue: "false",
+        restartRequired: true,
+        docsUrl: `${DOCS}guides/observability-opentelemetry`,
+      },
+      {
         key: "ANONYMIZED_TELEMETRY",
         label: "Anonymized telemetry",
         description:

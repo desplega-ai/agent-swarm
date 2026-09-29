@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { scrubSecrets } from "../utils/secret-scrubber";
 
 /**
  * Async database seam.
@@ -153,10 +154,10 @@ export function isInTransaction(): boolean {
  *
  * Two properties keep a retrying operation from starving the rest of the
  * process, both measured (see PR #1229's read-heavy probe):
- * - each retryable driver attempt runs under a SHORT `busy_timeout`
- *   (`attemptSpinMs`), so the driver's synchronous busy wait blocks the
- *   event loop for at most that long per attempt; the real waiting happens
- *   in the async backoff sleeps,
+ * - every driver attempt runs under a SHORT `busy_timeout`
+ *   (`attemptSpinMs`, or `finalAttemptSpinMs` for the last one), so the
+ *   driver's synchronous busy wait blocks the event loop for at most that
+ *   long per attempt; the real waiting happens in the async backoff sleeps,
  * - the FIFO lock is RELEASED during those sleeps (except after COMMIT
  *   failures, where the open transaction pins the connection), so queued
  *   reads flow while a writer waits out an external lock holder.
@@ -168,16 +169,65 @@ export type BusyRetryOptions = {
   backoffMs: number[];
   /** `busy_timeout` applied for the duration of each retryable driver attempt. */
   attemptSpinMs: number;
+  /**
+   * `busy_timeout` for the final attempt, after the backoff budget is spent.
+   * Defaults to `DEFAULT_FINAL_ATTEMPT_SPIN_MS`.
+   */
+  finalAttemptSpinMs?: number;
 };
 
-// The backoff sum (~6.9s) plus per-attempt spins must outlast a realistic
+/**
+ * The final attempt used to camp on the connection's ambient busy_timeout
+ * (5000ms), which froze every in-flight request for up to 5s whenever an
+ * external holder outlived the backoff budget. A slightly longer spin than
+ * `attemptSpinMs` still widens the last window without that freeze.
+ */
+const DEFAULT_FINAL_ATTEMPT_SPIN_MS = 250;
+
+// The backoff sum (~10.9s) plus per-attempt spins must outlast a realistic
 // external hold (litestream checkpoint stalls measured in seconds) so writes
 // land in the holder's release gaps instead of failing at the driver cliff.
+// It covers the patience the old 5s synchronous final camp provided, spent
+// in async sleeps instead. The 500ms tail keeps attempts at most one spin
+// apart from any 500ms release gap, so a lone writer cannot phase-lock with a
+// periodic holder (measured: 6 of 6 writes under a 6s-hold/500ms-gap locker;
+// 1s spacing lost 3 of 6).
 const DEFAULT_BUSY_RETRY: BusyRetryOptions = {
-  maxWaitMs: 10_000,
-  backoffMs: [25, 50, 100, 250, 500, 1000, 1000, 1000, 1000, 1000, 1000],
+  maxWaitMs: 11_000,
+  backoffMs: [25, 50, 100, 250, ...Array<number>(21).fill(500)],
   attemptSpinMs: 100,
+  finalAttemptSpinMs: DEFAULT_FINAL_ATTEMPT_SPIN_MS,
 };
+
+/**
+ * A single synchronous driver call longer than this froze the whole event
+ * loop (every route, not only its own request) and is logged.
+ */
+const SLOW_STATEMENT_WARN_MS = 100;
+const SLOW_STATEMENT_SQL_MAX_CHARS = 200;
+
+/** Params are never logged: they can carry secrets and user content. */
+function warnIfSlowStatement(sql: string, durationMs: number): void {
+  if (durationMs < SLOW_STATEMENT_WARN_MS) return;
+  const flat = sql.replace(/\s+/g, " ").trim();
+  const shown =
+    flat.length > SLOW_STATEMENT_SQL_MAX_CHARS
+      ? `${flat.slice(0, SLOW_STATEMENT_SQL_MAX_CHARS)}…`
+      : flat;
+  console.warn(
+    `[db-client] slow sync statement blocked the event loop for ${Math.round(durationMs)}ms: ${scrubSecrets(shown)}`,
+  );
+}
+
+/** Run one synchronous driver call and log it when it blocked the loop too long. */
+function timedStatement<T>(sql: string, run: () => T): T {
+  const startedAt = performance.now();
+  try {
+    return run();
+  } finally {
+    warnIfSlowStatement(sql, performance.now() - startedAt);
+  }
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -206,15 +256,15 @@ class BunSqliteClient implements DbClient {
   ) {}
 
   query<T>(sql: string, params: DbParam[] = []): Promise<T[]> {
-    return this.execute((db) => db.query<T, DbParam[]>(sql).all(...params));
+    return this.execute(sql, (db) => db.query<T, DbParam[]>(sql).all(...params));
   }
 
   get<T>(sql: string, params: DbParam[] = []): Promise<T | null> {
-    return this.execute((db) => db.query<T, DbParam[]>(sql).get(...params));
+    return this.execute(sql, (db) => db.query<T, DbParam[]>(sql).get(...params));
   }
 
   run(sql: string, params: DbParam[] = []): Promise<{ changes: number }> {
-    return this.execute((db) => {
+    return this.execute(sql, (db) => {
       const result = db.query(sql).run(...params);
       return { changes: result.changes };
     });
@@ -226,6 +276,7 @@ class BunSqliteClient implements DbClient {
   ): Promise<{ changes: number; executionMs: number }> {
     let executionMs = 0;
     const result = await this.execute(
+      sql,
       (db) => {
         const run = db.query(sql).run(...params);
         return { changes: run.changes };
@@ -248,12 +299,10 @@ class BunSqliteClient implements DbClient {
     for (let attemptIndex = 0; ; attemptIndex++) {
       const backoff = this.busyRetry.backoffMs[attemptIndex];
       const canRetryAfter = backoff !== undefined && sleptMs + backoff <= this.busyRetry.maxWaitMs;
-      // The FINAL attempt camps on the ambient busy_timeout instead of the
-      // short spin: a lone writer sampling 100ms windows can stay phase-locked
-      // with a periodic external holder and miss every release gap (measured:
-      // 3 of 6 writes lost at 1 writer under a 6s/500ms locker). One long
-      // synchronous spin per request, only after every polite attempt failed,
-      // acquires the lock the instant the holder releases.
+      // The FINAL attempt spins `finalAttemptSpinMs`, never the ambient
+      // busy_timeout: a 5s synchronous camp froze every in-flight request.
+      // The dense 500ms backoff tail catches a periodic holder's release gap
+      // instead (see DEFAULT_BUSY_RETRY).
       const attempt = await this.runTransactionAttempt(fn, readOnly, !canRetryAfter);
       if (attempt.ok) return attempt.value;
       if (!canRetryAfter || backoff === undefined) throw attempt.busyBegin;
@@ -274,7 +323,7 @@ class BunSqliteClient implements DbClient {
   private async runTransactionAttempt<T>(
     fn: (tx: DbExecutor) => Promise<T>,
     readOnly: boolean,
-    campOnAmbientTimeout = false,
+    finalAttempt = false,
   ): Promise<{ ok: true; value: T } | { ok: false; busyBegin: unknown }> {
     const release = await this.lock.acquire();
     const ctx: TxContext = { closed: false, afterCommit: [] };
@@ -293,13 +342,7 @@ class BunSqliteClient implements DbClient {
           // instead of on an arbitrary statement mid-callback where it is
           // not. The short spin keeps the driver's synchronous busy wait off
           // the event loop; the real waiting is the caller's async backoff.
-          // The final attempt camps on the ambient busy_timeout instead (see
-          // transaction()).
-          if (campOnAmbientTimeout) {
-            db.run("BEGIN IMMEDIATE");
-          } else {
-            this.shortSpin(db, () => db.run("BEGIN IMMEDIATE"));
-          }
+          this.shortSpin(db, () => db.run("BEGIN IMMEDIATE"), finalAttempt);
         } catch (err) {
           if (isSqliteBusy(err)) return { ok: false, busyBegin: err };
           throw err;
@@ -393,19 +436,27 @@ class BunSqliteClient implements DbClient {
    * a post-commit continuation (e.g. queueMicrotask) is treated as absent.
    */
   private async execute<T>(
+    sql: string,
     op: (db: Database) => T,
     recordExecutionMs?: (ms: number) => void,
   ): Promise<T> {
     // Wraps ONLY the synchronous driver call, so lock acquisition above and
     // backoff sleeps below are never charged to the statement. Called once per
     // attempt; a retrying statement reports the sum. See DbClient.runTimed.
-    const timed = (attempt: () => T): T => {
-      if (!recordExecutionMs) return attempt();
+    // A BUSY attempt that will be retried is not logged as slow: its block is
+    // capped at `attemptSpinMs` by construction.
+    const timed = (attempt: () => T, retryable = false): T => {
       const startedAt = performance.now();
+      let willRetry = false;
       try {
         return attempt();
+      } catch (err) {
+        willRetry = retryable && isSqliteBusy(err);
+        throw err;
       } finally {
-        recordExecutionMs(performance.now() - startedAt);
+        const ms = performance.now() - startedAt;
+        recordExecutionMs?.(ms);
+        if (!willRetry) warnIfSlowStatement(sql, ms);
       }
     };
     const ctx = txContext.getStore();
@@ -420,13 +471,11 @@ class BunSqliteClient implements DbClient {
       let backoff = 0;
       try {
         // A top-level single statement is atomic, so a repeat on BUSY is
-        // exact. The final attempt camps on the ambient busy_timeout so a
-        // lone writer cannot stay phase-locked with a periodic holder (see
+        // exact. The final attempt spins `finalAttemptSpinMs` (see
         // transaction()).
-        return timed(() =>
-          canRetryAfter
-            ? this.shortSpin(this.getDatabase(), () => op(this.getDatabase()))
-            : op(this.getDatabase()),
+        return timed(
+          () => this.shortSpin(this.getDatabase(), () => op(this.getDatabase()), !canRetryAfter),
+          canRetryAfter,
         );
       } catch (err) {
         if (!isSqliteBusy(err) || !canRetryAfter || next === undefined) throw err;
@@ -442,17 +491,21 @@ class BunSqliteClient implements DbClient {
   }
 
   /**
-   * Run a retryable driver attempt under a short `busy_timeout` so the
-   * synchronous in-driver busy wait blocks the event loop for at most
-   * `attemptSpinMs`. Only called while the FIFO lock is held, so the
-   * set/attempt/restore sequence cannot interleave with other client work.
+   * Run a driver attempt under a short `busy_timeout` so the synchronous
+   * in-driver busy wait blocks the event loop for at most `attemptSpinMs`
+   * (`finalAttemptSpinMs` for the final attempt). Only called while the FIFO
+   * lock is held, so the set/attempt/restore sequence cannot interleave with
+   * other client work.
    */
-  private shortSpin<T>(db: Database, attempt: () => T): T {
+  private shortSpin<T>(db: Database, attempt: () => T, finalAttempt = false): T {
     if (this.restoreBusyTimeoutMs === null) {
       const row = db.query<{ timeout: number }, []>("PRAGMA busy_timeout").get();
       this.restoreBusyTimeoutMs = row?.timeout ?? 5000;
     }
-    db.exec(`PRAGMA busy_timeout = ${this.busyRetry.attemptSpinMs}`);
+    const spinMs = finalAttempt
+      ? (this.busyRetry.finalAttemptSpinMs ?? DEFAULT_FINAL_ATTEMPT_SPIN_MS)
+      : this.busyRetry.attemptSpinMs;
+    db.exec(`PRAGMA busy_timeout = ${spinMs}`);
     try {
       return attempt();
     } finally {
@@ -488,17 +541,23 @@ class BunSqliteClient implements DbClient {
     };
     return {
       query: async <T>(sql: string, params: DbParam[] = []): Promise<T[]> =>
-        guard()
-          .query<T, DbParam[]>(sql)
-          .all(...params),
+        timedStatement(sql, () =>
+          guard()
+            .query<T, DbParam[]>(sql)
+            .all(...params),
+        ),
       get: async <T>(sql: string, params: DbParam[] = []): Promise<T | null> =>
-        guard()
-          .query<T, DbParam[]>(sql)
-          .get(...params),
+        timedStatement(sql, () =>
+          guard()
+            .query<T, DbParam[]>(sql)
+            .get(...params),
+        ),
       run: async (sql: string, params: DbParam[] = []): Promise<{ changes: number }> => {
-        const result = guard()
-          .query(sql)
-          .run(...params);
+        const result = timedStatement(sql, () =>
+          guard()
+            .query(sql)
+            .run(...params),
+        );
         return { changes: result.changes };
       },
     };

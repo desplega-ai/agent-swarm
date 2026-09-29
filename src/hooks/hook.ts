@@ -42,6 +42,26 @@ type McpServerConfig = {
   };
 };
 
+export async function loadHookMcpConfig(
+  projectDir: string,
+  workspaceDir = "/workspace",
+): Promise<McpServerConfig | undefined> {
+  for (const configDir of new Set([projectDir, workspaceDir])) {
+    try {
+      const mcpFile = Bun.file(`${configDir}/.mcp.json`);
+      if (!(await mcpFile.exists())) continue;
+
+      const config = await mcpFile.json();
+      const serverConfig = config?.mcpServers?.[SERVER_NAME] as McpServerConfig | undefined;
+      if (serverConfig) return serverConfig;
+    } catch {
+      // Try the next config location.
+    }
+  }
+
+  return undefined;
+}
+
 interface HookMessage {
   hook_event_name: string;
   session_id?: string;
@@ -493,18 +513,7 @@ export async function runSessionSummaryFromStdin(): Promise<void> {
  */
 export async function handleHook(): Promise<void> {
   const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
-
-  let mcpConfig: McpServerConfig | undefined;
-
-  try {
-    const mcpFile = Bun.file(`${projectDir}/.mcp.json`);
-    if (await mcpFile.exists()) {
-      const config = await mcpFile.json();
-      mcpConfig = config?.mcpServers?.[SERVER_NAME] as McpServerConfig;
-    }
-  } catch {
-    // No config found, proceed without MCP
-  }
+  const mcpConfig = await loadHookMcpConfig(projectDir);
 
   let msg: HookMessage;
   try {
