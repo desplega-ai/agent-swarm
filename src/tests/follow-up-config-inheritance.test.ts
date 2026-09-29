@@ -10,9 +10,9 @@ import {
   getScheduledTaskById,
   getTaskById,
   initDb,
+  reclaimTask,
   startTask,
 } from "../be/db";
-import { getRebootAffectedTasks, runRebootSweep } from "../heartbeat/heartbeat";
 import { createStandaloneScheduleTask } from "../scheduler/schedule-task";
 import { createResumeFollowUp, createWorkerTaskFollowUp } from "../tasks/worker-follow-up";
 import { registerDeferTaskTool } from "../tools/defer-task";
@@ -122,20 +122,24 @@ describe("kept: continuations of the same work inherit followUpConfig", () => {
     expect(resume.task.followUpConfig).toEqual(ON_COMPLETED);
   });
 
-  test("reboot-sweep retry", async () => {
+  test("heartbeat reclaim keeps the same row, so its followUpConfig is untouched", async () => {
     const parent = await workerTaskWithOnCompleted("work cut by a reboot");
-    await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
-      new Date(Date.now() - 1000).toISOString(),
-      parent.id,
-    ]);
+    const row = await getTaskById(parent.id);
 
-    await runRebootSweep();
+    const reclaimed = await reclaimTask(parent.id, {
+      expectedAttempt: row!.attempt ?? 0,
+      expectedLastUpdatedAt: row!.lastUpdatedAt,
+      observedSessionHeartbeatAt: null,
+      reason: "test",
+    });
 
-    const retryTaskId = getRebootAffectedTasks().find(
-      (a) => a.original.id === parent.id,
-    )?.retryTaskId;
-    expect(retryTaskId).toBeTruthy();
-    expect(await followUpConfigOf(retryTaskId!)).toEqual(ON_COMPLETED);
+    expect(reclaimed?.id).toBe(parent.id);
+    expect(await followUpConfigOf(parent.id)).toEqual(ON_COMPLETED);
+    const children = await getDbClient().query<{ id: string }>(
+      "SELECT id FROM agent_tasks WHERE parentTaskId = ?",
+      [parent.id],
+    );
+    expect(children).toHaveLength(0);
   });
 
   test("defer-task wake-up continuation", async () => {

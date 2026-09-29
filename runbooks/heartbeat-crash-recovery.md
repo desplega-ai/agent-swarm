@@ -409,7 +409,7 @@ A task's `followUpConfig` (its creator's `onCompleted` / `onFailed` / `disabled`
 | Creator | Inherits? | Why |
 |---------|-----------|-----|
 | `createResumeFollowUp` (crash recovery, graceful shutdown, `POST /api/tasks/{id}/supersede`) | Yes | Same work, new session |
-| `runRebootSweep` retry child | Yes | Same work, re-run |
+| Heartbeat reclaim (stalled or reboot-interrupted task) | n/a | No child is created: the same row goes back to `pending`, so its `followUpConfig` is never copied |
 | `defer-task` wake-up (`schedule.taskType === "deferred"`) | Yes | Continues the deferred work |
 | `send-task` with `taskType: "resume"` (reroute-decision re-delegation) | Yes | Continues the crashed work |
 | `createWorkerTaskFollowUp` (Lead follow-up) | No | Would re-fire the finished task's instructions on the Lead's next delegation |
