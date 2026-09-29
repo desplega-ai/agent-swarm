@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById } from "@/be/db";
 import { upsertModelCatalogOverlay } from "@/be/model-catalog-store";
-import { refreshModelCatalog } from "@/be/pricing-refresh";
+import { requestModelCatalogRefresh } from "@/be/pricing-refresh";
 import { can } from "@/rbac";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
@@ -23,19 +23,22 @@ export const registerModelCatalogRefreshTool = (server: McpServer) => {
     {
       title: "Refresh Model Catalog",
       description:
-        "Refresh the swarm model catalog (and pricing rows) from models.dev, like `pi update --models`. Without force, skips the network when the last check is under 4h old. Returns the status, model count, and newly added provider/modelId keys.",
+        "Refresh the swarm model catalog (and pricing rows) from models.dev, like `pi update --models`. Without force, skips the network when the last check is under 4h old. A forced refresh is accepted once per minute; a second one inside that window returns `skipped-cooldown` with `retryAfterMs`. Lead agent only. Returns the status, model count, and newly added provider/modelId keys.",
       annotations: { idempotentHint: true, openWorldHint: true },
       inputSchema: z.object({
         force: z
           .boolean()
           .optional()
-          .describe("Fetch even if the last check is under 4h old (default false)."),
+          .describe(
+            "Fetch even if the last check is under 4h old (default false). Rate limited to one per minute.",
+          ),
       }),
       outputSchema: swarmToolOutputSchema({
         status: z.string().optional(),
         models: z.number().optional(),
         added: z.array(z.string()).optional(),
         checkedAt: z.number().nullable().optional(),
+        retryAfterMs: z.number().optional(),
       }),
     },
     async ({ force }, requestInfo) => {
@@ -45,12 +48,13 @@ export const registerModelCatalogRefreshTool = (server: McpServer) => {
       const denied = await denyUnlessCatalogWriter(requestInfo.agentId);
       if (denied) return toolErr(denied);
 
-      const result = await refreshModelCatalog({ force });
+      const result = await requestModelCatalogRefresh({ force });
       const data = {
         status: result.status,
         models: result.models,
         added: result.added,
         checkedAt: result.checkedAt,
+        retryAfterMs: result.retryAfterMs,
       };
       if (result.status === "error") {
         return toolErr(`Model catalog refresh failed: ${result.error ?? "unknown error"}`, {

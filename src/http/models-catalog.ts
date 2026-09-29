@@ -16,7 +16,7 @@ import {
   upsertModelCatalogOverlay,
 } from "../be/model-catalog-store";
 import { previewModelTiers } from "../be/model-tier-resolution";
-import { refreshModelCatalog } from "../be/pricing-refresh";
+import { requestModelCatalogRefresh } from "../be/pricing-refresh";
 import { can, type RbacPrincipal } from "../rbac";
 import { MODEL_TIERS, ProviderNameSchema } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
@@ -62,10 +62,12 @@ const OverlayPricingSchema = z.object({
 });
 
 export const ModelCatalogRefreshResultSchema = z.object({
-  status: z.enum(["updated", "not-modified", "skipped-fresh", "error"]),
+  status: z.enum(["updated", "not-modified", "skipped-fresh", "skipped-cooldown", "error"]),
   models: z.number(),
   added: z.array(z.string()),
   checkedAt: z.number().nullable(),
+  /** Set with `skipped-cooldown`: milliseconds until a forced refresh is accepted again. */
+  retryAfterMs: z.number().optional(),
   error: z.string().optional(),
 });
 
@@ -155,7 +157,7 @@ const refreshCatalog = route({
   pattern: ["api", "models-catalog", "refresh"],
   summary: "Refresh the model catalog from models.dev",
   description:
-    "Unforced calls skip the network when the last models.dev check is younger than 4h (`skipped-fresh`). `force: true` always fetches, still conditional on the stored ETag (`not-modified` on 304). `added` lists provider/modelId keys new since the previous fetch.",
+    "Unforced calls skip the network when the last models.dev check is younger than 4h (`skipped-fresh`). `force: true` always fetches, still conditional on the stored ETag (`not-modified` on 304), but a forced call within a minute of the previous one returns `skipped-cooldown` with `retryAfterMs`. Concurrent refreshes share one fetch. Lead agent, operator or user only. `added` lists provider/modelId keys new since the previous fetch.",
   tags: ["Pricing"],
   rbac: { permission: "models.catalog.write" },
   body: z.object({ force: z.boolean().optional() }),
@@ -229,7 +231,7 @@ const recordHarnessSupport = route({
   description:
     "Written by workers: `ok` after a model's first successful run, `unsupported` when the CLI rejects the model id. Claim-time resolution falls back (alias/tier) or fails fast (explicit model) on `unsupported`.",
   tags: ["Pricing"],
-  rbac: { permission: "models.catalog.write" },
+  rbac: { permission: "models.harness-support.write" },
   body: z.object({
     harness: z.string().min(1),
     cliVersion: z.string().min(1).max(64),
@@ -243,32 +245,47 @@ const recordHarnessSupport = route({
   },
 });
 
-/** Resolve the caller and gate on `models.catalog.write`; writes a 403 on denial. */
+/**
+ * Resolve the caller and gate on `verb`; writes a 403 on denial. Refresh and overlay writes
+ * (`models.catalog.write`) are lead, operator or user only; workers may only record harness
+ * support (`models.harness-support.write`).
+ */
 async function ensureCatalogWriter(
   req: IncomingMessage,
   res: ServerResponse,
+  verb: "models.catalog.write" | "models.harness-support.write" = "models.catalog.write",
 ): Promise<{ userId: string | null } | null> {
   const auth = getRequestAuth(req);
+  const header = req.headers["x-agent-id"];
+  const agentId =
+    auth?.kind === "agent" ? auth.agentId : Array.isArray(header) ? header[0] : header;
   let principal: RbacPrincipal;
-  if (auth?.kind === "operator") {
-    principal = { kind: "operator" };
-  } else if (auth?.kind === "user") {
+  if (auth?.kind === "user") {
     principal = { kind: "user", userId: auth.userId };
+  } else if (agentId) {
+    // An X-Agent-ID wins over the shared API key: a worker holds that key, so treating it as the
+    // operator would let any worker skip the verb's lead-only rule.
+    const agent = await getAgentById(agentId);
+    principal = { kind: "agent", agentId, isLead: agent?.isLead ?? false };
+  } else if (auth?.kind === "operator") {
+    principal = { kind: "operator" };
   } else {
-    const header = req.headers["x-agent-id"];
-    const agentId =
-      auth?.kind === "agent" ? auth.agentId : Array.isArray(header) ? header[0] : header;
-    const agent = agentId ? await getAgentById(agentId) : undefined;
-    principal = { kind: "agent", agentId: agentId ?? "", isLead: agent?.isLead ?? false };
+    principal = { kind: "agent", agentId: "", isLead: false };
   }
   const decision = can({
     principal,
-    verb: "models.catalog.write",
+    verb,
     resource: { kind: "none" },
     source: "http",
   });
   if (!decision.allow) {
-    jsonError(res, "Writing the model catalog requires the lead agent or an operator", 403);
+    jsonError(
+      res,
+      verb === "models.catalog.write"
+        ? "Writing the model catalog requires the lead agent or an operator"
+        : "Recording harness model support requires an authenticated caller",
+      403,
+    );
     return null;
   }
   return { userId: auth?.kind === "user" ? auth.userId : null };
@@ -298,7 +315,11 @@ export async function handleModelsCatalog(
     const parsed = await refreshCatalog.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     if (!(await ensureCatalogWriter(req, res))) return true;
-    refreshCatalog.respond(res, 200, await refreshModelCatalog({ force: parsed.body.force }));
+    refreshCatalog.respond(
+      res,
+      200,
+      await requestModelCatalogRefresh({ force: parsed.body.force }),
+    );
     return true;
   }
 
@@ -331,7 +352,7 @@ export async function handleModelsCatalog(
   if (recordHarnessSupport.match(req.method, pathSegments)) {
     const parsed = await recordHarnessSupport.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!(await ensureCatalogWriter(req, res))) return true;
+    if (!(await ensureCatalogWriter(req, res, "models.harness-support.write"))) return true;
     recordHarnessSupport.respond(res, 200, await recordHarnessModelSupport(parsed.body));
     return true;
   }

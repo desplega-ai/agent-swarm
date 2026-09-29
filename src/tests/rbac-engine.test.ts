@@ -82,7 +82,11 @@ const LEAD_ONLY_VERBS: PermissionVerb[] = [
 ];
 
 const OPERATOR_ONLY_VERBS: PermissionVerb[] = [];
-const LEAD_OR_OPERATOR_VERBS: PermissionVerb[] = ["extension.write", "extension.activate"];
+const LEAD_OR_OPERATOR_VERBS: PermissionVerb[] = [
+  "extension.write",
+  "extension.activate",
+  "models.catalog.write",
+];
 
 const LEAD_OR_RESOURCE_OWNER_VERBS: PermissionVerb[] = [
   "memory.edit.any",
@@ -107,7 +111,7 @@ const ANY_AUTHENTICATED_VERBS: PermissionVerb[] = [
   "task.create.own",
   "favorite.write.own",
   "script.search",
-  "models.catalog.write",
+  "models.harness-support.write",
 ];
 
 const REQUESTER_OWNS_TASK_VERBS: PermissionVerb[] = [

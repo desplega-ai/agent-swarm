@@ -210,11 +210,25 @@ export async function refreshPricingFromModelsDev(
 }
 
 export interface ModelCatalogRefreshResult {
-  status: "updated" | "not-modified" | "skipped-fresh" | "error";
+  status: "updated" | "not-modified" | "skipped-fresh" | "skipped-cooldown" | "error";
   models: number;
   added: string[];
   checkedAt: number | null;
+  /** Set with `skipped-cooldown`: milliseconds until a forced refresh is accepted again. */
+  retryAfterMs?: number;
   error?: string;
+}
+
+/** Minimum gap between forced refreshes accepted from callers (HTTP route, MCP tool). */
+export const MODEL_CATALOG_FORCE_COOLDOWN_MS = 60 * 1000;
+
+let refreshInFlight: Promise<ModelCatalogRefreshResult> | null = null;
+let lastForcedRefreshAt: number | null = null;
+
+/** Test-only: forget the in-flight refresh and the forced-refresh cooldown. */
+export function resetModelCatalogRefreshGuardForTests(): void {
+  refreshInFlight = null;
+  lastForcedRefreshAt = null;
 }
 
 /**
@@ -224,7 +238,50 @@ export interface ModelCatalogRefreshResult {
  * `status: "error"` and the catalog keeps serving the last good table (or the
  * vendored snapshot).
  */
-export async function refreshModelCatalog(
+export function refreshModelCatalog(
+  opts: { force?: boolean } & RefreshPricingOptions = {},
+): Promise<ModelCatalogRefreshResult> {
+  // Single flight: a refresh that is already running serves every concurrent caller, so a burst of
+  // requests (or the boot loop racing a forced call) costs one models.dev fetch.
+  if (refreshInFlight) return refreshInFlight;
+  const run = runModelCatalogRefresh(opts).finally(() => {
+    if (refreshInFlight === run) refreshInFlight = null;
+  });
+  refreshInFlight = run;
+  return run;
+}
+
+/**
+ * Caller-facing entry for the HTTP route and the MCP tool: `refreshModelCatalog` plus a cooldown
+ * on `force`. A forced call within MODEL_CATALOG_FORCE_COOLDOWN_MS of the previous one does not
+ * fetch; it reports `skipped-cooldown` and how long to wait. Unforced calls pass straight through
+ * (they already skip the network while the table is fresh).
+ */
+export async function requestModelCatalogRefresh(
+  opts: { force?: boolean } & RefreshPricingOptions = {},
+): Promise<ModelCatalogRefreshResult> {
+  const now = opts.now ?? Date.now();
+  if (opts.force) {
+    const waitMs =
+      lastForcedRefreshAt === null
+        ? 0
+        : lastForcedRefreshAt + MODEL_CATALOG_FORCE_COOLDOWN_MS - now;
+    if (waitMs > 0) {
+      const meta = await getModelCatalogMeta().catch(() => null);
+      return {
+        status: "skipped-cooldown",
+        models: await countModelCatalog().catch(() => 0),
+        added: [],
+        checkedAt: meta?.lastCheckedAt ?? null,
+        retryAfterMs: waitMs,
+      };
+    }
+    lastForcedRefreshAt = now;
+  }
+  return refreshModelCatalog({ ...opts, now });
+}
+
+async function runModelCatalogRefresh(
   opts: { force?: boolean } & RefreshPricingOptions = {},
 ): Promise<ModelCatalogRefreshResult> {
   const now = opts.now ?? Date.now();

@@ -158,6 +158,11 @@ export const PERMISSIONS = {
       "Force a model-catalog refresh from models.dev or write/delete model-catalog overlay rows.",
     namespace: "models",
   },
+  "models.harness-support.write": {
+    description:
+      "Record whether a pinned harness CLI version accepts a model (workers report their own probe results).",
+    namespace: "models",
+  },
   "config.read.secrets": {
     description: "Read unmasked secret config values.",
     namespace: "config",
