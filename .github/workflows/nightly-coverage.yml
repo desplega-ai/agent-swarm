@@ -30,9 +30,11 @@ jobs:
         run: bun --config=bunfig.coverage.toml test
 
       - name: Build coverage summary
+        if: ${{ !cancelled() && hashFiles('coverage/lcov.info') != '' }}
         run: bun scripts/coverage-summary.ts coverage/lcov.info coverage-summary.json
 
       - name: Upload LCOV report
+        if: ${{ !cancelled() && hashFiles('coverage/lcov.info') != '' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: root-src-coverage-${{ github.sha }}
@@ -41,6 +43,7 @@ jobs:
           retention-days: 30
 
       - name: Store coverage baseline
+        if: ${{ !cancelled() && hashFiles('coverage/lcov.info') != '' }}
         env:
           SWARM_API_BASE_URL: ${{ vars.SWARM_API_BASE_URL || 'https://api.desplega.agent-swarm.dev' }}
           SWARM_COVERAGE_API_KEY: ${{ secrets.SWARM_COVERAGE_API_KEY }}
