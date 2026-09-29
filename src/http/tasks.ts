@@ -1321,14 +1321,31 @@ export async function handleTasks(
   if (updateTaskProgressRoute.match(req.method, pathSegments)) {
     const parsed = await updateTaskProgressRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const task = await getTaskById(parsed.params.id);
+    const runtimeInstanceId = headerRuntimeInstanceId(req);
 
-    if (!task) {
-      jsonError(res, "Task not found", 404);
+    // Attempt fence (src/tasks/attempt-fence.ts), on a fresh read in the write's
+    // transaction: progress from an attempt the heartbeat reclaimed must not
+    // refresh `lastUpdatedAt` on the replacement and hide its stall. A caller
+    // that names no agent keeps the pre-fence behavior (older runners).
+    const outcome = await getDbClient().transaction(
+      async (): Promise<{ error: string; status: number } | null> => {
+        const task = await getTaskById(parsed.params.id);
+        if (!task) return { error: "Task not found", status: 404 };
+        if (myAgentId) {
+          const staleAttempt = staleAttemptWriteReason(task, {
+            agentId: myAgentId,
+            runtimeInstanceId,
+          });
+          if (staleAttempt) return { error: staleAttempt, status: 403 };
+        }
+        await updateTaskProgress(parsed.params.id, parsed.body.progress);
+        return null;
+      },
+    );
+    if (outcome) {
+      jsonError(res, outcome.error, outcome.status);
       return true;
     }
-
-    await updateTaskProgress(parsed.params.id, parsed.body.progress);
     updateTaskProgressRoute.respond(res, 200, { success: true });
     return true;
   }

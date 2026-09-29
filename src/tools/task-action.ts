@@ -433,15 +433,15 @@ export async function taskActionHandler(
             message: `Cannot release task in status "${existingTask.status}". Only 'pending' or 'in_progress' tasks can be released.`,
           };
         }
-        // Attempt fence (src/tasks/attempt-fence.ts): a process holding an
-        // attempt the heartbeat reclaimed must not release the replacement.
-        if (existingTask.status === "in_progress") {
-          const staleAttempt = staleAttemptWriteReason(existingTask, {
-            agentId,
-            runtimeInstanceId: ctx.kind === "owner" ? ctx.runtimeInstanceId : undefined,
-          });
-          if (staleAttempt) return { success: false, message: staleAttempt };
-        }
+        // Attempt fence (src/tasks/attempt-fence.ts), for every releasable
+        // status and inside this action's transaction: a process holding an
+        // attempt the heartbeat reclaimed must not release the replacement, or
+        // drop a reclaimed pin back to the pool before the Unpin grace.
+        const staleAttempt = staleAttemptWriteReason(existingTask, {
+          agentId,
+          runtimeInstanceId: ctx.kind === "owner" ? ctx.runtimeInstanceId : undefined,
+        });
+        if (staleAttempt) return { success: false, message: staleAttempt };
         const releasedTask = await releaseTask(taskId);
         if (!releasedTask) {
           return { success: false, message: `Failed to release task "${taskId}".` };

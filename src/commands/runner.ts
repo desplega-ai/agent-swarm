@@ -56,6 +56,7 @@ import {
   resolveCodexCreditsExhaustedCooldownMs,
 } from "../utils/error-tracker.ts";
 import { resolveHarnessProvider } from "../utils/harness-provider.ts";
+import { swarmRuntimeInstanceId } from "../utils/multi-runtime.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
 import { terminateRegisteredProcessGroups } from "../utils/process-group.ts";
 import { resolveScriptsOnlyMode } from "../utils/scripts-only-mode.ts";
@@ -1390,9 +1391,14 @@ async function updateProgressViaAPI(
   apiKey: string,
   taskId: string,
   progress: string,
+  identity: { agentId?: string; runtimeInstanceId?: string } = {},
 ): Promise<void> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+  // The API fences progress by attempt: a process holding a reclaimed attempt
+  // is refused instead of refreshing the replacement's `lastUpdatedAt`.
+  if (identity.agentId) headers["X-Agent-ID"] = identity.agentId;
+  if (identity.runtimeInstanceId) headers["X-Runtime-Instance-ID"] = identity.runtimeInstanceId;
 
   try {
     await fetch(`${apiUrl}/api/tasks/${taskId}/progress`, {
@@ -3990,9 +3996,10 @@ async function spawnProviderProcess(
             const progress = toolCallToProgress(event.toolName, event.args);
             if (progress) {
               lastProgressTime = now;
-              updateProgressViaAPI(opts.apiUrl, opts.apiKey, effectiveTaskId, progress).catch(
-                () => {},
-              );
+              updateProgressViaAPI(opts.apiUrl, opts.apiKey, effectiveTaskId, progress, {
+                agentId: opts.agentId,
+                runtimeInstanceId: swarmRuntimeInstanceId(),
+              }).catch(() => {});
             }
           }
 
@@ -4192,9 +4199,10 @@ async function spawnProviderProcess(
             const now = Date.now();
             if (now - lastProgressTime >= PROGRESS_THROTTLE_MS) {
               lastProgressTime = now;
-              updateProgressViaAPI(opts.apiUrl, opts.apiKey, effectiveTaskId, event.message).catch(
-                () => {},
-              );
+              updateProgressViaAPI(opts.apiUrl, opts.apiKey, effectiveTaskId, event.message, {
+                agentId: opts.agentId,
+                runtimeInstanceId: swarmRuntimeInstanceId(),
+              }).catch(() => {});
             }
           }
           break;

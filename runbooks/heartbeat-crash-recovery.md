@@ -203,9 +203,9 @@ flowchart TD
 - any non-lead write to a non-terminal row with `attempt > 0` that is not `in_progress` on the caller's agent (reclaimed and not yet restarted, back in the pool, or started by another agent);
 - a write to an `in_progress` row owned by the caller's agent from a runtime other than `attemptRuntimeId` (the replacement attempt runs in another runtime of the same agent).
 
-It guards `store-progress`, `defer-task` (before the schedule insert and the terminal write, in one transaction), the runner's `/finish`, `/pause` and `/supersede`, and `task-action release`. `DELETE /api/active-sessions/by-task/:id` deletes only the row the calling agent and runtime registered, so an old run's cleanup cannot remove the replacement's session. Leads keep their override on rows they do not own.
+It guards `store-progress`, `defer-task` (before the schedule insert and the terminal write, in one transaction), the runner's `/finish`, `/pause`, `/supersede` and `/progress`, and `task-action release` (on a reclaimed `pending` row too). `DELETE /api/active-sessions/by-task/:id` deletes only the row the calling agent and runtime registered, so an old run's cleanup cannot remove the replacement's session. Leads keep their override on rows they do not own.
 
-A caller that sends no `X-Runtime-Instance-ID` is rejected on a reclaimed row (`attempt > 0`) that a runtime restarted: it cannot prove it holds the current attempt. On a never-reclaimed row (one attempt only) it keeps the status + agent check, so remote harnesses such as `claude-managed` (static MCP headers) keep working; after a reclaim their tool writes are refused and the runner's `/finish` settles the task. An attempt started without a runtime id (`attemptRuntimeId` NULL) falls back to the status + agent check. `/pause` and `/supersede` re-read the row and run the fence inside their write transaction. The runner's own `/progress` and session heartbeat calls are not fenced; they can refresh progress text or `lastHeartbeatAt` but cannot change status.
+A caller that sends no `X-Runtime-Instance-ID` is rejected on a reclaimed row (`attempt > 0`) that a runtime restarted: it cannot prove it holds the current attempt. On a never-reclaimed row (one attempt only) it keeps the status + agent check, so remote harnesses such as `claude-managed` (static MCP headers) keep working; after a reclaim their tool writes are refused and the runner's `/finish` settles the task. An attempt started without a runtime id (`attemptRuntimeId` NULL) falls back to the status + agent check. `/pause` and `/supersede` re-read the row and run the fence inside their write transaction. `/progress` is fenced when the caller sends `X-Agent-ID` (the runner sends it with its runtime id); a caller that names no agent, such as an older runner, is not. The session heartbeat is not fenced; it refreshes `lastHeartbeatAt` but cannot change status.
 
 **Runner.** When the reclaimed row comes back to an agent that still runs the earlier attempt, the runner keeps the running copy and does not start a second one. When it starts a row with `attempt > 0`, it injects a resume preamble built from the task's own id (its earlier attempts' session logs).
 
@@ -271,7 +271,7 @@ unpinUnclaimedTasks():
         #   status = unassigned, agentId = NULL → affinity-gated pool (§4)
 
 # attempt fence (src/tasks/attempt-fence.ts), same transaction as the write:
-# store-progress, defer-task, /finish, /pause, /supersede, task-action release
+# store-progress, defer-task, /finish, /pause, /supersede, /progress, task-action release
 start (poll / claim / resume):  task.attemptRuntimeId = caller X-Runtime-Instance-ID (or NULL)
 worker write (caller agent, caller runtime):
     if task is terminal: fall through to the terminal-result guard

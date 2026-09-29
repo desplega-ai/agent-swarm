@@ -39,6 +39,9 @@ import { handleTasks } from "../http/tasks";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { registerDeferTaskTool } from "../tools/defer-task";
 import { registerStoreProgressTool } from "../tools/store-progress";
+import { taskActionHandler } from "../tools/task-action";
+import { ownerCtx } from "../tools/task-tool-ctx";
+import { finalizeSwarmToolResult } from "../tools/utils";
 import { setRequestAuth } from "../utils/request-auth-context";
 
 const TEST_DB_PATH = "./test-heartbeat-attempt-fence.sqlite";
@@ -280,6 +283,72 @@ describe("pause is fenced (Superagent P2)", () => {
     const holder = await api("POST", `/api/tasks/${task.id}/pause`, as(agent.id, RUNTIME_B));
     expect(holder.status).toBe(200);
     expect((await getTaskById(task.id))?.status).toBe("paused");
+  });
+});
+
+describe("runner progress is fenced (Superagent P2)", () => {
+  test("a stale runtime's progress cannot refresh the replacement attempt's row", async () => {
+    const agent = await worker("fence-progress");
+    const task = await startedThenReclaimed(agent.id);
+    await startTask(task.id, { runtimeInstanceId: RUNTIME_B });
+    const before = await getTaskById(task.id);
+
+    const stale = await api("POST", `/api/tasks/${task.id}/progress`, as(agent.id, RUNTIME_A), {
+      progress: "stale runtime still working",
+    });
+    expect(stale.status).toBe(403);
+    const after = await getTaskById(task.id);
+    expect(after?.progress).toBe(before?.progress);
+    expect(after?.lastUpdatedAt).toBe(before?.lastUpdatedAt);
+
+    const holder = await api("POST", `/api/tasks/${task.id}/progress`, as(agent.id, RUNTIME_B), {
+      progress: "replacement working",
+    });
+    expect(holder.status).toBe(200);
+    expect((await getTaskById(task.id))?.progress).toBe("replacement working");
+  });
+
+  test("a caller that names no agent keeps the pre-fence behavior (older runners)", async () => {
+    const agent = await worker("fence-progress-legacy");
+    const task = await createTaskExtended("Legacy runner work", { agentId: agent.id });
+    await startTask(task.id, { runtimeInstanceId: RUNTIME_A });
+
+    const legacy = await api("POST", `/api/tasks/${task.id}/progress`, {}, { progress: "legacy" });
+    expect(legacy.status).toBe(200);
+    expect((await getTaskById(task.id))?.progress).toBe("legacy");
+  });
+});
+
+describe("release is fenced on a reclaimed pending row (Superagent P2)", () => {
+  async function release(agentId: string, runtimeInstanceId: string, taskId: string) {
+    const result = await finalizeSwarmToolResult(
+      "task-action",
+      await taskActionHandler(ownerCtx({ agentId, runtimeInstanceId }), {
+        action: "release",
+        taskId,
+      }),
+    );
+    return result.structuredContent as { success: boolean };
+  }
+
+  test("the old runtime cannot drop a reclaimed pin back to the pool", async () => {
+    const agent = await worker("fence-release-pending");
+    const task = await startedThenReclaimed(agent.id);
+
+    const stale = await release(agent.id, RUNTIME_A, task.id);
+
+    expect(stale.success).toBe(false);
+    const after = await getTaskById(task.id);
+    expect(after?.status).toBe("pending");
+    expect(after?.agentId).toBe(agent.id);
+  });
+
+  test("a never-reclaimed pending task can still be released by its agent", async () => {
+    const agent = await worker("fence-release-fresh");
+    const task = await createTaskExtended("Not started", { agentId: agent.id });
+
+    expect((await release(agent.id, RUNTIME_A, task.id)).success).toBe(true);
+    expect((await getTaskById(task.id))?.status).toBe("unassigned");
   });
 });
 
