@@ -48,6 +48,19 @@ class NumberExecutor extends BaseExecutor<
 }
 
 /**
+ * NumberExecutor that also emits `nextPort: "success"`, like `script` / `swarm-script`.
+ */
+class SuccessPortNumberExecutor extends NumberExecutor {
+  override readonly type = "success-port-number";
+
+  protected override async execute(
+    config: z.infer<typeof NumberExecutor.schema>,
+  ): Promise<ExecutorResult<z.infer<typeof NumberExecutor.outSchema>>> {
+    return { status: "success", output: { result: config.value }, nextPort: "success" };
+  }
+}
+
+/**
  * Validate executor stub that checks if the target node's result is > 50.
  * Returns { pass: true } or { pass: false, reason: string }.
  */
@@ -112,6 +125,7 @@ function createTestRegistry(): ExecutorRegistry {
   const registry = new ExecutorRegistry();
   registry.register(new NumberExecutor(mockDeps));
   registry.register(new ValidateStubExecutor(mockDeps));
+  registry.register(new SuccessPortNumberExecutor(mockDeps));
   return registry;
 }
 
@@ -247,6 +261,48 @@ describe("Retry Poller — Validation on Retry", () => {
     const run = await getWorkflowRun(runId);
     expect(run!.status).toBe("completed");
     expect(validateCallCount).toBeGreaterThanOrEqual(1);
+  });
+
+  test('retried script-like node routes to "pass" once validation passes', async () => {
+    validateCallCount = 0;
+    validateAlwaysPass = false;
+
+    const workflow = await makeWorkflow({
+      nodes: [
+        {
+          id: "n1",
+          type: "success-port-number",
+          config: { value: 10 },
+          next: { pass: "on-pass", fail: "on-fail" },
+          validation: {
+            executor: "validate",
+            config: { prompt: "Is result > 50?" },
+            mustPass: true,
+            retry: { strategy: "static", maxRetries: 2, baseDelayMs: 10, maxDelayMs: 10 },
+          },
+        },
+        { id: "on-pass", type: "number-gen", config: { value: 1 } },
+        { id: "on-fail", type: "number-gen", config: { value: 2 } },
+      ],
+    });
+
+    const runId = await startWorkflowExecution(workflow, {}, registry);
+    const initial = (await getWorkflowRunStepsByRunId(runId)).find((s) => s.nodeId === "n1")!;
+    expect(initial.status).toBe("failed");
+    expect(initial.nextRetryAt).toBeTruthy();
+
+    validateAlwaysPass = true;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    startRetryPoller(registry, 10);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    stopRetryPoller();
+    validateAlwaysPass = false;
+
+    const steps = await getWorkflowRunStepsByRunId(runId);
+    const nodeIds = steps.map((s) => s.nodeId);
+    expect(steps.find((s) => s.nodeId === "n1")!.nextPort).toBe("pass");
+    expect(nodeIds).toContain("on-pass");
+    expect(nodeIds).not.toContain("on-fail");
   });
 
   test("validation halt on retry → step and run marked failed", async () => {

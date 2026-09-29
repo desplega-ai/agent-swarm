@@ -175,6 +175,8 @@ There are two script-oriented workflow nodes:
 - `script` runs inline `bash`, `ts`, or `python` source embedded directly in the workflow definition.
 - `swarm-script` runs a TypeScript script from the reusable swarm catalog (`scripts` table). Use this when the logic should be shared across agents or reused by multiple workflows.
 
+Both executors emit the `success` port. To branch on a check, add a `validation` block and a record `next` with `pass` and `fail` keys. When the node's `next` is a record that does not declare the executor's port, the validation result picks `pass` or `fail`. When `next` does declare the executor's port (for example `next: { success: ... }`), the executor port wins and validation does not reroute. The engine checkpoints the chosen port on the step, and recovery, resume, and retries route from that value. The same rule applies to every executor type (`resolveValidationPort` in `src/workflows/definition.ts`).
+
 ### `script` config
 
 - `runtime` (required): `bash`, `ts`, or `python`.
