@@ -409,7 +409,6 @@ value:getUnassignedTaskIdsForAgent
 value:getUnassignedTasksCount
 value:getUnreadInboxMessages
 value:getUnreadMessages
-value:getUsageDataVersion
 value:getUserById
 value:getWaitStateById
 value:getWaitStateByStepId

@@ -3,30 +3,68 @@
  * `/api/attribution/by-person`). Each open usage page polls them, and every
  * reply aggregates the whole window.
  *
- * A key holds the request filters plus a data version (see
- * `getUsageDataVersion`), so a new session or task misses the cache at once.
- * Changes to existing rows (a task re-attributed to another requester) show
- * after at most `USAGE_CACHE_TTL_MS`. A credential plan or name change
- * clears the cache.
+ * A key holds only the request filters. An entry is fresh for
+ * `USAGE_CACHE_TTL_MS` (the time bucket). Past that it is served as-is while one
+ * background load revalidates it, up to `USAGE_CACHE_MAX_STALE_MS`; an older or
+ * missing entry blocks on a load. Concurrent misses for one key share that load.
+ *
+ * The key deliberately carries no data version. The old one changed on every
+ * new task or session, and the swarm creates one every few seconds, so it
+ * almost never hit. The cost is that a new session shows up after at most one
+ * bucket. A credential plan or name change clears the cache.
  */
 
 export const USAGE_CACHE_TTL_MS = 30_000;
+export const USAGE_CACHE_MAX_STALE_MS = 120_000;
 const MAX_ENTRIES = 100;
 
-const entries = new Map<string, { expiresAt: number; value: unknown }>();
+const entries = new Map<string, { fetchedAt: number; value: unknown }>();
+const loading = new Map<string, Promise<unknown>>();
+// Bumped by `clearUsageCache`, so a load that started before the clear cannot
+// write its (now outdated) result back.
+let generation = 0;
 
-export async function cachedUsageReport<T>(key: string, load: () => Promise<T>): Promise<T> {
-  const now = Date.now();
+function load<T>(key: string, loader: () => Promise<T>): Promise<T> {
+  const running = loading.get(key);
+  if (running) return running as Promise<T>;
+
+  const startedIn = generation;
+  const promise: Promise<T> = Promise.resolve()
+    .then(loader)
+    .then((value) => {
+      if (startedIn === generation) {
+        entries.delete(key);
+        // Map order is insertion order, so the first key is the oldest entry.
+        if (entries.size >= MAX_ENTRIES) entries.delete(entries.keys().next().value as string);
+        entries.set(key, { fetchedAt: Date.now(), value });
+      }
+      return value;
+    })
+    .finally(() => {
+      if (loading.get(key) === promise) loading.delete(key);
+    });
+  loading.set(key, promise);
+  return promise;
+}
+
+export async function cachedUsageReport<T>(key: string, loader: () => Promise<T>): Promise<T> {
   const hit = entries.get(key);
-  if (hit && hit.expiresAt > now) return hit.value as T;
-  const value = await load();
-  entries.delete(key);
-  // Map order is insertion order, so the first key is the oldest entry.
-  if (entries.size >= MAX_ENTRIES) entries.delete(entries.keys().next().value as string);
-  entries.set(key, { expiresAt: now + USAGE_CACHE_TTL_MS, value });
-  return value;
+  if (hit) {
+    const age = Date.now() - hit.fetchedAt;
+    if (age < USAGE_CACHE_TTL_MS) return hit.value as T;
+    if (age < USAGE_CACHE_MAX_STALE_MS) {
+      // Keep serving the stale value; a failed refresh retries on the next request.
+      load(key, loader).catch((error) => {
+        console.error(`[usage-cache] background refresh failed for ${key.split(":")[0]}:`, error);
+      });
+      return hit.value as T;
+    }
+  }
+  return load(key, loader);
 }
 
 export function clearUsageCache(): void {
+  generation++;
   entries.clear();
+  loading.clear();
 }

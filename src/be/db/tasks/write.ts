@@ -15,6 +15,7 @@ import { scrubSecrets } from "../../../utils/secret-scrubber";
 import { emitTaskStarted } from "../../task-lifecycle-events";
 import { getAgentById, isAgentEligibleForTask } from "../agents";
 import { getDbClient } from "../runtime";
+import { classifyTaskHumanFree } from "./human-free";
 import { type AgentTaskRow, getTaskById, rowToAgentTask } from "./read";
 
 type TaskWriteDependencies = {
@@ -68,9 +69,10 @@ export async function createTask(
 ): Promise<AgentTask> {
   const id = crypto.randomUUID();
   const source = options?.source ?? "mcp";
+  const isHumanFree = await classifyTaskHumanFree({ source });
   const row = await getDbClient().get<AgentTaskRow>(
-    `INSERT INTO agent_tasks (id, "key", agentId, task, status, source, slackChannelId, slackThreadTs, slackUserId, swarmVersion, createdAt, lastUpdatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) RETURNING *`,
+    `INSERT INTO agent_tasks (id, "key", agentId, task, status, source, slackChannelId, slackThreadTs, slackUserId, swarmVersion, isHumanFree, createdAt, lastUpdatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) RETURNING *`,
     [
       id,
       defaultAssetKey("task", id),
@@ -82,6 +84,7 @@ export async function createTask(
       options?.slackThreadTs ?? null,
       options?.slackUserId ?? null,
       pkg.version,
+      isHumanFree ? 1 : 0,
     ],
   );
   if (!row) throw new Error("Failed to create task");
