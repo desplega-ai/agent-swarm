@@ -27,6 +27,8 @@ import { formatTokens } from "@/lib/format-tokens";
 import { cn } from "@/lib/utils";
 
 const PAGE_SIZE = 300;
+/** The live 1200-row window is the dashboard's heaviest poll; 30s, not the global 10s. */
+const TIMELINE_REFETCH_MS = 30_000;
 const MIN_BAR_WIDTH = 10;
 const LABEL_WIDTH = 208;
 /**
@@ -629,10 +631,12 @@ export function AgentActivityTimeline() {
       createdAfter,
       limit: 1200,
       orderBy: "createdAt",
+      fields: "timeline",
     },
     // `createdAfter` still rolls forward every bucket. Serve the old rows until
-    // the new key lands so the chart never blinks back to a spinner.
-    { keepPreviousData: true },
+    // the new key lands so the chart never blinks back to a spinner. Running
+    // bars grow from the local clock, so a 30s poll only delays new bars.
+    { keepPreviousData: true, refetchInterval: TIMELINE_REFETCH_MS },
   );
 
   // Deep zoom folds the live drift more often so growing bars step less; the
@@ -786,6 +790,7 @@ export function AgentActivityTimeline() {
         createdBefore: historyCursor,
         orderBy: "createdAt",
         limit: PAGE_SIZE,
+        fields: "timeline",
       });
       setHistoryTasks((prev) => mergeTasks(prev, result.tasks));
       if (result.tasks.length > 0) {

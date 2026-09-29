@@ -187,12 +187,19 @@ export default function AgentDetailPage() {
   const taskPage = readNumberParam(searchParams, "taskPage", 0, { min: 0 });
 
   const taskFilters = useMemo(() => {
-    const f: { agentId?: string; status?: string; search?: string; limit: number; offset: number } =
-      {
-        agentId: id,
-        limit: PAGE_SIZE,
-        offset: taskPage * PAGE_SIZE,
-      };
+    const f: {
+      agentId?: string;
+      status?: string;
+      search?: string;
+      limit: number;
+      offset: number;
+      includeTotal: true;
+    } = {
+      agentId: id,
+      limit: PAGE_SIZE,
+      offset: taskPage * PAGE_SIZE,
+      includeTotal: true,
+    };
     if (taskStatus !== "all") f.status = taskStatus;
     if (taskSearch) f.search = taskSearch;
     return f;
