@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test
 import { unlink } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { closeDb, createAgent, initDb } from "../be/db";
+import { closeDb, createAgent, createTaskExtended, initDb } from "../be/db";
 import { setAgentHarnessCliVersion } from "../be/harness-model-support";
 import {
   MODEL_CATALOG_FORCE_COOLDOWN_MS,
@@ -196,6 +196,40 @@ describe("catalog write access", () => {
       );
       expect(res.status).toBe(403);
     }
+  });
+
+  test("a worker reports unsupported only for a model it ran, with the CLI's rejection text", async () => {
+    const rejection = { ...SUPPORT, modelId: "gpt-ran", status: "unsupported" };
+    const error = "The model `gpt-ran` does not exist or you do not have access to it.";
+    const unran = await call(
+      "PUT",
+      "/api/models-catalog/harness-support",
+      { ...rejection, modelId: "gpt-peer-model", error },
+      workerWithSharedKey,
+    );
+    expect(unran.status).toBe(403);
+
+    await createTaskExtended("ran gpt-ran", { agentId: WORKER_ID, model: "gpt-ran" });
+    const noRejectionText = await call(
+      "PUT",
+      "/api/models-catalog/harness-support",
+      { ...rejection, error: "rate limited" },
+      workerWithSharedKey,
+    );
+    expect(noRejectionText.status).toBe(403);
+    const ran = await call(
+      "PUT",
+      "/api/models-catalog/harness-support",
+      { ...rejection, error },
+      workerWithSharedKey,
+    );
+    expect(ran.status).toBe(200);
+
+    const rows = await call("GET", "/api/models-catalog/harness-support", undefined, {});
+    const body = (await rows.json()) as { rows: { status: string; modelId: string }[] };
+    const unsupported = body.rows.filter((r) => r.status === "unsupported").map((r) => r.modelId);
+    expect(unsupported).toContain("gpt-ran");
+    expect(unsupported).not.toContain("gpt-peer-model");
   });
 
   test("the operator can record support for any tuple", async () => {

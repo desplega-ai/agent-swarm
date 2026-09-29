@@ -10,6 +10,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { getAgentById } from "../be/db";
 import {
+  agentRanModel,
   getAgentHarnessCliVersion,
   listHarnessModelSupport,
   recordHarnessModelSupport,
@@ -23,6 +24,7 @@ import { previewModelTiers } from "../be/model-tier-resolution";
 import { requestModelCatalogRefresh } from "../be/pricing-refresh";
 import { can, type RbacPrincipal } from "../rbac";
 import { MODEL_TIERS, ProviderNameSchema } from "../types";
+import { isUnknownModelError } from "../utils/harness-model-error";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
@@ -377,6 +379,23 @@ export async function handleModelsCatalog(
       jsonError(
         res,
         "Harness support can only be recorded for the calling agent's own harness and registered CLI version",
+        403,
+      );
+      return true;
+    }
+    if (
+      writer.agentId &&
+      parsed.body.status === "unsupported" &&
+      !(
+        isUnknownModelError(parsed.body.error) &&
+        (await agentRanModel(writer.agentId, parsed.body.modelId))
+      )
+    ) {
+      // An `unsupported` row changes claims on every peer with this CLI, so an agent may only
+      // report it for a model it was assigned, with the CLI's model-rejection text.
+      jsonError(
+        res,
+        "An unsupported report needs a model the calling agent ran and the CLI's model-rejection error",
         403,
       );
       return true;

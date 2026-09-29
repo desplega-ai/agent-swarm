@@ -98,6 +98,21 @@ export async function recordHarnessModelSupport(input: {
   return row;
 }
 
+/**
+ * True when `agentId` was assigned a task that ran `modelId`: the server's claim-time resolution,
+ * or the task's own model when nothing was resolved. Binds an `unsupported` report to a model the
+ * worker actually ran, so it cannot mark an arbitrary model unsupported for its peers.
+ */
+export async function agentRanModel(agentId: string, modelId: string): Promise<boolean> {
+  const row = await getDbClient().get<{ id: string }>(
+    `SELECT id FROM agent_tasks
+     WHERE agentId = ? AND (resolvedModel = ? OR (resolvedModel IS NULL AND model = ?))
+     LIMIT 1`,
+    [agentId, modelId, modelId],
+  );
+  return row !== null && row !== undefined;
+}
+
 export async function getAgentHarnessCliVersion(agentId: string): Promise<string | null> {
   const row = await getDbClient().get<{ harnessCliVersion: string | null }>(
     "SELECT harnessCliVersion FROM agents WHERE id = ?",
