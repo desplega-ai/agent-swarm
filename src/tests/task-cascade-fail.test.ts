@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlinkSync } from "node:fs";
 import {
+  backfillSupersedeTaskResumeTaskId,
   cancelTask,
   cascadeFailDependents,
   closeDb,
@@ -230,7 +231,7 @@ describe("cascadeFailDependents", () => {
     expect(childAfter!.failureReason).toContain("was cancelled");
   });
 
-  test("supersedeTask cascades to dependents", async () => {
+  test("supersedeTask with a resume id re-points never-started dependents", async () => {
     const agent = await createAgent({
       name: "cascade-worker-6",
       isLead: false,
@@ -239,15 +240,80 @@ describe("cascadeFailDependents", () => {
     });
 
     const parent = await createTaskExtended("Parent supersede", { agentId: agent.id });
+    const other = await createTaskExtended("Other dependency", { agentId: agent.id });
     const child = await createTaskExtended("Child of superseded", {
+      agentId: agent.id,
+      dependsOn: [parent.id, other.id],
+    });
+    const resume = await createTaskExtended("Resume of parent", { agentId: agent.id });
+
+    await startTask(parent.id);
+    await supersedeTask(parent.id, { reason: "context limit", resumeTaskId: resume.id });
+
+    const childAfter = await getTaskById(child.id);
+    expect(childAfter!.status).toBe("pending");
+    expect(childAfter!.dependsOn).toEqual([resume.id, other.id]);
+
+    const log = await getDbClient().get<{ oldValue: string; newValue: string; metadata: string }>(
+      "SELECT oldValue, newValue, metadata FROM agent_log WHERE taskId = ? AND eventType = 'task_dependency_repointed'",
+      [child.id],
+    );
+    expect(log?.oldValue).toBe(parent.id);
+    expect(log?.newValue).toBe(resume.id);
+    expect(JSON.parse(log!.metadata).reason).toBe("supersede_resume");
+  });
+
+  test("supersedeTask without a resume id defers dependents until the backfill", async () => {
+    const agent = await createAgent({
+      name: "cascade-worker-6b",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+
+    const parent = await createTaskExtended("Parent supersede late resume", { agentId: agent.id });
+    const child = await createTaskExtended("Child of late-resumed", {
       agentId: agent.id,
       dependsOn: [parent.id],
     });
 
     await startTask(parent.id);
-    await supersedeTask(parent.id, { reason: "context limit", resumeTaskId: null });
+    await supersedeTask(parent.id, { reason: "graceful_shutdown", resumeTaskId: null });
+
+    // The window between supersede and resume creation must not fail it.
+    expect((await getTaskById(child.id))!.status).toBe("pending");
+
+    const resume = await createTaskExtended("Late resume", { agentId: agent.id });
+    await backfillSupersedeTaskResumeTaskId(parent.id, resume.id);
 
     const childAfter = await getTaskById(child.id);
+    expect(childAfter!.status).toBe("pending");
+    expect(childAfter!.dependsOn).toEqual([resume.id]);
+  });
+
+  test("supersede settle does not rewrite a dependent that already started", async () => {
+    const agent = await createAgent({
+      name: "cascade-worker-6c",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+
+    const parent = await createTaskExtended("Parent supersede started dep", {
+      agentId: agent.id,
+    });
+    const child = await createTaskExtended("Started child", {
+      agentId: agent.id,
+      dependsOn: [parent.id],
+    });
+    const resume = await createTaskExtended("Resume for started dep", { agentId: agent.id });
+
+    await startTask(parent.id);
+    await startTask(child.id);
+    await supersedeTask(parent.id, { reason: "context limit", resumeTaskId: resume.id });
+
+    const childAfter = await getTaskById(child.id);
+    expect(childAfter!.dependsOn).toEqual([parent.id]);
     expect(childAfter!.status).toBe("failed");
     expect(childAfter!.failureReason).toContain("was superseded");
   });

@@ -752,20 +752,88 @@ export async function supersedeTask(
         );
     });
 
-    try {
-      await dependencies.cascadeFailDependents(id, "superseded");
-    } catch (err) {
-      console.error("[supersedeTask] cascade-fail dependents error:", err);
-    }
+    // Without a resume id the dependents wait: every caller supersedes first,
+    // creates the resume, then calls `backfillSupersedeTaskResumeTaskId`, which
+    // settles them. Cascading here would fail work the resume is about to carry.
+    if (args.resumeTaskId) await settleSupersededDependents(id, args.resumeTaskId);
   }
 
   return row ? rowToAgentTask(row) : null;
 }
 
+/** Statuses a dependent can hold before it ever started running. */
+const NEVER_STARTED_STATUSES = [
+  "draft",
+  "backlog",
+  "unassigned",
+  "offered",
+  "reviewing",
+  "pending",
+];
+
+/**
+ * Settle the dependents of a superseded task. Every never-started dependent
+ * has the superseded id in `dependsOn` replaced by the resume id, so it waits
+ * on the resume instead of dying with `Blocked dependency … was superseded`.
+ * Anything still depending on the superseded task afterwards (a dependent
+ * that already started) cascade-fails as before.
+ */
+async function settleSupersededDependents(
+  supersededId: string,
+  resumeTaskId: string,
+): Promise<void> {
+  try {
+    const placeholders = NEVER_STARTED_STATUSES.map(() => "?").join(", ");
+    const rows = await getDbClient().query<AgentTaskRow>(
+      `SELECT t.* FROM agent_tasks t, json_each(t.dependsOn) AS dep
+         WHERE dep.value = ? AND t.status IN (${placeholders})`,
+      [supersededId, ...NEVER_STARTED_STATUSES],
+    );
+    for (const dep of rows.map(rowToAgentTask)) {
+      const dependsOn = [
+        ...new Set(dep.dependsOn.map((id) => (id === supersededId ? resumeTaskId : id))),
+      ];
+      // Status + membership predicates make the re-point a no-op if the
+      // dependent was claimed or re-pointed since it was read.
+      const repointed = await getDbClient().get<{ id: string }>(
+        `UPDATE agent_tasks
+            SET dependsOn = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+          WHERE id = ? AND status = ?
+            AND EXISTS (SELECT 1 FROM json_each(agent_tasks.dependsOn) WHERE value = ?)
+          RETURNING id`,
+        [JSON.stringify(dependsOn), dep.id, dep.status, supersededId],
+      );
+      if (!repointed) continue;
+      try {
+        await dependencies.createLogEntry({
+          eventType: "task_dependency_repointed",
+          taskId: dep.id,
+          agentId: dep.agentId ?? undefined,
+          oldValue: supersededId,
+          newValue: resumeTaskId,
+          metadata: { reason: "supersede_resume" },
+        });
+      } catch {}
+    }
+    await dependencies.cascadeFailDependents(supersededId, "superseded");
+  } catch (err) {
+    console.error("[supersedeTask] settling dependents error:", err);
+  }
+}
+
+/**
+ * Attach the resume id to the task's `task_superseded` log entry, then settle
+ * the dependents `supersedeTask` left waiting (re-point to the resume, cascade
+ * the rest).
+ */
 export async function backfillSupersedeTaskResumeTaskId(
   taskId: string,
   resumeTaskId: string,
 ): Promise<boolean> {
+  if ((await getTaskById(taskId))?.status === "superseded") {
+    await settleSupersededDependents(taskId, resumeTaskId);
+  }
+
   const row = await getDbClient().get<{ id: string; metadata: string | null }>(
     `SELECT id, metadata
        FROM agent_log
