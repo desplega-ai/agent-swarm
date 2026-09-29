@@ -9,7 +9,7 @@ import {
 import { parseAppDefinition } from "../apps/definition";
 import { appIndexKey, appsNamespace, createAppRow, purgeAppRows } from "../apps/row-store";
 import { deleteApp, getApp } from "../apps/store";
-import { closeDb, countKv, getDbClient, getKv, initDb } from "../be/db";
+import { closeDb, countKv, getDbClient, getKv, initDb, upsertKv } from "../be/db";
 import { handleApps } from "../http/apps";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 
@@ -618,5 +618,32 @@ describe("apps spike", () => {
     expect(lateCreateOutcome).toBeDefined();
     expect(await lateCreateOutcome).toBe(true);
     expect(await countKv(appsNamespace(appId), {})).toBe(0);
+  });
+
+  test("app purge spans several delete batches and removes expired entries too", async () => {
+    const appId = await createIdeasApp();
+    const namespace = appsNamespace(appId);
+    for (let index = 0; index < 2_500; index++) {
+      await upsertKv({ namespace, key: `idea/row/${index}`, value: { index }, valueType: "json" });
+    }
+    await upsertKv({
+      namespace,
+      key: "idea/row/expired",
+      value: {},
+      valueType: "json",
+      expiresAt: Date.now() - 1,
+    });
+    await upsertKv({ namespace: "apps:other", key: "keep", value: "1", valueType: "json" });
+
+    await purgeAppRows(appId, ["idea"], async () => {
+      expect(await deleteApp(appId)).toBe(true);
+    });
+
+    const remaining = await getDbClient().get<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM kv_entries WHERE namespace = ?",
+      [namespace],
+    );
+    expect(remaining?.n).toBe(0);
+    expect(await getKv("apps:other", "keep")).not.toBeNull();
   });
 });

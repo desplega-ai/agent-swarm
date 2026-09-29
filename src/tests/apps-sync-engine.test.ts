@@ -26,7 +26,12 @@ import {
   withMutationLock,
 } from "../apps/row-store";
 import { createApp, getApp, updateApp } from "../apps/store";
-import { getAppSyncStatus, runAppSync, type SyncPassResult } from "../apps/sync";
+import {
+  getAppSyncStatus,
+  RECONCILE_CHUNK_SIZE,
+  runAppSync,
+  type SyncPassResult,
+} from "../apps/sync";
 import {
   closeDb,
   createAgent,
@@ -1277,17 +1282,20 @@ spawnDescribe("concurrency", () => {
   });
 
   test("a mid-pass write failure reports the committed churn instead of zero counts", async () => {
-    // Row writes are independent KV upserts, not a transaction: fail the
-    // SECOND create after the first already committed and the pass counts
-    // must say so instead of reporting the zero-count base.
-    const script = await fixtureScript("partial", [ghRecord(1), ghRecord(2)]);
+    // Rows are written in chunked transactions: fail the second create of the
+    // SECOND chunk after the first chunk committed. The pass counts must say
+    // so instead of reporting the zero-count base, and the failing chunk must
+    // roll back without leaving partial rows.
+    const total = RECONCILE_CHUNK_SIZE + 2;
+    const records = Array.from({ length: total }, (_, index) => ghRecord(index + 1));
+    const script = await fixtureScript("partial", records);
     const appId = await createSyncApp(issueDefinition(script.id));
 
     const realCreate = rowStore.createAppRowUnlocked;
     let creates = 0;
     const spy = spyOn(rowStore, "createAppRowUnlocked").mockImplementation((...callArgs) => {
       creates += 1;
-      if (creates === 2) throw new Error("kv write failed (injected)");
+      if (creates === RECONCILE_CHUNK_SIZE + 2) throw new Error("kv write failed (injected)");
       return realCreate(...callArgs);
     });
     try {
@@ -1296,9 +1304,12 @@ spawnDescribe("concurrency", () => {
 
       expect(result.ok).toBe(false);
       expect(pass.error).toContain("kv write failed (injected)");
-      expect(pass).toMatchObject({ pulled: 2, created: 1 });
-      expect((await rowsOf(appId)).map((row) => row.issueKey)).toEqual(["1"]);
-      expect(await getAppSyncStatus(appId, "issue", "gh")).toMatchObject({ ok: false, created: 1 });
+      expect(pass).toMatchObject({ pulled: total, created: RECONCILE_CHUNK_SIZE });
+      expect(await rowsOf(appId)).toHaveLength(RECONCILE_CHUNK_SIZE);
+      expect(await getAppSyncStatus(appId, "issue", "gh")).toMatchObject({
+        ok: false,
+        created: RECONCILE_CHUNK_SIZE,
+      });
     } finally {
       spy.mockRestore();
     }
