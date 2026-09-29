@@ -156,7 +156,9 @@ describe("saving a workflow whose system-one-decision node has no working key", 
   beforeEach(async () => {
     savedOpenRouterKey = process.env.OPENROUTER_API_KEY;
     delete process.env.OPENROUTER_API_KEY;
-    await getDbClient().run("DELETE FROM swarm_config WHERE key = 'TYPESAFE_API_KEY'");
+    await getDbClient().run(
+      "DELETE FROM swarm_config WHERE key IN ('TYPESAFE_API_KEY', 'LAYA_URL', 'LAYA_API_KEY')",
+    );
   });
 
   afterEach(() => {
@@ -193,6 +195,60 @@ describe("saving a workflow whose system-one-decision node has no working key", 
       "OPENROUTER_API_KEY is not configured",
     );
     expect(result.structuredContent?.warnings?.[0]).not.toContain("TYPESAFE_API_KEY");
+  });
+
+  test("a laya node warns for LAYA_URL and LAYA_API_KEY, never for a TypeSafe key", async () => {
+    await setTypeSafeKey();
+    const result = await tools.create({
+      name: uniqueName(),
+      definition: systemOneDefinition({ provider: "laya" }),
+    });
+    const out = result.structuredContent;
+
+    expect(out?.success).toBe(true);
+    expect(out?.warnings).toHaveLength(1);
+    const warning = out?.warnings?.[0] ?? "";
+    expect(warning).toContain("LAYA_URL is not configured");
+    expect(warning).toContain("LAYA_API_KEY is not configured");
+    expect(warning).toContain('system-one-decision node "qualify"');
+    expect(warning).not.toMatch(/TypeSafe|TYPESAFE/);
+
+    // Only the URL is set: the warning shrinks to the key.
+    await upsertSwarmConfig({
+      scope: "global",
+      key: "LAYA_URL",
+      value: "https://laya.example.test",
+    });
+    const half = await tools.create({
+      name: uniqueName(),
+      definition: systemOneDefinition({ provider: "laya" }),
+    });
+    expect(half.structuredContent?.warnings?.[0]).toContain("LAYA_API_KEY is not configured");
+    expect(half.structuredContent?.warnings?.[0]).not.toContain("LAYA_URL");
+
+    await upsertSwarmConfig({
+      scope: "global",
+      key: "LAYA_API_KEY",
+      value: "laya-example-save-warning-key-0123456789",
+      isSecret: true,
+    });
+    const ready = await tools.create({
+      name: uniqueName(),
+      definition: systemOneDefinition({ provider: "laya" }),
+    });
+    expect(ready.structuredContent?.warnings).toBeUndefined();
+    expect(JSON.stringify(ready)).not.toContain("laya-example-save-warning-key");
+  });
+
+  test("HTTP create of a laya node carries the same warning", async () => {
+    const created = await http("POST", "/api/workflows", {
+      name: uniqueName(),
+      definition: systemOneDefinition({ provider: "laya" }),
+    });
+    expect(created.status).toBe(201);
+    expect(created.body.warnings).toHaveLength(1);
+    expect(created.body.warnings?.[0]).toContain("LAYA_URL is not configured");
+    expect(created.body.warnings?.[0]).toContain("LAYA_API_KEY is not configured");
   });
 
   test("no warning once the key is configured, or when there is no system-one-decision node", async () => {

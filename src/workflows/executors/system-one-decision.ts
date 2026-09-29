@@ -17,7 +17,7 @@ import {
   NotificationConfigSchema,
 } from "./human-in-the-loop";
 import {
-  resolveSystemOneCredential,
+  resolveSystemOneTarget,
   SYSTEM_ONE_DEFAULT_PROVIDER,
   SYSTEM_ONE_PROVIDER_IDS,
   SYSTEM_ONE_PROVIDERS,
@@ -285,6 +285,12 @@ export const SystemOneDecisionOutputSchema = z.object({
     output_tokens: z.number().int().min(0),
   }),
   requestId: z.string().optional(),
+  /**
+   * The checkpoint that answered, when the host reports one (laya's `routing.model`).
+   * `model` names the service and stays the same across checkpoints, so this is what
+   * a run records to say which one was used.
+   */
+  routing: z.strictObject({ model: z.string().min(1) }).optional(),
   review: ReviewSchema.optional(),
 });
 
@@ -432,8 +438,15 @@ function distribution(value: unknown, keys: string[], what: string): Record<stri
   return out;
 }
 
+type ConfidenceField = SystemOneProvider["confidenceField"];
+
 /** Check one raw provider answer against its declared question. Extra provider fields are dropped. */
-function validateAnswer(id: string, question: SystemOneQuestion, raw: unknown): SystemOneAnswer {
+function validateAnswer(
+  id: string,
+  question: SystemOneQuestion,
+  raw: unknown,
+  confidenceField: ConfidenceField,
+): SystemOneAnswer {
   const at = `answer "${id}"`;
   if (!isRecord(raw)) fail(`${at} must be an object`);
   if (raw.type !== question.type) {
@@ -453,7 +466,7 @@ function validateAnswer(id: string, question: SystemOneQuestion, raw: unknown): 
         type: "choice",
         choice: raw.choice,
         probabilities: distribution(raw.probabilities, options, `${at}.probabilities`),
-        confidence: unit(raw.confidence, `${at}.confidence`),
+        confidence: unit(raw[confidenceField], `${at}.${confidenceField}`),
       };
     }
 
@@ -481,21 +494,35 @@ function validateAnswer(id: string, question: SystemOneQuestion, raw: unknown): 
         score: raw.score,
         legend,
         probabilities: distribution(raw.probabilities, indices, `${at}.probabilities`),
-        confidence: unit(raw.confidence, `${at}.confidence`),
+        confidence: unit(raw[confidenceField], `${at}.${confidenceField}`),
       };
     }
   }
 }
 
+/** Longest checkpoint name kept from a host's `routing.model`. */
+const MAX_ROUTING_MODEL_CHARS = 128;
+
+/** The checkpoint a host reports, or undefined. It is a record of a run, so a malformed value is left out, not a failure. */
+function readRoutingModel(routing: unknown): string | undefined {
+  if (!isRecord(routing)) return undefined;
+  const { model } = routing;
+  return typeof model === "string" && model !== "" && model.length <= MAX_ROUTING_MODEL_CHARS
+    ? model
+    : undefined;
+}
+
 /**
  * Turn a parsed provider body into the node output, or throw a SystemOneContractError.
  * Success requires exactly one valid answer per declared question. Nothing is
- * synthesized or normalized.
+ * synthesized or normalized. `confidenceField` names the field a `choice` or `score`
+ * answer's confidence is read from (see `SystemOneProvider.confidenceField`).
  */
 export function validateSystemOneResponse(
   questions: Record<string, SystemOneQuestion>,
   body: unknown,
   requestId?: string,
+  confidenceField: ConfidenceField = "confidence",
 ): SystemOneDecisionOutput {
   if (!isRecord(body)) fail("response body must be a JSON object");
   if (typeof body.model !== "string" || body.model === "") {
@@ -519,15 +546,17 @@ export function validateSystemOneResponse(
       fail(`response is missing the answer for question "${id}"`);
     const question = questions[id];
     if (!question) fail(`question "${id}" is not defined`);
-    answers[id] = validateAnswer(id, question, body.answers[id]);
+    answers[id] = validateAnswer(id, question, body.answers[id], confidenceField);
   }
   if (declared.length === 0) fail("a system-one-decision call needs at least one question");
 
+  const routingModel = readRoutingModel(body.routing);
   return {
     model: body.model,
     answers,
     usage: usage.data,
     ...(requestId ? { requestId } : {}),
+    ...(routingModel ? { routing: { model: routingModel } } : {}),
   };
 }
 
@@ -545,9 +574,10 @@ const round6 = (value: number) => Math.round(value * 1e6) / 1e6;
 
 /**
  * The number `humanReview.band` is tested against. A `choice` or `score` answer
- * reports `confidence`, and that is used as reported. A `noul` answer reports
- * none, so it is the probability of the side the model took, max(P(true),
- * P(false)). The output never gains a confidence field for it.
+ * carries `confidence`, the field its provider names (`confidenceField`) read at
+ * validation. A `noul` answer reports none, so it is the probability of the side
+ * the model took, max(P(true), P(false)). The output never gains a confidence
+ * field for it.
  */
 export function answerConfidence(answer: SystemOneAnswer): number {
   return answer.type === "noul"
@@ -757,6 +787,8 @@ export interface SystemOneDecisionExecutorOptions {
   fetch?: typeof fetch;
   /** Credential lookup for any provider. Defaults to each provider's own source (see `SYSTEM_ONE_PROVIDERS`). */
   getApiKey?: (provider: SystemOneProviderId) => Promise<string | null | undefined>;
+  /** Base-URL lookup for a provider with no fixed host (`laya`). Defaults to its global config value. */
+  getServerUrl?: (provider: SystemOneProviderId) => Promise<string | null | undefined>;
   /** Environment the OpenRouter credential is resolved from. Defaults to `process.env`. */
   env?: NodeJS.ProcessEnv;
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
@@ -846,6 +878,13 @@ export class SystemOneDecisionExecutor extends BaseExecutor<
     return { db: this.deps.db, env: this.options.env ?? process.env };
   }
 
+  private resolveTarget(id: SystemOneProviderId) {
+    return resolveSystemOneTarget(id, this.providerContext(), {
+      apiKey: this.options.getApiKey,
+      serverUrl: this.options.getServerUrl,
+    });
+  }
+
   /**
    * One problem per provider the given nodes use whose credential (or deployment
    * setting) is not usable. Reads raw config: the provider is a static literal.
@@ -861,12 +900,8 @@ export class SystemOneDecisionExecutor extends BaseExecutor<
     }
     const problems: ExecutorReadinessProblem[] = [];
     for (const [id, nodeIds] of nodeIdsByProvider) {
-      const credential = await resolveSystemOneCredential(
-        id,
-        this.providerContext(),
-        this.options.getApiKey,
-      );
-      if (!credential.ok) problems.push({ nodeIds, message: credential.error });
+      const target = await this.resolveTarget(id);
+      if (!target.ok) problems.push({ nodeIds, message: target.error });
     }
     return problems;
   }
@@ -887,22 +922,27 @@ export class SystemOneDecisionExecutor extends BaseExecutor<
 
     const providerId = config.provider;
     const provider: SystemOneProvider = SYSTEM_ONE_PROVIDERS[providerId];
-    const credential = await resolveSystemOneCredential(
-      providerId,
-      this.providerContext(),
-      this.options.getApiKey,
-    );
-    if (!credential.ok) return { status: "failed", error: credential.error };
-    const apiKey = credential.apiKey;
+    const target = await this.resolveTarget(providerId);
+    if (!target.ok) return { status: "failed", error: target.error };
+    const { apiKey, endpoint } = target;
 
+    // A provider with no default sends no `model` when the node sets none.
+    const model = config.model ?? provider.defaultModel;
     const body = JSON.stringify({
       state: config.state,
-      model: config.model ?? provider.defaultModel,
+      ...(model === undefined ? {} : { model }),
       questions: config.questions,
     });
 
     const scrub = (message: string) => message.split(apiKey).join("[REDACTED]");
-    const sent = await this.send(providerId, apiKey, body, config.timeoutMs, config.maxRetries);
+    const sent = await this.send(
+      providerId,
+      endpoint,
+      apiKey,
+      body,
+      config.timeoutMs,
+      config.maxRetries,
+    );
     if (!sent.ok) return { status: "failed", error: scrub(sent.error) };
 
     let parsed: unknown;
@@ -913,7 +953,12 @@ export class SystemOneDecisionExecutor extends BaseExecutor<
     }
     let decision: SystemOneDecisionOutput;
     try {
-      decision = validateSystemOneResponse(config.questions, parsed, sent.requestId);
+      decision = validateSystemOneResponse(
+        config.questions,
+        parsed,
+        sent.requestId,
+        provider.confidenceField,
+      );
     } catch (err) {
       if (err instanceof SystemOneContractError) {
         return {
@@ -1034,6 +1079,7 @@ export class SystemOneDecisionExecutor extends BaseExecutor<
    */
   private async send(
     providerId: SystemOneProviderId,
+    endpoint: string,
     apiKey: string,
     body: string,
     timeoutMs: number,
@@ -1058,6 +1104,7 @@ export class SystemOneDecisionExecutor extends BaseExecutor<
         const result = await this.attemptOnce(
           doFetch,
           providerId,
+          endpoint,
           apiKey,
           body,
           controller.signal,
@@ -1093,6 +1140,7 @@ export class SystemOneDecisionExecutor extends BaseExecutor<
   private async attemptOnce(
     doFetch: typeof fetch,
     providerId: SystemOneProviderId,
+    endpoint: string,
     apiKey: string,
     body: string,
     signal: AbortSignal,
@@ -1100,7 +1148,7 @@ export class SystemOneDecisionExecutor extends BaseExecutor<
   ): Promise<Attempt> {
     let res: Response;
     try {
-      res = await doFetch(SYSTEM_ONE_PROVIDERS[providerId].endpoint, {
+      res = await doFetch(endpoint, {
         method: "POST",
         headers: {
           "content-type": "application/json",

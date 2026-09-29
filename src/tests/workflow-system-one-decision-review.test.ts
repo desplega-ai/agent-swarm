@@ -27,13 +27,13 @@ import { ExecutorRegistry } from "../workflows/executors/registry";
 import {
   answerConfidence,
   resolveReviewedDecision,
-  SYSTEM_ONE_ENDPOINT,
   SystemOneDecisionConfigSchema,
   SystemOneDecisionExecutor,
   SystemOneDecisionOutputSchema,
   systemOneStaticShapeViolations,
   validateSystemOneResponse,
 } from "../workflows/executors/system-one-decision";
+import { SYSTEM_ONE_PROVIDERS } from "../workflows/executors/system-one-providers";
 import { recoverIncompleteRuns } from "../workflows/recovery";
 import { setupWorkflowResumeListener } from "../workflows/resume";
 import { interpolate } from "../workflows/template";
@@ -799,12 +799,11 @@ describe("resolveReviewedDecision", () => {
 // ─── A second backend on the same contract ──────────────────
 
 /**
- * What `@desplega/laya` returns from `agent.predict` (`SystemOneResult`, laya-js
- * `packages/laya/src/agent.ts`) and `@desplega/laya-server` returns from
- * `POST /v1/systemone` (the result plus `routing`). Values are shaped like
- * examples/01-support-triage.ts: probabilities rounded to 4 places, a fractional
- * score, and the extra fields laya adds. Built from the laya-js source, not
- * captured from a live server: the checkpoints are private.
+ * What `@desplega/laya-server` returns from `POST /v1/systemone`: the
+ * `agent.predict` result (`SystemOneResult`) plus `routing`. Values follow a live
+ * call to laya.agent-swarm.dev (2026-09-29): probabilities rounded to 4 places,
+ * a fractional score, an entropy-based `confidence` next to `answer_confidence`
+ * (the top probability), and the extra fields laya adds.
  */
 const layaResult = {
   model: "laya-rl-agent",
@@ -835,7 +834,13 @@ const layaResult = {
     },
   },
   usage: { input_tokens: 512, output_tokens: 0 },
-  routing: { model: "english", reason: "English Latin text" },
+  routing: {
+    model: "english",
+    repo: "desplega/laya-onnx/english/fp32",
+    reason: "English Latin text",
+    detection: { script: "latin", language: "en", isEnglish: true },
+    workflow: null,
+  },
 };
 
 const layaQuestions = {
@@ -852,9 +857,13 @@ const layaQuestions = {
   },
 };
 
+const LAYA_URL = "https://laya.example.test";
+const layaField = SYSTEM_ONE_PROVIDERS.laya.confidenceField;
+
 describe("a laya result fits the node's output contract", () => {
   const config = () =>
     SystemOneDecisionConfigSchema.parse({
+      provider: "laya",
       state: { message: "Production orders stopped syncing" },
       questions: layaQuestions,
       returns: {
@@ -862,83 +871,151 @@ describe("a laya result fits the node's output contract", () => {
         urgent: { type: "noul" },
         frustration: { type: "score" },
       },
-      humanReview: { band: { min: 0.4, max: 0.6 }, approvers: APPROVERS },
+      humanReview: { band: { min: 0.7, max: 0.8 }, approvers: APPROVERS },
     });
 
   test("questions written for laya are valid node questions", () => {
     expect(config().questions.team?.type).toBe("choice");
+    expect(config().provider).toBe("laya");
   });
 
-  test("the typed decision and confidence map one to one; laya-only fields are dropped", () => {
-    const output = validateSystemOneResponse(config().questions, layaResult);
+  test("the confidence of a choice or score is laya's answer_confidence, the top probability", () => {
+    expect(layaField).toBe("answer_confidence");
+    const output = validateSystemOneResponse(config().questions, layaResult, undefined, layaField);
     expect(output.model).toBe("laya-rl-agent");
     expect(output.usage).toEqual({ input_tokens: 512, output_tokens: 0 });
     expect(output.answers.team).toEqual({
       type: "choice",
       choice: "technical",
       probabilities: layaResult.answers.team.probabilities,
-      confidence: 0.5211,
+      confidence: 0.7302,
     });
-    expect(output.answers.frustration).toMatchObject({ type: "score", score: 1.8249 });
+    expect(output.answers.frustration).toMatchObject({
+      type: "score",
+      score: 1.8249,
+      confidence: 0.8461,
+    });
+    // laya's own entropy-based number is not kept, and neither is its action head.
+    expect(JSON.stringify(output)).not.toContain("0.5211");
     expect(JSON.stringify(output)).not.toContain("answer_confidence");
     expect(JSON.stringify(output)).not.toContain("act_probability");
-    expect(JSON.stringify(output)).not.toContain("routing");
+  });
+
+  test("the checkpoint that answered is kept as routing.model; the rest of routing is dropped", () => {
+    const output = validateSystemOneResponse(config().questions, layaResult, undefined, layaField);
+    expect(output.routing).toEqual({ model: "english" });
+    expect(output.model).toBe("laya-rl-agent");
+    expect(JSON.stringify(output)).not.toContain("laya-onnx");
+    expect(JSON.stringify(output)).not.toContain("detection");
+    expect(SystemOneDecisionOutputSchema.safeParse(output).success).toBe(true);
+  });
+
+  test("a missing or malformed routing is left out, not a failure", () => {
+    const { routing: _routing, ...noRouting } = layaResult;
+    for (const routing of [undefined, null, "english", {}, { model: "" }, { model: 3 }]) {
+      const body = routing === undefined ? noRouting : { ...layaResult, routing };
+      const output = validateSystemOneResponse(config().questions, body, undefined, layaField);
+      expect(output.routing).toBeUndefined();
+      expect("routing" in output).toBe(false);
+    }
+    const long = { ...layaResult, routing: { model: "x".repeat(129) } };
+    expect(
+      validateSystemOneResponse(config().questions, long, undefined, layaField).routing,
+    ).toBeUndefined();
   });
 
   test("usage.windows from predictLong is dropped, not rejected", () => {
-    const output = validateSystemOneResponse(config().questions, {
-      ...layaResult,
-      usage: { input_tokens: 900, output_tokens: 0, windows: 3 },
-    });
+    const output = validateSystemOneResponse(
+      config().questions,
+      { ...layaResult, usage: { input_tokens: 900, output_tokens: 0, windows: 3 } },
+      undefined,
+      layaField,
+    );
     expect(output.usage).toEqual({ input_tokens: 900, output_tokens: 0 });
   });
 
-  test("the band reads the same field: team (0.5211) and urgent (0.7649) against 0.4 to 0.6", () => {
-    const output = validateSystemOneResponse(config().questions, layaResult);
+  test("one band means the same on every question type: team 0.7302 and urgent 0.7649 in 0.7 to 0.8", () => {
+    const output = validateSystemOneResponse(config().questions, layaResult, undefined, layaField);
     const inBand = Object.entries(output.answers)
       .filter(([, answer]) => {
         const c = answerConfidence(answer);
-        return c >= 0.4 && c <= 0.6;
+        return c >= 0.7 && c <= 0.8;
       })
       .map(([id]) => id);
-    expect(inBand).toEqual(["team", "frustration"]);
+    expect(inBand).toEqual(["team", "urgent"]);
   });
 
-  test("the executor runs it end to end through a fetch that answers like laya-server", async () => {
-    let received: Record<string, unknown> = {};
-    const executor = new SystemOneDecisionExecutor(deps, {
-      fetch: (async (_url: string, init?: RequestInit) => {
-        received = JSON.parse(String(init?.body));
-        return new Response(JSON.stringify(layaResult), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }) as unknown as typeof fetch,
-      getApiKey: async () => API_KEY,
-    });
-    const result = await executor.run({
-      config: {
-        state: { message: "Production orders stopped syncing" },
-        questions: layaQuestions,
-        returns: {
-          team: { type: "choice" },
-          urgent: { type: "noul" },
-          frustration: { type: "score" },
-        },
+  const nodeConfig = (overrides: Record<string, unknown> = {}) => ({
+    provider: "laya",
+    state: { message: "Production orders stopped syncing" },
+    questions: layaQuestions,
+    returns: {
+      team: { type: "choice" },
+      urgent: { type: "noul" },
+      frustration: { type: "score" },
+    },
+    ...overrides,
+  });
+  const layaFetch = (calls: { url: string; init: RequestInit }[]) =>
+    (async (url: string, init?: RequestInit) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify(layaResult), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+
+  test("a humanReview band tested on answer_confidence parks, and routing survives the wait", async () => {
+    const calls: { url: string; init: RequestInit }[] = [];
+    const registry = new ExecutorRegistry();
+    registry.register(
+      new SystemOneDecisionExecutor(deps, {
+        fetch: layaFetch(calls),
+        getApiKey: async () => API_KEY,
+        getServerUrl: async () => LAYA_URL,
+      }),
+    );
+    registry.register(new MarkerExecutor(deps));
+    const marker = (id: string): WorkflowNode => ({ id, type: "marker", config: { label: id } });
+    const runId = await startRun(
+      {
+        nodes: [
+          {
+            id: "decide",
+            type: "system-one-decision",
+            config: nodeConfig({
+              humanReview: { band: { min: 0.7, max: 0.8 }, approvers: APPROVERS },
+            }),
+            next: PORTS,
+          },
+          ...Object.values(PORTS).map(marker),
+        ],
       },
-      context: {},
-      meta: {
-        runId: crypto.randomUUID(),
-        stepId: crypto.randomUUID(),
-        nodeId: "triage",
-        workflowId: crypto.randomUUID(),
-        dryRun: false,
-      },
+      registry,
+    );
+
+    // team (0.7302) and urgent (0.7649) are in the band; frustration (0.8461) is not.
+    expect((await getWorkflowRun(runId))?.status).toBe("waiting");
+    const parked = await decideOutput(runId);
+    expect(parked.routing).toEqual({ model: "english" });
+    expect(parked.review?.questions.team).toMatchObject({ confidence: 0.7302, inBand: true });
+    expect(parked.review?.questions.urgent).toMatchObject({ confidence: 0.7649, inBand: true });
+    expect(parked.review?.questions.frustration).toMatchObject({
+      confidence: 0.8461,
+      inBand: false,
     });
-    expect(result.status).toBe("success");
-    // The body a laya-server accepts: state, model, questions.
-    expect(Object.keys(received).sort()).toEqual(["model", "questions", "state"]);
-    expect(received.questions).toEqual(layaQuestions);
-    expect(SYSTEM_ONE_ENDPOINT).toContain("/v1/systemone");
+    const approval = await approvalOf(runId);
+    expect((approval.questions as Array<{ id: string }>).map((q) => q.id)).toEqual([
+      "$confirm",
+      "team",
+      "urgent",
+    ]);
+
+    await respond(runId, "approved");
+    expect(await settle(runId)).toBe("completed");
+    const finished = await decideOutput(runId);
+    expect(finished.review?.status).toBe("approved");
+    expect(finished.routing).toEqual({ model: "english" });
+    expect(calls).toHaveLength(1);
   });
 });

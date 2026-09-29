@@ -233,14 +233,14 @@ Jev is weak at counting. For a hybrid, count in a `script` and pass the number t
 
 ## SystemOne Decision nodes
 
-A `system-one-decision` node (display name "SystemOne Decision") makes typed decisions with a decisions model, through TypeSafe directly or through OpenRouter (see Providers). The model is a config field and defaults to Jev; the node name is not tied to one model. It answers at once, and waits only when `humanReview` sends an answer to a person (see Human review). One call sends one `state` and a map of questions, and the node returns one validated answer per question.
+A `system-one-decision` node (display name "SystemOne Decision") makes typed decisions with a decisions model, through TypeSafe directly, through OpenRouter, or through a laya server (see Providers). The model is a config field and defaults to Jev; the node name is not tied to one model. It answers at once, and waits only when `humanReview` sends an answer to a person (see Human review). One call sends one `state` and a map of questions, and the node returns one validated answer per question.
 
 ```yaml
 - id: qualify
   type: system-one-decision
   inputs: { lead: "trigger.lead" }
   config:
-    provider: typesafe # the default; or openrouter
+    provider: typesafe # the default; or openrouter, or laya
     model: jev-1.13.0
     state: "{{lead}}"
     questions:
@@ -265,14 +265,14 @@ A `system-one-decision` node (display name "SystemOne Decision") makes typed dec
 
 ### `system-one-decision` config
 
-- `provider`: `typesafe` (default) or `openrouter`. A literal, not a `{{token}}`, because it decides which key is checked before the run starts. See Providers.
+- `provider`: `typesafe` (default), `openrouter`, or `laya`. A literal, not a `{{token}}`, because it decides which settings are checked before the run starts. See Providers.
 - `state` (required): text, a string array, or a JSON object. An exact `{{token}}` keeps the upstream JSON type; mixed text is interpolated as a string. Resolved content is never interpolated again.
 - `questions` (required): a map of question id to a `noul`, `choice`, or `score` question. Ids match `[A-Za-z_][A-Za-z0-9_-]*`. Ids and types are static. Only `state` and the descriptions may use `{{tokens}}`.
   - `noul`: `instructions`, optional `criteria: { true?, false? }`. The answer is a probability that the claim is true.
   - `choice`: `instructions`, `criteria: { option: description }` with 2 to 255 options.
   - `score`: `instructions`, `criteria: [level, ...]` with 2 to 10 ordered levels.
 - `returns` (required): every question id with its `type`. Config validation rejects a missing id, an extra id, or a type that disagrees with the question. It is checked, never sent to the API.
-- `model`: the provider's own model id. Unset means the provider's default (`jev-latest` on `typesafe`, `~typesafe/jev-latest` on `openrouter`). Pin a version for a calibrated workflow: `jev-1.13.0` on `typesafe`, `typesafe/jev-1.13` on `openrouter`.
+- `model`: the provider's own model id. Unset means the provider's default (`jev-latest` on `typesafe`, `~typesafe/jev-latest` on `openrouter`). `laya` has no default: unset sends no `model` and laya picks the checkpoint itself. Pin a version for a calibrated workflow: `jev-1.13.0` on `typesafe`, `typesafe/jev-1.13` on `openrouter`, a checkpoint name such as `multilingual` on `laya`.
 - `timeoutMs`: `1000` through `300000`, default `30000`. The executor stops its own request `250` ms before the step watchdog.
 - `maxRetries`: `0` through `3`, default `2`.
 - `humanReview` (optional): send answers the model is unsure about to a person. See Human review.
@@ -293,7 +293,7 @@ The config has no endpoint, header, or key field, and unknown fields are rejecte
 }
 ```
 
-`model` is the version the API reports. `requestId` is added when the API sends a request-id header. `usage` is the token count of the successful call. Success needs exactly one answer of the declared type per question: a missing answer, an unknown choice, a score outside `0` to `levels - 1`, wrong probability keys, or a distribution that does not sum to 1 (tolerance `0.02`) fails the step. A `noul` answer stays `{ type, noul }`. It has no confidence field and the node never adds one.
+`model` is the version the API reports. `requestId` is added when the API sends a request-id header. `routing` is `{ model }`, the checkpoint that answered, and is added only when the host reports one (`laya`); a missing or malformed `routing` is left out and never fails the step. `usage` is the token count of the successful call. Success needs exactly one answer of the declared type per question: a missing answer, an unknown choice, a score outside `0` to `levels - 1`, wrong probability keys, or a distribution that does not sum to 1 (tolerance `0.02`) fails the step. A `noul` answer stays `{ type, noul }`. It has no confidence field and the node never adds one.
 
 Downstream nodes read `<alias>.answers.<question>.<field>` through an `inputs` mapping, for example `inputs: { qualification: "qualify" }` and `qualification.answers.authority.confidence`.
 
@@ -303,8 +303,9 @@ Downstream nodes read `<alias>.answers.<question>.<field>` through an `inputs` m
 |---|---|---|---|
 | `typesafe` (default) | `https://api.typesafe.ai/v1/systemone` | `TYPESAFE_API_KEY` | `jev-latest` |
 | `openrouter` | `https://openrouter.ai/api/alpha/decisions` | `OPENROUTER_API_KEY` | `~typesafe/jev-latest` |
+| `laya` | `<LAYA_URL>/v1/systemone` (`LAYA_URL` is a global config value) | `LAYA_API_KEY` | none: no `model` is sent |
 
-Both hosts take the same request and return the same answers, so `returns`, the output shape, the validation rules, and thresholds are identical on either. The list lives in `SYSTEM_ONE_PROVIDERS` (`src/workflows/executors/system-one-providers.ts`); adding a host is one entry there. `openrouter` reads its key through `resolveWorkflowLlmConfig`, the resolver `raw-llm` uses, and never falls through to `OPENAI_API_KEY`.
+Every host takes the same request and returns the same answers, so `returns`, the output shape, the validation rules, and thresholds are the same on each, with the one difference `laya` has for confidence (see Other backends: laya). The list lives in `SYSTEM_ONE_PROVIDERS` (`src/workflows/executors/system-one-providers.ts`); adding a host is one entry there. `openrouter` reads its key through `resolveWorkflowLlmConfig`, the resolver `raw-llm` uses, and never falls through to `OPENAI_API_KEY`.
 
 There is no fallback between providers. A node that names none uses `typesafe`, and it does not move to `openrouter` when the TypeSafe key is missing: the two accounts bill separately and use different model ids, and the key the preflight names must be the key the node uses. Switch by setting `provider`.
 
@@ -312,14 +313,14 @@ Use the decisions endpoint only. OpenRouter's `typesafe/jev-router` is a router 
 
 ### Keys and preflight
 
-Each provider needs its key as a global secret (Settings > Secrets, or `set-config` with scope `global` and `isSecret` true). The swarm checks it before first use, and every message names the exact key for the node's provider and where to set it:
+Each provider needs its key as a global secret (Settings > Secrets, or `set-config` with scope `global` and `isSecret` true). `laya` also needs `LAYA_URL`, its server's base URL, as a global config value (`set-config`, scope `global`, not secret). The swarm checks these before first use, and every message names the exact key or config value for the node's provider and where to set it. A `laya` node with neither set gets one message that names both:
 
-- **Save** (`create-workflow`, `update-workflow`, `patch-workflow`, `patch-workflow-node`, and the matching HTTP routes): the save succeeds and returns a warning when a `system-one-decision` node's key is missing or unreadable. MCP puts it in the result message and `data.warnings`. HTTP adds `warnings` to the workflow body, only when there is one. It is a warning, not a rejection: definitions are also saved before a human has supplied the key (template installs, seeders, version restores, authoring ahead of a key request), and the key can change after any save, so a save-time gate would block valid work without guaranteeing anything.
-- **Run start**: a run of a definition with a `system-one-decision` node whose key is missing fails before any node executes, with the same named error. The run is recorded as `failed`, has no steps, and sends no request. This is the guarantee. It covers manual, schedule, webhook, and event triggers.
-- **Retry**: `retry-workflow-run` refuses, and leaves the run failed, when a node still to run needs a key that is missing.
+- **Save** (`create-workflow`, `update-workflow`, `patch-workflow`, `patch-workflow-node`, and the matching HTTP routes): the save succeeds and returns a warning when a `system-one-decision` node's key (or, for `laya`, its `LAYA_URL`) is missing or unreadable. MCP puts it in the result message and `data.warnings`. HTTP adds `warnings` to the workflow body, only when there is one. It is a warning, not a rejection: definitions are also saved before a human has supplied the key (template installs, seeders, version restores, authoring ahead of a key request), and the key can change after any save, so a save-time gate would block valid work without guaranteeing anything.
+- **Run start**: a run of a definition with a `system-one-decision` node whose key or `LAYA_URL` is missing fails before any node executes, with the same named error. The run is recorded as `failed`, has no steps, and sends no request. This is the guarantee. It covers manual, schedule, webhook, and event triggers.
+- **Retry**: `retry-workflow-run` refuses, and leaves the run failed, when a node still to run needs a key or `LAYA_URL` that is missing.
 - **A key that exists but is refused**: a 401 or 403 fails the step with `<KEY> was rejected by <host> (HTTP <status>)` and tells the operator to replace it. It is not retried. Presence is what the run-start check can confirm without a paid call, so a wrong key still surfaces at the first `system-one-decision` step; the `workflow-iterate` skill has authors confirm the key with one cheap call before building the node.
 
-The key value never appears in a definition, a warning, a step output, or an error.
+The key value never appears in a definition, a warning, a step output, or an error. `LAYA_URL` is where the `laya` key is sent, so a value that is not an `https` URL (plain `http` is accepted for `localhost` only), or that carries credentials, a query, or a fragment, is refused with `LAYA_URL is not a usable laya server URL` and is never echoed. A trailing slash is ignored and a path is kept (`https://host/laya/` becomes `https://host/laya/v1/systemone`).
 
 ### Human review
 
@@ -340,7 +341,7 @@ Set `humanReview` to define, in the same node, a confidence band whose answers g
 ```
 
 - **`band`** is `{ min, max }`, each `0` to `1`, `min <= max`. An answer is in the band when `min <= confidence <= max`. `approvers`, `timeout`, and `notifications` are the `human-in-the-loop` schemas, imported, not copied. `title` defaults to `Review decision: <node id>`.
-- **Which number is the confidence.** `choice` and `score` answers report `confidence`, and it is used as reported. A `noul` answer reports none, so the band is tested against `max(noul, 1 - noul)`, the probability of the side the model took. The `noul` answer stays `{ type, noul }`; the tested number is recorded in `review.questions`. The number is the provider's own, so a band tuned on one provider or model does not carry to another.
+- **Which number is the confidence.** `choice` and `score` answers report `confidence`, and it is used as the provider reports it. On `laya` that is its `answer_confidence`, the top probability, not its entropy-based `confidence` (see Other backends: laya). A `noul` answer reports none, so the band is tested against `max(noul, 1 - noul)`, the probability of the side the model took. The `noul` answer stays `{ type, noul }`; the tested number is recorded in `review.questions`. The number is the provider's own, so a band tuned on one provider or model does not carry to another.
 - **Any answer in the band parks the node.** One approval request covers the whole node. It asks one `approval` question ("Accept these answers and continue?", id `$confirm`) and one question for each answer that is in the band: a `single-select` for `choice` (the options) and `score` (the levels), a `boolean` for `noul`. Answers outside the band are not asked and stay the model's. The card shows the model's answer and confidence, and the first 2000 characters of `state`, run through the secret scrubber.
 - **Approve** with an empty answer to confirm what the model said, or pick another option to replace it. A replaced `noul` becomes `1` or `0`, a person being certain. `probabilities`, `legend`, and `confidence` always describe the model and are never edited. **Reject**, or let `timeout` run out, and nobody has accepted an answer: `answers` stays the model's.
 - **Output.** The same `{ model, answers, usage }` a run without review returns, so downstream nodes read `<alias>.answers.<question>.<field>` on every path, plus a `review` block:
@@ -364,20 +365,46 @@ Set `humanReview` to define, in the same node, a confidence band whose answers g
 
 ### Other backends: laya
 
-`@desplega/laya` and `@desplega/laya-server` (laya-js, private and unpublished) answer the same kind of question, and their result maps onto this node's output without a schema change. No laya provider ships in this change and the node does not depend on laya-js.
+`laya` (`@desplega/laya-server`, from laya-js) answers the same kind of question on `POST /v1/systemone`. Set `provider: laya`; no other node field changes.
+
+```yaml
+- id: triage
+  type: system-one-decision
+  inputs: { ticket: "trigger.ticket" }
+  config:
+    provider: laya
+    state: { message: "{{ticket}}" }
+    questions:
+      team:
+        type: choice
+        instructions: Which team should handle the ticket in `message`?
+        criteria: { billing: Charges and invoices, technical: Bugs and outages, sales: Pricing }
+    returns:
+      team: { type: choice }
+    humanReview:
+      band: { min: 0.5, max: 0.8 }   # tested on answer_confidence, the top probability
+      approvers: { users: [support-lead], policy: any }
+  next: { approved: route, rejected: escalate, timeout: escalate }
+```
+
+Set `LAYA_URL` (global config, the server's base URL) and `LAYA_API_KEY` (global secret) first. The URL is never in the definition. A run of a `laya` node with either missing fails before any node executes.
 
 | This node | laya (`SystemOneResult`, `POST /v1/systemone`) |
 |---|---|
-| request `{ state, model, questions }` | the same body; `model` is a checkpoint name (`english`, `multilingual`, `typed-decisions`) or omitted to auto-route. laya-server also takes `max_len` and `head_max_len` |
+| request `{ state, model, questions }` | the same body. `model` is a checkpoint name (`english`, `multilingual`, `typed-decisions`) or omitted to auto-route, and the node omits it when its config sets none. laya-server also takes `max_len` and `head_max_len`, which the node does not send |
 | question `{ type, instructions, criteria }` | the same shape. laya also accepts a list of labels for a `choice`. Limits differ: laya allows 100 choice options (node: 255) and 32 score levels (node: 10), and its docs advise against boolean-word labels such as `yes` |
-| `model` | `model` (`laya-rl-agent`) |
-| `answers.<q>` `choice` / `score` / `noul`, `probabilities`, `legend`, `confidence` | the same fields and types; `score` is the expected level, so fractional |
-| `usage` `{ input_tokens, output_tokens }` | the same; `usage.windows` from `predictLong` is dropped |
-| not kept | `routing`, `answer_confidence`, `action`, `low_confidence`: dropped by the validator, as any extra provider field is |
+| `model` | `model` (`laya-rl-agent`, the same for every checkpoint) |
+| `routing.model` | `routing.model`: the checkpoint that answered (`english`). The rest of `routing` (`repo`, `reason`, `detection`) is not kept |
+| `answers.<q>` `choice` / `score` / `noul`, `probabilities`, `legend` | the same fields and types; `score` is the expected level, so fractional |
+| `answers.<q>.answer_confidence` | `answers.<q>.confidence` (see below) |
+| `usage` `{ input_tokens, output_tokens }` | the same; `output_tokens` is `0`, and `usage.windows` from `predictLong` is dropped |
+| not kept | laya's own `confidence`, `action`, `low_confidence`: dropped by the validator, as any extra provider field is |
 
-Every row is checked by a test that feeds a laya-shaped result through the same validator and band (`src/tests/workflow-system-one-decision-review.test.ts`). The fixture is built from the laya-js source, not captured from a running server, because the checkpoints are private.
+Every row is checked by a test that feeds a laya-shaped result through the same validator and band (`src/tests/workflow-system-one-decision-review.test.ts`), and the mapping was run against `https://laya.agent-swarm.dev`.
 
-Plugging laya in later is one `SYSTEM_ONE_PROVIDERS` entry plus two small changes to the provider interface, none of which touch the node type, its config, or its output. The endpoint has to come from a deployment setting because a laya server has no fixed host, and the key has to be optional because a laya server may run without a token. Two things need a decision from the laya side, not from this node: laya's `confidence` for `choice` and `score` is entropy-based (its `answer_confidence` is the max probability), so a band would be tuned on that number unless the provider maps `answer_confidence` into `confidence`; and where the server URL lives.
+- **`model` is not defaulted.** laya answers a `model` it does not know with HTTP 200 and routes on the text instead (`jev-latest` and a typo both went to `english`), so a default would be sent as if it meant something. Leaving `model` unset auto-routes. A `model` you set is sent as written, and a misspelled one is still ignored by laya: read `routing.model` to see which checkpoint answered.
+- **Which confidence.** laya reports two numbers for a `choice` or `score`. Its `confidence` is entropy-based (a top probability of 0.47 reads about 0.15). Its `answer_confidence` is the top probability. The node reads `answer_confidence`, so `output.answers.<q>.confidence` and the `humanReview` band are the top probability. Reason: a `noul` answer's band number is already the probability of the side taken, and the band is one number per node, so it now means the same on every question type. Cost: laya's entropy-based number, which also reflects how the rest of the probability is spread, is not kept; a band copied from a TypeSafe workflow still needs tuning, and a laya server that omits `answer_confidence` fails the step (`answers.<q>.answer_confidence must be a finite number between 0 and 1`) rather than quietly falling back to the other number.
+- **The key is required.** A laya server that runs without a token is not supported by this provider: the preflight asks for `LAYA_API_KEY`.
 
 ### Thresholds, retries, and credentials
 

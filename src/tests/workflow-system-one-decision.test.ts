@@ -213,7 +213,9 @@ beforeEach(async () => {
   await client.run("DELETE FROM workflow_run_steps");
   await client.run("DELETE FROM workflow_runs");
   await client.run("DELETE FROM workflows");
-  await client.run("DELETE FROM swarm_config WHERE key = 'TYPESAFE_API_KEY'");
+  await client.run(
+    "DELETE FROM swarm_config WHERE key IN ('TYPESAFE_API_KEY', 'LAYA_URL', 'LAYA_API_KEY')",
+  );
 });
 
 // ─── Config schema ──────────────────────────────────────────
@@ -1443,6 +1445,294 @@ describe("system-one-decision providers", () => {
     );
     expect(viaTypeSafeMissing.error).toContain("TYPESAFE_API_KEY is not configured");
     expect(orCalls).toHaveLength(0);
+  });
+});
+
+// ─── laya provider ──────────────────────────────────────────
+
+const LAYA_KEY = "laya-example-test-key-0123456789";
+const LAYA_URL = "https://laya.example.test";
+
+const setLayaConfig = async ({
+  url = LAYA_URL,
+  key = LAYA_KEY,
+}: {
+  url?: string;
+  key?: string;
+}) => {
+  if (url) await upsertSwarmConfig({ scope: "global", key: "LAYA_URL", value: url });
+  if (key) {
+    await upsertSwarmConfig({ scope: "global", key: "LAYA_API_KEY", value: key, isSecret: true });
+  }
+};
+
+/** laya-server's body: the shared contract plus `routing`, `answer_confidence`, and `action`. */
+const layaBody = () =>
+  mixedBody({
+    model: "laya-rl-agent",
+    answers: {
+      fit: { ...noulAnswer, confidence: 0.82, answer_confidence: 0.82 },
+      authority: { ...choiceAnswer, confidence: 0.4, answer_confidence: 0.9, action: {} },
+      urgency: { ...scoreAnswer, confidence: 0.3, answer_confidence: 0.75 },
+    },
+    usage: { input_tokens: 190, output_tokens: 0 },
+    routing: { model: "english", reason: "English Latin text" },
+  });
+
+/** A real executor over the swarm config rows, so the default lookups run. */
+function makeLayaExecutor(steps: TransportStep[]) {
+  const { calls, transport } = makeTransport(steps);
+  const executor = new SystemOneDecisionExecutor(deps, {
+    fetch: transport,
+    env: {},
+    sleep: async () => {},
+    random: () => 1,
+  });
+  return { executor, calls };
+}
+
+const layaConfig = (overrides: Record<string, unknown> = {}) =>
+  mixedConfig({ provider: "laya", model: undefined, ...overrides });
+
+describe("system-one-decision laya provider", () => {
+  test("the config accepts provider laya and nothing else about the host", () => {
+    expect(SystemOneDecisionConfigSchema.safeParse(layaConfig()).success).toBe(true);
+    for (const field of ["endpoint", "url", "baseUrl", "apiKey"]) {
+      expect(
+        SystemOneDecisionConfigSchema.safeParse(layaConfig({ [field]: "https://x.example" }))
+          .success,
+      ).toBe(false);
+    }
+  });
+
+  test("the request goes to LAYA_URL with LAYA_API_KEY, from the swarm config, with no model", async () => {
+    await setLayaConfig({});
+    // A TypeSafe key present must not be used for laya.
+    await upsertSwarmConfig({
+      scope: "global",
+      key: "TYPESAFE_API_KEY",
+      value: API_KEY,
+      isSecret: true,
+    });
+    const { executor, calls } = makeLayaExecutor([jsonResponse(layaBody())]);
+    const config = layaConfig();
+    const result = await runSystemOne(executor, config);
+
+    expect(result.status).toBe("success");
+    expect(calls).toHaveLength(1);
+    const call = calls[0]!;
+    expect(call.url).toBe(`${LAYA_URL}/v1/systemone`);
+    expect(call.init.method).toBe("POST");
+    expect(call.init.redirect).toBe("manual");
+    expect((call.init.headers as Record<string, string>).authorization).toBe(`Bearer ${LAYA_KEY}`);
+    // No `model`: laya answers an id it does not know with HTTP 200 and routes on the text.
+    expect(Object.keys(call.body).sort()).toEqual(["questions", "state"]);
+    expect(call.body.questions).toEqual(config.questions as object);
+    expect(JSON.stringify(result)).not.toContain(LAYA_KEY);
+  });
+
+  test("a model the node sets is passed through to laya unchanged", async () => {
+    await setLayaConfig({});
+    const { executor, calls } = makeLayaExecutor([jsonResponse(layaBody())]);
+    await runSystemOne(executor, layaConfig({ model: "multilingual" }));
+    expect(calls[0]?.body.model).toBe("multilingual");
+  });
+
+  test("the output keeps routing.model and reads the confidence from answer_confidence", async () => {
+    await setLayaConfig({});
+    const { executor } = makeLayaExecutor([jsonResponse(layaBody())]);
+    const result = await runSystemOne(executor, layaConfig());
+
+    expect(result.status).toBe("success");
+    const output = result.output;
+    expect(output?.model).toBe("laya-rl-agent");
+    expect(output?.routing).toEqual({ model: "english" });
+    // laya's entropy-based confidence (0.4, 0.3) is not the reported one.
+    expect(output?.answers.authority).toMatchObject({ confidence: 0.9 });
+    expect(output?.answers.urgency).toMatchObject({ confidence: 0.75 });
+    expect(JSON.stringify(output)).not.toContain("reason");
+    expect(SystemOneDecisionOutputSchema.safeParse(output).success).toBe(true);
+  });
+
+  test("a laya answer without answer_confidence fails validation", async () => {
+    await setLayaConfig({});
+    const { executor } = makeLayaExecutor([jsonResponse(mixedBody())]);
+    const result = await runSystemOne(executor, layaConfig());
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("answer_confidence must be a finite number between 0 and 1");
+  });
+
+  test("a base URL with a path and trailing slashes keeps its path", async () => {
+    await setLayaConfig({ url: "https://host.example.test/laya//" });
+    const { executor, calls } = makeLayaExecutor([jsonResponse(layaBody())]);
+    await runSystemOne(executor, layaConfig());
+    expect(calls[0]?.url).toBe("https://host.example.test/laya/v1/systemone");
+  });
+
+  test("plain http is accepted for localhost only", async () => {
+    await setLayaConfig({ url: "http://localhost:8080" });
+    const local = makeLayaExecutor([jsonResponse(layaBody())]);
+    expect((await runSystemOne(local.executor, layaConfig())).status).toBe("success");
+    expect(local.calls[0]?.url).toBe("http://localhost:8080/v1/systemone");
+
+    await setLayaConfig({ url: "http://laya.example.test" });
+    const remote = makeLayaExecutor([jsonResponse(layaBody())]);
+    const result = await runSystemOne(remote.executor, layaConfig());
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("LAYA_URL is not a usable laya server URL");
+    expect(remote.calls).toHaveLength(0);
+  });
+
+  test("an unusable LAYA_URL fails before any request and never echoes the value", async () => {
+    for (const url of [
+      "not a url",
+      "ftp://laya.example.test",
+      "https://admin:hunter2@laya.example.test",
+      "https://laya.example.test?token=hunter2",
+      "https://laya.example.test/#hunter2",
+    ]) {
+      await setLayaConfig({ url });
+      const { executor, calls } = makeLayaExecutor([jsonResponse(layaBody())]);
+      const result = await runSystemOne(executor, layaConfig());
+
+      expect(result.status).toBe("failed");
+      expect(result.error).toContain("LAYA_URL is not a usable laya server URL");
+      expect(result.error).not.toContain("hunter2");
+      expect(calls).toHaveLength(0);
+    }
+  });
+
+  test("a missing LAYA_URL and a missing LAYA_API_KEY are each named, with no TypeSafe text", async () => {
+    const onlyKey = makeLayaExecutor([jsonResponse(layaBody())]);
+    await setLayaConfig({ url: "" });
+    const noUrl = await runSystemOne(onlyKey.executor, layaConfig());
+    expect(noUrl.status).toBe("failed");
+    expect(noUrl.error).toContain("LAYA_URL is not configured");
+    expect(noUrl.error).toContain("URL of a laya server");
+    expect(noUrl.error).not.toContain("LAYA_API_KEY");
+
+    await getDbClient().run("DELETE FROM swarm_config WHERE key = 'LAYA_API_KEY'");
+    await setLayaConfig({ key: "" });
+    const noKey = await runSystemOne(onlyKey.executor, layaConfig());
+    expect(noKey.status).toBe("failed");
+    expect(noKey.error).toContain("LAYA_API_KEY is not configured");
+    expect(noKey.error).toContain("working laya API key");
+    expect(noKey.error).toContain("Secrets page");
+    expect(noKey.error).not.toContain("LAYA_URL");
+
+    // Neither set: one message that names both.
+    await getDbClient().run("DELETE FROM swarm_config WHERE key IN ('LAYA_URL', 'LAYA_API_KEY')");
+    const neither = await runSystemOne(onlyKey.executor, layaConfig());
+    expect(neither.error).toContain("LAYA_URL is not configured");
+    expect(neither.error).toContain("LAYA_API_KEY is not configured");
+    for (const result of [noUrl, noKey, neither]) {
+      expect(result.error).not.toMatch(/TypeSafe|TYPESAFE/);
+    }
+    expect(onlyKey.calls).toHaveLength(0);
+  });
+
+  test("readiness names LAYA_URL and LAYA_API_KEY for a laya node and does not call laya", async () => {
+    const { executor, calls } = makeLayaExecutor([jsonResponse(layaBody())]);
+    const problems = await executor.checkReadiness([
+      { id: "a", config: layaConfig() },
+      { id: "b", config: layaConfig() },
+      { id: "c", config: mixedConfig() },
+    ]);
+
+    const laya = problems.find((p) => p.message.startsWith("LAYA_URL"));
+    expect(laya?.nodeIds).toEqual(["a", "b"]);
+    expect(laya?.message).toContain("LAYA_API_KEY is not configured");
+    expect(problems.find((p) => p.message.startsWith("TYPESAFE_API_KEY"))?.nodeIds).toEqual(["c"]);
+    expect(problems).toHaveLength(2);
+    expect(calls).toHaveLength(0);
+
+    await setLayaConfig({});
+    expect(await executor.checkReadiness([{ id: "a", config: layaConfig() }])).toEqual([]);
+  });
+
+  test("a config row that cannot be read is reported without its cause", async () => {
+    const { calls, transport } = makeTransport([jsonResponse(layaBody())]);
+    const executor = new SystemOneDecisionExecutor(deps, {
+      fetch: transport,
+      env: {},
+      getServerUrl: async () => {
+        throw new Error("Failed to decrypt config 'LAYA_URL' (id=row-9)");
+      },
+      getApiKey: async () => LAYA_KEY,
+    });
+    const problems = await executor.checkReadiness([{ id: "a", config: layaConfig() }]);
+    expect(problems).toEqual([
+      { nodeIds: ["a"], message: "Could not read LAYA_URL from swarm config" },
+    ]);
+    expect(calls).toHaveLength(0);
+  });
+
+  test("a save warning and a run start both name the laya settings", async () => {
+    const { calls, transport } = makeTransport([jsonResponse(layaBody())]);
+    const registry = engineRegistry(
+      new SystemOneDecisionExecutor(deps, { fetch: transport, env: {} }),
+    );
+    const definition = markerThenSystemOne({ config: layaConfig() });
+
+    const warnings = await workflowSaveWarnings(definition, registry);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("LAYA_URL is not configured");
+    expect(warnings[0]).toContain("LAYA_API_KEY is not configured");
+    expect(warnings[0]).toContain('system-one-decision node "qualify"');
+
+    const runId = await startWorkflowExecution(await makeWorkflow(definition), {}, registry);
+    const run = await getWorkflowRun(runId);
+    expect(run?.status).toBe("failed");
+    expect(run?.error).toContain("Run not started, no node executed");
+    expect(run?.error).toContain("LAYA_URL is not configured");
+    expect(run?.error).toContain("LAYA_API_KEY is not configured");
+    expect(await getWorkflowRunStepsByRunId(runId)).toHaveLength(0);
+    expect(calls).toHaveLength(0);
+
+    await setLayaConfig({});
+    expect(await workflowSaveWarnings(definition, registry)).toEqual([]);
+    const ok = await startWorkflowExecution(await makeWorkflow(definition), {}, registry);
+    expect((await getWorkflowRun(ok))?.status).toBe("completed");
+    expect(calls).toHaveLength(1);
+  });
+
+  test("a 401 names LAYA_API_KEY and laya, not TypeSafe, and is not retried", async () => {
+    await setLayaConfig({});
+    const { executor, calls } = makeLayaExecutor([
+      // laya's own body, with no error code.
+      jsonResponse({ detail: "invalid or missing bearer token" }, 401),
+    ]);
+    const result = await runSystemOne(executor, layaConfig({ maxRetries: 3 }));
+
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("LAYA_API_KEY was rejected by laya (HTTP 401)");
+    expect(result.error).toContain("No decision was made");
+    expect(result.error).not.toMatch(/TypeSafe|TYPESAFE/);
+    expect(calls).toHaveLength(1);
+    expect(JSON.stringify(result)).not.toContain(LAYA_KEY);
+  });
+
+  test("laya reads only its own settings", async () => {
+    // A key on the wrong provider does not satisfy laya, and the reverse.
+    await upsertSwarmConfig({ scope: "global", key: "LAYA_URL", value: LAYA_URL });
+    const { executor, calls } = makeLayaExecutor([jsonResponse(layaBody())]);
+    const viaLaya = await runSystemOne(executor, layaConfig());
+    expect(viaLaya.error).toContain("LAYA_API_KEY is not configured");
+
+    await upsertSwarmConfig({
+      scope: "global",
+      key: "TYPESAFE_API_KEY",
+      value: API_KEY,
+      isSecret: true,
+    });
+    // The TypeSafe key serves typesafe, at the TypeSafe host, and laya still has none.
+    const viaTypeSafe = await runSystemOne(executor, mixedConfig({ provider: "typesafe" }));
+    expect(viaTypeSafe.status).toBe("success");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe(SYSTEM_ONE_ENDPOINT);
+    expect((await runSystemOne(executor, layaConfig())).error).toContain(
+      "LAYA_API_KEY is not configured",
+    );
   });
 });
 
