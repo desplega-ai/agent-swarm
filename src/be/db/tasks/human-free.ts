@@ -11,7 +11,7 @@ import { getDbClient } from "../runtime";
  * child is an independent handoff and stops propagation down that branch.
  *
  * The result is stored on `agent_tasks.isHumanFree` when the task is created
- * (migration 176 backfilled history), so the usage reports read a column
+ * (migration 182 backfilled history), so the usage reports read a column
  * instead of rebuilding a recursive CTE over every task per query.
  *
  * Every classifying input (`taskType`, `tags`, `source`, `requestedByUserId`,
@@ -60,7 +60,7 @@ export interface HumanFreeInput {
 
 /**
  * Classify a task about to be inserted. Runs the same SQL predicate the
- * migration 176 backfill used, so a task classified here and one classified by
+ * migration 182 backfill used, so a task classified here and one classified by
  * the backfill can never disagree. The parent must already be stored.
  */
 export async function classifyTaskHumanFree(input: HumanFreeInput): Promise<boolean> {

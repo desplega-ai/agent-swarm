@@ -121,7 +121,7 @@ from `attributedCostUsd` even if an old or inherited requester id remains on
 the row, keeping the numerator and denominator a consistent partition.
 
 The classification is computed once, when the task is created, and stored in
-`agent_tasks.isHumanFree` (migration 176 backfilled existing tasks). The usage
+`agent_tasks.isHumanFree` (migration 182 backfilled existing tasks). The usage
 reports read that column instead of walking every task tree per request. Every
 input to the rule is fixed at creation, so a code path that rewrites one of them
 must reclassify the task and its descendants.

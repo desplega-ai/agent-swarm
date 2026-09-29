@@ -4931,7 +4931,7 @@ export async function getSessionCostSummary(opts: {
   // INDEXED BY: without ANALYZE statistics (production has none) the planner
   // probes tasks through the primary key and reads each full row, which follows
   // the task's overflow pages. The covering index answers the same probe from
-  // the index alone (migration 176).
+  // the index alone (migration 182).
   const from =
     "FROM session_costs sc LEFT JOIN agent_tasks t INDEXED BY idx_agent_tasks_usage_cover ON t.id = sc.taskId";
   // Only a user filter reads the task, and the join adds no rows (task id is unique).

@@ -280,9 +280,9 @@ describe("agent_tasks.isHumanFree", () => {
     expect(actual).toEqual(expected);
   });
 
-  test("migration 176 backfill selects the same tasks as creation-time classification", async () => {
+  test("migration 182 backfill selects the same tasks as creation-time classification", async () => {
     const before = await storedFlags();
-    const sql = await Bun.file("src/be/migrations/176_task_human_free_flag.sql").text();
+    const sql = await Bun.file("src/be/migrations/182_task_human_free_flag.sql").text();
     const start = sql.indexOf("WITH RECURSIVE");
     const endMarker = "WHERE id IN (SELECT id FROM human_free_tasks);";
     const end = sql.indexOf(endMarker) + endMarker.length;
