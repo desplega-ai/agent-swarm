@@ -12478,6 +12478,11 @@ export async function listTaskTemplates(opts?: {
  * Walk the parent→child chain rooted at `rootTaskId` via recursive CTE.
  * Returns the chain ordered by `createdAt` (so the root is first; siblings
  * appear in creation order; grand-children after their parents).
+ *
+ * `CROSS JOIN` pins the chain as the outer loop. With a plain JOIN the planner
+ * walks every agent_tasks row via idx_agent_tasks_created to skip the sort and
+ * probes the chain per row: a full-table scan per request. `t.rowid` keeps the
+ * index's tie order for equal `createdAt`.
  */
 export async function getRootTaskChain(rootTaskId: string): Promise<AgentTask[]> {
   const rows = await getDbClient().query<AgentTaskRow>(
@@ -12487,9 +12492,9 @@ export async function getRootTaskChain(rootTaskId: string): Promise<AgentTask[]>
          SELECT t.id FROM agent_tasks t
          JOIN chain c ON t.parentTaskId = c.id
        )
-       SELECT t.* FROM agent_tasks t
-       JOIN chain ON chain.id = t.id
-       ORDER BY t.createdAt`,
+       SELECT t.* FROM chain
+       CROSS JOIN agent_tasks t ON t.id = chain.id
+       ORDER BY t.createdAt, t.rowid`,
     [rootTaskId],
   );
   return rows.map(rowToAgentTask);

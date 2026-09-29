@@ -171,6 +171,50 @@ describe("GET /api/sessions/{rootTaskId} batching", () => {
     expect(res.status).toBe(404);
   });
 
+  test("getRootTaskChain seeks the chain instead of scanning agent_tasks, same order", async () => {
+    const OLD_CHAIN_SQL = `WITH RECURSIVE chain(id) AS (
+         SELECT id FROM agent_tasks WHERE id = ?
+         UNION ALL
+         SELECT t.id FROM agent_tasks t
+         JOIN chain c ON t.parentTaskId = c.id
+       )
+       SELECT t.id FROM agent_tasks t
+       JOIN chain ON chain.id = t.id
+       ORDER BY t.createdAt`;
+    // Ties on createdAt: the old plan returned them in idx_agent_tasks_created (rowid) order.
+    const ids = [rootId, ...chainIds];
+    const saved = await getDbClient().query<{ id: string; createdAt: string }>(
+      `SELECT id, createdAt FROM agent_tasks WHERE id IN (${ids.map(() => "?").join(",")})`,
+      ids,
+    );
+    await getDbClient().run(
+      `UPDATE agent_tasks SET createdAt = '2026-01-01T00:00:00.000Z' WHERE id IN (${ids
+        .slice(1)
+        .map(() => "?")
+        .join(",")})`,
+      ids.slice(1),
+    );
+    try {
+      const old = await getDbClient().query<{ id: string }>(OLD_CHAIN_SQL, [rootId]);
+      expect((await getRootTaskChain(rootId)).map((t) => t.id)).toEqual(old.map((r) => r.id));
+    } finally {
+      for (const row of saved) {
+        await getDbClient().run("UPDATE agent_tasks SET createdAt = ? WHERE id = ?", [
+          row.createdAt,
+          row.id,
+        ]);
+      }
+    }
+
+    const src = (await Bun.file(`${import.meta.dir}/../be/db.ts`).text()).match(
+      /export async function getRootTaskChain[\s\S]*?`(WITH RECURSIVE[\s\S]*?)`/,
+    )![1]!;
+    const plan = await getDbClient().query<{ detail: string }>(`EXPLAIN QUERY PLAN ${src}`, [
+      rootId,
+    ]);
+    expect(plan.map((r) => r.detail)).not.toContain("SCAN t USING INDEX idx_agent_tasks_created");
+  });
+
   test("batched loaders chunk past 500 ids and match the per-id loaders", async () => {
     const chain = await getRootTaskChain(rootId);
     // Pad with ids that have no rows so the real ones straddle chunk boundaries.
