@@ -33,6 +33,7 @@ import { FOREACH_TERMINAL_STEP_STATUSES, resolveForeachParent } from "./foreach-
 import { getSecretInputKeys, redactSecretsForStorage, resolveInputs } from "./input";
 import { validateJsonSchema } from "./json-schema-validator";
 import { getMaxWorkflowStepsPerRun } from "./limits";
+import { findWorkflowReadinessProblems, formatReadinessRunError } from "./readiness";
 import { deepInterpolate } from "./template";
 import { runStepValidation, type ValidationRunResult } from "./validation";
 
@@ -149,6 +150,18 @@ export async function startWorkflowExecution(
     nodeCount: workflow.definition.nodes.length,
     triggerType: options.triggerType ?? "manual",
   });
+
+  // An executor that cannot run (for example a jev node with no API key) fails
+  // the run here, before any node has side effects, instead of partway through.
+  const notReady = await findWorkflowReadinessProblems(workflow.definition, registry);
+  if (notReady.length > 0) {
+    await updateWorkflowRun(runId, {
+      status: "failed",
+      error: formatReadinessRunError(notReady),
+      finishedAt: new Date().toISOString(),
+    });
+    return runId;
+  }
 
   // Resolve inputs and merge into initial context
   const ctx: Record<string, unknown> = { trigger: triggerData };

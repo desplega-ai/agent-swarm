@@ -1,18 +1,35 @@
 import { z } from "zod";
 import type { ExecutorMeta } from "../../types";
-import { BaseExecutor, type ExecutorDependencies, type ExecutorResult } from "./base";
+import {
+  BaseExecutor,
+  type ExecutorDependencies,
+  type ExecutorReadinessNode,
+  type ExecutorReadinessProblem,
+  type ExecutorResult,
+} from "./base";
+import {
+  JEV_DEFAULT_PROVIDER,
+  JEV_PROVIDER_IDS,
+  JEV_PROVIDERS,
+  type JevProvider,
+  type JevProviderId,
+  jevKeyRejectedMessage,
+  jevProviderOf,
+  resolveJevCredential,
+} from "./jev-providers";
 
 // ─── Constants ──────────────────────────────────────────────
 
 export const JEV_NODE_TYPE = "jev";
 
-/** The only host the node talks to. Not configurable: no endpoint, header, or key field exists. */
-export const JEV_ENDPOINT = "https://api.typesafe.ai/v1/systemone";
+/**
+ * The TypeSafe host and its credential name, kept as named exports. The set of
+ * hosts a node may reach is `JEV_PROVIDERS`: no endpoint, header, or key field
+ * exists in a definition, only `provider`, an id from that list.
+ */
+export const JEV_ENDPOINT = JEV_PROVIDERS.typesafe.endpoint;
+export const JEV_API_KEY_CONFIG_KEY = JEV_PROVIDERS.typesafe.keyName;
 
-/** Global `swarm_config` key holding the TypeSafe bearer token. Read server-side only. */
-export const JEV_API_KEY_CONFIG_KEY = "TYPESAFE_API_KEY";
-
-export const JEV_DEFAULT_MODEL = "jev-latest";
 export const JEV_DEFAULT_TIMEOUT_MS = 30_000;
 export const JEV_MIN_TIMEOUT_MS = 1_000;
 export const JEV_MAX_TIMEOUT_MS = 300_000;
@@ -105,7 +122,9 @@ const JevPrimitiveTypeSchema = z.enum(["noul", "choice", "score"]);
 
 export const JevConfigSchema = z
   .strictObject({
-    model: z.string().min(1).default(JEV_DEFAULT_MODEL),
+    provider: z.enum(JEV_PROVIDER_IDS).default(JEV_DEFAULT_PROVIDER),
+    /** Provider-specific model id. Unset means the provider's default. */
+    model: z.string().min(1).optional(),
     state: JevStateSchema,
     timeoutMs: z
       .number()
@@ -247,7 +266,7 @@ export function jevRetryViolations(node: {
   return violations;
 }
 
-/** Static-shape rules that a per-field schema cannot express (question ids and return types are static). */
+/** Static-shape rules that a per-field schema cannot express (question ids, return types, and the provider are static). */
 export function jevStaticShapeViolations(node: {
   id: string;
   type: string;
@@ -265,6 +284,12 @@ export function jevStaticShapeViolations(node: {
         `Node "${node.id}" (jev) config.${field} must be an object: question ids and return types are static, only state and descriptions may use {{tokens}}`,
       );
     }
+  }
+  const provider = node.config.provider;
+  if (typeof provider === "string" && provider.includes("{{")) {
+    violations.push(
+      `Node "${node.id}" (jev) config.provider must be a literal (${JEV_PROVIDER_IDS.join(", ")}), not a {{token}}: the provider decides which credential is checked before the run starts`,
+    );
   }
   return violations;
 }
@@ -427,8 +452,10 @@ export function validateJevResponse(
 export interface JevExecutorOptions {
   /** Transport. Tests inject a fake; production uses the global `fetch`. */
   fetch?: typeof fetch;
-  /** Credential lookup. Defaults to the global `TYPESAFE_API_KEY` swarm config row. */
-  getApiKey?: () => Promise<string | null | undefined>;
+  /** Credential lookup for any provider. Defaults to each provider's own source (see `JEV_PROVIDERS`). */
+  getApiKey?: (provider: JevProviderId) => Promise<string | null | undefined>;
+  /** Environment the OpenRouter credential is resolved from. Defaults to `process.env`. */
+  env?: NodeJS.ProcessEnv;
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
   now?: () => number;
   random?: () => number;
@@ -467,19 +494,17 @@ function readErrorCode(text: string): string | undefined {
   }
   if (!isRecord(parsed)) return undefined;
   const nested = isRecord(parsed.error) ? parsed.error : undefined;
-  for (const candidate of [nested?.code, nested?.type, parsed.code, parsed.type]) {
+  const detail = isRecord(parsed.detail) ? parsed.detail : undefined;
+  for (const candidate of [
+    nested?.code,
+    nested?.type,
+    detail?.error_type,
+    parsed.code,
+    parsed.type,
+  ]) {
     if (typeof candidate === "string" && ERROR_CODE_RE.test(candidate)) return candidate;
   }
   return undefined;
-}
-
-/** A bearer token is one visible token; anything else would break or split the header. */
-function hasWhitespaceOrControl(value: string): boolean {
-  for (const char of value) {
-    const code = char.charCodeAt(0);
-    if (code <= 0x20 || code === 0x7f) return true;
-  }
-  return false;
 }
 
 function defaultSleep(ms: number, signal: AbortSignal): Promise<void> {
@@ -510,42 +535,58 @@ export class JevExecutor extends BaseExecutor<typeof JevConfigSchema, typeof Jev
     super(deps);
   }
 
+  private providerContext() {
+    return { db: this.deps.db, env: this.options.env ?? process.env };
+  }
+
+  /**
+   * One problem per provider the given nodes use whose credential (or deployment
+   * setting) is not usable. Reads raw config: the provider is a static literal.
+   */
+  override async checkReadiness(
+    nodes: readonly ExecutorReadinessNode[],
+  ): Promise<ExecutorReadinessProblem[]> {
+    const nodeIdsByProvider = new Map<JevProviderId, string[]>();
+    for (const node of nodes) {
+      // An unknown provider is a config error the schema reports; it names no credential.
+      const id = jevProviderOf(node.config);
+      if (id) nodeIdsByProvider.set(id, [...(nodeIdsByProvider.get(id) ?? []), node.id]);
+    }
+    const problems: ExecutorReadinessProblem[] = [];
+    for (const [id, nodeIds] of nodeIdsByProvider) {
+      const credential = await resolveJevCredential(
+        id,
+        this.providerContext(),
+        this.options.getApiKey,
+      );
+      if (!credential.ok) problems.push({ nodeIds, message: credential.error });
+    }
+    return problems;
+  }
+
   protected async execute(
     config: JevConfig,
     _context: Readonly<Record<string, unknown>>,
     _meta: ExecutorMeta,
   ): Promise<ExecutorResult<JevOutput>> {
-    let apiKey: string | null | undefined;
-    try {
-      apiKey = await this.lookupApiKey();
-    } catch {
-      // The underlying error can name a config row id; keep the message generic.
-      return {
-        status: "failed",
-        error: `Could not read ${JEV_API_KEY_CONFIG_KEY} from swarm config`,
-      };
-    }
-    if (!apiKey || apiKey.trim() === "") {
-      return {
-        status: "failed",
-        error: `${JEV_API_KEY_CONFIG_KEY} is not configured (set it as a global swarm config value)`,
-      };
-    }
-    if (hasWhitespaceOrControl(apiKey)) {
-      return {
-        status: "failed",
-        error: `${JEV_API_KEY_CONFIG_KEY} is not a valid bearer token value`,
-      };
-    }
+    const providerId = config.provider;
+    const provider: JevProvider = JEV_PROVIDERS[providerId];
+    const credential = await resolveJevCredential(
+      providerId,
+      this.providerContext(),
+      this.options.getApiKey,
+    );
+    if (!credential.ok) return { status: "failed", error: credential.error };
+    const apiKey = credential.apiKey;
 
     const body = JSON.stringify({
       state: config.state,
-      model: config.model,
+      model: config.model ?? provider.defaultModel,
       questions: config.questions,
     });
 
     const scrub = (message: string) => message.split(apiKey).join("[REDACTED]");
-    const sent = await this.send(apiKey, body, config.timeoutMs, config.maxRetries);
+    const sent = await this.send(providerId, apiKey, body, config.timeoutMs, config.maxRetries);
     if (!sent.ok) return { status: "failed", error: scrub(sent.error) };
 
     let parsed: unknown;
@@ -567,22 +608,13 @@ export class JevExecutor extends BaseExecutor<typeof JevConfigSchema, typeof Jev
     }
   }
 
-  private async lookupApiKey(): Promise<string | null | undefined> {
-    if (this.options.getApiKey) return this.options.getApiKey();
-    // Filter by key and scope in SQL so no other config row is read or decrypted.
-    const rows = await this.deps.db.getSwarmConfigs({
-      scope: "global",
-      key: JEV_API_KEY_CONFIG_KEY,
-    });
-    return rows.find((row) => row.scope === "global" && row.key === JEV_API_KEY_CONFIG_KEY)?.value;
-  }
-
   /**
    * POST once, retrying only transient failures inside one time budget.
    * Retries: connection errors, HTTP 408 / 429 / 5xx (incl. 529). Never: 401, 422,
    * other 4xx, redirects, or a bad success body (the caller validates that).
    */
   private async send(
+    providerId: JevProviderId,
     apiKey: string,
     body: string,
     timeoutMs: number,
@@ -604,7 +636,14 @@ export class JevExecutor extends BaseExecutor<typeof JevConfigSchema, typeof Jev
 
     try {
       for (let attempt = 0; ; attempt++) {
-        const result = await this.attemptOnce(doFetch, apiKey, body, controller.signal, now);
+        const result = await this.attemptOnce(
+          doFetch,
+          providerId,
+          apiKey,
+          body,
+          controller.signal,
+          now,
+        );
         if (result.kind === "ok") {
           return { ok: true, text: result.text, requestId: result.requestId };
         }
@@ -634,6 +673,7 @@ export class JevExecutor extends BaseExecutor<typeof JevConfigSchema, typeof Jev
 
   private async attemptOnce(
     doFetch: typeof fetch,
+    providerId: JevProviderId,
     apiKey: string,
     body: string,
     signal: AbortSignal,
@@ -641,7 +681,7 @@ export class JevExecutor extends BaseExecutor<typeof JevConfigSchema, typeof Jev
   ): Promise<Attempt> {
     let res: Response;
     try {
-      res = await doFetch(JEV_ENDPOINT, {
+      res = await doFetch(JEV_PROVIDERS[providerId].endpoint, {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -703,12 +743,19 @@ export class JevExecutor extends BaseExecutor<typeof JevConfigSchema, typeof Jev
       if (signal.aborted) return { kind: "timeout" };
     }
     const code = readErrorCode(errorText);
+    // The host answered but does not accept the key: name it, never retry.
+    if (res.status === 401 || res.status === 403) {
+      return {
+        kind: "fail",
+        message: withId(jevKeyRejectedMessage(providerId, res.status, code)),
+        retryable: false,
+      };
+    }
     const detail = code ? ` (${code})` : "";
     const retryable = res.status === 408 || res.status === 429 || res.status >= 500;
-    const hint = res.status === 401 ? `; check ${JEV_API_KEY_CONFIG_KEY}` : "";
     return {
       kind: "fail",
-      message: withId(`Jev API returned HTTP ${res.status}${detail}${hint}`),
+      message: withId(`Jev API returned HTTP ${res.status}${detail}`),
       retryable,
       retryAfterMs: retryable ? parseRetryAfter(res.headers.get("retry-after"), now()) : undefined,
     };

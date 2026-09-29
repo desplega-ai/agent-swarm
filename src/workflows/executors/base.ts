@@ -10,6 +10,19 @@ export interface ExecutorDependencies {
   interpolate: (template: string, ctx: Record<string, unknown>) => string;
 }
 
+// ─── Readiness ─────────────────────────────────────────────
+
+export interface ExecutorReadinessNode {
+  id: string;
+  config: Record<string, unknown>;
+}
+
+export interface ExecutorReadinessProblem {
+  /** Nodes that hit this problem. */
+  nodeIds: string[];
+  message: string;
+}
+
 // ─── Input / Result Types ──────────────────────────────────
 
 export interface ExecutorInput {
@@ -46,6 +59,20 @@ export abstract class BaseExecutor<
   readonly retryPolicy?: RetryPolicy;
 
   constructor(protected readonly deps: ExecutorDependencies) {}
+
+  /**
+   * Can this executor run the given nodes right now? Return one problem per
+   * distinct missing prerequisite (for example a credential), or an empty array.
+   * The engine asks before a run starts, and authoring surfaces ask after a
+   * save, so a missing prerequisite surfaces before any node has side effects.
+   * Reads raw (pre-interpolation) node config. Must not call external services
+   * and must not put secret values in a message.
+   */
+  async checkReadiness(
+    _nodes: readonly ExecutorReadinessNode[],
+  ): Promise<ExecutorReadinessProblem[]> {
+    return [];
+  }
 
   /**
    * Validate config, execute, validate output.

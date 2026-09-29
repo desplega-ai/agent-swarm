@@ -57,7 +57,7 @@ Jev is weak at counting. For a hybrid, count in a `script` and pass the number t
 
 ### Jev decisions
 
-A `jev` node sends one `state` and a map of questions to TypeSafe's Jev model and returns one validated answer per question. It needs the global `TYPESAFE_API_KEY` config value. The key is read on the server and never appears in a definition, a step output, or an error.
+A `jev` node sends one `state` and a map of questions to TypeSafe's Jev model and returns one validated answer per question. It reaches Jev through a `provider`: `typesafe` (the default) or `openrouter`. Each provider needs its own global secret, `TYPESAFE_API_KEY` or `OPENROUTER_API_KEY`. The key is read on the server and never appears in a definition, a step output, or an error.
 
 ```json
 {
@@ -65,6 +65,7 @@ A `jev` node sends one `state` and a map of questions to TypeSafe's Jev model an
   "type": "jev",
   "inputs": { "lead": "trigger.lead" },
   "config": {
+    "provider": "typesafe",
     "model": "jev-1.13.0",
     "state": "{{lead}}",
     "questions": {
@@ -85,11 +86,20 @@ A `jev` node sends one `state` and a map of questions to TypeSafe's Jev model an
 }
 ```
 
+- `provider` is `typesafe` (default) or `openrouter`, and must be a literal. `model` is that provider's own id (`jev-1.13.0` on `typesafe`, `typesafe/jev-1.13` on `openrouter`); unset means the provider's default. Both providers take the same request and return the same answers, so everything below holds on either. There is no fallback: a node that names no provider does not switch to `openrouter` when the TypeSafe key is missing.
 - Question types are `noul` (probability that a claim is true), `choice` (2 to 255 named options), and `score` (2 to 10 ordered levels). `returns` repeats each question id and type, and a mismatch is rejected when the workflow is saved.
 - The output is `{ model, answers, usage }`. A downstream node reads `<alias>.answers.<question>.<field>` through an `inputs` mapping. A `noul` answer is `{ type, noul }` with no confidence. `choice` and `score` answers carry `probabilities` and `confidence`.
 - A low-confidence answer is still a success. Put the threshold in the next node, such as `property-match` or `code-match`, and route the uncertain band to `human-in-the-loop`.
 - The node retries connection errors, 408, 429, and 5xx itself, up to `maxRetries` (0 to 3, default 2) within `timeoutMs` (default 30000). It never retries a 401, a 422, or an answer that fails validation. Do not set `retry` or `validation.retry` on a `jev` node.
 - An unresolved `{{token}}` fails the step before the request is sent.
+
+#### Keys and preflight
+
+The swarm checks a `jev` node's key before first use. Set `TYPESAFE_API_KEY` or `OPENROUTER_API_KEY` as a global secret on the Secrets page (Settings > Secrets). Every message names the key for the node's provider.
+
+- **Saving a workflow** with a `jev` node whose key is missing succeeds and returns a warning: in the tool result message and `data.warnings` over MCP, and as `warnings` on the workflow body over HTTP. A save is not rejected, because definitions are also saved before a human has supplied the key and the key can change later.
+- **Starting a run** fails before any node executes when the key is missing. The run is recorded as `failed` with no steps and no request sent. Retrying a failed run is refused, and the run stays failed, while a node still to run needs a missing key.
+- **A key the provider refuses** (HTTP 401 or 403) fails the step with `<KEY> was rejected by <provider>` and is not retried.
 
 ### Foreach fan-out
 

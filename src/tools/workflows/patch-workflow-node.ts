@@ -11,6 +11,7 @@ import {
 import { WorkflowNodePatchSchema } from "@/types";
 import { getExecutorRegistry } from "@/workflows";
 import { patchWorkflowDefinition } from "@/workflows/patch-definition";
+import { withSaveWarnings, workflowSaveWarnings } from "@/workflows/readiness";
 
 export const registerPatchWorkflowNodeTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -30,6 +31,7 @@ export const registerPatchWorkflowNodeTool = (server: McpServer) => {
       outputSchema: swarmToolOutputSchema({
         workflow: z.unknown().optional(),
         versionCreated: z.number().optional(),
+        warnings: z.array(z.string()).optional(),
       }),
     },
     async ({ id, nodeId, ...nodeFields }, requestInfo) => {
@@ -59,14 +61,22 @@ export const registerPatchWorkflowNodeTool = (server: McpServer) => {
           { id: nodeId, type: patchedNode?.type, config: nodeFields.config },
         ]);
 
-        return toolOk(`Patched node "${nodeId}" in workflow "${workflow.name}".`, {
-          details: `Patched node "${nodeId}" in workflow "${workflow.name}" (${id}). Version ${version} snapshot created.`,
-          data: {
-            workflow,
-            versionCreated: version ?? undefined,
-            ...(longScriptTimeoutHint ? { longScriptTimeoutHint } : {}),
+        const warnings = await workflowSaveWarnings(result.definition, getExecutorRegistry());
+        return toolOk(
+          withSaveWarnings(`Patched node "${nodeId}" in workflow "${workflow.name}".`, warnings),
+          {
+            details: withSaveWarnings(
+              `Patched node "${nodeId}" in workflow "${workflow.name}" (${id}). Version ${version} snapshot created.`,
+              warnings,
+            ),
+            data: {
+              workflow,
+              versionCreated: version ?? undefined,
+              ...(warnings.length > 0 ? { warnings } : {}),
+              ...(longScriptTimeoutHint ? { longScriptTimeoutHint } : {}),
+            },
           },
-        });
+        );
       } catch (err) {
         return toolErr(String(err));
       }

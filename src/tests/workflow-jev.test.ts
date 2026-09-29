@@ -29,6 +29,8 @@ import {
 } from "../workflows/executors/jev";
 import { PropertyMatchExecutor } from "../workflows/executors/property-match";
 import { createExecutorRegistry, ExecutorRegistry } from "../workflows/executors/registry";
+import { findWorkflowReadinessProblems, workflowSaveWarnings } from "../workflows/readiness";
+import { retryFailedRun } from "../workflows/resume";
 import { interpolate } from "../workflows/template";
 
 const TEST_DB_PATH = "./test-workflow-jev.sqlite";
@@ -223,7 +225,9 @@ describe("jev config schema", () => {
       questions: { fit: { type: "noul", instructions: "Is it real?" } },
       returns: { fit: { type: "noul" } },
     });
-    expect(parsed.model).toBe("jev-latest");
+    expect(parsed.provider).toBe("typesafe");
+    // The model default belongs to the provider, so the schema leaves it unset.
+    expect(parsed.model).toBeUndefined();
     expect(parsed.timeoutMs).toBe(30_000);
     expect(parsed.maxRetries).toBe(2);
     expect(JevConfigSchema.safeParse(mixedConfig()).success).toBe(true);
@@ -1250,5 +1254,468 @@ describe("jev in the workflow engine", () => {
     expect(steps.map((s) => s.nodeId)).toEqual(["qualify"]);
     expect((await getWorkflowRun(id))?.status).toBe("failed");
     expect(JSON.stringify(steps)).not.toContain(API_KEY);
+  });
+});
+
+// ─── Providers ──────────────────────────────────────────────
+
+const OPENROUTER_KEY = "sk-or-example-jev-test-key-0123456789";
+const OPENROUTER_ENDPOINT = "https://openrouter.ai/api/alpha/decisions";
+
+/** OpenRouter's decisions body: the same contract plus id, provider, and usage.cost. */
+const openRouterBody = () =>
+  mixedBody({
+    model: "typesafe/jev-1.13-20260917",
+    id: "gen-dec-1790686228-example",
+    provider: "TypeSafe",
+    usage: { input_tokens: 418, output_tokens: 61, cost: 0.000017556 },
+  });
+
+function makeOpenRouterExecutor(steps: TransportStep[], env: NodeJS.ProcessEnv = {}) {
+  const { calls, transport } = makeTransport(steps);
+  const executor = new JevExecutor(deps, {
+    fetch: transport,
+    env: { OPENROUTER_API_KEY: OPENROUTER_KEY, ...env },
+    sleep: async () => {},
+    random: () => 1,
+  });
+  return { executor, calls };
+}
+
+describe("jev providers", () => {
+  test("a definition can name only a listed provider and carries no endpoint, header, or key", () => {
+    for (const evil of ["https://evil.example", "typesafe.ai", "", "constructor"]) {
+      expect(JevConfigSchema.safeParse(mixedConfig({ provider: evil })).success).toBe(false);
+    }
+    // A definition cannot carry an endpoint, header, or key.
+    for (const field of ["endpoint", "url", "headers", "apiKey"]) {
+      expect(JevConfigSchema.safeParse(mixedConfig({ [field]: "x" })).success).toBe(false);
+    }
+  });
+
+  test("provider must be a literal, not a token that could change the checked key", () => {
+    const registry = createExecutorRegistry(deps);
+    const node = (provider: string): WorkflowNode => ({
+      id: "qualify",
+      type: "jev",
+      inputs: { p: "trigger.p" },
+      config: mixedConfig({ provider }),
+    });
+    const bad = validateDefinition({ nodes: [node("{{p}}")] }, registry);
+    expect(bad.valid).toBe(false);
+    expect(bad.errors.join(";")).toContain("config.provider must be a literal");
+    expect(validateDefinition({ nodes: [node("openrouter")] }, registry).valid).toBe(true);
+  });
+
+  test("typesafe sends to the TypeSafe host with the TypeSafe default model and no provider field", async () => {
+    const { executor, calls } = makeExecutor([jsonResponse(mixedBody())]);
+    const result = await runJev(executor, mixedConfig({ model: undefined }));
+
+    expect(result.status).toBe("success");
+    expect(calls[0]?.url).toBe(JEV_ENDPOINT);
+    expect(calls[0]?.body.model).toBe("jev-latest");
+    expect(Object.keys(calls[0]?.body ?? {}).sort()).toEqual(["model", "questions", "state"]);
+  });
+
+  test("openrouter sends the same request to the decisions endpoint with the OpenRouter key", async () => {
+    const { executor, calls } = makeOpenRouterExecutor([jsonResponse(openRouterBody())]);
+    const config = mixedConfig({ provider: "openrouter", model: undefined });
+    const result = await runJev(executor, config);
+
+    expect(result.status).toBe("success");
+    expect(calls).toHaveLength(1);
+    const call = calls[0]!;
+    expect(call.url).toBe(OPENROUTER_ENDPOINT);
+    expect(call.init.redirect).toBe("manual");
+    expect((call.init.headers as Record<string, string>).authorization).toBe(
+      `Bearer ${OPENROUTER_KEY}`,
+    );
+    // Same wire body as TypeSafe: no `provider`, no `returns`.
+    expect(Object.keys(call.body).sort()).toEqual(["model", "questions", "state"]);
+    expect(call.body.model).toBe("~typesafe/jev-latest");
+    expect(call.body.questions).toEqual(config.questions as object);
+    // The typed contract holds on this path: one validated answer per question.
+    expect(Object.keys(result.output?.answers ?? {}).sort()).toEqual([
+      "authority",
+      "fit",
+      "urgency",
+    ]);
+    expect(result.output?.model).toBe("typesafe/jev-1.13-20260917");
+    expect(JSON.stringify(result)).not.toContain(OPENROUTER_KEY);
+  });
+
+  test("openrouter passes an explicit model slug through", async () => {
+    const { executor, calls } = makeOpenRouterExecutor([jsonResponse(openRouterBody())]);
+    await runJev(executor, mixedConfig({ provider: "openrouter", model: "typesafe/jev-1.13" }));
+    expect(calls[0]?.body.model).toBe("typesafe/jev-1.13");
+  });
+
+  test("openrouter fails the same answer contract as typesafe", async () => {
+    const { executor } = makeOpenRouterExecutor([
+      jsonResponse(withAnswers({ fit: noulAnswer, authority: choiceAnswer })),
+    ]);
+    const result = await runJev(executor, mixedConfig({ provider: "openrouter" }));
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain('missing the answer for question "urgency"');
+  });
+
+  test("openrouter never falls through to OPENAI_API_KEY", async () => {
+    const { calls, transport } = makeTransport([jsonResponse(openRouterBody())]);
+    const executor = new JevExecutor(deps, {
+      fetch: transport,
+      env: { OPENAI_API_KEY: "sk-openai-example-0123456789" },
+    });
+    const result = await runJev(executor, mixedConfig({ provider: "openrouter" }));
+
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("OPENROUTER_API_KEY is not configured");
+    expect(result.error).not.toContain("OPENAI_API_KEY");
+    expect(calls).toHaveLength(0);
+  });
+
+  test("openrouter refuses a gateway base URL instead of sending the key there", async () => {
+    const { executor, calls } = makeOpenRouterExecutor([jsonResponse(openRouterBody())], {
+      OPENROUTER_BASE_URL: "https://gateway.example.test/proxy/v1",
+    });
+    const result = await runJev(executor, mixedConfig({ provider: "openrouter" }));
+
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("OPENROUTER_BASE_URL");
+    expect(calls).toHaveLength(0);
+    expect(
+      await executor.checkReadiness([{ id: "n", config: { provider: "openrouter" } }]),
+    ).toEqual([{ nodeIds: ["n"], message: expect.stringContaining("OPENROUTER_BASE_URL") }]);
+  });
+
+  test("each provider reads only its own key", async () => {
+    // TypeSafe key present, OpenRouter key absent.
+    await upsertSwarmConfig({
+      scope: "global",
+      key: "TYPESAFE_API_KEY",
+      value: API_KEY,
+      isSecret: true,
+    });
+    const { calls, transport } = makeTransport([jsonResponse(mixedBody())]);
+    const executor = new JevExecutor(deps, { fetch: transport, env: {} });
+
+    const viaOpenRouter = await runJev(executor, mixedConfig({ provider: "openrouter" }));
+    expect(viaOpenRouter.error).toContain("OPENROUTER_API_KEY");
+    expect(calls).toHaveLength(0);
+
+    const viaTypeSafe = await runJev(executor, mixedConfig({ provider: "typesafe" }));
+    expect(viaTypeSafe.status).toBe("success");
+    expect((calls[0]?.init.headers as Record<string, string>).authorization).toBe(
+      `Bearer ${API_KEY}`,
+    );
+
+    // OpenRouter key present, TypeSafe row absent.
+    await getDbClient().run("DELETE FROM swarm_config WHERE key = 'TYPESAFE_API_KEY'");
+    const { calls: orCalls, transport: orTransport } = makeTransport([
+      jsonResponse(openRouterBody()),
+    ]);
+    const orExecutor = new JevExecutor(deps, {
+      fetch: orTransport,
+      env: { OPENROUTER_API_KEY: OPENROUTER_KEY },
+    });
+    const viaTypeSafeMissing = await runJev(orExecutor, mixedConfig({ provider: "typesafe" }));
+    expect(viaTypeSafeMissing.error).toContain("TYPESAFE_API_KEY is not configured");
+    expect(orCalls).toHaveLength(0);
+  });
+});
+
+// ─── Rejected key ───────────────────────────────────────────
+
+describe("a key the host rejects", () => {
+  test("a 401 or 403 says the named key was rejected, once, never retried", async () => {
+    for (const status of [401, 403]) {
+      const { executor, calls, sleeps } = makeExecutor([
+        jsonResponse({ detail: { error_type: "authentication_error", message: API_KEY } }, status),
+      ]);
+      const result = await runJev(executor, mixedConfig({ maxRetries: 3 }));
+
+      expect(result.status).toBe("failed");
+      expect(result.error).toContain(`TYPESAFE_API_KEY was rejected by TypeSafe (HTTP ${status}`);
+      expect(result.error).toContain("(authentication_error)");
+      expect(result.error).toContain("Secrets page");
+      expect(calls).toHaveLength(1);
+      expect(sleeps).toHaveLength(0);
+      // The host echoed the key in its body; nothing of it reaches the error.
+      expect(JSON.stringify(result)).not.toContain(API_KEY);
+    }
+  });
+
+  test("the rejection names the provider that was used", async () => {
+    const { executor, calls } = makeOpenRouterExecutor([
+      jsonResponse({ error: { message: OPENROUTER_KEY, code: 401 } }, 401),
+    ]);
+    const result = await runJev(executor, mixedConfig({ provider: "openrouter", maxRetries: 3 }));
+
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("OPENROUTER_API_KEY was rejected by OpenRouter (HTTP 401");
+    expect(result.error).not.toContain("TYPESAFE_API_KEY");
+    expect(calls).toHaveLength(1);
+    expect(JSON.stringify(result)).not.toContain(OPENROUTER_KEY);
+  });
+
+  test("other failures keep the generic message, not the key-rejected one", async () => {
+    for (const status of [400, 402, 422, 500]) {
+      const { executor } = makeExecutor([jsonResponse({ error: { code: "boom" } }, status)]);
+      const result = await runJev(executor, mixedConfig({ maxRetries: 0 }));
+      expect(result.error).toContain(`Jev API returned HTTP ${status}`);
+      expect(result.error).not.toContain("was rejected");
+    }
+  });
+});
+
+// ─── Readiness (before first use) ───────────────────────────
+
+describe("jev readiness before first use", () => {
+  test("no problem when the key is present", async () => {
+    const { executor } = makeExecutor([jsonResponse(mixedBody())]);
+    expect(await executor.checkReadiness([{ id: "a", config: mixedConfig() }])).toEqual([]);
+  });
+
+  test("names the exact key for the provider each node uses", async () => {
+    const { calls, transport } = makeTransport([jsonResponse(mixedBody())]);
+    const executor = new JevExecutor(deps, { fetch: transport, env: {} });
+    const problems = await executor.checkReadiness([
+      { id: "a", config: mixedConfig() },
+      { id: "b", config: mixedConfig({ provider: "openrouter" }) },
+      { id: "c", config: mixedConfig({ provider: "typesafe" }) },
+      { id: "d", config: mixedConfig({ provider: "no-such-provider" }) },
+    ]);
+
+    expect(problems).toHaveLength(2);
+    const typesafe = problems.find((p) => p.message.startsWith("TYPESAFE_API_KEY"));
+    const openrouter = problems.find((p) => p.message.startsWith("OPENROUTER_API_KEY"));
+    expect(typesafe?.nodeIds).toEqual(["a", "c"]);
+    expect(openrouter?.nodeIds).toEqual(["b"]);
+    for (const problem of problems) {
+      expect(problem.message).toContain("Secrets page");
+      expect(problem.message).toContain("not configured");
+    }
+    // Readiness never calls the provider.
+    expect(calls).toHaveLength(0);
+  });
+
+  test("blank and malformed keys are not ready", async () => {
+    for (const key of ["   ", "bad\nkey"]) {
+      const { executor } = makeExecutor([jsonResponse(mixedBody())], {
+        getApiKey: async () => key,
+      });
+      const problems = await executor.checkReadiness([{ id: "a", config: mixedConfig() }]);
+      expect(problems).toHaveLength(1);
+      expect(problems[0]?.message).toContain("TYPESAFE_API_KEY");
+      expect(JSON.stringify(problems)).not.toContain("bad");
+    }
+  });
+
+  test("a config row that cannot be read is reported without its cause", async () => {
+    const { executor } = makeExecutor([jsonResponse(mixedBody())], {
+      getApiKey: async () => {
+        throw new Error("Failed to decrypt config 'TYPESAFE_API_KEY' (id=row-1)");
+      },
+    });
+    const problems = await executor.checkReadiness([{ id: "a", config: mixedConfig() }]);
+    expect(problems[0]?.message).toBe("Could not read TYPESAFE_API_KEY from swarm config");
+  });
+
+  test("a workflow with no jev node is ready without asking anyone", async () => {
+    const registry = engineRegistry(new JevExecutor(deps, { getApiKey: async () => null }));
+    expect(
+      await findWorkflowReadinessProblems(
+        { nodes: [{ id: "m", type: "marker", config: { label: "x" } }] },
+        registry,
+      ),
+    ).toEqual([]);
+  });
+
+  test("a save warning names the key, where to set it, the node, and the consequence", async () => {
+    const registry = engineRegistry(new JevExecutor(deps, { getApiKey: async () => null }));
+    const warnings = await workflowSaveWarnings(gatedDefinition(), registry);
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("TYPESAFE_API_KEY is not configured");
+    expect(warnings[0]).toContain("Secrets page");
+    expect(warnings[0]).toContain('jev node "qualify"');
+    expect(warnings[0]).toContain("fail before any node executes");
+
+    const ready = engineRegistry(new JevExecutor(deps, { getApiKey: async () => API_KEY }));
+    expect(await workflowSaveWarnings(gatedDefinition(), ready)).toEqual([]);
+  });
+
+  test("a readiness check that throws becomes a problem, never an exception", async () => {
+    class ThrowingExecutor extends MarkerExecutor {
+      override async checkReadiness(): Promise<never> {
+        throw new Error("boom with secret-detail");
+      }
+    }
+    const registry = new ExecutorRegistry();
+    registry.register(new ThrowingExecutor(deps));
+    const problems = await findWorkflowReadinessProblems(
+      { nodes: [{ id: "m", type: "marker", config: { label: "x" } }] },
+      registry,
+    );
+    expect(problems).toHaveLength(1);
+    expect(problems[0]?.message).not.toContain("secret-detail");
+  });
+});
+
+// ─── Run start ──────────────────────────────────────────────
+
+/** A marker runs first, so a run that started would leave a step behind. */
+const markerThenJev = (jev: Partial<WorkflowNode> = {}): WorkflowDefinition => ({
+  nodes: [
+    { id: "before", type: "marker", config: { label: "side effect" }, next: "qualify" },
+    {
+      id: "qualify",
+      type: "jev",
+      config: mixedConfig(),
+      next: "after",
+      ...jev,
+    },
+    { id: "after", type: "marker", config: { label: "done" } },
+  ],
+});
+
+describe("run start with a jev node", () => {
+  test("a missing key fails the run before any node executes", async () => {
+    // Default key lookup (the swarm config row) with no row present.
+    const { calls, transport } = makeTransport([jsonResponse(mixedBody())]);
+    const registry = engineRegistry(new JevExecutor(deps, { fetch: transport, env: {} }));
+    const runId = await startWorkflowExecution(await makeWorkflow(markerThenJev()), {}, registry);
+
+    const run = await getWorkflowRun(runId);
+    expect(run?.status).toBe("failed");
+    expect(run?.finishedAt).toBeTruthy();
+    expect(run?.error).toContain("Run not started, no node executed");
+    expect(run?.error).toContain("TYPESAFE_API_KEY is not configured");
+    expect(run?.error).toContain("Secrets page");
+    expect(run?.error).toContain('jev node "qualify"');
+    // Not even the marker ahead of the jev node ran, and nothing was sent.
+    expect(await getWorkflowRunStepsByRunId(runId)).toHaveLength(0);
+    expect(calls).toHaveLength(0);
+  });
+
+  test("the error names the key of the provider the node uses", async () => {
+    const { calls, transport } = makeTransport([jsonResponse(openRouterBody())]);
+    // A TypeSafe key exists; the node asks for OpenRouter, which has none.
+    await upsertSwarmConfig({
+      scope: "global",
+      key: "TYPESAFE_API_KEY",
+      value: API_KEY,
+      isSecret: true,
+    });
+    const registry = engineRegistry(new JevExecutor(deps, { fetch: transport, env: {} }));
+    const runId = await startWorkflowExecution(
+      await makeWorkflow(markerThenJev({ config: mixedConfig({ provider: "openrouter" }) })),
+      {},
+      registry,
+    );
+
+    const run = await getWorkflowRun(runId);
+    expect(run?.status).toBe("failed");
+    expect(run?.error).toContain("OPENROUTER_API_KEY is not configured");
+    expect(run?.error).not.toContain("TYPESAFE_API_KEY");
+    expect(await getWorkflowRunStepsByRunId(runId)).toHaveLength(0);
+    expect(calls).toHaveLength(0);
+  });
+
+  test("with the key configured the same definition runs to completion", async () => {
+    await upsertSwarmConfig({
+      scope: "global",
+      key: "TYPESAFE_API_KEY",
+      value: API_KEY,
+      isSecret: true,
+    });
+    const { calls, transport } = makeTransport([jsonResponse(mixedBody())]);
+    const registry = engineRegistry(new JevExecutor(deps, { fetch: transport, env: {} }));
+    const runId = await startWorkflowExecution(await makeWorkflow(markerThenJev()), {}, registry);
+
+    expect((await getWorkflowRun(runId))?.status).toBe("completed");
+    expect((await getWorkflowRunStepsByRunId(runId)).map((s) => s.nodeId).sort()).toEqual([
+      "after",
+      "before",
+      "qualify",
+    ]);
+    expect(calls).toHaveLength(1);
+  });
+
+  test("a definition without a jev node starts whether or not any key exists", async () => {
+    const registry = engineRegistry(new JevExecutor(deps, { env: {} }));
+    const runId = await startWorkflowExecution(
+      await makeWorkflow({ nodes: [{ id: "only", type: "marker", config: { label: "x" } }] }),
+      {},
+      registry,
+    );
+    expect((await getWorkflowRun(runId))?.status).toBe("completed");
+  });
+
+  test("a rejected key then a rotated key: retry is refused while the key is gone, then succeeds", async () => {
+    const upsertKey = () =>
+      upsertSwarmConfig({
+        scope: "global",
+        key: "TYPESAFE_API_KEY",
+        value: API_KEY,
+        isSecret: true,
+      });
+    await upsertKey();
+    const { calls, transport } = makeTransport([
+      jsonResponse({ detail: { error_type: "authentication_error" } }, 401),
+      jsonResponse(mixedBody()),
+    ]);
+    const registry = engineRegistry(new JevExecutor(deps, { fetch: transport, env: {} }));
+    const runId = await startWorkflowExecution(await makeWorkflow(markerThenJev()), {}, registry);
+
+    // Distinct rejected-key error on the step; the marker ahead of it did run.
+    const failedRun = await getWorkflowRun(runId);
+    const qualify = (await getWorkflowRunStepsByRunId(runId)).find((s) => s.nodeId === "qualify");
+    expect(failedRun?.status).toBe("failed");
+    expect(qualify?.error).toContain("TYPESAFE_API_KEY was rejected by TypeSafe (HTTP 401");
+    expect(calls).toHaveLength(1);
+
+    // Key removed: the retry is refused up front and the run stays failed.
+    await getDbClient().run("DELETE FROM swarm_config WHERE key = 'TYPESAFE_API_KEY'");
+    await expect(retryFailedRun(runId, registry)).rejects.toThrow(
+      /Retry not started, run left failed: TYPESAFE_API_KEY is not configured/,
+    );
+    expect((await getWorkflowRun(runId))?.status).toBe("failed");
+    expect(calls).toHaveLength(1);
+
+    // Key replaced: the retry goes through.
+    await upsertKey();
+    await retryFailedRun(runId, registry);
+    expect((await getWorkflowRun(runId))?.status).toBe("completed");
+    expect(calls).toHaveLength(2);
+  });
+});
+
+// ─── The skill's key probe ──────────────────────────────────
+
+describe("the workflow-iterate key probe", () => {
+  test("the probe definition in the skill validates and makes exactly one one-question call", async () => {
+    const skill = await Bun.file(
+      new URL("../../templates/skills/workflow-iterate/content.md", import.meta.url).pathname,
+    ).text();
+    const blocks = [...skill.matchAll(/```json\n([\s\S]*?)```/g)].map((match) => match[1] ?? "");
+    const probe = blocks.find((block) => block.includes('"id": "ping"'));
+    expect(probe).toBeDefined();
+    const definition = JSON.parse(probe as string) as WorkflowDefinition;
+
+    const registry = createExecutorRegistry(deps);
+    expect(validateDefinition(definition, registry)).toEqual({ valid: true, errors: [] });
+
+    const { calls, transport } = makeTransport([
+      jsonResponse(withAnswers({ ping: noulAnswer }, { model: "jev-1.13.0" })),
+    ]);
+    const node = definition.nodes[0] as WorkflowNode;
+    const result = await new JevExecutor(deps, {
+      fetch: transport,
+      getApiKey: async () => API_KEY,
+    }).run({ config: node.config, context: {}, meta: meta("ping") });
+
+    expect(result.status).toBe("success");
+    expect(calls).toHaveLength(1);
+    expect(Object.keys(calls[0]?.body.questions as object)).toEqual(["ping"]);
   });
 });
