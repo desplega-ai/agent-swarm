@@ -170,6 +170,7 @@ RUN mkdir -p /home/worker/.codex && \
       'show_raw_agent_reasoning = false' \
       '' \
       '[features]' \
+      'apps = false' \
       'hooks = true' \
       'plugin_hooks = true' \
       > /home/worker/.codex/config.toml && \

@@ -1914,12 +1914,13 @@ describe("buildCodexConfig — context-mode + features", () => {
     expect(mcp["context-mode"]).toBeUndefined();
   });
 
-  test("sets features.hooks and features.plugin_hooks to true", async () => {
+  test("disables apps and enables hooks", async () => {
     delete process.env.CONTEXT_MODE_DISABLED;
     globalThis.fetch = stubFetch({ servers: [], total: 0 });
     const merged = await buildCodexConfig(cfg(), "gpt-5.4", () => {});
 
     const features = merged.features as Record<string, unknown>;
+    expect(features.apps).toBe(false);
     expect(features.hooks).toBe(true);
     expect(features.plugin_hooks).toBe(true);
   });
