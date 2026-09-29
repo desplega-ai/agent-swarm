@@ -91,12 +91,12 @@ describe("migration 166 approval auto-cancellation index", () => {
       expect(() => insert("e-timeout", "timeout")).not.toThrow();
       expect(() => insert("f-expired", "expired")).toThrow(/CHECK/);
 
-      // Later migrations may land on top, so assert 166 was re-applied rather
-      // than that it is the newest one.
-      const applied = db
+      // Assert 166 was re-recorded, not that it is the tail: later migrations
+      // land on top of it.
+      const reapplied = db
         .query<{ version: number }, []>("SELECT version FROM _migrations WHERE version = 166")
         .get();
-      expect(applied?.version).toBe(166);
+      expect(reapplied?.version).toBe(166);
     } finally {
       db.close();
     }

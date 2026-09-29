@@ -64,6 +64,7 @@ type:InboxSummary
 type:InsertPricingRowInput
 type:InsertTaskAttachmentInput
 type:KeyCostSummary
+type:KvJsonFieldEquals
 type:McpServerFilters
 type:McpServerInsert
 type:MentionPreview
@@ -441,6 +442,7 @@ value:isPendingSlackMessage
 value:isPoolAffinityEnforcementEnabled
 value:isSettledSlackMessage
 value:isSqliteVecAvailable
+value:kvPrefixUpperBound
 value:listAgentsWithCredStatusByProvider
 value:listAllMetrics
 value:listAllPages

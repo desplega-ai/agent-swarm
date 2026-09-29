@@ -523,8 +523,9 @@ export async function createResumeFollowUp(args: {
 
   // Identity-shaped fields (dir, VCS provider/repo/number/url/etc.,
   // outputSchema, slack channel/thread/user, agentmail, mention, contextKey,
-  // requestedByUserId, followUpConfig) are auto-inherited from the parent by
-  // `createTaskExtended`'s parentTaskId block (see src/be/db.ts). `model` is
+  // requestedByUserId) are auto-inherited from the parent by
+  // `createTaskExtended`'s parentTaskId block (see src/be/db.ts);
+  // followUpConfig is opt-in and set below. `model` is
   // deliberately excluded there so the resume task resolves to the claiming
   // agent's own provider/model — never the parent's concrete model string.
   // We only override what's SPECIFIC to the resume task here.
@@ -563,6 +564,9 @@ export async function createResumeFollowUp(args: {
     tags,
     priority,
     parentTaskId: parent.id,
+    // Same work, new session: the creator's onCompleted/onFailed must still
+    // fire when this resume finishes.
+    inheritParentFollowUpConfig: true,
     routingAffinity,
   });
 

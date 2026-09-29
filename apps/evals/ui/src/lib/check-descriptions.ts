@@ -163,11 +163,25 @@ export function explainCheck(name: string): CheckExplanation {
   };
 }
 
+/**
+ * A scored check feeds a weighted dimension and reports a graded score. It is
+ * shown as that number (0.67), never as pass/fail: pass means exactly 1.0, so a
+ * 0.67 used to read as "Failed". Gates (no dimension) keep pass/fail.
+ */
+export function isScoredJudgment(j: { dimension: string | null; score: number | null }): boolean {
+  return j.dimension !== null && j.score !== null;
+}
+
 export function observedText(
   reasoning: string | null,
   pass: boolean,
   score: number | null,
+  scored = false,
 ): string {
+  if (scored && score !== null) {
+    const head = `Scored ${score.toFixed(2)} of 1`;
+    return reasoning ? `${head}: ${reasoning}` : `${head}.`;
+  }
   const scoreText = score === null ? null : `score ${score.toFixed(2)}`;
   const verdict = pass ? "Passed" : "Failed";
   if (reasoning && scoreText) return `${verdict} with ${scoreText}: ${reasoning}`;

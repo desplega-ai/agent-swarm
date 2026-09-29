@@ -24,7 +24,7 @@ import { rerank } from "../be/memory/reranker";
 import { getRetrievalsForAgent, hasRetrievalForTask } from "../be/memory/retrieval-store";
 import { getUsefulnessStats } from "../be/memory/usefulness-stats";
 import { shouldPersistAutomaticTaskMemory } from "../memory/automatic-task-gate";
-import { SIMILARITY_THRESHOLD } from "../prompts/memories";
+import { memoryRelevance, SIMILARITY_THRESHOLD } from "../prompts/memories";
 import { can } from "../rbac";
 import { AgentMemorySchema, AgentMemoryScopeSchema, AgentMemorySourceSchema } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
@@ -688,7 +688,24 @@ export async function handleMemory(
         source,
         isLead: false,
       });
-      const ranked = rerank(expanded, { limit: Math.min(limit, 20) });
+      const resultLimit = Math.min(limit, 20);
+      const consumptionHeader = req.headers["x-memory-consumption"];
+      const consumptionMode = Array.isArray(consumptionHeader)
+        ? consumptionHeader[0]
+        : consumptionHeader;
+      // Prompt recall injects only rows above the relevance gate, so the gate
+      // must pick the slots, not trim them afterwards: eligible rows fill the
+      // cap first (in composite order), ineligible rows only the remainder.
+      // Capping by composite first let boosted low-relevance rows take every
+      // slot and render an empty prompt while an eligible hit existed.
+      const ranked =
+        consumptionMode === "prompt"
+          ? rerank(expanded, { limit: expanded.length })
+              .map((r) => ({ r, eligible: memoryRelevance(r) > SIMILARITY_THRESHOLD }))
+              .sort((a, b) => Number(b.eligible) - Number(a.eligible))
+              .slice(0, resultLimit)
+              .map(({ r }) => r)
+          : rerank(expanded, { limit: resultLimit });
 
       // Retrieval bridge — when caller passed `X-Source-Task-ID`, record one
       // `memory_retrieval` row per returned memory so server-side raters
@@ -701,10 +718,6 @@ export async function handleMemory(
         : sourceTaskIdHeader;
       const contextKeyHeader = req.headers["x-context-key"];
       const contextKey = Array.isArray(contextKeyHeader) ? contextKeyHeader[0] : contextKeyHeader;
-      const consumptionHeader = req.headers["x-memory-consumption"];
-      const consumptionMode = Array.isArray(consumptionHeader)
-        ? consumptionHeader[0]
-        : consumptionHeader;
       if (sourceTaskId && intent) {
         try {
           await recordRetrievals(
@@ -713,6 +726,7 @@ export async function handleMemory(
             ranked.map((r) => ({
               memoryId: r.id,
               similarity: r.similarity,
+              relevance: r.rawSimilarity,
               retrievalSource: r.retrievalSource,
             })),
             undefined,
@@ -727,7 +741,7 @@ export async function handleMemory(
       if (intent) {
         const consumed =
           consumptionMode === "prompt"
-            ? ranked.filter((r) => r.similarity > SIMILARITY_THRESHOLD)
+            ? ranked.filter((r) => memoryRelevance(r) > SIMILARITY_THRESHOLD)
             : ranked;
         consumedIds = dedupeMemoryDocumentIds(consumed);
         try {

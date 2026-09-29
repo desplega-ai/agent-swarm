@@ -402,6 +402,20 @@ The function dispatches `pre.task.followUp` before it creates the follow-up task
 
 The resulting task also dispatches `pre.task.create` with origin `followUp`. Both extension events run before any database transaction begins.
 
+### `followUpConfig` inheritance
+
+A task's `followUpConfig` (its creator's `onCompleted` / `onFailed` / `disabled`) belongs to one piece of work, not to the thread. `createTaskExtended` copies it from the parent only when the caller passes `inheritParentFollowUpConfig: true`; an explicit `followUpConfig` always wins.
+
+| Creator | Inherits? | Why |
+|---------|-----------|-----|
+| `createResumeFollowUp` (crash recovery, graceful shutdown, `POST /api/tasks/{id}/supersede`) | Yes | Same work, new session |
+| `runRebootSweep` retry child | Yes | Same work, re-run |
+| `defer-task` wake-up (`schedule.taskType === "deferred"`) | Yes | Continues the deferred work |
+| `send-task` with `taskType: "resume"` (reroute-decision re-delegation) | Yes | Continues the crashed work |
+| `createWorkerTaskFollowUp` (Lead follow-up) | No | Would re-fire the finished task's instructions on the Lead's next delegation |
+| `send-task` without `taskType: "resume"` | No | New work |
+| Everything else with a `parentTaskId` (Slack/AgentMail/VCS thread replies, steering promotion, reroute/pool-starvation decisions, `POST /tasks`, scripts) | No | New work in the same thread |
+
 ---
 
 ## Quick reference: env knobs

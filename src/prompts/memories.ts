@@ -18,9 +18,26 @@ export type RelevantMemory = {
   name: string;
   content: string;
   similarity: number;
+  rawSimilarity?: number;
 };
 
-export const SIMILARITY_THRESHOLD = 0.4;
+/**
+ * Minimum pre-boost relevance for a memory to be injected into a task prompt.
+ *
+ * Compared against `rawSimilarity`, the [0,1] match score every retrieval arm
+ * emits before rerank (vec cosine, hybrid fused cosine, graph-derived), never
+ * against the composite `similarity`: the reranker's access, source-quality
+ * and usefulness multipliers can lift a score up to 4.5x, so a composite
+ * threshold admits unrelated rows. 0.55 sits between an unrelated query's best
+ * cosine (~0.33 on the production embedding model) and an exact-name hybrid
+ * hit (~0.65 fused).
+ */
+export const SIMILARITY_THRESHOLD = 0.55;
+
+/** The score the injection threshold applies to. Older servers omit `rawSimilarity`. */
+export function memoryRelevance(memory: { similarity: number; rawSimilarity?: number }): number {
+  return memory.rawSimilarity ?? memory.similarity;
+}
 
 const RATE_TOOL_HINT = `
 
@@ -35,7 +52,7 @@ This trains the swarm to surface better memories next time. Use sparingly:
  * append entirely (matching pre-step-5 behaviour).
  */
 export function renderMemoriesPrompt(memories: RelevantMemory[]): string | null {
-  const useful = memories.filter((m) => m.similarity > SIMILARITY_THRESHOLD);
+  const useful = memories.filter((m) => memoryRelevance(m) > SIMILARITY_THRESHOLD);
   if (useful.length === 0) return null;
 
   const memoryContext = useful

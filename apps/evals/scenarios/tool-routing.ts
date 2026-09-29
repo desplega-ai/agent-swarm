@@ -8,7 +8,6 @@ import {
   type SequenceStage,
   safeStringify,
   scoreResult,
-  stageOrderScore,
   taskToolUses,
 } from "./orchestration-utils.ts";
 
@@ -54,15 +53,13 @@ const routingCheck: DeterministicCheck = {
 };
 
 // ---------------------------------------------------------------------------
-// dispatch-order: a hop-SEQUENCE structural axis, additive to routingCheck
-// above. routingCheck only grades tool-category PRESENCE ("did you touch
-// memory/kv/get-tasks/send-task at all") — a run that fires them in a
-// scrambled order (e.g. dispatches the follow-up task BEFORE it ever looked up
-// the completed-alpha tasks the follow-up is supposed to build on) scores
-// identically to one that respects the causal order the prompt implies. This
-// is the single-worker analog of "the right hop happened at the right point in
-// the sequence" — Edge-F1-style order fidelity (stageOrderScore) rather than
-// Node-F1-style presence.
+// dispatch-order: a PARTIAL order over the hops, additive to routingCheck
+// above. Only the causal edges the task implies are graded: recall memory
+// before delegating the follow-up, and delegate before completing. KV and
+// task-lookup can happen anywhere; a strict first-use order over all five
+// stages penalized harmless reorderings (e.g. a kv-set before the lookup).
+// Each edge scores when both stages are present and the first use of the
+// earlier stage comes before the first use of the later one.
 // ---------------------------------------------------------------------------
 const ROUTING_STAGES: SequenceStage[] = [
   {
@@ -78,18 +75,39 @@ const ROUTING_STAGES: SequenceStage[] = [
   { label: "complete", patterns: ["store-progress", "store_progress"] },
 ];
 
+/** Graded before→after edges, as indices into ROUTING_STAGES. */
+const ROUTING_EDGES: Array<[number, number]> = [
+  [0, 3], // memory-recall before delegate-followup
+  [3, 4], // delegate-followup before complete
+];
+
+function partialOrderScore(indices: number[]): { score: number; edges: string[] } {
+  const edges = ROUTING_EDGES.map(([a, b]) => {
+    const ia = indices[a]!;
+    const ib = indices[b]!;
+    const ok = ia >= 0 && ib >= 0 && ia < ib;
+    return {
+      ok,
+      label: `${ROUTING_STAGES[a]!.label}<${ROUTING_STAGES[b]!.label}=${ok ? "ok" : "no"}`,
+    };
+  });
+  return {
+    score: edges.filter((e) => e.ok).length / ROUTING_EDGES.length,
+    edges: edges.map((e) => e.label),
+  };
+}
+
 const routingSequenceCheck: DeterministicCheck = {
   name: "tool-routing-hop-order",
   fn: async (ctx): Promise<CheckResult> => {
     const tools = await taskToolUses(ctx, ctx.tasks[0]);
     if (tools.length === 0) return { pass: false, score: 0, detail: "no parsed tool calls" };
     const indices = firstStageIndices(tools, ROUTING_STAGES);
-    const score = stageOrderScore(indices);
-    return scoreResult(
-      "routing hop order",
-      score,
-      ROUTING_STAGES.map((s, i) => `${s.label}=${indices[i]! >= 0 ? indices[i] : "absent"}`),
-    );
+    const { score, edges } = partialOrderScore(indices);
+    return scoreResult("routing hop order", score, [
+      ...edges,
+      ...ROUTING_STAGES.map((s, i) => `${s.label}=${indices[i]! >= 0 ? indices[i] : "absent"}`),
+    ]);
   },
 };
 
@@ -129,7 +147,7 @@ async function workerKvEntries(ctx: JudgeContext, tools: ToolUse[]): Promise<KvE
 // answer key that lives only in the seeded history (same fixture as sql-audit):
 // the completed count and the highest-priority completed task, plus a KV
 // checkpoint and a follow-up task that carry those facts.
-const COMPLETED_COUNT = /(?<![\d.])21(?![\d.])/;
+const COMPLETED_COUNT = /(?<![\d.])12(?![\d.])/;
 const TOP_TASK = /rotate[\s\S]{0,40}payments[\s\S]{0,40}api[\s\S]{0,20}keys/i;
 
 const routingCorrectnessCheck: DeterministicCheck = {
@@ -177,6 +195,47 @@ const routingOutputGate: DeterministicCheck = {
   },
 };
 
+/**
+ * Structured-output gate (folded in from the retired structured-output-adherence
+ * scenario): the completion output must be ONLY a JSON object matching the
+ * task's outputSchema, with every field correctly typed.
+ */
+const ROUTING_OUTPUT_SCHEMA = {
+  type: "object",
+  required: ["alphaSummary", "checkpointKey", "followUpCreated"],
+  properties: {
+    alphaSummary: { type: "string" },
+    checkpointKey: { type: "string" },
+    followUpCreated: { type: "boolean" },
+  },
+};
+
+function structuredOutputProblem(output: unknown): string | null {
+  if (typeof output !== "string" || !output.trim()) return "no task output";
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(output);
+  } catch {
+    return "output is not valid JSON";
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+    return "JSON output is not an object";
+  const obj = parsed as Record<string, unknown>;
+  if (typeof obj.alphaSummary !== "string" || !obj.alphaSummary.trim())
+    return "alphaSummary missing or not a string";
+  if (typeof obj.checkpointKey !== "string") return "checkpointKey missing or not a string";
+  if (typeof obj.followUpCreated !== "boolean") return "followUpCreated missing or not a boolean";
+  return null;
+}
+
+const structuredOutputGate: DeterministicCheck = {
+  name: "routing-structured-output",
+  fn: async (ctx) => {
+    const problem = structuredOutputProblem(ctx.tasks[0]?.result);
+    return { pass: problem === null, detail: problem ?? "output matches the outputSchema" };
+  },
+};
+
 export const toolRouting: Scenario = {
   id: "tool-routing",
   name: "Tool routing",
@@ -193,16 +252,17 @@ export const toolRouting: Scenario = {
   tasks: [
     {
       title: "Route Project Alpha through the swarm tools",
+      outputSchema: ROUTING_OUTPUT_SCHEMA,
       description: [
         "Hand Project Alpha from phase one to phase two. The handoff conventions are in swarm memory; follow them exactly.",
         "Use the swarm's own MCP tools for every step. Do not use raw curl/fetch against /api endpoints and do not use db-query.",
         "Create exactly one follow-up task for phase two.",
-        "Complete through store-progress with JSON including alphaSummary (with the completed count and the top task title), checkpointKey, and followUpCreated.",
+        "Complete through store-progress with output that is ONLY a JSON object (no markdown or prose): alphaSummary (string, with the completed count and the top task title), checkpointKey (string), followUpCreated (boolean).",
       ].join("\n"),
     },
   ],
   outcome: {
-    gates: [routingOutputGate],
+    gates: [routingOutputGate, structuredOutputGate],
     dimensions: [
       { name: "tool-selection", weight: 5, checks: [routingCheck] },
       { name: "dispatch-order", weight: 2, checks: [routingSequenceCheck] },
@@ -217,5 +277,8 @@ export const __test__ = {
   routingSequenceCheck,
   routingCorrectnessCheck,
   routingOutputGate,
+  structuredOutputGate,
+  structuredOutputProblem,
+  partialOrderScore,
   ROUTING_STAGES,
 };

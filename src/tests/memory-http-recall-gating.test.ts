@@ -5,7 +5,6 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
 import * as realMemoryModule from "../be/memory";
-import { sourceQuality } from "../be/memory/reranker";
 import { SIMILARITY_THRESHOLD } from "../prompts/memories";
 import type { AgentMemory } from "../types";
 
@@ -111,7 +110,9 @@ mock.module("../be/memory", () => ({
       if (options.queryText === "prompt recall") {
         return [
           candidate(memory, 0.95),
-          candidate(thresholdMemory, SIMILARITY_THRESHOLD / sourceQuality(thresholdMemory.source)),
+          // Relevance exactly at the threshold; the manual-source boost lifts
+          // the composite well above it. The gate must read relevance.
+          candidate(thresholdMemory, SIMILARITY_THRESHOLD),
         ];
       }
       return [candidate(memory, 0.95)];
@@ -281,16 +282,25 @@ describe("memory HTTP recall capture gating", () => {
     ]);
   });
 
-  test("prompt recall excludes memories at the injection threshold", async () => {
+  test("prompt recall gates on relevance, not the boosted composite score", async () => {
     const response = await callMemoryRoute(
       "POST",
       "/api/memory/search",
       ["api", "memory", "search"],
       { query: "prompt recall", intent: "pre-task memory recall", limit: 5 },
-      { "x-memory-consumption": "prompt" },
+      { "x-memory-consumption": "prompt", "x-source-task-id": sourceTaskId },
     );
 
     expect(response.statusCode).toBe(200);
+    const threshold = response.body.results.find((r: any) => r.id === thresholdMemoryId);
+    expect(threshold.similarity).toBeGreaterThan(SIMILARITY_THRESHOLD);
+    expect(threshold.rawSimilarity).toBe(SIMILARITY_THRESHOLD);
+    expect(
+      await getDbClient().get<{ similarity: number; relevance: number }>(
+        "SELECT similarity, relevance FROM memory_retrieval WHERE memoryId = ?",
+        [thresholdMemoryId],
+      ),
+    ).toEqual({ similarity: threshold.similarity, relevance: SIMILARITY_THRESHOLD });
     expect(response.body.results.map((result: any) => result.accessCount)).toEqual([1, 0]);
     expect(
       await getDbClient().get<{ accessCount: number }>(

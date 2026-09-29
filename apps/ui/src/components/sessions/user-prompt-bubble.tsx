@@ -10,6 +10,7 @@
 
 import { useUsers } from "@/api/hooks/use-users";
 import type { TaskAttachment } from "@/api/types";
+import { stripContextFooter } from "@/components/session-panel/model";
 import { TaskPromptAttachments } from "@/components/shared/task-attachments-section";
 import { cn } from "@/lib/utils";
 
@@ -55,7 +56,8 @@ export function UserPromptBubble({
             "whitespace-pre-wrap break-words text-left min-w-0",
           )}
         >
-          {text}
+          {/* The contextual panel's page-context footer is for the lead, not the reader. */}
+          {stripContextFooter(text)}
         </div>
       </div>
     </section>

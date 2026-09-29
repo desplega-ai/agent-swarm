@@ -331,11 +331,23 @@ export async function getAppRow(
   return entry.value as AppRow;
 }
 
-export async function listAppRows(appId: string, model: string): Promise<AppRow[]> {
+/**
+ * `equals` pre-filters rows in SQL on top-level fields so a filtered list
+ * does not decode the whole model. The match is looser than `===` (JSON
+ * `true` equals `1`); callers re-check the returned rows.
+ */
+export async function listAppRows(
+  appId: string,
+  model: string,
+  equals: Array<{ column: string; value: string | number | boolean }> = [],
+): Promise<AppRow[]> {
   const entries = await listKv(appsNamespace(appId), {
     prefix: `${model}/row/`,
     limit: 100000,
     offset: 0,
+    jsonFieldEquals: equals
+      .filter((filter) => !/["\\]/.test(filter.column))
+      .map((filter) => ({ field: filter.column, value: filter.value })),
   });
   return entries
     .map((entry) => entry.value)

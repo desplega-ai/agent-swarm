@@ -3282,7 +3282,13 @@ async function fetchRelevantMemories(
     if (!response.ok) return null;
 
     const data = (await response.json()) as {
-      results: Array<{ id: string; name: string; content: string; similarity: number }>;
+      results: Array<{
+        id: string;
+        name: string;
+        content: string;
+        similarity: number;
+        rawSimilarity?: number;
+      }>;
     };
 
     return renderMemoriesPrompt(data.results || []);

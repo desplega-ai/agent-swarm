@@ -409,6 +409,10 @@ export async function sendTaskHandler(
     slackUserId,
     overrideSlackContext,
     followUpConfig,
+    // A delegation with parentTaskId is new work and starts without the
+    // parent's followUpConfig. A `resume` re-delegation (the reroute-decision
+    // template) continues the parent's work, so it keeps it.
+    inheritParentFollowUpConfig: taskType === "resume",
     outputSchema,
     routingReason: effectiveRoutingReason,
     routingSource: effectiveRoutingSource,

@@ -46,7 +46,6 @@ const EXPECTED_IDS = [
   "script-authoring",
   "delegation-chain",
   "tool-routing",
-  "structured-output-adherence",
 ];
 
 describe("scenario registry", () => {
@@ -86,6 +85,8 @@ describe("scenario registry", () => {
       "memory-distractor",
       "relay-pipeline",
       "distributed-audit",
+      // Folded into tool-routing as a structured-output gate (phase 2).
+      "structured-output-adherence",
     ]) {
       expect(registry.scenarios.has(dead)).toBe(false);
     }
@@ -243,7 +244,7 @@ describe("spec'd scenario shapes (v9 orchestration substrate)", () => {
     expect(s).toBeDefined();
     expect(scenarioWorkerCount(s.workers)).toBe(3);
     expect(s.lead?.template).toBe("lead");
-    expect(s.seed?.sqlDump).toBe("sql-audit-history.sql");
+    expect(s.seed?.sqlDump).toBe("delegation-chain-history.sql");
     expect(s.tasks[0]?.worker).toBe("lead");
     expect(dimensions.map((d) => d.name)).toEqual([
       "delegation-chain",
@@ -269,18 +270,18 @@ describe("spec'd scenario shapes (v9 orchestration substrate)", () => {
     expect(`${s.tasks[0]?.description}`).toMatch(/raw curl/);
   });
 
-  test("structured-output-adherence forwards a real task outputSchema", () => {
-    const s = byId.get("structured-output-adherence")!;
-    const outcome = s.outcome!;
-    const dimensions = outcome.dimensions!;
-    expect(s).toBeDefined();
-    expect(s.tasks[0]?.outputSchema).toBeDefined();
+  test("tool-routing forwards an outputSchema and gates on it", () => {
+    const s = byId.get("tool-routing")!;
     expect(s.tasks[0]?.outputSchema?.required).toEqual([
-      "services",
-      "shippableCount",
-      "confidence",
+      "alphaSummary",
+      "checkpointKey",
+      "followUpCreated",
     ]);
-    expect(dimensions.map((d) => d.name)).toEqual(["instruction-following", "correctness"]);
+    expect(s.outcome.gates?.map((g) => g.name)).toContain("routing-structured-output");
+  });
+
+  test("registry lists 6 active scenarios", () => {
+    expect(scenarios.map((x) => x.id)).toHaveLength(6);
   });
 });
 
@@ -297,5 +298,51 @@ describe("sql-audit-history.sql fixture", () => {
     // Answer-key rows are present in the seed data.
     expect(text).toMatch(/Rotate the payments service API keys/);
     expect(text).toMatch(/Deploy the checkout redesign to production/);
+  });
+});
+
+describe("seed fixtures fit one default /api/tasks page", () => {
+  // /api/tasks defaults to 25 rows. A 30-row seed plus the worker's own task was
+  // truncated and produced the "15 completed" wrong answer, so seeds cap at 20.
+  for (const [file, maxRows] of [
+    ["sql-audit-history.sql", 20],
+    ["delegation-chain-history.sql", 20],
+  ] as const) {
+    test(`${file} has at most ${maxRows} rows and passes the seed rules`, async () => {
+      const text = await Bun.file(new URL(`./fixtures/${file}`, import.meta.url)).text();
+      expect(validateSqlDumpText(text)).toBeNull();
+      const rows = text.split("\n").filter((l) => l.startsWith("INSERT INTO agent_tasks")).length;
+      expect(rows).toBeGreaterThan(0);
+      expect(rows).toBeLessThanOrEqual(maxRows);
+    });
+  }
+
+  test("delegation-chain has its own answer key, not sql-audit's", async () => {
+    const chain = await Bun.file(
+      new URL("./fixtures/delegation-chain-history.sql", import.meta.url),
+    ).text();
+    expect(chain).toMatch(/Cut over the ledger service to the new region/);
+    expect(chain).not.toMatch(/Rotate the payments service API keys/);
+  });
+
+  test("sql-audit count check accepts 12 and rejects the truncated-page answer 15", async () => {
+    const s = scenarios.find((x) => x.id === "sql-audit")!;
+    const check = s.outcome.dimensions!.find((d) => d.name === "correctness")!.checks![0]!;
+    const ctxWith = (content: string) =>
+      ({ readFile: async () => content }) as unknown as Parameters<typeof check.fn>[0];
+    expect((await check.fn(ctxWith("12\n"))).pass).toBe(true);
+    expect((await check.fn(ctxWith("15\n"))).pass).toBe(false);
+    expect((await check.fn(ctxWith("21\n"))).pass).toBe(false);
+  });
+});
+
+describe("workflow-authoring seeds a lint/check script", () => {
+  test("pr-checks is seeded from a fixture that exists", async () => {
+    const s = scenarios.find((x) => x.id === "workflow-authoring")!;
+    const spec = s.seed?.scripts?.find((x) => x.name === "pr-checks");
+    expect(spec).toBeDefined();
+    const file = Bun.file(new URL(`./fixtures/${spec!.sourceFile}`, import.meta.url));
+    expect(await file.exists()).toBe(true);
+    expect(await file.text()).toMatch(/export default async function/);
   });
 });

@@ -582,6 +582,8 @@ describe("script connections", () => {
       // 168 and 172 alter agent_tasks, which this partial fixture creates without its columns.
       markMigrationApplied(database, "168_agent_task_attempt.sql");
       markMigrationApplied(database, "172_agent_task_attempt_runtime.sql");
+      // 171 alters memory_retrieval, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "171_memory_retrieval_relevance.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

@@ -121,6 +121,12 @@ export interface ScenarioSeed {
    */
   sqlDump?: string;
   /**
+   * Reusable scripts upserted (agent scope, as worker 0) through
+   * `POST /api/scripts/upsert` before tasks start, so the real API typechecks and
+   * embeds them. `sourceFile` is a bare filename under evals/scenarios/fixtures/.
+   */
+  scripts?: { name: string; description: string; intent: string; sourceFile: string }[];
+  /**
    * Failure-injection primitive (swarm-mechanics evals): deterministically break
    * a CHOSEN worker (not just worker 0) at seed time so the scenario can grade
    * whether the SWARM recovers from a poisoned/disabled teammate.
