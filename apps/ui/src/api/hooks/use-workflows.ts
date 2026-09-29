@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../client";
 import { invalidateStatusQuery } from "./status-query";
 
@@ -18,11 +18,13 @@ export function useWorkflow(id: string) {
   });
 }
 
-export function useWorkflowRuns(workflowId: string) {
+export function useWorkflowRuns(workflowId: string, page: { limit: number; offset: number }) {
   return useQuery({
-    queryKey: ["workflow-runs", workflowId],
-    queryFn: () => api.fetchWorkflowRuns(workflowId),
+    queryKey: ["workflow-runs", workflowId, page.limit, page.offset],
+    queryFn: () => api.fetchWorkflowRuns(workflowId, page),
     enabled: !!workflowId,
+    // Keep the current rows on screen while the next page loads.
+    placeholderData: keepPreviousData,
   });
 }
 

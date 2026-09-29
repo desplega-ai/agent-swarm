@@ -25,6 +25,7 @@ ALLOWLIST=(
   src/be/connection-bindings-blob-migration.ts  # boot: one-time migration
   src/be/seed-pricing.ts                        # boot: seeder
   src/be/rbac-roles.ts                          # boot: ensureRbacSeedsSynced
+  src/be/boot-seeds.ts                          # boot: once-per-handle guards around the two seeders (getDb() only identifies the handle)
   src/be/asset-key-audit.ts                     # boot: startup audit (raw handle param)
   src/be/memory/providers/sqlite-store.ts       # constructor vec/FTS bootstrap; instance is boot-warmed by startMemoryGc()'s initial tick (async init = future decision)
   src/be/script-connections.ts                  # listScriptConnections feeds default parameter expressions (must stay sync)

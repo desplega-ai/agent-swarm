@@ -21345,7 +21345,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List runs for a workflow */
+        /**
+         * List runs for a workflow, newest first
+         * @description Returns one page of runs without `context` (fetch it with GET /api/workflow-runs/{id}). `limit` defaults to 50 and is capped at 100; follow `page.nextOffset` while `page.hasMore` is true.
+         */
         get: {
             parameters: {
                 query?: {
@@ -21361,14 +21364,14 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Workflow run list */
+                /** @description One page of workflow runs */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["WorkflowRun"][] | {
-                            runs: components["schemas"]["WorkflowRun"][];
+                        "application/json": {
+                            runs: components["schemas"]["WorkflowRunSummary"][];
                             page: {
                                 limit: number;
                                 offset: number;
@@ -23205,6 +23208,20 @@ export interface components {
             };
             requiredParams?: string[];
             requires?: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
+        };
+        WorkflowRunSummary: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            workflowId: string;
+            /** @enum {string} */
+            status: "running" | "waiting" | "completed" | "failed" | "skipped" | "cancelled";
+            triggerData?: unknown;
+            error?: string;
+            createdBy?: string;
+            startedAt: string;
+            lastUpdatedAt: string;
+            finishedAt?: string;
         };
         WorkflowRun: {
             /** Format: uuid */
