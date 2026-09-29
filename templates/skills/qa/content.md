@@ -94,7 +94,7 @@ Write all test cases into the QA document's `## Test Cases` section.
 2. `agent-browser snapshot -i` to read the page state and its `@eN` refs
 3. Act on refs (`click @eN`, `fill @eN "text"`, `type`, `press`) and re-snapshot after every navigation or state change; refs are only valid for the snapshot that produced them
 4. `agent-browser screenshot /tmp/<name>.png` for evidence, then `agent-browser close`
-5. To share a screenshot outside the machine, upload it to agent-fs with `agent-fs write <path> --file /tmp/<name>.png -m "<what it shows>"` (binary-safe; `--content` mangles PNGs), then `agent-fs signed-url <path> --json` and embed the URL as `![caption](<url>)`. If agent-fs is not configured, report the local path and say the upload was skipped
+5. To share a screenshot outside the machine, upload it to agent-fs with `agent-fs write <path> --file /tmp/<name>.png -m "<what it shows>"` (binary-safe; `--content` mangles PNGs), then use `agent-fs share-create <path> --json` for a link a person can open. For raw embeds such as an image in GitHub PR markdown, use `agent-fs signed-url <path> --json` and embed it as `![caption](<url>)`. If agent-fs is not configured, report the local path and say the upload was skipped
 
 **For manual testing**:
 1. Present each test case's steps to the user
@@ -117,7 +117,7 @@ For each test case, record the actual result and pass/fail status.
 ### Step 4: Capture Evidence
 
 Gather evidence for the QA report:
-- **Screenshots**: Via `agent-browser screenshot` (uploaded to agent-fs with a signed URL when they must be shared) or user-provided
+- **Screenshots**: Via `agent-browser screenshot` (uploaded to agent-fs with a `share-create` link for people to open, or a signed URL for raw embeds such as an image in GitHub PR markdown) or user-provided
 - **Videos**: Session recording URLs (Loom, etc.)
 - **Logs**: Console output, error messages, relevant log lines
 - **External links**: Sentry issues, CI/CD runs, Grafana dashboards, PR URLs
