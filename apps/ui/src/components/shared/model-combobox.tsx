@@ -146,7 +146,7 @@ export function ModelCombobox({
         </Button>
       </PopoverTrigger>
       <PopoverContent
-        className="w-(--radix-popover-trigger-width) min-w-[360px] max-w-[calc(100vw-2rem)] p-0"
+        className="w-(--radix-popover-trigger-width) min-w-[440px] max-w-[calc(100vw-2rem)] p-0"
         align="start"
       >
         <Command
