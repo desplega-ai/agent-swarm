@@ -573,7 +573,8 @@ describe("Tasks", () => {
     expect(status).toBe(200);
     expect(body.tasks).toBeDefined();
     expect(Array.isArray(body.tasks)).toBe(true);
-    expect(body.total).toBeGreaterThanOrEqual(2);
+    // `total` is an opt-in COUNT(*): omitted unless `includeTotal=true`.
+    expect(body.total).toBeUndefined();
   });
 
   test("GET /api/tasks?status=pending — filter by status", async () => {
@@ -599,10 +600,23 @@ describe("Tasks", () => {
   });
 
   test("GET /api/tasks?limit=1 — pagination", async () => {
-    const { status, body } = await get("/api/tasks?limit=1");
+    const { status, body } = await get("/api/tasks?limit=1&includeTotal=true");
     expect(status).toBe(200);
     expect(body.tasks.length).toBe(1);
     expect(body.total).toBeGreaterThanOrEqual(2);
+  });
+
+  test("GET /api/tasks?fields=timeline — narrow timeline rows", async () => {
+    const { status, body } = await get("/api/tasks?fields=timeline&orderBy=createdAt&limit=5");
+    expect(status).toBe(200);
+    expect(body.tasks.length).toBeGreaterThanOrEqual(1);
+    for (const t of body.tasks) {
+      expect(typeof t.id).toBe("string");
+      expect(typeof t.status).toBe("string");
+      expect(t.progress).toBeUndefined();
+      expect(t.tags).toBeUndefined();
+    }
+    expect(body.total).toBeUndefined();
   });
 
   test("GET /api/tasks/:id — get specific task", async () => {
