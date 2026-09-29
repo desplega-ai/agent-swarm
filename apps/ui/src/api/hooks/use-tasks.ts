@@ -35,6 +35,10 @@ export interface TaskFilters {
   source?: string[];
   /** Exact requester user id, or the sentinel `none` for unattributed (NULL) rows. */
   requestedByUserId?: string;
+  /** Row projection; `timeline` is the narrow shape the dashboard timeline draws. */
+  fields?: "full" | "slim" | "timeline";
+  /** Ask for the filtered `total` (an extra COUNT(*)); only pagers need it. */
+  includeTotal?: boolean;
 }
 
 export interface UseTasksOptions {
@@ -45,6 +49,8 @@ export interface UseTasksOptions {
    * flashes their whole view back to its loading state.
    */
   keepPreviousData?: boolean;
+  /** Override the QueryClient's global poll interval (ms). */
+  refetchInterval?: number;
 }
 
 export function useTasks(filters?: TaskFilters, opts?: UseTasksOptions) {
@@ -53,6 +59,7 @@ export function useTasks(filters?: TaskFilters, opts?: UseTasksOptions) {
     queryFn: () => api.fetchTasks(filters),
     select: (data) => ({ tasks: data.tasks, total: data.total }),
     ...(opts?.keepPreviousData ? { placeholderData: keepPreviousData } : {}),
+    ...(opts?.refetchInterval !== undefined ? { refetchInterval: opts.refetchInterval } : {}),
   });
 }
 
@@ -133,7 +140,7 @@ interface CreateTaskInput {
 
 interface TasksCache {
   tasks: AgentTask[];
-  total: number;
+  total?: number;
 }
 
 interface TaskMutationContext {
@@ -198,11 +205,17 @@ function applyTaskToTaskLists(queryClient: QueryClient, task: AgentTask) {
       const shouldAdd = !existed && matchesTaskFilters(task, filters);
       const rows = shouldAdd ? [task, ...filteredRows] : filteredRows;
       const limitedRows = filters?.limit ? rows.slice(0, filters.limit) : rows;
+      // Lists fetched without `includeTotal` carry no total to adjust.
       const total =
-        prev.total +
-        (shouldAdd ? 1 : 0) -
-        (existed && filteredRows.length < nextRows.length ? 1 : 0);
-      return { tasks: sortTasksByUpdatedAt(limitedRows), total: Math.max(0, total) };
+        prev.total === undefined
+          ? undefined
+          : Math.max(
+              0,
+              prev.total +
+                (shouldAdd ? 1 : 0) -
+                (existed && filteredRows.length < nextRows.length ? 1 : 0),
+            );
+      return { tasks: sortTasksByUpdatedAt(limitedRows), total };
     });
   }
 }

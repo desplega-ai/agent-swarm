@@ -96,6 +96,7 @@ function TasksPaging({ pageSize, views }: { pageSize: number; views: View[] }) {
     search: searchParams.get("search") ?? undefined,
     limit: pageSize,
     offset: page * pageSize,
+    includeTotal: true,
   });
   const { page: listPage, stale: pageStale } = useStalePageCorrection(
     page,

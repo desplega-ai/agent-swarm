@@ -2451,6 +2451,26 @@ export type AgentTaskSummary = Pick<
   | "totalCostUsd"
 >;
 
+/**
+ * `/api/tasks?fields=timeline` list item: only what the dashboard activity
+ * timeline draws (lane, bar extent, label, hover stats). Same bounded `task`
+ * preview as `AgentTaskSummary`.
+ */
+export type AgentTaskTimelineItem = Pick<
+  AgentTask,
+  | "id"
+  | "agentId"
+  | "parentTaskId"
+  | "task"
+  | "title"
+  | "status"
+  | "createdAt"
+  | "lastUpdatedAt"
+  | "finishedAt"
+  | "peakContextTokens"
+  | "totalCostUsd"
+>;
+
 export const PageVersionSchema = z
   .object({
     id: z.string(),
