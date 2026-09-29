@@ -1122,11 +1122,18 @@ function RollupSection(props: {
   efforts: AnalyticsGroupRollup[];
 }): ReactNode {
   const [mode, setMode] = useState<RollupMode>("harness");
-  const rows =
-    mode === "harness" ? props.harnesses : mode === "vendor" ? props.vendors : props.efforts;
-  const columns = useMemo(() => rollupColumns(mode), [mode]);
   // The effort tab only earns its place once some attempt ran at a set effort.
   const hasEfforts = props.efforts.some((r) => r.group !== "default");
+  // A filter can drop the effort tab while it is selected; rows, columns and the
+  // control all follow this one mode so they never disagree.
+  const effectiveMode: RollupMode = mode === "effort" && !hasEfforts ? "harness" : mode;
+  const rows =
+    effectiveMode === "harness"
+      ? props.harnesses
+      : effectiveMode === "vendor"
+        ? props.vendors
+        : props.efforts;
+  const columns = useMemo(() => rollupColumns(effectiveMode), [effectiveMode]);
   const options: { key: RollupMode; label: string }[] = [
     { key: "harness", label: "By Harness" },
     { key: "vendor", label: "By Vendor" },
@@ -1139,11 +1146,7 @@ function RollupSection(props: {
         title={hasEfforts ? "By Harness, Vendor, Effort" : "By Harness, By Vendor"}
         tip="The same per-model aggregates rolled up one level: by harness provider (which agent CLI ran the attempt), by model vendor (who serves the model the attempt actually used), or by reasoning effort (what the worker was launched with; attempts at the harness default group together). Group colors match the scatter above."
       >
-        <Seg
-          options={options}
-          value={mode === "effort" && !hasEfforts ? "harness" : mode}
-          onChange={setMode}
-        />
+        <Seg options={options} value={effectiveMode} onChange={setMode} />
       </SectionHead>
       <DataTable
         rows={rows}
