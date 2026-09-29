@@ -145,6 +145,35 @@ export async function getTaskCitations(taskId: string): Promise<TaskCitation[]> 
   return rows.map((row) => ({ ...row, general: row.general === 1 }));
 }
 
+/** Bound-parameter chunk for `IN (...)`, well under SQLite's variable limit. */
+const TASK_ID_CHUNK = 500;
+
+/**
+ * Batched {@link getTaskCitations}: one query per 500 task ids. Every
+ * requested id is a key; each list keeps `citation_index` order.
+ */
+export async function getTaskCitationsForTasks(
+  taskIds: string[],
+): Promise<Map<string, TaskCitation[]>> {
+  const ids = [...new Set(taskIds)];
+  const byTask = new Map<string, TaskCitation[]>(ids.map((id) => [id, []]));
+  for (let i = 0; i < ids.length; i += TASK_ID_CHUNK) {
+    const chunk = ids.slice(i, i + TASK_ID_CHUNK);
+    const rows = await getDbClient().query<
+      Omit<TaskCitation, "general"> & { general: number; taskId: string }
+    >(
+      `SELECT task_id AS taskId, citation_index AS "index", kind, ref, label, quote,
+      resolved_url AS resolvedUrl, verified, general FROM task_citations
+      WHERE task_id IN (${chunk.map(() => "?").join(",")}) ORDER BY task_id, citation_index`,
+      chunk,
+    );
+    for (const { taskId, ...row } of rows) {
+      byTask.get(taskId)?.push({ ...row, general: row.general === 1 });
+    }
+  }
+  return byTask;
+}
+
 /**
  * The completion citation check refuses at most once per task. The refusal
  * is an `agent_log` row, so it also shows in the task's activity timeline.
