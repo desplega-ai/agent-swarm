@@ -233,6 +233,7 @@ value:getAgentMailInboxMapping
 value:getAgentMailInboxMappingsByAgent
 value:getAgentMcpServers
 value:getAgentSkills
+value:getAgentStatusCounts
 value:getAgentWithTasks
 value:getAgentWorkingOnThread
 value:getAllAgentMailInboxMappings
@@ -387,6 +388,7 @@ value:getStepCountForNode
 value:getStuckApprovalRuns
 value:getStuckWaitRuns
 value:getStuckWorkflowRuns
+value:getSupersededTasksWithUnsettledDependents
 value:getSupersededTasksWithoutResume
 value:getSwarmConfigById
 value:getSwarmConfigLookupById
@@ -529,6 +531,7 @@ value:setBudgetRefusalFollowUpTaskId
 value:setFavorite
 value:setSlackMessageTracking
 value:setUserFavorite
+value:settleSupersededTaskDependents
 value:shouldBlockPolling
 value:startTask
 value:supersedeTask
@@ -596,6 +599,7 @@ value:overwriteTerminalTaskResultText
 value:pauseTask
 value:resetOrphanedInProgressTasksForAgent
 value:resumeTask
+value:settleSupersededTaskDependents
 value:startTask
 value:supersedeTask
 value:updateTaskClaudeSessionId

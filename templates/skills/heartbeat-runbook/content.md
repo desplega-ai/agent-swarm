@@ -29,8 +29,8 @@ Two kinds of sections:
 
 1. Read the latest runbook. The snapshot in the task may be stale.
 2. Prune first. Check every tracked item against its lift trigger. Remove resolved, stale, and past-date items.
-3. Run the seeded audit: `script-run` with name `Heartbeat Audit` and `args: { heartbeatMarkdown: <the runbook text> }`. It reports resolved stale PRs, pool-target risk schedules, schedule and provider failure clusters, and whether the daily blocker digest ran today.
-4. Read the system status and the audit result for stalled tasks, idle workers next to open work, and anomalies.
+3. Run the seeded scripts: `script-run` with name `schedule-health`, then `task-failure-audit`, both with `args: { days: 1, publishPage: false }`. They report failing schedules and failure clusters. Check any other standing order in the runbook yourself.
+4. Read the system status and the script results for stalled tasks, idle workers next to open work, and anomalies.
 5. Reboot-interrupted failures: a failure reason "worker session not found" or "worker session heartbeat is stale" means a server restart cut the task off. For each one: `get-task-details` on the task, confirm a retry task tagged `reboot-retry` exists and moves, recreate the task when no retry exists and the work is still needed. These are never "expected cleanup".
 6. Act with your tools: create tasks, cancel stuck ones, post to Slack under the `slack-interaction` skill rules.
 7. Update the runbook after pruning.

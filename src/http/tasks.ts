@@ -27,6 +27,7 @@ import {
   pauseTask,
   promoteDraftTask,
   resumeTask,
+  settleSupersededTaskDependents,
   supersedeTask,
   updateAgentStatusFromCapacity,
   updateTaskClaudeSessionId,
@@ -1750,6 +1751,7 @@ export async function handleTasks(
     // `skipped` covers parent_not_found / lead_not_found edge cases — the
     // supersede already landed, so log + roll forward without a resume task.
     if (followUp.kind !== "created") {
+      await settleSupersededTaskDependents(parsed.params.id, null);
       console.warn(
         `[Supersede] Task ${parsed.params.id.slice(0, 8)} superseded but resume creation skipped (${
           followUp.kind === "skipped" ? followUp.reason : followUp.kind

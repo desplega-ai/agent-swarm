@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import {
-  getAllAgents,
+  getAgentStatusCounts,
   getAllLogs,
   getAllServices,
   getConcurrentContext,
@@ -247,16 +247,11 @@ export async function handleStats(
   }
 
   if (getStats.match(req.method, pathSegments)) {
-    const agents = await getAllAgents();
+    const agents = await getAgentStatusCounts();
     const taskStats = await getTaskStats();
 
     const stats = {
-      agents: {
-        total: agents.length,
-        idle: agents.filter((a) => a.status === "idle").length,
-        busy: agents.filter((a) => a.status === "busy").length,
-        offline: agents.filter((a) => a.status === "offline").length,
-      },
+      agents,
       tasks: {
         total: taskStats.total,
         unassigned: taskStats.unassigned,
