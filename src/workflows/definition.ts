@@ -6,6 +6,10 @@ import type {
   WorkflowPatch,
 } from "../types";
 import type { ExecutorRegistry } from "./executors/registry";
+import {
+  systemOneRetryViolations,
+  systemOneStaticShapeViolations,
+} from "./executors/system-one-decision";
 
 /** Extract all target node IDs from a node's `next` field */
 export function getNextTargets(next: string | string[] | Record<string, string>): string[] {
@@ -206,6 +210,9 @@ export function validateDefinition(
         `Node "${node.id}" human-in-the-loop config.questions must be an array or one exact {{interpolation}} token`,
       );
     }
+    // A system-one-decision node's question ids and return types are static, and it never carries
+    // an engine retry policy (it retries transient transport errors itself).
+    errors.push(...systemOneStaticShapeViolations(node), ...systemOneRetryViolations(node));
     if (node.type === "foreach") {
       validateForeachNode(node, errors);
       // A legacy `#` id may stay editable as a NORMAL node, but never as a foreach

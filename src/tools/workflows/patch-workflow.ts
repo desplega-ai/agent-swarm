@@ -14,6 +14,7 @@ import type { WorkflowPatch } from "@/types";
 import { AssetKeySchema, WorkflowNodePatchSchema } from "@/types";
 import { getExecutorRegistry } from "@/workflows";
 import { patchWorkflowDefinition } from "@/workflows/patch-definition";
+import { withSaveWarnings, workflowSaveWarnings } from "@/workflows/readiness";
 
 export const registerPatchWorkflowTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -78,6 +79,7 @@ export const registerPatchWorkflowTool = (server: McpServer) => {
         nodesCreated: z.number().optional(),
         nodesUpdated: z.number().optional(),
         nodesDeleted: z.number().optional(),
+        warnings: z.array(z.string()).optional(),
       }),
     },
     async ({ id, key, update, delete: del, create, onNodeFailure, triggerSchema }, requestInfo) => {
@@ -133,14 +135,19 @@ export const registerPatchWorkflowTool = (server: McpServer) => {
         );
         const longScriptTimeoutHint = findLongScriptTimeoutHint(authoredFinalNodes);
 
-        return toolOk(`Patched workflow "${workflow.name}".`, {
-          details: `Patched workflow "${workflow.name}" (${id}). Version ${version} snapshot created.`,
+        const warnings = await workflowSaveWarnings(result.definition, getExecutorRegistry());
+        return toolOk(withSaveWarnings(`Patched workflow "${workflow.name}".`, warnings), {
+          details: withSaveWarnings(
+            `Patched workflow "${workflow.name}" (${id}). Version ${version} snapshot created.`,
+            warnings,
+          ),
           data: {
             workflow,
             versionCreated: version ?? undefined,
             nodesCreated: create?.length ?? 0,
             nodesUpdated: update?.length ?? 0,
             nodesDeleted: del?.length ?? 0,
+            ...(warnings.length > 0 ? { warnings } : {}),
             ...(longScriptTimeoutHint ? { longScriptTimeoutHint } : {}),
           },
         });

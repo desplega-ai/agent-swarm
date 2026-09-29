@@ -717,6 +717,16 @@ if (args.showHelp || args.command === "help" || args.command === undefined) {
 } else if (args.command === "version") {
   console.log(`${binName} v${pkg.version}`);
   process.exit(0);
+} else if (args.command === "onboard" && !process.versions.bun) {
+  // The published bin uses Node, but the onboarding wizard requires Bun APIs.
+  const { spawnSync } = await import("node:child_process");
+  const result = spawnSync("bun", process.argv.slice(1), { stdio: "inherit" });
+  if (result.error) {
+    console.error(
+      "Onboarding requires Bun. Install Bun from https://bun.sh, then retry this command.",
+    );
+  }
+  process.exit(result.status ?? 1);
 } else if (args.command === "docs") {
   const docsUrl = "https://docs.agent-swarm.dev";
   console.log(`\n${binName} docs — v${pkg.version}\n`);

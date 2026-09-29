@@ -13,6 +13,7 @@ import {
   updateWorkflowRun,
 } from "../be/db";
 import type { WorkflowRunStep } from "../types";
+import { shapeApprovalResolution } from "./approval-resolution";
 import { loadCompletedStepRouting } from "./completed-step-routing";
 import { FAILED_TASK_OUTPUT_PREFIX } from "./constants";
 import { findReadyNodes, isWorkflowRunActive, walkGraph } from "./engine";
@@ -279,18 +280,17 @@ async function recoverApprovalWaitingRuns(registry: ExecutorRegistry): Promise<n
           return null;
         }
 
-        const nextPort =
-          approvalStatus === "timeout"
-            ? "timeout"
-            : approvalStatus === "rejected"
-              ? "rejected"
-              : "approved";
-
-        const stepOutput = {
-          requestId: stuck.approvalId,
-          status: approvalStatus,
-          responses: approval?.responses ?? null,
-        };
+        const { output: stepOutput, nextPort } = shapeApprovalResolution(
+          registry,
+          workflow.definition,
+          stuck.nodeId,
+          (await getWorkflowRunStep(stuck.stepId))?.output,
+          {
+            requestId: stuck.approvalId,
+            status: approvalStatus,
+            responses: (approval?.responses ?? null) as Record<string, unknown> | null,
+          },
+        );
 
         // Use port-based routing to determine correct successors. Claimed: the
         // live approval.resolved bus event may have routed this step between

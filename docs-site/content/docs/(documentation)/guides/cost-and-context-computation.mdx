@@ -120,8 +120,35 @@ classification along that branch. Structurally human-free rows are excluded
 from `attributedCostUsd` even if an old or inherited requester id remains on
 the row, keeping the numerator and denominator a consistent partition.
 
+The classification is computed once, when the task is created, and stored in
+`agent_tasks.isHumanFree` (migration 182 backfilled existing tasks). The usage
+reports read that column instead of walking every task tree per request. Every
+input to the rule is fixed at creation except where a mutation rewrites one:
+deleting a user without a replacement clears the requester and the workflow run
+creator, deleting a workflow removes its runs, deleting a task removes a parent,
+and completing a task can add tags. Each of those reclassifies the affected tasks
+and their descendants, so the stored flag matches the rule over the current rows.
+
+The work per request is bounded, because the size of a task tree is not. A
+request reclassifies at most 500 tasks, walking down from the changed task
+breadth first, in the same transaction as the change. Whatever is left of a
+larger tree is recorded in `human_free_reclassify_queue` in that transaction, and
+a background drain finishes it in batches of 500, one transaction each. Until the
+queue is empty the stored flag of a queued descendant is its previous value, so
+the usage reports can lag by seconds for a very large tree. The queue survives a
+restart.
+
+The usage endpoints (`/api/session-costs/summary`, `/api/attribution/by-person`)
+cache each reply per filter set. A reply is fresh for 30 seconds. Until its total
+age reaches 120 seconds (counted from when it was loaded), requests still get it
+while one background query refreshes it. A request that finds it older than that
+waits for a new query. The first request past the 30 seconds only starts the
+refresh and still receives the old reply, so a new session shows up on the
+request after that: about one poll later for a client that polls every 30
+seconds. Changing a credential's plan or name clears the cache.
+
 The **By Person** view uses the same requester data model, but it is not a
-grouping of the cost denominator and does not run the coverage CTE. It reports
+grouping of the cost denominator and reads the same stored flag. It reports
 work outcomes rather than a cost score: human-requested root tasks supply
 Problems Initiated and Problems Shipped, while each person's full task trees
 supply Agents Reached, Repos Reached, and Surfaces Reached. Requester-less

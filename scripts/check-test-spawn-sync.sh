@@ -24,7 +24,6 @@ set -euo pipefail
 # see reintroduced.
 ALLOWLIST=(
   "src/tests/build-pi-skills.test.ts"   # execSync(node:child_process) runs once at describe-block collection time to build plugin/pi-skills; short, deterministic, not a runChild-shaped call site
-  "src/tests/package-publish.test.ts"   # execSync(node:child_process) pack/unpack/version probes; already has an explicit setDefaultTimeout(30_000)
 )
 
 PATTERN='\bspawnSync\(|\bexecSync\(|\bexecFileSync\('

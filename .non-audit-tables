@@ -18,6 +18,7 @@ channel_read_state
 context_versions
 events
 extension_runs         # append-only execution log; parent extension writes carry audit columns
+human_free_reclassify_queue # internal work queue, rows deleted as the drain finishes them; no user attribution (183)
 memory_link
 memory_rating
 memory_retrieval
