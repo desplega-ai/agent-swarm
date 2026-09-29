@@ -4365,6 +4365,8 @@ export interface paths {
                 query?: {
                     agentId?: string;
                     repoId?: string;
+                    /** @description Return only the entry with this exact key. Omit to return every resolved entry. */
+                    key?: string;
                     includeSecrets?: "true" | "false";
                 };
                 header?: never;
@@ -4599,6 +4601,8 @@ export interface paths {
                 query?: {
                     scope?: string;
                     scopeId?: string;
+                    /** @description Return only entries with this exact key. Omit to return every entry. */
+                    key?: string;
                     includeSecrets?: "true" | "false";
                 };
                 header?: never;

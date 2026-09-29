@@ -14174,6 +14174,17 @@
           {
             "schema": {
               "type": "string",
+              "minLength": 1,
+              "description": "Return only the entry with this exact key. Omit to return every resolved entry."
+            },
+            "required": false,
+            "description": "Return only the entry with this exact key. Omit to return every resolved entry.",
+            "name": "key",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
               "enum": [
                 "true",
                 "false"
@@ -14492,6 +14503,17 @@
             },
             "required": false,
             "name": "scopeId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Return only entries with this exact key. Omit to return every entry."
+            },
+            "required": false,
+            "description": "Return only entries with this exact key. Omit to return every entry.",
+            "name": "key",
             "in": "query"
           },
           {
