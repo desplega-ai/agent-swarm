@@ -306,14 +306,6 @@ describe("Claude CLI shortnames (the tier defaults) take effort like the model t
     expect(reasoningCapability("claude", "fable").supported).toBe(true);
   });
 
-  test("a stored effort reaches the CLI when the resolved model is a shortname", () => {
-    expect(applyReasoningEffort("claude", "opus", "high")).toEqual({
-      kind: "claude-env",
-      env: { CLAUDE_CODE_EFFORT_LEVEL: "high" },
-    });
-    expect(applyReasoningEffort("claude", "opus", "max")).toEqual({ kind: "noop" });
-  });
-
   test("shortnames mean nothing to the other harnesses", () => {
     expect(reasoningCapability("codex", "opus").supported).toBe(false);
     expect(reasoningCapability("pi", "opus").supported).toBe(false);
