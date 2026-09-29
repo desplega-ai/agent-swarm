@@ -202,7 +202,12 @@ export async function handleActiveSessions(
   if (heartbeatSession.match(req.method, pathSegments)) {
     const parsed = await heartbeatSession.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const updated = await heartbeatActiveSession(parsed.params.taskId);
+    // Same caller scope as the delete: a process holding an attempt the
+    // heartbeat reclaimed must not refresh the replacement attempt's session.
+    const updated = await heartbeatActiveSession(parsed.params.taskId, {
+      agentId: myAgentId,
+      runtimeInstanceId: headerRuntimeInstanceId(req),
+    });
     heartbeatSession.respond(res, 200, { updated });
     return true;
   }
@@ -213,6 +218,7 @@ export async function handleActiveSessions(
     const updated = await updateActiveSessionProviderSessionId(
       parsed.params.taskId,
       parsed.body.providerSessionId,
+      { agentId: myAgentId, runtimeInstanceId: headerRuntimeInstanceId(req) },
     );
     updateProviderSession.respond(res, 200, { updated });
     return true;

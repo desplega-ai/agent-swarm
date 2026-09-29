@@ -663,6 +663,140 @@ describe("blocker 3 (re-review): cleanup that cannot name its runtime fails clos
   });
 });
 
+describe("session heartbeat and provider session are scoped to the current attempt (Superagent P2)", () => {
+  const STALE = "2020-01-01T00:00:00.000Z";
+  const register = (agentId: string, taskId: string, runtime: string | null) =>
+    api("POST", "/api/active-sessions", as(agentId, runtime ?? "unused"), {
+      agentId,
+      taskId,
+      triggerType: "task_assigned",
+      ...(runtime ? { runtimeInstanceId: runtime } : {}),
+    });
+  const heartbeat = (taskId: string, headers: Record<string, string>) =>
+    api("PUT", `/api/active-sessions/heartbeat/${taskId}`, headers);
+  const providerSession = (taskId: string, headers: Record<string, string>) =>
+    api("PUT", `/api/active-sessions/provider-session/${taskId}`, headers, {
+      providerSessionId: "provider-session-from-caller",
+    });
+  /** A running replacement attempt on runtime B, its session heartbeat aged out. */
+  async function replacementWithAgedSession(agentId: string) {
+    const task = await startedThenReclaimed(agentId);
+    await startTask(task.id, { runtimeInstanceId: RUNTIME_B });
+    await register(agentId, task.id, RUNTIME_B);
+    await getDbClient().run("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?", [
+      STALE,
+      task.id,
+    ]);
+    return task;
+  }
+
+  test("the old runtime's heartbeat cannot keep the replacement's session fresh", async () => {
+    const agent = await worker("fence-heartbeat-other-runtime");
+    const task = await replacementWithAgedSession(agent.id);
+
+    const stale = await heartbeat(task.id, as(agent.id, RUNTIME_A));
+    expect(stale.status).toBe(200);
+    expect(stale.body.updated).toBe(false);
+    expect((await getActiveSessionForTask(task.id))?.lastHeartbeatAt).toBe(STALE);
+
+    const own = await heartbeat(task.id, as(agent.id, RUNTIME_B));
+    expect(own.body.updated).toBe(true);
+    expect((await getActiveSessionForTask(task.id))?.lastHeartbeatAt).not.toBe(STALE);
+  });
+
+  test("another agent's heartbeat cannot keep the replacement's session fresh", async () => {
+    const agentA = await worker("fence-heartbeat-agent-a");
+    const agentB = await worker("fence-heartbeat-agent-b");
+    const task = await replacementWithAgedSession(agentA.id);
+
+    const stale = await heartbeat(task.id, as(agentB.id, RUNTIME_B));
+    expect(stale.body.updated).toBe(false);
+    expect((await getActiveSessionForTask(task.id))?.lastHeartbeatAt).toBe(STALE);
+  });
+
+  test("a heartbeat that cannot name its runtime fails closed on a reclaimed row", async () => {
+    const agent = await worker("fence-heartbeat-headerless");
+    const task = await replacementWithAgedSession(agent.id);
+
+    // The request an older runner's hook sends: agent only, or nothing at all.
+    for (const headers of [{ "X-Agent-ID": agent.id }, {}]) {
+      const legacy = await heartbeat(task.id, headers);
+      expect(legacy.status).toBe(200);
+      expect(legacy.body.updated).toBe(false);
+    }
+    expect((await getActiveSessionForTask(task.id))?.lastHeartbeatAt).toBe(STALE);
+  });
+
+  test("a session registered without a runtime is not a wildcard for a stale heartbeat", async () => {
+    const agent = await worker("fence-heartbeat-unset-runtime");
+    const task = await startedThenReclaimed(agent.id);
+    await startTask(task.id, { runtimeInstanceId: RUNTIME_B });
+    await register(agent.id, task.id, null);
+    await getDbClient().run("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?", [
+      STALE,
+      task.id,
+    ]);
+
+    expect((await heartbeat(task.id, as(agent.id, RUNTIME_A))).body.updated).toBe(false);
+    expect((await heartbeat(task.id, { "X-Agent-ID": agent.id })).body.updated).toBe(false);
+    expect((await getActiveSessionForTask(task.id))?.lastHeartbeatAt).toBe(STALE);
+  });
+
+  test("a never-reclaimed task keeps the legacy heartbeat (claude-managed and older runners)", async () => {
+    const agent = await worker("fence-heartbeat-never-reclaimed");
+    const task = await createTaskExtended("Never reclaimed heartbeat", { agentId: agent.id });
+    await startTask(task.id, { runtimeInstanceId: RUNTIME_A });
+    expect((await getTaskById(task.id))?.attempt).toBe(0);
+    await register(agent.id, task.id, RUNTIME_A);
+
+    for (const headers of [{ "X-Agent-ID": agent.id }, as(agent.id, RUNTIME_A), {}]) {
+      await getDbClient().run("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?", [
+        STALE,
+        task.id,
+      ]);
+      expect((await heartbeat(task.id, headers)).body.updated).toBe(true);
+      expect((await getActiveSessionForTask(task.id))?.lastHeartbeatAt).not.toBe(STALE);
+    }
+  });
+
+  test("a reclaimed row that finished accepts an agent-only heartbeat", async () => {
+    const agent = await worker("fence-heartbeat-finished");
+    const task = await replacementWithAgedSession(agent.id);
+    await api("POST", `/api/tasks/${task.id}/finish`, as(agent.id, RUNTIME_B), {
+      status: "completed",
+      output: "done",
+    });
+    await register(agent.id, task.id, RUNTIME_B);
+    await getDbClient().run("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?", [
+      STALE,
+      task.id,
+    ]);
+    expect((await heartbeat(task.id, { "X-Agent-ID": agent.id })).body.updated).toBe(true);
+  });
+
+  test("the old runtime cannot overwrite the replacement session's provider session id", async () => {
+    const agent = await worker("fence-provider-session");
+    const task = await replacementWithAgedSession(agent.id);
+
+    expect((await providerSession(task.id, as(agent.id, RUNTIME_A))).body.updated).toBe(false);
+    expect((await providerSession(task.id, {})).body.updated).toBe(false);
+    expect((await getActiveSessionForTask(task.id))?.providerSessionId).toBeNull();
+
+    expect((await providerSession(task.id, as(agent.id, RUNTIME_B))).body.updated).toBe(true);
+    expect((await getActiveSessionForTask(task.id))?.providerSessionId).toBe(
+      "provider-session-from-caller",
+    );
+  });
+
+  test("a pool task's runner session id is not a task row, so its provider session id still saves", async () => {
+    const agent = await worker("fence-provider-session-pool");
+    const runnerSessionTaskId = crypto.randomUUID();
+    await register(agent.id, runnerSessionTaskId, RUNTIME_A);
+    // The request `saveProviderSessionIdOnActiveSession` sends: auth only.
+    expect((await providerSession(runnerSessionTaskId, {})).body.updated).toBe(true);
+  });
+});
+
 describe("blocker 4: graceful / context-limit supersede commits with its resume or not at all", () => {
   test("a failure creating the resume child rolls the supersede back", async () => {
     const agent = await worker("fence-supersede-crash");

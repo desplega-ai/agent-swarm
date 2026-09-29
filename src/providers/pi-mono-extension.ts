@@ -11,6 +11,7 @@ import { buildRatingsFromLlm, fetchRetrievalsForTask, postRatings } from "../be/
 import { checkToolLoop, clearToolHistory } from "../hooks/tool-loop-detection";
 import { summarizeSession as runSummarize } from "../utils/internal-ai";
 import { getMemoryRaterNames } from "../utils/memory-raters";
+import { swarmRuntimeInstanceId } from "../utils/multi-runtime";
 import { scrubSecrets } from "../utils/secret-scrubber";
 
 export interface SwarmHooksConfig {
@@ -29,10 +30,14 @@ export interface SwarmHooksConfig {
 
 /** Standard headers for swarm API requests */
 function apiHeaders(config: SwarmHooksConfig): Record<string, string> {
+  // The runtime id lets the API tell this attempt's session heartbeat from an
+  // earlier attempt's (src/tasks/attempt-fence.ts).
+  const runtimeInstanceId = swarmRuntimeInstanceId();
   return {
     "Content-Type": "application/json",
     ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}),
     "X-Agent-ID": config.agentId,
+    ...(runtimeInstanceId ? { "X-Runtime-Instance-ID": runtimeInstanceId } : {}),
   };
 }
 

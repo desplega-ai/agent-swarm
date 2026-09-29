@@ -123,6 +123,7 @@ import {
   parseModelTier,
   SERVER_GENERATED_ATTACHMENT_CAPABILITY,
   SessionCostModelBreakdownSchema,
+  TERMINAL_TASK_STATUSES,
 } from "../types";
 import { deriveProviderFromKeyType } from "../utils/credentials";
 import type { RateLimitWindowTelemetry } from "../utils/error-tracker";
@@ -6910,50 +6911,43 @@ export async function insertActiveSession(session: {
 }
 
 /**
- * Delete a task's active session for an HTTP caller (a runner's cleanup). It
- * can land after the heartbeat reclaimed the task and a replacement attempt
- * registered a session under the same agent, so on a live reclaimed row
- * (`attempt > 0`) the caller must name agent AND runtime and match exactly; one
- * with no runtime (an older runner) fails closed and the heartbeat or stale
- * sweep cleans up. Other rows keep the legacy scope: agent match, runtime
- * match-or-unset. Check and delete share one transaction. Server-side deletes
- * use `deleteActiveSessionServerSide`.
+ * Caller scope for an HTTP write to a task's active session. Reclaim keeps the
+ * task id, so a process holding an earlier attempt must not touch the
+ * replacement's session (a heartbeat would hide its stall). On a live
+ * reclaimed row (`attempt > 0`, not terminal) the caller must name agent AND
+ * runtime and match both; one with no runtime (an older runner) matches
+ * nothing and the heartbeat's stale sweep decides. Other rows keep the legacy
+ * scope: no agent = any session of the task, else agent match with runtime
+ * match-or-unset. The row check is part of the statement, so check and write
+ * are atomic. Server-side deletes use `deleteActiveSessionServerSide`.
  */
+function activeSessionCallerScope(caller: {
+  agentId?: string | null;
+  runtimeInstanceId?: string | null;
+}): { sql: string; params: (string | null)[] } {
+  const agentId = caller.agentId ?? null;
+  const runtime = caller.runtimeInstanceId ?? null;
+  const terminal = TERMINAL_TASK_STATUSES.map((status) => `'${status}'`).join(", ");
+  return {
+    sql: `AND (
+      (NOT EXISTS (SELECT 1 FROM agent_tasks t
+                    WHERE t.id = active_sessions.taskId AND t.attempt > 0 AND t.status NOT IN (${terminal}))
+       AND (? IS NULL OR (agentId = ? AND (? IS NULL OR runtimeInstanceId IS NULL OR runtimeInstanceId = ?))))
+      OR (agentId = ? AND runtimeInstanceId = ?))`,
+    params: [agentId, agentId, runtime, runtime, agentId, runtime],
+  };
+}
+
 export async function deleteActiveSession(
   taskId: string,
   caller: { agentId?: string | null; runtimeInstanceId?: string | null },
 ): Promise<boolean> {
-  const agentId = caller.agentId ?? null;
-  const runtime = caller.runtimeInstanceId ?? null;
-  return await getDbClient().transaction(async () => {
-    const task = await getDbClient().get<{ status: string; attempt: number | null }>(
-      "SELECT status, attempt FROM agent_tasks WHERE id = ?",
-      [taskId],
-    );
-    const reclaimedLive =
-      !!task && (task.attempt ?? 0) > 0 && !isTerminalTaskStatus(task.status as AgentTaskStatus);
-    if (reclaimedLive) {
-      if (!agentId || !runtime) return false;
-      const result = await getDbClient().run(
-        "DELETE FROM active_sessions WHERE taskId = ? AND agentId = ? AND runtimeInstanceId = ?",
-        [taskId, agentId, runtime],
-      );
-      return result.changes > 0;
-    }
-    if (!agentId) {
-      const result = await getDbClient().run("DELETE FROM active_sessions WHERE taskId = ?", [
-        taskId,
-      ]);
-      return result.changes > 0;
-    }
-    const result = await getDbClient().run(
-      `DELETE FROM active_sessions
-         WHERE taskId = ? AND agentId = ?
-           AND (? IS NULL OR runtimeInstanceId IS NULL OR runtimeInstanceId = ?)`,
-      [taskId, agentId, runtime, runtime],
-    );
-    return result.changes > 0;
-  });
+  const scope = activeSessionCallerScope(caller);
+  const result = await getDbClient().run(
+    `DELETE FROM active_sessions WHERE taskId = ? ${scope.sql}`,
+    [taskId, ...scope.params],
+  );
+  return result.changes > 0;
 }
 
 /**
@@ -6982,11 +6976,14 @@ export async function getActiveSessions(agentId?: string): Promise<ActiveSession
   );
 }
 
-export async function heartbeatActiveSession(taskId: string): Promise<boolean> {
-  const now = new Date().toISOString();
+export async function heartbeatActiveSession(
+  taskId: string,
+  caller: { agentId?: string | null; runtimeInstanceId?: string | null },
+): Promise<boolean> {
+  const scope = activeSessionCallerScope(caller);
   const result = await getDbClient().run(
-    "UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?",
-    [now, taskId],
+    `UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ? ${scope.sql}`,
+    [new Date().toISOString(), taskId, ...scope.params],
   );
   return result.changes > 0;
 }
@@ -7010,10 +7007,12 @@ export async function cleanupAgentSessions(agentId: string): Promise<number> {
 export async function updateActiveSessionProviderSessionId(
   taskId: string,
   providerSessionId: string,
+  caller: { agentId?: string | null; runtimeInstanceId?: string | null },
 ): Promise<boolean> {
+  const scope = activeSessionCallerScope(caller);
   const result = await getDbClient().run(
-    "UPDATE active_sessions SET providerSessionId = ? WHERE taskId = ?",
-    [providerSessionId, taskId],
+    `UPDATE active_sessions SET providerSessionId = ? WHERE taskId = ? ${scope.sql}`,
+    [providerSessionId, taskId, ...scope.params],
   );
   return result.changes > 0;
 }
