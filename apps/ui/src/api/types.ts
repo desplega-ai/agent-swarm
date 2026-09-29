@@ -814,7 +814,8 @@ export interface AgentsResponse {
 
 export interface TasksResponse {
   tasks: AgentTask[];
-  total: number;
+  /** Present only when the request set `includeTotal`. */
+  total?: number;
 }
 
 export interface LogsResponse {

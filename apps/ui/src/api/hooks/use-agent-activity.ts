@@ -45,6 +45,9 @@ export interface UseAgentActivityResult {
   isError: boolean;
 }
 
+/** Per-agent 24h counts move slowly; poll at 30s instead of the global 10s. */
+const ACTIVITY_REFETCH_MS = 30_000;
+
 export function useAgentActivity(opts: UseAgentActivityOptions = {}): UseAgentActivityResult {
   const windowHours = opts.windowHours ?? 24;
   const taskLimit = opts.taskLimit ?? 1000;
@@ -59,13 +62,16 @@ export function useAgentActivity(opts: UseAgentActivityOptions = {}): UseAgentAc
   }, [windowHours]);
 
   const agentsQ = useAgents();
-  const tasksQ = useTasks({ createdAfter: sinceIso, limit: taskLimit });
+  // Only `agentId` is read, so the narrow timeline projection is enough.
+  const tasksQ = useTasks(
+    { createdAfter: sinceIso, limit: taskLimit, fields: "timeline" },
+    { refetchInterval: ACTIVITY_REFETCH_MS },
+  );
   const usageQ = useUsageSummary({ groupBy: "agent", startDate: sinceIso });
 
   return useMemo(() => {
     const agents = (agentsQ.data ?? []) as AgentWithTasks[];
     const tasks = tasksQ.data?.tasks ?? [];
-    const total = tasksQ.data?.total ?? tasks.length;
     const byAgent = usageQ.data?.byAgent ?? [];
 
     // Aggregate task count per agent.
@@ -89,7 +95,8 @@ export function useAgentActivity(opts: UseAgentActivityOptions = {}): UseAgentAc
 
     return {
       agents: rows,
-      truncated: total > taskLimit,
+      // No `total` is requested: a full page means the window may hold more.
+      truncated: tasks.length >= taskLimit,
       isLoading: agentsQ.isLoading || tasksQ.isLoading || usageQ.isLoading,
       isError: agentsQ.isError || tasksQ.isError || usageQ.isError,
     };

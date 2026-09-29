@@ -79,7 +79,7 @@ export function FeedbackDialog() {
       user: currentUser.user,
       state: popupState,
       installedAt,
-      hasFailedTask: (failedTasks.data?.total ?? 0) > 0,
+      hasFailedTask: (failedTasks.data?.tasks.length ?? 0) > 0,
       otherDialogOpen,
     });
 

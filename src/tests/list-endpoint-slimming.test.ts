@@ -227,6 +227,81 @@ describe("list-endpoint slimming", () => {
     expect(full?.totalCostUsd).toBeCloseTo(0.0168, 6);
   });
 
+  test("getAllTasks — SQL-side preview matches truncating the full text", async () => {
+    // SQLite `substr` counts code points while JS slices UTF-16 units, so pin
+    // the boundary with astral (surrogate-pair) and multibyte characters.
+    const marker = "preview-parity-";
+    const texts = [
+      `${marker}${"a".repeat(285)}`, // exactly 300 units
+      `${marker}${"a".repeat(286)}`, // 301 units
+      `${marker}${"😀".repeat(200)}`,
+      `${marker}${"é".repeat(284)}😀`,
+      `${marker}${"ñ".repeat(500)}`,
+      `${marker}short`,
+    ];
+    for (const text of texts) await createTaskExtended(text, { agentId: "slim-agent-1" });
+
+    const slim = await getAllTasks({ search: marker, limit: 50 }, { slim: true });
+    const full = await getAllTasks({ search: marker, limit: 50 });
+    expect(slim.map((t) => t.id)).toEqual(full.map((t) => t.id));
+    for (const [i, row] of full.entries()) {
+      const expected = row.task.length > 300 ? `${row.task.slice(0, 300)}…` : row.task;
+      expect(slim[i]!.task).toBe(expected);
+    }
+  });
+
+  test("getAllTasks — slim and full pages hold the same rows in the same order", async () => {
+    for (let i = 0; i < 12; i++) {
+      await createTaskExtended(`page-parity ${i}`, { agentId: "slim-agent-1" });
+    }
+    for (const orderBy of ["lastUpdatedAt", "createdAt"] as const) {
+      for (const offset of [0, 5, 10]) {
+        const filters = { search: "page-parity", limit: 5, offset, orderBy };
+        const slimIds = (await getAllTasks(filters, { slim: true })).map((t) => t.id);
+        const fullIds = (await getAllTasks(filters)).map((t) => t.id);
+        const timelineIds = (await getAllTasks(filters, { fields: "timeline" })).map((t) => t.id);
+        expect(slimIds).toEqual(fullIds);
+        expect(timelineIds).toEqual(fullIds);
+      }
+    }
+  });
+
+  test("getAllTasks — timeline projection carries only what the timeline draws", async () => {
+    const task = await createTaskExtended(`timeline-row ${"T".repeat(1000)}`, {
+      agentId: "slim-agent-1",
+      tags: ["timeline"],
+    });
+    await createSessionCost({
+      sessionId: "timeline-cost-session",
+      taskId: task.id,
+      agentId: "slim-agent-1",
+      totalCostUsd: 0.25,
+      durationMs: 1000,
+      numTurns: 1,
+      model: "test-model",
+    });
+
+    const [row] = await getAllTasks({ search: "timeline-row", limit: 1 }, { fields: "timeline" });
+    expect(Object.keys(row!).sort()).toEqual(
+      [
+        "agentId",
+        "createdAt",
+        "finishedAt",
+        "id",
+        "lastUpdatedAt",
+        "parentTaskId",
+        "peakContextTokens",
+        "status",
+        "task",
+        "title",
+        "totalCostUsd",
+      ].sort(),
+    );
+    expect(row!.id).toBe(task.id);
+    expect(row!.task).toBe(`${task.task.slice(0, 300)}…`);
+    expect(row!.totalCostUsd).toBeCloseTo(0.25, 6);
+  });
+
   test("listRecentSessions — slim root is a truncated task summary", async () => {
     const longText = "Q".repeat(2000);
     await createTaskExtended(longText, { agentId: "slim-agent-1" });
