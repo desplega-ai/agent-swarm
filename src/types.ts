@@ -770,6 +770,15 @@ export const CreateTaskOptionsSchema = z.object({
    * Lead-only control-plane authorization.
    */
   inheritParentRoutingAffinity: z.boolean().optional(),
+  /**
+   * `followUpConfig` belongs to one piece of work, not to the thread, so a
+   * child does NOT inherit the parent's by default. Set this to `true` only on
+   * a continuation of the SAME work (interrupted-task resume, reboot-sweep
+   * retry, defer-task wake-up, a Lead `resume` re-delegation) so the creator's
+   * onCompleted/onFailed still fires when that work truly ends. An explicit
+   * `followUpConfig` always wins.
+   */
+  inheritParentFollowUpConfig: z.boolean().optional(),
   followUpConfig: FollowUpConfigSchema.optional(),
   requestedByUserId: z.string().optional(),
   contextKey: z.string().optional(),
@@ -1425,6 +1434,8 @@ export const AgentLogEventTypeSchema = z.enum([
   "task_dispatch_rejected_affinity",
   "task_authorization_rejected",
   "task_recovery_authorization",
+  // Reboot sweep moved a never-started dependent from the swept task to its retry
+  "task_dependency_repointed",
   "task_released",
   // A settled task's settlement fired a deferred wait (metadata names the waiter)
   "task_deferred_wait_woke",

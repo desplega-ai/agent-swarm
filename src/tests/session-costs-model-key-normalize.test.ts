@@ -137,6 +137,7 @@ describe("normalizeModelKey()", () => {
     expect(normalizeModelKey("claude", "claude-opus-5")).toBe("claude-opus-5");
     expect(normalizeModelKey("claude", "claude-fable-5")).toBe("claude-fable-5");
     expect(normalizeModelKey("claude", "claude-mythos-5")).toBe("claude-mythos-5");
+    expect(normalizeModelKey("claude", "claude-sonnet-5-5")).toBe("claude-sonnet-5-5");
     expect(normalizeModelKey("claude", "claude-sonnet-5")).toBe("claude-sonnet-5");
   });
 

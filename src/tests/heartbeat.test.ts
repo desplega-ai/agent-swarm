@@ -1,10 +1,12 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import {
+  cancelTask,
   claimTask,
   closeDb,
   createAgent,
   createTaskExtended,
+  failTask,
   getActiveSessionForTask,
   getDbClient,
   getIdleWorkersWithCapacity,
@@ -1043,6 +1045,93 @@ describe("Heartbeat Triage", () => {
       const retryTask = await getTaskById(affected[0]!.retryTaskId!);
       expect(retryTask!.priority).toBe(90);
       expect(retryTask!.source).toBe("slack");
+    });
+
+    async function sweptTaskWithDependent(taskType?: string) {
+      const agent = await createAgent({ name: "dead-worker", isLead: false, status: "busy" });
+      const other = await createAgent({ name: "dependent-owner", isLead: false, status: "idle" });
+      const parent = await createTaskExtended("Thread root", { agentId: other.id });
+      const swept = await createTaskExtended("Research step", { agentId: agent.id, taskType });
+      await startTask(swept.id);
+      await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+        new Date(Date.now() - 1000).toISOString(),
+        swept.id,
+      ]);
+      const done = await createTaskExtended("Already done", { agentId: other.id });
+      await getDbClient().run("UPDATE agent_tasks SET status = 'completed' WHERE id = ?", [
+        done.id,
+      ]);
+      const dependent = await createTaskExtended("Act on the research", {
+        agentId: other.id,
+        dependsOn: [swept.id, done.id],
+        parentTaskId: parent.id,
+        priority: 70,
+        slackChannelId: "C0TEST",
+        slackThreadTs: "1700000000.000100",
+        slackUserId: "U0TEST",
+        followUpConfig: { onCompleted: "Tell the requester" },
+      });
+      return { swept, done, dependent, parent, other };
+    }
+
+    test("reboot sweep re-points a never-started dependent to the retry child instead of failing it", async () => {
+      const { swept, done, dependent, parent, other } = await sweptTaskWithDependent();
+      const cancelled = await createTaskExtended("Cancelled for another reason", {
+        agentId: other.id,
+        dependsOn: [swept.id],
+      });
+      await cancelTask(cancelled.id, "not needed");
+
+      await runRebootSweep();
+
+      expect((await getTaskById(swept.id))?.status).toBe("failed");
+      const retryTaskId = getRebootAffectedTasks()[0]!.retryTaskId;
+      expect(retryTaskId).not.toBeNull();
+
+      const survivor = await getTaskById(dependent.id);
+      expect(survivor?.status).toBe("pending");
+      expect(survivor?.failureReason).toBeFalsy();
+      expect(survivor?.dependsOn).toEqual([retryTaskId!, done.id]);
+      expect(survivor?.agentId).toBe(other.id);
+      expect(survivor?.parentTaskId).toBe(parent.id);
+      expect(survivor?.priority).toBe(70);
+      expect(survivor?.slackChannelId).toBe("C0TEST");
+      expect(survivor?.slackThreadTs).toBe("1700000000.000100");
+      expect(survivor?.slackUserId).toBe("U0TEST");
+      expect(survivor?.followUpConfig).toEqual({ onCompleted: "Tell the requester" });
+
+      const log = await getDbClient().get<{ oldValue: string; newValue: string }>(
+        "SELECT oldValue, newValue FROM agent_log WHERE taskId = ? AND eventType = 'task_dependency_repointed'",
+        [dependent.id],
+      );
+      expect(log).toEqual({ oldValue: swept.id, newValue: retryTaskId! });
+
+      // Already terminal for another reason: untouched.
+      const stillCancelled = await getTaskById(cancelled.id);
+      expect(stillCancelled?.status).toBe("cancelled");
+      expect(stillCancelled?.dependsOn).toEqual([swept.id]);
+    });
+
+    test("reboot sweep without a retry child still cascade-fails dependents", async () => {
+      const { swept, dependent } = await sweptTaskWithDependent("heartbeat-checklist");
+
+      await runRebootSweep();
+
+      expect(getRebootAffectedTasks()[0]!.retryTaskId).toBeNull();
+      const dead = await getTaskById(dependent.id);
+      expect(dead?.status).toBe("failed");
+      expect(dead?.failureReason).toBe(`Blocked dependency ${swept.id.slice(0, 8)} was failed`);
+    });
+
+    test("a non-reboot failure still cascade-fails dependents", async () => {
+      const { swept, dependent } = await sweptTaskWithDependent();
+
+      await failTask(swept.id, "Worker reported an error");
+
+      const dead = await getTaskById(dependent.id);
+      expect(dead?.status).toBe("failed");
+      expect(dead?.failureReason).toBe(`Blocked dependency ${swept.id.slice(0, 8)} was failed`);
+      expect(dead?.dependsOn).toContain(swept.id);
     });
   });
 

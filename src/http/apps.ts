@@ -1155,9 +1155,20 @@ export async function handleApps(
       json(res, { error: "invalid row query", issues }, 400);
       return true;
     }
-    const rows = (await listAppRows(parsed.params.id, parsed.params.model)).filter((row) =>
-      filters.every((filter) => rowValue(row, filter.column) === filter.value),
-    );
+    // SQL narrows the scan; the `===` re-check keeps the exact filter semantics.
+    const rows = (
+      await listAppRows(
+        parsed.params.id,
+        parsed.params.model,
+        filters.flatMap((filter) =>
+          typeof filter.value === "string" ||
+          typeof filter.value === "number" ||
+          typeof filter.value === "boolean"
+            ? [{ column: filter.column, value: filter.value }]
+            : [],
+        ),
+      )
+    ).filter((row) => filters.every((filter) => rowValue(row, filter.column) === filter.value));
     const sortRaw = parsed.query.sort;
     if (sortRaw) {
       const [column, dir, extra] = sortRaw.split(":");

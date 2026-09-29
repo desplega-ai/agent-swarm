@@ -89,13 +89,37 @@ export function computeScore(candidate: MemoryCandidate, now: Date): number {
  * Rerank candidates by combining similarity with recency, source quality,
  * and access signals. Returns the top `limit` candidates sorted by composite
  * score. Preserves raw similarity in `rawSimilarity` and sets `compositeScore`.
+ *
+ * A graph candidate's composite is capped at its parent's: the neighbour
+ * carries its own access/source/usefulness boosts, and without the cap a few
+ * boosted neighbours can push the direct hit that surfaced them out of the
+ * result set. Ties go to the higher `rawSimilarity`, so the parent sorts first.
  */
 export function rerank(candidates: MemoryCandidate[], options: RerankOptions): MemoryCandidate[] {
   const { limit, now = new Date() } = options;
 
+  const uncapped = new Map<string, number>();
+  for (const candidate of candidates) uncapped.set(candidate.id, computeScore(candidate, now));
+  const byId = new Map(candidates.map((c) => [c.id, c]));
+  const capped = new Map<string, number>();
+  // Walks the parent chain (a parent can itself be a graph entry that replaced
+  // an organic duplicate); `seen` guards against a link cycle.
+  const cappedScore = (candidate: MemoryCandidate, seen: Set<string>): number => {
+    const cached = capped.get(candidate.id);
+    if (cached !== undefined) return cached;
+    let score = uncapped.get(candidate.id)!;
+    const parent = candidate.graphParentId ? byId.get(candidate.graphParentId) : undefined;
+    if (parent && !seen.has(parent.id)) {
+      seen.add(candidate.id);
+      score = Math.min(score, cappedScore(parent, seen));
+    }
+    capped.set(candidate.id, score);
+    return score;
+  };
+
   const scored = candidates.map((candidate) => {
     const rawSimilarity = candidate.rawSimilarity ?? candidate.similarity;
-    const compositeScore = computeScore(candidate, now);
+    const compositeScore = cappedScore(candidate, new Set());
     return {
       ...candidate,
       rawSimilarity,
@@ -104,6 +128,6 @@ export function rerank(candidates: MemoryCandidate[], options: RerankOptions): M
     };
   });
 
-  scored.sort((a, b) => b.similarity - a.similarity);
+  scored.sort((a, b) => b.similarity - a.similarity || b.rawSimilarity - a.rawSimilarity);
   return scored.slice(0, limit);
 }

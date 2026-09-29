@@ -146,6 +146,7 @@ export const registerMemorySearchTool = (server: McpServer) => {
               ranked.map((r) => ({
                 memoryId: r.id,
                 similarity: r.similarity,
+                relevance: r.rawSimilarity,
                 retrievalSource: r.retrievalSource,
               })),
               requestInfo.sessionId,

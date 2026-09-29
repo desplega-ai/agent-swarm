@@ -1,7 +1,14 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
-import { computeRrfScore, SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
+import { expandCandidatesWithGraph } from "../be/memory/graph-expansion";
+import {
+  computeRrfScore,
+  fusedSimilarity,
+  SqliteMemoryStore,
+} from "../be/memory/providers/sqlite-store";
+import { rerank } from "../be/memory/reranker";
+import { memoryRelevance, renderMemoriesPrompt, SIMILARITY_THRESHOLD } from "../prompts/memories";
 
 const TEST_DB_PATH = "./test-memory-hybrid.sqlite";
 const agentId = "aaaa0000-0000-4000-8000-000000000101";
@@ -211,5 +218,158 @@ describe("memory hybrid search", () => {
     expect(freshIndex).toBeGreaterThanOrEqual(0);
     expect(staleIndex).toBeGreaterThanOrEqual(0);
     expect(freshIndex).toBeLessThan(staleIndex);
+  });
+});
+
+describe("fusedSimilarity", () => {
+  test("keeps the vec arm's [0,1] cosine scale", () => {
+    const both = computeRrfScore(0, 1.0) * 2;
+    expect(fusedSimilarity(0.8, both)).toBeCloseTo(0.8, 6);
+    expect(fusedSimilarity(0.8, computeRrfScore(0, 1.0))).toBeCloseTo(0.6, 6);
+    expect(fusedSimilarity(0.8, computeRrfScore(99, 1.0))).toBeGreaterThan(0.4);
+    expect(fusedSimilarity(1, both)).toBeLessThanOrEqual(1);
+  });
+});
+
+// Score-scale regression: every arm must land on one [0,1] scale before
+// rerank, and the injection gate must read that scale, not the boosted
+// composite. Before the fix a hybrid hit scored ~0.033 (raw RRF) while a graph
+// neighbour scored parentCosine × 0.7, so neighbours outranked the hit that
+// surfaced them and an unrelated vec-only query cleared the 0.4 composite gate.
+describe("memory search score scale", () => {
+  const scaleAgentId = "aaaa0000-0000-4000-8000-000000000102";
+  let store: SqliteMemoryStore;
+  let prevHybridFlag: string | undefined;
+  let exactId: string;
+  let siblingId: string;
+  let neighborId: string;
+
+  /** Unit vector: `cos` on axis 2 (the query axis), the remainder on `axis`. */
+  function mix(cos: number, axis: number): Float32Array {
+    const embedding = new Float32Array(512);
+    embedding[2] = cos;
+    embedding[axis] = Math.sqrt(1 - cos * cos);
+    return embedding;
+  }
+
+  const queryAxis = mix(1, 3);
+
+  async function searchRanked(queryEmbedding: Float32Array, queryText: string) {
+    const candidates = await store.search(queryEmbedding, scaleAgentId, {
+      scope: "agent",
+      limit: 15,
+      queryText,
+    });
+    const expanded = await expandCandidatesWithGraph(candidates, scaleAgentId, { scope: "agent" });
+    return rerank(expanded, { limit: 5 });
+  }
+
+  beforeAll(async () => {
+    prevHybridFlag = process.env.MEMORY_HYBRID_SEARCH;
+    process.env.MEMORY_HYBRID_SEARCH = "1";
+    await createAgent({
+      id: scaleAgentId,
+      name: "Scale Test Agent",
+      isLead: false,
+      status: "idle",
+    });
+    store = new SqliteMemoryStore();
+
+    const exact = await store.store({
+      agentId: scaleAgentId,
+      scope: "agent",
+      name: "blockerdigestexactname",
+      content: "Daily blocker digest for one specific day.",
+      source: "manual",
+    });
+    const sibling = await store.store({
+      agentId: scaleAgentId,
+      scope: "agent",
+      name: "digest for another day",
+      content: "Daily blocker digest for a different day.",
+      source: "manual",
+    });
+    const neighbor = await store.store({
+      agentId: scaleAgentId,
+      scope: "agent",
+      name: "linked follow-up",
+      content: "Follow-up linked from the digest.",
+      source: "manual",
+    });
+    exactId = exact.id;
+    siblingId = sibling.id;
+    neighborId = neighbor.id;
+    // The sibling is semantically CLOSER than the exact hit (as dated siblings
+    // are in production); only the keyword arm can put the exact name first.
+    await store.updateEmbedding(exactId, mix(0.7, 4), "test");
+    await store.updateEmbedding(siblingId, mix(0.72, 5), "test");
+    await store.updateEmbedding(neighborId, mix(0.2, 6), "test");
+    const now = new Date().toISOString();
+    await getDbClient().run(
+      `INSERT INTO memory_link
+         (id, from_memory_id, linkType, targetKind, targetId, strength, resolver, sourceText, metadata, createdAt, updatedAt)
+       VALUES (?, ?, 'wikilink', 'memory', ?, 1.0, 'wikilink', 'follow-up', NULL, ?, ?)`,
+      [crypto.randomUUID(), exactId, neighborId, now, now],
+    );
+  });
+
+  afterAll(() => {
+    if (prevHybridFlag === undefined) delete process.env.MEMORY_HYBRID_SEARCH;
+    else process.env.MEMORY_HYBRID_SEARCH = prevHybridFlag;
+  });
+
+  test("hybrid arm emits a [0,1] score instead of raw RRF", async () => {
+    const candidates = await store.search(queryAxis, scaleAgentId, {
+      scope: "agent",
+      limit: 10,
+      queryText: "blockerdigestexactname",
+    });
+    const exact = candidates.find((c) => c.id === exactId);
+    expect(exact?.retrievalSource).toBe("hybrid");
+    expect(exact!.similarity).toBeGreaterThan(0.6);
+    expect(exact!.similarity).toBeLessThanOrEqual(0.7);
+    expect(exact!.rawSimilarity).toBe(exact!.similarity);
+    expect(exact!.recencyDecayApplied).toBe(false);
+  });
+
+  test("exact-name direct hit outranks its graph neighbour and the closer sibling", async () => {
+    const ranked = await searchRanked(queryAxis, "blockerdigestexactname");
+    const ids = ranked.map((r) => r.id);
+    expect(ids[0]).toBe(exactId);
+    const neighbor = ranked.find((r) => r.id === neighborId);
+    expect(neighbor?.retrievalSource).toBe("graph");
+    expect(ids.indexOf(exactId)).toBeLessThan(ids.indexOf(neighborId));
+    expect(ids.indexOf(exactId)).toBeLessThan(ids.indexOf(siblingId));
+  });
+
+  test("a hybrid direct hit clears the injection threshold; its graph neighbour does not", async () => {
+    const ranked = await searchRanked(queryAxis, "blockerdigestexactname");
+    const exact = ranked.find((r) => r.id === exactId)!;
+    const neighbor = ranked.find((r) => r.id === neighborId)!;
+    expect(memoryRelevance(exact)).toBeGreaterThan(SIMILARITY_THRESHOLD);
+    expect(memoryRelevance(neighbor)).toBeLessThan(SIMILARITY_THRESHOLD);
+    const prompt = renderMemoriesPrompt(ranked);
+    expect(prompt).toContain(exactId);
+    expect(prompt).not.toContain(neighborId);
+  });
+
+  test("a vec-only direct hit (no keyword match) clears the injection threshold", async () => {
+    const ranked = await searchRanked(mix(0.99, 5), "paraphrasednokeywordmatch");
+    const sibling = ranked.find((r) => r.id === siblingId)!;
+    expect(sibling.retrievalSource).toBe("vec");
+    expect(memoryRelevance(sibling)).toBeGreaterThan(SIMILARITY_THRESHOLD);
+  });
+
+  test("negative control: a nonexistent-name query injects nothing", async () => {
+    // Best cosine ~0.33, the production level for an unrelated query. The old
+    // path returned it raw and rerank's 1.5x manual boost lifted it to ~0.5,
+    // over the old 0.4 composite gate.
+    const unrelated = new Float32Array(512);
+    unrelated[2] = 0.46;
+    unrelated[7] = Math.sqrt(1 - 0.46 ** 2);
+    const ranked = await searchRanked(unrelated, "blockerdigest-2031-01-01-nonexistent");
+    expect(ranked.length).toBeGreaterThan(0);
+    for (const r of ranked) expect(memoryRelevance(r)).toBeLessThan(SIMILARITY_THRESHOLD);
+    expect(renderMemoriesPrompt(ranked)).toBeNull();
   });
 });

@@ -64,6 +64,7 @@ declare module "swarm-extension" {
     outputSchema?: Record<string, unknown> | undefined;
     inheritParentOutputSchema?: boolean | undefined;
     inheritParentRoutingAffinity?: boolean | undefined;
+    inheritParentFollowUpConfig?: boolean | undefined;
     followUpConfig?:
       | {
           disabled?: boolean | undefined;

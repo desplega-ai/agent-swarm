@@ -579,6 +579,8 @@ describe("script connections", () => {
       // which this migration-112-only fixture creates.
       markMigrationApplied(database, "164_usage_cover_index_and_key_plans.sql");
       markMigrationApplied(database, "166_approval_request_auto_cancellation.sql");
+      // 171 alters memory_retrieval, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "171_memory_retrieval_relevance.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

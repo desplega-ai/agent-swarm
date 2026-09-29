@@ -82,6 +82,26 @@ function partitionAttachmentFiles(files: File[]): { valid: File[]; error: string
   return { valid, error };
 }
 
+/** An image previews as a thumbnail, anything else as a file icon. */
+function AttachmentIcon({ file }: { file: File }) {
+  const isImage = file.type.startsWith("image/");
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!isImage) return;
+    const next = URL.createObjectURL(file);
+    setUrl(next);
+    return () => URL.revokeObjectURL(next);
+  }, [file, isImage]);
+  if (!isImage || !url) return <FileText className="h-3 w-3 shrink-0 text-muted-foreground" />;
+  return (
+    <img
+      src={url}
+      alt=""
+      className="h-8 w-12 shrink-0 rounded-sm border border-border object-cover object-top"
+    />
+  );
+}
+
 export interface ComposerDockProps {
   value: string;
   onChange: (value: string) => void;
@@ -107,6 +127,11 @@ export interface ComposerDockProps {
   attachments?: File[];
   onAttachmentsChange?: (files: File[]) => void;
   attachmentErrorMessage?: string | null;
+  /**
+   * Extra buttons for the action row, before the attach button. The session
+   * panel's "Add screenshot" goes here.
+   */
+  extraActions?: React.ReactNode;
   /** Focus the textarea on mount. */
   autoFocus?: boolean;
   /**
@@ -141,6 +166,7 @@ export function ComposerDock({
   attachments = [],
   onAttachmentsChange,
   attachmentErrorMessage,
+  extraActions,
   autoFocus,
   fullWidth,
   decoration,
@@ -232,7 +258,9 @@ export function ComposerDock({
 
   return (
     <form
-      className={cn("shrink-0 px-4 pt-2 pb-4 bg-background w-full", className)}
+      // `@container`: the keyboard hint below hides by the dock's own width, so
+      // a narrow side panel drops it even on a wide screen.
+      className={cn("@container shrink-0 px-4 pt-2 pb-4 bg-background w-full", className)}
       onSubmit={(e) => {
         e.preventDefault();
         if (canSubmit) onSubmit();
@@ -300,7 +328,7 @@ export function ComposerDock({
                   "bg-muted/55 px-2 py-1 text-xs text-foreground",
                 )}
               >
-                <FileText className="h-3 w-3 shrink-0 text-muted-foreground" />
+                <AttachmentIcon file={file} />
                 <span className="truncate max-w-[12rem] sm:max-w-[18rem]">{file.name}</span>
                 <span className="shrink-0 text-[10px] text-muted-foreground">
                   {formatFileSize(file.size)}
@@ -342,6 +370,7 @@ export function ComposerDock({
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {extraActions}
             {onAttachmentsChange ? (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -360,7 +389,7 @@ export function ComposerDock({
                 <TooltipContent>Attach files</TooltipContent>
               </Tooltip>
             ) : null}
-            <span className="text-[10px] font-mono text-muted-foreground tracking-wider hidden sm:inline">
+            <span className="text-[10px] font-mono text-muted-foreground tracking-wider whitespace-nowrap hidden @lg:inline">
               ↵ send · ⇧↵ newline
             </span>
             <Tooltip>

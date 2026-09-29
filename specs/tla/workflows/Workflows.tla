@@ -32,9 +32,10 @@ CONSTANTS
   \* --- fixes for the bugs found by this model (FINDINGS.md) ---
   FixPollerRunGuard, \* F1: retry poller claims the step only while the run is live
   FixPendingRetryGate, \* F2: a predecessor that is still running or pending retry keeps its edge active
-  FixConcurrentJoin, \* F3: convergence step creation is keyed per iteration, not per row count
-  FixUserRetryLive,  \* F5: user retry does not re-walk a node whose step is still live
-  FixRecoveryRetry   \* F4: recovery does not re-walk a node that is pending retry / held by the poller
+  FixConcurrentJoin, \* F3: step insert skips a node already completed, waiting, or running in this process
+  FixUserRetryLive,  \* F5: user retry skips a node whose step is running or waiting (resume.ts retryFailedRun)
+  FixRecoveryRetry,  \* F4: recovery does not re-walk a node that is pending retry / held by the poller
+  FixJoinWaitsLive   \* F6: join waits for a branch whose latest step is live or not inserted; finalizers leave a run with a running step to its walker
 
 ASSUME MaxRetries >= 1 /\ BranchOutcomes \subseteq {"ok", "fail", "async"}
 
@@ -82,10 +83,28 @@ RetryNodes == {steps[i].node : i \in {j \in StepIds : PendingRetry(j)}}
 \* F2: a join also waits for a predecessor that was routed to (active
 \* incoming edge) or that has a live / retry-pending step, even though that
 \* predecessor has not produced its own outgoing edge yet.
+\* F6 (engine.ts awaitedNodeIds): only a node's latest row counts, so an
+\* orphaned `pending` row from a user retry does not hold the join, and a
+\* terminally failed branch does not either (partial failure still joins).
+HasRow(n) == \E i \in StepIds : steps[i].node = n
+LatestSt(n) == steps[CHOOSE i \in StepIds : steps[i].node = n
+                        /\ \A j \in StepIds : steps[j].node = n => j <= i].st
+LatestIn(S) == {n \in Nodes : HasRow(n) /\ LatestSt(n) \in S}
 Awaited(p, edges) ==
-  FixPendingRetryGate /\
-  \/ \E q \in Nodes : <<q, p>> \in edges
-  \/ p \in NodesWith("running") \cup NodesWith("pending") \cup NodesWith("waiting") \cup RetryNodes
+  \/ /\ FixPendingRetryGate
+     /\ \/ \E q \in Nodes : <<q, p>> \in edges
+        \/ p \in NodesWith("running") \cup NodesWith("pending") \cup NodesWith("waiting") \cup RetryNodes
+  \/ /\ FixJoinWaitsLive
+     /\ \/ p \in LatestIn({"running", "waiting"})
+        \/ (\E q \in Nodes : <<q, p>> \in edges) /\ ~HasRow(p)
+
+\* F3: step rows an executeStep call still owns (engine.ts executingSteps,
+\* process-local, cleared by a crash). The retry poller's rows are not owned.
+Owned == {thr[t].sid : t \in {u \in Threads : thr[u].pc \in {"xRun", "xCkOk", "xFail", "xCkWait"}}}
+\* F3: nodes whose step already covers the current predecessor completions
+\* (no loops in this graph): completed, waiting, or running and owned.
+CurrentNodes == NodesWith("completed") \cup NodesWith("waiting")
+                \cup {steps[i].node : i \in {j \in Owned \cap StepIds : steps[j].st = "running"}}
 
 \* The node the retry poller currently holds (step flipped to running, not yet checkpointed).
 PollerHeld == IF thr[TPoll].pc \in {"p5", "p6", "p7", "p8", "p9", "p10"}
@@ -152,11 +171,12 @@ XDedup(t) ==
      THEN \* halted -> reported as completed with no successors
           /\ SetT(t, [thr[t] EXCEPT !.pc = "wPick", !.done = @ \cup {n}, !.ex = @ \cup {n}])
           /\ UNCHANGED <<steps, execLive>>
-     ELSE IF FixConcurrentJoin /\ n \in NodesWith("completed") \cup NodesWith("waiting")
-                                         \cup NodesWith("running")
-     THEN \* F3: the iteration key is already taken by a live/finished row -> memoized
+     ELSE IF FixConcurrentJoin /\ n \in CurrentNodes
+     THEN \* F3 engine.ts getCurrentStepForNode: memoized. A completed node is
+          \* rehydrated without routing; a live one pauses this walk.
           /\ SetT(t, [thr[t] EXCEPT !.pc = "wPick", !.ex = @ \cup {n},
-                       !.hasW = @ \/ n \in NodesWith("waiting") \cup NodesWith("running")])
+                       !.done = IF n \in NodesWith("completed") THEN @ \cup {n} ELSE @,
+                       !.hasW = @ \/ n \notin NodesWith("completed")])
           /\ UNCHANGED <<steps, execLive>>
      ELSE /\ steps' = Append(steps, [node |-> n, st |-> "running", rc |-> 0,
                                       nra |-> FALSE, task |-> "none"])
@@ -224,18 +244,23 @@ WBatchEnd(t) ==
   /\ IF thr[t].hasW
      THEN SetT(t, [thr[t] EXCEPT !.pc = "wRet"])
      ELSE LET w == thr[t]
+              \* F6: the gate re-reads the steps; a predecessor whose latest
+              \* step completed in another walk joins the completed set.
+              wd == IF FixJoinWaitsLive THEN w.done \cup LatestIn({"completed"}) ELSE w.done
               rn == {n \in w.nxt : n \notin w.ex
                         /\ {p \in Preds(n) : <<p, n>> \in w.edges \/ Awaited(p, w.edges)}
-                             \subseteq w.done}
+                             \subseteq wd}
           IN IF rn # {}
-             THEN SetT(t, [thr[t] EXCEPT !.pend = rn, !.nxt = {}])
-             ELSE SetT(t, [thr[t] EXCEPT !.pc = "wFinal"])
+             THEN SetT(t, [thr[t] EXCEPT !.pend = rn, !.nxt = {}, !.done = wd])
+             ELSE SetT(t, [thr[t] EXCEPT !.pc = "wFinal", !.done = wd])
   /\ UNCHANGED <<run, steps, active, execLive, okCount, hbLeft, crashes>>
 
 \* W4 engine.ts:403-453 — finalization transaction (guarded on running).
+\* F6: a node whose latest step is running belongs to another walker, which
+\* finalizes the run when it settles.
 WFinal(t) ==
   /\ thr[t].pc = "wFinal"
-  /\ IF run = "running"
+  /\ IF run = "running" /\ ~(FixJoinWaitsLive /\ LatestIn({"running"}) # {})
      THEN LET hasW == \E i \in StepIds : steps[i].st = "waiting"
                         \/ (FixPendingRetryGate /\ steps[i].st \in {"running", "pending"})
               hasPR == \E i \in StepIds : PendingRetry(i)
@@ -312,8 +337,7 @@ P3 ==
 P4 ==
   /\ thr[TPoll].pc = "p4"
   /\ LET i == thr[TPoll].sid IN
-     IF FixPollerRunGuard /\ ~(PendingRetry(i) /\ run \in {"running", "waiting", "failed"}
-                               /\ (run = "failed" => \A j \in StepIds : ~(steps[j].st = "failed" /\ ~steps[j].nra)))
+     IF FixPollerRunGuard /\ ~(PendingRetry(i) /\ run \in {"running", "waiting", "failed"})
      THEN /\ SetT(TPoll, [thr[TPoll] EXCEPT !.pc = "p2"])
           /\ UNCHANGED <<steps, execLive, run, active>>
      ELSE /\ steps' = [steps EXCEPT ![i].st = "running", ![i].nra = FALSE]
@@ -388,8 +412,9 @@ P8 ==
   /\ SetT(TPoll, [thr[TPoll] EXCEPT !.pc = "pRel"])
   /\ UNCHANGED <<active, execLive, okCount, hbLeft, crashes>>
 
-\* End of one poller row. F4: the poller holds activeWalks for the row it
-\* executes, so recovery's existing isWorkflowRunActive guard covers it.
+\* End of one poller row. F4 retry-poller.ts:57, :218: the poller holds
+\* activeWalks (holdWorkflowRun) for the row it executes, so recovery's
+\* existing isWorkflowRunActive guard covers it.
 PRel ==
   /\ thr[TPoll].pc = "pRel"
   /\ active' = IF FixRecoveryRetry THEN active - 1 ELSE active
@@ -405,9 +430,10 @@ Ready(done, edges) ==
   {n \in Nodes : /\ n \notin done
                  /\ \/ Preds(n) = {}
                     \/ LET ap == {p \in Preds(n) : <<p, n>> \in edges}
-                       IN ap # {} /\ ap \subseteq done
-                 \* F4: a node pending retry belongs to the retry poller.
-                 /\ (FixRecoveryRetry => n \notin RetryNodes)}
+                       IN ap # {} /\ ap \subseteq done}
+
+\* Each node's latest step row (steps are appended in insert order).
+LatestIds == {i \in StepIds : ~\E j \in StepIds : j > i /\ steps[j].node = steps[i].node}
 
 \* H1 recovery.ts:63-68 — running run ids; activeWalks check.
 H1 ==
@@ -419,13 +445,15 @@ H1 ==
   /\ UNCHANGED <<run, steps, active, execLive, okCount, crashes>>
 
 \* H2 recovery.ts:69-85 — re-read run, completed steps, routing; findReadyNodes.
+\* F4 recovery.ts:88-93: a node pending retry belongs to the retry poller.
 H2 ==
   /\ thr[THb].pc = "h2"
   /\ IF run # "running"
      THEN SetT(THb, [thr[THb] EXCEPT !.pc = "h5"])
      ELSE LET done == NodesWith("completed")
           IN SetT(THb, [thr[THb] EXCEPT !.pc = "h3", !.done = done,
-                         !.pend = Ready(done, Edges(done))])
+                         !.pend = {n \in Ready(done, Edges(done)) :
+                                     FixRecoveryRetry => n \notin RetryNodes}])
   /\ UNCHANGED <<run, steps, active, execLive, okCount, hbLeft, crashes>>
 
 \* H3 recovery.ts:87-106 — activeWalks re-check; complete or re-walk.
@@ -441,13 +469,15 @@ H3 ==
   /\ UNCHANGED <<run, steps, execLive, okCount, hbLeft, crashes>>
 
 \* H4 recovery.ts:88-94 — run -> completed (blind write, no transaction).
-\* F4: finalize in one transaction, only while the run is still running and
-\* no step is live or pending retry.
+\* F4 recovery.ts:136-156 completeIfSettled: one transaction, only while the
+\* run is still running, no row is pending retry, and no node's latest row is
+\* live.
 H4 ==
   /\ thr[THb].pc = "h4"
   /\ run' = IF FixRecoveryRetry
-            THEN IF run = "running" /\ ~\E i \in StepIds :
-                      steps[i].st \in {"waiting", "running", "pending"} \/ PendingRetry(i)
+            THEN IF /\ run = "running"
+                    /\ ~\E i \in StepIds : PendingRetry(i)
+                    /\ ~\E i \in LatestIds : steps[i].st \in {"waiting", "running", "pending"}
                  THEN "completed" ELSE run
             ELSE "completed"
   /\ SetT(THb, [thr[THb] EXCEPT !.pc = "h5"])
@@ -540,7 +570,10 @@ E2(t) ==
 \* E3 resume.ts:201-218 finalizeOrWait — transaction, but no run-status guard.
 EFin(t) ==
   /\ thr[t].pc = "eFin"
-  /\ run' = IF \E j \in StepIds : steps[j].st = "waiting"
+  /\ run' = IF FixJoinWaitsLive /\ LatestIn({"running"}) # {}
+            THEN \* F6: leave it to the live walk, whose finalizer needs `running`
+                 IF run = "waiting" THEN "running" ELSE run
+            ELSE IF \E j \in StepIds : steps[j].st = "waiting"
                  \/ (FixPendingRetryGate /\ steps[j].st \in {"running", "pending"})
             THEN "waiting" ELSE "completed"
   /\ SetT(t, [thr[t] EXCEPT !.pc = "eDone"])
@@ -593,7 +626,7 @@ U1 ==
 \* U2 resume.ts:341-363 — claim transaction, then walkGraph.
 U2 ==
   /\ thr[TRetry].pc = "u2"
-  /\ IF run = "failed" /\ ~(FixUserRetryLive /\ active > 0)
+  /\ IF run = "failed"
      THEN /\ steps' = [steps EXCEPT ![thr[TRetry].sid].st = "pending"]
           /\ run' = "running"
           /\ Call(TRetry, thr[TRetry].pend, "uDone")
@@ -664,6 +697,14 @@ CompletedRunQuiescent ==
 JoinWaitsForAll ==
   [][ Len(steps') > Len(steps) /\ steps'[Len(steps')].node = "M"
         => Branches \subseteq NodesWith("completed") ]_vars
+
+\* Inv3c (CX3): the convergence node is only created once every branch has a
+\* step and none is still executing or waiting. Weaker than Inv3b: a branch
+\* that failed for good may still join (partial failure), and a branch pending
+\* retry is F2's concern.
+JoinWaitsForBranches ==
+  [][ Len(steps') > Len(steps) /\ steps'[Len(steps')].node = "M"
+        => \A b \in Branches : HasRow(b) /\ LatestSt(b) \notin {"running", "waiting", "pending"} ]_vars
 
 \* Inv5 (liveness): the run eventually leaves running/waiting.
 EventuallySettles == <>[](run \in RunTerminal)

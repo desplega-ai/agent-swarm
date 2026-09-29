@@ -22,6 +22,7 @@
  *   task:workflow:{workflowRunId}
  *   task:agent:{agentId}                          (KV-only: per-agent scratchpad)
  *   task:page:{pageId}                            (KV-only: per-page state, proxy-enforced)
+ *   task:ui:{kind}:{ref}:{sessionNonce}           (UI-built by the contextual session panel; no server parser)
  *
  * Rules:
  *   - Fixed prefix tokens (`task`, family, sub-family, kind) are always lowercase.

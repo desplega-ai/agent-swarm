@@ -37,7 +37,11 @@ import { interpolate } from "../workflows/template";
 
 const TEST_DB_PATH = `./test-workflow-tla-races-${crypto.randomUUID()}.sqlite`;
 
-type Behavior = "ok" | "fail" | "async" | { hold: Promise<void>; entered: () => void };
+type Behavior =
+  | "ok"
+  | "fail"
+  | "async"
+  | { hold: Promise<void>; entered: () => void; async?: boolean };
 
 /** Scripted executor: each call for a node consumes the next behavior. */
 const plans = new Map<string, Behavior[]>();
@@ -61,8 +65,13 @@ class ScriptedExecutor extends BaseExecutor<
     meta: { nodeId: string },
   ): Promise<ExecutorResult<z.infer<typeof ScriptedExecutor.outSchema>>> {
     calls.push(meta.nodeId);
-    const behavior = plans.get(meta.nodeId)?.shift() ?? "ok";
+    let behavior = plans.get(meta.nodeId)?.shift() ?? "ok";
     if (behavior === "fail") return { status: "failed", error: `${meta.nodeId} failed` };
+    if (typeof behavior === "object" && behavior.async) {
+      behavior.entered();
+      await behavior.hold;
+      behavior = "async";
+    }
     if (behavior === "async") {
       return {
         status: "success",
@@ -124,10 +133,11 @@ async function newRun(def: WorkflowDefinition) {
   return { runId, ctx, walk };
 }
 
-function barrier() {
+/** Holds the executor until released; with `async`, it then dispatches a task. */
+function barrier(async = false) {
   const entered = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
-  const behavior: Behavior = { hold: release.promise, entered: entered.resolve };
+  const behavior: Behavior = { hold: release.promise, entered: entered.resolve, async };
   return { behavior, entered: entered.promise, release: release.resolve };
 }
 
@@ -166,7 +176,7 @@ afterAll(async () => {
 });
 
 describe("TLA+ workflow counterexamples", () => {
-  test.failing("CX1: the retry poller does not re-execute a failed step of a cancelled run", async () => {
+  test("CX1: the retry poller does not re-execute a failed step of a cancelled run", async () => {
     plans.clear();
     calls.length = 0;
     const def = fanOut(false);
@@ -188,7 +198,7 @@ describe("TLA+ workflow counterexamples", () => {
     expect((await getWorkflowRun(runId))?.status).toBe("cancelled");
   });
 
-  test.failing("CX2: a user retry does not re-execute a branch the live walk is still running", async () => {
+  test("CX2: a user retry does not re-execute a branch the live walk is still running", async () => {
     plans.clear();
     calls.length = 0;
     const def = fanOut(true);
@@ -214,7 +224,35 @@ describe("TLA+ workflow counterexamples", () => {
     expect(callsOf("A")).toBe(1);
   });
 
-  test.failing("CX3: an async branch completing does not fire the join while a sibling branch is still executing", async () => {
+  test("CX2: a user retry does not re-dispatch a branch whose waiting checkpoint lost to the run failing", async () => {
+    plans.clear();
+    calls.length = 0;
+    const def = fanOut(true);
+    const holdA = barrier(true);
+    plans.set("A", [holdA.behavior, "async"]);
+    plans.set("B", ["async", "async"]);
+    const { runId, walk } = await newRun(def);
+
+    // XRun(A): A is dispatching its task while B waits on its own.
+    const initial = walk(["T"]);
+    await holdA.entered;
+    const stepB = await untilStatus(runId, "B", "waiting");
+
+    // EF: B's task fails -> run failed. XCkWait(A): the checkpoint CAS sees a
+    // failed run, so A's row stays `running` with its task out.
+    await failStepAndRunIfWaiting(stepB!.id, runId, "task failed");
+    holdA.release();
+    await initial;
+    expect((await stepsOf(runId, "A"))[0]?.status).toBe("running");
+
+    // U1/U2: the retry must not dispatch A a second time.
+    await retryFailedRun(runId, registry);
+
+    expect(callsOf("A")).toBe(1);
+    expect(await stepsOf(runId, "A")).toHaveLength(1);
+  });
+
+  test("CX3: an async branch completing does not fire the join while a sibling branch is still executing", async () => {
     plans.clear();
     calls.length = 0;
     const def = fanOut(true);
@@ -247,7 +285,7 @@ describe("TLA+ workflow counterexamples", () => {
     expect(statusBeforeA).not.toBe("completed");
   });
 
-  test.failing("CX4: two branch completions racing to the join execute it once", async () => {
+  test("CX4: two branch completions racing to the join execute it once", async () => {
     plans.clear();
     calls.length = 0;
     const def = fanOut(true);
@@ -268,7 +306,7 @@ describe("TLA+ workflow counterexamples", () => {
     expect(await stepsOf(runId, "M")).toHaveLength(1);
   });
 
-  test.failing("CX5: heartbeat recovery leaves a step that is pending retry to the retry poller", async () => {
+  test("CX5: heartbeat recovery leaves a step that is pending retry to the retry poller", async () => {
     plans.clear();
     calls.length = 0;
     const def = fanOut(false);
@@ -281,6 +319,9 @@ describe("TLA+ workflow counterexamples", () => {
 
     // H1..H3: recovery sees a running, idle run and re-walks A (findReadyNodes).
     await recoverIncompleteRuns(registry);
+    // With A excluded nothing is ready, and recovery must not complete the run
+    // while A's retry is pending.
+    expect((await getWorkflowRun(runId))?.status).toBe("running");
     await sleep(5);
     // P1..P6: the poller retries the original failed A row.
     await runPollerOnce();
@@ -289,7 +330,7 @@ describe("TLA+ workflow counterexamples", () => {
     expect(callsOf("A")).toBe(2);
   });
 
-  test.failing("CX6: heartbeat recovery does not walk a run whose trigger is still resolving inputs", async () => {
+  test("CX6: heartbeat recovery does not walk a run whose trigger is still resolving inputs", async () => {
     plans.clear();
     calls.length = 0;
     const def = fanOut(false);
@@ -313,7 +354,7 @@ describe("TLA+ workflow counterexamples", () => {
     expect(await stepsOf(runId, "T")).toHaveLength(1);
   });
 
-  test.failing("CX7: the walk finalizer does not complete a run while the retry poller is executing a step", async () => {
+  test("CX7: the walk finalizer does not complete a run while the retry poller is executing a step", async () => {
     plans.clear();
     calls.length = 0;
     const def = fanOut(false);
