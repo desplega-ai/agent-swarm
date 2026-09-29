@@ -14,10 +14,14 @@ import { getDbClient } from "../runtime";
  * (migration 182 backfilled history), so the usage reports read a column
  * instead of rebuilding a recursive CTE over every task per query.
  *
- * Every classifying input (`taskType`, `tags`, `source`, `requestedByUserId`,
- * `requestedByUserIdInherited`, `parentTaskId`, `workflowRunId`) is fixed at
- * insert. Adding a code path that rewrites one of them must re-run
- * `classifyTaskHumanFree` for that task and its descendants.
+ * The stored flag must equal what the rule selects over the CURRENT rows, so a
+ * code path that rewrites a classifying input has to call
+ * `reclassifyTaskHumanFree` in the same transaction. The inputs are
+ * `agent_tasks.{taskType,tags,source,requestedByUserId,requestedByUserIdInherited,parentTaskId,workflowRunId}`,
+ * `workflow_runs.{triggerType,created_by}`, and the existence of the parent and
+ * run rows. Today these mutate in four places: `deleteUser` (requester and
+ * workflow creator cleared), `deleteWorkflow` (run link cleared, runs deleted),
+ * `deleteTask` (a parent row disappears) and `completeTask` with `addTags`.
  */
 
 /**
@@ -47,6 +51,21 @@ const HUMAN_FREE_BASE_SQL = `(
         )
       )`;
 
+/**
+ * The classification as a 0/1 expression over the aliases `task` (the row) and
+ * `parent` (see above). `parentFlag` is the SQL expression for the parent's
+ * already-decided flag: the stored column for a task classified on its own, the
+ * freshly computed value while reclassifying a tree top-down.
+ */
+function humanFreeCase(parentFlag: string): string {
+  return `CASE
+        WHEN ${HUMAN_FREE_BASE_SQL} THEN 1
+        WHEN ${parentFlag} = 1
+          AND (task.requestedByUserId IS NULL OR task.requestedByUserIdInherited = 1) THEN 1
+        ELSE 0
+      END`;
+}
+
 export interface HumanFreeInput {
   taskType?: string | null;
   /** The JSON-encoded `tags` column value. */
@@ -68,12 +87,7 @@ export async function classifyTaskHumanFree(input: HumanFreeInput): Promise<bool
     `WITH task(taskType, tags, source, requestedByUserId, requestedByUserIdInherited, parentTaskId, workflowRunId) AS (
         VALUES (?, ?, ?, ?, ?, ?, ?)
       )
-      SELECT CASE
-        WHEN ${HUMAN_FREE_BASE_SQL} THEN 1
-        WHEN parent.isHumanFree = 1
-          AND (task.requestedByUserId IS NULL OR task.requestedByUserIdInherited = 1) THEN 1
-        ELSE 0
-      END AS humanFree
+      SELECT ${humanFreeCase("parent.isHumanFree")} AS humanFree
       FROM task
       LEFT JOIN agent_tasks parent ON parent.id = task.parentTaskId`,
     [
@@ -87,4 +101,48 @@ export async function classifyTaskHumanFree(input: HumanFreeInput): Promise<bool
     ],
   );
   return row?.humanFree === 1;
+}
+
+/**
+ * Recompute the stored flag for `seedTaskIds` and every descendant, after a
+ * mutation changed a classifying input. Call it inside the mutating
+ * transaction, once the new state is written, with ids gathered BEFORE the
+ * write when the write erases what identifies them (a cleared requester).
+ *
+ * The tree is walked top-down so each task reads its parent's new flag. Seeds
+ * can be descendants of other seeds (a root and its inherited child both
+ * lose the same requester), which yields two candidate rows for one task: the
+ * seed row read a parent flag that may be stale, the walked row read the fresh
+ * one. The row at the greatest depth came through the topmost seed, so it wins.
+ * Returns how many stored flags changed.
+ */
+export async function reclassifyTaskHumanFree(seedTaskIds: readonly string[]): Promise<number> {
+  if (seedTaskIds.length === 0) return 0;
+  const result = await getDbClient().run(
+    `WITH RECURSIVE reclassified(id, humanFree, depth) AS (
+        SELECT task.id, ${humanFreeCase("parent.isHumanFree")}, 0
+        FROM agent_tasks task
+        LEFT JOIN agent_tasks parent ON parent.id = task.parentTaskId
+        WHERE task.id IN (SELECT value FROM json_each(?))
+
+        UNION
+
+        SELECT task.id, ${humanFreeCase("reclassified.humanFree")}, reclassified.depth + 1
+        FROM reclassified
+        JOIN agent_tasks task ON task.parentTaskId = reclassified.id
+        LEFT JOIN agent_tasks parent ON parent.id = task.parentTaskId
+        WHERE reclassified.depth < 1000
+      )
+      UPDATE agent_tasks
+      SET isHumanFree = decided.humanFree
+      FROM (
+        SELECT id, humanFree, MAX(depth) AS depth
+        FROM reclassified
+        GROUP BY id
+      ) AS decided
+      WHERE agent_tasks.id = decided.id
+        AND agent_tasks.isHumanFree != decided.humanFree`,
+    [JSON.stringify(seedTaskIds)],
+  );
+  return result.changes;
 }

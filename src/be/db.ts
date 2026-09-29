@@ -160,7 +160,7 @@ import {
   getLatestContextVersion,
 } from "./db/context-versions";
 import { getDb, getDbClient } from "./db/runtime";
-import { classifyTaskHumanFree } from "./db/tasks/human-free";
+import { classifyTaskHumanFree, reclassifyTaskHumanFree } from "./db/tasks/human-free";
 import {
   type AgentTaskRow,
   configureTaskReadDependencies,
@@ -7485,7 +7485,19 @@ export async function updateWorkflow(
 }
 
 export async function deleteWorkflow(id: string, source?: "api" | "mcp"): Promise<boolean> {
+  // One transaction: the stored human-free flags must never lag the deleted runs
+  // (a scheduled workflow root is human-free only while its run row exists).
+  return await getDbClient().transaction(() => deleteWorkflowRows(id, source));
+}
+
+async function deleteWorkflowRows(id: string, source?: "api" | "mcp"): Promise<boolean> {
   const client = getDbClient();
+  const linkedTaskIds = (
+    await client.query<{ id: string }>(
+      `SELECT id FROM agent_tasks WHERE workflowRunId IN (SELECT id FROM workflow_runs WHERE workflowId = ?)`,
+      [id],
+    )
+  ).map((row) => row.id);
   // Cascade delete in FK-safe order:
   // 1. Unlink agent_tasks (they reference steps and runs)
   await client.run(
@@ -7499,6 +7511,7 @@ export async function deleteWorkflow(id: string, source?: "api" | "mcp"): Promis
   );
   // 3. Delete runs (they reference workflow)
   await client.run("DELETE FROM workflow_runs WHERE workflowId = ?", [id]);
+  await reclassifyTaskHumanFree(linkedTaskIds);
   // 4. Delete workflow
   const result = await client.run("DELETE FROM workflows WHERE id = ?", [id]);
   const deleted = result.changes > 0;
@@ -12019,6 +12032,21 @@ export async function deleteUser(id: string, replacementUserId?: string): Promis
          )`,
     );
     const replacement = replacementUserId ?? null;
+    // The human-free rule only asks whether a task's requester or its workflow
+    // run's creator is NULL, so only clearing them (no replacement) can change a
+    // stored flag. Gather the tasks now: after the rewrite nothing identifies
+    // them. The workflow branch covers roots whose requester was never set.
+    const reclassifySeedIds: string[] = replacementUserId
+      ? []
+      : (
+          await tx.query<{ id: string }>(
+            `SELECT id FROM agent_tasks WHERE requestedByUserId = ?
+             UNION
+             SELECT id FROM agent_tasks
+             WHERE workflowRunId IN (SELECT id FROM workflow_runs WHERE created_by = ?)`,
+            [id, id],
+          )
+        ).map((row) => row.id);
     for (const reference of references) {
       const table = quoteSqlIdentifier(reference.tableName);
       const column = quoteSqlIdentifier(reference.columnName);
@@ -12045,6 +12073,8 @@ export async function deleteUser(id: string, replacementUserId?: string): Promis
         [id],
       );
     }
+
+    await reclassifyTaskHumanFree(reclassifySeedIds);
 
     const result = await tx.run("DELETE FROM users WHERE id = ?", [id]);
     return result.changes > 0;

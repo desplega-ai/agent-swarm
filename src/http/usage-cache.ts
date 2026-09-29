@@ -5,13 +5,16 @@
  *
  * A key holds only the request filters. An entry is fresh for
  * `USAGE_CACHE_TTL_MS` (the time bucket). Past that it is served as-is while one
- * background load revalidates it, up to `USAGE_CACHE_MAX_STALE_MS`; an older or
- * missing entry blocks on a load. Concurrent misses for one key share that load.
+ * background load revalidates it, until its total age reaches
+ * `USAGE_CACHE_MAX_STALE_MS`; an older or missing entry blocks on a load.
+ * Concurrent misses for one key share that load.
  *
  * The key deliberately carries no data version. The old one changed on every
  * new task or session, and the swarm creates one every few seconds, so it
- * almost never hit. The cost is that a new session shows up after at most one
- * bucket. A credential plan or name change clears the cache.
+ * almost never hit. The cost is staleness: the first request past the bucket
+ * still gets the old value and only starts the refresh, so a new session shows
+ * up on the request after that. A client polling once per bucket sees it about
+ * one poll later. A credential plan or name change clears the cache.
  */
 
 export const USAGE_CACHE_TTL_MS = 30_000;

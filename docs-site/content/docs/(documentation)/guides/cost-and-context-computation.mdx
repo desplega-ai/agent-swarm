@@ -123,14 +123,21 @@ the row, keeping the numerator and denominator a consistent partition.
 The classification is computed once, when the task is created, and stored in
 `agent_tasks.isHumanFree` (migration 182 backfilled existing tasks). The usage
 reports read that column instead of walking every task tree per request. Every
-input to the rule is fixed at creation, so a code path that rewrites one of them
-must reclassify the task and its descendants.
+input to the rule is fixed at creation except where a mutation rewrites one:
+deleting a user without a replacement clears the requester and the workflow run
+creator, deleting a workflow removes its runs, deleting a task removes a parent,
+and completing a task can add tags. Each of those reclassifies the affected tasks
+and their descendants in the same transaction, so the stored flag always matches
+the rule over the current rows.
 
 The usage endpoints (`/api/session-costs/summary`, `/api/attribution/by-person`)
-cache each reply per filter set for 30 seconds. After that they answer with the
-cached reply for up to two more minutes while one background query refreshes it,
-so a new session can take up to one bucket to appear. Changing a credential's
-plan or name clears the cache.
+cache each reply per filter set. A reply is fresh for 30 seconds. Until its total
+age reaches 120 seconds (counted from when it was loaded), requests still get it
+while one background query refreshes it. A request that finds it older than that
+waits for a new query. The first request past the 30 seconds only starts the
+refresh and still receives the old reply, so a new session shows up on the
+request after that: about one poll later for a client that polls every 30
+seconds. Changing a credential's plan or name clears the cache.
 
 The **By Person** view uses the same requester data model, but it is not a
 grouping of the cost denominator and reads the same stored flag. It reports

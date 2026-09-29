@@ -15,7 +15,7 @@ import { scrubSecrets } from "../../../utils/secret-scrubber";
 import { emitTaskStarted } from "../../task-lifecycle-events";
 import { getAgentById, isAgentEligibleForTask } from "../agents";
 import { getDbClient } from "../runtime";
-import { classifyTaskHumanFree } from "./human-free";
+import { classifyTaskHumanFree, reclassifyTaskHumanFree } from "./human-free";
 import { type AgentTaskRow, getTaskById, rowToAgentTask } from "./read";
 
 type TaskWriteDependencies = {
@@ -366,6 +366,8 @@ export async function completeTask(
         "UPDATE agent_tasks SET tags = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *",
         [JSON.stringify(nextTags), id],
       );
+      // A "heartbeat" tag makes a task human-free, so a tag write reclassifies it.
+      await reclassifyTaskHumanFree([id]);
     }
     if (completed && options?.deferredAt) {
       completed = await getDbClient().get<AgentTaskRow>(
@@ -963,8 +965,17 @@ export async function getRecentlyCancelledTasksForAgent(agentId: string): Promis
 }
 
 export async function deleteTask(id: string): Promise<boolean> {
-  const result = await getDbClient().run("DELETE FROM agent_tasks WHERE id = ?", [id]);
-  return result.changes > 0;
+  return await getDbClient().transaction(async (tx) => {
+    // `parentTaskId` has no foreign key, so children survive with a dangling
+    // parent. The human-free rule reads the parent row, so they are reclassified
+    // once it is gone.
+    const childIds = (
+      await tx.query<{ id: string }>("SELECT id FROM agent_tasks WHERE parentTaskId = ?", [id])
+    ).map((row) => row.id);
+    const result = await tx.run("DELETE FROM agent_tasks WHERE id = ?", [id]);
+    await reclassifyTaskHumanFree(childIds);
+    return result.changes > 0;
+  });
 }
 
 export async function updateTaskProgress(id: string, progress: string): Promise<AgentTask | null> {

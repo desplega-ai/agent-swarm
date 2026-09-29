@@ -1,0 +1,327 @@
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { unlink } from "node:fs/promises";
+import {
+  closeDb,
+  createAgent,
+  createScheduledTask,
+  createSessionCost,
+  createTaskExtended,
+  createUser,
+  createWorkflow,
+  createWorkflowRun,
+  deleteUser,
+  deleteWorkflow,
+  getDbClient,
+  getSessionCostSummary,
+  initDb,
+} from "../be/db";
+import { reclassifyTaskHumanFree } from "../be/db/tasks/human-free";
+import { completeTask, deleteTask } from "../be/db/tasks/write";
+import { expectFlagsMatchLegacy, legacyHumanFreeIds, storedFlags } from "./human-free-oracle";
+
+const TEST_DB_PATH = "./test-human-free-reclassify.sqlite";
+
+// `agent_tasks.isHumanFree` is written when a task is created. Every mutation
+// that rewrites a classifying input has to bring it back in line, or the usage
+// reports drift from what the rule selects over the current rows (which is what
+// the live recursive CTE returned before the column existed). After each
+// mutation these tests compare the whole table against that CTE as an oracle.
+async function expectStoredMatchesRule() {
+  expectFlagsMatchLegacy(await storedFlags(), await legacyHumanFreeIds());
+}
+
+async function flag(taskId: string): Promise<boolean | undefined> {
+  return (await storedFlags()).get(taskId);
+}
+
+async function task(text: string, options: Parameters<typeof createTaskExtended>[1] = {}) {
+  return (await createTaskExtended(text, options)).id;
+}
+
+describe("human-free flag stays correct when a classifying input changes", () => {
+  beforeAll(async () => {
+    for (const suffix of ["", "-wal", "-shm"]) {
+      try {
+        await unlink(TEST_DB_PATH + suffix);
+      } catch {}
+    }
+    initDb(TEST_DB_PATH);
+  });
+
+  afterAll(async () => {
+    closeDb();
+    for (const suffix of ["", "-wal", "-shm"]) {
+      try {
+        await unlink(TEST_DB_PATH + suffix);
+      } catch {}
+    }
+  });
+
+  test("deleteUser without a replacement reclassifies requester-cleared tasks and their descendants", async () => {
+    const user = await createUser({ name: "Reclassify Deleted Requester" });
+    const other = await createUser({ name: "Reclassify Other Requester" });
+    const agent = await createAgent({ name: "Reclassify Agent A", isLead: false, status: "idle" });
+
+    const root = await task("scheduled by a person", {
+      source: "schedule",
+      requestedByUserId: user.id,
+    });
+    const child = await task("inherits the requester", { parentTaskId: root });
+    const grandchild = await task("inherits it too", { parentTaskId: child });
+    // An explicit handoff to someone else is independent and must stay attributed.
+    const handoff = await task("handed to another person", {
+      parentTaskId: root,
+      requestedByUserId: other.id,
+    });
+    const belowHandoff = await task("below the handoff", { parentTaskId: handoff });
+    // `system` follow-ups are free only while the parent has no requester.
+    const systemChild = await task("system follow-up", { source: "system", parentTaskId: root });
+    // A workflow root whose run was scheduled by this user: creator cleared with the user.
+    const workflow = await createWorkflow({
+      name: `reclassify-user-${crypto.randomUUID()}`,
+      definition: { nodes: [] },
+    });
+    const schedule = await createScheduledTask({
+      name: `reclassify-user-${crypto.randomUUID()}`,
+      intervalMs: 60_000,
+      targetType: "workflow",
+      workflowId: workflow.id,
+      createdBy: user.id,
+    });
+    const run = await createWorkflowRun({
+      id: crypto.randomUUID(),
+      workflowId: workflow.id,
+      triggerType: "schedule",
+      triggerData: { scheduleId: schedule.id },
+      createdBy: user.id,
+    });
+    const workflowRoot = await task("workflow root", { source: "workflow", workflowRunId: run.id });
+    const workflowChild = await task("workflow child", {
+      source: "workflow",
+      workflowRunId: run.id,
+      parentTaskId: workflowRoot,
+    });
+
+    for (const [name, taskId] of [
+      ["root", root],
+      ["child", child],
+    ] as const) {
+      await createSessionCost({
+        sessionId: `reclassify-${name}`,
+        taskId,
+        agentId: agent.id,
+        totalCostUsd: 1,
+        durationMs: 1000,
+        numTurns: 1,
+        model: "opus",
+      });
+    }
+
+    const beforeFlags = await storedFlags();
+    for (const taskId of [
+      root,
+      child,
+      grandchild,
+      handoff,
+      belowHandoff,
+      systemChild,
+      workflowRoot,
+      workflowChild,
+    ]) {
+      expect(beforeFlags.get(taskId)).toBe(false);
+    }
+    const before = (await getSessionCostSummary({ agentId: agent.id, groupBy: "day" })).totals;
+    expect(before.excludedCostUsd).toBe(0);
+    expect(before.excludedTaskCount).toBe(0);
+    expect(before.attributableCostUsd).toBe(2);
+    await expectStoredMatchesRule();
+
+    expect(await deleteUser(user.id)).toBe(true);
+
+    const after = await storedFlags();
+    expect(
+      Object.fromEntries(
+        Object.entries({
+          root,
+          child,
+          grandchild,
+          handoff,
+          belowHandoff,
+          systemChild,
+          workflowRoot,
+          workflowChild,
+        }).map(([name, taskId]) => [name, after.get(taskId)]),
+      ),
+    ).toEqual({
+      root: true,
+      child: true,
+      grandchild: true,
+      handoff: false,
+      belowHandoff: false,
+      systemChild: true,
+      workflowRoot: true,
+      workflowChild: true,
+    });
+    // The report the reviewer reproduced: both sessions leave the human denominator.
+    const totals = (await getSessionCostSummary({ agentId: agent.id, groupBy: "day" })).totals;
+    expect(totals.excludedCostUsd).toBe(2);
+    expect(totals.excludedTaskCount).toBe(2);
+    expect(totals.attributableCostUsd).toBe(0);
+    await expectStoredMatchesRule();
+  });
+
+  test("deleteUser with a replacement leaves the classification alone", async () => {
+    const user = await createUser({ name: "Reclassify Replaced Requester" });
+    const replacement = await createUser({ name: "Reclassify Replacement" });
+    const root = await task("scheduled by a person", {
+      source: "schedule",
+      requestedByUserId: user.id,
+    });
+    const child = await task("inherits the requester", { parentTaskId: root });
+
+    expect(await deleteUser(user.id, replacement.id)).toBe(true);
+
+    const row = await getDbClient().get<{ requestedByUserId: string | null }>(
+      "SELECT requestedByUserId FROM agent_tasks WHERE id = ?",
+      [child],
+    );
+    expect(row?.requestedByUserId).toBe(replacement.id);
+    expect(await flag(root)).toBe(false);
+    expect(await flag(child)).toBe(false);
+    await expectStoredMatchesRule();
+  });
+
+  test("deleteWorkflow drops the flag from scheduled workflow roots whose run is gone", async () => {
+    const workflow = await createWorkflow({
+      name: `reclassify-workflow-${crypto.randomUUID()}`,
+      definition: { nodes: [] },
+    });
+    const schedule = await createScheduledTask({
+      name: `reclassify-workflow-${crypto.randomUUID()}`,
+      intervalMs: 60_000,
+      targetType: "workflow",
+      workflowId: workflow.id,
+    });
+    const run = await createWorkflowRun({
+      id: crypto.randomUUID(),
+      workflowId: workflow.id,
+      triggerType: "schedule",
+      triggerData: { scheduleId: schedule.id },
+    });
+    const root = await task("wf root", { source: "workflow", workflowRunId: run.id });
+    const child = await task("wf child", {
+      source: "workflow",
+      workflowRunId: run.id,
+      parentTaskId: root,
+    });
+    expect(await flag(root)).toBe(true);
+    expect(await flag(child)).toBe(true);
+
+    expect(await deleteWorkflow(workflow.id)).toBe(true);
+
+    expect(await flag(root)).toBe(false);
+    expect(await flag(child)).toBe(false);
+    await expectStoredMatchesRule();
+  });
+
+  test("deleteWorkflow keeps flags that rest on other rules", async () => {
+    const workflow = await createWorkflow({
+      name: `reclassify-workflow-heartbeat-${crypto.randomUUID()}`,
+      definition: { nodes: [] },
+    });
+    const run = await createWorkflowRun({
+      id: crypto.randomUUID(),
+      workflowId: workflow.id,
+      triggerType: "schedule",
+    });
+    const heartbeat = await task("hb in a run", {
+      taskType: "heartbeat",
+      source: "workflow",
+      workflowRunId: run.id,
+    });
+    const below = await task("below the heartbeat", { parentTaskId: heartbeat });
+    expect(await flag(heartbeat)).toBe(true);
+
+    expect(await deleteWorkflow(workflow.id)).toBe(true);
+
+    expect(await flag(heartbeat)).toBe(true);
+    expect(await flag(below)).toBe(true);
+    await expectStoredMatchesRule();
+  });
+
+  test("deleteTask reclassifies children left with a dangling parent", async () => {
+    const root = await task("scheduled root", { source: "schedule" });
+    const child = await task("plain child", { parentTaskId: root });
+    const grandchild = await task("plain grandchild", { parentTaskId: child });
+    const systemChild = await task("system child", { source: "system", parentTaskId: root });
+    const heartbeatChild = await task("heartbeat child", {
+      taskType: "heartbeat",
+      parentTaskId: root,
+    });
+    for (const taskId of [root, child, grandchild, systemChild, heartbeatChild]) {
+      expect(await flag(taskId)).toBe(true);
+    }
+
+    expect(await deleteTask(root)).toBe(true);
+
+    expect(await flag(child)).toBe(false);
+    expect(await flag(grandchild)).toBe(false);
+    expect(await flag(systemChild)).toBe(false);
+    // Its own taskType still classifies it.
+    expect(await flag(heartbeatChild)).toBe(true);
+    await expectStoredMatchesRule();
+  });
+
+  test("completing a task with a heartbeat tag reclassifies it and its descendants", async () => {
+    const root = await task("became a heartbeat");
+    const child = await task("below it", { parentTaskId: root });
+    expect(await flag(root)).toBe(false);
+    expect(await flag(child)).toBe(false);
+
+    await completeTask(root, "done", { addTags: ["deferred", "heartbeat"] });
+
+    expect(await flag(root)).toBe(true);
+    expect(await flag(child)).toBe(true);
+    await expectStoredMatchesRule();
+  });
+
+  test("completing a task with an unrelated tag changes nothing", async () => {
+    const root = await task("deferred work");
+    const child = await task("below it", { parentTaskId: root });
+
+    await completeTask(root, "done", { addTags: ["deferred"] });
+
+    expect(await flag(root)).toBe(false);
+    expect(await flag(child)).toBe(false);
+    await expectStoredMatchesRule();
+  });
+
+  test("reclassify handles seeds that descend from other seeds, in any order", async () => {
+    const user = await createUser({ name: "Reclassify Ordering Requester" });
+    const root = await task("root", { source: "schedule", requestedByUserId: user.id });
+    const child = await task("child", { parentTaskId: root });
+    const grandchild = await task("grandchild", { parentTaskId: child });
+    const greatGrandchild = await task("great-grandchild", { parentTaskId: grandchild });
+    for (const taskId of [root, child, grandchild, greatGrandchild]) {
+      expect(await flag(taskId)).toBe(false);
+    }
+
+    // Clear the requester without going through deleteUser, then hand the seeds
+    // over deepest-first so a seed reads its parent's stale stored flag.
+    await getDbClient().run(
+      "UPDATE agent_tasks SET requestedByUserId = NULL WHERE id IN (?, ?, ?, ?)",
+      [root, child, grandchild, greatGrandchild],
+    );
+    const changed = await reclassifyTaskHumanFree([greatGrandchild, grandchild, child, root]);
+
+    expect(changed).toBe(4);
+    for (const taskId of [root, child, grandchild, greatGrandchild]) {
+      expect(await flag(taskId)).toBe(true);
+    }
+    await expectStoredMatchesRule();
+
+    // Nothing left to change.
+    expect(await reclassifyTaskHumanFree([root])).toBe(0);
+    expect(await reclassifyTaskHumanFree([])).toBe(0);
+  });
+});
