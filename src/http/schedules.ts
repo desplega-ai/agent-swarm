@@ -550,7 +550,9 @@ export async function handleSchedules(
         throw error;
       }
     }
-    // The escape hatch is a request flag, not a schedule column.
+    // The escape hatch is a request flag, not a schedule column. `body` aliases
+    // `parsed.body`, so read the flag before stripping it.
+    const allowCustomModel = parsed.body.allowCustomModel;
     delete body.allowCustomModel;
     const existing = await getScheduledTaskById(parsed.params.id);
     if (!existing) {
@@ -566,7 +568,7 @@ export async function handleSchedules(
       if (normalizedModel.model !== existing.model) {
         const modelError = await explicitModelErrorForAgent({
           model: normalizedModel.model,
-          allowCustomModel: parsed.body.allowCustomModel,
+          allowCustomModel,
           agentId: parsed.body.targetAgentId ?? existing.targetAgentId,
         });
         if (modelError) {

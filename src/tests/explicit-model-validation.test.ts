@@ -250,6 +250,28 @@ describe("schedules", () => {
     expect(resaved.status).toBe(200);
     expect(resaved.body.description).toBe("an unrelated edit");
   });
+
+  test("update to a new unknown model with the flag succeeds on PUT and PATCH", async () => {
+    const created = await api("POST", "/api/schedules", {
+      ...body,
+      name: "s-update-custom-model",
+      model: "claude-sonnet-5-5",
+    });
+    const id = created.body.id as string;
+    const put = await api("PUT", `/api/schedules/${id}`, {
+      model: "claude-nonexistent-10",
+      allowCustomModel: true,
+    });
+    expect(put.status).toBe(200);
+    expect(put.body.model).toBe("claude-nonexistent-10");
+    expect(put.body.allowCustomModel).toBeUndefined();
+    const patch = await api("PATCH", `/api/schedules/${id}`, {
+      model: "claude-nonexistent-11",
+      allowCustomModel: true,
+    });
+    expect(patch.status).toBe(200);
+    expect(patch.body.model).toBe("claude-nonexistent-11");
+  });
 });
 
 describe("PATCH /api/agents/:id/runtime", () => {
