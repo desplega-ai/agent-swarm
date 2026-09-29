@@ -158,6 +158,47 @@ describe("persistent model catalog", () => {
     expect(price?.pricePerMillionUsd).toBe(21);
   });
 
+  test("a corrected overlay-only price supersedes the earlier pricing row", async () => {
+    await refreshModelCatalog({ force: true, now: 1_000, fetchImpl: ok(payload(), '"v1"') });
+    const overlay = {
+      provider: "openai",
+      modelId: "gpt-overlay-only",
+      pricing: { input: 7, output: 21 },
+      reason: "launch blog",
+    };
+    await upsertModelCatalogOverlay(overlay, { now: 2_000 });
+    await upsertModelCatalogOverlay(
+      { ...overlay, pricing: { input: 7, output: 28 } },
+      { now: 3_000 },
+    );
+    expect(
+      (await getActivePricingRow("codex", "gpt-overlay-only", "output", 2_500))?.pricePerMillionUsd,
+    ).toBe(21);
+    expect(
+      (await getActivePricingRow("codex", "gpt-overlay-only", "output", 3_000))?.pricePerMillionUsd,
+    ).toBe(28);
+    expect(
+      (await getActivePricingRow("codex", "gpt-overlay-only", "input", 3_000))?.effectiveFrom,
+    ).toBe(2_000);
+  });
+
+  test("an overlay price never overrides an upstream-priced model", async () => {
+    await refreshModelCatalog({ force: true, now: 1_000, fetchImpl: ok(payload(), '"v1"') });
+    const before = await getActivePricingRow("codex", "gpt-base", "output", 1_000);
+    expect(before).not.toBeNull();
+    await upsertModelCatalogOverlay(
+      {
+        provider: "openai",
+        modelId: "gpt-base",
+        pricing: { input: 99, output: 999 },
+        reason: "upstream wrong",
+      },
+      { now: 2_000 },
+    );
+    const after = await getActivePricingRow("codex", "gpt-base", "output", 2_000);
+    expect(after?.pricePerMillionUsd).toBe(before?.pricePerMillionUsd);
+  });
+
   test("overlay wins per field over upstream", async () => {
     await refreshModelCatalog({ force: true, now: 1_000, fetchImpl: ok(payload(), '"v1"') });
     await upsertModelCatalogOverlay({

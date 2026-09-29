@@ -430,26 +430,58 @@ export async function expireMatchedOverlays(): Promise<string[]> {
 
 /**
  * Overlay prices → pricing rows, via the same models.dev projection the
- * refresh uses. Only (provider, model, tokenClass) triples with NO active
- * pricing row are written, so upstream prices are never overridden and a
- * brand-new model still gets priced by the server-side cost recompute.
+ * refresh uses. A (provider, model, tokenClass) triple with NO active pricing
+ * row is written, so upstream prices are never overridden and a brand-new
+ * model still gets priced by the server-side cost recompute. For an
+ * overlay-only model (no upstream catalog row) the overlay is the only price
+ * source, so a corrected overlay price supersedes its earlier row.
  */
 export async function applyOverlayPricingRows(now = Date.now()): Promise<number> {
   const overlays = await listModelCatalogOverlay();
+  const upstream = new Set((await listModelCatalog()).map((e) => `${e.provider}/${e.modelId}`));
   const synthetic: ModelsDevCache = {};
+  const overlayOnly: ModelsDevCache = {};
   for (const overlay of overlays) {
     if (!overlay.pricing || Object.keys(overlay.pricing).length === 0) continue;
-    synthetic[overlay.provider] ??= { models: {} };
-    const models = synthetic[overlay.provider]?.models;
-    if (models) models[overlay.modelId] = { cost: overlay.pricing };
+    for (const target of upstream.has(`${overlay.provider}/${overlay.modelId}`)
+      ? [synthetic]
+      : [synthetic, overlayOnly]) {
+      target[overlay.provider] ??= { models: {} };
+      const models = target[overlay.provider]?.models;
+      if (models) models[overlay.modelId] = { cost: overlay.pricing };
+    }
   }
   if (Object.keys(synthetic).length === 0) return 0;
   const rows = buildModelsDevSeedRows(synthetic);
+  const tripleKey = (r: { provider: string; model: string; tokenClass: string }) =>
+    `${r.provider}|${r.model}|${r.tokenClass}`;
+  // The projection also emits rows for an empty provider block (shortname
+  // fallbacks); those are not owned by any overlay-only model.
+  const emptyBlocks: ModelsDevCache = Object.fromEntries(
+    Object.keys(overlayOnly).map((provider) => [provider, { models: {} }]),
+  );
+  const fallbackKeys = new Set(buildModelsDevSeedRows(emptyBlocks).map(tripleKey));
+  const overlayOwned = new Set(
+    buildModelsDevSeedRows(overlayOnly)
+      .map(tripleKey)
+      .filter((key) => !fallbackKeys.has(key)),
+  );
   return await getDbClient().transaction(async () => {
     let inserted = 0;
     for (const row of rows) {
       const existing = await getActivePricingRow(row.provider, row.model, row.tokenClass, now);
-      if (existing) continue;
+      if (existing) {
+        if (!overlayOwned.has(tripleKey(row))) continue;
+        if (existing.pricePerMillionUsd === row.pricePerMillionUsd) continue;
+        if (existing.effectiveFrom === now) {
+          await getDbClient().run(
+            "UPDATE pricing SET price_per_million_usd = ?, lastUpdatedAt = ? WHERE provider = ? AND model = ? AND token_class = ? AND effective_from = ?",
+            [row.pricePerMillionUsd, now, row.provider, row.model, row.tokenClass, now],
+          );
+          inserted += 1;
+          continue;
+        }
+      }
       const input: InsertPricingRowInput = { ...row, effectiveFrom: now };
       await insertPricingRow(input);
       inserted += 1;
