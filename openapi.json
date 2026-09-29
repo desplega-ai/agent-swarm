@@ -22812,7 +22812,7 @@
     "/api/models-catalog/refresh": {
       "post": {
         "summary": "Refresh the model catalog from models.dev",
-        "description": "Unforced calls skip the network when the last models.dev check is younger than 4h (`skipped-fresh`). `force: true` always fetches, still conditional on the stored ETag (`not-modified` on 304), but a forced call within a minute of the previous one returns `skipped-cooldown` with `retryAfterMs`. Concurrent refreshes share one fetch. Lead agent, operator or user only. `added` lists provider/modelId keys new since the previous fetch.",
+        "description": "Unforced calls skip the network when the last models.dev check is younger than 4h (`skipped-fresh`). `force: true` always fetches, still conditional on the stored ETag (`not-modified` on 304), but a forced call within a minute of the previous one returns `skipped-cooldown` with `retryAfterMs`. Concurrent refreshes share one fetch. Lead agent or operator only. `added` lists provider/modelId keys new since the previous fetch.",
         "tags": [
           "Pricing"
         ],
@@ -23331,7 +23331,8 @@
                 "properties": {
                   "harness": {
                     "type": "string",
-                    "minLength": 1
+                    "minLength": 1,
+                    "maxLength": 32
                   },
                   "cliVersion": {
                     "type": "string",
@@ -23340,7 +23341,8 @@
                   },
                   "modelId": {
                     "type": "string",
-                    "minLength": 1
+                    "minLength": 1,
+                    "maxLength": 200
                   },
                   "status": {
                     "type": "string",
@@ -23351,7 +23353,8 @@
                     ]
                   },
                   "error": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 4000
                   }
                 },
                 "required": [

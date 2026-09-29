@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test
 import { unlink } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { closeDb, createAgent, initDb } from "../be/db";
+import { setAgentHarnessCliVersion } from "../be/harness-model-support";
 import {
   MODEL_CATALOG_FORCE_COOLDOWN_MS,
   refreshModelCatalog,
@@ -56,7 +57,14 @@ beforeAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
   initDb(TEST_DB_PATH);
   await createAgent({ id: LEAD_ID, name: "catalog-lead", isLead: true, status: "idle" });
-  await createAgent({ id: WORKER_ID, name: "catalog-worker", isLead: false, status: "idle" });
+  await createAgent({
+    id: WORKER_ID,
+    name: "catalog-worker",
+    isLead: false,
+    status: "idle",
+    harnessProvider: "codex",
+  });
+  await setAgentHarnessCliVersion(WORKER_ID, "9.9.9");
 
   // The shared API key resolves to an operator; `x-test-auth` picks the auth kind the real
   // pipeline would attach. `x-agent-id` rides along exactly as a worker sends it.
@@ -152,13 +160,33 @@ describe("catalog write access", () => {
     expect(del.status).toBe(200);
   });
 
-  test("a worker can still record harness support for its own CLI", async () => {
+  test("a worker can record harness support for its own harness and CLI version", async () => {
     const res = await call(
       "PUT",
       "/api/models-catalog/harness-support",
       SUPPORT,
       workerWithSharedKey,
     );
+    expect(res.status).toBe(200);
+  });
+
+  test("a worker cannot record support for another CLI version or harness", async () => {
+    const otherVersion = { ...SUPPORT, cliVersion: "1.0.0", status: "unsupported" };
+    const otherHarness = { ...SUPPORT, harness: "claude", status: "unsupported" };
+    for (const body of [otherVersion, otherHarness]) {
+      const res = await call(
+        "PUT",
+        "/api/models-catalog/harness-support",
+        body,
+        workerWithSharedKey,
+      );
+      expect(res.status).toBe(403);
+    }
+  });
+
+  test("the operator can record support for any tuple", async () => {
+    const body = { ...SUPPORT, cliVersion: "1.0.0" };
+    const res = await call("PUT", "/api/models-catalog/harness-support", body, operatorOnly);
     expect(res.status).toBe(200);
   });
 });

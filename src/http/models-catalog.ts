@@ -9,7 +9,11 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { getAgentById } from "../be/db";
-import { listHarnessModelSupport, recordHarnessModelSupport } from "../be/harness-model-support";
+import {
+  getAgentHarnessCliVersion,
+  listHarnessModelSupport,
+  recordHarnessModelSupport,
+} from "../be/harness-model-support";
 import {
   deleteModelCatalogOverlay,
   loadModelsCatalog,
@@ -157,7 +161,7 @@ const refreshCatalog = route({
   pattern: ["api", "models-catalog", "refresh"],
   summary: "Refresh the model catalog from models.dev",
   description:
-    "Unforced calls skip the network when the last models.dev check is younger than 4h (`skipped-fresh`). `force: true` always fetches, still conditional on the stored ETag (`not-modified` on 304), but a forced call within a minute of the previous one returns `skipped-cooldown` with `retryAfterMs`. Concurrent refreshes share one fetch. Lead agent, operator or user only. `added` lists provider/modelId keys new since the previous fetch.",
+    "Unforced calls skip the network when the last models.dev check is younger than 4h (`skipped-fresh`). `force: true` always fetches, still conditional on the stored ETag (`not-modified` on 304), but a forced call within a minute of the previous one returns `skipped-cooldown` with `retryAfterMs`. Concurrent refreshes share one fetch. Lead agent or operator only. `added` lists provider/modelId keys new since the previous fetch.",
   tags: ["Pricing"],
   rbac: { permission: "models.catalog.write" },
   body: z.object({ force: z.boolean().optional() }),
@@ -233,11 +237,11 @@ const recordHarnessSupport = route({
   tags: ["Pricing"],
   rbac: { permission: "models.harness-support.write" },
   body: z.object({
-    harness: z.string().min(1),
+    harness: z.string().min(1).max(32),
     cliVersion: z.string().min(1).max(64),
-    modelId: z.string().min(1),
+    modelId: z.string().min(1).max(200),
     status: z.enum(["ok", "unsupported", "unknown"]),
-    error: z.string().optional(),
+    error: z.string().max(4000).optional(),
   }),
   responses: {
     200: { description: "Support row upserted", schema: HarnessSupportRowSchema },
@@ -254,7 +258,7 @@ async function ensureCatalogWriter(
   req: IncomingMessage,
   res: ServerResponse,
   verb: "models.catalog.write" | "models.harness-support.write" = "models.catalog.write",
-): Promise<{ userId: string | null } | null> {
+): Promise<{ userId: string | null; agentId: string | null } | null> {
   const auth = getRequestAuth(req);
   const header = req.headers["x-agent-id"];
   const agentId =
@@ -288,7 +292,19 @@ async function ensureCatalogWriter(
     );
     return null;
   }
-  return { userId: auth?.kind === "user" ? auth.userId : null };
+  return {
+    userId: auth?.kind === "user" ? auth.userId : null,
+    agentId: principal.kind === "agent" && principal.agentId ? principal.agentId : null,
+  };
+}
+
+async function callerOwnsSupportRow(
+  agentId: string,
+  body: { harness: string; cliVersion: string },
+): Promise<boolean> {
+  const agent = await getAgentById(agentId);
+  if (!agent || agent.harnessProvider !== body.harness) return false;
+  return (await getAgentHarnessCliVersion(agentId)) === body.cliVersion;
 }
 
 export async function handleModelsCatalog(
@@ -352,7 +368,18 @@ export async function handleModelsCatalog(
   if (recordHarnessSupport.match(req.method, pathSegments)) {
     const parsed = await recordHarnessSupport.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!(await ensureCatalogWriter(req, res, "models.harness-support.write"))) return true;
+    const writer = await ensureCatalogWriter(req, res, "models.harness-support.write");
+    if (!writer) return true;
+    if (writer.agentId && !(await callerOwnsSupportRow(writer.agentId, parsed.body))) {
+      // Support rows are shared per (harness, CLI version), so a worker may only write the row
+      // for the harness and CLI version it registered, never an arbitrary tuple.
+      jsonError(
+        res,
+        "Harness support can only be recorded for the calling agent's own harness and registered CLI version",
+        403,
+      );
+      return true;
+    }
     recordHarnessSupport.respond(res, 200, await recordHarnessModelSupport(parsed.body));
     return true;
   }
