@@ -289,8 +289,10 @@ describe("Heartbeat Checklist", () => {
       expect(tasks[0]!.task).toContain("≤10 items");
       expect(tasks[0]!.task).toContain("20 is the absolute max");
       expect(tasks[0]!.task).toContain("script-run");
-      expect(tasks[0]!.task).toContain("Heartbeat Audit");
-      expect(tasks[0]!.task).toContain("Rule #11");
+      expect(tasks[0]!.task).toContain("schedule-health");
+      expect(tasks[0]!.task).toContain("task-failure-audit");
+      expect(tasks[0]!.task).not.toContain("Heartbeat Audit");
+      expect(tasks[0]!.task).not.toMatch(/Rules? #\d/);
     });
 
     test("created task has correct tags", async () => {

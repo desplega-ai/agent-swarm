@@ -462,6 +462,48 @@ export async function getSupersededTasksWithoutResume(
   return rows.map(rowToAgentTask);
 }
 
+/** Statuses a dependent can hold before it ever started running. */
+export const NEVER_STARTED_TASK_STATUSES = [
+  "draft",
+  "backlog",
+  "unassigned",
+  "offered",
+  "reviewing",
+  "pending",
+];
+
+/**
+ * Superseded tasks that already have a resume child but still have
+ * never-started dependents waiting on them, paired with their latest resume.
+ * A crash after the resume is created but before
+ * `backfillSupersedeTaskResumeTaskId` leaves this state, and
+ * {@link getSupersededTasksWithoutResume} no longer sees it.
+ */
+export async function getSupersededTasksWithUnsettledDependents(
+  finishedBefore: string,
+  finishedAfter: string,
+): Promise<{ taskId: string; resumeTaskId: string }[]> {
+  const placeholders = NEVER_STARTED_TASK_STATUSES.map(() => "?").join(", ");
+  return getDbClient().query<{ taskId: string; resumeTaskId: string }>(
+    `SELECT taskId, resumeTaskId FROM (
+       SELECT t.id AS taskId, t.finishedAt AS finishedAt,
+              (SELECT c.id FROM agent_tasks c
+                 WHERE c.parentTaskId = t.id AND c.taskType = 'resume'
+                 ORDER BY c.createdAt DESC LIMIT 1) AS resumeTaskId
+         FROM agent_tasks t
+         WHERE t.status = 'superseded'
+           AND t.finishedAt < ?
+           AND t.finishedAt > ?
+           AND EXISTS (
+             SELECT 1 FROM agent_tasks d, json_each(d.dependsOn) AS j
+              WHERE j.value = t.id AND d.status IN (${placeholders})
+           ))
+     WHERE resumeTaskId IS NOT NULL
+     ORDER BY finishedAt ASC`,
+    [finishedBefore, finishedAfter, ...NEVER_STARTED_TASK_STATUSES],
+  );
+}
+
 /**
  * True when a non-terminal `reroute-decision` child exists for `parentId`.
  *

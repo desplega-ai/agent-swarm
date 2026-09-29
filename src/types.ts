@@ -1441,6 +1441,8 @@ export const AgentLogEventTypeSchema = z.enum([
   "task_dispatch_rejected_affinity",
   "task_authorization_rejected",
   "task_recovery_authorization",
+  // A superseded task's never-started dependent was re-pointed to its resume child
+  "task_dependency_repointed",
   "task_released",
   // A settled task's settlement fired a deferred wait (metadata names the waiter)
   "task_deferred_wait_woke",

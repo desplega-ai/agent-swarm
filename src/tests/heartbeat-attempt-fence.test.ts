@@ -706,6 +706,54 @@ describe("blocker 4: graceful / context-limit supersede commits with its resume 
     expect(children[0]?.id).toBe(res.body.resumeTaskId);
   });
 
+  test("a never-started dependent is re-pointed to the resume child, not failed", async () => {
+    const agent = await worker("fence-supersede-dependent");
+    const task = await createTaskExtended("Supersede with a dependent", { agentId: agent.id });
+    const dependent = await createTaskExtended("Waits on the superseded task", {
+      agentId: agent.id,
+      dependsOn: [task.id],
+    });
+    await startTask(task.id, { runtimeInstanceId: RUNTIME_A });
+
+    const res = await api("POST", `/api/tasks/${task.id}/supersede`, as(agent.id, RUNTIME_A), {
+      reason: "graceful_shutdown",
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.kind).toBe("resumed");
+
+    const after = await getTaskById(dependent.id);
+    expect(after?.status).toBe("pending");
+    expect(after?.dependsOn).toEqual([res.body.resumeTaskId]);
+  });
+
+  test("a rolled-back supersede leaves its dependent untouched", async () => {
+    const agent = await worker("fence-supersede-dependent-rollback");
+    const task = await createTaskExtended("Supersede, then crash", { agentId: agent.id });
+    const dependent = await createTaskExtended("Still waits on the parent", {
+      agentId: agent.id,
+      dependsOn: [task.id],
+    });
+    await startTask(task.id, { runtimeInstanceId: RUNTIME_A });
+
+    await getDbClient().run(
+      `CREATE TRIGGER fail_resume_insert_dependent BEFORE INSERT ON agent_tasks
+         WHEN NEW.taskType = 'resume'
+         BEGIN SELECT RAISE(ABORT, 'simulated crash before resume insert'); END`,
+    );
+    try {
+      const res = await api("POST", `/api/tasks/${task.id}/supersede`, as(agent.id, RUNTIME_A), {
+        reason: "graceful_shutdown",
+      });
+      expect(res.status).toBe(500);
+    } finally {
+      await getDbClient().run("DROP TRIGGER IF EXISTS fail_resume_insert_dependent");
+    }
+
+    const after = await getTaskById(dependent.id);
+    expect(after?.status).toBe("pending");
+    expect(after?.dependsOn).toEqual([task.id]);
+  });
+
   test("a stale runtime cannot supersede the replacement attempt", async () => {
     const agent = await worker("fence-supersede-stale");
     const task = await startedThenReclaimed(agent.id);

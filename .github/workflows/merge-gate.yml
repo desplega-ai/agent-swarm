@@ -1123,9 +1123,28 @@ jobs:
       - name: Check harness plugin descriptor versions
         run: bun run check:plugin-versions
 
+  # Run on every PR and merge queue group, even when no migration files changed.
+  # Use the event's exact base commit so the checker cannot skip checks if main moves.
+  migration-conflict-check:
+    name: Migration Conflict Check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The checker compares the candidate tree with the event's base commit.
+          fetch-depth: 0
+
+      - name: Check migration numbering and immutability
+        env:
+          MIGRATION_BASE_REF: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || github.event.pull_request.base.sha }}
+        run: bash scripts/check-migration-conflicts.sh
+
   gate:
     name: Merge Gate
-    needs: [detect-changes, restore-timings, lint-and-typecheck, test, e2e-contract, pi-skills-freshness, seed-skills, script-types-freshness, openapi-freshness, vendored-openapi, docker-build, ui-lint, template-workflow-validation, operator-skill]
+    needs: [detect-changes, restore-timings, lint-and-typecheck, test, e2e-contract, pi-skills-freshness, seed-skills, script-types-freshness, openapi-freshness, vendored-openapi, docker-build, ui-lint, template-workflow-validation, operator-skill, migration-conflict-check]
     if: always()
     runs-on: ubuntu-latest
     # No checkout, no API calls; the job only inspects `needs` results.

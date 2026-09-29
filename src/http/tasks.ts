@@ -27,6 +27,7 @@ import {
   pauseTask,
   promoteDraftTask,
   resumeTask,
+  settleSupersededTaskDependents,
   supersedeTask,
   updateAgentStatusFromCapacity,
   updateTaskClaudeSessionId,
@@ -1825,6 +1826,9 @@ export async function handleTasks(
       // above). `skipped` covers parent_not_found / lead_not_found: no agent
       // can take a resume, so the supersede still lands without one.
       if (followUp.kind !== "created") {
+        // Nothing to re-point the dependents to: they cascade-fail with the
+        // supersede, in the same commit (no gap for a crash to leave them pending).
+        await settleSupersededTaskDependents(parsed.params.id, null);
         return { kind: "skipped" as const, superseded, followUp };
       }
       await backfillSupersedeTaskResumeTaskId(parsed.params.id, followUp.task.id);

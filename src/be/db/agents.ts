@@ -282,6 +282,26 @@ export async function getAllAgents(opts?: {
   return rows.map((row) => rowToAgent(row, opts?.slim ?? false));
 }
 
+/** Counts non-extension agents by status without loading their profile fields. */
+export async function getAgentStatusCounts(): Promise<{
+  total: number;
+  idle: number;
+  busy: number;
+  offline: number;
+}> {
+  const rows = await getDbClient().query<{ status: AgentStatus; count: number }>(
+    `SELECT status, COUNT(*) AS count FROM agents WHERE ${NOT_EXTENSION_AGENT_SQL} GROUP BY status`,
+  );
+  const counts = { total: 0, idle: 0, busy: 0, offline: 0 };
+  for (const { status, count } of rows) {
+    counts.total += count;
+    if (status === "idle" || status === "busy" || status === "offline") {
+      counts[status] = count;
+    }
+  }
+  return counts;
+}
+
 export async function getLeadAgent(): Promise<Agent | null> {
   const leads = (await getAllAgents()).filter((a) => a.isLead);
   // Prefer a usable (non-offline) lead so callers route to one that can actually
