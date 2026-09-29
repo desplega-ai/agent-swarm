@@ -62,17 +62,38 @@ export default async function taskFailureAudit(args: any, ctx: any) {
   const payload: any = res && res.data ? res.data : res;
   const tasks: any = payload && Array.isArray(payload.tasks) ? payload.tasks : [];
 
+  const failureReasons = new Map<string, string>();
+  if (groupBy === "reason") {
+    const missingDetails = tasks.filter((task: any) => !task.failureReason && task.id);
+    const batchSize = 10;
+    for (let i = 0; i < missingDetails.length; i += batchSize) {
+      const batch = missingDetails.slice(i, i + batchSize);
+      const details = await Promise.all(
+        batch.map((task: any) => ctx.swarm.task_get({ taskId: task.id })),
+      );
+      for (let j = 0; j < details.length; j++) {
+        const response: any = details[j];
+        const detail: any = response?.data ?? response;
+        if (response?.success === false || detail?.success === false) {
+          return { error: "task_get failed with status " + response?.status };
+        }
+        failureReasons.set(batch[j].id, detail?.failureReason || "");
+      }
+    }
+  }
+
   const groups: any = {};
   for (const t of tasks) {
     let key: string;
     if (groupBy === "agent") key = t.agentId || "(unassigned)";
     else if (groupBy === "schedule") key = t.scheduleId || "(not scheduled)";
-    else key = reasonCluster(t.failureReason || "");
+    else key = reasonCluster(failureReasons.get(t.id) || t.failureReason || "");
     if (!groups[key]) groups[key] = { key, count: 0, taskIds: [], sampleReason: "" };
     groups[key].count++;
     if (groups[key].taskIds.length < 5) groups[key].taskIds.push(t.id);
-    if (!groups[key].sampleReason && t.failureReason) {
-      groups[key].sampleReason = String(t.failureReason).slice(0, 200);
+    const failureReason = failureReasons.get(t.id) || t.failureReason;
+    if (!groups[key].sampleReason && failureReason) {
+      groups[key].sampleReason = String(failureReason).slice(0, 200);
     }
   }
 

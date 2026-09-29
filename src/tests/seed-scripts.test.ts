@@ -15,6 +15,7 @@ import opsCatalogAudit, {
   renderPage as renderOpsCatalogAuditPage,
 } from "../be/seed-scripts/catalog/ops-catalog-audit";
 import taskContextGathering from "../be/seed-scripts/catalog/task-context-gathering";
+import taskFailureAudit from "../be/seed-scripts/catalog/task-failure-audit";
 import { extractScriptSignature } from "../scripts-runtime/extract-signature";
 import { validateScriptImports } from "../scripts-runtime/import-allowlist";
 
@@ -138,6 +139,34 @@ describe("seed-scripts catalog", () => {
       output: undefined,
       failureReason: undefined,
     });
+  });
+
+  test("task-failure-audit hydrates slim task rows before clustering by reason", async () => {
+    const taskId = "failed-task-with-reason";
+    const result = await taskFailureAudit(
+      { days: 1, publishPage: false },
+      {
+        swarm: {
+          async task_list() {
+            return {
+              success: true,
+              data: { tasks: [{ id: taskId, status: "failed" }] },
+            };
+          },
+          async task_get(args: { taskId: string }) {
+            expect(args.taskId).toBe(taskId);
+            return {
+              success: true,
+              data: { id: taskId, status: "failed", failureReason: "Gate refusal, not a crash." },
+            };
+          },
+        },
+      },
+    );
+
+    expect(result.groups).toHaveLength(1);
+    expect(result.groups[0].key).toBe("gate refusal, not a crash.");
+    expect(result.groups[0].sampleReason).toBe("Gate refusal, not a crash.");
   });
 
   test("scriptsSeeder declares the script kind and one item per catalog entry", async () => {
