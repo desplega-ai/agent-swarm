@@ -15,7 +15,11 @@ import { scrubSecrets } from "../../../utils/secret-scrubber";
 import { emitTaskStarted } from "../../task-lifecycle-events";
 import { getAgentById, isAgentEligibleForTask } from "../agents";
 import { getDbClient } from "../runtime";
-import { classifyTaskHumanFree, reclassifyTaskHumanFree } from "./human-free";
+import {
+  classifyTaskHumanFree,
+  reclassifyTaskHumanFree,
+  tagWriteChangesHumanFree,
+} from "./human-free";
 import { type AgentTaskRow, getTaskById, rowToAgentTask } from "./read";
 
 type TaskWriteDependencies = {
@@ -362,12 +366,17 @@ export async function completeTask(
     if (completed && options?.addTags?.length) {
       const existingTags: string[] = completed.tags ? JSON.parse(completed.tags) : [];
       const nextTags = Array.from(new Set([...existingTags, ...options.addTags]));
+      const previousTagsJson = completed.tags;
+      const nextTagsJson = JSON.stringify(nextTags);
       completed = await getDbClient().get<AgentTaskRow>(
         "UPDATE agent_tasks SET tags = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *",
-        [JSON.stringify(nextTags), id],
+        [nextTagsJson, id],
       );
-      // A "heartbeat" tag makes a task human-free, so a tag write reclassifies it.
-      await reclassifyTaskHumanFree([id]);
+      // Only a tag the classifier reads (e.g. "heartbeat") can flip the flag;
+      // a "deferred" write must not walk the task's whole subtree.
+      if (tagWriteChangesHumanFree(previousTagsJson, nextTagsJson)) {
+        await reclassifyTaskHumanFree([id]);
+      }
     }
     if (completed && options?.deferredAt) {
       completed = await getDbClient().get<AgentTaskRow>(

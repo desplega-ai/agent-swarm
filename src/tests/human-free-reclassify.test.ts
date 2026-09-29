@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import {
   closeDb,
@@ -36,6 +36,20 @@ async function flag(taskId: string): Promise<boolean | undefined> {
 
 async function task(text: string, options: Parameters<typeof createTaskExtended>[1] = {}) {
   return (await createTaskExtended(text, options)).id;
+}
+
+// How many subtree recomputations `fn` ran. Asserting on the flags alone cannot
+// tell "skipped the walk" from "walked and found nothing to change", and the
+// walk is the cost a deferral must not pay.
+async function countSubtreeRecomputations(fn: () => Promise<unknown>): Promise<number> {
+  const runSpy = spyOn(getDbClient(), "run");
+  try {
+    await fn();
+    return runSpy.mock.calls.filter(([sql]) => String(sql).includes("WITH RECURSIVE affected"))
+      .length;
+  } finally {
+    runSpy.mockRestore();
+  }
 }
 
 describe("human-free flag stays correct when a classifying input changes", () => {
@@ -296,6 +310,76 @@ describe("human-free flag stays correct when a classifying input changes", () =>
     await expectStoredMatchesRule();
   });
 
+  test("deferring a task does not recompute its subtree", async () => {
+    const root = await task("about to be deferred");
+    const child = await task("child", { parentTaskId: root });
+    const grandchild = await task("grandchild", { parentTaskId: child });
+    // Give the subtree a stored flag that disagrees with the rule. A deferral
+    // that walked it would repair the flag; one that skips the walk leaves it.
+    await getDbClient().run("UPDATE agent_tasks SET isHumanFree = 1 WHERE id = ?", [grandchild]);
+
+    // The exact write `defer-task` makes when it completes the deferred task.
+    const recomputations = await countSubtreeRecomputations(() =>
+      completeTask(root, "deferred", {
+        addTags: ["deferred"],
+        deferredAt: new Date().toISOString(),
+      }),
+    );
+
+    expect(recomputations).toBe(0);
+    expect(await flag(grandchild)).toBe(true);
+    const tags = await getDbClient().get<{ tags: string }>(
+      "SELECT tags FROM agent_tasks WHERE id = ?",
+      [root],
+    );
+    expect(JSON.parse(tags?.tags ?? "[]")).toContain("deferred");
+
+    // Put the table back in line: an explicit reclassification repairs exactly
+    // the flag the deferral left alone.
+    expect(await reclassifyTaskHumanFree([root])).toBe(1);
+    await expectStoredMatchesRule();
+  });
+
+  test("a tag write that changes no classifying tag skips the walk, one that does runs it once", async () => {
+    // Already a heartbeat: re-adding the tag (with a deferral) flips nothing.
+    const heartbeat = await task("already tagged", { tags: ["heartbeat"] });
+    const heartbeatChild = await task("below it", { parentTaskId: heartbeat });
+    expect(await flag(heartbeatChild)).toBe(true);
+    await getDbClient().run("UPDATE agent_tasks SET isHumanFree = 0 WHERE id = ?", [
+      heartbeatChild,
+    ]);
+    expect(
+      await countSubtreeRecomputations(() =>
+        completeTask(heartbeat, "done", { addTags: ["deferred", "heartbeat"] }),
+      ),
+    ).toBe(0);
+    expect(await flag(heartbeatChild)).toBe(false);
+    expect(await reclassifyTaskHumanFree([heartbeat])).toBe(1);
+    expect(await flag(heartbeatChild)).toBe(true);
+
+    // A tag that looks like the classifying one but is not it.
+    const lookalike = await task("lookalike tag");
+    expect(
+      await countSubtreeRecomputations(() =>
+        completeTask(lookalike, "done", { addTags: ["heartbeat-review", "not_heartbeat"] }),
+      ),
+    ).toBe(0);
+    expect(await flag(lookalike)).toBe(false);
+
+    // The classifying tag is matched case-insensitively by the SQL, so the
+    // guard must not miss a case variant.
+    const shouting = await task("uppercase tag");
+    const shoutingChild = await task("below it", { parentTaskId: shouting });
+    expect(
+      await countSubtreeRecomputations(() =>
+        completeTask(shouting, "done", { addTags: ["HEARTBEAT"] }),
+      ),
+    ).toBe(1);
+    expect(await flag(shouting)).toBe(true);
+    expect(await flag(shoutingChild)).toBe(true);
+    await expectStoredMatchesRule();
+  });
+
   test("reclassify handles seeds that descend from other seeds, in any order", async () => {
     const user = await createUser({ name: "Reclassify Ordering Requester" });
     const root = await task("root", { source: "schedule", requestedByUserId: user.id });
@@ -355,8 +439,13 @@ describe("human-free flag stays correct when a classifying input changes", () =>
     expect(before.attributableCostUsd).toBe(4);
     expect(before.excludedCostUsd).toBe(0);
 
-    await completeTask(root, "done", { addTags: ["heartbeat"] });
+    // Mixed with the "deferred" tag a deferral writes: the classifying tag
+    // still triggers one full, uncapped walk.
+    const recomputations = await countSubtreeRecomputations(() =>
+      completeTask(root, "done", { addTags: ["deferred", "heartbeat"] }),
+    );
 
+    expect(recomputations).toBe(1);
     expect(await flag(root)).toBe(true);
     expect(await flag(lastWithinOldCutoff)).toBe(true);
     expect(await flag(leaf)).toBe(true);

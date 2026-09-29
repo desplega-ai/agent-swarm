@@ -21,8 +21,22 @@ import { getDbClient } from "../runtime";
  * `workflow_runs.{triggerType,created_by}`, and the existence of the parent and
  * run rows. Today these mutate in four places: `deleteUser` (requester and
  * workflow creator cleared), `deleteWorkflow` (run link cleared, runs deleted),
- * `deleteTask` (a parent row disappears) and `completeTask` with `addTags`.
+ * `deleteTask` (a parent row disappears) and `completeTask` with `addTags`,
+ * which only needs it when `tagWriteChangesHumanFree` says the tag write can
+ * change the outcome.
  */
+
+/**
+ * The tags the classification reads. The SQL below is generated from this list
+ * and `tagWriteChangesHumanFree` reads it too, so the guard on tag writes cannot
+ * drift from the classifier. Keep each entry to plain word characters: the SQL
+ * matches it with `LIKE`, where `%` and `_` are wildcards.
+ */
+export const HUMAN_FREE_TAGS = ["heartbeat"] as const;
+
+const HUMAN_FREE_TAG_SQL = HUMAN_FREE_TAGS.map(
+  (tag) => `COALESCE(task.tags, '[]') LIKE '%"${tag}"%'`,
+).join("\n        OR ");
 
 /**
  * Non-propagated part of the classification, over the alias `task` (the row)
@@ -30,7 +44,7 @@ import { getDbClient } from "../runtime";
  */
 const HUMAN_FREE_BASE_SQL = `(
         COALESCE(task.taskType, '') IN ('heartbeat', 'heartbeat-checklist', 'boot-triage')
-        OR COALESCE(task.tags, '[]') LIKE '%"heartbeat"%'
+        OR ${HUMAN_FREE_TAG_SQL}
         OR (COALESCE(task.source, '') = 'schedule' AND task.requestedByUserId IS NULL)
         OR (
           task.parentTaskId IS NULL
@@ -69,6 +83,27 @@ function humanFreeCase(parentFlag: string): string {
         WHEN ${parentFlag} = 1 AND ${UNATTRIBUTED_SQL} THEN 1
         ELSE 0
       END`;
+}
+
+function carriesHumanFreeTag(tagsJson: string | null | undefined): boolean {
+  // Mirror the SQL: `LIKE` matches the quoted tag inside the JSON text and is
+  // ASCII case-insensitive. Lowercasing is at least as broad, so this can only
+  // over-report a change, never miss one.
+  const haystack = (tagsJson ?? "[]").toLowerCase();
+  return HUMAN_FREE_TAGS.some((tag) => haystack.includes(`"${tag}"`));
+}
+
+/**
+ * Whether rewriting a task's `tags` column from `previousTagsJson` to
+ * `nextTagsJson` can change its classification. A tag write that adds or drops
+ * no tag from `HUMAN_FREE_TAGS` (a `deferred` tag, say) cannot, so the caller
+ * skips `reclassifyTaskHumanFree` and its walk over the task's whole subtree.
+ */
+export function tagWriteChangesHumanFree(
+  previousTagsJson: string | null | undefined,
+  nextTagsJson: string | null | undefined,
+): boolean {
+  return carriesHumanFreeTag(previousTagsJson) !== carriesHumanFreeTag(nextTagsJson);
 }
 
 export interface HumanFreeInput {
