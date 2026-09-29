@@ -117,7 +117,10 @@ export async function registerWorker(
   });
   if (r.status >= 300) throw new Error(`register ${name}: ${r.status} ${r.text}`);
   // POST /api/agents drops `role`; it is set through the profile route.
-  const pr = await api("PUT", `/api/agents/${id}/profile`, { agent: id, body: { role: o.role ?? "worker" } });
+  const pr = await api("PUT", `/api/agents/${id}/profile`, {
+    agent: id,
+    body: { role: o.role ?? "worker" },
+  });
   if (pr.status >= 300) throw new Error(`role ${name}: ${pr.status} ${pr.text}`);
   return { id, runtime, name };
 }
@@ -127,7 +130,9 @@ export async function createTask(
   text: string,
   o: Record<string, unknown> = {},
 ): Promise<string> {
-  const r = await api("POST", "/api/tasks", { body: { task: text, source: "api", routingReason: "human_pinned", ...o } });
+  const r = await api("POST", "/api/tasks", {
+    body: { task: text, source: "api", routingReason: "human_pinned", ...o },
+  });
   if (r.status >= 300) throw new Error(`create task: ${r.status} ${r.text}`);
   return r.json.id as string;
 }

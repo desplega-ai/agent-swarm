@@ -126,136 +126,118 @@ afterAll(async () => {
 });
 
 describe("QA-1 (P2): worker write routes the attempt fence does not cover", () => {
-  test.failing(
-    "POST /api/tasks/:id/progress from the old runtime cannot overwrite the replacement's progress",
-    async () => {
-      const agent = await worker("qa1-progress");
-      const task = await replacedByB(agent.id);
-      await api("POST", `/api/tasks/${task.id}/progress`, as(agent.id, RUNTIME_B), {
-        progress: "attempt 1 progress",
-      });
+  test.failing("POST /api/tasks/:id/progress from the old runtime cannot overwrite the replacement's progress", async () => {
+    const agent = await worker("qa1-progress");
+    const task = await replacedByB(agent.id);
+    await api("POST", `/api/tasks/${task.id}/progress`, as(agent.id, RUNTIME_B), {
+      progress: "attempt 1 progress",
+    });
 
-      const stale = await api("POST", `/api/tasks/${task.id}/progress`, as(agent.id, RUNTIME_A), {
-        progress: "STALE attempt 0 progress",
-      });
-      expect(stale.status).toBeGreaterThanOrEqual(400);
-      expect((await getTaskById(task.id))?.progress).toBe("attempt 1 progress");
-    },
-  );
+    const stale = await api("POST", `/api/tasks/${task.id}/progress`, as(agent.id, RUNTIME_A), {
+      progress: "STALE attempt 0 progress",
+    });
+    expect(stale.status).toBeGreaterThanOrEqual(400);
+    expect((await getTaskById(task.id))?.progress).toBe("attempt 1 progress");
+  });
 
-  test.failing(
-    "PUT /api/tasks/:id/session from the old runtime cannot overwrite the replacement's provider session",
-    async () => {
-      const agent = await worker("qa1-session");
-      const task = await replacedByB(agent.id);
-      await api("PUT", `/api/tasks/${task.id}/session`, as(agent.id, RUNTIME_B), {
-        claudeSessionId: "session-of-attempt-1",
-        provider: "claude",
-      });
+  test.failing("PUT /api/tasks/:id/session from the old runtime cannot overwrite the replacement's provider session", async () => {
+    const agent = await worker("qa1-session");
+    const task = await replacedByB(agent.id);
+    await api("PUT", `/api/tasks/${task.id}/session`, as(agent.id, RUNTIME_B), {
+      claudeSessionId: "session-of-attempt-1",
+      provider: "claude",
+    });
 
-      const stale = await api("PUT", `/api/tasks/${task.id}/session`, as(agent.id, RUNTIME_A), {
-        claudeSessionId: "STALE-session-of-attempt-0",
-        provider: "claude",
-      });
-      expect(stale.status).toBeGreaterThanOrEqual(400);
-      expect((await getTaskById(task.id))?.claudeSessionId).toBe("session-of-attempt-1");
-    },
-  );
+    const stale = await api("PUT", `/api/tasks/${task.id}/session`, as(agent.id, RUNTIME_A), {
+      claudeSessionId: "STALE-session-of-attempt-0",
+      provider: "claude",
+    });
+    expect(stale.status).toBeGreaterThanOrEqual(400);
+    expect((await getTaskById(task.id))?.claudeSessionId).toBe("session-of-attempt-1");
+  });
 
-  test.failing(
-    "POST /api/active-sessions from the old runtime cannot register a session for the replacement's task",
-    async () => {
-      const agent = await worker("qa1-session-create");
-      const task = await replacedByB(agent.id);
-      const stale = await api("POST", "/api/active-sessions", as(agent.id, RUNTIME_A), {
-        agentId: agent.id,
-        taskId: task.id,
-        triggerType: "task_assigned",
-        runtimeInstanceId: RUNTIME_A,
-      });
-      expect(stale.status).toBeGreaterThanOrEqual(400);
-    },
-  );
+  test.failing("POST /api/active-sessions from the old runtime cannot register a session for the replacement's task", async () => {
+    const agent = await worker("qa1-session-create");
+    const task = await replacedByB(agent.id);
+    const stale = await api("POST", "/api/active-sessions", as(agent.id, RUNTIME_A), {
+      agentId: agent.id,
+      taskId: task.id,
+      triggerType: "task_assigned",
+      runtimeInstanceId: RUNTIME_A,
+    });
+    expect(stale.status).toBeGreaterThanOrEqual(400);
+  });
 });
 
 describe("QA-2 (P2): recover-orphaned-tasks bypasses the attempt counter", () => {
-  test.failing(
-    "a sibling runtime booting for the same agent does not reset the other runtime's live attempt",
-    async () => {
-      const agent = await worker("qa2-recover");
-      const task = await createTaskExtended(`QA live ${crypto.randomUUID()}`, {
-        agentId: agent.id,
-      });
-      // Runtime A started it 3 minutes ago; its harness has not registered a
-      // session or reported a provider session id yet.
-      await startTask(task.id, { runtimeInstanceId: RUNTIME_A });
-      await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
-        minutesAgo(3),
-        task.id,
-      ]);
+  test.failing("a sibling runtime booting for the same agent does not reset the other runtime's live attempt", async () => {
+    const agent = await worker("qa2-recover");
+    const task = await createTaskExtended(`QA live ${crypto.randomUUID()}`, {
+      agentId: agent.id,
+    });
+    // Runtime A started it 3 minutes ago; its harness has not registered a
+    // session or reported a provider session id yet.
+    await startTask(task.id, { runtimeInstanceId: RUNTIME_A });
+    await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+      minutesAgo(3),
+      task.id,
+    ]);
 
-      // Runtime B of the same agent boots and runs the runner's boot recovery.
-      const recover = await api(
-        "POST",
-        "/api/active-sessions/recover-orphaned-tasks",
-        as(agent.id, RUNTIME_B),
-        { agentId: agent.id, minAgeSeconds: 60 },
-      );
-      expect(recover.status).toBe(200);
+    // Runtime B of the same agent boots and runs the runner's boot recovery.
+    const recover = await api(
+      "POST",
+      "/api/active-sessions/recover-orphaned-tasks",
+      as(agent.id, RUNTIME_B),
+      { agentId: agent.id, minAgeSeconds: 60 },
+    );
+    expect(recover.status).toBe(200);
 
-      const after = await getTaskById(task.id);
-      expect(after?.status).toBe("in_progress");
-    },
-  );
+    const after = await getTaskById(task.id);
+    expect(after?.status).toBe("in_progress");
+  });
 });
 
 describe("QA-3 (P3): a superseded row without a resume child", () => {
-  test.failing(
-    "the heartbeat repairs a row left `superseded` with no continuation (legacy crash window)",
-    async () => {
-      const agent = await worker("qa3-orphan");
-      const task = await createTaskExtended(`QA orphan ${crypto.randomUUID()}`, {
-        agentId: agent.id,
-      });
-      await startTask(task.id, { runtimeInstanceId: RUNTIME_A });
-      // Shape the pre-upgrade non-atomic supersede leaves if the API dies
-      // between `supersedeTask` and `createResumeFollowUp`.
-      await getDbClient().run(
-        "UPDATE agent_tasks SET status = 'superseded', lastUpdatedAt = ? WHERE id = ?",
-        [minutesAgo(30), task.id],
-      );
+  test.failing("the heartbeat repairs a row left `superseded` with no continuation (legacy crash window)", async () => {
+    const agent = await worker("qa3-orphan");
+    const task = await createTaskExtended(`QA orphan ${crypto.randomUUID()}`, {
+      agentId: agent.id,
+    });
+    await startTask(task.id, { runtimeInstanceId: RUNTIME_A });
+    // Shape the pre-upgrade non-atomic supersede leaves if the API dies
+    // between `supersedeTask` and `createResumeFollowUp`.
+    await getDbClient().run(
+      "UPDATE agent_tasks SET status = 'superseded', lastUpdatedAt = ? WHERE id = ?",
+      [minutesAgo(30), task.id],
+    );
 
-      await codeLevelTriage();
-      await codeLevelTriage();
+    await codeLevelTriage();
+    await codeLevelTriage();
 
-      expect((await getChildTasks(task.id)).length).toBeGreaterThan(0);
-    },
-  );
+    expect((await getChildTasks(task.id)).length).toBeGreaterThan(0);
+  });
 });
 
 describe("QA-4 (P3): retry budget across the upgrade", () => {
-  test.failing(
-    "a legacy resume row already at the generation cap is failed, not given a fresh budget",
-    async () => {
-      const agent = await worker("qa4-budget");
-      const task = await createTaskExtended(`QA gen3 ${crypto.randomUUID()}`, {
-        agentId: agent.id,
-        taskType: "resume",
-        tags: ["auto-resume", "reason:crash_recovery", "resume-generation:3"],
-      });
-      await startTask(task.id, { runtimeInstanceId: RUNTIME_A });
-      await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
-        minutesAgo(10),
-        task.id,
-      ]);
+  test.failing("a legacy resume row already at the generation cap is failed, not given a fresh budget", async () => {
+    const agent = await worker("qa4-budget");
+    const task = await createTaskExtended(`QA gen3 ${crypto.randomUUID()}`, {
+      agentId: agent.id,
+      taskType: "resume",
+      tags: ["auto-resume", "reason:crash_recovery", "resume-generation:3"],
+    });
+    await startTask(task.id, { runtimeInstanceId: RUNTIME_A });
+    await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+      minutesAgo(10),
+      task.id,
+    ]);
 
-      await codeLevelTriage();
+    await codeLevelTriage();
 
-      // Old chain: generation 3 of 3 (HEARTBEAT_MAX_RESUME_GENERATIONS) has no
-      // budget left. New code reads only `attempt`, which starts at 0.
-      expect((await getTaskById(task.id))?.status).toBe("failed");
-    },
-  );
+    // Old chain: generation 3 of 3 (HEARTBEAT_MAX_RESUME_GENERATIONS) has no
+    // budget left. New code reads only `attempt`, which starts at 0.
+    expect((await getTaskById(task.id))?.status).toBe("failed");
+  });
 });
 
 describe("regression guards (handled correctly by the PR)", () => {
