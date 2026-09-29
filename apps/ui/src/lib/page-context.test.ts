@@ -60,7 +60,17 @@ describe("getPageContext — route fallback", () => {
   test("the home page keys as `home`", () => {
     const c = ctx("/");
     expect(c.pageKey).toBe("task:ui:route:home");
-    expect(pageContextLabel(c)).toBe("/");
+    expect(pageContextLabel(c)).toBe("Home");
+  });
+});
+
+describe("pageContextLabel", () => {
+  test("entity pages show the kind and a short id; other routes show the path", () => {
+    expect(pageContextLabel(ctx("/agents/86505d2a-e7b7-4eb8-b9e9-77a7e5f5d780"))).toBe(
+      "Agent 86505d2a",
+    );
+    expect(pageContextLabel(ctx("/workflow-runs/r1"))).toBe("Workflow run r1");
+    expect(pageContextLabel(ctx("/tasks"))).toBe("/tasks");
   });
 });
 

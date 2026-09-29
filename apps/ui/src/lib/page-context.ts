@@ -129,7 +129,15 @@ export function buildPageContextFooter(ctx: PageContext): string {
   );
 }
 
-/** Human label for the panel header. */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Human label for the panel header, short enough for a phone: `Agent 86505d2a`,
+ * `Workflow run r1`, `/tasks`, `Home`. The footer still carries the full id.
+ */
 export function pageContextLabel(ctx: PageContext): string {
-  return ctx.kind === "route" ? ctx.routePattern : `${ctx.kind} ${ctx.ref}`;
+  if (ctx.kind === "route") return ctx.routePattern === "/" ? "Home" : ctx.routePattern;
+  const kind = ctx.kind.replace(/-/g, " ");
+  const ref = UUID_RE.test(ctx.ref) ? ctx.ref.slice(0, 8) : ctx.ref;
+  return `${kind[0]?.toUpperCase() ?? ""}${kind.slice(1)} ${ref}`;
 }

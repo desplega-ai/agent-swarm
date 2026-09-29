@@ -19,7 +19,9 @@
  *
  * Attachments stay on the `createTask` path only — steering carries text.
  * They also survive the swap (same reasoning) — they're just not offered while
- * the steering composer is up.
+ * the steering composer is up. A file added through `renderActions` (the
+ * session panel's "Add screenshot") while steering is up switches back to the
+ * `createTask` path, so the message goes out as a follow-up with the file.
  */
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -47,12 +49,18 @@ export interface SessionComposerProps {
    * False → the composer behaves exactly as it did before.
    */
   steeringSupported?: boolean;
+  /**
+   * Extra action-row buttons (the session panel's "Add screenshot"). Receives
+   * a callback that adds a file to this composer's attachments.
+   */
+  renderActions?: (addAttachment: (file: File) => void) => React.ReactNode;
 }
 
 export function SessionComposer({
   rootTaskId,
   latestLeafTask,
   steeringSupported,
+  renderActions,
 }: SessionComposerProps) {
   const latestLeafTaskId = latestLeafTask?.id ?? null;
   const queryClient = useQueryClient();
@@ -121,12 +129,21 @@ export function SessionComposer({
   // delivers it once the session starts. `unassigned` / `offered` can't occur
   // for a lead leaf task in this view, so they're not enumerated here — the
   // composer handles them anyway via `taskStatus` if that ever changes.
+  //
+  // Steering carries text only, so a message with attachments goes out as a
+  // follow-up task instead.
   const steerTarget =
+    attachments.length === 0 &&
     steeringSupported &&
     latestLeafTask?.isLeadTask &&
     (latestLeafTask.status === "in_progress" || latestLeafTask.status === "pending")
       ? latestLeafTask
       : null;
+
+  const extraActions = renderActions?.((file) => {
+    setAttachments((current) => [...current, file]);
+    setAttachmentError(null);
+  });
 
   if (steerTarget) {
     return (
@@ -137,6 +154,7 @@ export function SessionComposer({
         taskStatus={steerTarget.status}
         value={draft}
         onValueChange={setDraft}
+        extraActions={extraActions}
       />
     );
   }
@@ -159,6 +177,7 @@ export function SessionComposer({
         setAttachmentError(null);
       }}
       attachmentErrorMessage={attachmentError}
+      extraActions={extraActions}
     />
   );
 }

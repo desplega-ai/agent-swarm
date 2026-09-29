@@ -14,6 +14,10 @@
  *   The new session is selected in place.
  * - Links open the session in `/sessions` and its root task in `/tasks`; each
  *   task in the timeline opens its detail sheet, which links to its task page.
+ * - "Add screenshot" in the composer captures `screenshotTarget` (the page,
+ *   never the panel: it is marked `data-screenshot-exclude`) and attaches the
+ *   PNG through the composer's normal attachment upload, for a new session and
+ *   for a follow-up.
  */
 
 import { ExternalLink, ListTree, X } from "lucide-react";
@@ -30,6 +34,7 @@ import { useCurrentUser } from "@/contexts/current-user-context";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { cn } from "@/lib/utils";
 import { contextKeyPrefix, newSessionContextKey, sessionLabel, withContextFooter } from "./model";
+import { ScreenshotButton } from "./screenshot-button";
 import { NEW_SESSION, SessionPicker } from "./session-picker";
 
 export { NEW_SESSION };
@@ -47,6 +52,11 @@ export interface SessionPanelProps {
   storage?: SelectionStorage | null;
   /** Namespace for storage keys, e.g. the API URL, so two deployments do not collide. */
   storageNamespace?: string;
+  /**
+   * The element "Add screenshot" captures. Default `document.body`; pass the
+   * page container when the panel sits beside it. `null` hides the button.
+   */
+  screenshotTarget?: (() => HTMLElement | null) | null;
   /** Renders a close button when set. */
   onClose?: () => void;
   title?: string;
@@ -57,6 +67,8 @@ export function SessionPanel(props: SessionPanelProps) {
   // Remount per page key so selection, drafts and the new-session key follow the page.
   return <SessionPanelBody key={props.pageKey} {...props} />;
 }
+
+const defaultScreenshotTarget = () => document.body;
 
 function defaultStorage(): SelectionStorage | null {
   try {
@@ -97,6 +109,7 @@ function SessionPanelBody({
   contextFooter,
   storage,
   storageNamespace,
+  screenshotTarget = defaultScreenshotTarget,
   onClose,
   title = "Session about this page",
   className,
@@ -135,6 +148,7 @@ function SessionPanelBody({
     <div
       className={cn("flex h-full min-h-0 flex-col bg-background", className)}
       data-testid="session-panel"
+      data-screenshot-exclude=""
     >
       <div className="flex items-center gap-1 border-b border-border px-3 py-2">
         <div className="min-w-0 flex-1">
@@ -187,10 +201,11 @@ function SessionPanelBody({
           key={newContextKey}
           contextKey={newContextKey}
           contextFooter={contextFooter}
+          screenshotTarget={screenshotTarget}
           onStarted={setSelected}
         />
       ) : (
-        <ActiveSession key={selected} rootTaskId={selected} />
+        <ActiveSession key={selected} rootTaskId={selected} screenshotTarget={screenshotTarget} />
       )}
     </div>
   );
@@ -214,10 +229,12 @@ function HeaderLink({ to, label, children }: { to: string; label: string; childr
 function NewSession({
   contextKey,
   contextFooter,
+  screenshotTarget,
   onStarted,
 }: {
   contextKey: string;
   contextFooter?: string;
+  screenshotTarget: (() => HTMLElement | null) | null;
   onStarted: (rootTaskId: string) => void;
 }) {
   const { userId, composerProps } = useStartSession({
@@ -237,12 +254,30 @@ function NewSession({
         {...composerProps}
         placeholder={userId ? "Message the swarm…" : "Pick an identity to send messages."}
         sendLabel="Start session"
+        extraActions={
+          screenshotTarget ? (
+            <ScreenshotButton
+              getTarget={screenshotTarget}
+              disabled={composerProps.disabled || composerProps.isPending}
+              onCaptured={(file) =>
+                composerProps.onAttachmentsChange?.([...(composerProps.attachments ?? []), file])
+              }
+            />
+          ) : null
+        }
       />
     </>
   );
 }
 
-function ActiveSession({ rootTaskId }: { rootTaskId: string }) {
+function ActiveSession({
+  rootTaskId,
+  screenshotTarget,
+}: {
+  rootTaskId: string;
+  screenshotTarget: (() => HTMLElement | null) | null;
+}) {
+  const { userId } = useCurrentUser();
   const { data: detail } = useSession(rootTaskId);
   return (
     <>
@@ -251,7 +286,21 @@ function ActiveSession({ rootTaskId }: { rootTaskId: string }) {
           <SessionMeta detail={detail} />
         </div>
       ) : null}
-      <SessionConversation rootTaskId={rootTaskId} scrollClassName="px-3 py-4" />
+      <SessionConversation
+        rootTaskId={rootTaskId}
+        scrollClassName="px-3 py-4"
+        renderComposerActions={
+          screenshotTarget
+            ? (addAttachment) => (
+                <ScreenshotButton
+                  getTarget={screenshotTarget}
+                  disabled={!userId}
+                  onCaptured={addAttachment}
+                />
+              )
+            : undefined
+        }
+      />
     </>
   );
 }

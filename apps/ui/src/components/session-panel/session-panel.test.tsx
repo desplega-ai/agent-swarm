@@ -45,7 +45,21 @@ mock.module("@/api/client", () => ({
     promoteDraftTask: async () => ({}),
   },
 }));
-mock.module("@/api/fs", () => ({ uploadTaskAttachment: async () => ({}) }));
+const uploads: Array<{ taskId: string; file: File }> = [];
+mock.module("@/api/fs", () => ({
+  uploadTaskAttachment: async (input: { taskId: string; file: File }) => {
+    uploads.push(input);
+    return {};
+  },
+}));
+// The DOM rasterizer: records what it was asked to capture and how.
+const captures: Array<{ node: HTMLElement; filter: (n: Node) => boolean }> = [];
+mock.module("modern-screenshot", () => ({
+  domToBlob: async (node: HTMLElement, opts: { filter: (n: Node) => boolean }) => {
+    captures.push({ node, filter: opts.filter });
+    return new Blob([new Uint8Array([137, 80, 78, 71])], { type: "image/png" });
+  },
+}));
 mock.module("@/contexts/current-user-context", () => ({
   useCurrentUser: () => ({ userId: currentUserId }),
 }));
@@ -58,9 +72,20 @@ mock.module("@/api/hooks/use-sessions", () => ({
     data: id ? { root: { id, task: `session ${id}` }, chain: [] } : undefined,
   }),
 }));
+// Follow-up attachments land in the conversation's composer; the stub renders
+// the panel's composer actions and records what they add.
+const followUpFiles: File[] = [];
 mock.module("@/components/sessions/session-conversation", () => ({
-  SessionConversation: ({ rootTaskId }: { rootTaskId: string }) => (
-    <div data-testid="session-conversation" data-root={rootTaskId} />
+  SessionConversation: ({
+    rootTaskId,
+    renderComposerActions,
+  }: {
+    rootTaskId: string;
+    renderComposerActions?: (add: (file: File) => void) => React.ReactNode;
+  }) => (
+    <div data-testid="session-conversation" data-root={rootTaskId}>
+      {renderComposerActions?.((file) => followUpFiles.push(file))}
+    </div>
   ),
 }));
 mock.module("@/components/sessions/session-meta", () => ({
@@ -87,6 +112,9 @@ function memoryStorage(initial: Record<string, string> = {}) {
 function reset() {
   createdTasks.length = 0;
   listCalls.length = 0;
+  uploads.length = 0;
+  captures.length = 0;
+  followUpFiles.length = 0;
   sessions = [];
   currentUserId = "u1";
 }
@@ -127,6 +155,15 @@ async function clickSend(container: HTMLElement) {
   ) as HTMLButtonElement | null;
   if (!send) throw new Error("no send button");
   await act(async () => send.click());
+  await act(async () => {});
+}
+
+async function clickScreenshot(container: HTMLElement) {
+  const button = container.querySelector(
+    'button[aria-label="Add screenshot"]',
+  ) as HTMLButtonElement | null;
+  if (!button) throw new Error("no screenshot button");
+  await act(async () => button.click());
   await act(async () => {});
 }
 
@@ -300,6 +337,102 @@ describe("SessionPanel", () => {
     );
     expect(listCalls.at(-1)?.enabled).toBe(false);
     expect((container.querySelector("textarea") as HTMLTextAreaElement).disabled).toBe(true);
+    await act(async () => root.unmount());
+    container.remove();
+  });
+  test("Add screenshot captures the page, previews it, can be removed, and uploads with the new session", async () => {
+    reset();
+    const page = document.createElement("main");
+    document.body.appendChild(page);
+    const { root, container } = await mount(
+      <SessionPanel
+        pageKey="task:ui:workflow:w1"
+        contextLabel="workflow w1"
+        storage={null}
+        screenshotTarget={() => page}
+      />,
+    );
+
+    await clickScreenshot(container);
+    await waitFor(
+      () => container.querySelector('button[aria-label^="Remove screenshot-"]') !== null,
+    );
+    expect(captures).toHaveLength(1);
+    expect(captures[0]?.node).toBe(page);
+    // Preview: an image thumbnail plus a remove button.
+    expect(container.querySelector("form img")).not.toBeNull();
+
+    // Removing it drops the attachment.
+    const remove = container.querySelector(
+      'button[aria-label^="Remove screenshot-"]',
+    ) as HTMLButtonElement;
+    await act(async () => remove.click());
+    expect(container.querySelector('button[aria-label^="Remove screenshot-"]')).toBeNull();
+
+    // Capture again and send: the task is created, then the PNG uploads to it.
+    await clickScreenshot(container);
+    await waitFor(
+      () => container.querySelector('button[aria-label^="Remove screenshot-"]') !== null,
+    );
+    await type(container, "the legend overlaps");
+    await clickSend(container);
+    await waitFor(() => uploads.length > 0);
+
+    expect(createdTasks[0]).toMatchObject({ source: "ui", draft: true });
+    expect(uploads).toHaveLength(1);
+    expect(uploads[0]?.taskId).toBe("new-root");
+    expect(uploads[0]?.file.name).toMatch(/^screenshot-.*\.png$/);
+    expect(uploads[0]?.file.type).toBe("image/png");
+
+    await act(async () => root.unmount());
+    container.remove();
+    page.remove();
+  });
+
+  test("by default the whole document is captured with the panel filtered out", async () => {
+    reset();
+    const { root, container } = await mount(
+      <SessionPanel pageKey="task:ui:workflow:w1" contextLabel="workflow w1" storage={null} />,
+    );
+    await clickScreenshot(container);
+    await waitFor(() => captures.length > 0);
+
+    expect(captures[0]?.node).toBe(document.body);
+    const panel = container.querySelector('[data-testid="session-panel"]') as HTMLElement;
+    expect(captures[0]?.filter(panel)).toBe(false);
+    expect(captures[0]?.filter(container)).toBe(true);
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  test("in a running session the screenshot goes to the follow-up composer", async () => {
+    reset();
+    const storage = memoryStorage({ "session-panel:last:task:ui:workflow:w1": "s1" });
+    const { root, container } = await mount(
+      <SessionPanel pageKey="task:ui:workflow:w1" contextLabel="workflow w1" storage={storage} />,
+    );
+    await clickScreenshot(container);
+    await waitFor(() => followUpFiles.length > 0);
+
+    expect(followUpFiles).toHaveLength(1);
+    expect(followUpFiles[0]?.name).toMatch(/^screenshot-.*\.png$/);
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  test("screenshotTarget={null} hides the button", async () => {
+    reset();
+    const { root, container } = await mount(
+      <SessionPanel
+        pageKey="task:ui:workflow:w1"
+        contextLabel="workflow w1"
+        storage={null}
+        screenshotTarget={null}
+      />,
+    );
+    expect(container.querySelector('button[aria-label="Add screenshot"]')).toBeNull();
     await act(async () => root.unmount());
     container.remove();
   });

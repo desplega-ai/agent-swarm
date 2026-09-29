@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAutoScroll } from "@/hooks/use-auto-scroll";
 import { cn } from "@/lib/utils";
-import { SessionComposer } from "./session-composer";
+import { SessionComposer, type SessionComposerProps } from "./session-composer";
 import { SessionTimeline } from "./session-timeline";
 
 export interface SessionConversationProps {
@@ -23,12 +23,15 @@ export interface SessionConversationProps {
   showInternalHandoffs?: boolean;
   /** Classes for the scrolling timeline area (padding). */
   scrollClassName?: string;
+  /** Extra composer action-row buttons; see `SessionComposerProps.renderActions`. */
+  renderComposerActions?: SessionComposerProps["renderActions"];
 }
 
 export function SessionConversation({
   rootTaskId,
   showInternalHandoffs = false,
   scrollClassName,
+  renderComposerActions,
 }: SessionConversationProps) {
   // Steering (≥1.122.1) — older servers 404 `/api/tasks/:id/steer`, so the
   // composer falls back to its pre-steering chained-task behaviour.
@@ -108,6 +111,7 @@ export function SessionConversation({
         rootTaskId={rootTaskId}
         latestLeafTask={latestLeafTask}
         steeringSupported={steerGate.supported && steeringEnabled}
+        renderActions={renderComposerActions}
       />
     </>
   );
