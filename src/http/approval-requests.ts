@@ -9,6 +9,7 @@ import {
   getDbClient,
   getWorkflowRun,
   getWorkflowRunStep,
+  listApprovalRequestSummaries,
   listApprovalRequests,
   resolveApprovalRequest,
 } from "../be/db";
@@ -91,6 +92,15 @@ const ApprovalRequestSchema = z.object({
   createdAt: z.string(),
   updatedAt: z.string(),
 });
+
+/** Slim list row (`?fields=slim`) — see `ApprovalRequestSummary`. */
+const ApprovalRequestSummarySchema = ApprovalRequestSchema.omit({
+  questions: true,
+  approvers: true,
+  responses: true,
+  resolutionReason: true,
+  notificationChannels: true,
+}).extend({ questionCount: z.number().int() });
 
 /**
  * Reshapes a DB `ApprovalRequest` row for `respond()` — identical values,
@@ -298,16 +308,25 @@ const listRoute = route({
   path: "/api/approval-requests",
   pattern: ["api", "approval-requests"],
   summary: "List approval requests with optional filters",
+  description:
+    "Returns full approval requests by default. Pass `fields=slim` for the list-view shape: `questions`, `approvers`, `responses`, `resolutionReason` and `notificationChannels` are dropped and `questionCount` is added. Fetch one request in full via `GET /api/approval-requests/{id}`.",
   tags: ["ApprovalRequests"],
   query: z.object({
     status: z.string().optional(),
     workflowRunId: z.string().optional(),
     limit: z.coerce.number().optional(),
+    /** `slim` is the list-view shape; default is full. */
+    fields: z.enum(["full", "slim"]).optional(),
   }),
   responses: {
     200: {
       description: "List of approval requests",
-      schema: z.object({ approvalRequests: z.array(ApprovalRequestSchema) }),
+      schema: z.object({
+        approvalRequests: z.union([
+          z.array(ApprovalRequestSchema),
+          z.array(ApprovalRequestSummarySchema),
+        ]),
+      }),
     },
   },
   auth: { apiKey: true },
@@ -504,12 +523,20 @@ export async function handleApprovalRequests(
     const parsed = await listRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const requests = await listApprovalRequests({
+    const filters = {
       status: parsed.query.status || undefined,
       workflowRunId: parsed.query.workflowRunId || undefined,
       limit: parsed.query.limit || undefined,
-    });
+    };
+    // Opt-in: API, MCP and script callers that don't ask keep the full rows.
+    if (parsed.query.fields === "slim") {
+      listRoute.respond(res, 200, {
+        approvalRequests: await listApprovalRequestSummaries(filters),
+      });
+      return true;
+    }
 
+    const requests = await listApprovalRequests(filters);
     listRoute.respond(res, 200, {
       approvalRequests: requests.map(toApprovalRequestResponse),
     });

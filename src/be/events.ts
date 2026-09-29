@@ -238,6 +238,15 @@ export async function getEventsFiltered(filters: {
   since?: string;
   until?: string;
   limit?: number;
+  /** Match any of these event names (`event IN (...)`), ANDed with `event`. */
+  events?: EventName[];
+  /**
+   * Return only the newest row per (event, data.field) pair, for every pair of
+   * these event names and field values. Each pair is its own indexed
+   * `ORDER BY createdAt DESC LIMIT 1` lookup, so the cost does not grow with
+   * the agent's event history.
+   */
+  latestPerDataField?: { events: EventName[]; dataFields: string[] };
 }): Promise<SwarmEvent[]> {
   const conditions: string[] = [];
   const params: (string | number)[] = [];
@@ -249,6 +258,10 @@ export async function getEventsFiltered(filters: {
   if (filters.event) {
     conditions.push("event = ?");
     params.push(filters.event);
+  }
+  if (filters.events && filters.events.length > 0) {
+    conditions.push(`event IN (${filters.events.map(() => "?").join(", ")})`);
+    params.push(...filters.events);
   }
   if (filters.status) {
     conditions.push("status = ?");
@@ -283,8 +296,27 @@ export async function getEventsFiltered(filters: {
     params.push(filters.until);
   }
 
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const limit = filters.limit ?? 100;
+
+  if (filters.latestPerDataField) {
+    const lookups: string[] = [];
+    const lookupParams: (string | number)[] = [];
+    for (const event of filters.latestPerDataField.events) {
+      for (const field of filters.latestPerDataField.dataFields) {
+        const where = [...conditions, "event = ?", "json_extract(data, '$.field') = ?"];
+        lookups.push(
+          `SELECT * FROM (SELECT * FROM events WHERE ${where.join(" AND ")} ORDER BY createdAt DESC LIMIT 1)`,
+        );
+        lookupParams.push(...params, event, field);
+      }
+    }
+    if (lookups.length === 0) return [];
+    const sql = `${lookups.join(" UNION ALL ")} ORDER BY createdAt DESC LIMIT ?`;
+    const rows = await getDbClient().query<EventRow>(sql, [...lookupParams, limit]);
+    return rows.map(rowToSwarmEvent);
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   params.push(limit);
 
   const sql = `SELECT * FROM events ${where} ORDER BY createdAt DESC LIMIT ?`;

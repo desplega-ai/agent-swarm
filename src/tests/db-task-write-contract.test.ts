@@ -42,6 +42,7 @@ const baseFacade = `type:AgentMailInboxMapping
 type:ApiKeyStatus
 type:AppVersion
 type:ApprovalRequest
+type:ApprovalRequestSummary
 type:AssetSummaryFilters
 type:AttributionByPersonRow
 type:AvailableKeyIndicesResult
@@ -447,6 +448,7 @@ value:kvPrefixUpperBound
 value:listAgentsWithCredStatusByProvider
 value:listAllMetrics
 value:listAllPages
+value:listApprovalRequestSummaries
 value:listApprovalRequests
 value:listAssetSummaries
 value:listCancelledApprovalRequestsForRun

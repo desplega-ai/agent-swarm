@@ -6,7 +6,7 @@ import { useAgents } from "@/api/hooks/use-agents";
 import { useFavoriteToggle } from "@/api/hooks/use-favorites";
 import { useModelsCatalog } from "@/api/hooks/use-models-catalog";
 import { useCreateSchedule, useScheduledTasks, useUpdateSchedule } from "@/api/hooks/use-schedules";
-import type { ScheduledTask, ScheduledTaskTargetType } from "@/api/types";
+import type { ScheduledTaskSummary, ScheduledTaskTargetType } from "@/api/types";
 import { useStatusContext } from "@/app/status-context";
 import { findAutomation, NeedsSetupBadge } from "@/components/automations/needs-setup-badge";
 import {
@@ -386,17 +386,17 @@ export default function SchedulesPage() {
   }, [agentMap, scheduleRows, search]);
 
   const handleToggleEnabled = useCallback(
-    (schedule: ScheduledTask, enabled: boolean) => {
+    (schedule: ScheduledTaskSummary, enabled: boolean) => {
       updateSchedule.mutate({ id: schedule.id, data: { enabled } });
     },
     [updateSchedule],
   );
 
-  const columnDefs = useMemo<ColDef<ScheduledTask>[]>(
+  const columnDefs = useMemo<ColDef<ScheduledTaskSummary>[]>(
     () => [
       {
         ...FAVORITE_COLUMN,
-        cellRenderer: (params: ICellRendererParams<ScheduledTask>) => {
+        cellRenderer: (params: ICellRendererParams<ScheduledTaskSummary>) => {
           const schedule = params.data;
           if (!schedule) return null;
           return (
@@ -451,7 +451,7 @@ export default function SchedulesPage() {
         headerName: "Setup",
         width: 190,
         minWidth: 190,
-        cellRenderer: (params: ICellRendererParams<ScheduledTask>) => {
+        cellRenderer: (params: ICellRendererParams<ScheduledTaskSummary>) => {
           const schedule = params.data;
           if (!schedule) return null;
           return (
@@ -470,7 +470,7 @@ export default function SchedulesPage() {
         headerName: "Schedule",
         width: 250,
         minWidth: 200,
-        cellRenderer: (params: ICellRendererParams<ScheduledTask>) => {
+        cellRenderer: (params: ICellRendererParams<ScheduledTaskSummary>) => {
           const data = params.data;
           if (!data) return null;
 
@@ -514,7 +514,7 @@ export default function SchedulesPage() {
       {
         headerName: "Model",
         width: 150,
-        cellRenderer: (params: ICellRendererParams<ScheduledTask>) => {
+        cellRenderer: (params: ICellRendererParams<ScheduledTaskSummary>) => {
           const data = params.data;
           if (!data?.model && !data?.modelTier) return "—";
           return data.model ? (
@@ -540,7 +540,7 @@ export default function SchedulesPage() {
         field: "nextRunAt",
         headerName: "Next Run",
         width: 160,
-        cellRenderer: (params: ICellRendererParams<ScheduledTask>) => {
+        cellRenderer: (params: ICellRendererParams<ScheduledTaskSummary>) => {
           if (!params.value) return <span className="text-muted-foreground">—</span>;
           return (
             <Tooltip>
@@ -556,7 +556,7 @@ export default function SchedulesPage() {
         field: "lastRunAt",
         headerName: "Last Run",
         width: 160,
-        cellRenderer: (params: ICellRendererParams<ScheduledTask>) => {
+        cellRenderer: (params: ICellRendererParams<ScheduledTaskSummary>) => {
           if (!params.value) return <span className="text-muted-foreground">Never</span>;
           return (
             <Tooltip>
@@ -578,7 +578,7 @@ export default function SchedulesPage() {
         field: "enabled",
         headerName: "Enabled",
         width: 100,
-        cellRenderer: (params: ICellRendererParams<ScheduledTask>) => {
+        cellRenderer: (params: ICellRendererParams<ScheduledTaskSummary>) => {
           const schedule = params.data;
           if (!schedule) return null;
           return (
@@ -597,7 +597,7 @@ export default function SchedulesPage() {
   );
 
   const onRowClicked = useCallback(
-    (event: RowClickedEvent<ScheduledTask>) => {
+    (event: RowClickedEvent<ScheduledTaskSummary>) => {
       // Skip navigation when clicking interactive elements (switch, button, etc.)
       const target = event.event?.target as HTMLElement | null;
       if (target?.closest('a, [data-slot="switch"], button')) return;

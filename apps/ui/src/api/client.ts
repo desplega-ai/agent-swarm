@@ -16,6 +16,7 @@ import type {
   AppListItem,
   AppRow,
   ApprovalRequest,
+  ApprovalRequestSummariesResponse,
   ApprovalRequestsResponse,
   AppUserConfigResponse,
   AppUserConfigValue,
@@ -981,7 +982,8 @@ class ApiClient {
     if (filters?.workflowId) params.set("workflowId", filters.workflowId);
     if (filters?.scriptName) params.set("scriptName", filters.scriptName);
     const usesAssetNamespaceFilter = !!(filters?.key || filters?.keyPrefix);
-    if (usesAssetNamespaceFilter) params.set("fields", "full");
+    // List views never render the full template; ask for the slim row.
+    params.set("fields", usesAssetNamespaceFilter ? "full" : "slim");
     const queryString = params.toString();
     const route = usesAssetNamespaceFilter ? "/api/schedules" : "/api/scheduled-tasks";
     const url = `${this.getBaseUrl()}${route}${queryString ? `?${queryString}` : ""}`;
@@ -2058,6 +2060,20 @@ class ApiClient {
     if (filters?.limit != null) params.set("limit", String(filters.limit));
     const qs = params.toString();
     const url = `${this.getBaseUrl()}/api/approval-requests${qs ? `?${qs}` : ""}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch approval requests: ${res.status}`);
+    return res.json();
+  }
+
+  /** List-view rows (`fields=slim`): no question bodies or answers, plus `questionCount`. */
+  async fetchApprovalRequestSummaries(filters?: {
+    status?: string;
+    limit?: number;
+  }): Promise<ApprovalRequestSummariesResponse> {
+    const params = new URLSearchParams({ fields: "slim" });
+    if (filters?.status) params.set("status", filters.status);
+    if (filters?.limit != null) params.set("limit", String(filters.limit));
+    const url = `${this.getBaseUrl()}/api/approval-requests?${params.toString()}`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch approval requests: ${res.status}`);
     return res.json();

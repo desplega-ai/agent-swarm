@@ -86,12 +86,33 @@ const getEventsRoute = route({
     since: z.string().optional(),
     until: z.string().optional(),
     limit: z.coerce.number().int().min(1).max(1000).optional(),
+    events: z
+      .string()
+      .optional()
+      .describe("Comma-separated event names; matches any of them (ANDed with `event`)"),
+    dataFields: z
+      .string()
+      .optional()
+      .describe("Comma-separated `data.field` values, used with latestPerDataField"),
+    latestPerDataField: z
+      .enum(["true", "false"])
+      .optional()
+      .describe(
+        "When true, return only the newest event per (event, data.field) pair for every name in `event`/`events` and every value in `dataFields`",
+      ),
   }),
   responses: {
     200: {
       description: "List of events",
-      schema: z.object({ events: z.array(SwarmEventSchema) }),
+      schema: z.object({
+        events: z.array(SwarmEventSchema),
+        latestPerDataField: z
+          .literal(true)
+          .optional()
+          .describe("Present only when the request asked for latestPerDataField=true"),
+      }),
     },
+    400: { description: "Validation error" },
   },
   auth: { apiKey: true },
 });
@@ -121,6 +142,9 @@ const getEventCountsRoute = route({
   },
   auth: { apiKey: true },
 });
+
+/** Bounds the UNION ALL built for latestPerDataField: one indexed lookup per pair. */
+const MAX_LATEST_PAIRS = 50;
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
@@ -184,6 +208,36 @@ export async function handleEvents(
     const parsed = await getEventsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
+    const eventNames = parsed.query.events
+      ? parsed.query.events.split(",").map((name) => EventNameSchema.safeParse(name.trim()))
+      : [];
+    const invalid = eventNames.find((result) => !result.success);
+    if (invalid) {
+      jsonError(res, "Invalid event name in `events`", 400);
+      return true;
+    }
+    const eventFilter = eventNames.flatMap((result) => (result.success ? [result.data] : []));
+    const latestPerDataField = parsed.query.latestPerDataField === "true";
+    const dataFields = (parsed.query.dataFields ?? "")
+      .split(",")
+      .map((field) => field.trim())
+      .filter(Boolean);
+    const latestEvents =
+      eventFilter.length > 0 ? eventFilter : parsed.query.event ? [parsed.query.event] : [];
+    if (
+      latestPerDataField &&
+      (latestEvents.length === 0 ||
+        dataFields.length === 0 ||
+        latestEvents.length * dataFields.length > MAX_LATEST_PAIRS)
+    ) {
+      jsonError(
+        res,
+        `latestPerDataField needs \`event\` or \`events\` and \`dataFields\`, at most ${MAX_LATEST_PAIRS} pairs`,
+        400,
+      );
+      return true;
+    }
+
     const events = await getEventsFiltered({
       category: parsed.query.category || undefined,
       event: parsed.query.event || undefined,
@@ -196,8 +250,14 @@ export async function handleEvents(
       since: parsed.query.since || undefined,
       until: parsed.query.until || undefined,
       limit: parsed.query.limit ?? 100,
+      events: eventFilter,
+      latestPerDataField: latestPerDataField ? { events: latestEvents, dataFields } : undefined,
     });
-    getEventsRoute.respond(res, 200, { events });
+    getEventsRoute.respond(
+      res,
+      200,
+      latestPerDataField ? { events, latestPerDataField: true } : { events },
+    );
     return true;
   }
 
