@@ -145,7 +145,7 @@ ENV PI_PACKAGE_DIR=/usr/lib/node_modules/@earendil-works/pi-coding-agent
 # Install Codex CLI (alternative harness, selected via HARNESS_PROVIDER=codex)
 # Pinned version must match direct @openai/codex in package.json. Enforced by
 # scripts/check-codex-default-model.sh and the CI merge gate.
-ARG CODEX_VERSION=0.157.1
+ARG CODEX_VERSION=0.159.0
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @openai/codex@${CODEX_VERSION} \
@@ -170,6 +170,7 @@ RUN mkdir -p /home/worker/.codex && \
       'show_raw_agent_reasoning = false' \
       '' \
       '[features]' \
+      'apps = false' \
       'hooks = true' \
       'plugin_hooks = true' \
       > /home/worker/.codex/config.toml && \

@@ -952,6 +952,22 @@
         }
       ]
     },
+    "gpt-6.1-sol": {
+      "id": "gpt-6.1-sol",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "effort",
+          "values": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
+      ]
+    },
     "gpt-6-sol": {
       "id": "gpt-6-sol",
       "reasoning": true,

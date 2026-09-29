@@ -19,6 +19,7 @@ import {
 } from "@/types";
 import { getExecutorRegistry } from "@/workflows";
 import { definitionNodeIds, validateDefinition } from "@/workflows/definition";
+import { withSaveWarnings, workflowSaveWarnings } from "@/workflows/readiness";
 import { snapshotAndUpdateWorkflow } from "@/workflows/version";
 
 export const registerUpdateWorkflowTool = (server: McpServer) => {
@@ -84,6 +85,7 @@ export const registerUpdateWorkflowTool = (server: McpServer) => {
       outputSchema: swarmToolOutputSchema({
         workflow: z.unknown().optional(),
         versionCreated: z.number().optional(),
+        warnings: z.array(z.string()).optional(),
       }),
     },
     async (
@@ -152,11 +154,16 @@ export const registerUpdateWorkflowTool = (server: McpServer) => {
         const longScriptTimeoutHint = definition
           ? findLongScriptTimeoutHint(definition.nodes)
           : undefined;
-        return toolOk(`Updated workflow "${workflow.name}".`, {
-          details: `Updated workflow "${workflow.name}" (${id}). Version ${version.version} snapshot created.`,
+        const warnings = await workflowSaveWarnings(workflow.definition, getExecutorRegistry());
+        return toolOk(withSaveWarnings(`Updated workflow "${workflow.name}".`, warnings), {
+          details: withSaveWarnings(
+            `Updated workflow "${workflow.name}" (${id}). Version ${version.version} snapshot created.`,
+            warnings,
+          ),
           data: {
             workflow,
             versionCreated: version.version,
+            ...(warnings.length > 0 ? { warnings } : {}),
             ...(longScriptTimeoutHint ? { longScriptTimeoutHint } : {}),
           },
         });

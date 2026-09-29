@@ -21,6 +21,7 @@ import {
   CooldownConfigSchema,
   InputValueSchema,
   TriggerConfigSchema,
+  type WorkflowDefinition,
   WorkflowDefinitionSchema,
   WorkflowEdgeSchema,
   WorkflowNodePatchSchema,
@@ -37,6 +38,7 @@ import { definitionNodeIds, generateEdges, validateDefinition } from "../workflo
 import { TriggerSchemaError } from "../workflows/engine";
 import { validateJsonSchema } from "../workflows/json-schema-validator";
 import { patchWorkflowDefinition } from "../workflows/patch-definition";
+import { workflowSaveWarnings } from "../workflows/readiness";
 import { cancelWorkflowRun, retryFailedRun } from "../workflows/resume";
 import { handleWebhookTrigger, WebhookError } from "../workflows/triggers";
 import { snapshotAndUpdateWorkflow } from "../workflows/version";
@@ -48,6 +50,14 @@ import { jsonError, parseBody, triggerSchemaErrorResponse } from "./utils";
 
 /** `Workflow` decorated with the caller-scoped favorite flag (always set once `withFavoriteFlags` runs). */
 const WorkflowWithFavoriteSchema = WorkflowSchema.extend({ favorite: z.boolean() });
+
+/**
+ * `Workflow` returned by a save (create / update / patch). `warnings` is present only when the
+ * save succeeded but a node cannot run yet, e.g. a system-one-decision node whose provider key is not configured.
+ */
+const WorkflowSaveResponseSchema = WorkflowSchema.extend({
+  warnings: z.array(z.string()).optional(),
+});
 
 /** `/api/workflows` slim list item — mirrors `WorkflowSummary` in src/types.ts (no exported schema there). */
 const WorkflowSummarySchema = WorkflowSchema.omit({
@@ -84,6 +94,14 @@ const WorkflowRunPageSchema = z.object({
 });
 
 const SuccessResponseSchema = z.object({ success: z.literal(true) });
+
+/** Adds `warnings` to a just-saved workflow when a node in it cannot run yet. */
+async function withSaveWarnings<T extends { definition: WorkflowDefinition }>(
+  workflow: T,
+): Promise<T & { warnings?: string[] }> {
+  const warnings = await workflowSaveWarnings(workflow.definition, getExecutorRegistry());
+  return warnings.length > 0 ? { ...workflow, warnings } : workflow;
+}
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
 
@@ -137,7 +155,7 @@ const createWorkflowRoute = route({
     vcsRepo: z.string().min(1).optional(),
   }),
   responses: {
-    201: { description: "Workflow created", schema: WorkflowSchema },
+    201: { description: "Workflow created", schema: WorkflowSaveResponseSchema },
     400: { description: "Invalid definition" },
   },
 });
@@ -188,7 +206,10 @@ const updateWorkflowRoute = route({
     enabled: z.boolean().optional(),
   }),
   responses: {
-    200: { description: "Workflow updated (version snapshot created)", schema: WorkflowSchema },
+    200: {
+      description: "Workflow updated (version snapshot created)",
+      schema: WorkflowSaveResponseSchema,
+    },
     400: { description: "Invalid definition" },
     404: { description: "Workflow not found" },
   },
@@ -203,7 +224,10 @@ const patchWorkflowRoute = route({
   params: z.object({ id: z.string() }),
   body: WorkflowPatchSchema.extend({ key: AssetKeySchema.optional() }),
   responses: {
-    200: { description: "Workflow patched (version snapshot created)", schema: WorkflowSchema },
+    200: {
+      description: "Workflow patched (version snapshot created)",
+      schema: WorkflowSaveResponseSchema,
+    },
     400: { description: "Invalid patch or resulting definition" },
     404: { description: "Workflow not found" },
   },
@@ -218,7 +242,10 @@ const patchWorkflowNodeRoute = route({
   params: z.object({ id: z.string(), nodeId: z.string() }),
   body: WorkflowNodePatchSchema,
   responses: {
-    200: { description: "Node patched (version snapshot created)", schema: WorkflowSchema },
+    200: {
+      description: "Node patched (version snapshot created)",
+      schema: WorkflowSaveResponseSchema,
+    },
     400: { description: "Invalid patch or resulting definition" },
     404: { description: "Workflow or node not found" },
   },
@@ -583,7 +610,7 @@ export async function handleWorkflows(
       },
       "api",
     );
-    createWorkflowRoute.respond(res, 201, workflow);
+    createWorkflowRoute.respond(res, 201, await withSaveWarnings(workflow));
     return true;
   }
 
@@ -638,7 +665,7 @@ export async function handleWorkflows(
       );
       return true;
     }
-    patchWorkflowNodeRoute.respond(res, 200, result.workflow);
+    patchWorkflowNodeRoute.respond(res, 200, await withSaveWarnings(result.workflow));
     return true;
   }
 
@@ -695,7 +722,7 @@ export async function handleWorkflows(
       );
       return true;
     }
-    patchWorkflowRoute.respond(res, 200, result.workflow);
+    patchWorkflowRoute.respond(res, 200, await withSaveWarnings(result.workflow));
     return true;
   }
 
@@ -766,7 +793,7 @@ export async function handleWorkflows(
       res.end();
       return true;
     }
-    updateWorkflowRoute.respond(res, 200, workflow);
+    updateWorkflowRoute.respond(res, 200, await withSaveWarnings(workflow));
     return true;
   }
 

@@ -26,6 +26,10 @@ on:
       - ".github/workflows/docker-and-deploy.yml"
   workflow_dispatch:
 
+# BuildKit layer cache lives in GHCR as `buildcache-<scope>` tags on the two public
+# image packages, not in the GHA cache: six mode=max scopes pushed the repo's GHA
+# cache past its 10 GB cap, so it evicted itself. Public packages also let
+# merge-gate.yml (fork PRs included) read the same refs anonymously.
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
@@ -106,8 +110,8 @@ jobs:
           platforms: linux/amd64
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=server-amd64
-          cache-to: type=gha,scope=server-amd64,mode=max
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-server-amd64
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-server-amd64,mode=max
 
   build-and-push-server-arm64:
     runs-on: ubuntu-24.04-arm
@@ -147,8 +151,8 @@ jobs:
           platforms: linux/arm64
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=server-arm64
-          cache-to: type=gha,scope=server-arm64,mode=max
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-server-arm64
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-server-arm64,mode=max
 
   merge-server:
     runs-on: ubuntu-latest
@@ -239,8 +243,8 @@ jobs:
           platforms: linux/amd64
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker,push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=worker-amd64
-          cache-to: type=gha,scope=worker-amd64,mode=max
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker:buildcache-worker-amd64
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker:buildcache-worker-amd64,mode=max
 
   build-and-push-worker-arm64:
     runs-on: ubuntu-24.04-arm
@@ -281,8 +285,8 @@ jobs:
           platforms: linux/arm64
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker,push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=worker-arm64
-          cache-to: type=gha,scope=worker-arm64,mode=max
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker:buildcache-worker-arm64
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker:buildcache-worker-arm64,mode=max
 
   merge-worker:
     runs-on: ubuntu-latest
@@ -378,9 +382,9 @@ jobs:
           outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker,push-by-digest=true,name-canonical=true,push=true
           # Reuse the full-image cache too — worker-slim is a prefix of its stage graph.
           cache-from: |
-            type=gha,scope=worker-slim-amd64
-            type=gha,scope=worker-amd64
-          cache-to: type=gha,scope=worker-slim-amd64,mode=max
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker:buildcache-worker-slim-amd64
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker:buildcache-worker-amd64
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker:buildcache-worker-slim-amd64,mode=max
 
   build-and-push-worker-slim-arm64:
     runs-on: ubuntu-24.04-arm
@@ -422,9 +426,9 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker,push-by-digest=true,name-canonical=true,push=true
           cache-from: |
-            type=gha,scope=worker-slim-arm64
-            type=gha,scope=worker-arm64
-          cache-to: type=gha,scope=worker-slim-arm64,mode=max
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker:buildcache-worker-slim-arm64
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker:buildcache-worker-arm64
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker:buildcache-worker-slim-arm64,mode=max
 
   merge-worker-slim:
     runs-on: ubuntu-latest

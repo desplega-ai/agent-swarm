@@ -16,6 +16,11 @@ import { emitTaskStarted } from "../../task-lifecycle-events";
 import { getAgentById, isAgentEligibleForTask } from "../agents";
 import { getDbClient } from "../runtime";
 import {
+  classifyTaskHumanFree,
+  reclassifyTaskHumanFree,
+  tagWriteChangesHumanFree,
+} from "./human-free";
+import {
   type AgentTaskRow,
   getTaskById,
   NEVER_STARTED_TASK_STATUSES,
@@ -73,9 +78,10 @@ export async function createTask(
 ): Promise<AgentTask> {
   const id = crypto.randomUUID();
   const source = options?.source ?? "mcp";
+  const isHumanFree = await classifyTaskHumanFree({ source });
   const row = await getDbClient().get<AgentTaskRow>(
-    `INSERT INTO agent_tasks (id, "key", agentId, task, status, source, slackChannelId, slackThreadTs, slackUserId, swarmVersion, createdAt, lastUpdatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) RETURNING *`,
+    `INSERT INTO agent_tasks (id, "key", agentId, task, status, source, slackChannelId, slackThreadTs, slackUserId, swarmVersion, isHumanFree, createdAt, lastUpdatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) RETURNING *`,
     [
       id,
       defaultAssetKey("task", id),
@@ -87,6 +93,7 @@ export async function createTask(
       options?.slackThreadTs ?? null,
       options?.slackUserId ?? null,
       pkg.version,
+      isHumanFree ? 1 : 0,
     ],
   );
   if (!row) throw new Error("Failed to create task");
@@ -373,10 +380,17 @@ export async function completeTask(
     if (completed && options?.addTags?.length) {
       const existingTags: string[] = completed.tags ? JSON.parse(completed.tags) : [];
       const nextTags = Array.from(new Set([...existingTags, ...options.addTags]));
+      const previousTagsJson = completed.tags;
+      const nextTagsJson = JSON.stringify(nextTags);
       completed = await getDbClient().get<AgentTaskRow>(
         "UPDATE agent_tasks SET tags = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *",
-        [JSON.stringify(nextTags), id],
+        [nextTagsJson, id],
       );
+      // Only a tag the classifier reads (e.g. "heartbeat") can flip the flag;
+      // a "deferred" write must not walk the task's whole subtree.
+      if (tagWriteChangesHumanFree(previousTagsJson, nextTagsJson)) {
+        await reclassifyTaskHumanFree([id]);
+      }
     }
     if (completed && options?.deferredAt) {
       completed = await getDbClient().get<AgentTaskRow>(
@@ -1149,8 +1163,17 @@ export async function getRecentlyCancelledTasksForAgent(agentId: string): Promis
 }
 
 export async function deleteTask(id: string): Promise<boolean> {
-  const result = await getDbClient().run("DELETE FROM agent_tasks WHERE id = ?", [id]);
-  return result.changes > 0;
+  return await getDbClient().transaction(async (tx) => {
+    // `parentTaskId` has no foreign key, so children survive with a dangling
+    // parent. The human-free rule reads the parent row, so they are reclassified
+    // once it is gone.
+    const childIds = (
+      await tx.query<{ id: string }>("SELECT id FROM agent_tasks WHERE parentTaskId = ?", [id])
+    ).map((row) => row.id);
+    const result = await tx.run("DELETE FROM agent_tasks WHERE id = ?", [id]);
+    await reclassifyTaskHumanFree(childIds);
+    return result.changes > 0;
+  });
 }
 
 export async function updateTaskProgress(id: string, progress: string): Promise<AgentTask | null> {
