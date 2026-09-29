@@ -25,9 +25,10 @@ const REASON_PATTERNS: any[] = [
   { key: "sigterm/killed", re: /sigterm|sigkill|killed|143|137/i },
   { key: "timeout", re: /time?d?\s*out|timeout|deadline/i },
   { key: "context-window", re: /context (window|limit|saturat)|peakcontext|compact/i },
+  { key: "reboot-sweep", re: /reboot sweep/i },
   { key: "not-found", re: /not found|404|missing|no such/i },
   { key: "auth/credentials", re: /unauthorized|401|403|credential|token|forbidden/i },
-  { key: "ci/checks-failed", re: /ci|check.?s? fail|lint|tsc|test.?s? fail/i },
+  { key: "ci/checks-failed", re: /\bci\b|check.?s? fail|lint|tsc|test.?s? fail/i },
   { key: "network", re: /network|econn|fetch failed|socket|dns|502|503|504/i },
   { key: "cancelled", re: /cancel|aborted/i },
 ];

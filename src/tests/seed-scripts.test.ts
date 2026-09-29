@@ -142,7 +142,13 @@ describe("seed-scripts catalog", () => {
   });
 
   test("task-failure-audit hydrates slim task rows before clustering by reason", async () => {
-    const taskId = "failed-task-with-reason";
+    const reasons = new Map([
+      [
+        "failed-reboot-sweep",
+        "Auto-failed by reboot sweep: worker session not found after server restart",
+      ],
+      ["failed-decisions", "Review decisions after the run stopped."],
+    ]);
     const result = await taskFailureAudit(
       { days: 1, publishPage: false },
       {
@@ -150,23 +156,39 @@ describe("seed-scripts catalog", () => {
           async task_list() {
             return {
               success: true,
-              data: { tasks: [{ id: taskId, status: "failed" }] },
+              data: {
+                tasks: [...reasons.keys()].map((id) => ({ id, status: "failed" })),
+              },
             };
           },
           async task_get(args: { taskId: string }) {
-            expect(args.taskId).toBe(taskId);
+            const failureReason = reasons.get(args.taskId);
+            expect(failureReason).toBeDefined();
             return {
               success: true,
-              data: { id: taskId, status: "failed", failureReason: "Gate refusal, not a crash." },
+              data: { id: args.taskId, status: "failed", failureReason },
             };
           },
         },
       },
     );
 
-    expect(result.groups).toHaveLength(1);
-    expect(result.groups[0].key).toBe("gate refusal, not a crash.");
-    expect(result.groups[0].sampleReason).toBe("Gate refusal, not a crash.");
+    expect(result.groups).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: "reboot-sweep",
+          sampleReason:
+            "Auto-failed by reboot sweep: worker session not found after server restart",
+        }),
+        expect.objectContaining({
+          key: "review decisions after the run stopped.",
+          sampleReason: "Review decisions after the run stopped.",
+        }),
+      ]),
+    );
+    expect(result.groups.map((group: { key: string }) => group.key)).not.toContain(
+      "ci/checks-failed",
+    );
   });
 
   test("scriptsSeeder declares the script kind and one item per catalog entry", async () => {
