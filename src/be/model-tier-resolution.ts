@@ -54,6 +54,7 @@ import {
 } from "./harness-model-support";
 import {
   buildCatalogEntries,
+  getCatalogGeneration,
   listModelCatalog,
   listModelCatalogOverlay,
   type ModelCatalogEntry,
@@ -141,7 +142,13 @@ export async function setAgentModelTierOverrides(
 // ─── Catalog for alias resolution ────────────────────────────────────────────
 
 const CATALOG_TTL_MS = 30_000;
-let cachedCatalog: { at: number; catalog: ModelsDevCatalog; priced: Set<string> } | null = null;
+let cachedCatalog: {
+  at: number;
+  /** `getCatalogGeneration()` read before the tables were, so a write mid-load still invalidates. */
+  generation: number;
+  catalog: ModelsDevCatalog;
+  priced: Set<string>;
+} | null = null;
 
 export function invalidateTierResolutionCatalog(): void {
   cachedCatalog = null;
@@ -166,7 +173,14 @@ async function loadResolutionCatalog(): Promise<{
   priced: Set<string>;
 }> {
   const now = Date.now();
-  if (cachedCatalog && now - cachedCatalog.at < CATALOG_TTL_MS) return cachedCatalog;
+  const generation = getCatalogGeneration();
+  if (
+    cachedCatalog &&
+    cachedCatalog.generation === generation &&
+    now - cachedCatalog.at < CATALOG_TTL_MS
+  ) {
+    return cachedCatalog;
+  }
 
   let entries: ModelCatalogEntry[] = await listModelCatalog();
   if (entries.length === 0) {
@@ -207,7 +221,7 @@ async function loadResolutionCatalog(): Promise<{
       priced.add(`${provider}/${modelId}`);
     }
   }
-  cachedCatalog = { at: now, catalog, priced };
+  cachedCatalog = { at: now, generation, catalog, priced };
   return cachedCatalog;
 }
 
@@ -416,12 +430,19 @@ async function applyCliSupport(
     return { unsupported: unsupportedModelMessage(harness, cliVersion, resolution.resolvedModel) };
   }
   const section = harnessCatalogSection(harness);
-  const { catalog } = await loadResolutionCatalog();
+  const { catalog, priced } = await loadResolutionCatalog();
+  // Same rule as alias resolution: a model with no price never becomes the pick, or the run
+  // would bypass cost accounting.
+  const candidates = Object.fromEntries(
+    Object.entries((section && catalog[section]?.models) || {}).filter(([id]) =>
+      priced.has(`${section}/${id}`),
+    ),
+  );
   const fallback = await fallbackForUnsupportedModel(
     harness,
     cliVersion,
     resolution.resolvedModel,
-    (section && catalog[section]?.models) || {},
+    candidates,
   );
   if (!fallback) return resolution;
   noticeCliUnsupported(harness, cliVersion, resolution.resolvedModel, fallback);

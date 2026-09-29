@@ -127,6 +127,30 @@ describe("claim-time CLI support", () => {
     delete process.env.MODEL_TIER_CLAUDE_SMART;
   });
 
+  test("the fallback never picks an unpriced sibling, which would run outside cost accounting", async () => {
+    process.env.MODEL_TIER_CLAUDE_SMART = "latest:anthropic/opus@stable";
+    // Newer than the priced fallback (claude-opus-5) but with no price yet.
+    await replaceModelCatalog([
+      entry("claude-opus-5", 200),
+      entry("claude-opus-5-5", 30),
+      { ...entry("claude-opus-5-4", 60), pricing: null },
+    ]);
+    invalidateTierResolutionCatalog();
+    await recordHarnessModelSupport({
+      harness: "claude",
+      cliVersion: CLI,
+      modelId: "claude-opus-5-5",
+      status: "unsupported",
+    });
+    const w = await worker("w-unpriced-fallback");
+    await createTaskExtended("smart work", { agentId: w.id, modelTier: "smart" });
+
+    const trigger = await callPoll(w.id);
+    expect(trigger?.task.resolvedModel).toBe("claude-opus-5");
+    expect(trigger?.task.modelSource).toBe("fallback:cli-unsupported");
+    delete process.env.MODEL_TIER_CLAUDE_SMART;
+  });
+
   test("explicit unsupported model fails fast: trigger carries modelUnsupported", async () => {
     await recordHarnessModelSupport({
       harness: "claude",
