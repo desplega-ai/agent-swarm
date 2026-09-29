@@ -251,7 +251,8 @@ describe("kv-storage helpers", () => {
     expect(await keys([])).toEqual(["r/1", "r/2", "r/3", "r/4"]);
     expect(await keys([{ field: "run", value: "a" }])).toEqual(["r/1", "r/3"]);
     expect(await keys([{ field: "ok", value: true }])).toEqual(["r/1"]);
-    expect(await keys([{ field: "n", value: 3.5 }])).toEqual(["r/3"]);
+    // Non-safe-integer numbers are not prefiltered (the caller re-checks).
+    expect(await keys([{ field: "n", value: 3.5 }])).toEqual(["r/1", "r/2", "r/3", "r/4"]);
     expect(
       await keys([
         { field: "run", value: "a" },

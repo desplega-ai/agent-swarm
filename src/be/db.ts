@@ -13555,6 +13555,11 @@ function kvJsonFieldConditions(filters: KvJsonFieldEquals[] | undefined): {
     if (/["\\]/.test(filter.field)) {
       throw new Error(`unsupported JSON field name: ${filter.field}`);
     }
+    // Only safe integers compare exactly: SQLite parses a stored literal like
+    // 1000000000000000100 as an exact INTEGER (and fractions with its own
+    // float parser) while the bound JS number is a double, so SQL could drop
+    // a row that JS `===` matches. Other numbers are left to the caller.
+    if (typeof filter.value === "number" && !Number.isSafeInteger(filter.value)) continue;
     // json_valid guards the corrupt rows decodeKvRow tolerates: json_extract
     // would abort the whole query on one of them.
     parts.push(
@@ -13571,8 +13576,9 @@ function kvJsonFieldConditions(filters: KvJsonFieldEquals[] | undefined): {
  * stable cursor; sweeping happens on point-reads instead).
  *
  * `jsonFieldEquals` narrows the rows in SQL so non-matching values are never
- * decoded. SQL equality is looser than JS `===` (JSON `true` equals `1`), so
- * callers that need exact semantics re-check the decoded values.
+ * decoded. SQL equality is looser than JS `===` (JSON `true` equals `1`) and
+ * numbers that are not safe integers are not filtered at all, so callers that
+ * need exact semantics re-check the decoded values.
  *
  * `limit` is capped by the caller (HTTP enforces ≤1000); helper does no extra
  * bounds-check beyond what SQL accepts.
