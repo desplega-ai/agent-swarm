@@ -15,8 +15,14 @@ import {
   getSessionCostSummary,
   initDb,
 } from "../be/db";
-import { reclassifyTaskHumanFree } from "../be/db/tasks/human-free";
+import {
+  drainHumanFreeReclassifyQueue,
+  HUMAN_FREE_RECLASSIFY_BATCH,
+  pendingHumanFreeReclassifications,
+  reclassifyTaskHumanFree,
+} from "../be/db/tasks/human-free";
 import { completeTask, deleteTask } from "../be/db/tasks/write";
+import { startHumanFreeDrain, stopHumanFreeDrain } from "../be/human-free-drain";
 import { expectFlagsMatchLegacy, legacyHumanFreeIds, storedFlags } from "./human-free-oracle";
 
 const TEST_DB_PATH = "./test-human-free-reclassify.sqlite";
@@ -418,7 +424,7 @@ describe("human-free flag stays correct when a classifying input changes", () =>
     const root = await task("ordinary root");
     // Task creation has no depth limit, so a follow-up chain can outgrow any
     // fixed bound in the reclassification walk. 1,001 links put the leaf one
-    // past the old cutoff.
+    // past the old cutoff, and past two batches of the current one.
     const chain: string[] = [root];
     for (let i = 0; i < 1_001; i++) {
       chain.push(await task(`link ${i}`, { parentTaskId: chain[chain.length - 1] }));
@@ -440,13 +446,21 @@ describe("human-free flag stays correct when a classifying input changes", () =>
     expect(before.excludedCostUsd).toBe(0);
 
     // Mixed with the "deferred" tag a deferral writes: the classifying tag
-    // still triggers one full, uncapped walk.
+    // still triggers the walk, but only one batch of it runs in the request.
     const recomputations = await countSubtreeRecomputations(() =>
       completeTask(root, "done", { addTags: ["deferred", "heartbeat"] }),
     );
 
     expect(recomputations).toBe(1);
     expect(await flag(root)).toBe(true);
+    expect(await flag(chain[HUMAN_FREE_RECLASSIFY_BATCH - 1])).toBe(true);
+    expect(await flag(chain[HUMAN_FREE_RECLASSIFY_BATCH])).toBe(false);
+    expect(await flag(leaf)).toBe(false);
+    expect(await pendingHumanFreeReclassifications()).toBe(1);
+
+    const drained = await drainHumanFreeReclassifyQueue();
+
+    expect(drained.remaining).toBe(0);
     expect(await flag(lastWithinOldCutoff)).toBe(true);
     expect(await flag(leaf)).toBe(true);
     const after = (await getSessionCostSummary({ agentId: agent.id, groupBy: "day" })).totals;
@@ -455,6 +469,155 @@ describe("human-free flag stays correct when a classifying input changes", () =>
     expect(after.excludedTaskCount).toBe(1);
     await expectStoredMatchesRule();
   }, 60_000);
+
+  test("a tree larger than one batch is not walked in one request, and the rest drains", async () => {
+    // Root, a chain, a wide parent, and a branch that stops propagation: every
+    // shape the batch boundary can cut through.
+    const owner = await createUser({ name: "Bounded Reclassify Owner" });
+    const root = await task("bounded root");
+    const chain: string[] = [root];
+    for (let i = 0; i < 6; i++) chain.push(await task(`chain ${i}`, { parentTaskId: chain[i] }));
+    const wide = await task("wide parent", { parentTaskId: root });
+    const fans: string[] = [];
+    for (let i = 0; i < 9; i++) fans.push(await task(`fan ${i}`, { parentTaskId: wide }));
+    const fanChild = await task("below a fan", { parentTaskId: fans[4] });
+    const handedOff = await task("explicitly attributed", {
+      parentTaskId: wide,
+      requestedByUserId: owner.id,
+    });
+    const belowHandedOff = await task("below the handoff", { parentTaskId: handedOff });
+    const everyTask = [...chain, wide, ...fans, fanChild, handedOff, belowHandedOff];
+    const treeSize = everyTask.length;
+    const batchSize = 4;
+    expect(treeSize).toBeGreaterThan(batchSize * 3);
+    await getDbClient().run("UPDATE agent_tasks SET tags = ? WHERE id = ?", [
+      JSON.stringify(["heartbeat"]),
+      root,
+    ]);
+
+    const changedInline = await reclassifyTaskHumanFree([root], { batchSize });
+
+    // One batch changed exactly `batchSize` flags and left work behind.
+    expect(changedInline).toBe(batchSize);
+    const flaggedInline = [...(await storedFlags())].filter(
+      ([id, flagged]) => flagged && everyTask.includes(id),
+    );
+    expect(flaggedInline.length).toBe(batchSize);
+    expect(await pendingHumanFreeReclassifications()).toBeGreaterThan(0);
+
+    // Each drained batch is bounded the same way, and the queue empties.
+    let totalChanged = changedInline;
+    let passes = 0;
+    while ((await pendingHumanFreeReclassifications()) > 0) {
+      const pass = await drainHumanFreeReclassifyQueue({ batchSize, maxBatches: 1 });
+      expect(pass.batches).toBe(1);
+      expect(pass.changed).toBeLessThanOrEqual(batchSize);
+      totalChanged += pass.changed;
+      passes += 1;
+      expect(passes).toBeLessThan(treeSize);
+    }
+    expect(passes).toBeGreaterThan(1);
+    // Every task of the tree flipped exactly once, except the attributed branch.
+    expect(totalChanged).toBe(treeSize - 2);
+    for (const taskId of everyTask) {
+      expect(await flag(taskId)).toBe(taskId !== handedOff && taskId !== belowHandedOff);
+    }
+    await expectStoredMatchesRule();
+  });
+
+  test("a wide parent queues one row, not one per child", async () => {
+    const parent = await task("very wide parent", { tags: ["heartbeat"] });
+    const children: string[] = [];
+    for (let i = 0; i < 40; i++) children.push(await task(`child ${i}`, { parentTaskId: parent }));
+    await getDbClient().run("UPDATE agent_tasks SET isHumanFree = 0 WHERE id = ?", [parent]);
+    await getDbClient().run("UPDATE agent_tasks SET isHumanFree = 0 WHERE parentTaskId = ?", [
+      parent,
+    ]);
+
+    await reclassifyTaskHumanFree([parent], { batchSize: 5 });
+
+    expect(await pendingHumanFreeReclassifications()).toBe(1);
+    const drained = await drainHumanFreeReclassifyQueue({ batchSize: 5 });
+    expect(drained.remaining).toBe(0);
+    // Paged five children at a time, none skipped or walked twice into a change.
+    expect(drained.batches).toBeGreaterThanOrEqual(children.length / 5 - 1);
+    for (const child of children) expect(await flag(child)).toBe(true);
+    await expectStoredMatchesRule();
+  });
+
+  test("a seed list longer than one batch queues the overflow", async () => {
+    const user = await createUser({ name: "Overflow Seed Requester" });
+    const roots: string[] = [];
+    for (let i = 0; i < 11; i++) {
+      roots.push(await task(`scheduled ${i}`, { source: "schedule", requestedByUserId: user.id }));
+    }
+    const below = await task("below the first", { parentTaskId: roots[0] });
+    for (const root of roots) {
+      await getDbClient().run("UPDATE agent_tasks SET requestedByUserId = NULL WHERE id = ?", [
+        root,
+      ]);
+    }
+
+    const changedInline = await reclassifyTaskHumanFree(roots, { batchSize: 3 });
+
+    expect(changedInline).toBeLessThanOrEqual(3);
+    expect(await pendingHumanFreeReclassifications()).toBeGreaterThan(0);
+    expect((await drainHumanFreeReclassifyQueue({ batchSize: 3 })).remaining).toBe(0);
+    for (const taskId of [...roots, below]) expect(await flag(taskId)).toBe(true);
+    await expectStoredMatchesRule();
+  });
+
+  test("a second mutation while work is queued restarts it and still converges", async () => {
+    const root = await task("restarted root");
+    const chain: string[] = [root];
+    for (let i = 0; i < 12; i++) chain.push(await task(`link ${i}`, { parentTaskId: chain[i] }));
+    const setTags = (tags: string[]) =>
+      getDbClient().run("UPDATE agent_tasks SET tags = ? WHERE id = ?", [
+        JSON.stringify(tags),
+        root,
+      ]);
+
+    await setTags(["heartbeat"]);
+    await reclassifyTaskHumanFree([root], { batchSize: 4 });
+    await drainHumanFreeReclassifyQueue({ batchSize: 4, maxBatches: 1 });
+    expect(await pendingHumanFreeReclassifications()).toBeGreaterThan(0);
+    expect(await flag(chain[12])).toBe(false);
+
+    // The tag is gone again before the first wave reached the leaf. The chain
+    // holds a mix of new and old flags until the second wave finishes.
+    await setTags([]);
+    await reclassifyTaskHumanFree([root], { batchSize: 4 });
+    expect((await drainHumanFreeReclassifyQueue({ batchSize: 4 })).remaining).toBe(0);
+
+    for (const taskId of chain) expect(await flag(taskId)).toBe(false);
+    await expectStoredMatchesRule();
+  });
+
+  test("the background drain finishes a queued subtree on its own", async () => {
+    const root = await task("drained in the background");
+    const chain: string[] = [root];
+    for (let i = 0; i < HUMAN_FREE_RECLASSIFY_BATCH + 20; i++) {
+      chain.push(await task(`link ${i}`, { parentTaskId: chain[chain.length - 1] }));
+    }
+    const leaf = chain[chain.length - 1];
+    await completeTask(root, "done", { addTags: ["heartbeat"] });
+    expect(await flag(leaf)).toBe(false);
+    expect(await pendingHumanFreeReclassifications()).toBeGreaterThan(0);
+
+    startHumanFreeDrain();
+    try {
+      const deadline = Date.now() + 10_000;
+      while ((await pendingHumanFreeReclassifications()) > 0 && Date.now() < deadline) {
+        await Bun.sleep(25);
+      }
+    } finally {
+      stopHumanFreeDrain();
+    }
+
+    expect(await pendingHumanFreeReclassifications()).toBe(0);
+    expect(await flag(leaf)).toBe(true);
+    await expectStoredMatchesRule();
+  });
 
   test("reclassify terminates on a parent cycle and matches the rule", async () => {
     const first = await task("cycle first");
@@ -475,4 +638,32 @@ describe("human-free flag stays correct when a classifying input changes", () =>
     }
     await expectStoredMatchesRule();
   });
+
+  test("a parent cycle longer than one batch stops re-queuing itself", async () => {
+    const ring: string[] = [await task("ring 0")];
+    for (let i = 1; i < 6; i++) ring.push(await task(`ring ${i}`, { parentTaskId: ring[i - 1] }));
+    await getDbClient().run("UPDATE agent_tasks SET parentTaskId = ? WHERE id = ?", [
+      ring[5],
+      ring[0],
+    ]);
+    await getDbClient().run("UPDATE agent_tasks SET tags = ? WHERE id = ?", [
+      JSON.stringify(["heartbeat"]),
+      ring[2],
+    ]);
+    // Nothing in the product writes a cycle. One longer than a batch never
+    // runs out of tree, so only the hop limit ends the drain.
+    const errorSpy = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await reclassifyTaskHumanFree([ring[0]], { batchSize: 2 });
+      const drained = await drainHumanFreeReclassifyQueue({ batchSize: 2 });
+
+      expect(drained.remaining).toBe(0);
+      expect(
+        errorSpy.mock.calls.some(([message]) => String(message).includes("parent cycle")),
+      ).toBe(true);
+    } finally {
+      errorSpy.mockRestore();
+    }
+    for (const taskId of ring) expect(await flag(taskId)).toBe(true);
+  }, 60_000);
 });
