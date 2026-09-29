@@ -36,6 +36,7 @@ import {
   reconcileOrphanedRuns,
 } from "../runner/index.ts";
 import { assertRunConfigsResolve, ensureRunConfigPins } from "../runner/run-configs.ts";
+import { parseEffortOverrides, planRunEfforts } from "../runner/run-efforts.ts";
 import { type SessionLogRow, SwarmClient } from "../swarm/client.ts";
 import { cleanVersion } from "../swarm/version.ts";
 import {
@@ -52,6 +53,7 @@ import {
 import { type AnalyticsSourceRow, buildAnalytics } from "./analytics.ts";
 import {
   createConfig,
+  effortLevelsFor,
   initHarnessConfigs,
   patchConfig,
   serializeConfigResolved,
@@ -408,7 +410,7 @@ export const ANALYTICS_SQL = `
                 json_extract(a.sandbox_json, '$.workers[0].version')
               ) END AS worker_version,
          r.name AS run_name, r.created_at AS run_created_at,
-         a.resolved_model, rc.resolved_model AS pinned_model
+         a.resolved_model, a.reasoning_effort, rc.resolved_model AS pinned_model
   FROM attempts a JOIN eval_runs r ON r.id = a.run_id
   LEFT JOIN eval_run_configs rc ON rc.run_id = a.run_id AND rc.config_id = a.config_id
   ORDER BY r.created_at ASC, a.attempt_index ASC`;
@@ -582,6 +584,8 @@ export async function startServer(
             attemptsPerCell?: number;
             concurrency?: number;
             judgeModel?: string;
+            /** configId → reasoning effort (null = harness default), over the config default. */
+            efforts?: unknown;
           } | null;
           if (!body?.scenarioIds?.length || !body?.configIds?.length) {
             return json({ error: "scenarioIds and configIds are required" }, 400);
@@ -594,8 +598,16 @@ export async function startServer(
           for (const id of body.configIds) {
             if (!registry.configs.has(id)) return json({ error: `unknown config "${id}"` }, 400);
           }
+          let efforts: Awaited<ReturnType<typeof planRunEfforts>>;
           try {
             await assertRunConfigsResolve(registry, body.scenarioIds, body.configIds);
+            efforts = planRunEfforts({
+              registry,
+              scenarioIds: body.scenarioIds,
+              configIds: body.configIds,
+              overrides: parseEffortOverrides(body.efforts),
+              catalog: await getResolutionCatalog(),
+            });
           } catch (err) {
             return json({ error: err instanceof Error ? err.message : String(err) }, 400);
           }
@@ -608,6 +620,7 @@ export async function startServer(
             attemptsPerCell: Math.max(1, body.attemptsPerCell ?? 1),
             concurrency: Math.max(1, body.concurrency ?? 2),
             judgeModel: body.judgeModel || undefined,
+            efforts,
           });
           await ensureRunConfigPins(db, runId, registry, body.scenarioIds, body.configIds);
           startRunExecution(db, runId);
@@ -855,6 +868,12 @@ export async function startServer(
           );
         },
       },
+      /** Reasoning efforts a harness takes for a model or alias (config form + new-run dialog). */
+      "/api/effort-levels": async (req) => {
+        if (!(await isAuthorized(req))) return unauthorized();
+        const result = effortLevelsFor(new URL(req.url).searchParams, await getResolutionCatalog());
+        return result.ok ? json(result.body) : json({ error: result.error }, result.status);
+      },
       /** Quick-run config presets (v7.7 item 1) — static catalog data, validated by registry.test.ts. */
       "/api/presets": async (req) => {
         if (!(await isAuthorized(req))) return unauthorized();
@@ -907,6 +926,7 @@ export async function startServer(
         const filter: AnalyticsFilter = {
           harnesses: parseFilterCsv(params.get("harnesses")),
           configIds: parseFilterCsv(params.get("configs")),
+          efforts: parseFilterCsv(params.get("efforts")),
         };
         const res = await db.execute(ANALYTICS_SQL);
         const rows: AnalyticsSourceRow[] = res.rows.map((r) => ({
@@ -920,6 +940,7 @@ export async function startServer(
           judgeCostUsd: r.judge_cost_usd === null ? null : Number(r.judge_cost_usd),
           durationMs: r.duration_ms === null ? null : Number(r.duration_ms),
           resolvedModel: (r.resolved_model as string) ?? null,
+          reasoningEffort: (r.reasoning_effort as string) ?? null,
           pinnedModel: (r.pinned_model as string) ?? null,
           tokenModel: (r.token_model as string) ?? null,
           // v7 §6.1: token sums; numOrNull guards stored-JSON garbage (no NaN).

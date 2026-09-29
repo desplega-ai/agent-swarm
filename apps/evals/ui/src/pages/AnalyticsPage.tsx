@@ -8,6 +8,7 @@ import { type ChartMarker, LineChart, type LineSeries } from "../components/char
 import { type MiniBar, MiniBarChart } from "../components/charts/MiniBarChart.tsx";
 import { ScatterChart, type ScatterPoint } from "../components/charts/ScatterChart.tsx";
 import { type Column, DataTable, MultiSelect } from "../components/DataTable.tsx";
+import { EffortChip, effortKeyLabel } from "../components/EffortChip.tsx";
 import { EntityLink } from "../components/EntityLink.tsx";
 import {
   fmtAgo,
@@ -812,6 +813,31 @@ const MODEL_COLUMNS: Column<AnalyticsModel>[] = [
       ),
   },
   {
+    key: "efforts",
+    header: "Effort",
+    headerTip:
+      "Reasoning efforts this model's attempts ran at. Narrow to one with the Effort filter in the page header to compare efforts.",
+    width: "120px",
+    sortValue: (m) => m.efforts?.join(" ") ?? null,
+    titleText: (m) => m.efforts?.map(effortKeyLabel).join(", ") ?? "",
+    render: (m) =>
+      m.efforts && m.efforts.length > 0 ? (
+        <span className="an-efforts">
+          {m.efforts.map((e) =>
+            e === "default" ? (
+              <span className="dim" key={e}>
+                default
+              </span>
+            ) : (
+              <EffortChip key={e} effort={e} />
+            ),
+          )}
+        </span>
+      ) : (
+        <span className="dim">—</span>
+      ),
+  },
+  {
     key: "attempts",
     header: "Attempts",
     width: "76px",
@@ -950,26 +976,37 @@ function ModelsSection(props: { models: AnalyticsModel[] }): ReactNode {
 
 // ---- section 5: Rollups — by harness / by vendor (v7 §7.3) ----
 
-function rollupColumns(mode: ColorByKey): Column<AnalyticsGroupRollup>[] {
+type RollupMode = ColorByKey | "effort";
+
+function rollupColumns(mode: RollupMode): Column<AnalyticsGroupRollup>[] {
   return [
     {
       key: "group",
-      header: mode === "harness" ? "Harness" : "Vendor",
+      header: mode === "harness" ? "Harness" : mode === "vendor" ? "Vendor" : "Effort",
       searchText: (r) => r.group,
-      render: (r) => (
-        <span className="an-group">
-          <span
-            className="chart-dot"
-            style={{
-              background: colorForGroup(
-                r.group,
-                mode === "harness" ? HARNESS_COLORS : VENDOR_COLORS,
-              ),
-            }}
-          />
-          {mode === "harness" ? <HarnessIcon harness={r.group} showLabel /> : r.group}
-        </span>
-      ),
+      render: (r) =>
+        mode === "effort" ? (
+          <span className="an-group">
+            {r.group === "default" ? (
+              <span className="dim">{effortKeyLabel(r.group)}</span>
+            ) : (
+              <EffortChip effort={r.group} />
+            )}
+          </span>
+        ) : (
+          <span className="an-group">
+            <span
+              className="chart-dot"
+              style={{
+                background: colorForGroup(
+                  r.group,
+                  mode === "harness" ? HARNESS_COLORS : VENDOR_COLORS,
+                ),
+              }}
+            />
+            {mode === "harness" ? <HarnessIcon harness={r.group} showLabel /> : r.group}
+          </span>
+        ),
     },
     {
       key: "models",
@@ -1082,23 +1119,29 @@ function rollupColumns(mode: ColorByKey): Column<AnalyticsGroupRollup>[] {
 function RollupSection(props: {
   harnesses: AnalyticsGroupRollup[];
   vendors: AnalyticsGroupRollup[];
+  efforts: AnalyticsGroupRollup[];
 }): ReactNode {
-  const [mode, setMode] = useState<ColorByKey>("harness");
-  const rows = mode === "harness" ? props.harnesses : props.vendors;
+  const [mode, setMode] = useState<RollupMode>("harness");
+  const rows =
+    mode === "harness" ? props.harnesses : mode === "vendor" ? props.vendors : props.efforts;
   const columns = useMemo(() => rollupColumns(mode), [mode]);
+  // The effort tab only earns its place once some attempt ran at a set effort.
+  const hasEfforts = props.efforts.some((r) => r.group !== "default");
+  const options: { key: RollupMode; label: string }[] = [
+    { key: "harness", label: "By Harness" },
+    { key: "vendor", label: "By Vendor" },
+    ...(hasEfforts ? [{ key: "effort" as const, label: "By Effort" }] : []),
+  ];
 
   return (
     <div className="panel">
       <SectionHead
-        title="By Harness, By Vendor"
-        tip="The same per-model aggregates rolled up one level: by harness provider (which agent CLI ran the attempt) or by model vendor (who serves the model the attempt actually used). Group colors match the scatter above."
+        title={hasEfforts ? "By Harness, Vendor, Effort" : "By Harness, By Vendor"}
+        tip="The same per-model aggregates rolled up one level: by harness provider (which agent CLI ran the attempt), by model vendor (who serves the model the attempt actually used), or by reasoning effort (what the worker was launched with; attempts at the harness default group together). Group colors match the scatter above."
       >
         <Seg
-          options={[
-            { key: "harness" as const, label: "By Harness" },
-            { key: "vendor" as const, label: "By Vendor" },
-          ]}
-          value={mode}
+          options={options}
+          value={mode === "effort" && !hasEfforts ? "harness" : mode}
           onChange={setMode}
         />
       </SectionHead>
@@ -1137,8 +1180,10 @@ function PageHead(props: {
   onRefresh: () => void;
   fHarnesses: string[];
   fConfigIds: string[];
+  fEfforts: string[];
   onHarnesses: (next: string[]) => void;
   onConfigIds: (next: string[]) => void;
+  onEfforts: (next: string[]) => void;
 }): ReactNode {
   const { data } = props;
   const configSearchText = useConfigSearchText();
@@ -1147,7 +1192,10 @@ function PageHead(props: {
     [data.matrix],
   );
   const options = useMemo(() => filterOptionsOf(data), [data]);
-  const active = props.fHarnesses.length + props.fConfigIds.length;
+  const active = props.fHarnesses.length + props.fConfigIds.length + props.fEfforts.length;
+  // Offer the filter once any attempt ran at a set effort (else it would list only "default").
+  const effortOptions = options.efforts ?? [];
+  const showEffort = effortOptions.some((e) => e !== "default") || props.fEfforts.length > 0;
   return (
     <div className="an-head">
       <h2 className="an-title">Analytics</h2>
@@ -1167,6 +1215,15 @@ function PageHead(props: {
           renderOption={(o) => <ConfigChip configId={o} />}
           searchText={configSearchText}
         />
+        {showEffort ? (
+          <MultiSelect
+            label="Effort"
+            options={effortOptions}
+            selected={props.fEfforts}
+            onChange={props.onEfforts}
+            renderOption={(o) => effortKeyLabel(o)}
+          />
+        ) : null}
         {active > 0 ? (
           <button
             type="button"
@@ -1175,6 +1232,7 @@ function PageHead(props: {
             onClick={() => {
               props.onHarnesses([]);
               props.onConfigIds([]);
+              props.onEfforts([]);
             }}
           >
             ✕ {active} {active === 1 ? "filter" : "filters"}
@@ -1210,10 +1268,11 @@ function PageHead(props: {
 export default function AnalyticsPage(): ReactNode {
   const [fHarnesses, setFHarnesses] = useState<string[]>([]);
   const [fConfigIds, setFConfigIds] = useState<string[]>([]);
+  const [fEfforts, setFEfforts] = useState<string[]>([]);
   const analytics = usePoll(
-    () => getAnalytics({ harnesses: fHarnesses, configIds: fConfigIds }),
+    () => getAnalytics({ harnesses: fHarnesses, configIds: fConfigIds, efforts: fEfforts }),
     null,
-    [fHarnesses.join(","), fConfigIds.join(",")],
+    [fHarnesses.join(","), fConfigIds.join(","), fEfforts.join(",")],
   );
 
   if (analytics.data === null) {
@@ -1233,8 +1292,10 @@ export default function AnalyticsPage(): ReactNode {
         onRefresh={analytics.refresh}
         fHarnesses={fHarnesses}
         fConfigIds={fConfigIds}
+        fEfforts={fEfforts}
         onHarnesses={setFHarnesses}
         onConfigIds={setFConfigIds}
+        onEfforts={setFEfforts}
       />
       <HighlightsSection models={analytics.data.models} />
       <TrendsSection series={analytics.data.series} />
@@ -1244,6 +1305,7 @@ export default function AnalyticsPage(): ReactNode {
       <RollupSection
         harnesses={analytics.data.harnesses ?? []}
         vendors={analytics.data.vendors ?? []}
+        efforts={analytics.data.efforts ?? []}
       />
     </>
   );

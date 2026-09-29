@@ -5,6 +5,7 @@ import {
   nearestReasoningLevel,
   REASONING_EFFORT_LEVELS,
   reasoningLevelsFor,
+  reasoningLevelsForModel,
 } from "./index.ts";
 
 const effort = (...values: string[]) => ({
@@ -107,6 +108,70 @@ describe("claudeCatalogModelId", () => {
 
   test("a shortname that is also a catalog id stays that id", () => {
     expect(claudeCatalogModelId("opus", { opus: {}, "claude-opus-5-5": {} })).toBe("opus");
+  });
+});
+
+describe("reasoningLevelsForModel", () => {
+  const catalog = {
+    anthropic: {
+      models: {
+        "claude-opus-5-5": { ...effort("low", "high", "xhigh"), release_date: "2026-09-22" },
+        "claude-haiku-4-5": {
+          reasoning: true,
+          reasoning_options: [
+            { type: "budget_tokens" },
+            { type: "effort", values: ["low", "high"] },
+          ],
+          release_date: "2025-10-15",
+        },
+        "claude-plain": { reasoning: false, release_date: "2025-01-01" },
+      },
+    },
+    openai: { models: { "gpt-5.6-sol": effort("low", "high", "max") } },
+    openrouter: { models: { "google/gemini-3-flash-preview": effort("low", "medium", "high") } },
+  };
+
+  test("claude reads the anthropic section and resolves CLI shortnames", () => {
+    expect(reasoningLevelsForModel("claude", "claude-opus-5-5", catalog)).toEqual([
+      "low",
+      "high",
+      "xhigh",
+    ]);
+    expect(reasoningLevelsForModel("claude", "opus", catalog)).toEqual(["low", "high", "xhigh"]);
+    expect(reasoningLevelsForModel("claude", "claude-haiku-4-5", catalog)).toEqual([
+      "off",
+      "low",
+      "high",
+    ]);
+  });
+
+  test("codex reads the openai section and keeps max", () => {
+    expect(reasoningLevelsForModel("codex", "gpt-5.6-sol", catalog)).toEqual([
+      "low",
+      "high",
+      "max",
+    ]);
+  });
+
+  test("pi and opencode split the provider off on the first slash only", () => {
+    for (const harness of ["pi", "opencode"]) {
+      expect(
+        reasoningLevelsForModel(harness, "openrouter/google/gemini-3-flash-preview", catalog),
+      ).toEqual(["low", "medium", "high"]);
+      expect(reasoningLevelsForModel(harness, "google/gemini-3-flash-preview", catalog)).toEqual(
+        [],
+      );
+      expect(reasoningLevelsForModel(harness, "gemini-3-flash-preview", catalog)).toEqual([]);
+    }
+  });
+
+  test("unknown models, non-reasoning models, missing input and other harnesses give none", () => {
+    expect(reasoningLevelsForModel("claude", "claude-plain", catalog)).toEqual([]);
+    expect(reasoningLevelsForModel("claude", "claude-unlisted", catalog)).toEqual([]);
+    expect(reasoningLevelsForModel("claude", "", catalog)).toEqual([]);
+    expect(reasoningLevelsForModel("claude", null, catalog)).toEqual([]);
+    expect(reasoningLevelsForModel("claude", "opus", null)).toEqual([]);
+    expect(reasoningLevelsForModel("devin", "claude-opus-5-5", catalog)).toEqual([]);
   });
 });
 

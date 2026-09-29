@@ -59,6 +59,7 @@ import {
   type JudgeTrace,
   type NormalizedDimension,
   type PhaseTimings,
+  type ReasoningEffortLevel,
   type RecomputeInput,
   type RecomputeResult,
   type SandboxInfo,
@@ -73,6 +74,7 @@ import {
   type WorkerSpec,
 } from "../types.ts";
 import { applyRunConfigPins, ensureRunConfigPins } from "./run-configs.ts";
+import { applyRunEfforts } from "./run-efforts.ts";
 import { topoOrder } from "./topo.ts";
 
 const DEFAULT_TASK_TIMEOUT_MS = 10 * 60 * 1000;
@@ -301,6 +303,7 @@ export function buildSandboxInfo(stack: StackHandle): SandboxInfo {
  * Member config resolution (v7 §12.3 — FROZEN):
  *   base   = spec.configId ? catalog[spec.configId] : cellConfig
  *   model  = spec.model ?? base.model     (provider/env/tier from base)
+ *   effort = base.reasoningEffort, unless spec.model swaps the model
  *   overridden = spec.configId !== undefined || spec.model !== undefined
  */
 export function resolveMemberConfig(
@@ -313,8 +316,12 @@ export function resolveMemberConfig(
     // Unreachable for registered scenarios (validateScenario gates configId).
     throw new Error(`member configId "${spec.configId}" is not in the config catalog`);
   }
+  const config: HarnessConfig = { ...base, model: spec.model ?? base.model };
+  // The base's effort was checked against the base's model; a different model
+  // does not inherit it.
+  if (spec.model !== undefined && spec.model !== base.model) delete config.reasoningEffort;
   return {
-    config: { ...base, model: spec.model ?? base.model },
+    config,
     overridden: spec.configId !== undefined || spec.model !== undefined,
   };
 }
@@ -361,6 +368,16 @@ export function isHeterogeneousRoster(members: BootMember[], cellConfig: Harness
   return members.some(
     (m) => m.overridden || (m.role === "lead" && m.config.provider !== cellConfig.provider),
   );
+}
+
+/**
+ * The effort the attempt's cell config actually ran at, as its harness
+ * reported it: the first member that did not override the cell config (workers
+ * before the lead). Null when that member reported none.
+ */
+export function cellAppliedEffort(roster: WorkerRosterEntry[]): ReasoningEffortLevel | null {
+  const member = roster.find((e) => e.configId === null && e.model === null);
+  return member?.appliedReasoningEffort ?? null;
 }
 
 /**
@@ -411,6 +428,8 @@ export function buildRosterEntries(opts: {
       agentTemplate: w.member.spec.template ?? null,
       configId: w.member.overridden ? w.member.config.id : null,
       model: w.member.overridden ? (w.member.config.model ?? null) : null,
+      reasoningEffort: w.member.config.reasoningEffort ?? null,
+      appliedReasoningEffort: agent?.appliedReasoningEffort ?? null,
       version: w.version,
       taskIds,
       costUsd:
@@ -1029,6 +1048,8 @@ async function runAttemptOnce(opts: {
     error: null,
     // A retry must not keep the previous try's roster (its sandboxes are dead).
     workersJson: null,
+    reasoningEffort: config.reasoningEffort ?? null,
+    appliedReasoningEffort: null,
   });
   // A re-run of an interrupted attempt must not keep half-written results.
   await clearAttemptResults(db, attempt.id);
@@ -1595,7 +1616,16 @@ async function runAttemptOnce(opts: {
     costMs += rosterTimed.ms;
     const roster = rosterTimed.result;
     if (roster) {
-      await updateAttempt(db, attempt.id, { workersJson: JSON.stringify(roster) });
+      const applied = cellAppliedEffort(roster);
+      await updateAttempt(db, attempt.id, {
+        workersJson: JSON.stringify(roster),
+        appliedReasoningEffort: applied,
+      });
+      if ((config.reasoningEffort ?? null) !== applied) {
+        log(
+          `[effort] requested ${config.reasoningEffort ?? "harness default"} but the harness reported ${applied ?? "none"}`,
+        );
+      }
       await insertArtifact(db, {
         id: crypto.randomUUID(),
         attemptId: attempt.id,
@@ -2046,9 +2076,13 @@ export async function executeRun(opts: {
   // Alias configs grade the model pinned at run creation (pinned here too for
   // runs created before pinning existed), never the catalog of the moment.
   const pins = await ensureRunConfigPins(db, runId, opts.registry, run.scenarioIds, run.configIds);
-  const registry = applyRunConfigPins(opts.registry, pins);
+  // Same for effort: the run's snapshot, never the live config default.
+  const registry = applyRunEfforts(applyRunConfigPins(opts.registry, pins), run.efforts);
   for (const pin of pins.values()) {
     baseLog(`config ${pin.configId}: ${pin.modelAlias} → ${pin.resolvedModel}`);
+  }
+  for (const [configId, effort] of Object.entries(run.efforts ?? {})) {
+    baseLog(`config ${configId}: reasoning effort ${effort}`);
   }
 
   await ensureAttemptRows(db, runId);

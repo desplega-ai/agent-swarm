@@ -9,11 +9,14 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { reasoningLevelsForModel } from "@desplega/model-catalog";
 import {
   applyReasoningEffort,
   REASONING_EFFORT_LEVELS,
+  type ReasoningHarness,
   reasoningCapability,
 } from "../providers/reasoning-effort";
+import { runtimeCatalogSection } from "../utils/runtime-model-catalog";
 
 describe("REASONING_EFFORT_LEVELS", () => {
   test("is the closed normalized enum", () => {
@@ -309,5 +312,43 @@ describe("Claude CLI shortnames (the tier defaults) take effort like the model t
   test("shortnames mean nothing to the other harnesses", () => {
     expect(reasoningCapability("codex", "opus").supported).toBe(false);
     expect(reasoningCapability("pi", "opus").supported).toBe(false);
+  });
+});
+
+// The evals app validates and lists efforts with `reasoningLevelsForModel` (packages/model-catalog);
+// the worker applies them with `reasoningCapability`. They are two entry points to one rule, and
+// this pins them together over the real snapshot so an eval can never accept a level the worker
+// would drop (or hide one it would take).
+describe("reasoningLevelsForModel agrees with reasoningCapability", () => {
+  const catalog = {
+    anthropic: { models: runtimeCatalogSection("anthropic") },
+    openai: { models: runtimeCatalogSection("openai") },
+    openrouter: { models: runtimeCatalogSection("openrouter") },
+  };
+  const pairs: [ReasoningHarness, string][] = [
+    ...Object.keys(catalog.anthropic.models).map((id): [ReasoningHarness, string] => [
+      "claude",
+      id,
+    ]),
+    ...["opus", "sonnet", "haiku", "fable"].map((id): [ReasoningHarness, string] => ["claude", id]),
+    ...Object.keys(catalog.openai.models).map((id): [ReasoningHarness, string] => ["codex", id]),
+    ...Object.keys(catalog.openrouter.models).flatMap((id): [ReasoningHarness, string][] => [
+      ["pi", `openrouter/${id}`],
+      ["opencode", `openrouter/${id}`],
+    ]),
+    ["pi", "anthropic/claude-opus-5-5"],
+    ["opencode", "openai/gpt-5.6-sol"],
+    ["claude", "not-a-model"],
+    ["pi", "no-provider-prefix"],
+  ];
+
+  test("gives the same levels for every catalog model on every harness", () => {
+    expect(pairs.length).toBeGreaterThan(100);
+    const mismatches = pairs.filter(
+      ([harness, model]) =>
+        JSON.stringify(reasoningLevelsForModel(harness, model, catalog)) !==
+        JSON.stringify(reasoningCapability(harness, model).levels),
+    );
+    expect(mismatches).toEqual([]);
   });
 });

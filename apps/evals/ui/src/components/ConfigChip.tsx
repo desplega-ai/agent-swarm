@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { useConfigs, useModels } from "../hooks.ts";
 import type { AaBenchmarkJson, ConfigJson } from "../types.ts";
+import { EffortChip } from "./EffortChip.tsx";
 import { HarnessIcon } from "./HarnessIcon.tsx";
 import { Tooltip } from "./Tooltip.tsx";
 
@@ -17,6 +18,13 @@ export function ConfigChip(props: {
   /** Wrap the name in a link to #/configs/:id. */
   link?: boolean;
   dim?: boolean;
+  /**
+   * Reasoning effort to show after the name: the run's or attempt's effective
+   * value. Omit to show the config's own default; null shows none.
+   */
+  effort?: string | null;
+  /** The effort the attempt's harness reported applying (see EffortChip). */
+  applied?: string | null;
 }): ReactNode {
   const { byId, loaded } = useConfigs();
   const models = useModels();
@@ -32,6 +40,7 @@ export function ConfigChip(props: {
           <NameOrLink configId={props.configId} link={props.link}>
             <code className="config-chip-id">{props.configId}</code>
           </NameOrLink>
+          <EffortChip effort={props.effort} applied={props.applied} dim={props.dim} />
         </span>
       </Tooltip>
     );
@@ -44,6 +53,7 @@ export function ConfigChip(props: {
     config.model === null
       ? (config.label ?? "Default Model")
       : (models.resolve(config.model)?.name ?? config.label ?? config.model);
+  const effort = props.effort === undefined ? config.reasoningEffort : props.effort;
 
   return (
     <Tooltip wide text={<ConfigCard config={config} modelName={name} />}>
@@ -52,6 +62,7 @@ export function ConfigChip(props: {
         <NameOrLink configId={config.id} link={props.link}>
           <span className="config-chip-name">{name}</span>
         </NameOrLink>
+        <EffortChip effort={effort} applied={props.applied} dim={props.dim} />
       </span>
     </Tooltip>
   );
@@ -102,6 +113,16 @@ function ConfigCard(props: { config: ConfigJson; modelName: string }): ReactNode
         </CardRow>
       ) : null}
       <CardRow label="Tier">{c.modelTier ?? <span className="dim">—</span>}</CardRow>
+      <CardRow label="Effort">
+        {c.reasoningEffort ? (
+          <code>{c.reasoningEffort}</code>
+        ) : (
+          <span className="dim">Harness default</span>
+        )}
+        {c.effortLevels && c.effortLevels.length > 0 ? (
+          <span className="dim"> · takes {c.effortLevels.join(", ")}</span>
+        ) : null}
+      </CardRow>
       <CardRow label="Env Keys">
         {c.envKeys.length > 0 ? c.envKeys.join(", ") : <span className="dim">—</span>}
       </CardRow>

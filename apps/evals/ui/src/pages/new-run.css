@@ -267,3 +267,10 @@
   flex-wrap: wrap;
   gap: 4px 10px;
 }
+
+/* Per-run reasoning effort select on a selected config chip. */
+.cms-effort {
+  max-width: 190px;
+  padding: 1px 4px;
+  font-size: 11px;
+}

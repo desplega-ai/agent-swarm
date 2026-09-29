@@ -94,6 +94,14 @@ function setCurrent(state: CatalogState): void {
 export const MAX_CATALOG_BYTES = 32 * 1024 * 1024;
 const MAX_MODEL_ID_LENGTH = 200;
 const MAX_TEXT_LENGTH = 200;
+/**
+ * Stamped on the persisted payload. Bump it when `sanitizeModel` starts keeping
+ * a field, so a payload cached by the older sanitizer is refetched in full.
+ * v2: `reasoning_options`.
+ */
+const PAYLOAD_VERSION = 2;
+const MAX_REASONING_OPTIONS = 8;
+const MAX_REASONING_VALUES = 16;
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === "object" && !Array.isArray(v);
@@ -107,12 +115,38 @@ function text(v: unknown): string | undefined {
   return typeof v === "string" && v.length <= MAX_TEXT_LENGTH ? v : undefined;
 }
 
+/**
+ * The `reasoning_options` entries the effort rule reads (`type`, and `values` for
+ * `effort`). Dropping them would make every live model fall back to the generic
+ * low/medium/high, so the effort picker would offer levels the pair does not take.
+ */
+function sanitizeReasoningOptions(raw: unknown): ModelsDevModel["reasoning_options"] {
+  if (!Array.isArray(raw)) return undefined;
+  const options: NonNullable<ModelsDevModel["reasoning_options"]> = [];
+  for (const entry of raw.slice(0, MAX_REASONING_OPTIONS)) {
+    if (!isRecord(entry)) continue;
+    const type = text(entry.type);
+    if (type === undefined) continue;
+    const option: { type: string; values?: string[] } = { type };
+    if (Array.isArray(entry.values)) {
+      option.values = entry.values
+        .slice(0, MAX_REASONING_VALUES)
+        .map(text)
+        .filter((v): v is string => v !== undefined);
+    }
+    options.push(option);
+  }
+  return options.length > 0 ? options : undefined;
+}
+
 function sanitizeModel(raw: unknown): ModelsDevModel | null {
   if (!isRecord(raw)) return null;
   const model: ModelsDevModel = {};
   const name = text(raw.name);
   if (name !== undefined) model.name = name;
   if (typeof raw.reasoning === "boolean") model.reasoning = raw.reasoning;
+  const reasoningOptions = sanitizeReasoningOptions(raw.reasoning_options);
+  if (reasoningOptions) model.reasoning_options = reasoningOptions;
   if (typeof raw.tool_call === "boolean") model.tool_call = raw.tool_call;
   const release = text(raw.release_date);
   if (release !== undefined) model.release_date = release;
@@ -195,11 +229,15 @@ export async function loadCatalogFromDb(db: Client): Promise<boolean> {
   if (!catalog) return false;
   // Never replace a newer in-memory live payload with an older DB copy.
   if (current && current.source === "live") return true;
+  // A payload cached by an older sanitizer lacks the newer fields, and a 304 on
+  // its ETag would keep it that way: drop the ETag and the timestamp so the boot
+  // refresh refetches in full.
+  const stale = !isRecord(payload) || payload._v !== PAYLOAD_VERSION;
   setCurrent({
     catalog,
     source: "db",
-    fetchedAt: String(row.fetched_at),
-    etag: row.etag == null ? null : String(row.etag),
+    fetchedAt: stale ? null : String(row.fetched_at),
+    etag: stale || row.etag == null ? null : String(row.etag),
   });
   return true;
 }
@@ -256,7 +294,7 @@ export async function refreshCatalog(opts: RefreshOptions = {}): Promise<Refresh
       return { status: "error", error: "models.dev payload failed validation" };
     }
     const newEtag = text(res.headers.get("etag"));
-    const stored = JSON.stringify(payload);
+    const stored = JSON.stringify({ ...payload, _v: PAYLOAD_VERSION });
     setCurrent({ catalog: payload, source: "live", fetchedAt: now, etag: newEtag ?? null });
     await opts.db?.execute({
       sql: `INSERT INTO model_catalog_cache (id, fetched_at, etag, payload) VALUES (1, ?, ?, ?)

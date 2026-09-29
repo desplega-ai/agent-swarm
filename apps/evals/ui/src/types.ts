@@ -16,6 +16,11 @@ export interface RunJson {
   attemptsPerCell: number;
   concurrency: number;
   judgeModel: string | null;
+  /**
+   * Reasoning effort each config ran at, snapshotted at run creation (configs
+   * at the harness default are absent). Null/absent on runs from before efforts.
+   */
+  efforts?: Record<string, string> | null;
   createdAt: string;
   finishedAt: string | null;
 }
@@ -134,6 +139,10 @@ export interface WorkerRosterEntryJson {
   /** Effective member config (v7 §12); null = ran the cell config exactly. */
   configId: string | null;
   model: string | null;
+  /** Effort the member launched with (null = harness default). Absent on older rosters. */
+  reasoningEffort?: string | null;
+  /** Effort the member's harness reported applying; null = none reported. */
+  appliedReasoningEffort?: string | null;
   version: string | null;
   taskIds: string[];
   costUsd: number | null;
@@ -298,6 +307,10 @@ export interface AttemptJson {
   error: string | null;
   costUsd: number | null;
   costSource: string | null;
+  /** Effort the attempt's worker launched with; null = harness default. Absent on older servers. */
+  reasoningEffort?: string | null;
+  /** Effort its harness reported applying; differs from `reasoningEffort` when the harness ignored it. */
+  appliedReasoningEffort?: string | null;
   /** Aggregate judge LLM cost (harness overhead) — NEVER included in costUsd. */
   judgeCostUsd: number | null;
   tokens: TokenTotalsJson | null;
@@ -514,6 +527,10 @@ export interface ConfigJson {
    */
   resolvedModel?: string | null;
   modelTier: string | null;
+  /** The config's default reasoning effort; null = harness default. */
+  reasoningEffort?: string | null;
+  /** Efforts the harness takes for the config's model, low → high; empty = none. */
+  effortLevels?: string[];
   envKeys: string[];
   isDefault: boolean;
   /** "seed" = follows configs/index.ts; "user" = created or edited through the API. */
@@ -591,6 +608,8 @@ export interface CreateRunBody {
   attemptsPerCell?: number;
   concurrency?: number;
   judgeModel?: string;
+  /** configId → effort for this run (null = the harness default), over each config's default. */
+  efforts?: Record<string, string | null>;
 }
 
 // ---- analytics v2 additions (round 7 — v7 spec §6/§7/§11, FROZEN) ----
@@ -704,6 +723,8 @@ export interface AnalyticsModel {
   maxCostUsd?: number | null;
   /** v7 §7: model vendor (anthropic/openai/…); "(unknown)" fallback. */
   vendor?: string;
+  /** Efforts the model's attempts ran at, low → high; `default` = the harness default. */
+  efforts?: string[];
   /** v7 §11: token sums over the model's token-bearing attempts. */
   tokens?: AnalyticsTokenSums | null;
 }
@@ -758,12 +779,16 @@ export interface AnalyticsSeries {
 export interface AnalyticsFilter {
   harnesses: string[];
   configIds: string[];
+  /** Effort keys (`default` = attempts at the harness default). Empty/absent = no filter. */
+  efforts?: string[];
 }
 
 /** Pre-filter option lists for the global filter bar (v7.6 §C3). */
 export interface AnalyticsFilterOptions {
   harnesses: string[];
   configIds: string[];
+  /** Distinct effort keys, low → high with `default` last. */
+  efforts?: string[];
 }
 
 export interface AnalyticsResponse {
@@ -777,6 +802,8 @@ export interface AnalyticsResponse {
   harnesses?: AnalyticsGroupRollup[];
   /** v7 §7: rollups by model vendor, sorted by attempts desc. */
   vendors?: AnalyticsGroupRollup[];
+  /** Rollups by reasoning effort (`default` = harness default), sorted by attempts desc. */
+  efforts?: AnalyticsGroupRollup[];
   /** v7 §7/§11: one point per model key (scatter: accuracy vs tokens). */
   scatter?: AnalyticsScatterPoint[];
   /** v7.6 §C3: distinct harness/config options over ALL rows (pre-filter). Absent on old cached payloads. */

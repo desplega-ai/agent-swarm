@@ -1,0 +1,33 @@
+/* Reasoning-effort pill (EffortChip). Neutral by default; amber when the harness ignored the level. */
+.effort-chip {
+  display: inline-block;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--dim);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 16px;
+  white-space: nowrap;
+  cursor: help;
+}
+
+.effort-chip.dim {
+  opacity: 0.7;
+}
+
+.effort-chip.effort-mismatch {
+  border-color: color-mix(in oklab, var(--accent), transparent 40%);
+  background: color-mix(in oklab, var(--accent), transparent 88%);
+  color: var(--accent);
+}
+
+.effort-chip.effort-mismatch::after {
+  content: " !";
+}
+
+/* Matrix column headers put the pill straight after the config id. */
+th .effort-chip {
+  margin-left: 6px;
+}

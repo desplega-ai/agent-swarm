@@ -4,6 +4,7 @@ import type { BootMember, WorkerHandle } from "../swarm/sandbox.ts";
 import type { HarnessConfig, Scenario } from "../types.ts";
 import {
   buildRosterEntries,
+  cellAppliedEffort,
   isHeterogeneousRoster,
   resolveBootMembers,
   resolveMemberConfig,
@@ -67,6 +68,31 @@ describe("resolveMemberConfig (v7 §12.3 frozen rule)", () => {
   test("unknown configId throws a clear error", () => {
     expect(() => resolveMemberConfig({ configId: "nope" }, CELL, CATALOG)).toThrow(
       'member configId "nope"',
+    );
+  });
+});
+
+describe("resolveMemberConfig reasoning effort", () => {
+  const CELL_HIGH: HarnessConfig = { ...CELL, reasoningEffort: "high" };
+
+  test("a member on the cell config, or another config, keeps that config's effort", () => {
+    expect(resolveMemberConfig({}, CELL_HIGH, CATALOG).config.reasoningEffort).toBe("high");
+    const withEffort = new Map(CATALOG).set(PI_FLASH.id, { ...PI_FLASH, reasoningEffort: "xhigh" });
+    expect(
+      resolveMemberConfig({ configId: PI_FLASH.id }, CELL_HIGH, withEffort).config.reasoningEffort,
+    ).toBe("xhigh");
+    expect(
+      resolveMemberConfig({ configId: PI_FLASH.id }, CELL_HIGH, CATALOG).config.reasoningEffort,
+    ).toBeUndefined();
+  });
+
+  test("a member that swaps the model does not inherit an effort checked for another model", () => {
+    expect(
+      resolveMemberConfig({ model: "sonnet" }, CELL_HIGH, CATALOG).config.reasoningEffort,
+    ).toBeUndefined();
+    // the same model restated is not a swap
+    expect(resolveMemberConfig({ model: "haiku" }, CELL_HIGH, CATALOG).config.reasoningEffort).toBe(
+      "high",
     );
   });
 });
@@ -190,6 +216,7 @@ describe("buildRosterEntries (v7 §10.1 frozen field sourcing)", () => {
       lastActivityAt: "2026-06-12T10:00:00Z",
       provider: "claude",
       harnessProvider: "claude",
+      appliedReasoningEffort: null,
     },
   ];
 
@@ -283,5 +310,94 @@ describe("buildRosterEntries (v7 §10.1 frozen field sourcing)", () => {
     expect(entries[0]?.costUsd).toBeNull();
     expect(entries[0]?.tokens).toBeNull();
     expect(JSON.stringify(entries)).not.toContain("NaN");
+  });
+});
+
+describe("roster reasoning effort", () => {
+  const handle = (over: {
+    index: number;
+    agentId: string;
+    member?: Partial<BootMember>;
+  }): WorkerHandle =>
+    ({
+      index: over.index,
+      member: {
+        index: over.index,
+        role: "worker",
+        spec: {},
+        config: CELL,
+        overridden: false,
+        ...(over.member ?? {}),
+      },
+      sandbox: { sandboxID: `sbx-${over.index}`, templateID: "agent-swarm-worker-latest" },
+      agentId: over.agentId,
+      version: "1.94.0",
+    }) as unknown as WorkerHandle;
+
+  const agentWith = (id: string, applied: "high" | null): AgentJson => ({
+    id,
+    name: null,
+    isLead: false,
+    status: "idle",
+    role: "worker",
+    capabilities: [],
+    maxTasks: null,
+    lastActivityAt: null,
+    provider: "claude",
+    harnessProvider: "claude",
+    appliedReasoningEffort: applied,
+  });
+
+  test("each entry carries the effort the member launched with and the one its harness reported", () => {
+    const entries = buildRosterEntries({
+      workers: [
+        handle({
+          index: 0,
+          agentId: "agent-0",
+          member: { config: { ...CELL, reasoningEffort: "high" } },
+        }),
+        handle({
+          index: 1,
+          agentId: "agent-1",
+          member: { config: CLAUDE_SONNET, overridden: true },
+        }),
+      ],
+      agents: [agentWith("agent-0", "high"), agentWith("agent-1", null)],
+      taskMemberIndex: new Map(),
+      costRows: [],
+    });
+    expect(entries[0]?.reasoningEffort).toBe("high");
+    expect(entries[0]?.appliedReasoningEffort).toBe("high");
+    expect(entries[1]?.reasoningEffort).toBeNull();
+    expect(entries[1]?.appliedReasoningEffort).toBeNull();
+  });
+
+  test("a member with no matching agent row reports no applied effort", () => {
+    const [entry] = buildRosterEntries({
+      workers: [handle({ index: 0, agentId: "ghost" })],
+      agents: [],
+      taskMemberIndex: new Map(),
+      costRows: [],
+    });
+    expect(entry?.appliedReasoningEffort).toBeNull();
+  });
+
+  test("the attempt's applied effort is the first member that ran the cell config", () => {
+    const entry = (
+      over: Partial<Parameters<typeof cellAppliedEffort>[0][number]>,
+    ): Parameters<typeof cellAppliedEffort>[0][number] =>
+      ({ configId: null, model: null, appliedReasoningEffort: null, ...over }) as never;
+    expect(
+      cellAppliedEffort([
+        entry({ configId: "pi-x", model: "m", appliedReasoningEffort: "low" }),
+        entry({ appliedReasoningEffort: "high" }),
+        entry({ appliedReasoningEffort: "low" }),
+      ]),
+    ).toBe("high");
+    expect(cellAppliedEffort([entry({})])).toBeNull();
+    expect(
+      cellAppliedEffort([entry({ configId: "pi-x", appliedReasoningEffort: "low" })]),
+    ).toBeNull();
+    expect(cellAppliedEffort([])).toBeNull();
   });
 });

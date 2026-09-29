@@ -3,6 +3,7 @@ import { cancelRun, getRun, listRuns, resumeRun } from "../api.ts";
 import { ConfigChip } from "../components/ConfigChip.tsx";
 import { useConfirm } from "../components/ConfirmDialog.tsx";
 import { type Column, DataTable, MultiSelect } from "../components/DataTable.tsx";
+import { sortEffortKeys } from "../components/EffortChip.tsx";
 import { EntityLink } from "../components/EntityLink.tsx";
 import { fmtAgo, fmtCost, fmtDate, fmtDuration } from "../components/format.ts";
 import { Matrix } from "../components/Matrix.tsx";
@@ -76,6 +77,7 @@ const COL_SCENARIOS: Column<RunListItem> = {
       scenarioIds={r.run.scenarioIds}
       configIds={r.run.configIds}
       cells={r.cells}
+      efforts={r.run.efforts}
     />
   ),
   sortValue: (r) => r.run.scenarioIds.length,
@@ -149,7 +151,7 @@ function deepRunColumns(defaultJudgeModel: string | null): Column<RunListItem>[]
         <div className="runs-configs-tip">
           {r.run.configIds.map((id) => (
             <div key={id}>
-              <ConfigChip configId={id} />
+              <ConfigChip configId={id} effort={r.run.efforts?.[id] ?? null} />
             </div>
           ))}
         </div>
@@ -268,7 +270,11 @@ function aggregateBy(
   });
 }
 
-function breakdownColumns(kind: "scenario" | "config"): Column<BreakdownRow>[] {
+function breakdownColumns(
+  kind: "scenario" | "config",
+  /** The run's snapshotted effort per config; absent = every config ran at the harness default. */
+  efforts?: Record<string, string> | null,
+): Column<BreakdownRow>[] {
   // item 13: configs render as a ConfigChip (hover card carries id/label/provider/…).
   const idColumn: Column<BreakdownRow> =
     kind === "scenario"
@@ -283,7 +289,7 @@ function breakdownColumns(kind: "scenario" | "config"): Column<BreakdownRow>[] {
           key: "id",
           header: "Config",
           sortValue: (r) => r.id,
-          render: (r) => <ConfigChip configId={r.id} link />,
+          render: (r) => <ConfigChip configId={r.id} link effort={efforts?.[r.id] ?? null} />,
         };
   return [
     idColumn,
@@ -315,7 +321,6 @@ function breakdownColumns(kind: "scenario" | "config"): Column<BreakdownRow>[] {
 }
 
 const SCENARIO_COLUMNS = breakdownColumns("scenario");
-const CONFIG_COLUMNS = breakdownColumns("config");
 
 function Meta(props: { label: string; title?: string; children: ReactNode }): ReactNode {
   return (
@@ -405,6 +410,7 @@ function RunDetailPane(props: {
     () => aggregateBy(run.configIds, cells, "configId"),
     [run.configIds, cells],
   );
+  const configColumns = useMemo(() => breakdownColumns("config", run.efforts), [run.efforts]);
 
   const wallTime = run.finishedAt ? (
     fmtDuration(new Date(run.finishedAt).getTime() - new Date(run.createdAt).getTime())
@@ -493,6 +499,7 @@ function RunDetailPane(props: {
             configIds={run.configIds}
             cells={cells}
             attempts={attempts}
+            efforts={run.efforts}
             cellHref={(s, c) => `#/runs/${run.id}/attempts/${run.id}_${s}_${c}_0`}
           />
         </div>
@@ -511,7 +518,7 @@ function RunDetailPane(props: {
           <h3 className="panel-title">By Config</h3>
           <DataTable
             rows={configRows}
-            columns={CONFIG_COLUMNS}
+            columns={configColumns}
             rowKey={(r) => r.id}
             searchable={false}
           />
@@ -544,6 +551,7 @@ export default function RunsPage(): ReactNode {
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const [scenarioFilter, setScenarioFilter] = useState<string[]>([]);
   const [configFilter, setConfigFilter] = useState<string[]>([]);
+  const [effortFilter, setEffortFilter] = useState<string[]>([]);
 
   const toggleTableMode = () => {
     setTableMode((prev) => {
@@ -567,6 +575,10 @@ export default function RunsPage(): ReactNode {
   }, [runs]);
   const scenarioOptions = useMemo(() => distinct(runs.flatMap((r) => r.run.scenarioIds)), [runs]);
   const configOptions = useMemo(() => distinct(runs.flatMap((r) => r.run.configIds)), [runs]);
+  const effortOptions = useMemo(
+    () => sortEffortKeys(runs.flatMap((r) => Object.values(r.run.efforts ?? {}))),
+    [runs],
+  );
 
   const filteredRuns = useMemo(
     () =>
@@ -584,9 +596,15 @@ export default function RunsPage(): ReactNode {
         if (configFilter.length > 0 && !r.run.configIds.some((c) => configFilter.includes(c))) {
           return false;
         }
+        if (
+          effortFilter.length > 0 &&
+          !Object.values(r.run.efforts ?? {}).some((e) => effortFilter.includes(e))
+        ) {
+          return false;
+        }
         return true;
       }),
-    [runs, statusFilter, scenarioFilter, configFilter],
+    [runs, statusFilter, scenarioFilter, configFilter, effortFilter],
   );
 
   const newest = useMemo(
@@ -667,8 +685,16 @@ export default function RunsPage(): ReactNode {
           options={configOptions}
           selected={configFilter}
           onChange={setConfigFilter}
-          renderOption={(option) => <ConfigChip configId={option} />}
+          renderOption={(option) => <ConfigChip configId={option} effort={null} />}
         />
+        {effortOptions.length > 0 ? (
+          <MultiSelect
+            label="Efforts"
+            options={effortOptions}
+            selected={effortFilter}
+            onChange={setEffortFilter}
+          />
+        ) : null}
       </div>
     );
     body =

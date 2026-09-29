@@ -90,8 +90,15 @@ describe("SwarmClient.listAgents (v7 §10.1 roster capture)", () => {
           lastActivityAt: "2026-06-12T10:00:00Z",
           provider: "claude",
           harnessProvider: "claude",
+          credStatus: {
+            latestModel: {
+              model: "claude-opus-5-5",
+              source: "agent_config",
+              reasoningEffort: "high",
+            },
+          },
         },
-        { id: "agent-2", isLead: true },
+        { id: "agent-2", isLead: true, credStatus: { latestModel: { reasoningEffort: "bogus" } } },
       ],
     });
     const client = new SwarmClient("http://stack.test", "swarm-key");
@@ -110,6 +117,7 @@ describe("SwarmClient.listAgents (v7 §10.1 roster capture)", () => {
         lastActivityAt: "2026-06-12T10:00:00Z",
         provider: "claude",
         harnessProvider: "claude",
+        appliedReasoningEffort: "high",
       },
       {
         id: "agent-2",
@@ -122,6 +130,7 @@ describe("SwarmClient.listAgents (v7 §10.1 roster capture)", () => {
         lastActivityAt: null,
         provider: null,
         harnessProvider: null,
+        appliedReasoningEffort: null,
       },
     ]);
   });

@@ -166,6 +166,14 @@ Two deliberate differences from the swarm's own catalog:
 
 `EVALS_MODEL_CATALOG_REFRESH=off` turns the boot load and the 6h refresh off, so the committed snapshot serves (the loop is also off under `NODE_ENV=test`). The manual refresh endpoint still works.
 
+### Reasoning effort
+
+A config may set `reasoningEffort`, and a run may override it per config: the New Run dialog, `--effort <configId>=<level>` on `run` (`default` = harness default), or `efforts` on `POST /api/runs`. Which levels a harness + model pair takes comes from the shared rule in `packages/model-catalog` (`reasoningLevelsForModel`, the one the swarm API validates with), read against the same catalog aliases resolve against. `GET /api/effort-levels?provider=&model=` (or `&modelAlias=`) returns them for the config form and the dialog. Creating a run or saving a config with a level the pair does not take is rejected.
+
+The effective effort of each config is snapshotted in `eval_runs.efforts_json` when the run is created, and attempts read only that snapshot, never the live config, so a resumed run grades the same effort. It reaches the worker as `REASONING_EFFORT_OVERRIDE`, next to `MODEL_OVERRIDE`. Each attempt records the level it launched with (`attempts.reasoning_effort`) and the level its harness reported applying (`attempts.applied_reasoning_effort`, from the agent's `latestModel`); a mismatch is logged. Rows from before efforts existed read as the harness default.
+
+The Runs and Configs pages have an Effort filter, the matrix and config tables show a chip beside the model, and Analytics filters by effort and has a By Effort rollup. Runs at different efforts of one model stay in one model row; the row lists its efforts.
+
 ### Seeding (`scenario.seed`)
 
 Seeding runs before the first task is created, in this order:

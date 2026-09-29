@@ -3,6 +3,8 @@
 export interface ModelsDevModel {
   name?: string;
   reasoning?: boolean;
+  /** Which reasoning controls the model takes (`effort` lists its levels); see `reasoningLevelsFor`. */
+  reasoning_options?: { type?: string; values?: string[] }[];
   tool_call?: boolean;
   release_date?: string;
   limit?: { context?: number };

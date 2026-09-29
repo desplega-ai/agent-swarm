@@ -1,8 +1,9 @@
-import { type FormEvent, type ReactNode, useMemo, useState } from "react";
-import { createConfig, listConfigs, listRuns } from "../api.ts";
+import { type FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
+import { createConfig, getEffortLevels, listConfigs, listRuns } from "../api.ts";
 import { CatalogBadge } from "../components/CatalogBadge.tsx";
 import { ConfigChip } from "../components/ConfigChip.tsx";
 import { type Column, DataTable } from "../components/DataTable.tsx";
+import { EffortChip, effortKeyLabel, sortEffortKeys } from "../components/EffortChip.tsx";
 import { EntityLink } from "../components/EntityLink.tsx";
 import { fmtCost, fmtScore } from "../components/format.ts";
 import { HARNESS_LABELS, HarnessIcon } from "../components/HarnessIcon.tsx";
@@ -238,6 +239,23 @@ const configColumns: Column<ConfigJson>[] = [
       <ModelChip model={c.model ?? c.resolvedModel ?? null} alias={c.modelAlias ?? null} />
     ),
   },
+  {
+    key: "effort",
+    header: "Effort",
+    width: "90px",
+    headerTip: "Reasoning effort the config runs at; a run can override it per config",
+    sortValue: (c) => c.reasoningEffort ?? null,
+    filterOptions: (rows) => sortEffortKeys(rows.map((c) => c.reasoningEffort ?? "default")),
+    filterValue: (c) => c.reasoningEffort ?? "default",
+    filterRender: (option) => effortKeyLabel(option),
+    titleText: (c) =>
+      c.reasoningEffort
+        ? `Reasoning effort ${c.reasoningEffort}`
+        : c.effortLevels && c.effortLevels.length > 0
+          ? `Harness default; takes ${c.effortLevels.join(", ")}`
+          : "Harness default; this harness + model takes no reasoning effort",
+    render: (c) => (c.reasoningEffort ? <EffortChip effort={c.reasoningEffort} /> : dim()),
+  },
   ...aaColumns,
   {
     key: "default",
@@ -269,8 +287,41 @@ function NewConfigForm(props: { onCreated: () => void }): ReactNode {
   const [provider, setProvider] = useState<string>("pi");
   const [target, setTarget] = useState("");
   const [label, setLabel] = useState("");
+  const [effort, setEffort] = useState("");
+  // Efforts the chosen harness takes for the chosen model (or the model the alias
+  // resolves to today), from the server's catalog rule. Empty = it takes none.
+  const [levels, setLevels] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  const value = target.trim();
+  useEffect(() => {
+    if (!value) {
+      setLevels([]);
+      setEffort("");
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      const isAlias = value.startsWith("latest:");
+      getEffortLevels({ provider, ...(isAlias ? { modelAlias: value } : { model: value }) })
+        .then((res) => {
+          if (cancelled) return;
+          setLevels(res.levels);
+          // A level the new pair does not take resets to the harness default.
+          setEffort((current) => (res.levels.includes(current) ? current : ""));
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setLevels([]);
+          setEffort("");
+        });
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [provider, value]);
 
   if (!open) {
     return (
@@ -282,7 +333,6 @@ function NewConfigForm(props: { onCreated: () => void }): ReactNode {
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    const value = target.trim();
     if (!value) return;
     setSaving(true);
     setError(null);
@@ -291,6 +341,7 @@ function NewConfigForm(props: { onCreated: () => void }): ReactNode {
       const created = await createConfig({
         provider,
         label: label.trim() || undefined,
+        ...(effort ? { reasoningEffort: effort } : {}),
         ...(isAlias ? { modelAlias: value } : { model: value }),
       });
       invalidateConfigsCache();
@@ -298,6 +349,7 @@ function NewConfigForm(props: { onCreated: () => void }): ReactNode {
       setOpen(false);
       setTarget("");
       setLabel("");
+      setEffort("");
       navigate(`#/configs/${created.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -321,6 +373,26 @@ function NewConfigForm(props: { onCreated: () => void }): ReactNode {
         placeholder="Model id or latest:… alias"
         aria-label="Model or alias"
       />
+      <select
+        value={effort}
+        onChange={(e) => setEffort(e.target.value)}
+        disabled={levels.length === 0}
+        aria-label="Reasoning effort"
+        title={
+          levels.length === 0
+            ? value
+              ? "This harness + model takes no reasoning effort"
+              : "Enter a model to see the efforts it takes"
+            : "Reasoning effort this config runs at"
+        }
+      >
+        <option value="">Effort: harness default</option>
+        {levels.map((level) => (
+          <option key={level} value={level}>
+            Effort: {level}
+          </option>
+        ))}
+      </select>
       <input
         value={label}
         onChange={(e) => setLabel(e.target.value)}
@@ -521,6 +593,8 @@ function ConfigDetail(props: { configId: string }): ReactNode {
               provider: "Harness",
               modelAlias: "Model Alias",
               resolvedModel: "Resolved Model",
+              reasoningEffort: "Reasoning Effort",
+              effortLevels: "Supported Efforts",
               isDefault: "Default",
               aa: "Artificial Analysis (2026-06-12)",
               sourceRow: "Source Row",
@@ -541,6 +615,8 @@ function ConfigDetail(props: { configId: string }): ReactNode {
                   alias={config.modelAlias ?? null}
                 />
               ),
+              reasoningEffort: (v) =>
+                typeof v === "string" && v ? <EffortChip effort={v} /> : dim("Harness default"),
               blendedUsdPer1M: (v) => (typeof v === "number" ? `$${v.toFixed(2)}` : dim()),
               latencyFirstChunkS: (v) => (typeof v === "number" ? `${v.toFixed(2)}s` : dim()),
               totalResponseS: (v) => (typeof v === "number" ? `${v.toFixed(2)}s` : dim()),

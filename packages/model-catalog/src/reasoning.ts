@@ -133,6 +133,46 @@ export function claudeCatalogModelId(
   return buildClaudeShortnameMap(models)[modelId] ?? modelId;
 }
 
+/** A catalog whose provider sections hold models with reasoning facts (models.dev shape). */
+export type ReasoningCatalog = Record<
+  string,
+  { models?: Record<string, ReasoningModelFacts & HarnessCatalogModel> } | undefined
+>;
+
+/**
+ * The effort levels `harness` accepts for `model`, read from `catalog`.
+ *
+ * `model` is the string the harness stores: a bare id for `claude` and `codex`
+ * (a Claude CLI shortname such as `opus` resolves to the newest model of its
+ * family), `<providerId>/<model-id>` for `pi` and `opencode`, split on the FIRST
+ * slash because the id may hold more (`openrouter/google/gemini-3-flash-preview`).
+ * Empty for a harness with no effort control, a model the catalog does not
+ * list, and a model that does not reason. Callers that hold two catalogs (a
+ * live one over a bundled snapshot) merge them first.
+ */
+export function reasoningLevelsForModel(
+  harness: string,
+  model: string | null | undefined,
+  catalog: ReasoningCatalog | null | undefined,
+): ReasoningEffortLevel[] {
+  if (!model || !isReasoningHarness(harness)) return [];
+  let providerId: string;
+  let catalogId: string;
+  if (harness === "claude") {
+    providerId = "anthropic";
+    catalogId = claudeCatalogModelId(model, catalog?.[providerId]?.models);
+  } else if (harness === "codex") {
+    providerId = "openai";
+    catalogId = model;
+  } else {
+    const slash = model.indexOf("/");
+    if (slash <= 0) return [];
+    providerId = model.slice(0, slash);
+    catalogId = model.slice(slash + 1);
+  }
+  return reasoningLevelsFor(harness, catalogId, catalog?.[providerId]?.models?.[catalogId]);
+}
+
 /**
  * The supported level nearest to `level` by canonical-order distance; on a tie
  * the lower one. Null when `levels` is empty.

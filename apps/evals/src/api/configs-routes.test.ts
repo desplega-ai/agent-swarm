@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { configs as seedConfigs } from "../../configs/index.ts";
+import { DEFAULT_SCENARIO_IDS } from "../../scenarios/index.ts";
 import { getResolutionCatalog } from "../cost/catalog.ts";
 import { resolveAlias } from "../cost/resolve-alias.ts";
 import { getDb, initDb, resetDbForTests } from "../db/client.ts";
@@ -237,6 +238,235 @@ describe("/api/configs", () => {
 
       await send(server, "PATCH", "/api/configs/claude-opus", { archived: true });
       expect(loadRegistry().configs.has("claude-opus")).toBe(false);
+    } finally {
+      server.stop(true);
+    }
+  });
+});
+
+describe("reasoning effort on configs", () => {
+  const HAIKU = { provider: "claude", model: "claude-haiku-4-5" };
+
+  test("GET carries effortLevels per config, from the catalog rule", async () => {
+    const server = await startServer(0);
+    try {
+      const body = (await (await fetch(url(server, "/api/configs"))).json()) as Array<{
+        id: string;
+        reasoningEffort: string | null;
+        effortLevels: string[];
+      }>;
+      expect(body.every((c) => c.reasoningEffort === null)).toBe(true);
+      // an alias config's levels come from the model the alias resolves to
+      const opus = body.find((c) => c.id === "claude-opus");
+      expect(opus?.effortLevels.length).toBeGreaterThan(0);
+      expect(opus?.effortLevels).not.toContain("max");
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("POST stores a supported effort and echoes it with the levels", async () => {
+    const server = await startServer(0);
+    try {
+      const res = await send(server, "POST", "/api/configs", {
+        ...HAIKU,
+        id: "claude-haiku-low",
+        reasoningEffort: "low",
+      });
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as { reasoningEffort: string; effortLevels: string[] };
+      expect(body.reasoningEffort).toBe("low");
+      expect(body.effortLevels).toContain("low");
+      const row = await getHarnessConfig(getDb(), "claude-haiku-low");
+      expect(row?.config.reasoningEffort).toBe("low");
+      expect(loadRegistry().configs.get("claude-haiku-low")?.reasoningEffort).toBe("low");
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("POST refuses an effort the harness + model do not take, and a non-level", async () => {
+    const server = await startServer(0);
+    try {
+      const unsupported = await send(server, "POST", "/api/configs", {
+        ...HAIKU,
+        id: "claude-haiku-max",
+        reasoningEffort: "max",
+      });
+      expect(unsupported.status).toBe(400);
+      expect(((await unsupported.json()) as { error: string }).error).toContain(
+        'does not take effort "max"',
+      );
+      const junk = await send(server, "POST", "/api/configs", {
+        ...HAIKU,
+        id: "claude-haiku-junk",
+        reasoningEffort: "ultra",
+      });
+      expect(junk.status).toBe(400);
+      expect(await getHarnessConfig(getDb(), "claude-haiku-max")).toBeNull();
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("PATCH sets, changes and clears the effort", async () => {
+    const server = await startServer(0);
+    try {
+      await send(server, "POST", "/api/configs", { ...HAIKU, id: "claude-haiku-e" });
+      const set = await send(server, "PATCH", "/api/configs/claude-haiku-e", {
+        reasoningEffort: "high",
+      });
+      expect(set.status).toBe(200);
+      expect(((await set.json()) as { reasoningEffort: string }).reasoningEffort).toBe("high");
+      expect((await getHarnessConfig(getDb(), "claude-haiku-e"))?.config.reasoningEffort).toBe(
+        "high",
+      );
+
+      const unsupported = await send(server, "PATCH", "/api/configs/claude-haiku-e", {
+        reasoningEffort: "max",
+      });
+      expect(unsupported.status).toBe(400);
+
+      const cleared = await send(server, "PATCH", "/api/configs/claude-haiku-e", {
+        reasoningEffort: null,
+      });
+      expect(cleared.status).toBe(200);
+      expect(
+        (await getHarnessConfig(getDb(), "claude-haiku-e"))?.config.reasoningEffort,
+      ).toBeUndefined();
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("PATCH refuses a model swap that leaves the stored effort unsupported, unless the effort goes too", async () => {
+    const server = await startServer(0);
+    try {
+      await send(server, "POST", "/api/configs", {
+        provider: "codex",
+        model: "gpt-5.6-sol",
+        id: "codex-sol-max",
+        reasoningEffort: "max",
+      });
+      const swap = await send(server, "PATCH", "/api/configs/codex-sol-max", {
+        model: "gpt-5.5",
+      });
+      expect(swap.status).toBe(400);
+      expect(((await swap.json()) as { error: string }).error).toContain('effort "max"');
+      expect((await getHarnessConfig(getDb(), "codex-sol-max"))?.config.model).toBe("gpt-5.6-sol");
+
+      const together = await send(server, "PATCH", "/api/configs/codex-sol-max", {
+        model: "gpt-5.5",
+        reasoningEffort: "high",
+      });
+      expect(together.status).toBe(200);
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("effort is a code-seed field too: a seed default follows the code until edited", async () => {
+    const db = await initDb();
+    const seed = {
+      id: "claude-seed-effort",
+      provider: "claude" as const,
+      model: "claude-haiku-4-5",
+      reasoningEffort: "low" as const,
+    };
+    await syncSeedConfigs(db, [seed]);
+    expect((await getHarnessConfig(db, seed.id))?.config.reasoningEffort).toBe("low");
+    await syncSeedConfigs(db, [{ ...seed, reasoningEffort: "high" }]);
+    expect((await getHarnessConfig(db, seed.id))?.config.reasoningEffort).toBe("high");
+    await db.execute("UPDATE harness_configs SET source = 'user' WHERE id = 'claude-seed-effort'");
+    await syncSeedConfigs(db, [{ ...seed, reasoningEffort: "medium" }]);
+    expect((await getHarnessConfig(db, seed.id))?.config.reasoningEffort).toBe("high");
+  });
+});
+
+describe("GET /api/effort-levels", () => {
+  test("lists what a harness takes for a model, or for the model an alias resolves to", async () => {
+    const server = await startServer(0);
+    try {
+      const pinned = (await (
+        await fetch(url(server, "/api/effort-levels?provider=codex&model=gpt-5.6-sol"))
+      ).json()) as { model: string; levels: string[] };
+      expect(pinned.model).toBe("gpt-5.6-sol");
+      expect(pinned.levels).toContain("max");
+
+      const alias = (await (
+        await fetch(
+          url(
+            server,
+            `/api/effort-levels?provider=claude&modelAlias=${encodeURIComponent("latest:anthropic/opus")}`,
+          ),
+        )
+      ).json()) as { model: string | null; levels: string[] };
+      expect(alias.model).toStartWith("claude-opus");
+      expect(alias.levels.length).toBeGreaterThan(0);
+
+      const unresolved = (await (
+        await fetch(
+          url(
+            server,
+            `/api/effort-levels?provider=claude&modelAlias=${encodeURIComponent("latest:anthropic/nosuchfamily")}`,
+          ),
+        )
+      ).json()) as { model: string | null; levels: string[] };
+      expect(unresolved).toEqual({ model: null, levels: [] });
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("400 without a provider or a model, and the bearer guard applies", async () => {
+    process.env.EVALS_API_KEY = "example-test-master-key";
+    const server = await startServer(0);
+    try {
+      const auth = { headers: { authorization: "Bearer example-test-master-key" } };
+      expect((await fetch(url(server, "/api/effort-levels?provider=claude&model=x"))).status).toBe(
+        401,
+      );
+      expect((await fetch(url(server, "/api/effort-levels?model=x"), auth)).status).toBe(400);
+      expect((await fetch(url(server, "/api/effort-levels?provider=claude"), auth)).status).toBe(
+        400,
+      );
+      expect(
+        (await fetch(url(server, "/api/effort-levels?provider=bogus&model=x"), auth)).status,
+      ).toBe(400);
+    } finally {
+      server.stop(true);
+    }
+  });
+});
+
+describe("POST /api/runs efforts", () => {
+  const runBody = { scenarioIds: [DEFAULT_SCENARIO_IDS[0]], configIds: ["claude-opus"] };
+
+  test("an effort the config's pair does not take is a 400 before any run exists", async () => {
+    const server = await startServer(0);
+    try {
+      const res = await send(server, "POST", "/api/runs", {
+        ...runBody,
+        efforts: { "claude-opus": "max" },
+      });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toContain(
+        'does not take effort "max"',
+      );
+      const runs = (await (await fetch(url(server, "/api/runs"))).json()) as unknown[];
+      expect(runs).toEqual([]);
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("400 for a non-level, a malformed map, and a config outside the run", async () => {
+    const server = await startServer(0);
+    try {
+      for (const efforts of [{ "claude-opus": "ultra" }, ["high"], { "codex-sol": "high" }]) {
+        const res = await send(server, "POST", "/api/runs", { ...runBody, efforts });
+        expect(res.status).toBe(400);
+      }
     } finally {
       server.stop(true);
     }

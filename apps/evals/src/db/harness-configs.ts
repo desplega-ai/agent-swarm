@@ -1,5 +1,5 @@
 import type { Client } from "@libsql/client";
-import type { HarnessConfig, HarnessProvider } from "../types.ts";
+import type { HarnessConfig, HarnessProvider, ReasoningEffortLevel } from "../types.ts";
 
 /**
  * DB-backed harness configs (`harness_configs`). `configs/index.ts` stays the
@@ -28,14 +28,15 @@ export async function syncSeedConfigs(db: Client, seeds: HarnessConfig[]): Promi
   for (const c of seeds) {
     await db.execute({
       sql: `INSERT INTO harness_configs
-              (id, label, provider, model, model_alias, model_tier, env_json, source)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'seed')
+              (id, label, provider, model, model_alias, model_tier, reasoning_effort, env_json, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'seed')
             ON CONFLICT(id) DO UPDATE SET
               label = excluded.label,
               provider = excluded.provider,
               model = excluded.model,
               model_alias = excluded.model_alias,
               model_tier = excluded.model_tier,
+              reasoning_effort = excluded.reasoning_effort,
               env_json = excluded.env_json,
               updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
             WHERE harness_configs.source = 'seed'`,
@@ -46,6 +47,7 @@ export async function syncSeedConfigs(db: Client, seeds: HarnessConfig[]): Promi
         c.model ?? null,
         c.modelAlias ?? null,
         c.modelTier ?? null,
+        c.reasoningEffort ?? null,
         envJson(c),
       ],
     });
@@ -58,6 +60,8 @@ function rowToConfig(r: Record<string, unknown>): HarnessConfigRow {
   if (r.model != null) config.model = String(r.model);
   if (r.model_alias != null) config.modelAlias = String(r.model_alias);
   if (r.model_tier != null) config.modelTier = r.model_tier as HarnessConfig["modelTier"];
+  if (r.reasoning_effort != null)
+    config.reasoningEffort = r.reasoning_effort as ReasoningEffortLevel;
   if (r.env_json != null) config.env = JSON.parse(String(r.env_json));
   return {
     config,
@@ -82,10 +86,18 @@ export async function getHarnessConfig(db: Client, id: string): Promise<HarnessC
 /** Insert a user config. Returns false when the id is taken. */
 export async function insertUserConfig(db: Client, c: HarnessConfig): Promise<boolean> {
   const res = await db.execute({
-    sql: `INSERT INTO harness_configs (id, label, provider, model, model_alias, source)
-          VALUES (?, ?, ?, ?, ?, 'user')
+    sql: `INSERT INTO harness_configs
+            (id, label, provider, model, model_alias, reasoning_effort, source)
+          VALUES (?, ?, ?, ?, ?, ?, 'user')
           ON CONFLICT(id) DO NOTHING`,
-    args: [c.id, c.label ?? null, c.provider, c.model ?? null, c.modelAlias ?? null],
+    args: [
+      c.id,
+      c.label ?? null,
+      c.provider,
+      c.model ?? null,
+      c.modelAlias ?? null,
+      c.reasoningEffort ?? null,
+    ],
   });
   return res.rowsAffected === 1;
 }
@@ -98,7 +110,7 @@ export async function updateUserConfig(
 ): Promise<void> {
   await db.execute({
     sql: `UPDATE harness_configs SET
-            label = ?, provider = ?, model = ?, model_alias = ?, archived = ?,
+            label = ?, provider = ?, model = ?, model_alias = ?, reasoning_effort = ?, archived = ?,
             source = 'user', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
           WHERE id = ?`,
     args: [
@@ -106,6 +118,7 @@ export async function updateUserConfig(
       c.provider,
       c.model ?? null,
       c.modelAlias ?? null,
+      c.reasoningEffort ?? null,
       archived ? 1 : 0,
       c.id,
     ],

@@ -17,10 +17,12 @@ export {
   nearestReasoningLevel,
   REASONING_EFFORT_LEVELS,
   REASONING_HARNESSES,
+  type ReasoningCatalog,
   type ReasoningEffortLevel,
   type ReasoningHarnessName,
   type ReasoningModelFacts,
   reasoningLevelsFor,
+  reasoningLevelsForModel,
 } from "./reasoning.ts";
 export {
   type AliasChannel,

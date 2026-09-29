@@ -34,6 +34,15 @@ export function ConfigMultiSelect(props: {
   configs: ConfigJson[]; // full /api/configs catalog (isDefault included)
   selected: Set<string>; // selected config ids
   onChange: (next: Set<string>) => void;
+  /**
+   * Per-run reasoning effort overrides, by config id: a level, or null for the
+   * harness default. A config with no entry runs at its own default. With
+   * `onEffortChange`, each selected chip gets an effort select limited to the
+   * levels its harness + model take (`ConfigJson.effortLevels`).
+   */
+  efforts?: Record<string, string | null>;
+  /** `undefined` clears the override (back to the config's own default). */
+  onEffortChange?: (configId: string, effort: string | null | undefined) => void;
 }): ReactNode {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -258,7 +267,14 @@ export function ConfigMultiSelect(props: {
         ) : (
           selectedRows.map((c) => (
             <span className="cms-selected-chip" key={c.id}>
-              <ConfigChip configId={c.id} />
+              <ConfigChip configId={c.id} effort={props.onEffortChange ? null : undefined} />
+              {props.onEffortChange && c.effortLevels && c.effortLevels.length > 0 ? (
+                <EffortSelect
+                  config={c}
+                  override={props.efforts?.[c.id]}
+                  onChange={(effort) => props.onEffortChange?.(c.id, effort)}
+                />
+              ) : null}
               <button
                 type="button"
                 className="cms-chip-x"
@@ -272,5 +288,45 @@ export function ConfigMultiSelect(props: {
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * Effort select on a selected config chip. Options: the config's own default
+ * (value ""), the harness default when the config has its own (value "none"),
+ * then exactly the levels its harness + model take.
+ */
+function EffortSelect(props: {
+  config: ConfigJson;
+  /** undefined = the config's own default; null = the harness default. */
+  override: string | null | undefined;
+  onChange: (effort: string | null | undefined) => void;
+}): ReactNode {
+  const { config, override } = props;
+  const own = config.reasoningEffort ?? null;
+  const value = override === undefined ? "" : override === null ? "none" : override;
+  return (
+    <select
+      className="cms-effort"
+      value={value}
+      aria-label={`Reasoning effort for ${config.id}`}
+      title="Reasoning effort for this run; only levels this harness + model take are listed"
+      onChange={(e) => {
+        const next = e.target.value;
+        props.onChange(next === "" ? undefined : next === "none" ? null : next);
+      }}
+    >
+      <option value="">
+        {own ? `Effort: ${own} (config default)` : "Effort: harness default"}
+      </option>
+      {own ? <option value="none">Effort: harness default</option> : null}
+      {(config.effortLevels ?? [])
+        .filter((level) => level !== own)
+        .map((level) => (
+          <option key={level} value={level}>
+            Effort: {level}
+          </option>
+        ))}
+    </select>
   );
 }

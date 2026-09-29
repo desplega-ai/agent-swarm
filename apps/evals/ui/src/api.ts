@@ -183,6 +183,7 @@ export interface NewConfigBody {
   label?: string;
   model?: string;
   modelAlias?: string;
+  reasoningEffort?: string | null;
 }
 
 export function createConfig(body: NewConfigBody): Promise<ConfigJson> {
@@ -191,6 +192,18 @@ export function createConfig(body: NewConfigBody): Promise<ConfigJson> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+}
+
+/** Efforts a harness takes for a model (or the model an alias resolves to today), low → high. */
+export function getEffortLevels(pair: {
+  provider: string;
+  model?: string;
+  modelAlias?: string;
+}): Promise<{ model: string | null; levels: string[] }> {
+  const params = new URLSearchParams({ provider: pair.provider });
+  if (pair.model) params.set("model", pair.model);
+  else if (pair.modelAlias) params.set("modelAlias", pair.modelAlias);
+  return request(`/api/effort-levels?${params.toString()}`);
 }
 
 export function listPresets(): Promise<PresetJson[]> {
@@ -215,6 +228,7 @@ export function refreshModelCatalog(): Promise<CatalogRefreshResponse> {
 export function getAnalytics(filter?: {
   harnesses?: string[];
   configIds?: string[];
+  efforts?: string[];
 }): Promise<AnalyticsResponse> {
   const params = new URLSearchParams();
   if (filter?.harnesses !== undefined && filter.harnesses.length > 0) {
@@ -222,6 +236,9 @@ export function getAnalytics(filter?: {
   }
   if (filter?.configIds !== undefined && filter.configIds.length > 0) {
     params.set("configs", filter.configIds.join(","));
+  }
+  if (filter?.efforts !== undefined && filter.efforts.length > 0) {
+    params.set("efforts", filter.efforts.join(","));
   }
   const qs = params.size > 0 ? `?${params.toString()}` : "";
   return request(`/api/analytics${qs}`);

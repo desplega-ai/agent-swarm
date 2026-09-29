@@ -1,6 +1,13 @@
+import { REASONING_EFFORT_LEVELS } from "@desplega/model-catalog";
 import type { Client } from "@libsql/client";
 import { configs as seedConfigs } from "../../configs/index.ts";
 import { getResolutionCatalog, type ModelsDevCatalog } from "../cost/catalog.ts";
+import {
+  configModelId,
+  effortError,
+  effortLevelsForConfig,
+  isEffortLevel,
+} from "../cost/effort.ts";
 import { resolveAlias, validateConfigResolves } from "../cost/resolve-alias.ts";
 import {
   getHarnessConfig,
@@ -10,7 +17,7 @@ import {
   updateUserConfig,
 } from "../db/harness-configs.ts";
 import { serializeConfig, setDbConfigs } from "../registry.ts";
-import type { HarnessConfig, HarnessProvider } from "../types.ts";
+import type { HarnessConfig, HarnessProvider, ReasoningEffortLevel } from "../types.ts";
 
 const PROVIDERS = new Set<HarnessProvider>(["claude", "pi", "codex", "opencode"]);
 /** Same id contract as configs/index.ts. */
@@ -39,13 +46,16 @@ export async function initHarnessConfigs(db: Client): Promise<void> {
 /**
  * The `/api/configs` row: `serializeConfig` plus `resolvedModel`, what a
  * `modelAlias` resolves to in the reviewed catalog right now (the id a run
- * created today would pin). Null for pinned-`model` configs and for an alias
- * that matches nothing. Pass `getResolutionCatalog()`.
+ * created today would pin), and `effortLevels`, the reasoning efforts the
+ * config's harness takes for that model (empty when it takes none). Null
+ * `resolvedModel` for pinned-`model` configs and for an alias that matches
+ * nothing. Pass `getResolutionCatalog()`.
  */
 export function serializeConfigResolved(config: HarnessConfig, catalog: ModelsDevCatalog) {
   return {
     ...serializeConfig(config),
     resolvedModel: config.modelAlias ? resolveAlias(config.modelAlias, catalog) : null,
+    effortLevels: effortLevelsForConfig(config, catalog),
   };
 }
 
@@ -72,7 +82,15 @@ async function checkResolves(config: HarnessConfig): Promise<string | null> {
   return errors.length > 0 ? errors.join("; ") : null;
 }
 
-/** POST /api/configs body: { provider, model | modelAlias, label?, id? }. */
+/** The body's `reasoningEffort`: a level, or null/"" to clear. Undefined when absent. */
+function parseEffortField(value: unknown): ReasoningEffortLevel | null | undefined | Error {
+  if (value === undefined) return undefined;
+  if (value === null || value === "") return null;
+  if (isEffortLevel(value)) return value;
+  return new Error(`reasoningEffort must be one of ${REASONING_EFFORT_LEVELS.join(", ")}`);
+}
+
+/** POST /api/configs body: { provider, model | modelAlias, reasoningEffort?, label?, id? }. */
 export async function createConfig(db: Client, body: unknown): Promise<ConfigMutationResult> {
   if (!body || typeof body !== "object")
     return { ok: false, status: 400, error: "JSON body required" };
@@ -101,12 +119,17 @@ export async function createConfig(db: Client, body: unknown): Promise<ConfigMut
       error: `id "${id}" must match ${CONFIG_ID_RE} for ${provider}`,
     };
   }
+  const effort = parseEffortField(b.reasoningEffort);
+  if (effort instanceof Error) return { ok: false, status: 400, error: effort.message };
   const config: HarnessConfig = { id, provider };
   if (label) config.label = label as string;
   if (model) config.model = model as string;
   if (modelAlias) config.modelAlias = modelAlias as string;
+  if (effort) config.reasoningEffort = effort;
   const invalid = await checkResolves(config);
   if (invalid) return { ok: false, status: 400, error: invalid };
+  const badEffort = effort ? effortError(config, effort, await getResolutionCatalog()) : null;
+  if (badEffort) return { ok: false, status: 400, error: badEffort };
   if (!(await insertUserConfig(db, config))) {
     return { ok: false, status: 409, error: `config "${id}" already exists` };
   }
@@ -115,8 +138,10 @@ export async function createConfig(db: Client, body: unknown): Promise<ConfigMut
 }
 
 /**
- * PATCH /api/configs/:id body: any of { label, model, modelAlias, archived }.
- * Setting `model` clears `modelAlias` and vice versa. Any edit marks the row
+ * PATCH /api/configs/:id body: any of { label, model, modelAlias, reasoningEffort,
+ * archived }. Setting `model` clears `modelAlias` and vice versa; `reasoningEffort`
+ * null clears the effort. A model change that leaves the stored effort unsupported
+ * is refused: send `reasoningEffort` with it. Any edit marks the row
  * `source='user'`, so boot seeding stops overwriting it.
  */
 export async function patchConfig(
@@ -158,6 +183,12 @@ export async function patchConfig(
       delete next.model;
     }
   }
+  if ("reasoningEffort" in b) {
+    const effort = parseEffortField(b.reasoningEffort);
+    if (effort instanceof Error) return { ok: false, status: 400, error: effort.message };
+    if (effort) next.reasoningEffort = effort;
+    else delete next.reasoningEffort;
+  }
   let archived = existing.archived;
   if ("archived" in b) {
     if (typeof b.archived !== "boolean") {
@@ -171,7 +202,44 @@ export async function patchConfig(
     const invalid = await checkResolves(next);
     if (invalid) return { ok: false, status: 400, error: invalid };
   }
+  const effortChanged = next.reasoningEffort !== existing.config.reasoningEffort;
+  if (next.reasoningEffort && (modelChanged || effortChanged)) {
+    const badEffort = effortError(next, next.reasoningEffort, await getResolutionCatalog());
+    if (badEffort) return { ok: false, status: 400, error: badEffort };
+  }
   await updateUserConfig(db, next, archived);
   await reloadDbConfigs(db);
   return { ok: true, status: 200, config: next };
+}
+
+/**
+ * GET /api/effort-levels?provider=&model=|modelAlias=: the reasoning efforts a
+ * harness takes for a model (or the model an alias resolves to today), so a
+ * config form offers exactly those. `model` is null for an alias that matches
+ * nothing; `levels` is empty when the pair takes no effort. Pass
+ * `getResolutionCatalog()`.
+ */
+export function effortLevelsFor(
+  params: URLSearchParams,
+  catalog: ModelsDevCatalog,
+):
+  | { ok: true; body: { model: string | null; levels: ReasoningEffortLevel[] } }
+  | { ok: false; status: 400; error: string } {
+  const provider = params.get("provider");
+  if (!provider || !PROVIDERS.has(provider as HarnessProvider)) {
+    return { ok: false, status: 400, error: "provider must be one of claude, pi, codex, opencode" };
+  }
+  const model = params.get("model")?.trim() || undefined;
+  const modelAlias = params.get("modelAlias")?.trim() || undefined;
+  if (!model && !modelAlias) return { ok: false, status: 400, error: "set model or modelAlias" };
+  const config: HarnessConfig = { id: `${provider}-draft`, provider: provider as HarnessProvider };
+  if (model) config.model = model;
+  else if (modelAlias) config.modelAlias = modelAlias;
+  return {
+    ok: true,
+    body: {
+      model: configModelId(config, catalog) ?? null,
+      levels: effortLevelsForConfig(config, catalog),
+    },
+  };
 }
