@@ -10,14 +10,76 @@ handlers, user cancel, user retry, crash). Code map: `ACTIONS.md`. Calibration: 
 | | Count |
 |---|---|
 | Calibration bugs rediscovered | **2 / 2** (bf12ab53 / #1584, d4753302) |
-| Counterexamples on current `main` | **7** |
-| Confirmed by a bun test that fails on `main` | **7** |
+| Counterexamples found on `main` @ `2180cd401` (CX1-CX7) | **7**, all fixed (#1666, #1675, #1678, #1673) |
+| Confirmed by a bun test that failed on `main` | **7** (all now pass as plain `test`) |
+| Open counterexamples on `main` @ `795526ca3` (CX8-CX10) | **3**, no repro test yet |
 | Dropped as model drift | **0** (false-positive rate 0 / 7) |
 
-Every counterexample has a repro in `src/tests/workflow-tla-races.test.ts`. The tests call the
+CX1-CX7 each have a repro in `src/tests/workflow-tla-races.test.ts`. The tests call the
 production functions in trace order against a temp SQLite DB; a barrier executor holds a node
-"in flight" where the trace interleaves with a running executor. They are marked
-`test.failing` so CI stays green while the bug exists; each fix PR flips its test to `test`.
+"in flight" where the trace interleaves with a running executor. Each was marked `test.failing`
+while the bug existed; each fix PR flipped its test to `test`. On `795526ca3` the file is
+8 pass / 0 fail / 0 `test.failing`.
+
+## Status on `main` @ `795526ca3`
+
+| CX | Fix | Flag now current | Fix config (holds) | Control (still finds it) |
+|---|---|---|---|---|
+| CX1 | #1666 | F1 `FixPollerRunGuard` | `Fix-CX1.cfg` | `Workflows.cfg` before this sync |
+| CX2 | #1675 | F3 `FixConcurrentJoin`, F5 `FixUserRetryLive` | `Fix-CX2.cfg` | `Ctl-CX2.cfg` |
+| CX3 | #1673 | F6 `FixJoinWaitsLive` | `Fix-CX3.cfg` | `Ctl-CX3.cfg` |
+| CX4 | #1675 | F3 | `Fix-CX4.cfg` | `Ctl-CX4.cfg` |
+| CX5 | #1678 | F4 `FixRecoveryRetry` | `Fix-CX5.cfg` | `Ctl-CX5.cfg` |
+| CX6 | #1675 | F3 | `Fix-CX6.cfg` | `Ctl-CX6.cfg`, `Probe-input-await.cfg` |
+| CX7 | #1673 | F6 | `Fix-CX7.cfg` | `Ctl-CX7.cfg` |
+
+`Workflows.cfg` and `Long.cfg` now model `main` with F1, F3, F4, F5, and F6 on (F2 is not
+implemented). They check `JoinWaitsForBranches` instead of `JoinWaitsForAll`, because #1673
+lets a terminally failed branch join (partial failure). With those flags, TLC finds CX8-CX10
+below. Each trace was checked against the code by reading it; none has a bun repro yet.
+
+### CX8: the join fires while a branch is waiting for, or running, its retry
+
+`executeStep` reports a step that failed with a retry pending as `completed` with no successors,
+so the walk adds the branch to `completedNodeIds` (`engine.ts:387`). When a sibling branch
+completes, the F6 batch gate sees that branch in `completedNodeIds` and runs `M`, even when the
+retry poller has already claimed the branch and is executing it. `M` runs without the branch's
+output. This is the gap F2 (`FixPendingRetryGate`) was proposed for.
+
+- Property: `JoinWaitsForBranches` (Inv3c). 16,466 distinct states, 26-state trace, `Workflows.cfg`.
+- Trace: `… XDedup (A) → XRun → XFail (A retry pending) → P1 → WPick → XDedup (B) → P2 → P3 → P4 (A running, poller) → XRun → XCkOk (B) → WBatchEnd → WPick → XDedup (M, A still running)`
+- `JoinWaitsForAll` (not claimed on `main`) fails earlier on the same root, with the retry not yet claimed: 4,717 distinct states, depth 20.
+
+### CX9: a user retry re-executes a branch that is pending its own retry
+
+`A` fails with a retry pending; async branch `B`'s task fails and fails the run. The user retries.
+`retryFailedRun` drops nodes whose step is `running` or `waiting` (F5), but not a node with a
+retry-pending row, so it walks `A` and inserts a new `A` row. The poller then claims the old
+`A` row (the run is `running` again): two executions of `A`.
+
+- Invariant: `AtMostOneExecuting` (Inv2). 332,267 distinct states, 31-state trace, `Workflows.cfg`
+  with `CompletedRunQuiescent`, `JoinWaitsForBranches` removed so TLC reaches it.
+- Trace: `… XFail (A retry pending) → P1 → P2 → P3 → TaskFinish(B fail) → E1 → EF (run failed) → U1 → U2 → WStart → WPick → XDedup (new A) → P4 (old A running)`
+
+### CX10: a stale walk's finalizer completes a run the user just retried
+
+`A` exhausts its retry in the poller and fails the run before the initial walk dedups `B`, so
+that dedup halts and the walk heads for its finalizer. The user
+retries: `U2` resets the failed row to `pending` and sets the run `running`. The initial walk now
+reaches its finalizer, which sees a `running` run with no waiting, running, or retry-pending row
+(it does not count `pending`) and marks it `completed`. The retry walk then halts on the completed
+run, so the user's retry never executes.
+
+- Invariant: `CompletedRunQuiescent` (Inv4). 78,914 distinct states, 27-state trace, `Workflows.cfg`
+  without `JoinWaitsForBranches`.
+- Trace: `… P4 (A running) → P5 → P7 → P10 (run failed) → XDedup (B halted) → WBatchEnd → U1 → U2 (A pending, run running) → WFinal (run completed)`
+- Related to the third fix-model gap below (the orphaned `pending` row).
+
+A fourth trace needs a crash: `Long.cfg` (BFS, 19,342 distinct states, depth 21) finds
+`AtMostOneExecuting` when the process crashes after an async executor dispatched its task but
+before `checkpointStepWaiting`. F3 deliberately lets recovery re-run a `running` row nobody owns,
+so the node dispatches a second task. This is at-least-once delivery at a crash, not a race
+between live actors.
 
 ## Counterexamples
 
@@ -144,7 +206,19 @@ spec before the fix PRs:
 | Long run, simulation | `Long.cfg` (3 branches, maxRetries 2, 2 sweeps, 1 crash), `-simulate -depth 120 -continue`, 16 workers | 1,456 violating traces | 310,647,742 states generated (simulation does not dedupe) | ≤120 | 19 min 30 s |
 | Long run, BFS | `Long.cfg` | CX1 | 5,385 | 19 | 4 s |
 
-The long simulation on current `main` with 3 branches produced 1,456 violating traces: 1,438
+Re-run on `main` @ `795526ca3` (tla2tools 1.8, BFS). Distinct states at a violation vary with `-workers`; a rerun at 4 workers found the `Workflows.cfg` and `Long.cfg` violations at 32,667 and 12,282.
+
+| Config | Result | Distinct states | Depth |
+|---|---|---|---|
+| `Workflows.cfg` (current flags) | `JoinWaitsForBranches` violated (CX8) | 16,466 | 26 |
+| `Long.cfg` (current flags) | `AtMostOneExecuting` violated (crash trace above) | 19,342 | 21 |
+| `Cal-bf12ab53.cfg` / control | found / holds | 113 / 160 | 14 / 27 |
+| `Cal-d4753302.cfg` / control | found / found (CX4, see CALIBRATION.md) | 4,292 / 2,856 | 32 / 32 |
+| `Fix-CX1` .. `Fix-CX7` | all hold | 4,073 / 471,850 / 308,120 / 113,010 / 26,296 / 3,325 / 3,778 | 36-47 |
+| `Ctl-CX2` .. `Ctl-CX7` | all find their CX | 809 / 2,055 / 29,904 / 6,466 / 116 / 965 | 12-29 |
+| `Probe-input-await.cfg` | CX6 found | 119 | 12 |
+
+The long simulation on `main` @ `2180cd401` with 3 branches produced 1,456 violating traces: 1,438
 `TerminalRunStaysQuiet`, 11 `JoinWaitsForAll`, 3 `ExecutesOnce`, 2 `AtMostOneExecuting`,
 2 `CompletedRunQuiescent`. No new property failed. Individual simulation traces were not triaged
 one by one; the BFS traces above are the ones mapped to code and tests.
