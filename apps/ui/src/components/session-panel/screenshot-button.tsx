@@ -65,7 +65,8 @@ export function ScreenshotButton({
           )}
         </Button>
       </TooltipTrigger>
-      <TooltipContent>Add screenshot of this page</TooltipContent>
+      {/* Left, not top: above the button it would cover the new attachment's remove button. */}
+      <TooltipContent side="left">Add screenshot of this page</TooltipContent>
     </Tooltip>
   );
 }
