@@ -101,10 +101,13 @@ export async function instantFlush(key: string): Promise<void> {
 
 /**
  * Fetch thread context from Slack for the buffer flush task description.
+ * Messages in `excludeTs` (the buffered follow-ups themselves) are skipped:
+ * the description already carries them below the context block.
  */
 async function getThreadContextForBuffer(
   channelId: string,
   threadTs: string,
+  excludeTs: ReadonlySet<string>,
   botUserId?: string,
 ): Promise<string> {
   const app = getSlackApp();
@@ -121,7 +124,7 @@ async function getThreadContextForBuffer(
     if (messages.length === 0) return "";
 
     const formatted = messages
-      .filter((m) => extractSlackMessageText(m) !== "")
+      .filter((m) => !(m.ts && excludeTs.has(m.ts)) && extractSlackMessageText(m) !== "")
       .map((m) => {
         const msg = m as Record<string, unknown>;
         const isBotMessage = msg.bot_id !== undefined || msg.subtype === "bot_message";
@@ -268,7 +271,12 @@ async function slackFlush(
   const lead = await getLeadAgent();
 
   // Thread context for the task
-  const threadContext = await getThreadContextForBuffer(channelId, threadTs, botUserId);
+  const threadContext = await getThreadContextForBuffer(
+    channelId,
+    threadTs,
+    new Set(items.map((item) => item.ts)),
+    botUserId,
+  );
   const fullDescription = threadContext
     ? `<thread_context>\n${threadContext}\n</thread_context>\n\n${description}`
     : description;
