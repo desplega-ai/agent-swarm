@@ -581,9 +581,11 @@ describe("script connections", () => {
       markMigrationApplied(database, "166_approval_request_auto_cancellation.sql");
       // 171 alters memory_retrieval, which this migration-112-only fixture does not create.
       markMigrationApplied(database, "171_memory_retrieval_relevance.sql");
-      // 172 and 174 alter agent_tasks, which this partial fixture creates without its columns.
-      markMigrationApplied(database, "172_agent_task_attempt.sql");
-      markMigrationApplied(database, "174_agent_task_attempt_runtime.sql");
+      // 175 indexes workflow_runs, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "175_workflow_runs_list_index.sql");
+      // 177 and 178 alter agent_tasks, which this partial fixture creates without its columns.
+      markMigrationApplied(database, "177_agent_task_attempt.sql");
+      markMigrationApplied(database, "178_agent_task_attempt_runtime.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

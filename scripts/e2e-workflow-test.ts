@@ -17,7 +17,7 @@
  *   bun scripts/e2e-workflow-test.ts --with-docker    # Also build+spawn docker lead/worker
  *   E2E_PORT=13099 bun scripts/e2e-workflow-test.ts   # Custom port
  */
-import { type Subprocess, $ } from "bun";
+import { $, type Subprocess } from "bun";
 
 // ─── Config ─────────────────────────────────────────────────────────────────
 const PORT = process.env.E2E_PORT || "13099";
@@ -508,12 +508,12 @@ async function testTriggerHighPriority(workflowId: string) {
   }
 
   // List runs
-  const { data: runs } = await api<Array<{ id: string }>>(
+  const { data: page } = await api<{ runs: Array<{ id: string }> }>(
     "GET",
     `/api/workflows/${workflowId}/runs`,
   );
   assert(
-    Array.isArray(runs) && runs.some((r) => r.id === data.runId),
+    Array.isArray(page?.runs) && page.runs.some((r) => r.id === data.runId),
     "List runs contains our run",
   );
 

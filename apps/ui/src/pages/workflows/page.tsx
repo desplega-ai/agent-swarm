@@ -2,10 +2,11 @@ import type { ColDef, ICellRendererParams, RowClickedEvent } from "ag-grid-commu
 import { Star, Workflow as WorkflowIcon } from "lucide-react";
 import { useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
+import { ALL_WORKFLOW_RUNS_PER_WORKFLOW } from "@/api/client";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useFavoriteToggle } from "@/api/hooks/use-favorites";
 import { useAllWorkflowRuns, useUpdateWorkflow, useWorkflows } from "@/api/hooks/use-workflows";
-import type { WorkflowRun, WorkflowRunStatus, WorkflowSummary } from "@/api/types";
+import type { WorkflowRunStatus, WorkflowRunSummary, WorkflowSummary } from "@/api/types";
 import { useStatusContext } from "@/app/status-context";
 import { findAutomation, NeedsSetupBadge } from "@/components/automations/needs-setup-badge";
 import { DataGrid } from "@/components/shared/data-grid";
@@ -59,7 +60,8 @@ export default function WorkflowsPage() {
   const { data: workflows, isLoading: wfLoading } = useWorkflows();
   const { data: status } = useStatusContext();
   const { data: agents } = useAgents();
-  const { data: allRuns, isLoading: runsLoading } = useAllWorkflowRuns();
+  const { data: allRunsData, isLoading: runsLoading } = useAllWorkflowRuns();
+  const allRuns = allRunsData?.runs;
   const updateWorkflow = useUpdateWorkflow();
   const favoriteToggle = useFavoriteToggle("workflow");
   const workflowRows = useMemo(() => {
@@ -223,7 +225,7 @@ export default function WorkflowsPage() {
     });
   }, [allRuns, statusFilter, workflowFilter]);
 
-  const runColumns = useMemo<ColDef<WorkflowRun>[]>(
+  const runColumns = useMemo<ColDef<WorkflowRunSummary>[]>(
     () => [
       {
         headerName: "Workflow",
@@ -238,7 +240,7 @@ export default function WorkflowsPage() {
         field: "status",
         headerName: "Status",
         width: 130,
-        cellRenderer: (params: { value: WorkflowRunStatus; data?: WorkflowRun }) =>
+        cellRenderer: (params: { value: WorkflowRunStatus; data?: WorkflowRunSummary }) =>
           isAutomationSetupError(params.data?.error) ? (
             <Badge
               variant="outline"
@@ -277,7 +279,7 @@ export default function WorkflowsPage() {
   );
 
   const onRunRowClicked = useCallback(
-    (event: RowClickedEvent<WorkflowRun>) => {
+    (event: RowClickedEvent<WorkflowRunSummary>) => {
       if (event.data) void navigate(`/workflow-runs/${event.data.id}`);
     },
     [navigate],
@@ -524,6 +526,12 @@ export default function WorkflowsPage() {
         </TabsContent>
 
         <TabsContent value="runs" className="flex flex-col flex-1 min-h-0 mt-2 gap-3">
+          {allRunsData?.capped && (
+            <p className="text-xs text-muted-foreground">
+              Showing the latest {ALL_WORKFLOW_RUNS_PER_WORKFLOW} runs of each workflow. Open a
+              workflow for its full run history.
+            </p>
+          )}
           {isMobile ? (
             <MobileList label="Workflow runs" loading={runsLoading} emptyMessage="No workflow runs">
               {filteredRuns.map((run) => (

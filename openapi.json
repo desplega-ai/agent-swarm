@@ -5128,6 +5128,53 @@
           }
         }
       },
+      "WorkflowRunSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "workflowId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "running",
+              "waiting",
+              "completed",
+              "failed",
+              "skipped",
+              "cancelled"
+            ]
+          },
+          "triggerData": {},
+          "error": {
+            "type": "string"
+          },
+          "createdBy": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "lastUpdatedAt": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "workflowId",
+          "status",
+          "startedAt",
+          "lastUpdatedAt"
+        ]
+      },
       "WorkflowRun": {
         "type": "object",
         "properties": {
@@ -51595,7 +51642,8 @@
     },
     "/api/workflows/{id}/runs": {
       "get": {
-        "summary": "List runs for a workflow",
+        "summary": "List runs for a workflow, newest first",
+        "description": "Returns one page of runs without `context` (fetch it with GET /api/workflow-runs/{id}). `limit` defaults to 50 and is capped at 100; follow `page.nextOffset` while `page.hasMore` is true.",
         "tags": [
           "Workflows"
         ],
@@ -51654,58 +51702,48 @@
         ],
         "responses": {
           "200": {
-            "description": "Workflow run list",
+            "description": "One page of workflow runs",
             "content": {
               "application/json": {
                 "schema": {
-                  "anyOf": [
-                    {
+                  "type": "object",
+                  "properties": {
+                    "runs": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/components/schemas/WorkflowRun"
+                        "$ref": "#/components/schemas/WorkflowRunSummary"
                       }
                     },
-                    {
+                    "page": {
                       "type": "object",
                       "properties": {
-                        "runs": {
-                          "type": "array",
-                          "items": {
-                            "$ref": "#/components/schemas/WorkflowRun"
-                          }
+                        "limit": {
+                          "type": "integer"
                         },
-                        "page": {
-                          "type": "object",
-                          "properties": {
-                            "limit": {
-                              "type": "integer"
-                            },
-                            "offset": {
-                              "type": "integer"
-                            },
-                            "total": {
-                              "type": "integer"
-                            },
-                            "hasMore": {
-                              "type": "boolean"
-                            },
-                            "nextOffset": {
-                              "type": "integer"
-                            }
-                          },
-                          "required": [
-                            "limit",
-                            "offset",
-                            "total",
-                            "hasMore"
-                          ]
+                        "offset": {
+                          "type": "integer"
+                        },
+                        "total": {
+                          "type": "integer"
+                        },
+                        "hasMore": {
+                          "type": "boolean"
+                        },
+                        "nextOffset": {
+                          "type": "integer"
                         }
                       },
                       "required": [
-                        "runs",
-                        "page"
+                        "limit",
+                        "offset",
+                        "total",
+                        "hasMore"
                       ]
                     }
+                  },
+                  "required": [
+                    "runs",
+                    "page"
                   ]
                 }
               }
