@@ -7141,8 +7141,11 @@ export async function getStalledInProgressTasks(
  *    src/tasks/worker-follow-up.ts.
  * A task assigned directly to a busy agent is not a pin and stays queued.
  * Grace is measured from `lastUpdatedAt`, the time the row became `pending`.
+ * Lead-held pins are excluded here (the sweep never unpins them), so they
+ * cannot fill the window. At most `limit` rows come back, oldest first; a
+ * backlog drains across sweeps because each unpinned row leaves the set.
  */
-export async function getUnclaimedPins(graceMin: number): Promise<AgentTask[]> {
+export async function getUnclaimedPins(graceMin: number, limit = 100): Promise<AgentTask[]> {
   const cutoff = new Date(Date.now() - graceMin * 60 * 1000).toISOString();
   const rows = await getDbClient().query<AgentTaskRow>(
     `SELECT * FROM agent_tasks
@@ -7154,8 +7157,10 @@ export async function getUnclaimedPins(graceMin: number): Promise<AgentTask[]> {
            OR (taskType = 'resume' AND (tags LIKE '%"crash-recovery-pin"%' OR tags LIKE '%"graceful-shutdown-pin"%'))
            OR tags LIKE '%"reboot-retry-pin"%'
          )
-       ORDER BY lastUpdatedAt ASC`,
-    [cutoff],
+         AND agentId NOT IN (SELECT id FROM agents WHERE isLead = 1)
+       ORDER BY lastUpdatedAt ASC
+       LIMIT ?`,
+    [cutoff, limit],
   );
   return rows.map(rowToAgentTask);
 }

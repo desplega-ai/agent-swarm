@@ -149,6 +149,9 @@ function maxAutoAssignPerSweep(): number {
 const POOL_SCAN_BATCH_SIZE = Number(process.env.HEARTBEAT_POOL_SCAN_BATCH_SIZE) || 50;
 const POOL_SCAN_CAP = Number(process.env.HEARTBEAT_POOL_SCAN_CAP) || 500;
 
+/** Most pins one sweep unpins (`unpinUnclaimedTasks`); the rest wait for the next sweep. */
+const UNPIN_BATCH_SIZE = 100;
+
 /**
  * Max times the heartbeat reclaims one task before failing it for Lead triage.
  * The env var keeps its pre-Reclaim name so existing deployments keep their
@@ -691,7 +694,9 @@ async function unpinUnclaimedTasks(findings: HeartbeatFindings): Promise<void> {
   // Grace 0 = Unpin disabled (rollback switch).
   if (HEARTBEAT_RESUME_PIN_GRACE_MIN <= 0) return;
 
-  const pins = await getUnclaimedPins(HEARTBEAT_RESUME_PIN_GRACE_MIN);
+  // Bounded per sweep (UNPIN_BATCH_SIZE, oldest first): a large backlog drains
+  // over several sweeps instead of one unbounded tick.
+  const pins = await getUnclaimedPins(HEARTBEAT_RESUME_PIN_GRACE_MIN, UNPIN_BATCH_SIZE);
   if (pins.length === 0) return;
   const agents = new Map((await getAllAgents()).map((agent) => [agent.id, agent]));
 

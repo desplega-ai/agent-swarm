@@ -209,7 +209,7 @@ A caller that sends no `X-Runtime-Instance-ID` is rejected on a reclaimed row (`
 
 **Runner.** When the reclaimed row comes back to an agent that still runs the earlier attempt, the runner keeps the running copy and does not start a second one. When it starts a row with `attempt > 0`, it injects a resume preamble built from the task's own id (its earlier attempts' session logs).
 
-**Unpin.** `unpinUnclaimedTasks` runs inside `cleanupStaleResources` on every sweep. `getUnclaimedPins` returns `pending` rows with an `agentId` whose `lastUpdatedAt` is older than `HEARTBEAT_RESUME_PIN_GRACE_MIN`, limited to reclaimed rows (`attempt > 0`) and legacy resume pins (`crash-recovery-pin`, `graceful-shutdown-pin`, `reboot-retry-pin` tags). Lead-held pins are skipped. For each other pin, `unpinTask` does a CAS on `status = pending AND lastUpdatedAt = read` and sets `status = unassigned`, `agentId = NULL`. It keeps an existing `routingAffinity`, or stamps a snapshot of the previous holder. The task then routes through the affinity-gated pool and starvation escalation (§4). Grace `0` disables Unpin.
+**Unpin.** `unpinUnclaimedTasks` runs inside `cleanupStaleResources` on every sweep. `getUnclaimedPins` returns `pending` rows with an `agentId` whose `lastUpdatedAt` is older than `HEARTBEAT_RESUME_PIN_GRACE_MIN`, limited to reclaimed rows (`attempt > 0`) and legacy resume pins (`crash-recovery-pin`, `graceful-shutdown-pin`, `reboot-retry-pin` tags). Lead-held pins are excluded in SQL. One sweep unpins at most 100 pins, oldest first (`UNPIN_BATCH_SIZE`); a larger backlog drains over the next sweeps. For each pin, `unpinTask` does a CAS on `status = pending AND lastUpdatedAt = read` and sets `status = unassigned`, `agentId = NULL`. It keeps an existing `routingAffinity`, or stamps a snapshot of the previous holder. The task then routes through the affinity-gated pool and starvation escalation (§4). Grace `0` disables Unpin.
 
 **Graceful shutdown.** A worker that shuts down calls the supersede route (`POST /api/tasks/:id/supersede`). It still uses `supersedeTask` plus `createResumeFollowUp(graceful_shutdown | context_limits | manual_supersede)`, and both run with `backfillSupersedeTaskResumeTaskId` in ONE transaction: a crash or throw before the resume child is written rolls the supersede back, the task stays `in_progress`, and §2 reclaims it. A superseded row therefore always has its resume child, except when `createResumeFollowUp` returns `skipped` (no eligible agent or Lead), which is logged. `createResumeFollowUp` pins the resume child to the same agent when its row exists, it is not `offline`, and it has capacity (`HEARTBEAT_PIN_GRACEFUL_RESUME`, default on). A `leadOnly` parent may only pin to a Lead. Otherwise the child goes to the pool with a `routingAffinity` snapshot. An unstarted graceful-shutdown pin is returned to the pool by Unpin.
 
@@ -262,9 +262,10 @@ restore agent idle if it has no active tasks
 # every sweep, inside cleanupStaleResources (HeartbeatSimple.tla Unpin):
 unpinUnclaimedTasks():
     if HEARTBEAT_RESUME_PIN_GRACE_MIN <= 0: return
-    for t in getUnclaimedPins(grace):           # pending, agentId set, lastUpdatedAt < now-grace,
-                                                # attempt > 0 OR legacy resume/reboot pin tag
-        if holder is Lead: continue
+    for t in getUnclaimedPins(grace, 100):      # pending, agentId set, lastUpdatedAt < now-grace,
+                                                # attempt > 0 OR legacy resume/reboot pin tag,
+                                                # holder not Lead; oldest first, max 100 per sweep
+        if holder is Lead: continue             # defensive; the query already excludes Lead
         affinity = t.routingAffinity ?? buildRoutingAffinityFromAgent(holder)
         unpinTask(t.id, expectedLastUpdatedAt = t.lastUpdatedAt, affinity)
         #   status = unassigned, agentId = NULL → affinity-gated pool (§4)

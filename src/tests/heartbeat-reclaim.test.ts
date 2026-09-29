@@ -20,6 +20,7 @@ import {
   getLeadAgent,
   getLogsByTaskId,
   getTaskById,
+  getUnclaimedPins,
   initDb,
   insertActiveSession,
   reclaimTask,
@@ -422,6 +423,29 @@ describe("Heartbeat Unpin (HeartbeatSimple.tla)", () => {
 
     expect(findings.unpinnedTasks).toHaveLength(0);
     expect((await getTaskById(task.id))?.agentId).toBe(lead.id);
+  });
+
+  test("one sweep reads a bounded, oldest-first batch and Lead pins never fill it", async () => {
+    const lead = await createAgent({ name: "lead", isLead: true, status: "idle" });
+    const leadTask = await createTaskExtended("Lead work", { agentId: lead.id });
+    await setLastUpdated(leadTask.id, minutesAgo(60)); // oldest of all
+    const agent = await createAgent({ name: "worker", isLead: false, status: "idle" });
+    const pins: string[] = [];
+    for (const [i, minutes] of [20, 40, 30].entries()) {
+      const pin = await createTaskExtended(`Resume ${i}`, {
+        agentId: agent.id,
+        taskType: "resume",
+        tags: ["graceful-shutdown-pin"],
+      });
+      await setLastUpdated(pin.id, minutesAgo(minutes));
+      pins.push(pin.id);
+    }
+    await setAttempt(leadTask.id, 1);
+
+    const batch = await getUnclaimedPins(10, 2);
+
+    // pins[1] (40 min) then pins[2] (30 min); the 60-minute Lead pin is excluded.
+    expect(batch.map((t) => t.id)).toEqual([pins[1], pins[2]]);
   });
 
   test("getLeadAgent prefers a non-offline lead", async () => {
