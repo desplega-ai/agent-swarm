@@ -219,6 +219,89 @@ Example:
 
 Downstream nodes read the executor output from the node ID. The script's return value is under `result`, so an `inputs` mapping usually points at `parse.result.someField`.
 
+## Choosing a decider
+
+When a node has to decide, pick the cheapest node that can decide. Use `jev` for bounded judgments without waiting to be asked.
+
+| The decision is | Use |
+|---|---|
+| A fact: a count, PR state, flag, date, lookup, regex, or schema check | `script`, `property-match`, or `code-match` |
+| A bounded judgment: pass/fail, pick one of N, a score on a rubric, or the probability that a claim is true | `jev` |
+| Free-form generation, or findings a later node reads | `raw-llm` or `agent-task` |
+
+Jev is weak at counting. For a hybrid, count in a `script` and pass the number to `jev` as part of `state`. The `workflow-iterate` skill carries the same rule for agents that edit workflows.
+
+## Jev nodes
+
+A `jev` node makes typed decisions with TypeSafe's Jev model (`POST https://api.typesafe.ai/v1/systemone`). It is an instant executor. One call sends one `state` and a map of questions, and the node returns one validated answer per question.
+
+```yaml
+- id: qualify
+  type: jev
+  inputs: { lead: "trigger.lead" }
+  config:
+    model: jev-1.13.0
+    state: "{{lead}}"
+    questions:
+      fit:
+        type: noul
+        instructions: Is this a real engineering team seeking agent workflow automation?
+        criteria: { true: A matching team with a concrete use case, false: Spam or no matching team }
+      authority:
+        type: choice
+        instructions: What purchasing authority does the message support?
+        criteria: { buyer: Can approve the purchase, champion: Influences the decision, unknown: Not established }
+      urgency:
+        type: score
+        instructions: How urgent is the stated need?
+        criteria: [No timeline, This quarter, Blocked now]
+    returns:
+      fit: { type: noul }
+      authority: { type: choice }
+      urgency: { type: score }
+  next: gate
+```
+
+### `jev` config
+
+- `state` (required): text, a string array, or a JSON object. An exact `{{token}}` keeps the upstream JSON type; mixed text is interpolated as a string. Resolved content is never interpolated again.
+- `questions` (required): a map of question id to a `noul`, `choice`, or `score` question. Ids match `[A-Za-z_][A-Za-z0-9_-]*`. Ids and types are static. Only `state` and the descriptions may use `{{tokens}}`.
+  - `noul`: `instructions`, optional `criteria: { true?, false? }`. The answer is a probability that the claim is true.
+  - `choice`: `instructions`, `criteria: { option: description }` with 2 to 255 options.
+  - `score`: `instructions`, `criteria: [level, ...]` with 2 to 10 ordered levels.
+- `returns` (required): every question id with its `type`. Config validation rejects a missing id, an extra id, or a type that disagrees with the question. It is checked, never sent to the API.
+- `model`: defaults to `jev-latest`. Pin a version such as `jev-1.13.0` for a calibrated workflow.
+- `timeoutMs`: `1000` through `300000`, default `30000`. The executor stops its own request `250` ms before the step watchdog.
+- `maxRetries`: `0` through `3`, default `2`.
+
+The config has no endpoint, header, or key field, and unknown fields are rejected.
+
+### `jev` output
+
+```json
+{
+  "model": "jev-1.13.0",
+  "answers": {
+    "fit": { "type": "noul", "noul": 0.82 },
+    "authority": { "type": "choice", "choice": "buyer", "confidence": 0.75, "probabilities": { "buyer": 0.9, "champion": 0.07, "unknown": 0.03 } },
+    "urgency": { "type": "score", "score": 1.7, "confidence": 0.65, "legend": { "0": "No timeline", "1": "This quarter", "2": "Blocked now" }, "probabilities": { "0": 0.05, "1": 0.2, "2": 0.75 } }
+  },
+  "usage": { "input_tokens": 400, "output_tokens": 80 }
+}
+```
+
+`model` is the version the API reports. `requestId` is added when the API sends a request-id header. `usage` is the token count of the successful call. Success needs exactly one answer of the declared type per question: a missing answer, an unknown choice, a score outside `0` to `levels - 1`, wrong probability keys, or a distribution that does not sum to 1 (tolerance `0.02`) fails the step. A `noul` answer stays `{ type, noul }`. It has no confidence field and the node never adds one.
+
+Downstream nodes read `<alias>.answers.<question>.<field>` through an `inputs` mapping, for example `inputs: { qualification: "qualify" }` and `qualification.answers.authority.confidence`.
+
+### Thresholds, retries, and credentials
+
+- A valid low-confidence answer is a successful evaluation. Keep the threshold in the next node: `property-match` (`gt`, `lt`, `eq`) or `code-match` for `>=`, and route the uncertain band to `human-in-the-loop`. There is no global threshold.
+- The executor retries connection errors, HTTP 408, 429, and 5xx (including 529) with exponential backoff and jitter, up to `maxRetries`. It honors `Retry-After` and fails instead of retrying early when the wait does not fit the budget. It never retries 401, 422, other 4xx, redirects, or an invalid success body.
+- A `jev` node must not set `retry` or `validation.retry`. Engine retries are not status-aware and would re-send rejected requests. Workflow create and update reject it, and a stored definition that has it fails the step before any request.
+- The node reads the global `TYPESAFE_API_KEY` swarm config value on the server. The key never appears in the definition, the step output, or an error. Errors carry the HTTP status, a short error code, and the request id, not the provider's message or your state.
+- Any unresolved `{{token}}` in a `jev` config fails the step before the request, because the call is paid and not idempotent.
+
 ## Trigger requester attribution
 
 Each workflow run persists the trusted human requester in `workflow_runs.created_by` when one is available. MCP resolves the caller from the invoking agent's owned source or current task; authenticated HTTP uses its trusted request user or owned agent-task context; schedules use their creator; and Kapso routing uses the resolved canonical sender. Generic unsigned or HMAC webhooks and creatorless schedules stay unattributed, and an ownerless trigger never falls back to the workflow author.

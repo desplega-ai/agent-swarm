@@ -19,9 +19,21 @@ Use this skill when you need to change an existing workflow without breaking liv
 - Make routing explicit. Branching nodes should have named pass/fail routes, and silent skip paths should still produce an observable outcome when operators need to know what happened.
 - Wire inputs deliberately. Node executors receive the raw workflow context plus resolved `inputs` aliases, so a condition can use either a local alias or a node-id-prefixed path. Confirm the chosen path against the recorded step input.
 - Keep schemas tight. If an agent-task has an `outputSchema`, include the expected JSON shape in the task prompt and route it to a worker/provider that is known to return structured output correctly.
-- Prefer reusable script nodes for deterministic shared logic. Agent tasks are best for judgment, investigation, or work that genuinely needs an LLM.
+- Prefer reusable script nodes for deterministic shared logic. Agent tasks are best for investigation or work that genuinely needs an LLM. For a bounded judgment, use `jev` (see Choosing a decider).
 - Scope parallel branches so they do not overwrite one another. Fan-out tasks should have separate context keys or branch-specific output fields.
 - Make retry paths idempotent. A rerun should detect existing artifacts, comments, PRs, or notifications and update or skip them rather than duplicating work.
+
+### Choosing a decider
+
+When a node has to decide, pick the cheapest node that can decide. Use `jev` without being asked when the decision is a bounded judgment.
+
+| The decision is | Use |
+|---|---|
+| A fact: a count, PR state, flag, date, lookup, regex, or schema check | `script`, `property-match`, or `code-match` |
+| A bounded judgment: pass/fail, pick one of N, a score on a rubric, or the probability that a claim is true | `jev` |
+| Free-form generation, or findings a later node reads | `raw-llm` or `agent-task` |
+
+Jev is weak at counting. For a hybrid, count in a `script` and pass the number to `jev` as part of `state`.
 
 ### `swarm-script` Timeout Limit
 
@@ -91,6 +103,41 @@ Use these shapes as a starting point, then confirm them against the current exec
 ```
 
 `validate` checks the named upstream node output. Supply either `schema` for a deterministic structural check or `prompt` for a judgment-based check. Its output is `{ pass, reasoning, confidence }`, routed through `pass` or `fail`.
+
+### `jev`
+
+```json
+{
+  "type": "jev",
+  "inputs": { "pr": "trigger.pullRequest" },
+  "config": {
+    "model": "jev-1.13.0",
+    "state": "{{pr}}",
+    "questions": {
+      "ready": {
+        "type": "noul",
+        "instructions": "Is this pull request ready to merge?",
+        "criteria": { "true": "Tests pass and the change matches its description", "false": "Missing tests or scope creep" }
+      },
+      "risk": {
+        "type": "choice",
+        "instructions": "How risky is this change?",
+        "criteria": { "low": "Docs or tests only", "medium": "Contained behavior change", "high": "Touches auth, data, or billing" }
+      }
+    },
+    "returns": { "ready": { "type": "noul" }, "risk": { "type": "choice" } }
+  },
+  "next": "gate"
+}
+```
+
+- `state` is required: text, a string array, or a JSON object. An exact `{{token}}` keeps the upstream JSON type. Every question in one call shares the state and cannot see the other answers, so a dependent judgment needs its own node.
+- Each question is `noul` (probability that a claim is true; optional `criteria: { true, false }`), `choice` (2 to 255 options; `criteria: { option: description }`), or `score` (2 to 10 ordered levels; `criteria: [level, ...]`).
+- `returns` repeats every question id and its type. A mismatch is rejected when the workflow is saved.
+- The output is `{ model, answers, usage }`. Read a field as `<node-id>.answers.<question>.<field>`, for example `qualification.answers.risk.confidence`. A `noul` answer is only `{ type, noul }` and has no confidence. A `choice` answer has `choice`, `probabilities`, and `confidence`. A `score` answer has `score`, `legend`, `probabilities`, and `confidence`.
+- A valid low-confidence answer is a success. Keep thresholds in the next node: `property-match` (`gt`, `lt`) or `code-match`, with the uncertain band routed to `human-in-the-loop`. Do not invent a global threshold.
+- Do not set `retry` or `validation.retry` on a `jev` node. It retries connection errors, 408, 429, and 5xx itself (`config.maxRetries`, 0 to 3, default 2) inside `config.timeoutMs` (default 30000). A 401, a 422, or an answer that fails validation ends after one attempt.
+- The node reads the global secret `TYPESAFE_API_KEY` server-side. The key never appears in the definition, the step output, or an error. An unresolved `{{token}}` fails the step before any request.
 
 ### `swarm-script`
 

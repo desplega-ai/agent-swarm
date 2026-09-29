@@ -19,7 +19,7 @@ A workflow consists of:
 
 ### Executor Types
 
-The engine includes 12 built-in executor types:
+The engine includes 13 built-in executor types:
 
 | Executor | Description |
 |----------|-------------|
@@ -28,6 +28,7 @@ The engine includes 12 built-in executor types:
 | `agent-task` | Create and delegate a task to a swarm agent |
 | `foreach` | Fan out one agent task per array item, wait for every child, and emit one aggregate result |
 | `raw-llm` | Call an LLM directly with a prompt template |
+| `jev` | Make typed decisions (probability, choice, score) over supplied state with TypeSafe's Jev model |
 | `vcs` | Version control operations (create PR, merge, etc.) |
 | `property-match` | Route based on matching properties in step input |
 | `code-match` | Route based on a custom JavaScript expression in a sandbox |
@@ -41,6 +42,54 @@ Each executor has typed config and output schemas available via `GET /api/execut
 `swarm-script` is the durable, reusable counterpart to inline `script` nodes. In workflow definitions it accepts `scriptName`, optional `scope` (`agent` or `global`), optional `pinHash`, JSON `args`, and `timeoutMs`. The timeout defaults to `30000` ms, accepts integers from `1000` through `300000` (5 minutes), and raises the script runtime's wall-clock budget for I/O-bound work while still respecting the separate 60-second CPU-time ceiling.
 
 For `config.args`, values written as an **exact single token** such as `{{input.payload}}` preserve the resolved JSON type, so objects, arrays, numbers, and booleans reach the script as native values. If you wrap a token with surrounding text, such as `"prefix-{{input.id}}"`, interpolation falls back to string output. Raw-token resolution is scoped to the node's local interpolation context, including any explicit `inputs` mapping on that node.
+
+### Choosing a decider
+
+When a node has to decide, use the cheapest node that can decide. Agents authoring workflows apply this rule by default, so you do not need to ask for `jev`.
+
+| The decision is | Use |
+|---|---|
+| A fact: a count, PR state, flag, date, lookup, regex, or schema check | `script`, `property-match`, or `code-match` |
+| A bounded judgment: pass/fail, pick one of N, a score on a rubric, or the probability that a claim is true | `jev` |
+| Free-form generation, or findings a later node reads | `raw-llm` or `agent-task` |
+
+Jev is weak at counting. For a hybrid, count in a `script` and pass the number to `jev` as part of `state`.
+
+### Jev decisions
+
+A `jev` node sends one `state` and a map of questions to TypeSafe's Jev model and returns one validated answer per question. It needs the global `TYPESAFE_API_KEY` config value. The key is read on the server and never appears in a definition, a step output, or an error.
+
+```json
+{
+  "id": "qualify",
+  "type": "jev",
+  "inputs": { "lead": "trigger.lead" },
+  "config": {
+    "model": "jev-1.13.0",
+    "state": "{{lead}}",
+    "questions": {
+      "fit": {
+        "type": "noul",
+        "instructions": "Is this a real engineering team seeking agent workflow automation?",
+        "criteria": { "true": "A matching team with a concrete use case", "false": "Spam or no matching team" }
+      },
+      "authority": {
+        "type": "choice",
+        "instructions": "What purchasing authority does the message support?",
+        "criteria": { "buyer": "Can approve the purchase", "champion": "Influences the decision", "unknown": "Not established" }
+      }
+    },
+    "returns": { "fit": { "type": "noul" }, "authority": { "type": "choice" } }
+  },
+  "next": "gate"
+}
+```
+
+- Question types are `noul` (probability that a claim is true), `choice` (2 to 255 named options), and `score` (2 to 10 ordered levels). `returns` repeats each question id and type, and a mismatch is rejected when the workflow is saved.
+- The output is `{ model, answers, usage }`. A downstream node reads `<alias>.answers.<question>.<field>` through an `inputs` mapping. A `noul` answer is `{ type, noul }` with no confidence. `choice` and `score` answers carry `probabilities` and `confidence`.
+- A low-confidence answer is still a success. Put the threshold in the next node, such as `property-match` or `code-match`, and route the uncertain band to `human-in-the-loop`.
+- The node retries connection errors, 408, 429, and 5xx itself, up to `maxRetries` (0 to 3, default 2) within `timeoutMs` (default 30000). It never retries a 401, a 422, or an answer that fails validation. Do not set `retry` or `validation.retry` on a `jev` node.
+- An unresolved `{{token}}` fails the step before the request is sent.
 
 ### Foreach fan-out
 
