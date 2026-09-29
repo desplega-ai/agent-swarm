@@ -8,7 +8,13 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } fr
 import { unlink } from "node:fs/promises";
 import { closeDb, createAgent, createTaskExtended, getDbClient, initDb } from "../be/db";
 import { type AgentTaskRow, rowToAgentTaskSummary } from "../be/db/tasks/read";
-import { type ModelCatalogEntry, replaceModelCatalog } from "../be/model-catalog-store";
+import {
+  deleteModelCatalogOverlay,
+  type ModelCatalogEntry,
+  reloadModelsCatalog,
+  replaceModelCatalog,
+  upsertModelCatalogOverlay,
+} from "../be/model-catalog-store";
 import {
   getAgentModelTierOverrides,
   invalidateTierResolutionCatalog,
@@ -311,6 +317,31 @@ describe("latest: guardrails", () => {
     ]);
     const result = await resolveTaskModel({ ...base, model: "latest:anthropic/opus" });
     expect(result?.resolvedModel).toBe("claude-opus-5-5");
+  });
+
+  test("overlay writes and catalog reloads reach alias resolution without waiting out the cache", async () => {
+    const alias = { ...base, model: "latest:anthropic/opus@any", record: false };
+    expect((await resolveTaskModel(alias))?.resolvedModel).toBe("claude-opus-5-5");
+
+    // No invalidateTierResolutionCatalog() from here on: the store's own writes must do it.
+    await upsertModelCatalogOverlay({
+      provider: "anthropic",
+      modelId: "claude-opus-6",
+      releaseDate: daysAgo(20),
+      pricing: { input: 5, output: 25 },
+      reason: "test overlay",
+    });
+    expect((await resolveTaskModel(alias))?.resolvedModel).toBe("claude-opus-6");
+
+    await deleteModelCatalogOverlay("anthropic", "claude-opus-6");
+    expect((await resolveTaskModel(alias))?.resolvedModel).toBe("claude-opus-5-5");
+
+    await replaceModelCatalog([
+      entry("anthropic", "claude-opus-5-5", daysAgo(30)),
+      entry("anthropic", "claude-opus-7", daysAgo(5)),
+    ]);
+    await reloadModelsCatalog();
+    expect((await resolveTaskModel(alias))?.resolvedModel).toBe("claude-opus-7");
   });
 
   test("MODEL_AUTO_UPGRADE=false freezes an alias at its last resolution", async () => {

@@ -256,6 +256,12 @@ const recordHarnessSupport = route({
  * (`models.catalog.write`) are lead or operator only. Harness support (`models.harness-support.write`)
  * is a registered agent's report about its own CLI (bound to it by `callerOwnsSupportRow`) or an
  * operator correction. Dashboard users can do neither.
+ *
+ * Trust boundary: a bound identity (an `aswt_` user token or an `aseph_` session token) is honoured
+ * as is. Beyond that, the shared swarm key is the operator credential and `X-Agent-ID` is
+ * self-declared, the same model `config.ts`, `mcp-servers.ts` and `extensions.ts` use. Every
+ * worker holds that key, so this gate stops a mistaken or ordinary worker call, not a worker that
+ * chooses to drop or forge the header; that needs per-agent credentials swarm-wide.
  */
 async function ensureCatalogWriter(
   req: IncomingMessage,

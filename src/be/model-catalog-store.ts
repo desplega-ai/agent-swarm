@@ -566,12 +566,23 @@ function catalogModelToFacts(model: CatalogModel): ModelCatalogFacts {
 }
 
 let catalogLoaded = false;
+let catalogGeneration = 0;
+
+/**
+ * Bumped by every reload and stale mark, i.e. after each refresh or overlay
+ * write. Caches derived from the catalog tables (tier resolution) compare it
+ * to drop entries that predate a write, instead of waiting out their TTL.
+ */
+export function getCatalogGeneration(): number {
+  return catalogGeneration;
+}
 
 /**
  * Rebuild the in-memory catalog from `model_catalog` + overlay. Empty table →
  * vendored snapshot (with overlay rows layered on). Returns the served result.
  */
 export async function reloadModelsCatalog(): Promise<ModelsCatalogResult> {
+  catalogGeneration++;
   invalidateModelsCatalog();
   const [entries, overlays, meta] = await Promise.all([
     listModelCatalog(),
@@ -622,6 +633,7 @@ function publishRuntimeCatalog(result: ModelsCatalogResult): ModelsCatalogResult
 /** Mark the cached projection stale; the next `loadModelsCatalog()` rebuilds it. */
 export function markModelsCatalogStale(): void {
   catalogLoaded = false;
+  catalogGeneration++;
   invalidateModelsCatalog();
 }
 
