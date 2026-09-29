@@ -396,9 +396,11 @@ export default function TasksPage() {
       requestedByUserId?: string;
       limit: number;
       offset: number;
+      includeTotal: true;
     } = {
       limit: pageSize,
       offset: page * pageSize,
+      includeTotal: true,
     };
     if (statusFilter !== "all") f.status = statusFilter;
     if (agentFilter !== "all") f.agentId = agentFilter;

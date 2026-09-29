@@ -42,6 +42,18 @@ const PINS: Pin[] = [
     path: "docs-site/content/docs/(documentation)/guides/agent-fs-co-deployment.mdx",
     pattern: AGENT_FS_HELM_TAG_PATTERN,
   },
+  {
+    path: ".github/workflows/ui-e2e.yml",
+    pattern: /^([ \t]*npm i -g @desplega\.ai\/agent-fs@)(\S+)$/m,
+  },
+  {
+    path: "charts/agent-swarm/examples/values-all-workers-agent-fs.yaml",
+    pattern: AGENT_FS_HELM_TAG_PATTERN,
+  },
+  {
+    path: "DEPLOYMENT.md",
+    pattern: /^(The bundled agent-fs service uses version )(\S+)(?=\.)/m,
+  },
 ];
 
 function fail(message: string): never {

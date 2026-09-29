@@ -114,6 +114,21 @@ const AgentTaskSummarySchema = AgentTaskSchema.pick({
   totalCostUsd: true,
 });
 
+/** `/api/tasks?fields=timeline` item — mirrors `AgentTaskTimelineItem` in ../types. */
+const AgentTaskTimelineItemSchema = AgentTaskSchema.pick({
+  id: true,
+  agentId: true,
+  parentTaskId: true,
+  task: true,
+  title: true,
+  status: true,
+  createdAt: true,
+  lastUpdatedAt: true,
+  finishedAt: true,
+  peakContextTokens: true,
+  totalCostUsd: true,
+});
+
 /** Shared by cancel/pause/resume — each sends `{ success: true, task }` on success. */
 const TaskActionResultSchema = z.object({
   success: z.literal(true),
@@ -174,7 +189,7 @@ const listTasks = route({
   pattern: ["api", "tasks"],
   summary: "List tasks with filters",
   description:
-    "Returns tasks with the full `task` text replaced by a bounded `taskPreview` and completion/integration blobs dropped by default — list views only need the preview. Pass `fields=full` to restore the full `AgentTask`. Fetch a single task in full via `GET /api/tasks/{id}`.",
+    "Returns tasks with the full `task` text replaced by a bounded `taskPreview` and completion/integration blobs dropped by default — list views only need the preview. Pass `fields=full` to restore the full `AgentTask`, or `fields=timeline` for the narrow shape the dashboard timeline draws. Fetch a single task in full via `GET /api/tasks/{id}`. `total` (the filtered row count, ignoring limit/offset) is computed only with `includeTotal=true`.",
   tags: ["Tasks"],
   query: z.object({
     /** Single status, or comma-separated list (e.g. "failed,cancelled"). */
@@ -201,15 +216,25 @@ const listTasks = route({
     orderBy: z.enum(["lastUpdatedAt", "createdAt"]).optional(),
     limit: z.coerce.number().int().optional(),
     offset: z.coerce.number().int().optional(),
-    /** `full` restores the legacy shape (full `task` text + all fields); default is slim. */
-    fields: z.enum(["full", "slim"]).optional(),
+    /**
+     * `full` restores the legacy shape (full `task` text + all fields);
+     * `timeline` is the dashboard timeline's narrow shape; default is slim.
+     */
+    fields: z.enum(["full", "slim", "timeline"]).optional(),
+    /** `true` adds `total`, a filtered COUNT(*) that pagers need. Omitted by default. */
+    includeTotal: z.enum(["true", "false"]).optional(),
   }),
   responses: {
     200: {
       description: "Paginated task list",
       schema: z.object({
-        tasks: z.union([z.array(AgentTaskSchema), z.array(AgentTaskSummarySchema)]),
-        total: z.number().int(),
+        tasks: z.union([
+          z.array(AgentTaskSchema),
+          z.array(AgentTaskSummarySchema),
+          z.array(AgentTaskTimelineItemSchema),
+        ]),
+        /** Present only when the request passed `includeTotal=true`. */
+        total: z.number().int().optional(),
       }),
     },
     400: { description: "Validation error (e.g. unknown status token)" },
@@ -793,9 +818,16 @@ export async function handleTasks(
     const tasks =
       parsed.query.fields === "full"
         ? await getAllTasks(filters)
-        : await getAllTasks(filters, { slim: true });
-    const total = await getTasksCount(filters);
-    listTasks.respond(res, 200, { tasks, total });
+        : parsed.query.fields === "timeline"
+          ? await getAllTasks(filters, { fields: "timeline" })
+          : await getAllTasks(filters, { slim: true });
+    // The COUNT(*) re-scans every matching row, so only pagers pay for it.
+    if (parsed.query.includeTotal === "true") {
+      const total = await getTasksCount(filters);
+      listTasks.respond(res, 200, { tasks, total });
+    } else {
+      listTasks.respond(res, 200, { tasks });
+    }
     return true;
   }
 
