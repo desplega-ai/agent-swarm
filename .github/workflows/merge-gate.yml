@@ -10,6 +10,13 @@ on:
   # https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue#triggering-merge-group-checks-with-github-actions
   merge_group:
 
+# A new push to a PR cancels that PR's superseded gate run. merge_group runs are
+# never cancelled: each queue entry has its own gh-readonly-queue ref, and
+# cancelling one would drop the PR from the queue.
+concurrency:
+  group: merge-gate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   detect-changes:
     name: Detect Changes
