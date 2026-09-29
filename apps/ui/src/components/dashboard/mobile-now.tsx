@@ -50,17 +50,22 @@ function isUnavailable(query: SectionQuery<unknown>): boolean {
 
 export interface MobileNowViewProps {
   approvals: SectionQuery<unknown[]>;
-  running: SectionQuery<{ tasks: AgentTask[]; total: number }>;
+  running: SectionQuery<{ tasks: AgentTask[]; total?: number }>;
   queuedCount: number;
-  failed: SectionQuery<{ tasks: AgentTask[]; total: number }>;
+  failed: SectionQuery<{ tasks: AgentTask[]; total?: number }>;
   agentName: (id: string | null) => string;
   now: number;
 }
 
 export function MobileNow() {
   const approvals = useApprovalRequests({ status: "pending" });
-  const running = useTasks({ status: "in_progress", limit: 20, orderBy: "lastUpdatedAt" });
-  const { data: queued } = useTasks({ status: "pending", limit: 1 });
+  const running = useTasks({
+    status: "in_progress",
+    limit: 20,
+    orderBy: "lastUpdatedAt",
+    includeTotal: true,
+  });
+  const { data: queued } = useTasks({ status: "pending", limit: 1, includeTotal: true });
   const failed = useTasks({ status: "failed", limit: FAILURE_PAGE, orderBy: "lastUpdatedAt" });
   const { data: agents } = useAgents();
 
@@ -100,7 +105,7 @@ export function MobileNowView({
 
       <NowSection
         title="Working now"
-        count={running.data ? String(running.data.total) : undefined}
+        count={running.data ? String(running.data.total ?? running.data.tasks.length) : undefined}
         extra={queuedCount > 0 ? `${queuedCount} queued` : undefined}
         to="/tasks?status=in_progress"
       >

@@ -134,6 +134,28 @@ export class SwarmClient {
     );
   }
 
+  /** Upsert an agent-scoped script as `agentId` (the API typechecks + embeds it). */
+  async upsertAgentScript(opts: {
+    agentId: string;
+    name: string;
+    source: string;
+    description: string;
+    intent: string;
+  }): Promise<{ name: string; version: number }> {
+    return this.request<{ name: string; version: number }>(
+      "POST",
+      "/api/scripts/upsert",
+      {
+        name: opts.name,
+        source: opts.source,
+        description: opts.description,
+        intent: opts.intent,
+        scope: "agent",
+      },
+      { "X-Agent-ID": opts.agentId },
+    );
+  }
+
   /**
    * Memory search (readiness probe). The route hard-requires X-Agent-ID —
    * `agentId` is sent as that header, not in the body.
@@ -203,6 +225,35 @@ export class SwarmClient {
   async listAgents(): Promise<AgentJson[]> {
     const res = await this.request<{ agents?: Record<string, unknown>[] }>("GET", "/api/agents");
     return (res.agents ?? []).map(normalizeAgent);
+  }
+
+  /**
+   * Poll until every task matching `relevant` is terminal (quiescence), or the
+   * deadline passes. Returns the last snapshot plus the ids still open. Used by
+   * scenarios whose lead delegates or defers: the upfront task can go terminal
+   * (e.g. completed via defer-task) while the work it spawned is still running.
+   */
+  async waitForQuiescence(
+    relevant: (task: SwarmTask) => boolean,
+    opts: { deadline: number; intervalMs?: number; signal?: AbortSignal },
+  ): Promise<{ tasks: SwarmTask[]; open: string[] }> {
+    const interval = opts.intervalMs ?? 5_000;
+    let tasks: SwarmTask[] = [];
+    let open: string[] = [];
+    while (true) {
+      if (opts.signal?.aborted) throw new Error("aborted");
+      try {
+        tasks = await this.listAllTasks();
+        open = tasks
+          .filter((t) => relevant(t) && !TERMINAL_STATUSES.has(t.status))
+          .map((t) => t.id);
+        if (open.length === 0) return { tasks, open };
+      } catch {
+        // transient API blip — keep polling until the deadline
+      }
+      if (Date.now() >= opts.deadline) return { tasks, open };
+      await Bun.sleep(interval);
+    }
   }
 
   /**

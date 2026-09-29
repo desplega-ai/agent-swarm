@@ -1,10 +1,10 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { countSessions, getRootTaskChain, getTaskById, listRecentSessions } from "../be/db";
-import { getTaskSteeringFields } from "../be/steering";
-import { getTaskCitations, TaskCitationSchema } from "../be/task-citations";
+import { getTaskSteeringFieldsForTasks } from "../be/steering";
+import { getTaskCitationsForTasks, TaskCitationSchema } from "../be/task-citations";
 import { mintSessionToken, revokeSessionToken } from "../be/users";
-import { AgentTaskSchema, AgentTaskStatusSchema, SteerModeSchema } from "../types";
+import { type AgentTask, AgentTaskSchema, AgentTaskStatusSchema, SteerModeSchema } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
@@ -144,6 +144,12 @@ const listSessions = route({
      * excluded. Omit to return every session (legacy / non-UI callers).
      */
     requestedByUserId: z.string().min(1).optional(),
+    /**
+     * When present, restrict results to root tasks whose `contextKey` starts
+     * with this literal prefix. The UI contextual session panel passes its page
+     * key plus a trailing `:` (e.g. `task:ui:workflow:abc:`).
+     */
+    contextKeyPrefix: z.string().min(1).optional(),
     /** `full` restores the legacy shape (full root `AgentTask`); default is slim. */
     fields: z.enum(["full", "slim"]).optional(),
   }),
@@ -235,18 +241,20 @@ export async function handleSessions(
       source: sources,
       q: parsed.query.q,
       requestedByUserId: parsed.query.requestedByUserId,
+      contextKeyPrefix: parsed.query.contextKeyPrefix,
     };
     // List responses default to slim (root is a task summary); `?fields=full` restores it.
     const sessions =
       parsed.query.fields === "full"
         ? await listRecentSessions(baseOpts)
         : await listRecentSessions({ ...baseOpts, slim: true });
-    // Filter-aware total: same `source`/`q`/`requestedByUserId` WHERE as the
-    // list query, so the UI pager reflects the filtered result set.
+    // Filter-aware total: same WHERE as the list query, so the UI pager
+    // reflects the filtered result set.
     const total = await countSessions({
       source: sources,
       q: parsed.query.q,
       requestedByUserId: parsed.query.requestedByUserId,
+      contextKeyPrefix: parsed.query.contextKeyPrefix,
     });
     listSessions.respond(res, 200, {
       sessions,
@@ -266,20 +274,19 @@ export async function handleSessions(
       return true;
     }
     const chain = await getRootTaskChain(parsed.params.rootTaskId);
-    getSession.respond(res, 200, {
-      root: {
-        ...root,
-        ...(await getTaskSteeringFields(root)),
-        citations: await getTaskCitations(root.id),
-      },
-      chain: await Promise.all(
-        chain.map(async (task) => ({
-          ...task,
-          ...(await getTaskSteeringFields(task)),
-          citations: await getTaskCitations(task.id),
-        })),
-      ),
+    // Fixed query count regardless of chain length: one agents lookup and one
+    // citations lookup for the whole chain (chunked past 500 ids).
+    const tasks = [root, ...chain];
+    const [steering, citations] = await Promise.all([
+      getTaskSteeringFieldsForTasks(tasks),
+      getTaskCitationsForTasks(tasks.map((task) => task.id)),
+    ]);
+    const decorate = (task: AgentTask) => ({
+      ...task,
+      ...steering.get(task.id)!,
+      citations: citations.get(task.id)!,
     });
+    getSession.respond(res, 200, { root: decorate(root), chain: chain.map(decorate) });
     return true;
   }
 

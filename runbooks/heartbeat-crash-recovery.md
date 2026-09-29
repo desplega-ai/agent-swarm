@@ -16,17 +16,19 @@ Queue-pickup liveness alarm: `src/queue-stall-alarm.ts`.
 flowchart TD
   tick["Heartbeat tick (~90s)<br/>codeLevelTriage()"] --> expire["expireStaleRuntimeInstances() (§1a)<br/>multi-runtime only"]
   expire --> detect["detectAndRemediateStalledTasks()"]
-  detect --> health["checkWorkerHealth()<br/>busy ↔ idle (skips offline)"]
+  detect --> repair["repairSupersededWithoutResume()<br/>superseded, no resume child,<br/>finished 1m-24h ago → create resume<br/>+ settle dependents left on a superseded task"]
+  repair --> health["checkWorkerHealth()<br/>busy ↔ idle (skips offline)"]
   health --> cleanup["cleanupStaleResources()<br/>stale sessions (30m), reviewing,<br/>inbox, mentions, workflow runs,<br/>+ approval timeout + auto-cancel sweeps<br/>+ reaper: escalate unreclaimed pinned resumes (§3)<br/>+ escalateStarvedPoolTasks: zero-eligible-agent pool tasks (§4)"]
   cleanup --> assign["autoAssignPoolTasks()<br/>per-task: first idle worker satisfying<br/>isAgentEligibleForTask (§4) — else leave queued"]
 
-  boot["Server boot (once)"] --> reboot["runRebootSweep()<br/>in_progress claimed after boot → skip<br/>else: no session OR pre-boot stale session<br/>→ failTask + retry child<br/>(pinned to original agent when recoverable, §4)"]
+  boot["Server boot (once)"] --> reboot["runRebootSweep()<br/>in_progress claimed after boot → skip<br/>else: no session OR pre-boot stale session<br/>→ failTask + retry child<br/>(pinned to original agent when recoverable, §4)<br/>never-started dependents re-pointed to the retry"]
 ```
 
 - **Reboot sweep liveness predicate** (`runRebootSweep`, boot epoch parsed from `globalThis.__runId` = `run_<epochMs>`), evaluated per `in_progress` task in this order:
   1. **Claimed after boot → skip.** A task with `lastUpdatedAt >= bootEpoch - 5s` is skipped before any session lookup. `claimTask` / `startTask` stamp `lastUpdatedAt` at the `in_progress` transition and the API is the sole DB writer, so a post-boot value proves the claim (or a live worker's write) happened after this process started. It cannot be a pre-boot orphan. This is what keeps a task alive when its worker is still inside a slow provider spawn (opencode cold start exceeds the 5s sweep delay). If the task later goes quiet, the regular stalled-task sweep still covers it.
   2. **Session live → skip.** A session is "live, skip" if `lastHeartbeatAt >= bootEpoch - 5s`, **or** if its heartbeat is younger than `STALL_THRESHOLD_STALE_HEARTBEAT_MIN` (15 min). Workers run in their own containers and outlive an API restart, and sessions heartbeat on tool calls only, so a live worker inside a long model call has no post-boot heartbeat in the first 5s. Only a session stale by the classifier's own threshold is treated as dead → auto-fail + retry child; fresher ones are left to the stalled-task sweep.
   3. If `__runId` is missing/unparseable, both checks fall back to the legacy behavior (session exists → skip, no claim-time check). Never more aggressive than before.
+- **Reboot sweep dependents.** `failTask` normally cascade-fails every non-terminal task whose `dependsOn` names the failed task (`cascadeFailDependents`, reason `Blocked dependency <id8> was failed`). The reboot sweep calls it with `cascadeDependents: false` and settles the dependents itself once the retry decision is made: each never-started dependent (`draft`/`backlog`/`unassigned`/`offered`/`reviewing`/`pending`) has the swept id in `dependsOn` replaced by the retry child's id and waits on the retry (`task_dependency_repointed` log row). The dependent keeps its row, so agent, Slack fields, `followUpConfig`, priority and parent are unchanged. Anything still depending on the swept task afterwards — no retry was created (skip-type task, invalid affinity, a non-terminal child already existed, retry creation threw), or a dependent that already started — cascade-fails exactly as before. Already-terminal dependents are never touched. Every other `failTask` caller cascades as today.
 - **Worker side** (`src/commands/runner.ts`): the worker registers its active session (POST `/api/active-sessions`, keyed on the per-task runner session id) *before* it starts the provider spawn, and fills in the provider session id on `session_init`. So the window in which an `in_progress` task has no session row is one HTTP round trip, not the whole spawn. On spawn failure the worker fails the task and then removes the row.
 - The **boot-triage seed script** (`src/be/seed-scripts/catalog/boot-triage.ts`) mirrors this logic: it flags `in_progress` tasks that are on an offline agent OR whose session's `lastHeartbeatAt` is older than `stuckMinutes` ago (no fresh session heartbeat).
 - `autoAssignPoolTasks` and `claimTask`/`assignUnassignedTaskPending` are gated by the **routing-affinity eligibility check** (§4, `isAgentEligibleForTask`) — a pooled task tagged with a `routingAffinity` snapshot (from a resume/retry, or an explicit `requiredCapabilities` on a fresh `send-task`) can only go to a role/capability-matching agent. Untagged tasks are unaffected — assignment stays open to any idle (non-lead) worker, exactly as before. `autoAssignPoolTasks` **does** skip idle workers whose `emptyPollCount >= MAX_EMPTY_POLLS` (the poll gate) — assigning to them would just have them exit on their next poll. The filter reads `emptyPollCount` off the rows `getIdleWorkersWithCapacity()` already returns (no per-worker re-query). Note the poll gate is cleared on a genuine `waiting_for_credentials -> ready` recovery (`updateAgentCredentialState`) and on re-register, but **not** by routine post-task `ready:true` credential reports.
@@ -254,6 +256,34 @@ resume = createResumeFollowUp(parent, reason = crash_recovery | graceful_shutdow
     createTaskExtended(resume, agentId = preferredAgentId, tags = tags)
     #   agentId set  → status = pending  (PINNED to the original agent)
     #   agentId none → status = unassigned (pool — only genuinely-gone / rollback)
+# supersedeTask(resumeTaskId = null) leaves dependents waiting on parent; they settle here:
+if resume created: backfillSupersedeTaskResumeTaskId(parent, resume)   # log entry + settle(parent, resume)
+else:              settleSupersededTaskDependents(parent, null); failTask(parent, resume_creation_skipped_<reason>)
+
+settleSupersededTaskDependents(parent, resume):
+    if resume:
+        # one UPDATE per settlement: rebuilt from the row's current dependsOn,
+        # status checked at write time (concurrent settlements compose; a claim
+        # into in_progress is skipped, offered → reviewing/pending is not)
+        for d with parent in dependsOn and status in never-started:
+            dependsOn(d) = dedupe(replace parent with resume); log task_dependency_repointed
+        if any re-pointed and resume is failed/cancelled: cascadeFailDependents(resume)
+    cascadeFailDependents(parent, "superseded")   # started dependents, or all when no resume
+
+# every sweep, after the stalled-task detector:
+repairSupersededWithoutResume():
+    # supersede and resume creation are separate writes; a crash between them
+    # leaves a superseded task with no resume and nothing else reads it
+    for t in superseded tasks, not workflow steps, finishedAt in [now-24h, now-1m],
+             with no child where taskType = 'resume':
+        if no agent or resume budget exhausted or resume not created:
+            settleSupersededTaskDependents(t, null); continue      # dependents cascade-fail
+        createResumeFollowUp(t, crash_recovery); backfillSupersedeTaskResumeTaskId(t, resume)
+    # a crash after the resume exists but before the backfill leaves dependents
+    # waiting on t, and the loop above no longer sees t
+    for t in superseded tasks, finishedAt in [now-24h, now-1m], with a resume child
+             and a never-started dependent still naming t in dependsOn:
+        settleSupersededTaskDependents(t, latest resume child of t)
 
 # every sweep, inside cleanupStaleResources:
 escalateUnreclaimedResumes():
@@ -353,7 +383,7 @@ if bootEpoch and task.lastUpdatedAt >= bootEpoch - 5s: skip   # claimed after bo
 session = getActiveSessionForTask(task.id)
 if session and (bootEpoch is null or session.lastHeartbeatAt >= bootEpoch - 5s): skip
 if session and now - session.lastHeartbeatAt < STALL_THRESHOLD_STALE_HEARTBEAT_MIN: skip
-failTask(task.id)                                             # then create the retry child below
+failTask(task.id, cascadeDependents=false)                    # then create the retry child below
 
 # reboot-sweep retry child (on each auto-failed in_progress task):
 preferredAgentId = undefined
@@ -365,6 +395,15 @@ createTaskExtended(task.task, parentTaskId=task.id, agentId=preferredAgentId,
                     routingAffinity=buildRoutingAffinityFromAgent(task.agentId))
 #   agentId set  → status = pending  (PINNED — never enters the pool)
 #   agentId none → status = unassigned (pool — but still routingAffinity-gated)
+
+# dependents of the swept task (settleRebootSweptDependents, in a finally, so
+# every exit path above settles them — no retry included):
+if retryTaskId:
+    for dep in getDependentTasks(task.id) where dep.status in
+            {draft, backlog, unassigned, offered, reviewing, pending}:   # never started
+        dep.dependsOn = dep.dependsOn with task.id → retryTaskId       # same row, same id
+        log task_dependency_repointed(dep, old=task.id, new=retryTaskId)
+cascadeFailDependents(task.id, "failed")   # whatever still depends on the swept task
 
 # autoAssignPoolTasks, per heartbeat sweep — paginated pool scan (PR #954 fix):
 assignedCount, offset = 0, 0
@@ -395,6 +434,20 @@ escalateStarvedPoolTasks():
 The function dispatches `pre.task.followUp` before it creates the follow-up task. An extension can block creation or modify the description, assignee, priority, and `followUpConfig`.
 
 The resulting task also dispatches `pre.task.create` with origin `followUp`. Both extension events run before any database transaction begins.
+
+### `followUpConfig` inheritance
+
+A task's `followUpConfig` (its creator's `onCompleted` / `onFailed` / `disabled`) belongs to one piece of work, not to the thread. `createTaskExtended` copies it from the parent only when the caller passes `inheritParentFollowUpConfig: true`; an explicit `followUpConfig` always wins.
+
+| Creator | Inherits? | Why |
+|---------|-----------|-----|
+| `createResumeFollowUp` (crash recovery, graceful shutdown, `POST /api/tasks/{id}/supersede`) | Yes | Same work, new session |
+| `runRebootSweep` retry child | Yes | Same work, re-run |
+| `defer-task` wake-up (`schedule.taskType === "deferred"`) | Yes | Continues the deferred work |
+| `send-task` with `taskType: "resume"` (reroute-decision re-delegation) | Yes | Continues the crashed work |
+| `createWorkerTaskFollowUp` (Lead follow-up) | No | Would re-fire the finished task's instructions on the Lead's next delegation |
+| `send-task` without `taskType: "resume"` | No | New work |
+| Everything else with a `parentTaskId` (Slack/AgentMail/VCS thread replies, steering promotion, reroute/pool-starvation decisions, `POST /tasks`, scripts) | No | New work in the same thread |
 
 ---
 
@@ -435,6 +488,8 @@ Rollback switches accept `0`/`false` interchangeably (both parse through
 | `autoAssignPoolTasks` pool-scan hard cap (rows/sweep) | 500 | `HEARTBEAT_POOL_SCAN_CAP` |
 | `getUnassignedTaskIdsForAgent` eligibility-scan page size | 25 | `ELIGIBILITY_SCAN_BATCH_SIZE` |
 | `getUnassignedTaskIdsForAgent` eligibility-scan hard cap (rows/call) | 500 | `ELIGIBILITY_SCAN_CAP` |
+| `HEARTBEAT.md` checklist tick (restart required; `0` = recurring tick off, boot triage still runs) | 30 min | `HEARTBEAT_CHECKLIST_INTERVAL_MS` |
+| Checklist tick + boot triage kill switch (restart required; `true`/`1` = off, `false`/`0` = on) | off | `HEARTBEAT_CHECKLIST_DISABLE` |
 
 ---
 

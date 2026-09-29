@@ -12,8 +12,21 @@ on:
       - "package.json"
       - "bunfig.toml"
       - ".github/workflows/ui-e2e.yml"
+  # Same paths as pull_request: an unfiltered push to main ran the suite on every
+  # merge and most runs were cancelled by the next one. The nightly schedule still
+  # covers main in full.
   push:
     branches: [main]
+    paths:
+      - "apps/ui/**"
+      - "packages/ui-e2e/**"
+      - "scripts/e2e/**"
+      - "src/http/**"
+      - "src/be/**"
+      - "bun.lock"
+      - "package.json"
+      - "bunfig.toml"
+      - ".github/workflows/ui-e2e.yml"
   # Runs on main and is reported to the tracker as a nightly run.
   schedule:
     - cron: "0 3 * * *"
@@ -229,7 +242,7 @@ jobs:
           RUN_SHA: ${{ steps.context.outputs.sha }}
         run: |
           set -euo pipefail
-          npm i -g @desplega.ai/agent-fs@0.13.10
+          npm i -g @desplega.ai/agent-fs@0.14.0
           node --experimental-strip-types reporter/publish-artifacts.ts \
             --results all-results \
             --prefix "e2e/desplega-ai__agent-swarm/$RUN_TARGET/$RUN_SHA" \

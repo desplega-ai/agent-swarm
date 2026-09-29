@@ -753,7 +753,7 @@ describe("Workflow HTTP API v2", () => {
       // List all runs
       const res1 = await fetch(`${baseUrl}/api/workflows/${workflow.id}/runs`, { headers });
       expect(res1.status).toBe(200);
-      const allRuns = (await res1.json()) as WorkflowRun[];
+      const allRuns = ((await res1.json()) as { runs: WorkflowRun[] }).runs;
       expect(allRuns.length).toBeGreaterThanOrEqual(1);
 
       // Filter by status — use a status that likely doesn't match
@@ -761,14 +761,14 @@ describe("Workflow HTTP API v2", () => {
         headers,
       });
       expect(res2.status).toBe(200);
-      const filteredRuns = (await res2.json()) as WorkflowRun[];
+      const filteredRuns = ((await res2.json()) as { runs: WorkflowRun[] }).runs;
       // All returned runs should have the requested status
       for (const run of filteredRuns) {
         expect(run.status).toBe("waiting");
       }
     });
 
-    test("supports deterministic limit/offset pages while preserving the omitted legacy shape", async () => {
+    test("supports deterministic limit/offset pages", async () => {
       const workflow = await createTestWorkflow();
       const runIds = Array.from({ length: 5 }, () => crypto.randomUUID());
       const statuses = ["running", "failed", "running", "failed", "running"] as const;
@@ -782,11 +782,11 @@ describe("Workflow HTTP API v2", () => {
         ]);
       }
 
-      const legacyRes = await fetch(`${baseUrl}/api/workflows/${workflow.id}/runs`, { headers });
-      expect(legacyRes.status).toBe(200);
-      const legacyBody = (await legacyRes.json()) as WorkflowRun[];
-      expect(Array.isArray(legacyBody)).toBe(true);
-      expect(legacyBody.map((run) => run.id)).toEqual([...runIds].reverse());
+      const defaultRes = await fetch(`${baseUrl}/api/workflows/${workflow.id}/runs`, { headers });
+      expect(defaultRes.status).toBe(200);
+      const defaultBody = (await defaultRes.json()) as { runs: WorkflowRun[]; page: unknown };
+      expect(defaultBody.runs.map((run) => run.id)).toEqual([...runIds].reverse());
+      expect(defaultBody.page).toEqual({ limit: 50, offset: 0, total: 5, hasMore: false });
 
       const pageRes = await fetch(`${baseUrl}/api/workflows/${workflow.id}/runs?limit=2&offset=1`, {
         headers,
@@ -827,6 +827,97 @@ describe("Workflow HTTP API v2", () => {
         headers,
       });
       expect(invalidRes.status).toBe(400);
+    });
+
+    test("caps an unpaged request at 50 runs and pages through the rest", async () => {
+      const workflow = await createTestWorkflow();
+      const total = 53;
+      for (let index = 0; index < total; index++) {
+        const id = crypto.randomUUID();
+        await createWorkflowRun({ id, workflowId: workflow.id });
+        await getDbClient().run("UPDATE workflow_runs SET startedAt = ? WHERE id = ?", [
+          new Date(Date.UTC(2026, 0, 1, 0, 0, index)).toISOString(),
+          id,
+        ]);
+      }
+
+      const first = (await (
+        await fetch(`${baseUrl}/api/workflows/${workflow.id}/runs`, { headers })
+      ).json()) as {
+        runs: WorkflowRun[];
+        page: {
+          limit: number;
+          offset: number;
+          total: number;
+          hasMore: boolean;
+          nextOffset?: number;
+        };
+      };
+      expect(first.runs).toHaveLength(50);
+      expect(first.page).toEqual({ limit: 50, offset: 0, total, hasMore: true, nextOffset: 50 });
+
+      const second = (await (
+        await fetch(
+          `${baseUrl}/api/workflows/${workflow.id}/runs?offset=${first.page.nextOffset}`,
+          {
+            headers,
+          },
+        )
+      ).json()) as { runs: WorkflowRun[]; page: { hasMore: boolean } };
+      expect(second.runs).toHaveLength(3);
+      expect(second.page.hasMore).toBe(false);
+      expect(new Set([...first.runs, ...second.runs].map((run) => run.id)).size).toBe(total);
+    });
+
+    test("list rows carry triggerData but not context; the detail route serves context", async () => {
+      const workflow = await createTestWorkflow();
+      const run = await createWorkflowRun({
+        id: crypto.randomUUID(),
+        workflowId: workflow.id,
+        triggerData: { topic: "runs" },
+      });
+      await updateWorkflowRun(run.id, { context: { nodeOutput: "x".repeat(50_000) } });
+
+      const body = (await (
+        await fetch(`${baseUrl}/api/workflows/${workflow.id}/runs`, { headers })
+      ).json()) as { runs: Array<Record<string, unknown>> };
+      expect(body.runs).toHaveLength(1);
+      expect(body.runs[0]!.id).toBe(run.id);
+      expect(body.runs[0]!.triggerData).toEqual({ topic: "runs" });
+      expect("context" in body.runs[0]!).toBe(false);
+
+      const detail = (await (
+        await fetch(`${baseUrl}/api/workflow-runs/${run.id}`, { headers })
+      ).json()) as { run: WorkflowRun };
+      expect(detail.run.context).toEqual({ nodeOutput: "x".repeat(50_000) });
+    });
+
+    test("a run page and its count read from the workflow indexes without a sort or cross-workflow scan", async () => {
+      const explain = async (sql: string, params: string[]) =>
+        (await getDbClient().query<{ detail: string }>(`EXPLAIN QUERY PLAN ${sql}`, params))
+          .map((row) => row.detail)
+          .join("\n");
+      const workflowId = crypto.randomUUID();
+
+      const page = await explain(
+        "SELECT id FROM workflow_runs WHERE workflowId = ? ORDER BY startedAt DESC, id DESC LIMIT 50",
+        [workflowId],
+      );
+      expect(page).toContain("idx_workflow_runs_workflow_started");
+      expect(page).not.toContain("USE TEMP B-TREE");
+
+      const filtered = await explain(
+        "SELECT id FROM workflow_runs WHERE workflowId = ? AND status = ? ORDER BY startedAt DESC, id DESC LIMIT 50",
+        [workflowId, "failed"],
+      );
+      expect(filtered).toContain("idx_workflow_runs_workflow_status_started");
+      expect(filtered).not.toContain("USE TEMP B-TREE");
+
+      const count = await explain(
+        "SELECT COUNT(*) FROM workflow_runs WHERE workflowId = ? AND status = ?",
+        [workflowId, "failed"],
+      );
+      expect(count).toContain("COVERING INDEX idx_workflow_runs_workflow_status_started");
     });
 
     test("MCP run listing defaults to bounded slim rows and preserves an explicit full-row opt-in", async () => {

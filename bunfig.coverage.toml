@@ -1,0 +1,9 @@
+# Separate from bunfig.toml because its coverage=false setting overrides the
+# CLI flag. Keep the root test setup and exclusions aligned with bunfig.toml.
+[test]
+coverage = true
+coverageReporter = ["lcov"]
+coverageDir = "coverage"
+maxConcurrency = 1
+preload = ["./src/tests/preload.ts"]
+pathIgnorePatterns = ["apps/evals/**", "packages/ui-e2e/**"]

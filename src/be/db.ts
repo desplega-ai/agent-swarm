@@ -154,12 +154,14 @@ import {
   reservedRoleViolation,
   rowToAgent,
 } from "./db/agents";
+import { type ApprovalRequestListFilters, approvalRequestListClause } from "./db/approvals";
 import {
   computeContentHash,
   createContextVersion,
   getLatestContextVersion,
 } from "./db/context-versions";
 import { getDb, getDbClient } from "./db/runtime";
+import { classifyTaskHumanFree, reclassifyTaskHumanFree } from "./db/tasks/human-free";
 import {
   type AgentTaskRow,
   configureTaskReadDependencies,
@@ -186,6 +188,7 @@ export {
   getAgentById,
   getAgentDailyTaskCounts,
   getAgentHarnessProviders,
+  getAgentStatusCounts,
   getAllAgents,
   getLeadAgent,
   getRemainingCapacity,
@@ -211,6 +214,7 @@ export {
   updateAgentStatus,
   updateAgentStatusFromCapacity,
 } from "./db/agents";
+export { type ApprovalRequestSummary, listApprovalRequestSummaries } from "./db/approvals";
 export {
   computeContentHash,
   createContextVersion,
@@ -257,6 +261,8 @@ export {
   getPendingSlackRelayTasks,
   getRecentlyFinishedWorkerTasks,
   getSlackTasksMissingTree,
+  getSupersededTasksWithoutResume,
+  getSupersededTasksWithUnsettledDependents,
   getTaskById,
   getTaskStats,
   getTasksByAgentId,
@@ -288,6 +294,7 @@ export {
   pauseTask,
   resetOrphanedInProgressTasksForAgent,
   resumeTask,
+  settleSupersededTaskDependents,
   startTask,
   supersedeTask,
   updateTaskClaudeSessionId,
@@ -319,9 +326,13 @@ type TaskTelemetryContext = {
   harnessVersion?: string;
 };
 
+/** LIKE pattern matching strings that start with `prefix` literally (use with `ESCAPE '\\'`). */
+function literalPrefixPattern(prefix: string): string {
+  return `${prefix.replace(/[\\%_]/g, "\\$&")}%`;
+}
+
 function assetKeyPrefixPattern(input: string): string {
-  const canonical = normalizeAssetKey(input);
-  return `${canonical.replace(/[\\%_]/g, "\\$&")}%`;
+  return literalPrefixPattern(normalizeAssetKey(input));
 }
 
 function emitTaskLifecycleTelemetryAfterCommit(
@@ -2487,7 +2498,15 @@ export async function createTaskExtended(
       if (parent.contextKey && !options.contextKey) {
         options.contextKey = parent.contextKey;
       }
-      if (parent.followUpConfig && !options.followUpConfig) {
+      // followUpConfig is opt-in: only a continuation of the same work carries
+      // the creator's onCompleted/onFailed forward. Lead follow-ups, new
+      // delegations and thread replies all pass parentTaskId too, and
+      // inheriting there spread one task's instructions down the thread.
+      if (
+        parent.followUpConfig &&
+        !options.followUpConfig &&
+        options.inheritParentFollowUpConfig === true
+      ) {
         options.followUpConfig = parent.followUpConfig;
       }
       if (parent.routingAffinityInvalid && options.inheritParentRoutingAffinity !== false) {
@@ -2688,6 +2707,16 @@ export async function createTaskExtended(
       logRoutingDecisionFailure(id, "capture", error);
     }
 
+    const isHumanFree = await classifyTaskHumanFree({
+      taskType: options?.taskType,
+      tags: JSON.stringify(options?.tags ?? []),
+      source: options?.source ?? "mcp",
+      requestedByUserId: options?.requestedByUserId,
+      requestedByUserIdInherited,
+      parentTaskId: options?.parentTaskId,
+      workflowRunId: options?.workflowRunId,
+    });
+
     const inserted = await getDbClient().get<AgentTaskRow>(
       `INSERT INTO agent_tasks (
         id, "key", agentId, creatorAgentId, task, status, source, routing_reason, routing_source, routing_note,
@@ -2697,8 +2726,8 @@ export async function createTaskExtended(
         vcsInstallationId, vcsNodeId,
         agentmailInboxId, agentmailMessageId, agentmailThreadId,
         mentionMessageId, mentionChannelId, dir, parentTaskId, model, modelTier, effort, scheduleId,
-        workflowRunId, workflowRunStepId, outputSchema, followUpConfig, requestedByUserId, requestedByUserIdInherited, contextKey, routingAffinity, swarmVersion, createdAt, lastUpdatedAt, created_by, updated_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+        workflowRunId, workflowRunStepId, outputSchema, followUpConfig, requestedByUserId, requestedByUserIdInherited, contextKey, routingAffinity, swarmVersion, createdAt, lastUpdatedAt, created_by, updated_by, isHumanFree
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
       [
         id,
         assetKey,
@@ -2753,6 +2782,7 @@ export async function createTaskExtended(
         now,
         auditUserId,
         auditUserId,
+        isHumanFree ? 1 : 0,
       ],
     );
     if (!inserted) throw new Error("Failed to create task");
@@ -4878,60 +4908,12 @@ export interface SessionCostByUserRow {
 /** `opts.userId` sentinel selecting spend with no human requester. */
 export const UNATTRIBUTED_USER_ID = "unattributed";
 
-// Structurally-human-free tasks and their descendants. An explicitly supplied
-// requester is a human handoff and stops propagation; a requester copied from
-// the parent does not.
-const HUMAN_FREE_TASKS_CTE = `human_free_tasks(id) AS (
-        SELECT task.id
-        FROM agent_tasks task
-        LEFT JOIN agent_tasks parent ON parent.id = task.parentTaskId
-        WHERE COALESCE(task.taskType, '') IN ('heartbeat', 'heartbeat-checklist', 'boot-triage')
-          OR COALESCE(task.tags, '[]') LIKE '%"heartbeat"%'
-          OR (COALESCE(task.source, '') = 'schedule' AND task.requestedByUserId IS NULL)
-          OR (
-            task.parentTaskId IS NULL
-            AND COALESCE(task.source, '') = 'workflow'
-            AND task.requestedByUserId IS NULL
-            AND EXISTS (
-              SELECT 1
-              FROM workflow_runs run
-              WHERE run.id = task.workflowRunId
-                AND run.triggerType = 'schedule'
-                AND run.created_by IS NULL
-            )
-          )
-          OR (
-            COALESCE(task.source, '') = 'system'
-            AND parent.id IS NOT NULL
-            AND parent.requestedByUserId IS NULL
-          )
-
-        UNION
-
-        SELECT child.id
-        FROM agent_tasks child
-        JOIN human_free_tasks parent ON child.parentTaskId = parent.id
-        WHERE child.requestedByUserId IS NULL
-          OR child.requestedByUserIdInherited = 1
-      )`;
-/** True on rows joined through `human_free_tasks hf` (see `getSessionCostSummary`). */
-const HUMAN_FREE_SQL = "hf.id IS NOT NULL";
-const ROOT_HUMAN_FREE_SQL = `(
-        COALESCE(t.taskType, '') IN ('heartbeat', 'heartbeat-checklist', 'boot-triage')
-        OR COALESCE(t.tags, '[]') LIKE '%"heartbeat"%'
-        OR (COALESCE(t.source, '') = 'schedule' AND t.requestedByUserId IS NULL)
-        OR (
-          COALESCE(t.source, '') = 'workflow'
-          AND t.requestedByUserId IS NULL
-          AND EXISTS (
-            SELECT 1
-            FROM workflow_runs run
-            WHERE run.id = t.workflowRunId
-              AND run.triggerType = 'schedule'
-              AND run.created_by IS NULL
-          )
-        )
-      )`;
+/**
+ * True for a session whose task is structurally human-free (`isHumanFree`, set
+ * when the task is created; rule in `src/be/db/tasks/human-free.ts`). A session
+ * with no task row is not human-free.
+ */
+const HUMAN_FREE_SQL = "(COALESCE(t.isHumanFree, 0) = 1)";
 
 export async function getSessionCostSummary(opts: {
   startDate?: string;
@@ -4951,19 +4933,15 @@ export async function getSessionCostSummary(opts: {
   // re-attributed after the fact, so the human requester is resolved by joining
   // through the task (same shape as `getDailySpendForUser`). Every column is
   // `sc.`-qualified because `createdAt`/`agentId` exist on both sides.
-  const from = "FROM session_costs sc LEFT JOIN agent_tasks t ON t.id = sc.taskId";
-  // One join marks the sessions of structurally-human-free tasks (`hf.id` set).
-  // The CTE holds each task id once, so the join never duplicates a session.
-  const fromHf = `${from} LEFT JOIN human_free_tasks hf ON hf.id = t.id`;
+  // INDEXED BY: without ANALYZE statistics (production has none) the planner
+  // probes tasks through the primary key and reads each full row, which follows
+  // the task's overflow pages. The covering index answers the same probe from
+  // the index alone (migration 182).
+  const from =
+    "FROM session_costs sc LEFT JOIN agent_tasks t INDEXED BY idx_agent_tasks_usage_cover ON t.id = sc.taskId";
+  // Only a user filter reads the task, and the join adds no rows (task id is unique).
+  const agentFrom = opts.userId === undefined ? "FROM session_costs sc" : from;
 
-  // Structurally-human-free: the swarm maintaining itself, with no human
-  // requester by construction — heartbeat/boot-triage tasks, scheduled runs
-  // without a human creator (including workflow roots launched by such a
-  // schedule), and `source='system'` follow-ups whose parent itself has no
-  // human requester. That classification propagates through descendants while
-  // they remain unattributed, so autonomous fan-out cannot leak back into the
-  // denominator. An explicitly attributed child is an independent handoff and
-  // stops propagation down that branch.
   const conditions: string[] = [];
   const params: string[] = [];
 
@@ -4987,11 +4965,6 @@ export async function getSessionCostSummary(opts: {
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  // Only a user filter makes the daily and per-agent breakdowns classify rows.
-  // Without one they skip the CTE, which scans every task.
-  const classify = opts.userId !== undefined;
-  const withHf = classify ? `WITH RECURSIVE ${HUMAN_FREE_TASKS_CTE}` : "";
-  const scopedFrom = classify ? fromHf : from;
   const subscriptionSql = `t.credentialKeyType IN (${SUBSCRIPTION_KEY_TYPES.map((k) => `'${k}'`).join(", ")})`;
 
   // Totals
@@ -5011,8 +4984,7 @@ export async function getSessionCostSummary(opts: {
   };
 
   const totalsRow = await getDbClient().get<TotalsRow>(
-    `WITH RECURSIVE ${HUMAN_FREE_TASKS_CTE}
-      SELECT
+    `SELECT
         COALESCE(SUM(sc.totalCostUsd), 0) as totalCostUsd,
         COALESCE(SUM(sc.inputTokens), 0) as totalInputTokens,
         COALESCE(SUM(sc.outputTokens), 0) as totalOutputTokens,
@@ -5029,7 +5001,7 @@ export async function getSessionCostSummary(opts: {
         COUNT(DISTINCT CASE WHEN ${HUMAN_FREE_SQL} THEN t.id END) as excludedTaskCount,
         COALESCE(SUM(CASE WHEN ${subscriptionSql}
           THEN sc.totalCostUsd ELSE 0 END), 0) as subscriptionCostUsd
-      ${fromHf} ${where}`,
+      ${from} ${where}`,
     params,
   );
 
@@ -5067,8 +5039,7 @@ export async function getSessionCostSummary(opts: {
       sessions: number;
       subscriptionCostUsd: number;
     }>(
-      `${withHf}
-        SELECT
+      `SELECT
           DATE(sc.createdAt) as date,
           COALESCE(SUM(sc.totalCostUsd), 0) as costUsd,
           COALESCE(SUM(sc.inputTokens), 0) as inputTokens,
@@ -5076,7 +5047,7 @@ export async function getSessionCostSummary(opts: {
           COUNT(*) as sessions,
           COALESCE(SUM(CASE WHEN ${subscriptionSql} THEN sc.totalCostUsd ELSE 0 END), 0)
             as subscriptionCostUsd
-        ${scopedFrom} ${where}
+        ${from} ${where}
         GROUP BY DATE(sc.createdAt)
         ORDER BY date ASC`,
       params,
@@ -5094,15 +5065,14 @@ export async function getSessionCostSummary(opts: {
       sessions: number;
       durationMs: number;
     }>(
-      `${withHf}
-        SELECT
+      `SELECT
           sc.agentId as agentId,
           COALESCE(SUM(sc.totalCostUsd), 0) as costUsd,
           COALESCE(SUM(sc.inputTokens), 0) as inputTokens,
           COALESCE(SUM(sc.outputTokens), 0) as outputTokens,
           COUNT(*) as sessions,
           COALESCE(SUM(sc.durationMs), 0) as durationMs
-        ${scopedFrom} ${where}
+        ${agentFrom} ${where}
         GROUP BY sc.agentId
         ORDER BY costUsd DESC`,
       params,
@@ -5114,15 +5084,14 @@ export async function getSessionCostSummary(opts: {
   let byUser: SessionCostByUserRow[] = [];
   if (groupBy === "user" || groupBy === "both") {
     byUser = await getDbClient().query<SessionCostByUserRow>(
-      `WITH RECURSIVE ${HUMAN_FREE_TASKS_CTE}
-        SELECT
+      `SELECT
           CASE WHEN ${HUMAN_FREE_SQL} THEN NULL ELSE t.requestedByUserId END as userId,
           COALESCE(SUM(sc.totalCostUsd), 0) as costUsd,
           COALESCE(SUM(sc.inputTokens), 0) as inputTokens,
           COALESCE(SUM(sc.outputTokens), 0) as outputTokens,
           COUNT(DISTINCT sc.taskId) as tasks,
           COALESCE(SUM(sc.durationMs), 0) as durationMs
-        ${fromHf} ${where}
+        ${from} ${where}
         GROUP BY CASE WHEN ${HUMAN_FREE_SQL} THEN NULL ELSE t.requestedByUserId END
         ORDER BY costUsd DESC`,
       params,
@@ -5136,8 +5105,7 @@ export async function getSessionCostSummary(opts: {
       "name" | "subscription" | "plan" | "planSource"
     >;
     const rows = await getDbClient().query<CredentialRow>(
-      `${withHf}
-        SELECT
+      `SELECT
           t.credentialKeyType as keyType,
           t.credentialKeySuffix as keySuffix,
           COALESCE(SUM(sc.totalCostUsd), 0) as costUsd,
@@ -5146,7 +5114,7 @@ export async function getSessionCostSummary(opts: {
           COUNT(*) as sessions,
           MIN(sc.createdAt) as firstSessionAt,
           MAX(sc.createdAt) as lastSessionAt
-        ${scopedFrom} ${where}
+        ${from} ${where}
         GROUP BY t.credentialKeyType, t.credentialKeySuffix
         ORDER BY costUsd DESC`,
       params,
@@ -5208,18 +5176,6 @@ async function getCredentialLabels(): Promise<
   return labels;
 }
 
-/**
- * Changes when a session cost or a task is inserted. Part of the usage report
- * cache key (`src/http/usage-cache.ts`). Reads two rowid maxima, so it is cheap.
- */
-export async function getUsageDataVersion(): Promise<string> {
-  const row = await getDbClient().get<{ version: string }>(
-    `SELECT COALESCE((SELECT MAX(rowid) FROM session_costs), 0) || ':' ||
-            COALESCE((SELECT MAX(rowid) FROM agent_tasks), 0) as version`,
-  );
-  return row?.version ?? "0:0";
-}
-
 // --- Per-person attribution (four-metric view) ---
 
 export interface AttributionByPersonRow {
@@ -5250,7 +5206,7 @@ export interface AttributionByPersonRow {
  * a composite score. Scope is root tasks (`problemsInitiated`/`problemsShipped`)
  * or the person's entire task tree (`*Reached`); `requestedByUserId IS NULL`
  * (autonomous work) and structurally-human-free rows with a stale/inherited
- * requester (see `HUMAN_FREE_SQL` in `getSessionCostSummary`) are excluded —
+ * requester (`agent_tasks.isHumanFree`, see `src/be/db/tasks/human-free.ts`) are excluded —
  * neither belongs to a person.
  *
  * "Problems shipped" detection walks each root's full task tree, preferring a
@@ -5294,18 +5250,20 @@ export async function getAttributionByPerson(opts: {
 
   type RootRow = { userId: string; initiated: number; shipped: number };
   const rootRows = await getDbClient().query<RootRow>(
-    `WITH RECURSIVE selected_roots(id, requestedByUserId, status, output) AS (
-        SELECT t.id, t.requestedByUserId, t.status, t.output
+    `WITH RECURSIVE selected_roots(id, requestedByUserId, status) AS (
+        SELECT t.id, t.requestedByUserId, t.status
         FROM agent_tasks t
-        ${where} AND t.parentTaskId IS NULL AND NOT ${ROOT_HUMAN_FREE_SQL}
+        ${where} AND t.parentTaskId IS NULL AND t.isHumanFree = 0
       ),
-      task_tree(rootId, taskId, output) AS (
-        SELECT id, id, output
+      -- Ids only: carrying each descendant's \`output\` through the recursion copied
+      -- every task's text into the queue. The output fallback below reads it by id.
+      task_tree(rootId, taskId) AS (
+        SELECT id, id
         FROM selected_roots
 
         UNION ALL
 
-        SELECT tree.rootId, child.id, child.output
+        SELECT tree.rootId, child.id
         FROM agent_tasks child
         JOIN task_tree tree ON child.parentTaskId = tree.taskId
       ),
@@ -5338,8 +5296,11 @@ export async function getAttributionByPerson(opts: {
 
         SELECT tree.rootId
         FROM task_tree tree
-        WHERE tree.output LIKE '%github.com/%/pull/%'
-           OR tree.output LIKE '%/-/merge_requests/%'
+        -- CROSS JOIN pins the order (tree outer, task by id). Left to itself the
+        -- planner scans every task's output and probes the tree instead.
+        CROSS JOIN agent_tasks described ON described.id = tree.taskId
+        WHERE described.output LIKE '%github.com/%/pull/%'
+           OR described.output LIKE '%/-/merge_requests/%'
       )
       SELECT
         t.requestedByUserId as userId,
@@ -5358,65 +5319,13 @@ export async function getAttributionByPerson(opts: {
     surfacesReached: number;
   };
   const reachRows = await getDbClient().query<ReachRow>(
-    `WITH RECURSIVE report_tasks AS (
-        -- Only the columns read below: a task row carries its full prompt and output.
-        SELECT t.id, t.agentId, t.vcsRepo, t.source, t.parentTaskId, t.requestedByUserId,
-          t.requestedByUserIdInherited, t.taskType, t.tags, t.workflowRunId
-        FROM agent_tasks t
-        ${where}
-      ),
-      task_ancestry(
-        taskId, id, parentTaskId, requestedByUserId, requestedByUserIdInherited,
-        taskType, tags, source, workflowRunId
-      ) AS (
-        SELECT
-          id, id, parentTaskId, requestedByUserId, requestedByUserIdInherited,
-          taskType, tags, source, workflowRunId
-        FROM report_tasks
-
-        UNION ALL
-
-        SELECT
-          child.taskId, parent.id, parent.parentTaskId, parent.requestedByUserId,
-          parent.requestedByUserIdInherited, parent.taskType, parent.tags,
-          parent.source, parent.workflowRunId
-        FROM agent_tasks parent
-        JOIN task_ancestry child ON parent.id = child.parentTaskId
-        WHERE child.requestedByUserId IS NULL
-          OR child.requestedByUserIdInherited = 1
-      ),
-      human_free_report_tasks(id) AS (
-        SELECT DISTINCT ancestor.taskId
-        FROM task_ancestry ancestor
-        LEFT JOIN agent_tasks parent ON parent.id = ancestor.parentTaskId
-        WHERE COALESCE(ancestor.taskType, '') IN ('heartbeat', 'heartbeat-checklist', 'boot-triage')
-          OR COALESCE(ancestor.tags, '[]') LIKE '%"heartbeat"%'
-          OR (COALESCE(ancestor.source, '') = 'schedule' AND ancestor.requestedByUserId IS NULL)
-          OR (
-            ancestor.parentTaskId IS NULL
-            AND COALESCE(ancestor.source, '') = 'workflow'
-            AND ancestor.requestedByUserId IS NULL
-            AND EXISTS (
-              SELECT 1
-              FROM workflow_runs run
-              WHERE run.id = ancestor.workflowRunId
-                AND run.triggerType = 'schedule'
-                AND run.created_by IS NULL
-            )
-          )
-          OR (
-            COALESCE(ancestor.source, '') = 'system'
-            AND parent.id IS NOT NULL
-            AND parent.requestedByUserId IS NULL
-          )
-      )
-      SELECT
+    `SELECT
         t.requestedByUserId as userId,
         COUNT(DISTINCT t.agentId) as agentsReached,
         COUNT(DISTINCT t.vcsRepo) as reposReached,
         COUNT(DISTINCT t.source) as surfacesReached
-      FROM report_tasks t
-      WHERE NOT EXISTS (SELECT 1 FROM human_free_report_tasks WHERE id = t.id)
+      FROM agent_tasks t
+      ${where} AND t.isHumanFree = 0
       GROUP BY t.requestedByUserId`,
     params,
   );
@@ -7581,7 +7490,19 @@ export async function updateWorkflow(
 }
 
 export async function deleteWorkflow(id: string, source?: "api" | "mcp"): Promise<boolean> {
+  // One transaction: the stored human-free flags must never lag the deleted runs
+  // (a scheduled workflow root is human-free only while its run row exists).
+  return await getDbClient().transaction(() => deleteWorkflowRows(id, source));
+}
+
+async function deleteWorkflowRows(id: string, source?: "api" | "mcp"): Promise<boolean> {
   const client = getDbClient();
+  const linkedTaskIds = (
+    await client.query<{ id: string }>(
+      `SELECT id FROM agent_tasks WHERE workflowRunId IN (SELECT id FROM workflow_runs WHERE workflowId = ?)`,
+      [id],
+    )
+  ).map((row) => row.id);
   // Cascade delete in FK-safe order:
   // 1. Unlink agent_tasks (they reference steps and runs)
   await client.run(
@@ -7595,6 +7516,7 @@ export async function deleteWorkflow(id: string, source?: "api" | "mcp"): Promis
   );
   // 3. Delete runs (they reference workflow)
   await client.run("DELETE FROM workflow_runs WHERE workflowId = ?", [id]);
+  await reclassifyTaskHumanFree(linkedTaskIds);
   // 4. Delete workflow
   const result = await client.run("DELETE FROM workflows WHERE id = ?", [id]);
   const deleted = result.changes > 0;
@@ -7635,7 +7557,8 @@ type WorkflowRunRow = {
   status: string;
   triggerType: string;
   triggerData: string | null;
-  context: string | null;
+  /** Absent from list rows: see `WORKFLOW_RUN_SUMMARY_COLUMNS`. */
+  context?: string | null;
   error: string | null;
   created_by: string | null;
   startedAt: string;
@@ -7763,7 +7686,17 @@ export type WorkflowRunListOptions = {
   status?: WorkflowRunStatus;
   limit?: number;
   offset?: number;
+  /**
+   * Read the run `context`. Off by default: it is the one large column, and
+   * `getWorkflowRun` serves it for a single run.
+   */
+  includeContext?: boolean;
 };
+
+// Everything but `context`. `triggerData` stays: it is small, and stored
+// scripts read it off list rows (dedupe by trigger, failure reports).
+const WORKFLOW_RUN_SUMMARY_COLUMNS =
+  "id, workflowId, status, triggerType, triggerData, error, created_by, startedAt, lastUpdatedAt, finishedAt";
 
 export type WorkflowRunPage = {
   runs: WorkflowRun[];
@@ -7796,8 +7729,9 @@ export async function listWorkflowRuns(
     params.push(options.offset);
   }
 
+  const columns = options.includeContext ? "*" : WORKFLOW_RUN_SUMMARY_COLUMNS;
   const rows = await getDbClient().query<WorkflowRunRow>(
-    `SELECT * FROM workflow_runs
+    `SELECT ${columns} FROM workflow_runs
        WHERE ${conditions.join(" AND ")}
        ORDER BY startedAt DESC, id DESC${pagination}`,
     params,
@@ -7825,7 +7759,7 @@ export async function countWorkflowRuns(
 export async function listWorkflowRunsPage(
   workflowId: string,
   options: Required<Pick<WorkflowRunListOptions, "limit" | "offset">> &
-    Pick<WorkflowRunListOptions, "status">,
+    Pick<WorkflowRunListOptions, "status" | "includeContext">,
 ): Promise<WorkflowRunPage> {
   const runs = await listWorkflowRuns(workflowId, options);
   const total = await countWorkflowRuns(workflowId, { status: options.status });
@@ -8057,11 +7991,13 @@ export async function getLastRunStart(workflowId: string): Promise<WorkflowRun |
 export async function getRetryableSteps(): Promise<WorkflowRunStep[]> {
   const now = new Date().toISOString();
   const rows = await getDbClient().query<WorkflowRunStepRow>(
-    `SELECT * FROM workflow_run_steps
-       WHERE status = 'failed'
-         AND nextRetryAt IS NOT NULL
-         AND nextRetryAt <= ?
-       ORDER BY nextRetryAt ASC`,
+    `SELECT s.* FROM workflow_run_steps s
+       JOIN workflow_runs r ON r.id = s.runId
+       WHERE s.status = 'failed'
+         AND s.nextRetryAt IS NOT NULL
+         AND s.nextRetryAt <= ?
+         AND r.status IN ('running', 'waiting', 'failed')
+       ORDER BY s.nextRetryAt ASC`,
     [now],
   );
   return rows.map(rowToWorkflowRunStep);
@@ -8113,6 +8049,37 @@ export async function getLatestStepForNode(
     [runId, nodeId],
   );
   return row ? rowToWorkflowRunStep(row) : null;
+}
+
+/**
+ * The node's latest step when it already covers the current predecessor
+ * completions: it is running, waiting or completed, and no predecessor has
+ * completed a step inserted after it. A loop iteration always has a newer
+ * predecessor completion, so it never matches. Ordered by rowid, which
+ * follows insert order; startedAt can tie within a millisecond.
+ */
+export async function getCurrentStepForNode(
+  runId: string,
+  nodeId: string,
+  predecessorIds: string[],
+): Promise<WorkflowRunStep | null> {
+  const row = await getDbClient().get<WorkflowRunStepRow>(
+    "SELECT * FROM workflow_run_steps WHERE runId = ? AND nodeId = ? ORDER BY rowid DESC LIMIT 1",
+    [runId, nodeId],
+  );
+  if (!row || !["running", "waiting", "completed"].includes(row.status)) return null;
+  if (predecessorIds.length > 0) {
+    const newer = await getDbClient().get<{ found: number }>(
+      `SELECT 1 AS found FROM workflow_run_steps
+         WHERE runId = ? AND status = 'completed'
+           AND nodeId IN (${predecessorIds.map(() => "?").join(", ")})
+           AND rowid > (SELECT rowid FROM workflow_run_steps WHERE id = ?)
+         LIMIT 1`,
+      [runId, ...predecessorIds, row.id],
+    );
+    if (newer) return null;
+  }
+  return rowToWorkflowRunStep(row);
 }
 
 // --- Workflow Version History ---
@@ -9746,32 +9713,14 @@ export async function updateApprovalRequestNotifications(
   );
 }
 
-export async function listApprovalRequests(filters?: {
-  status?: string;
-  workflowRunId?: string;
-  limit?: number;
-}): Promise<ApprovalRequest[]> {
-  const conditions: string[] = [];
-  const params: (string | number)[] = [];
-
-  if (filters?.status) {
-    conditions.push("status = ?");
-    params.push(filters.status);
-  }
-  if (filters?.workflowRunId) {
-    conditions.push("workflowRunId = ?");
-    params.push(filters.workflowRunId);
-  }
-
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const limit = filters?.limit ?? 100;
-  params.push(limit);
-
+export async function listApprovalRequests(
+  filters?: ApprovalRequestListFilters,
+): Promise<ApprovalRequest[]> {
+  const { sql, params } = approvalRequestListClause(filters);
   const rows = await getDbClient().query<ApprovalRequestRow>(
-    `SELECT * FROM approval_requests ${where} ORDER BY createdAt DESC LIMIT ?`,
+    `SELECT * FROM approval_requests ${sql}`,
     params,
   );
-
   return rows.map(rowToApprovalRequest);
 }
 
@@ -12070,6 +12019,21 @@ export async function deleteUser(id: string, replacementUserId?: string): Promis
          )`,
     );
     const replacement = replacementUserId ?? null;
+    // The human-free rule only asks whether a task's requester or its workflow
+    // run's creator is NULL, so only clearing them (no replacement) can change a
+    // stored flag. Gather the tasks now: after the rewrite nothing identifies
+    // them. The workflow branch covers roots whose requester was never set.
+    const reclassifySeedIds: string[] = replacementUserId
+      ? []
+      : (
+          await tx.query<{ id: string }>(
+            `SELECT id FROM agent_tasks WHERE requestedByUserId = ?
+             UNION
+             SELECT id FROM agent_tasks
+             WHERE workflowRunId IN (SELECT id FROM workflow_runs WHERE created_by = ?)`,
+            [id, id],
+          )
+        ).map((row) => row.id);
     for (const reference of references) {
       const table = quoteSqlIdentifier(reference.tableName);
       const column = quoteSqlIdentifier(reference.columnName);
@@ -12096,6 +12060,8 @@ export async function deleteUser(id: string, replacementUserId?: string): Promis
         [id],
       );
     }
+
+    await reclassifyTaskHumanFree(reclassifySeedIds);
 
     const result = await tx.run("DELETE FROM users WHERE id = ?", [id]);
     return result.changes > 0;
@@ -12417,9 +12383,9 @@ export async function listTaskTemplates(opts?: {
 // ============================================================================
 
 /**
- * Walk the parent→child chain rooted at `rootTaskId` via recursive CTE.
- * Returns the chain ordered by `createdAt` (so the root is first; siblings
- * appear in creation order; grand-children after their parents).
+ * Walk the chain rooted at `rootTaskId`, ordered by `createdAt` (root first; `rowid` breaks
+ * ties as idx_agent_tasks_created did). `CROSS JOIN` keeps the chain as the outer loop: with
+ * a plain JOIN, SQLite scanned all of agent_tasks to skip the sort.
  */
 export async function getRootTaskChain(rootTaskId: string): Promise<AgentTask[]> {
   const rows = await getDbClient().query<AgentTaskRow>(
@@ -12429,9 +12395,9 @@ export async function getRootTaskChain(rootTaskId: string): Promise<AgentTask[]>
          SELECT t.id FROM agent_tasks t
          JOIN chain c ON t.parentTaskId = c.id
        )
-       SELECT t.* FROM agent_tasks t
-       JOIN chain ON chain.id = t.id
-       ORDER BY t.createdAt`,
+       SELECT t.* FROM chain
+       CROSS JOIN agent_tasks t ON t.id = chain.id
+       ORDER BY t.createdAt, t.rowid`,
     [rootTaskId],
   );
   return rows.map(rowToAgentTask);
@@ -12476,6 +12442,12 @@ interface ListRecentSessionsOpts {
   q?: string;
   /** When set, restrict to root tasks where `requestedByUserId` equals this value. NULL rows are excluded. */
   requestedByUserId?: string;
+  /**
+   * When set, restrict to root tasks whose `contextKey` starts with this
+   * literal prefix (`%`, `_` and `\` are escaped). Powers the UI contextual
+   * session panel's per-page dropdown.
+   */
+  contextKeyPrefix?: string;
   /** When true, return slim `SessionListItemSummary` rows (default: full). */
   slim?: boolean;
 }
@@ -12510,6 +12482,10 @@ export async function listRecentSessions(
   if (requestedByUserId) {
     conditions.push("r.requestedByUserId = ?");
     params.push(requestedByUserId);
+  }
+  if (opts?.contextKeyPrefix) {
+    conditions.push(`r.contextKey LIKE ? ESCAPE '\\'`);
+    params.push(literalPrefixPattern(opts.contextKeyPrefix));
   }
   params.push(limit, offset);
 
@@ -12547,7 +12523,7 @@ export async function listRecentSessions(
        FROM agent_tasks r
        JOIN agg a ON a.root_id = r.id
        LEFT JOIN latest_status ls ON ls.root_id = r.id
-       ORDER BY a.lastActivityAt DESC
+       ORDER BY a.lastActivityAt DESC, r.createdAt DESC, r.id DESC
        LIMIT ? OFFSET ?`,
     params,
   );
@@ -12582,7 +12558,7 @@ export async function listRecentSessions(
  * a plain count, no recursive chain walk needed.
  */
 export async function countSessions(
-  opts?: Pick<ListRecentSessionsOpts, "source" | "q" | "requestedByUserId">,
+  opts?: Pick<ListRecentSessionsOpts, "source" | "q" | "requestedByUserId" | "contextKeyPrefix">,
 ): Promise<number> {
   const sources = opts?.source?.filter((s) => s.length > 0) ?? [];
   const q = opts?.q?.trim();
@@ -12603,6 +12579,10 @@ export async function countSessions(
   if (requestedByUserId) {
     conditions.push("requestedByUserId = ?");
     params.push(requestedByUserId);
+  }
+  if (opts?.contextKeyPrefix) {
+    conditions.push(`contextKey LIKE ? ESCAPE '\\'`);
+    params.push(literalPrefixPattern(opts.contextKeyPrefix));
   }
 
   const row = await getDbClient().get<{ count: number }>(
@@ -13477,41 +13457,95 @@ export async function incrKv(namespace: string, key: string, by: number): Promis
 }
 
 /**
+ * Smallest string greater than every string that starts with `prefix`, in
+ * code-point order (which is SQLite's BINARY order over UTF-8). `null` means
+ * no upper bound exists (the prefix is all U+10FFFF).
+ */
+export function kvPrefixUpperBound(prefix: string): string | null {
+  const codePoints = Array.from(prefix);
+  while (codePoints.length > 0) {
+    const last = codePoints.pop()!.codePointAt(0)!;
+    if (last < 0x10ffff) {
+      const next = last + 1 === 0xd800 ? 0xe000 : last + 1;
+      return codePoints.join("") + String.fromCodePoint(next);
+    }
+  }
+  return null;
+}
+
+/**
+ * Key-prefix predicate as a range on the (namespace, key) primary key.
+ * `key LIKE 'p%'` cannot use that index (LIKE is case-insensitive, the PK is
+ * BINARY), so it scanned every row of the namespace. A range seeks straight
+ * to the prefix and matches it exactly (case-sensitive).
+ */
+function kvPrefixCondition(prefix: string | undefined): { sql: string; params: string[] } {
+  if (prefix === undefined || prefix.length === 0) return { sql: "", params: [] };
+  const upper = kvPrefixUpperBound(prefix);
+  return upper === null
+    ? { sql: "AND key >= ?", params: [prefix] }
+    : { sql: "AND key >= ? AND key < ?", params: [prefix, upper] };
+}
+
+/** Top-level JSON field equality, evaluated in SQLite before rows reach JS. */
+export type KvJsonFieldEquals = { field: string; value: string | number | boolean };
+
+function kvJsonFieldConditions(filters: KvJsonFieldEquals[] | undefined): {
+  sql: string;
+  params: (string | number | boolean)[];
+} {
+  const parts: string[] = [];
+  const params: (string | number | boolean)[] = [];
+  for (const filter of filters ?? []) {
+    // JSON path quoting has no escape for these characters.
+    if (/["\\]/.test(filter.field)) {
+      throw new Error(`unsupported JSON field name: ${filter.field}`);
+    }
+    // Only safe integers compare exactly: SQLite parses a stored literal like
+    // 1000000000000000100 as an exact INTEGER (and fractions with its own
+    // float parser) while the bound JS number is a double, so SQL could drop
+    // a row that JS `===` matches. Other numbers are left to the caller.
+    if (typeof filter.value === "number" && !Number.isSafeInteger(filter.value)) continue;
+    // json_valid guards the corrupt rows decodeKvRow tolerates: json_extract
+    // would abort the whole query on one of them.
+    parts.push(
+      "AND (CASE WHEN value_type = 'json' AND json_valid(value) THEN json_extract(value, ?) END) = ?",
+    );
+    params.push(`$."${filter.field}"`, filter.value);
+  }
+  return { sql: parts.join(" "), params };
+}
+
+/**
  * List entries in a namespace, optionally filtered by prefix. Expired rows
  * are filtered out by the SELECT (no inline DELETE — listing should be a
  * stable cursor; sweeping happens on point-reads instead).
+ *
+ * `jsonFieldEquals` narrows the rows in SQL so non-matching values are never
+ * decoded. SQL equality is looser than JS `===` (JSON `true` equals `1`) and
+ * numbers that are not safe integers are not filtered at all, so callers that
+ * need exact semantics re-check the decoded values.
  *
  * `limit` is capped by the caller (HTTP enforces ≤1000); helper does no extra
  * bounds-check beyond what SQL accepts.
  */
 export async function listKv(
   namespace: string,
-  opts: { prefix?: string; limit: number; offset: number },
+  opts: { prefix?: string; limit: number; offset: number; jsonFieldEquals?: KvJsonFieldEquals[] },
 ): Promise<KvEntry[]> {
   const now = Date.now();
-  if (opts.prefix !== undefined && opts.prefix.length > 0) {
-    // LIKE-escape `\` `%` `_` so a user-supplied prefix can't run wildcards.
-    const escaped = opts.prefix.replace(/[\\%_]/g, "\\$&");
-    const rows = await getDbClient().query<KvRow>(
-      `SELECT namespace, key, value, value_type, expires_at, created_at, updated_at
-           FROM kv_entries
-          WHERE namespace = ?
-            AND (expires_at IS NULL OR expires_at > ?)
-            AND key LIKE ? ESCAPE '\\'
-          ORDER BY key
-          LIMIT ? OFFSET ?`,
-      [namespace, now, `${escaped}%`, opts.limit, opts.offset],
-    );
-    return rows.map(decodeKvRow);
-  }
+  const prefix = kvPrefixCondition(opts.prefix);
+  const json = kvJsonFieldConditions(opts.jsonFieldEquals);
   const rows = await getDbClient().query<KvRow>(
     `SELECT namespace, key, value, value_type, expires_at, created_at, updated_at
          FROM kv_entries
         WHERE namespace = ?
           AND (expires_at IS NULL OR expires_at > ?)
+          ${prefix.sql}
+          ${json.sql}
         ORDER BY key
         LIMIT ? OFFSET ?`,
-    [namespace, now, opts.limit, opts.offset],
+    [namespace, now, ...prefix.params, ...json.params, opts.limit, opts.offset],
   );
   return rows.map(decodeKvRow);
 }
@@ -13522,22 +13556,13 @@ export async function listKv(
  */
 export async function countKv(namespace: string, opts: { prefix?: string }): Promise<number> {
   const now = Date.now();
-  if (opts.prefix !== undefined && opts.prefix.length > 0) {
-    const escaped = opts.prefix.replace(/[\\%_]/g, "\\$&");
-    const row = await getDbClient().get<{ n: number }>(
-      `SELECT COUNT(*) AS n FROM kv_entries
-          WHERE namespace = ?
-            AND (expires_at IS NULL OR expires_at > ?)
-            AND key LIKE ? ESCAPE '\\'`,
-      [namespace, now, `${escaped}%`],
-    );
-    return row?.n ?? 0;
-  }
+  const prefix = kvPrefixCondition(opts.prefix);
   const row = await getDbClient().get<{ n: number }>(
     `SELECT COUNT(*) AS n FROM kv_entries
         WHERE namespace = ?
-          AND (expires_at IS NULL OR expires_at > ?)`,
-    [namespace, now],
+          AND (expires_at IS NULL OR expires_at > ?)
+          ${prefix.sql}`,
+    [namespace, now, ...prefix.params],
   );
   return row?.n ?? 0;
 }

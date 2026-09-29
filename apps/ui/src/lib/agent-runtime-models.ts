@@ -252,6 +252,7 @@ const DIRECT_MODELS: Record<"claude" | "codex", ModelOption[]> = {
     directModel("claude", "claude-opus-5", "Claude Opus 5", ANTHROPIC_META),
     directModel("claude", "claude-fable-5", "Claude Fable 5", ANTHROPIC_META),
     directModel("claude", "claude-mythos-5", "Claude Mythos 5", ANTHROPIC_META),
+    directModel("claude", "claude-sonnet-5-5", "Claude Sonnet 5.5", ANTHROPIC_META),
     directModel("claude", "claude-sonnet-5", "Claude Sonnet 5", ANTHROPIC_META),
     directModel("claude", "claude-opus-4-8", "Claude Opus 4.8", ANTHROPIC_META),
     directModel("claude", "claude-opus-4-7", "Claude Opus 4.7", ANTHROPIC_META),
@@ -261,6 +262,7 @@ const DIRECT_MODELS: Record<"claude" | "codex", ModelOption[]> = {
   ],
   codex: [
     directModel("codex", "gpt-6-astra", "GPT-6 Astra", OPENAI_META),
+    directModel("codex", "gpt-6.1-sol", "GPT-6.1 Sol", OPENAI_META),
     directModel("codex", "gpt-6-sol", "GPT-6 Sol", OPENAI_META),
     directModel("codex", "gpt-6-luna", "GPT-6 Luna", OPENAI_META),
     directModel("codex", "gpt-5.6-sol", "GPT-5.6 Sol", OPENAI_META),
@@ -525,12 +527,12 @@ export function findModelOption(
 
 // CLI shortnames Anthropic ships in their tools (`--model opus`, etc.). Workers
 // may report these verbatim — we map them to the canonical id so the row reads
-// "Claude Sonnet 5" instead of a bare "sonnet".
+// "Claude Sonnet 5.5" instead of a bare "sonnet".
 const ANTHROPIC_SHORTNAME_TO_ID: Record<string, string> = {
   fable: "claude-fable-5-1",
   mythos: "claude-mythos-5-1",
   opus: "claude-opus-5-5",
-  sonnet: "claude-sonnet-5",
+  sonnet: "claude-sonnet-5-5",
   haiku: "claude-haiku-4-5",
 };
 

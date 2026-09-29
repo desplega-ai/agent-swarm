@@ -4,19 +4,12 @@
  * session detail page.
  */
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { toast } from "sonner";
-import { api } from "@/api/client";
 import { useTaskTemplates } from "@/api/hooks/use-task-templates";
 import { SuggestionChips } from "@/components/shared/suggestion-chips";
-import { useCurrentUser } from "@/contexts/current-user-context";
-import {
-  formatComposeAttachmentUploadError,
-  uploadComposeAttachments,
-} from "./compose-attachment-upload";
 import { ComposerDock } from "./composer-dock";
+import { useStartSession } from "./use-start-session";
 
 export const SUGGESTIONS = [
   "Investigate a flaky test in the auth suite",
@@ -27,12 +20,9 @@ export const SUGGESTIONS = [
 
 export function NewSessionView() {
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const { userId } = useCurrentUser();
-  const [draft, setDraft] = useState("");
-  const [attachments, setAttachments] = useState<File[]>([]);
-  const [attachmentError, setAttachmentError] = useState<string | null>(null);
-  const [uploadedCount, setUploadedCount] = useState(0);
+  const { userId, setDraft, isPending, composerProps } = useStartSession({
+    onStarted: (created) => void navigate(`/sessions/${created.id}`),
+  });
   const [searchParams, setSearchParams] = useSearchParams();
   const prefillTemplateId = searchParams.get("prefill");
   const seedText = searchParams.get("seed");
@@ -45,7 +35,7 @@ export function NewSessionView() {
     const next = new URLSearchParams(searchParams);
     next.delete("seed");
     setSearchParams(next, { replace: true });
-  }, [seedText, searchParams, setSearchParams]);
+  }, [seedText, searchParams, setSearchParams, setDraft]);
 
   // ?prefill=<templateId> — dashboard "To start" bucket. Look up the template
   // and seed the composer with its prompt.
@@ -58,69 +48,7 @@ export function NewSessionView() {
     const next = new URLSearchParams(searchParams);
     next.delete("prefill");
     setSearchParams(next, { replace: true });
-  }, [prefillTemplateId, templatesQ.data, searchParams, setSearchParams]);
-
-  const create = useMutation({
-    mutationFn: async (input: {
-      task: string;
-      requestedByUserId?: string;
-      attachments: File[];
-    }) => {
-      setAttachmentError(null);
-      setUploadedCount(0);
-      // Create as a `draft` (#1240) whenever there are attachments to upload
-      // — a draft is invisible to dispatch, closing the window where a
-      // worker could claim the task and see zero/partial attachments. No
-      // attachments means nothing to race, so skip the extra round trip.
-      const isDraft = input.attachments.length > 0;
-      const created = await api.createTask({
-        task: input.task,
-        requestedByUserId: input.requestedByUserId,
-        source: "ui",
-        draft: isDraft,
-      });
-      try {
-        const uploadResult = await uploadComposeAttachments({
-          taskId: created.id,
-          files: input.attachments,
-          onUploaded: setUploadedCount,
-        });
-        return { created, uploadResult };
-      } finally {
-        // Always promote — success, partial failure, or an unexpected throw
-        // out of the upload batch must never strand the task in draft.
-        if (isDraft) await api.promoteDraftTask(created.id);
-      }
-    },
-    onSuccess: ({ created, uploadResult }) => {
-      const uploadError = formatComposeAttachmentUploadError(uploadResult.failed);
-      setAttachmentError(uploadError);
-      if (uploadError) toast.error(uploadError);
-      if (!uploadError) setAttachments([]);
-      queryClient.invalidateQueries({ queryKey: ["sessions"] });
-      queryClient.invalidateQueries({ queryKey: ["tasks"] });
-      queryClient.invalidateQueries({ queryKey: ["task", created.id] });
-      queryClient.invalidateQueries({ queryKey: ["task", created.id, "attachments"] });
-      void navigate(`/sessions/${created.id}`);
-    },
-  });
-
-  const submit = () => {
-    const trimmed = draft.trim();
-    if (trimmed.length === 0 || create.isPending) return;
-    create.mutate({
-      task: trimmed,
-      requestedByUserId: userId ?? undefined,
-      attachments,
-    });
-  };
-
-  const pendingLabel =
-    create.isPending && attachments.length > 0
-      ? uploadedCount > 0
-        ? `Uploading ${uploadedCount}/${attachments.length}…`
-        : "Creating task…"
-      : "Starting…";
+  }, [prefillTemplateId, templatesQ.data, searchParams, setSearchParams, setDraft]);
 
   return (
     <>
@@ -137,32 +65,17 @@ export function NewSessionView() {
           <SuggestionChips
             suggestions={SUGGESTIONS}
             onPick={setDraft}
-            disabled={!userId || create.isPending}
+            disabled={!userId || isPending}
           />
         </div>
       </div>
 
       <ComposerDock
-        value={draft}
-        onChange={setDraft}
-        onSubmit={submit}
-        isPending={create.isPending}
-        isError={create.isError}
-        errorMessage={
-          create.error instanceof Error ? create.error.message : "Failed to create session"
-        }
-        pendingLabel={pendingLabel}
+        {...composerProps}
         placeholder={
           userId ? "What's the goal?" : "Pick an identity in the sidebar before starting a session."
         }
-        disabled={!userId}
         sendLabel="Start session"
-        attachments={attachments}
-        onAttachmentsChange={(files) => {
-          setAttachments(files);
-          setAttachmentError(null);
-        }}
-        attachmentErrorMessage={attachmentError}
         autoFocus
       />
     </>

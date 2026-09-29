@@ -255,6 +255,13 @@ export function validateScenario(s: Scenario): string[] {
       `seed.sqlDump "${s.seed.sqlDump}" must be a bare filename ending in .sql (no path separators)`,
     );
   }
+  for (const spec of s.seed?.scripts ?? []) {
+    if (!/^[^/\\]+\.ts$/.test(spec.sourceFile)) {
+      errors.push(
+        `seed.scripts "${spec.name}" sourceFile "${spec.sourceFile}" must be a bare .ts filename`,
+      );
+    }
+  }
   if (s.seed?.memories !== undefined) {
     if (s.seed.memories.length > MAX_SEED_MEMORIES) {
       errors.push(`seed.memories has ${s.seed.memories.length} entries (max ${MAX_SEED_MEMORIES})`);
@@ -366,7 +373,12 @@ export interface SerializedScenario {
     dependsOn: number[];
     outputSchema?: Record<string, unknown>;
   }[];
-  seed: { exec: string[]; sqlDump: string | null; memories: string[] } | null;
+  seed: {
+    exec: string[];
+    sqlDump: string | null;
+    memories: string[];
+    scripts: string[];
+  } | null;
   timeoutMs: number;
   /** v8.0 §5: cost budget (USD) for the deterministic efficiency dimension; null when unset. */
   budgetUsd: number | null;
@@ -396,7 +408,9 @@ function serializeWorkerSpec(w: WorkerSpec): SerializedWorkerSpec {
 }
 
 export function serializeScenario(s: Scenario): SerializedScenario {
-  const hasSeed = Boolean(s.seed?.exec?.length || s.seed?.sqlDump || s.seed?.memories?.length);
+  const hasSeed = Boolean(
+    s.seed?.exec?.length || s.seed?.sqlDump || s.seed?.memories?.length || s.seed?.scripts?.length,
+  );
   // v8.0: serialize gates/dimensions from the NORMALIZED outcome so the UI sees
   // a consistent view regardless of v1/v2 authoring. The synthetic
   // "tasks-completed" prepend on `checks` stays (the runner injects it).
@@ -419,6 +433,7 @@ export function serializeScenario(s: Scenario): SerializedScenario {
       ? {
           exec: s.seed?.exec ?? [],
           sqlDump: s.seed?.sqlDump ?? null,
+          scripts: (s.seed?.scripts ?? []).map((x) => x.name),
           memories: s.seed?.memories ?? [],
         }
       : null,

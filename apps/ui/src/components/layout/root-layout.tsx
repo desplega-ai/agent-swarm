@@ -3,6 +3,8 @@ import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useOnboardingOwnsFirstRun } from "@/api/hooks/use-onboarding";
 import { StatusProvider } from "@/app/status-context";
+import { ContextPanelProvider } from "@/components/context-panel/context-panel-state";
+import { ContextSessionPanel } from "@/components/context-panel/context-session-panel";
 import { FeedbackDialog } from "@/components/feedback/feedback-dialog";
 import { IdentityModal } from "@/components/identity/identity-modal";
 import { OnboardingRedirect } from "@/components/onboarding/onboarding-redirect";
@@ -61,29 +63,34 @@ export function RootLayout() {
 
   return (
     <StatusProvider pollIntervalMs={30_000}>
-      <SidebarProvider className="h-svh max-w-full overflow-hidden">
-        <AppSidebar />
-        <SidebarInset className="min-w-0">
-          <AppHeader />
-          {/* Below lg the main column is the scroll container so pages that
+      <ContextPanelProvider>
+        <SidebarProvider className="h-svh max-w-full overflow-hidden">
+          <AppSidebar />
+          <SidebarInset className="min-w-0">
+            <AppHeader />
+            {/* Below lg the main column is the scroll container so pages that
               flow naturally (detail pages, forms) can scroll; at lg+ it goes
               back to overflow-hidden and pages own their scroll regions
               (pinned headers, grid-internal scrolling). */}
-          <main
-            className={cn(
-              "flex flex-1 flex-col min-h-0 min-w-0 overflow-x-hidden overflow-y-auto lg:overflow-hidden",
-              mainPadding,
-            )}
-          >
-            <ErrorBoundary>
-              <Suspense fallback={<HiveLoadingScreen />}>
-                <Outlet />
-              </Suspense>
-            </ErrorBoundary>
-          </main>
-          <AppFooter />
-        </SidebarInset>
-      </SidebarProvider>
+            <main
+              className={cn(
+                "flex flex-1 flex-col min-h-0 min-w-0 overflow-x-hidden overflow-y-auto lg:overflow-hidden",
+                mainPadding,
+              )}
+            >
+              <ErrorBoundary>
+                <Suspense fallback={<HiveLoadingScreen />}>
+                  <Outlet />
+                </Suspense>
+              </ErrorBoundary>
+            </main>
+            <AppFooter />
+          </SidebarInset>
+          {/* Contextual session panel: a flex sibling of the inset, so the page
+            stays interactive while the user gives feedback. */}
+          <ContextSessionPanel />
+        </SidebarProvider>
+      </ContextPanelProvider>
       <CommandMenu />
       <OnboardingRedirect />
       <IdentityGate />

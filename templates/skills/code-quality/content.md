@@ -42,7 +42,32 @@ The Repository Guidelines carry `allowMerge` and `mergeChecks`.
 2. Detect a GitHub fork PR with `gh pr view <number> --json isCrossRepository --jq .isCrossRepository`.
 3. For a GitHub fork PR, inspect held runs with `SHA=$(gh pr view <number> --json headRefOid --jq .headRefOid); gh api --paginate "repos/<owner>/<repo>/actions/runs?head_sha=$SHA" --jq '.workflow_runs[] | "\(.conclusion // .status)|\(.name)"'`; `gh pr checks` and `statusCheckRollup` can omit them.
 4. Treat any `action_required` run or no substantive run executed on that SHA as a CI blocker. Keep run handling read-only: REQUEST_CHANGES naming the held or unexecuted run, and report the blocker so an explicitly authorized maintainer or the application-controlled GitHub integration can approve the run after validating the workflow and its trust boundary. Do not APPROVE on omitted runs.
-5. Tests second. A code change without new or updated tests is a REQUEST_CHANGES. Name the tests you expect. Exceptions: documentation-only, configuration-only, and dependency-bump PRs.
+5. Tests second. This authoring gate applies to production changes and tests under root `src/` only; `apps/ui/` and `apps/evals/` are out of scope for now. For a behavior change in root `src/`, no new or updated test that names the regression it catches is a REQUEST_CHANGES. A test that fails the gate below is also a REQUEST_CHANGES. Documentation-only, configuration-only, and dependency-bump PRs are exempt.
+
+   Before adding or changing a root `src/` test, answer all four questions:
+   - What observable behavior, invariant, or independent contract does it protect?
+   - What credible regression would make it fail?
+   - Why would existing coverage miss that regression? Give each contract one primary test owner at its strongest boundary. Another layer needs a distinct risk the owner cannot reach. Prefer extending a table-driven case or shared fixture over a near-duplicate.
+   - Does it need a production seam (export, flag, wrapper, or injection hook) that no production caller needs? If so, move the test to the real boundary.
+
+   Reject tests that match these junk patterns:
+   - Assertion-free coverage probes.
+   - Self-comparisons and identity copiers.
+   - Copied fixtures, inventories, manifests, or export lists.
+   - Exact source, import, or string greps.
+   - Private predicate or call-shape tests duplicated at real boundaries.
+   - Duplicate invocations of the same contract.
+   - Provider-local replays of shared helpers.
+   - Tests whose only purpose is preserving test-only exports, globals, or wrappers.
+   - Dead production code whose only callers are tests.
+   - Expected values produced by the helper or renderer under test.
+   - Mocks that implement the asserted behavior, or one identical mock standing in for different APIs.
+   - Fixtures that supply the receipt, admission, or callback ordering the owner should produce, or persistence asserted against a store the path never writes.
+   - Capability tests that restate declared flags instead of exercising the delivery or acknowledgement the flag promises.
+   - Negative controls that pass for an unrelated reason, such as denial from a different guard or a rejection the production path never reaches.
+   - Test names or fixtures that promise more than the input exercises.
+
+   A regression test must fail on the pre-fix code for the intended reason and pass after the repair. A regression test that never demonstrably failed does not prove the fix.
 6. Apply the "Review Guidance" entries from the Repository Guidelines.
 7. Read the diff for security (injection, secrets in code), logic (null handling, off-by-one, edge cases), performance (N+1, leaks), and code shape (naming, duplication, error handling). Run the test suite and the type check locally when you can.
 8. Post the review with the verdict first. One finding per comment, with file and line, and what to change.

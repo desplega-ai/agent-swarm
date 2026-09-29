@@ -139,6 +139,40 @@ describe("orchestration substrate scenario rubrics", () => {
     expect((await workflows.triggerSchemaCheck.fn(c)).score).toBe(1);
   });
 
+  test("workflow-authoring resolves {{ref.x}} against inputs keys, not source paths", async () => {
+    // Shape Sonnet 5 and 5.5 both produced in the 2026-09-28 pilot: renamed
+    // input keys (pr <- trigger.pullRequest) and a three-node DAG.
+    const nodes = [
+      {
+        id: "check",
+        type: "swarm-script",
+        next: "verdict",
+        inputs: { pr: "trigger.pullRequest" },
+        config: { scriptName: "gh-pr-snapshot", args: { number: "{{pr.number}}" } },
+      },
+      {
+        id: "verdict",
+        type: "agent-task",
+        next: "notify",
+        inputs: { snapshot: "check", pr: "trigger.pullRequest" },
+        config: { template: "{{pr.number}} {{snapshot}}", outputSchema: { type: "object" } },
+      },
+      { id: "notify", type: "agent-task", inputs: { verdict: "verdict" }, config: {} },
+    ];
+    const wf = (n: unknown[]) =>
+      ctx({
+        tasks: [{ id: "seed", title: "t", description: "d", status: "completed" }],
+        logs: { seed: [toolUseRow("seed", "mcp__agent-swarm__create-workflow", {})] },
+        api: { "/api/workflows?fields=full": [{ id: "wf", name: "w", definition: { nodes: n } }] },
+      });
+    expect((await workflows.workflowDagCheck.fn(wf(nodes))).score).toBe(1);
+    // A placeholder with no matching inputs key still fails the inputs criterion.
+    const unmapped = nodes.map((n) =>
+      n.id === "verdict" ? { ...n, inputs: { snapshot: "check" } } : n,
+    );
+    expect((await workflows.workflowDagCheck.fn(wf(unmapped))).score).toBeCloseTo(7 / 9);
+  });
+
   test("script-authoring rewards script-upsert plus named script-run using ctx.swarm", async () => {
     const c = ctx({
       tasks: [
@@ -207,17 +241,17 @@ describe("orchestration substrate scenario rubrics", () => {
         status: "completed",
         agentId: "worker-0",
         creatorAgentId: "lead",
-        result: "completed: 21",
+        result: "completed: 10",
       },
       {
         id: "b",
         title: "b",
-        description: "top priority after completed: 21",
+        description: "top priority after completed: 10",
         status: "completed",
         agentId: "worker-1",
         creatorAgentId: "lead",
         dependsOn: ["a"],
-        result: "Rotate the payments service API keys",
+        result: "Cut over the ledger service to the new region",
       },
       {
         id: "c",
@@ -227,7 +261,7 @@ describe("orchestration substrate scenario rubrics", () => {
         agentId: "worker-2",
         creatorAgentId: "lead",
         dependsOn: ["b"],
-        result: "Deploy the checkout redesign to production is anomalous",
+        result: "Roll out the new pricing engine to EU customers is anomalous",
       },
     ];
     const c = ctx({
@@ -240,7 +274,7 @@ describe("orchestration substrate scenario rubrics", () => {
       },
       files: {
         [`w${chain.LEAD_WORKER}:${chain.REPORT_FILE}`]:
-          "completed: 21\nRotate the payments service API keys\nDeploy the checkout redesign to production",
+          "completed: 10\nCut over the ledger service to the new region\nRoll out the new pricing engine to EU customers",
       },
     });
     expect((await chain.chainStructureCheck.fn(c)).score).toBeGreaterThanOrEqual(0.9);
@@ -298,17 +332,17 @@ describe("orchestration substrate scenario rubrics", () => {
         status: "completed",
         agentId: agentByHop[0],
         creatorAgentId: "lead",
-        result: "completed: 21",
+        result: "completed: 10",
       },
       {
         id: "b",
         title: "b",
-        description: "top priority after completed: 21",
+        description: "top priority after completed: 10",
         status: "completed",
         agentId: agentByHop[1],
         creatorAgentId: "lead",
         dependsOn: ["a"],
-        result: "Rotate the payments service API keys",
+        result: "Cut over the ledger service to the new region",
       },
       {
         id: "c",
@@ -318,7 +352,7 @@ describe("orchestration substrate scenario rubrics", () => {
         agentId: agentByHop[2],
         creatorAgentId: "lead",
         dependsOn: ["b"],
-        result: "Deploy the checkout redesign to production is anomalous",
+        result: "Roll out the new pricing engine to EU customers is anomalous",
       },
     ];
   }
@@ -371,13 +405,13 @@ describe("orchestration substrate scenario rubrics", () => {
           title: "alpha",
           description: "Project Alpha",
           status: "completed",
-          result: '{"alphaSummary":"ok"}',
+          result: '{"alphaSummary":"12 completed; top: Rotate the payments service API keys"}',
           agentId: "worker-0",
         },
         {
           id: "follow",
           title: "next",
-          description: "next phase follow-up",
+          description: "Phase two, starting from: Rotate the payments service API keys",
           status: "completed",
           parentTaskId: "seed",
         },
@@ -396,7 +430,7 @@ describe("orchestration substrate scenario rubrics", () => {
       },
       api: {
         "/api/kv/_/task%3Aagent%3Aworker-0": {
-          entries: [{ key: "alpha/checkpoint", value: { ok: true } }],
+          entries: [{ key: "alpha/checkpoint", value: { completed: 12 } }],
         },
       },
     });
@@ -438,33 +472,104 @@ describe("orchestration substrate scenario rubrics", () => {
       },
     });
     const result = await routing.routingSequenceCheck.fn(c);
-    expect(result.score).toBeCloseTo(0.7, 5);
+    // memory<send-task broken, send-task<store-progress holds.
+    expect(result.score).toBeCloseTo(0.5, 5);
   });
 
-  test("structured-output-adherence distinguishes JSON schema match from prose", async () => {
-    const good = ctx({
-      tasks: [
+  test("tool-routing hop-order is a partial order: kv/lookup placement does not matter", async () => {
+    const c = ctx({
+      tasks: [{ id: "seed", title: "alpha", description: "Project Alpha", status: "completed" }],
+      logs: {
+        seed: [
+          toolUseRow("seed", "mcp__agent-swarm__get-tasks", { status: "completed" }),
+          toolUseRow("seed", "mcp__agent-swarm__memory-search", { query: "Project Alpha" }),
+          toolUseRow("seed", "mcp__agent-swarm__send-task", { task: "next phase" }),
+          toolUseRow("seed", "mcp__agent-swarm__kv-set", { key: "alpha/checkpoint" }),
+          toolUseRow("seed", "mcp__agent-swarm__store-progress", { output: "{}" }),
+        ],
+      },
+    });
+    expect((await routing.routingSequenceCheck.fn(c)).score).toBe(1);
+  });
+
+  test("tool-routing structured-output gate requires the outputSchema JSON", async () => {
+    const withResult = (result: string) =>
+      ctx({ tasks: [{ id: "seed", title: "t", description: "d", status: "completed", result }] });
+    const good = JSON.stringify({
+      alphaSummary: "two completed alpha tasks",
+      checkpointKey: "alpha/checkpoint",
+      followUpCreated: true,
+    });
+    expect((await routing.structuredOutputGate.fn(withResult(good))).pass).toBe(true);
+    expect((await routing.structuredOutputGate.fn(withResult("Done, see KV"))).pass).toBe(false);
+    expect(
+      (
+        await routing.structuredOutputGate.fn(
+          withResult(
+            JSON.stringify({ alphaSummary: "x", checkpointKey: "k", followUpCreated: "yes" }),
+          ),
+        )
+      ).pass,
+    ).toBe(false);
+  });
+
+  test("structured-output-adherence grades shape and the rule-derived answer key", async () => {
+    const risk = (description: string, severity: string, mitigated: boolean) => ({
+      description,
+      severity,
+      mitigated,
+    });
+    const answer = {
+      services: [
         {
-          id: "seed",
-          title: "t",
-          description: "d",
-          status: "completed",
-          result: JSON.stringify({
-            summary: "Hold for approval",
-            risks: ["owner approval missing"],
-            nextAction: "needs-review",
-            confidence: 0.82,
-          }),
+          name: "billing",
+          decision: "ship",
+          blockers: [],
+          risks: [risk("migration", "high", true)],
+        },
+        {
+          name: "search",
+          decision: "hold",
+          blockers: ["ranking-regression tests failing"],
+          risks: [],
+        },
+        {
+          name: "notifications",
+          decision: "hold",
+          blockers: ["owner approval missing; waiver expired"],
+          risks: [],
+        },
+        {
+          name: "checkout",
+          decision: "needs-review",
+          blockers: ["cache invalidation (high)"],
+          risks: [risk("cache", "high", false)],
         },
       ],
-    });
-    const bad = ctx({
-      tasks: [
-        { id: "seed", title: "t", description: "d", status: "completed", result: "Done: hold" },
-      ],
-    });
+      shippableCount: 1,
+      confidence: 0.8,
+    };
+    const task = (result: string) =>
+      ctx({ tasks: [{ id: "seed", title: "t", description: "d", status: "completed", result }] });
+    const good = task(JSON.stringify(answer));
+    // Well-formed but wrong: trusts the expired waiver and ignores the unmitigated risk.
+    const wrong = task(
+      JSON.stringify({
+        ...answer,
+        services: answer.services.map((s) =>
+          s.name === "notifications" || s.name === "checkout"
+            ? { ...s, decision: "ship", blockers: [] }
+            : s,
+        ),
+        shippableCount: 3,
+      }),
+    );
+    const prose = task("Done: hold");
     expect((await structured.schemaAdherenceCheck.fn(good)).score).toBe(1);
-    expect((await structured.schemaAdherenceCheck.fn(bad)).score).toBe(0);
+    expect((await structured.decisionAnswerCheck.fn(good)).score).toBe(1);
+    expect((await structured.schemaAdherenceCheck.fn(wrong)).score).toBe(1);
+    expect((await structured.decisionAnswerCheck.fn(wrong)).pass).toBe(false);
+    expect((await structured.schemaAdherenceCheck.fn(prose)).score).toBe(0);
   });
 });
 
@@ -627,17 +732,23 @@ describe("phase 1 broken-check regressions", () => {
           title: "alpha",
           description: "Project Alpha",
           status: "completed",
-          result: "Project Alpha summary",
+          result: "Project Alpha: 12 completed, top is Rotate the payments service API keys",
           agentId: "worker-0",
           contextKey: "task:agent:worker-0",
         },
-        { id: "f", title: "n", description: "follow-up", status: "pending", parentTaskId: "t" },
+        {
+          id: "f",
+          title: "n",
+          description: "phase two from Rotate the payments service API keys",
+          status: "pending",
+          parentTaskId: "t",
+        },
       ],
       api: {
         // The judge's header-resolved namespace is empty; the worker's has the entry.
         "/api/kv": { entries: [] },
         "/api/kv/_/task%3Aagent%3Aworker-0": {
-          entries: [{ key: "alpha/checkpoint", value: { phase: 1 } }],
+          entries: [{ key: "alpha/checkpoint", value: { phase: 1, completed: 12 } }],
         },
       },
     });
@@ -680,5 +791,43 @@ describe("phase 1 broken-check regressions", () => {
     const gate = await workflows.workflowExistsGate.fn(c);
     expect(gate.pass).toBe(true);
     expect(gate.detail).toBe("1 workflows found");
+  });
+  describe("delegation-chain reads facts from any lead task (defer wake-up)", () => {
+    const facts =
+      "completed: 10\nCut over the ledger service to the new region\nRoll out the new pricing engine to EU customers";
+    const leadTask = (id: string, result: string): SwarmTask => ({
+      id,
+      title: id,
+      description: "",
+      status: "completed",
+      agentId: "lead",
+      result,
+    });
+
+    test("passes when the facts sit in a later lead wake-up task", async () => {
+      const c = ctx({
+        tasks: [
+          leadTask("lead-1", "Deferred: waiting on the phase chain."),
+          leadTask("lead-2", facts),
+        ],
+      });
+      expect((await chain.finalReportGate.fn(c)).pass).toBe(true);
+      const r = await chain.chainCorrectnessCheck.fn(c);
+      expect(r.pass).toBe(true);
+      expect(r.score).toBe(1);
+    });
+
+    test("fails when no lead task carries the facts", async () => {
+      const c = ctx({
+        tasks: [
+          leadTask("lead-1", "Deferred: waiting on the phase chain."),
+          leadTask("lead-2", "Chain finished."),
+          { ...leadTask("w-1", facts), agentId: "worker-0" },
+        ],
+      });
+      const r = await chain.chainCorrectnessCheck.fn(c);
+      expect(r.pass).toBe(false);
+      expect(r.score).toBe(0);
+    });
   });
 });

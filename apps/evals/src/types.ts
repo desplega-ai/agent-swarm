@@ -121,6 +121,12 @@ export interface ScenarioSeed {
    */
   sqlDump?: string;
   /**
+   * Reusable scripts upserted (agent scope, as worker 0) through
+   * `POST /api/scripts/upsert` before tasks start, so the real API typechecks and
+   * embeds them. `sourceFile` is a bare filename under evals/scenarios/fixtures/.
+   */
+  scripts?: { name: string; description: string; intent: string; sourceFile: string }[];
+  /**
    * Failure-injection primitive (swarm-mechanics evals): deterministically break
    * a CHOSEN worker (not just worker 0) at seed time so the scenario can grade
    * whether the SWARM recovers from a poisoned/disabled teammate.
@@ -321,6 +327,13 @@ export interface Scenario {
   outcome: OutcomeSpec;
   /** Per-attempt wall clock budget. Default 10 minutes. */
   timeoutMs?: number;
+  /**
+   * After the upfront tasks go terminal, keep waiting (inside the same
+   * `timeoutMs` budget) until every runtime-spawned run task is terminal too.
+   * Needed when the lead delegates and defers: defer-task completes the upfront
+   * task at once, so grading it then sees the chain half done.
+   */
+  awaitSpawnedTasks?: boolean;
   /**
    * Cost budget in USD for the deterministic `efficiency` dimension (v8.0 §5).
    * When set (> 0, validated), an `efficiency` dimension with no checks/judge is

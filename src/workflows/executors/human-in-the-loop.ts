@@ -59,15 +59,20 @@ const QuestionSchema = z.discriminatedUnion("type", [
   }),
 ]);
 
-const ApproverConfigSchema = z.object({
+export const ApproverConfigSchema = z.object({
   users: z.array(z.string()).optional(),
   roles: z.array(z.string()).optional(),
   policy: z.union([z.literal("any"), z.literal("all"), z.object({ min: z.number().int().min(1) })]),
 });
 
-const NotificationConfigSchema = z.object({
+export const NotificationConfigSchema = z.object({
   channel: z.enum(["slack", "email"]),
   target: z.string(),
+});
+
+export const HITLTimeoutSchema = z.object({
+  seconds: z.number().int().min(1),
+  action: z.literal("reject"),
 });
 
 type HITLQuestion = z.infer<typeof QuestionSchema>;
@@ -103,12 +108,7 @@ const HITLConfigSchema = z.object({
       ),
   ]),
   approvers: ApproverConfigSchema,
-  timeout: z
-    .object({
-      seconds: z.number().int().min(1),
-      action: z.literal("reject"),
-    })
-    .optional(),
+  timeout: HITLTimeoutSchema.optional(),
   notifications: z.array(NotificationConfigSchema).optional(),
 });
 

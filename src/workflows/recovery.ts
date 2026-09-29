@@ -8,9 +8,12 @@ import {
   getWorkflow,
   getWorkflowRun,
   getWorkflowRunStep,
+  getWorkflowRunStepsByRunId,
   resolveApprovalRequest,
   updateWorkflowRun,
 } from "../be/db";
+import type { WorkflowRunStep } from "../types";
+import { shapeApprovalResolution } from "./approval-resolution";
 import { loadCompletedStepRouting } from "./completed-step-routing";
 import { FAILED_TASK_OUTPUT_PREFIX } from "./constants";
 import { findReadyNodes, isWorkflowRunActive, walkGraph } from "./engine";
@@ -83,16 +86,18 @@ async function recoverRunningRuns(registry: ExecutorRegistry): Promise<number> {
         runId,
         completedNodeIds,
       );
-      const readyNodes = findReadyNodes(workflow.definition, completedNodeIds, activeEdges);
+      // A node waiting for its retry belongs to the retry poller; walking it
+      // here would execute it again next to the poller's retry.
+      const retryPending = retryPendingNodeIds(await getWorkflowRunStepsByRunId(runId));
+      const readyNodes = findReadyNodes(workflow.definition, completedNodeIds, activeEdges).filter(
+        (node) => !retryPending.has(node.id),
+      );
       // DB reads above yield; a trigger/resume may have acquired the run meanwhile.
       if (isWorkflowRunActive(runId)) continue;
       if (readyNodes.length === 0) {
-        // All nodes completed or nothing is ready — mark as completed
-        await updateWorkflowRun(runId, {
-          status: "completed",
-          context: ctx,
-          finishedAt: new Date().toISOString(),
-        });
+        // Nothing is ready: complete the run from a snapshot read in the
+        // same transaction as the write.
+        if (!(await completeIfSettled(runId, ctx))) continue;
       } else {
         const secretKeys = getSecretInputKeys(workflow.input);
         await walkGraph(
@@ -112,6 +117,43 @@ async function recoverRunningRuns(registry: ExecutorRegistry): Promise<number> {
   }
 
   return recovered;
+}
+
+/** Nodes with a failed step the retry poller will pick up (`nextRetryAt` set). */
+function retryPendingNodeIds(steps: WorkflowRunStep[]): Set<string> {
+  const nodeIds = new Set<string>();
+  for (const step of steps) {
+    if (step.status === "failed" && step.nextRetryAt != null) nodeIds.add(step.nodeId);
+  }
+  return nodeIds;
+}
+
+/**
+ * Complete a running run that has nothing ready, in one transaction, only when
+ * no step is live or waiting for its retry. Only each node's latest step
+ * counts as live, so a `running` row a crash left behind, or the `pending` row
+ * a user retry leaves before inserting its new step, does not park the run.
+ */
+async function completeIfSettled(runId: string, ctx: Record<string, unknown>): Promise<boolean> {
+  return getDbClient().transaction(async () => {
+    const run = await getWorkflowRun(runId);
+    if (run?.status !== "running") return false;
+    const steps = await getWorkflowRunStepsByRunId(runId);
+    if (retryPendingNodeIds(steps).size > 0) return false;
+    const latest = new Map<string, WorkflowRunStep>();
+    for (const step of steps) latest.set(step.nodeId, step);
+    for (const step of latest.values()) {
+      if (step.status === "running" || step.status === "waiting" || step.status === "pending") {
+        return false;
+      }
+    }
+    await updateWorkflowRun(runId, {
+      status: "completed",
+      context: ctx,
+      finishedAt: new Date().toISOString(),
+    });
+    return true;
+  });
 }
 
 /**
@@ -238,18 +280,17 @@ async function recoverApprovalWaitingRuns(registry: ExecutorRegistry): Promise<n
           return null;
         }
 
-        const nextPort =
-          approvalStatus === "timeout"
-            ? "timeout"
-            : approvalStatus === "rejected"
-              ? "rejected"
-              : "approved";
-
-        const stepOutput = {
-          requestId: stuck.approvalId,
-          status: approvalStatus,
-          responses: approval?.responses ?? null,
-        };
+        const { output: stepOutput, nextPort } = shapeApprovalResolution(
+          registry,
+          workflow.definition,
+          stuck.nodeId,
+          (await getWorkflowRunStep(stuck.stepId))?.output,
+          {
+            requestId: stuck.approvalId,
+            status: approvalStatus,
+            responses: (approval?.responses ?? null) as Record<string, unknown> | null,
+          },
+        );
 
         // Use port-based routing to determine correct successors. Claimed: the
         // live approval.resolved bus event may have routed this step between

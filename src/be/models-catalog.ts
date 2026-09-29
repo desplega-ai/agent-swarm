@@ -36,6 +36,8 @@ export type CatalogProviderId = (typeof CATALOG_PROVIDER_IDS)[number];
 export const PINNED_MODELSDEV_ENTRIES = [
   // Official launch metadata; retain until models.dev catches up. Verified 2026-09-22.
   "anthropic/claude-opus-5-5",
+  // Official launch metadata; retain until models.dev catches up. Verified 2026-09-28.
+  "anthropic/claude-sonnet-5-5",
   "anthropic/claude-mythos-5",
   "anthropic/claude-sonnet-5",
   "amazon-bedrock/anthropic.claude-sonnet-5",

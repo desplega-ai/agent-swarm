@@ -814,7 +814,8 @@ export interface AgentsResponse {
 
 export interface TasksResponse {
   tasks: AgentTask[];
-  total: number;
+  /** Present only when the request set `includeTotal`. */
+  total?: number;
 }
 
 export interface LogsResponse {
@@ -1145,8 +1146,17 @@ export interface ScheduledTask {
   favorite?: boolean;
 }
 
+/**
+ * `/api/scheduled-tasks?fields=slim` list row: the full `taskTemplate` is
+ * swapped for a bounded `taskTemplatePreview`. Read the template from
+ * `GET /api/schedules/{id}`.
+ */
+export type ScheduledTaskSummary = Omit<ScheduledTask, "taskTemplate"> & {
+  taskTemplatePreview?: string;
+};
+
 export interface ScheduledTasksResponse {
-  scheduledTasks: ScheduledTask[];
+  scheduledTasks: ScheduledTaskSummary[];
 }
 
 export type SwarmConfigScope = "global" | "agent" | "repo";
@@ -1382,8 +1392,19 @@ export interface WorkflowsResponse {
   workflows: WorkflowSummary[];
 }
 
-export interface WorkflowRunsResponse {
-  runs: WorkflowRun[];
+/** List row of a run: no `context`, which `GET /api/workflow-runs/{id}` serves. */
+export type WorkflowRunSummary = Omit<WorkflowRun, "context">;
+
+/** One page of `GET /api/workflows/{id}/runs`, newest first. */
+export interface WorkflowRunsPage {
+  runs: WorkflowRunSummary[];
+  page: {
+    limit: number;
+    offset: number;
+    total: number;
+    hasMore: boolean;
+    nextOffset?: number;
+  };
 }
 
 export type ScriptRunStatus =
@@ -2193,6 +2214,20 @@ export interface ApprovalRequest {
 
 export interface ApprovalRequestsResponse {
   approvalRequests: ApprovalRequest[];
+}
+
+/**
+ * `/api/approval-requests?fields=slim` list row: question bodies, answers,
+ * approvers and notification targets are dropped; `questionCount` is added.
+ * Read the full request from `GET /api/approval-requests/{id}`.
+ */
+export type ApprovalRequestSummary = Omit<
+  ApprovalRequest,
+  "questions" | "approvers" | "responses" | "resolutionReason" | "notificationChannels"
+> & { questionCount: number };
+
+export interface ApprovalRequestSummariesResponse {
+  approvalRequests: ApprovalRequestSummary[];
 }
 
 // Skills

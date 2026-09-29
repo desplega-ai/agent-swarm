@@ -19,7 +19,7 @@ A workflow consists of:
 
 ### Executor Types
 
-The engine includes 12 built-in executor types:
+The engine includes 13 built-in executor types:
 
 | Executor | Description |
 |----------|-------------|
@@ -28,6 +28,7 @@ The engine includes 12 built-in executor types:
 | `agent-task` | Create and delegate a task to a swarm agent |
 | `foreach` | Fan out one agent task per array item, wait for every child, and emit one aggregate result |
 | `raw-llm` | Call an LLM directly with a prompt template |
+| `system-one-decision` | Make typed decisions (probability, choice, score) over supplied state, with Jev by default. Can send uncertain answers to a person |
 | `vcs` | Version control operations (create PR, merge, etc.) |
 | `property-match` | Route based on matching properties in step input |
 | `code-match` | Route based on a custom JavaScript expression in a sandbox |
@@ -41,6 +42,83 @@ Each executor has typed config and output schemas available via `GET /api/execut
 `swarm-script` is the durable, reusable counterpart to inline `script` nodes. In workflow definitions it accepts `scriptName`, optional `scope` (`agent` or `global`), optional `pinHash`, JSON `args`, and `timeoutMs`. The timeout defaults to `30000` ms, accepts integers from `1000` through `300000` (5 minutes), and raises the script runtime's wall-clock budget for I/O-bound work while still respecting the separate 60-second CPU-time ceiling.
 
 For `config.args`, values written as an **exact single token** such as `{{input.payload}}` preserve the resolved JSON type, so objects, arrays, numbers, and booleans reach the script as native values. If you wrap a token with surrounding text, such as `"prefix-{{input.id}}"`, interpolation falls back to string output. Raw-token resolution is scoped to the node's local interpolation context, including any explicit `inputs` mapping on that node.
+
+### Choosing a decider
+
+When a node has to decide, use the cheapest node that can decide. Agents authoring workflows apply this rule by default, so you do not need to ask for `system-one-decision`.
+
+| The decision is | Use |
+|---|---|
+| A fact: a count, PR state, flag, date, lookup, regex, or schema check | `script`, `property-match`, or `code-match` |
+| A bounded judgment: pass/fail, pick one of N, a score on a rubric, or the probability that a claim is true | `system-one-decision` |
+| Free-form generation, or findings a later node reads | `raw-llm` or `agent-task` |
+
+Jev is weak at counting. For a hybrid, count in a `script` and pass the number to `system-one-decision` as part of `state`.
+
+### SystemOne Decision
+
+A `system-one-decision` node (display name "SystemOne Decision") sends one `state` and a map of questions to a typed-decisions model and returns one validated answer per question. The model is Jev today (`model` defaults to it); the node name is not model-specific. It reaches the model through a `provider`: `typesafe` (the default), `openrouter`, or `laya`. Each provider needs its own global secret, `TYPESAFE_API_KEY`, `OPENROUTER_API_KEY`, or `LAYA_API_KEY`; `laya` also needs `LAYA_URL`, its server's base URL, as a global config value. The key is read on the server and never appears in a definition, a step output, or an error.
+
+```json
+{
+  "id": "qualify",
+  "type": "system-one-decision",
+  "inputs": { "lead": "trigger.lead" },
+  "config": {
+    "provider": "typesafe",
+    "model": "jev-1.13.0",
+    "state": "{{lead}}",
+    "questions": {
+      "fit": {
+        "type": "noul",
+        "instructions": "Is this a real engineering team seeking agent workflow automation?",
+        "criteria": { "true": "A matching team with a concrete use case", "false": "Spam or no matching team" }
+      },
+      "authority": {
+        "type": "choice",
+        "instructions": "What purchasing authority does the message support?",
+        "criteria": { "buyer": "Can approve the purchase", "champion": "Influences the decision", "unknown": "Not established" }
+      }
+    },
+    "returns": { "fit": { "type": "noul" }, "authority": { "type": "choice" } }
+  },
+  "next": "gate"
+}
+```
+
+- `provider` is `typesafe` (default), `openrouter`, or `laya`, and must be a literal. `model` is that provider's own id (`jev-1.13.0` on `typesafe`, `typesafe/jev-1.13` on `openrouter`); unset means the provider's default. `laya` has no default and sends no `model`, because it silently ignores one it does not know. All three take the same request and return the same answers, so everything below holds on each, except that `laya`'s confidence is its `answer_confidence`, the top probability. There is no fallback: a node that names no provider does not switch to another when the TypeSafe key is missing.
+- Question types are `noul` (probability that a claim is true), `choice` (2 to 255 named options), and `score` (2 to 10 ordered levels). `returns` repeats each question id and type, and a mismatch is rejected when the workflow is saved.
+- The output is `{ model, answers, usage }`, plus `routing: { model }` on `laya` (the checkpoint that answered). A downstream node reads `<alias>.answers.<question>.<field>` through an `inputs` mapping. A `noul` answer is `{ type, noul }` with no confidence. `choice` and `score` answers carry `probabilities` and `confidence`.
+- A low-confidence answer is still a success. To have a person review the uncertain ones, set `humanReview` (below). To route on a threshold yourself, put it in the next node, such as `property-match` or `code-match`, and route the uncertain band to `human-in-the-loop`.
+- The node retries connection errors, 408, 429, and 5xx itself, up to `maxRetries` (0 to 3, default 2) within `timeoutMs` (default 30000). It never retries a 401, a 422, or an answer that fails validation. Do not set `retry` or `validation.retry` on a `system-one-decision` node.
+- An unresolved `{{token}}` fails the step before the request is sent.
+
+#### Human review
+
+Set `humanReview` to define a confidence band in the same node. An answer whose confidence is inside the band goes to a person instead of passing straight through.
+
+```json
+"humanReview": {
+  "band": { "min": 0.5, "max": 0.8 },
+  "approvers": { "users": ["head-of-sales"], "policy": "any" },
+  "timeout": { "seconds": 86400, "action": "reject" }
+},
+"next": { "approved": "route", "rejected": "discard", "timeout": "escalate" }
+```
+
+- `band` is `min` and `max`, each 0 to 1, and both ends count as inside. `choice` and `score` answers are tested on the `confidence` they report. A `noul` answer reports none, so it is tested on `max(noul, 1 - noul)`. The number is the provider's own, so a band tuned on one model does not carry to another. On `laya` it is `answer_confidence`, the top probability.
+- `approvers`, `timeout`, and `notifications` are the `human-in-the-loop` settings. The node raises the request through that executor: same approvers, `waiting` run state, Slack notification, and approval card. Nothing is built twice.
+- If any answer is in the band, the run waits. The card asks the person to accept or reject the decision, and asks one question for each answer in the band. Leave it empty to confirm what the model said, or pick another option to replace it. Answers outside the band stay the model's.
+- The output is the same `{ model, answers, usage }`, plus `review`. `review.status` is `not_required`, `approved`, `rejected`, or `timeout`. `review.questions.<id>` records the confidence tested, whether it was in the band, and `decidedBy` (`model` or `human`). When a person decided, `modelAnswer` keeps what the model said. Rejected and timed-out decisions leave `answers` as the model's.
+- `next` must be a port map with `approved` (every accepted answer, whether the model's or a person's) and optionally `rejected` and `timeout`. A string or list `next` is refused, because it would run the same nodes after a rejection.
+
+#### Keys and preflight
+
+The swarm checks a `system-one-decision` node's key before first use. Set `TYPESAFE_API_KEY`, `OPENROUTER_API_KEY`, or `LAYA_API_KEY` as a global secret on the Secrets page (Settings > Secrets). For `laya`, also set `LAYA_URL` as a global config value (`set-config`, scope `global`). Every message names the key or config value for the node's provider.
+
+- **Saving a workflow** with a `system-one-decision` node whose key is missing succeeds and returns a warning: in the tool result message and `data.warnings` over MCP, and as `warnings` on the workflow body over HTTP. A save is not rejected, because definitions are also saved before a human has supplied the key and the key can change later.
+- **Starting a run** fails before any node executes when the key is missing. The run is recorded as `failed` with no steps and no request sent. Retrying a failed run is refused, and the run stays failed, while a node still to run needs a missing key.
+- **A key the provider refuses** (HTTP 401 or 403) fails the step with `<KEY> was rejected by <provider>` and is not retried.
 
 ### Foreach fan-out
 

@@ -770,6 +770,15 @@ export const CreateTaskOptionsSchema = z.object({
    * Lead-only control-plane authorization.
    */
   inheritParentRoutingAffinity: z.boolean().optional(),
+  /**
+   * `followUpConfig` belongs to one piece of work, not to the thread, so a
+   * child does NOT inherit the parent's by default. Set this to `true` only on
+   * a continuation of the SAME work (interrupted-task resume, reboot-sweep
+   * retry, defer-task wake-up, a Lead `resume` re-delegation) so the creator's
+   * onCompleted/onFailed still fires when that work truly ends. An explicit
+   * `followUpConfig` always wins.
+   */
+  inheritParentFollowUpConfig: z.boolean().optional(),
   followUpConfig: FollowUpConfigSchema.optional(),
   requestedByUserId: z.string().optional(),
   contextKey: z.string().optional(),
@@ -1425,6 +1434,8 @@ export const AgentLogEventTypeSchema = z.enum([
   "task_dispatch_rejected_affinity",
   "task_authorization_rejected",
   "task_recovery_authorization",
+  // Reboot sweep moved a never-started dependent from the swept task to its retry
+  "task_dependency_repointed",
   "task_released",
   // A settled task's settlement fired a deferred wait (metadata names the waiter)
   "task_deferred_wait_woke",
@@ -1985,7 +1996,7 @@ export const WorkflowNodeSchema = z
     type: z
       .string()
       .describe(
-        "Executor type: 'agent-task', 'script', 'swarm-script', 'raw-llm', 'validate', 'property-match'",
+        "Executor type: 'agent-task', 'script', 'swarm-script', 'raw-llm', 'system-one-decision', 'validate', 'property-match'",
       ),
     label: z.string().optional().describe("Human-readable label for UI display"),
     config: z
@@ -1994,6 +2005,7 @@ export const WorkflowNodeSchema = z
         "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. " +
           "For script: { runtime, script, args?, timeout? }. " +
           "For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. " +
+          "For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. " +
           "Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. " +
           "SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. " +
           "Pass dynamic values through config.args instead (inline script receives them as argv; swarm-script receives its args object). " +
@@ -2412,6 +2424,26 @@ export type AgentTaskSummary = Pick<
   | "totalCostUsd"
 >;
 
+/**
+ * `/api/tasks?fields=timeline` list item: only what the dashboard activity
+ * timeline draws (lane, bar extent, label, hover stats). Same bounded `task`
+ * preview as `AgentTaskSummary`.
+ */
+export type AgentTaskTimelineItem = Pick<
+  AgentTask,
+  | "id"
+  | "agentId"
+  | "parentTaskId"
+  | "task"
+  | "title"
+  | "status"
+  | "createdAt"
+  | "lastUpdatedAt"
+  | "finishedAt"
+  | "peakContextTokens"
+  | "totalCostUsd"
+>;
+
 export const PageVersionSchema = z
   .object({
     id: z.string(),
@@ -2593,6 +2625,12 @@ export const WorkflowRunSchema = z
   })
   .openapi("WorkflowRun");
 export type WorkflowRun = z.infer<typeof WorkflowRunSchema>;
+
+/** List row of a run: no `context`, which `GET /api/workflow-runs/{id}` serves. */
+export const WorkflowRunSummarySchema = WorkflowRunSchema.omit({ context: true }).openapi(
+  "WorkflowRunSummary",
+);
+export type WorkflowRunSummary = z.infer<typeof WorkflowRunSummarySchema>;
 
 // --- Script Workflow Runs ---
 

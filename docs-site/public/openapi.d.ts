@@ -3141,13 +3141,17 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List approval requests with optional filters */
+        /**
+         * List approval requests with optional filters
+         * @description Returns full approval requests by default. Pass `fields=slim` for the list-view shape: `questions`, `approvers`, `responses`, `resolutionReason` and `notificationChannels` are dropped and `questionCount` is added. Fetch one request in full via `GET /api/approval-requests/{id}`.
+         */
         get: {
             parameters: {
                 query?: {
                     status?: string;
                     workflowRunId?: string;
                     limit?: number | null;
+                    fields?: "full" | "slim";
                 };
                 header?: never;
                 path?: never;
@@ -3212,6 +3216,22 @@ export interface paths {
                                 createdBy?: string;
                                 createdAt: string;
                                 updatedAt: string;
+                            }[] | {
+                                id: string;
+                                title: string;
+                                workflowRunId: string | null;
+                                workflowRunStepId: string | null;
+                                sourceTaskId: string | null;
+                                /** @enum {string} */
+                                status: "pending" | "approved" | "rejected" | "timeout" | "cancelled";
+                                resolvedBy: string | null;
+                                resolvedAt: string | null;
+                                timeoutSeconds: number | null;
+                                expiresAt: string | null;
+                                createdBy?: string;
+                                createdAt: string;
+                                updatedAt: string;
+                                questionCount: number;
                             }[];
                         };
                     };
@@ -4365,6 +4385,8 @@ export interface paths {
                 query?: {
                     agentId?: string;
                     repoId?: string;
+                    /** @description Return only the entry with this exact key. Omit to return every resolved entry. */
+                    key?: string;
                     includeSecrets?: "true" | "false";
                 };
                 header?: never;
@@ -4599,6 +4621,8 @@ export interface paths {
                 query?: {
                     scope?: string;
                     scopeId?: string;
+                    /** @description Return only entries with this exact key. Omit to return every entry. */
+                    key?: string;
                     includeSecrets?: "true" | "false";
                 };
                 header?: never;
@@ -5763,6 +5787,12 @@ export interface paths {
                     since?: string;
                     until?: string;
                     limit?: number;
+                    /** @description Comma-separated event names; matches any of them (ANDed with `event`) */
+                    events?: string;
+                    /** @description Comma-separated `data.field` values, used with latestPerDataField */
+                    dataFields?: string;
+                    /** @description When true, return only the newest event per (event, data.field) pair for every name in `event`/`events` and every value in `dataFields` */
+                    latestPerDataField?: "true" | "false";
                 };
                 header?: never;
                 path?: never;
@@ -5778,7 +5808,21 @@ export interface paths {
                     content: {
                         "application/json": {
                             events: components["schemas"]["SwarmEvent"][];
+                            /**
+                             * @description Present only when the request asked for latestPerDataField=true
+                             * @enum {boolean}
+                             */
+                            latestPerDataField?: true;
                         };
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
             };
@@ -14824,6 +14868,7 @@ export interface paths {
                     source?: string;
                     q?: string;
                     requestedByUserId?: string;
+                    contextKeyPrefix?: string;
                     fields?: "full" | "slim";
                 };
                 header?: never;
@@ -16693,7 +16738,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List scheduled tasks */
+        /**
+         * List scheduled tasks
+         * @description Returns full schedules by default. Pass `fields=slim` for the list-view shape, which swaps the full `taskTemplate` for a bounded `taskTemplatePreview`. Fetch one schedule in full via `GET /api/schedules/{id}`.
+         */
         get: {
             parameters: {
                 query?: {
@@ -16704,6 +16752,7 @@ export interface paths {
                     targetType?: "agent-task" | "workflow" | "script";
                     workflowId?: string;
                     scriptName?: string;
+                    fields?: "full" | "slim";
                 };
                 header?: never;
                 path?: never;
@@ -16783,6 +16832,71 @@ export interface paths {
                                 createdBy?: string;
                                 updatedBy?: string;
                                 favorite?: boolean;
+                            }[] | {
+                                /** Format: uuid */
+                                id: string;
+                                /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
+                                key: string;
+                                name: string;
+                                description?: string;
+                                cronExpression?: string;
+                                intervalMs?: number;
+                                taskType?: string;
+                                /** @default [] */
+                                tags: string[];
+                                /** @default 50 */
+                                priority: number;
+                                targetAgentId?: string;
+                                /** @default true */
+                                enabled: boolean;
+                                /** Format: date-time */
+                                lastRunAt?: string;
+                                /** Format: date-time */
+                                nextRunAt?: string;
+                                createdByAgentId?: string;
+                                parentTaskId?: string;
+                                requestedDelayMs?: number;
+                                /** Format: date-time */
+                                requestedRunAt?: string;
+                                /** @default UTC */
+                                timezone: string;
+                                /** @default 0 */
+                                consecutiveErrors: number;
+                                /** Format: date-time */
+                                lastErrorAt?: string;
+                                lastErrorMessage?: string;
+                                model?: string;
+                                /** @enum {string} */
+                                modelTier?: "smol" | "regular" | "smart" | "ultra";
+                                /**
+                                 * @default recurring
+                                 * @enum {string}
+                                 */
+                                scheduleType: "recurring" | "one_time";
+                                /**
+                                 * @default agent-task
+                                 * @enum {string}
+                                 */
+                                targetType: "agent-task" | "workflow" | "script";
+                                /** Format: uuid */
+                                workflowId?: string;
+                                scriptName?: string;
+                                scriptArgs?: {
+                                    [key: string]: unknown;
+                                };
+                                params?: {
+                                    [key: string]: unknown;
+                                };
+                                requiredParams?: string[];
+                                requires?: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
+                                /** Format: date-time */
+                                createdAt: string;
+                                /** Format: date-time */
+                                lastUpdatedAt: string;
+                                createdBy?: string;
+                                updatedBy?: string;
+                                favorite: boolean;
+                                taskTemplatePreview: string;
                             }[];
                         };
                     };
@@ -16869,7 +16983,7 @@ export interface paths {
         };
         /**
          * List tasks with filters
-         * @description Returns tasks with the full `task` text replaced by a bounded `taskPreview` and completion/integration blobs dropped by default — list views only need the preview. Pass `fields=full` to restore the full `AgentTask`. Fetch a single task in full via `GET /api/tasks/{id}`.
+         * @description Returns tasks with the full `task` text replaced by a bounded `taskPreview` and completion/integration blobs dropped by default — list views only need the preview. Pass `fields=full` to restore the full `AgentTask`, or `fields=timeline` for the narrow shape the dashboard timeline draws. Fetch a single task in full via `GET /api/tasks/{id}`. `total` (the filtered row count, ignoring limit/offset) is computed only with `includeTotal=true`.
          */
         get: {
             parameters: {
@@ -16890,7 +17004,8 @@ export interface paths {
                     orderBy?: "lastUpdatedAt" | "createdAt";
                     limit?: number | null;
                     offset?: number | null;
-                    fields?: "full" | "slim";
+                    fields?: "full" | "slim" | "timeline";
+                    includeTotal?: "true" | "false";
                 };
                 header?: never;
                 path?: never;
@@ -16950,8 +17065,25 @@ export interface paths {
                                 finishedAt?: string;
                                 peakContextPercent?: number;
                                 totalCostUsd?: number;
+                            }[] | {
+                                /** Format: uuid */
+                                id: string;
+                                agentId: string | null;
+                                parentTaskId?: string;
+                                task: string;
+                                title?: string;
+                                /** @enum {string} */
+                                status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+                                /** Format: date-time */
+                                createdAt: string;
+                                /** Format: date-time */
+                                lastUpdatedAt: string;
+                                /** Format: date-time */
+                                finishedAt?: string;
+                                peakContextTokens?: number;
+                                totalCostUsd?: number;
                             }[];
-                            total: number;
+                            total?: number;
                         };
                     };
                 };
@@ -20733,7 +20865,9 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["Workflow"];
+                        "application/json": components["schemas"]["Workflow"] & {
+                            warnings?: string[];
+                        };
                     };
                 };
                 /** @description Invalid definition */
@@ -20896,7 +21030,9 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["Workflow"];
+                        "application/json": components["schemas"]["Workflow"] & {
+                            warnings?: string[];
+                        };
                     };
                 };
                 /** @description Invalid definition */
@@ -20977,7 +21113,9 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["Workflow"];
+                        "application/json": components["schemas"]["Workflow"] & {
+                            warnings?: string[];
+                        };
                     };
                 };
                 /** @description Invalid patch or resulting definition */
@@ -21029,11 +21167,11 @@ export interface paths {
             requestBody?: {
                 content: {
                     "application/json": {
-                        /** @description Executor type: 'agent-task', 'script', 'swarm-script', 'raw-llm', 'validate', 'property-match' */
+                        /** @description Executor type: 'agent-task', 'script', 'swarm-script', 'raw-llm', 'system-one-decision', 'validate', 'property-match' */
                         type?: string;
                         /** @description Human-readable label for UI display */
                         label?: string;
-                        /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
+                        /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
                         config?: {
                             [key: string]: unknown;
                         };
@@ -21065,7 +21203,9 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["Workflow"];
+                        "application/json": components["schemas"]["Workflow"] & {
+                            warnings?: string[];
+                        };
                     };
                 };
                 /** @description Invalid patch or resulting definition */
@@ -21225,7 +21365,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List runs for a workflow */
+        /**
+         * List runs for a workflow, newest first
+         * @description Returns one page of runs without `context` (fetch it with GET /api/workflow-runs/{id}). `limit` defaults to 50 and is capped at 100; follow `page.nextOffset` while `page.hasMore` is true.
+         */
         get: {
             parameters: {
                 query?: {
@@ -21241,14 +21384,14 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Workflow run list */
+                /** @description One page of workflow runs */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["WorkflowRun"][] | {
-                            runs: components["schemas"]["WorkflowRun"][];
+                        "application/json": {
+                            runs: components["schemas"]["WorkflowRunSummary"][];
                             page: {
                                 limit: number;
                                 offset: number;
@@ -22756,7 +22899,7 @@ export interface components {
             /** Format: uuid */
             id: string;
             /** @enum {string} */
-            eventType: "agent_joined" | "agent_status_change" | "agent_left" | "task_created" | "task_status_change" | "task_progress" | "task_steering" | "task_offered" | "task_accepted" | "task_rejected" | "task_claimed" | "task_claim_rejected_affinity" | "task_dispatch_rejected_affinity" | "task_authorization_rejected" | "task_recovery_authorization" | "task_released" | "task_deferred_wait_woke" | "task_follow_up_suppressed" | "task_citation_check_refused" | "channel_message" | "service_registered" | "service_unregistered" | "service_status_change" | "budget.upserted" | "budget.deleted" | "pricing.inserted" | "pricing.deleted" | "pricing.refresh" | "pricing.refresh.failed" | "task_superseded" | "slack_delivery";
+            eventType: "agent_joined" | "agent_status_change" | "agent_left" | "task_created" | "task_status_change" | "task_progress" | "task_steering" | "task_offered" | "task_accepted" | "task_rejected" | "task_claimed" | "task_claim_rejected_affinity" | "task_dispatch_rejected_affinity" | "task_authorization_rejected" | "task_recovery_authorization" | "task_dependency_repointed" | "task_released" | "task_deferred_wait_woke" | "task_follow_up_suppressed" | "task_citation_check_refused" | "channel_message" | "service_registered" | "service_unregistered" | "service_status_change" | "budget.upserted" | "budget.deleted" | "pricing.inserted" | "pricing.deleted" | "pricing.refresh" | "pricing.refresh.failed" | "task_superseded" | "slack_delivery";
             agentId?: string;
             taskId?: string;
             oldValue?: string;
@@ -22895,11 +23038,11 @@ export interface components {
         WorkflowNode: {
             /** @description Unique node identifier, used in 'next' and 'inputs' mappings */
             id: string;
-            /** @description Executor type: 'agent-task', 'script', 'swarm-script', 'raw-llm', 'validate', 'property-match' */
+            /** @description Executor type: 'agent-task', 'script', 'swarm-script', 'raw-llm', 'system-one-decision', 'validate', 'property-match' */
             type: string;
             /** @description Human-readable label for UI display */
             label?: string;
-            /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
+            /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
             config: {
                 [key: string]: unknown;
             };
@@ -23048,11 +23191,11 @@ export interface components {
                 nodeId: string;
                 /** @description Partial node data to merge */
                 node: {
-                    /** @description Executor type: 'agent-task', 'script', 'swarm-script', 'raw-llm', 'validate', 'property-match' */
+                    /** @description Executor type: 'agent-task', 'script', 'swarm-script', 'raw-llm', 'system-one-decision', 'validate', 'property-match' */
                     type?: string;
                     /** @description Human-readable label for UI display */
                     label?: string;
-                    /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
+                    /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
                     config?: {
                         [key: string]: unknown;
                     };
@@ -23094,6 +23237,20 @@ export interface components {
             };
             requiredParams?: string[];
             requires?: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
+        };
+        WorkflowRunSummary: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            workflowId: string;
+            /** @enum {string} */
+            status: "running" | "waiting" | "completed" | "failed" | "skipped" | "cancelled";
+            triggerData?: unknown;
+            error?: string;
+            createdBy?: string;
+            startedAt: string;
+            lastUpdatedAt: string;
+            finishedAt?: string;
         };
         WorkflowRun: {
             /** Format: uuid */

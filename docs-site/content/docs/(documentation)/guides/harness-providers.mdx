@@ -30,11 +30,18 @@ tokens. Their API reasoning efforts are `none`, `low`, `medium`, `high`, `xhigh`
 `max`; the swarm displays `none` as `off`. Ultra is an orchestration mode, not a
 model reasoning effort.
 
+The picker also includes `gpt-6.1-sol`, verified against the official
+[API](https://developers.openai.com/api/docs/models/gpt-6.1-sol) and Codex catalogs on
+September 29, 2026. It has the same context, output, input, and tool limits as GPT-6 Sol,
+but its API reasoning efforts are `low`, `medium` (default), `high`, `xhigh`, and `max`.
+It does not support `none`, so the swarm shows no `off` level for it.
+
 [Standard API prices](https://developers.openai.com/api/docs/pricing), in USD per
 million tokens, are:
 
 | Model | Input | Cached input | Cache write | Output |
 |---|---:|---:|---:|---:|
+| GPT-6.1 Sol | 2 | 0.10 | 2.50 | 10 |
 | GPT-6 Sol | 2 | 0.20 | 2.50 | 10 |
 | GPT-6 Luna | 0.10 | 0.01 | 0.125 | 0.50 |
 

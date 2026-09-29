@@ -6,6 +6,10 @@ import type {
   WorkflowPatch,
 } from "../types";
 import type { ExecutorRegistry } from "./executors/registry";
+import {
+  systemOneRetryViolations,
+  systemOneStaticShapeViolations,
+} from "./executors/system-one-decision";
 
 /** Extract all target node IDs from a node's `next` field */
 export function getNextTargets(next: string | string[] | Record<string, string>): string[] {
@@ -63,6 +67,27 @@ export function findEntryNodes(def: WorkflowDefinition): WorkflowNode[] {
     }
   }
   return def.nodes.filter((n) => !targets.has(n.id));
+}
+
+/**
+ * Pick the port a node routes on once validation has produced pass/fail.
+ *
+ * Validation decides when the node uses record-based `next` and the executor
+ * either chose no port or chose one that `next` does not declare. `script` and
+ * `swarm-script` always emit "success", so a `next: { pass, fail }` record would
+ * otherwise match nothing and the branch would end silently. An executor port
+ * that IS a key of `next` (property-match "true"/"false", a script node wired
+ * as `next: { success }`) stays authoritative.
+ */
+export function resolveValidationPort(
+  next: WorkflowNode["next"],
+  executorPort: string | undefined,
+  validationPassed: boolean | undefined,
+): string | undefined {
+  if (validationPassed === undefined) return executorPort;
+  if (!next || typeof next !== "object" || Array.isArray(next)) return executorPort;
+  if (executorPort && Object.hasOwn(next, executorPort)) return executorPort;
+  return validationPassed ? "pass" : "fail";
 }
 
 /**
@@ -185,6 +210,9 @@ export function validateDefinition(
         `Node "${node.id}" human-in-the-loop config.questions must be an array or one exact {{interpolation}} token`,
       );
     }
+    // A system-one-decision node's question ids and return types are static, and it never carries
+    // an engine retry policy (it retries transient transport errors itself).
+    errors.push(...systemOneStaticShapeViolations(node), ...systemOneRetryViolations(node));
     if (node.type === "foreach") {
       validateForeachNode(node, errors);
       // A legacy `#` id may stay editable as a NORMAL node, but never as a foreach

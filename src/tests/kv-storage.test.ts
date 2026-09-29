@@ -9,7 +9,9 @@ import {
   getKv,
   incrKv,
   initDb,
+  type KvJsonFieldEquals,
   KvTypeCollisionError,
+  kvPrefixUpperBound,
   listKv,
   sweepExpiredKv,
   sweepExpiredKvPrefix,
@@ -198,6 +200,66 @@ describe("kv-storage helpers", () => {
     const exact = await listKv(NS, { prefix: "x_", limit: 100, offset: 0 });
     // Without escaping, `_` would match any char and we'd get both rows.
     expect(exact.map((e) => e.key)).toEqual(["x_1"]);
+  });
+
+  test("listKv prefix is an exact, case-sensitive range on the primary key", async () => {
+    for (const key of ["m/row/1", "m/row/2", "M/row/3", "m/rowx", "m/row", "n/row/1", "m/row/é"]) {
+      await upsertKv({ namespace: NS, key, value: 1, valueType: "integer" });
+    }
+    const rows = await listKv(NS, { prefix: "m/row/", limit: 100, offset: 0 });
+    expect(rows.map((e) => e.key)).toEqual(["m/row/1", "m/row/2", "m/row/é"]);
+    expect(await countKv(NS, { prefix: "m/row/" })).toBe(3);
+    expect(kvPrefixUpperBound("m/row/")).toBe("m/row0");
+    expect(kvPrefixUpperBound(`a${String.fromCodePoint(0x10ffff)}`)).toBe("b");
+    expect(kvPrefixUpperBound(String.fromCodePoint(0xd7ff))).toBe(String.fromCodePoint(0xe000));
+
+    const plan = await getDbClient().query<{ detail: string }>(
+      `EXPLAIN QUERY PLAN SELECT key FROM kv_entries
+        WHERE namespace = ? AND (expires_at IS NULL OR expires_at > ?) AND key >= ? AND key < ?`,
+      [NS, 0, "m/row/", "m/row0"],
+    );
+    expect(plan.map((row) => row.detail).join(" ")).toContain("key>? AND key<?");
+  });
+
+  test("listKv jsonFieldEquals narrows rows in SQL and skips corrupt JSON", async () => {
+    await upsertKv({
+      namespace: NS,
+      key: "r/1",
+      value: { run: "a", ok: true, n: 2 },
+      valueType: "json",
+    });
+    await upsertKv({
+      namespace: NS,
+      key: "r/2",
+      value: { run: "b", ok: false, n: 2 },
+      valueType: "json",
+    });
+    await upsertKv({
+      namespace: NS,
+      key: "r/3",
+      value: { run: "a", ok: false, n: 3.5 },
+      valueType: "json",
+    });
+    await getDbClient().run(
+      "INSERT INTO kv_entries (namespace, key, value, value_type) VALUES (?, ?, ?, 'json')",
+      [NS, "r/4", "{not json"],
+    );
+    const keys = async (jsonFieldEquals: KvJsonFieldEquals[]) =>
+      (await listKv(NS, { prefix: "r/", limit: 100, offset: 0, jsonFieldEquals })).map(
+        (e) => e.key,
+      );
+    expect(await keys([])).toEqual(["r/1", "r/2", "r/3", "r/4"]);
+    expect(await keys([{ field: "run", value: "a" }])).toEqual(["r/1", "r/3"]);
+    expect(await keys([{ field: "ok", value: true }])).toEqual(["r/1"]);
+    // Non-safe-integer numbers are not prefiltered (the caller re-checks).
+    expect(await keys([{ field: "n", value: 3.5 }])).toEqual(["r/1", "r/2", "r/3", "r/4"]);
+    expect(
+      await keys([
+        { field: "run", value: "a" },
+        { field: "n", value: 2 },
+      ]),
+    ).toEqual(["r/1"]);
+    expect(await keys([{ field: "missing", value: "a" }])).toEqual([]);
   });
 
   test("incrKv creates from missing", async () => {

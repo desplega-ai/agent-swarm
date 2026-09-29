@@ -22,16 +22,18 @@ import {
   type ApprovalSlackClient,
   postApprovalCancellationUpdates,
 } from "./approval-notifications";
+import { shapeApprovalResolution } from "./approval-resolution";
 import { loadCompletedStepRouting } from "./completed-step-routing";
 import { FAILED_TASK_OUTPUT_PREFIX } from "./constants";
 import { getNextTargets } from "./definition";
-import { findReadyNodes, walkGraph } from "./engine";
+import { findReadyNodes, hasRunningStep, walkGraph } from "./engine";
 import type { WorkflowEventBus } from "./event-bus";
 import { workflowEventBus } from "./event-bus";
 import type { ExecutorRegistry } from "./executors/registry";
 import { computeNextPort } from "./executors/wait";
 import { resolveForeachParent } from "./foreach-join";
 import { getSecretInputKeys } from "./input";
+import { findWorkflowReadinessProblems, formatReadinessProblems } from "./readiness";
 import {
   checkpointPortStepAndResolveSuccessors,
   completeTaskStepAndResolveSuccessors,
@@ -204,6 +206,13 @@ export async function finalizeOrWait(runId: string): Promise<void> {
   // finalized from a stale snapshot strands that branch.
   await getDbClient().transaction(async () => {
     const steps = await getWorkflowRunStepsByRunId(runId);
+    // A branch still executing belongs to a live walk, which finalizes the
+    // run itself; its finalizer only acts on a `running` run.
+    if (hasRunningStep(steps)) {
+      const run = await getWorkflowRun(runId);
+      if (run?.status === "waiting") await updateWorkflowRun(runId, { status: "running" });
+      return;
+    }
     const hasWaiting = steps.some((s) => s.status === "waiting");
     if (hasWaiting) {
       await updateWorkflowRun(runId, { status: "waiting" });
@@ -318,6 +327,18 @@ export async function retryFailedRun(runId: string, registry: ExecutorRegistry):
   if (!failedStep) throw new Error("No failed step found");
 
   const completedNodeIds = new Set(await getCompletedStepNodeIds(runId));
+
+  // A retry re-executes the failed node and everything after it. Refuse before the
+  // run is reset when a node still to run cannot run (say, a system-one-decision node with no API
+  // key), so the retry does not repeat side effects only to fail again downstream.
+  const notReady = await findWorkflowReadinessProblems(
+    { nodes: workflow.definition.nodes.filter((node) => !completedNodeIds.has(node.id)) },
+    registry,
+  );
+  if (notReady.length > 0) {
+    throw new Error(`Retry not started, run left failed: ${formatReadinessProblems(notReady)}`);
+  }
+
   const { activeEdges } = await loadCompletedStepRouting(
     workflow.definition,
     runId,
@@ -351,7 +372,15 @@ export async function retryFailedRun(runId: string, registry: ExecutorRegistry):
   if (!claimed) throw new Error("Run is not in failed state");
 
   // Resume from the failed node — use findReadyNodes for convergence safety.
-  const readyNodes = findReadyNodes(workflow.definition, completedNodeIds, activeEdges);
+  // findReadyNodes returns every node without a completed step, including a
+  // branch whose step is still running or waiting on its task. That branch is
+  // not the retry's to run: walking it again executes it twice.
+  const liveNodeIds = new Set(
+    steps.filter((s) => s.status === "running" || s.status === "waiting").map((s) => s.nodeId),
+  );
+  const readyNodes = findReadyNodes(workflow.definition, completedNodeIds, activeEdges).filter(
+    (n) => n.id === failedNode.id || !liveNodeIds.has(n.id),
+  );
 
   // Loop and foreach retry targets can be absent from readyNodes even when
   // active; include them explicitly, but never revive an untaken branch.
@@ -504,15 +533,15 @@ async function resumeFromApprovalResolution(
     return;
   }
 
-  // Determine output port based on approval status
-  const nextPort =
-    event.status === "timeout" ? "timeout" : event.status === "rejected" ? "rejected" : "approved";
-
-  const stepOutput = {
-    requestId: event.requestId,
-    status: event.status,
-    responses: event.responses,
-  };
+  // Output and port for the approval status. A step parked by an executor other
+  // than human-in-the-loop shapes its own (see shapeApprovalResolution).
+  const { output: stepOutput, nextPort } = shapeApprovalResolution(
+    registry,
+    workflow.definition,
+    step.nodeId,
+    step.output,
+    { requestId: event.requestId, status: event.status, responses: event.responses },
+  );
 
   // Use port-based routing to determine the correct successors.
   // findReadyNodes without activeEdges would return ALL structural successors

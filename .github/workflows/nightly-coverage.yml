@@ -1,0 +1,67 @@
+name: Nightly root coverage
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  root-coverage:
+    name: Root src coverage baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run root tests serially with coverage
+        run: bun --config=bunfig.coverage.toml test
+
+      - name: Build coverage summary
+        if: ${{ !cancelled() && hashFiles('coverage/lcov.info') != '' }}
+        run: bun scripts/coverage-summary.ts coverage/lcov.info coverage-summary.json
+
+      - name: Upload LCOV report
+        if: ${{ !cancelled() && hashFiles('coverage/lcov.info') != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: root-src-coverage-${{ github.sha }}
+          path: coverage/lcov.info
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Store coverage baseline
+        if: ${{ !cancelled() && hashFiles('coverage/lcov.info') != '' }}
+        env:
+          SWARM_API_BASE_URL: ${{ vars.SWARM_API_BASE_URL || 'https://api.desplega.agent-swarm.dev' }}
+          SWARM_COVERAGE_API_KEY: ${{ secrets.SWARM_COVERAGE_API_KEY }}
+          SWARM_COVERAGE_AGENT_ID: e33fa717-b8d3-406d-a861-0e0e1272639f
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SWARM_API_BASE_URL" || { echo "Swarm API base URL is required."; exit 1; }
+          test -n "$SWARM_COVERAGE_API_KEY" || { echo "Repository secret SWARM_COVERAGE_API_KEY is required."; exit 1; }
+          jq -n --slurpfile summary coverage-summary.json \
+            '{name:"coverage-store", scope:"global", args:{mode:"store", summary:$summary[0]}, intent:"Store nightly root src coverage baseline"}' \
+            > coverage-store-request.json
+          base_url="${SWARM_API_BASE_URL%/}"
+          curl --fail-with-body --silent --show-error --retry 2 \
+            -H "Authorization: Bearer ${SWARM_COVERAGE_API_KEY}" \
+            -H "X-Agent-ID: ${SWARM_COVERAGE_AGENT_ID}" \
+            -H "Content-Type: application/json" \
+            --data-binary @coverage-store-request.json \
+            "${base_url}/api/scripts/run" \
+            > coverage-store-response.json
+          jq -e '.exitCode == 0 and .result.stored == true' coverage-store-response.json > /dev/null

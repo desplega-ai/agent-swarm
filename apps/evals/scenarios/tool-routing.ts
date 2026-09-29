@@ -1,11 +1,5 @@
 import { type ToolUse, toolUseMatches } from "../src/judge/session-log-parse.ts";
-import type {
-  CheckResult,
-  DeterministicCheck,
-  JudgeContext,
-  Scenario,
-  SwarmTask,
-} from "../src/types.ts";
+import type { CheckResult, DeterministicCheck, JudgeContext, Scenario } from "../src/types.ts";
 import {
   apiList,
   firstStageIndices,
@@ -14,7 +8,6 @@ import {
   type SequenceStage,
   safeStringify,
   scoreResult,
-  stageOrderScore,
   taskToolUses,
 } from "./orchestration-utils.ts";
 
@@ -60,15 +53,13 @@ const routingCheck: DeterministicCheck = {
 };
 
 // ---------------------------------------------------------------------------
-// dispatch-order: a hop-SEQUENCE structural axis, additive to routingCheck
-// above. routingCheck only grades tool-category PRESENCE ("did you touch
-// memory/kv/get-tasks/send-task at all") — a run that fires them in a
-// scrambled order (e.g. dispatches the follow-up task BEFORE it ever looked up
-// the completed-alpha tasks the follow-up is supposed to build on) scores
-// identically to one that respects the causal order the prompt implies. This
-// is the single-worker analog of "the right hop happened at the right point in
-// the sequence" — Edge-F1-style order fidelity (stageOrderScore) rather than
-// Node-F1-style presence.
+// dispatch-order: a PARTIAL order over the hops, additive to routingCheck
+// above. Only the causal edges the task implies are graded: recall memory
+// before delegating the follow-up, and delegate before completing. KV and
+// task-lookup can happen anywhere; a strict first-use order over all five
+// stages penalized harmless reorderings (e.g. a kv-set before the lookup).
+// Each edge scores when both stages are present and the first use of the
+// earlier stage comes before the first use of the later one.
 // ---------------------------------------------------------------------------
 const ROUTING_STAGES: SequenceStage[] = [
   {
@@ -84,18 +75,39 @@ const ROUTING_STAGES: SequenceStage[] = [
   { label: "complete", patterns: ["store-progress", "store_progress"] },
 ];
 
+/** Graded before→after edges, as indices into ROUTING_STAGES. */
+const ROUTING_EDGES: Array<[number, number]> = [
+  [0, 3], // memory-recall before delegate-followup
+  [3, 4], // delegate-followup before complete
+];
+
+function partialOrderScore(indices: number[]): { score: number; edges: string[] } {
+  const edges = ROUTING_EDGES.map(([a, b]) => {
+    const ia = indices[a]!;
+    const ib = indices[b]!;
+    const ok = ia >= 0 && ib >= 0 && ia < ib;
+    return {
+      ok,
+      label: `${ROUTING_STAGES[a]!.label}<${ROUTING_STAGES[b]!.label}=${ok ? "ok" : "no"}`,
+    };
+  });
+  return {
+    score: edges.filter((e) => e.ok).length / ROUTING_EDGES.length,
+    edges: edges.map((e) => e.label),
+  };
+}
+
 const routingSequenceCheck: DeterministicCheck = {
   name: "tool-routing-hop-order",
   fn: async (ctx): Promise<CheckResult> => {
     const tools = await taskToolUses(ctx, ctx.tasks[0]);
     if (tools.length === 0) return { pass: false, score: 0, detail: "no parsed tool calls" };
     const indices = firstStageIndices(tools, ROUTING_STAGES);
-    const score = stageOrderScore(indices);
-    return scoreResult(
-      "routing hop order",
-      score,
-      ROUTING_STAGES.map((s, i) => `${s.label}=${indices[i]! >= 0 ? indices[i] : "absent"}`),
-    );
+    const { score, edges } = partialOrderScore(indices);
+    return scoreResult("routing hop order", score, [
+      ...edges,
+      ...ROUTING_STAGES.map((s, i) => `${s.label}=${indices[i]! >= 0 ? indices[i] : "absent"}`),
+    ]);
   },
 };
 
@@ -129,28 +141,45 @@ async function workerKvEntries(ctx: JudgeContext, tools: ToolUse[]): Promise<KvE
   return [];
 }
 
+// v2 (2026-09-28): v1 graded "correctness" as "the word alpha appears in the
+// output, a KV entry exists, a follow-up exists" — satisfiable without reading a
+// single task, and the seeded history holds no alpha tasks at all. v2 grades an
+// answer key that lives only in the seeded history (same fixture as sql-audit):
+// the completed count and the highest-priority completed task, plus a KV
+// checkpoint and a follow-up task that carry those facts.
+const COMPLETED_COUNT = /(?<![\d.])12(?![\d.])/;
+const TOP_TASK = /rotate[\s\S]{0,40}payments[\s\S]{0,40}api[\s\S]{0,20}keys/i;
+
 const routingCorrectnessCheck: DeterministicCheck = {
   name: "routing-artifacts",
   fn: async (ctx): Promise<CheckResult> => {
-    const kvEntries = await workerKvEntries(ctx, await taskToolUses(ctx, ctx.tasks[0]));
-    const alphaTasks = ctx.tasks.filter((t: SwarmTask) =>
-      /alpha/i.test(`${t.title}\n${t.description}\n${safeStringify(t.tags)}`),
-    );
+    const root = ctx.tasks[0];
+    const kvEntries = await workerKvEntries(ctx, await taskToolUses(ctx, root));
+    const checkpoint = kvEntries.find((e) => e.key === "alpha/checkpoint");
+    const checkpointText = safeStringify(checkpoint?.value);
     const followUps = ctx.tasks.filter(
-      (t) => t.parentTaskId === ctx.tasks[0]?.id || /next phase|follow.?up/i.test(t.description),
+      (t) =>
+        t.id !== root?.id && (t.parentTaskId === root?.id || t.creatorAgentId === root?.agentId),
     );
-    const output = ctx.tasks[0]?.result ?? "";
-    const mentionsAlpha = /project alpha|alpha/i.test(output);
-    const score =
-      ((kvEntries.length > 0 ? 1 : 0) +
-        (alphaTasks.length > 0 ? 1 : 0) +
-        (followUps.length > 0 ? 1 : 0) +
-        (mentionsAlpha ? 1 : 0)) /
-      4;
+    const followUpText = followUps
+      .map((t) => `${t.title ?? ""}\n${t.description ?? ""}`)
+      .join("\n");
+    const output = root?.result ?? "";
+    const parts = {
+      outputCount: COMPLETED_COUNT.test(output),
+      outputTop: TOP_TASK.test(output),
+      checkpoint: Boolean(checkpoint) && COMPLETED_COUNT.test(checkpointText),
+      followUpTop: TOP_TASK.test(followUpText),
+      oneFollowUp: followUps.length === 1,
+    };
+    const score = Object.values(parts).filter(Boolean).length / Object.keys(parts).length;
     return {
       pass: score >= 1,
       score,
-      detail: `kv=${kvEntries.length}, alphaTasks=${alphaTasks.length}, followups=${followUps.length}, outputAlpha=${mentionsAlpha}`,
+      detail: Object.entries(parts)
+        .map(([k, v]) => `${k}=${v ? "yes" : "no"}`)
+        .concat(`followups=${followUps.length}`, `kv=${kvEntries.length}`)
+        .join(", "),
     };
   },
 };
@@ -166,37 +195,78 @@ const routingOutputGate: DeterministicCheck = {
   },
 };
 
+/**
+ * Structured-output gate (folded in from the retired structured-output-adherence
+ * scenario): the completion output must be ONLY a JSON object matching the
+ * task's outputSchema, with every field correctly typed.
+ */
+const ROUTING_OUTPUT_SCHEMA = {
+  type: "object",
+  required: ["alphaSummary", "checkpointKey", "followUpCreated"],
+  properties: {
+    alphaSummary: { type: "string" },
+    checkpointKey: { type: "string" },
+    followUpCreated: { type: "boolean" },
+  },
+};
+
+function structuredOutputProblem(output: unknown): string | null {
+  if (typeof output !== "string" || !output.trim()) return "no task output";
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(output);
+  } catch {
+    return "output is not valid JSON";
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+    return "JSON output is not an object";
+  const obj = parsed as Record<string, unknown>;
+  if (typeof obj.alphaSummary !== "string" || !obj.alphaSummary.trim())
+    return "alphaSummary missing or not a string";
+  if (typeof obj.checkpointKey !== "string") return "checkpointKey missing or not a string";
+  if (typeof obj.followUpCreated !== "boolean") return "followUpCreated missing or not a boolean";
+  return null;
+}
+
+const structuredOutputGate: DeterministicCheck = {
+  name: "routing-structured-output",
+  fn: async (ctx) => {
+    const problem = structuredOutputProblem(ctx.tasks[0]?.result);
+    return { pass: problem === null, detail: problem ?? "output matches the outputSchema" };
+  },
+};
+
 export const toolRouting: Scenario = {
   id: "tool-routing",
   name: "Tool routing",
   description:
-    "Behavioral scenario that grades whether a worker uses swarm MCP tools for memory, KV state, task lookup, delegation, and structured completion instead of raw shell/API workarounds.",
+    "Behavioral scenario: a worker must discover the handoff conventions from memory, read the seeded task history through swarm tools, and carry the right facts into KV and a follow-up task.",
   workers: 1,
   seed: {
     memories: [
-      "Project Alpha handoff: deployment readiness lives in the swarm task history, and checkpoint state belongs in KV under alpha/checkpoint.",
-      "Project Alpha requires a follow-up task for phase two after completed alpha tasks are summarized.",
+      "Project Alpha handoff: Alpha's phase-one scope is every task in the swarm task history that finished with status completed. Checkpoint state belongs in KV under the exact key alpha/checkpoint and must record how many phase-one tasks completed.",
+      "Project Alpha phase two starts from the single highest-priority completed phase-one task: the phase-two follow-up task must name that task's title.",
     ],
     sqlDump: "sql-audit-history.sql",
   },
   tasks: [
     {
       title: "Route Project Alpha through the swarm tools",
+      outputSchema: ROUTING_OUTPUT_SCHEMA,
       description: [
-        "Start by recalling memories about Project Alpha.",
-        "Store a checkpoint in the swarm KV store under key alpha/checkpoint.",
-        "Use the swarm task-listing tool to find relevant completed tasks and summarize what you found.",
-        "Create one follow-up task for the next Alpha phase using the task/delegation tool. Avoid raw curl/fetch against /api endpoints.",
-        "Complete through store-progress with JSON including alphaSummary, checkpointKey, and followUpCreated.",
+        "Hand Project Alpha from phase one to phase two. The handoff conventions are in swarm memory; follow them exactly.",
+        "Use the swarm's own MCP tools for every step. Do not use raw curl/fetch against /api endpoints and do not use db-query.",
+        "Create exactly one follow-up task for phase two.",
+        "Complete through store-progress with output that is ONLY a JSON object (no markdown or prose): alphaSummary (string, with the completed count and the top task title), checkpointKey (string), followUpCreated (boolean).",
       ].join("\n"),
     },
   ],
   outcome: {
-    gates: [routingOutputGate],
+    gates: [routingOutputGate, structuredOutputGate],
     dimensions: [
       { name: "tool-selection", weight: 5, checks: [routingCheck] },
       { name: "dispatch-order", weight: 2, checks: [routingSequenceCheck] },
-      { name: "correctness", weight: 1, checks: [routingCorrectnessCheck] },
+      { name: "correctness", weight: 4, checks: [routingCorrectnessCheck] },
     ],
   },
   timeoutMs: 8 * 60_000,
@@ -207,5 +277,8 @@ export const __test__ = {
   routingSequenceCheck,
   routingCorrectnessCheck,
   routingOutputGate,
+  structuredOutputGate,
+  structuredOutputProblem,
+  partialOrderScore,
   ROUTING_STAGES,
 };

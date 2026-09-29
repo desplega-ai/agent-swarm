@@ -1,4 +1,5 @@
-import { deleteKv, getDbClient, getKv, listKv, upsertKv } from "../be/db";
+import { deleteKv, getDbClient, getKv, kvPrefixUpperBound, listKv, upsertKv } from "../be/db";
+import { isInTransaction } from "../be/db-client";
 import {
   AppDefinitionSchema,
   type AppValidationIssue,
@@ -57,6 +58,15 @@ export class AppRowAppNotFoundError extends Error {
 
 const mutationChains = new Map<string, Promise<unknown>>();
 let lastCreatedAtMs = 0;
+
+/**
+ * Let queued I/O and other requests run. DB calls are synchronous, so a loop
+ * of awaited statements otherwise only drains microtasks and holds the event
+ * loop until it finishes.
+ */
+export function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
 
 export function appsNamespace(appId: string): string {
   return `apps:${appId}`;
@@ -331,11 +341,23 @@ export async function getAppRow(
   return entry.value as AppRow;
 }
 
-export async function listAppRows(appId: string, model: string): Promise<AppRow[]> {
+/**
+ * `equals` pre-filters rows in SQL on top-level fields so a filtered list
+ * does not decode the whole model. The match is looser than `===` (JSON
+ * `true` equals `1`); callers re-check the returned rows.
+ */
+export async function listAppRows(
+  appId: string,
+  model: string,
+  equals: Array<{ column: string; value: string | number | boolean }> = [],
+): Promise<AppRow[]> {
   const entries = await listKv(appsNamespace(appId), {
     prefix: `${model}/row/`,
     limit: 100000,
     offset: 0,
+    jsonFieldEquals: equals
+      .filter((filter) => !/["\\]/.test(filter.column))
+      .map((filter) => ({ field: filter.column, value: filter.value })),
   });
   return entries
     .map((entry) => entry.value)
@@ -355,17 +377,37 @@ export async function listAllAppRowsForMigrationUnlocked(
   const rows: AppRow[] = [];
   const namespace = appsNamespace(appId);
   const prefix = `${model}/row/`;
-  let offset = 0;
+  // Row keys are `<model>/row/<uuid>`, so this bound always exists.
+  const upper = kvPrefixUpperBound(prefix)!;
+  // Keyset paging on the (namespace, key) primary key: OFFSET re-walked every
+  // skipped row on each page. Same rows, order and TTL filter as `listKv`.
+  let afterKey = "";
   while (true) {
-    const entries = await listKv(namespace, { prefix, limit: MIGRATION_KV_BATCH_SIZE, offset });
-    for (const entry of entries) {
-      const value = entry.value;
+    const page = await getDbClient().query<{ key: string; value: string; value_type: string }>(
+      `SELECT key, value, value_type FROM kv_entries
+          WHERE namespace = ? AND key >= ? AND key < ? AND key > ?
+            AND (expires_at IS NULL OR expires_at > ?)
+          ORDER BY key
+          LIMIT ?`,
+      [namespace, prefix, upper, afterKey, Date.now(), MIGRATION_KV_BATCH_SIZE],
+    );
+    for (const entry of page) {
+      if (entry.value_type !== "json") continue;
+      let value: unknown;
+      try {
+        value = JSON.parse(entry.value);
+      } catch {
+        continue;
+      }
       if (typeof value === "object" && value !== null && !Array.isArray(value)) {
         rows.push(value as AppRow);
       }
     }
-    if (entries.length < MIGRATION_KV_BATCH_SIZE) return rows;
-    offset += entries.length;
+    if (page.length < MIGRATION_KV_BATCH_SIZE) return rows;
+    afterKey = page[page.length - 1]!.key;
+    // Schema migrations call this inside an open DbClient transaction, where a
+    // timer would stall every DB caller; only yield outside one.
+    if (!isInTransaction()) await yieldToEventLoop();
   }
 }
 
@@ -502,12 +544,25 @@ export function deleteAppRow(
   });
 }
 
+const PURGE_BATCH_SIZE = 1000;
+
+/**
+ * Batched DELETEs with an event-loop yield between them: one statement per
+ * row blocked every other request for the whole purge, and a single DELETE of
+ * the namespace would block for its full duration too. Expired entries go as
+ * well; a TTL-filtered listing would leave them orphaned.
+ */
 async function purgeNamespace(appId: string): Promise<void> {
   const namespace = appsNamespace(appId);
   while (true) {
-    const entries = await listKv(namespace, { prefix: "", limit: 100000, offset: 0 });
-    if (entries.length === 0) return;
-    for (const entry of entries) await deleteKv(namespace, entry.key);
+    const result = await getDbClient().run(
+      `DELETE FROM kv_entries
+          WHERE namespace = ?
+            AND key IN (SELECT key FROM kv_entries WHERE namespace = ? ORDER BY key LIMIT ?)`,
+      [namespace, namespace, PURGE_BATCH_SIZE],
+    );
+    if (result.changes === 0) return;
+    await yieldToEventLoop();
   }
 }
 

@@ -15,7 +15,17 @@ import { scrubSecrets } from "../../../utils/secret-scrubber";
 import { emitTaskStarted } from "../../task-lifecycle-events";
 import { getAgentById, isAgentEligibleForTask } from "../agents";
 import { getDbClient } from "../runtime";
-import { type AgentTaskRow, getTaskById, rowToAgentTask } from "./read";
+import {
+  classifyTaskHumanFree,
+  reclassifyTaskHumanFree,
+  tagWriteChangesHumanFree,
+} from "./human-free";
+import {
+  type AgentTaskRow,
+  getTaskById,
+  NEVER_STARTED_TASK_STATUSES,
+  rowToAgentTask,
+} from "./read";
 
 type TaskWriteDependencies = {
   createLogEntry: (entry: {
@@ -68,9 +78,10 @@ export async function createTask(
 ): Promise<AgentTask> {
   const id = crypto.randomUUID();
   const source = options?.source ?? "mcp";
+  const isHumanFree = await classifyTaskHumanFree({ source });
   const row = await getDbClient().get<AgentTaskRow>(
-    `INSERT INTO agent_tasks (id, "key", agentId, task, status, source, slackChannelId, slackThreadTs, slackUserId, swarmVersion, createdAt, lastUpdatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) RETURNING *`,
+    `INSERT INTO agent_tasks (id, "key", agentId, task, status, source, slackChannelId, slackThreadTs, slackUserId, swarmVersion, isHumanFree, createdAt, lastUpdatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) RETURNING *`,
     [
       id,
       defaultAssetKey("task", id),
@@ -82,6 +93,7 @@ export async function createTask(
       options?.slackThreadTs ?? null,
       options?.slackUserId ?? null,
       pkg.version,
+      isHumanFree ? 1 : 0,
     ],
   );
   if (!row) throw new Error("Failed to create task");
@@ -359,10 +371,17 @@ export async function completeTask(
     if (completed && options?.addTags?.length) {
       const existingTags: string[] = completed.tags ? JSON.parse(completed.tags) : [];
       const nextTags = Array.from(new Set([...existingTags, ...options.addTags]));
+      const previousTagsJson = completed.tags;
+      const nextTagsJson = JSON.stringify(nextTags);
       completed = await getDbClient().get<AgentTaskRow>(
         "UPDATE agent_tasks SET tags = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *",
-        [JSON.stringify(nextTags), id],
+        [nextTagsJson, id],
       );
+      // Only a tag the classifier reads (e.g. "heartbeat") can flip the flag;
+      // a "deferred" write must not walk the task's whole subtree.
+      if (tagWriteChangesHumanFree(previousTagsJson, nextTagsJson)) {
+        await reclassifyTaskHumanFree([id]);
+      }
     }
     if (completed && options?.deferredAt) {
       completed = await getDbClient().get<AgentTaskRow>(
@@ -446,6 +465,12 @@ export async function failTask(
      * cancels the remediation instead of being overwritten.
      */
     expectedLastUpdatedAt?: string;
+    /**
+     * `false` skips the dependent cascade. Only for a caller that settles the
+     * dependents itself — the reboot sweep re-points them to the retry child,
+     * then cascades whatever is left.
+     */
+    cascadeDependents?: boolean;
   } = {},
 ): Promise<AgentTask | null> {
   const oldTask = await getTaskById(id);
@@ -529,10 +554,12 @@ export async function failTask(
 
     // Cascade-fail any non-terminal tasks that depend on this one.
     // The cascade is recursive (transitive closure) and cycle-safe.
-    try {
-      await dependencies.cascadeFailDependents(id, "failed");
-    } catch (err) {
-      console.error("[failTask] cascade-fail dependents error:", err);
+    if (opts.cascadeDependents !== false) {
+      try {
+        await dependencies.cascadeFailDependents(id, "failed");
+      } catch (err) {
+        console.error("[failTask] cascade-fail dependents error:", err);
+      }
     }
   }
   return row ? rowToAgentTask(row) : null;
@@ -744,20 +771,88 @@ export async function supersedeTask(
         );
     });
 
-    try {
-      await dependencies.cascadeFailDependents(id, "superseded");
-    } catch (err) {
-      console.error("[supersedeTask] cascade-fail dependents error:", err);
-    }
+    // Without a resume id the dependents wait: every caller supersedes first,
+    // creates the resume, then calls `backfillSupersedeTaskResumeTaskId`, which
+    // settles them. Cascading here would fail work the resume is about to carry.
+    // A caller whose resume is not created settles with `null`; heartbeat
+    // repair settles whatever a crash left in between.
+    if (args.resumeTaskId) await settleSupersededTaskDependents(id, args.resumeTaskId);
   }
 
   return row ? rowToAgentTask(row) : null;
 }
 
+/**
+ * Settle the dependents of a superseded task. With a resume id, every
+ * never-started dependent has the superseded id in `dependsOn` replaced by the
+ * resume id, so it waits on the resume instead of dying with
+ * `Blocked dependency … was superseded`. Anything still depending on the
+ * superseded task afterwards (a dependent that already started, or every
+ * dependent when there is no resume) cascade-fails. Idempotent.
+ */
+export async function settleSupersededTaskDependents(
+  supersededId: string,
+  resumeTaskId: string | null,
+): Promise<void> {
+  try {
+    if (resumeTaskId) {
+      const placeholders = NEVER_STARTED_TASK_STATUSES.map(() => "?").join(", ");
+      // One statement: the new array is built from the row's current
+      // `dependsOn`, so settlements of a shared dependent compose, and the
+      // status predicate is evaluated at write time, so a claim into
+      // `in_progress` is skipped while offered -> reviewing/pending is not.
+      const repointed = await getDbClient().query<{ id: string; agentId: string | null }>(
+        `UPDATE agent_tasks
+            SET dependsOn = (
+                  SELECT json_group_array(value ORDER BY k) FROM (
+                    SELECT CASE WHEN j.value = ? THEN ? ELSE j.value END AS value,
+                           MIN(j.key) AS k
+                      FROM json_each(agent_tasks.dependsOn) AS j
+                     GROUP BY 1)),
+                lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+          WHERE status IN (${placeholders})
+            AND EXISTS (SELECT 1 FROM json_each(agent_tasks.dependsOn) WHERE value = ?)
+          RETURNING id, agentId`,
+        [supersededId, resumeTaskId, ...NEVER_STARTED_TASK_STATUSES, supersededId],
+      );
+      for (const dep of repointed) {
+        try {
+          await dependencies.createLogEntry({
+            eventType: "task_dependency_repointed",
+            taskId: dep.id,
+            agentId: dep.agentId ?? undefined,
+            oldValue: supersededId,
+            newValue: resumeTaskId,
+            metadata: { reason: "supersede_resume" },
+          });
+        } catch {}
+      }
+      // Repair can settle onto a resume that already failed; its own cascade
+      // ran before these dependents pointed at it.
+      const resume = await getTaskById(resumeTaskId);
+      if (repointed.length > 0 && (resume?.status === "failed" || resume?.status === "cancelled")) {
+        await dependencies.cascadeFailDependents(resumeTaskId, resume.status);
+      }
+    }
+    await dependencies.cascadeFailDependents(supersededId, "superseded");
+  } catch (err) {
+    console.error("[supersedeTask] settling dependents error:", err);
+  }
+}
+
+/**
+ * Attach the resume id to the task's `task_superseded` log entry, then settle
+ * the dependents `supersedeTask` left waiting (re-point to the resume, cascade
+ * the rest).
+ */
 export async function backfillSupersedeTaskResumeTaskId(
   taskId: string,
   resumeTaskId: string,
 ): Promise<boolean> {
+  if ((await getTaskById(taskId))?.status === "superseded") {
+    await settleSupersededTaskDependents(taskId, resumeTaskId);
+  }
+
   const row = await getDbClient().get<{ id: string; metadata: string | null }>(
     `SELECT id, metadata
        FROM agent_log
@@ -952,8 +1047,17 @@ export async function getRecentlyCancelledTasksForAgent(agentId: string): Promis
 }
 
 export async function deleteTask(id: string): Promise<boolean> {
-  const result = await getDbClient().run("DELETE FROM agent_tasks WHERE id = ?", [id]);
-  return result.changes > 0;
+  return await getDbClient().transaction(async (tx) => {
+    // `parentTaskId` has no foreign key, so children survive with a dangling
+    // parent. The human-free rule reads the parent row, so they are reclassified
+    // once it is gone.
+    const childIds = (
+      await tx.query<{ id: string }>("SELECT id FROM agent_tasks WHERE parentTaskId = ?", [id])
+    ).map((row) => row.id);
+    const result = await tx.run("DELETE FROM agent_tasks WHERE id = ?", [id]);
+    await reclassifyTaskHumanFree(childIds);
+    return result.changes > 0;
+  });
 }
 
 export async function updateTaskProgress(id: string, progress: string): Promise<AgentTask | null> {

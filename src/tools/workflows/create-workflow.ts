@@ -19,6 +19,7 @@ import {
 } from "@/types";
 import { getExecutorRegistry } from "@/workflows";
 import { validateDefinition } from "@/workflows/definition";
+import { withSaveWarnings, workflowSaveWarnings } from "@/workflows/readiness";
 
 export const registerCreateWorkflowTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -102,6 +103,7 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
       outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
         workflow: z.unknown().optional(),
+        warnings: z.array(z.string()).optional(),
       }),
     },
     async (
@@ -152,11 +154,16 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
           "mcp",
         );
         const longScriptTimeoutHint = findLongScriptTimeoutHint(definition.nodes);
-        return toolOk(`Created workflow "${workflow.name}".`, {
-          details: `Created workflow "${workflow.name}" (${workflow.id}).`,
+        const warnings = await workflowSaveWarnings(workflow.definition, getExecutorRegistry());
+        return toolOk(withSaveWarnings(`Created workflow "${workflow.name}".`, warnings), {
+          details: withSaveWarnings(
+            `Created workflow "${workflow.name}" (${workflow.id}).`,
+            warnings,
+          ),
           data: {
             yourAgentId: requestInfo.agentId,
             workflow,
+            ...(warnings.length > 0 ? { warnings } : {}),
             ...(longScriptTimeoutHint ? { longScriptTimeoutHint } : {}),
           },
         });

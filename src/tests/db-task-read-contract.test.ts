@@ -41,6 +41,7 @@ const baseFacade = `type:AgentMailInboxMapping
 type:ApiKeyStatus
 type:AppVersion
 type:ApprovalRequest
+type:ApprovalRequestSummary
 type:AssetSummaryFilters
 type:AttributionByPersonRow
 type:AvailableKeyIndicesResult
@@ -64,6 +65,7 @@ type:InboxSummary
 type:InsertPricingRowInput
 type:InsertTaskAttachmentInput
 type:KeyCostSummary
+type:KvJsonFieldEquals
 type:McpServerFilters
 type:McpServerInsert
 type:MentionPreview
@@ -230,6 +232,7 @@ value:getAgentMailInboxMapping
 value:getAgentMailInboxMappingsByAgent
 value:getAgentMcpServers
 value:getAgentSkills
+value:getAgentStatusCounts
 value:getAgentWithTasks
 value:getAgentWorkingOnThread
 value:getAllAgentMailInboxMappings
@@ -267,6 +270,7 @@ value:getContextSnapshotsByTaskId
 value:getContextSummaryByTaskId
 value:getContextVersion
 value:getContextVersionHistory
+value:getCurrentStepForNode
 value:getDailySpendForAgent
 value:getDailySpendForUser
 value:getDailySpendGlobal
@@ -383,6 +387,8 @@ value:getStepCountForNode
 value:getStuckApprovalRuns
 value:getStuckWaitRuns
 value:getStuckWorkflowRuns
+value:getSupersededTasksWithUnsettledDependents
+value:getSupersededTasksWithoutResume
 value:getSwarmConfigById
 value:getSwarmConfigLookupById
 value:getSwarmConfigs
@@ -405,7 +411,6 @@ value:getUnassignedTaskIdsForAgent
 value:getUnassignedTasksCount
 value:getUnreadInboxMessages
 value:getUnreadMessages
-value:getUsageDataVersion
 value:getUserById
 value:getWaitStateById
 value:getWaitStateByStepId
@@ -439,9 +444,11 @@ value:isPendingSlackMessage
 value:isPoolAffinityEnforcementEnabled
 value:isSettledSlackMessage
 value:isSqliteVecAvailable
+value:kvPrefixUpperBound
 value:listAgentsWithCredStatusByProvider
 value:listAllMetrics
 value:listAllPages
+value:listApprovalRequestSummaries
 value:listApprovalRequests
 value:listAssetSummaries
 value:listCancelledApprovalRequestsForRun
@@ -523,6 +530,7 @@ value:setBudgetRefusalFollowUpTaskId
 value:setFavorite
 value:setSlackMessageTracking
 value:setUserFavorite
+value:settleSupersededTaskDependents
 value:shouldBlockPolling
 value:startTask
 value:supersedeTask
@@ -598,6 +606,8 @@ value:getMostRecentTaskInThread
 value:getPendingSlackRelayTasks
 value:getRecentlyFinishedWorkerTasks
 value:getSlackTasksMissingTree
+value:getSupersededTasksWithUnsettledDependents
+value:getSupersededTasksWithoutResume
 value:getTaskById
 value:getTaskStats
 value:getTasksByAgentId
@@ -613,6 +623,7 @@ value:resetTasksNotified`.split("\n");
 const internal = [
   "type:AgentTaskRow",
   "value:configureTaskReadDependencies",
+  "value:NEVER_STARTED_TASK_STATUSES",
   "value:rowToAgentTask",
   "value:rowToAgentTaskSummary",
 ].sort();

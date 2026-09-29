@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import {
-  getAllAgents,
+  getAgentStatusCounts,
   getAllLogs,
   getAllServices,
   getConcurrentContext,
@@ -18,6 +18,7 @@ import { AgentLogSchema, ScheduledTaskSchema, ServiceSchema } from "../types";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
 import { route } from "./route-def";
+import { scheduleSummaryWithFavoriteSchema } from "./schedules";
 
 // ─── Response schemas ────────────────────────────────────────────────────────
 
@@ -183,6 +184,8 @@ const listScheduledTasks = route({
   path: "/api/scheduled-tasks",
   pattern: ["api", "scheduled-tasks"],
   summary: "List scheduled tasks",
+  description:
+    "Returns full schedules by default. Pass `fields=slim` for the list-view shape, which swaps the full `taskTemplate` for a bounded `taskTemplatePreview`. Fetch one schedule in full via `GET /api/schedules/{id}`.",
   tags: ["Stats"],
   query: z.object({
     enabled: z.enum(["true", "false"]).optional(),
@@ -192,11 +195,18 @@ const listScheduledTasks = route({
     targetType: z.enum(["agent-task", "workflow", "script"]).optional(),
     workflowId: z.string().uuid().optional(),
     scriptName: z.string().optional(),
+    /** `slim` is the list-view shape (no full `taskTemplate`); default is full. */
+    fields: z.enum(["full", "slim"]).optional(),
   }),
   responses: {
     200: {
       description: "Scheduled tasks list",
-      schema: z.object({ scheduledTasks: z.array(ScheduledTaskSchema) }),
+      schema: z.object({
+        scheduledTasks: z.union([
+          z.array(ScheduledTaskSchema),
+          z.array(scheduleSummaryWithFavoriteSchema),
+        ]),
+      }),
     },
   },
 });
@@ -237,16 +247,11 @@ export async function handleStats(
   }
 
   if (getStats.match(req.method, pathSegments)) {
-    const agents = await getAllAgents();
+    const agents = await getAgentStatusCounts();
     const taskStats = await getTaskStats();
 
     const stats = {
-      agents: {
-        total: agents.length,
-        idle: agents.filter((a) => a.status === "idle").length,
-        busy: agents.filter((a) => a.status === "busy").length,
-        offline: agents.filter((a) => a.status === "offline").length,
-      },
+      agents,
       tasks: {
         total: taskStats.total,
         unassigned: taskStats.unassigned,
@@ -301,7 +306,7 @@ export async function handleStats(
   if (listScheduledTasks.match(req.method, pathSegments)) {
     const parsed = await listScheduledTasks.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const scheduledTasks = await getScheduledTasks({
+    const filters = {
       enabled: parsed.query.enabled !== undefined ? parsed.query.enabled === "true" : undefined,
       name: parsed.query.name || undefined,
       scheduleType: (parsed.query.scheduleType as "recurring" | "one_time") || undefined,
@@ -312,13 +317,15 @@ export async function handleStats(
       targetType: parsed.query.targetType,
       workflowId: parsed.query.workflowId,
       scriptName: parsed.query.scriptName,
-    });
+    };
     const favoriteScope = (await resolveHttpFavoriteOwner(req, myAgentId))?.scope;
+    const favoriteOpts = { favoriteScope, itemType: "schedule" as const };
+    // Opt-in: API, MCP and script callers that don't ask keep the full rows.
     listScheduledTasks.respond(res, 200, {
-      scheduledTasks: await withFavoriteFlags(scheduledTasks, {
-        favoriteScope,
-        itemType: "schedule",
-      }),
+      scheduledTasks:
+        parsed.query.fields === "slim"
+          ? await withFavoriteFlags(await getScheduledTasks(filters, { slim: true }), favoriteOpts)
+          : await withFavoriteFlags(await getScheduledTasks(filters), favoriteOpts),
     });
     return true;
   }

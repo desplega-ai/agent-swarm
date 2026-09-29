@@ -10,6 +10,7 @@ import {
   createWorkflowRun,
   createWorkflowRunStep,
   getCompletedStepNodeIds,
+  getCurrentStepForNode,
   getDbClient,
   getLatestStepForNode,
   getStepByIdempotencyKey,
@@ -24,13 +25,19 @@ import type { Workflow, WorkflowDefinition, WorkflowNode, WorkflowRunStep } from
 import { checkpointStep, checkpointStepFailure, checkpointStepWaiting } from "./checkpoint";
 import { loadCompletedStepRouting } from "./completed-step-routing";
 import { shouldSkipCooldown } from "./cooldown";
-import { findEntryNodes, getNextTargets, getSuccessors } from "./definition";
+import { findEntryNodes, getNextTargets, getSuccessors, resolveValidationPort } from "./definition";
 import type { AsyncExecutorResult } from "./executors/base";
 import type { ExecutorRegistry } from "./executors/registry";
+import {
+  SYSTEM_ONE_DECISION_NODE_TYPE,
+  systemOneRetryViolations,
+  systemOneUnresolvedError,
+} from "./executors/system-one-decision";
 import { FOREACH_TERMINAL_STEP_STATUSES, resolveForeachParent } from "./foreach-join";
 import { getSecretInputKeys, redactSecretsForStorage, resolveInputs } from "./input";
 import { validateJsonSchema } from "./json-schema-validator";
 import { getMaxWorkflowStepsPerRun } from "./limits";
+import { findWorkflowReadinessProblems, formatReadinessRunError } from "./readiness";
 import { deepInterpolate } from "./template";
 import { runStepValidation, type ValidationRunResult } from "./validation";
 
@@ -148,6 +155,18 @@ export async function startWorkflowExecution(
     triggerType: options.triggerType ?? "manual",
   });
 
+  // An executor that cannot run (for example a system-one-decision node with no API key) fails
+  // the run here, before any node has side effects, instead of partway through.
+  const notReady = await findWorkflowReadinessProblems(workflow.definition, registry);
+  if (notReady.length > 0) {
+    await updateWorkflowRun(runId, {
+      status: "failed",
+      error: formatReadinessRunError(notReady),
+      finishedAt: new Date().toISOString(),
+    });
+    return runId;
+  }
+
   // Resolve inputs and merge into initial context
   const ctx: Record<string, unknown> = { trigger: triggerData };
   if (options.requestedByUserId) {
@@ -202,8 +221,30 @@ interface StepResult {
 // settles, including checkpointing and routing between executor calls.
 const activeWalks = new Map<string, number>();
 
+// Step rows an executeStep call in this process inserted and has not finished
+// yet. Process-local like activeWalks: a crash clears it, so a `running` row
+// left behind is not mistaken for a live execution.
+const executingSteps = new Set<string>();
+
 export function isWorkflowRunActive(runId: string): boolean {
   return activeWalks.has(runId);
+}
+
+/**
+ * Mark the run as owned by this process until the returned release runs.
+ * Recovery skips owned runs, so an executor outside walkGraph (the retry
+ * poller) holds the run for as long as it executes a step.
+ */
+export function holdWorkflowRun(runId: string): () => void {
+  activeWalks.set(runId, (activeWalks.get(runId) ?? 0) + 1);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const remaining = activeWalks.get(runId)! - 1;
+    if (remaining === 0) activeWalks.delete(runId);
+    else activeWalks.set(runId, remaining);
+  };
 }
 
 /**
@@ -223,13 +264,11 @@ export async function walkGraph(
   secretKeys: Set<string> = new Set(),
   options: WorkflowExecutionOptions = {},
 ): Promise<void> {
-  activeWalks.set(runId, (activeWalks.get(runId) ?? 0) + 1);
+  const release = holdWorkflowRun(runId);
   try {
     await walkGraphOwned(def, runId, ctx, startNodes, registry, workflowId, secretKeys, options);
   } finally {
-    const remaining = activeWalks.get(runId)! - 1;
-    if (remaining === 0) activeWalks.delete(runId);
-    else activeWalks.set(runId, remaining);
+    release();
   }
 }
 
@@ -293,6 +332,8 @@ async function walkGraphOwned(
     }
   }
 
+  const awaited = awaitedNodeIds(allSteps, activeEdges);
+
   // Seed with start nodes whose predecessors are all completed (convergence gate).
   // For entry nodes (no predecessors), skip if already completed — these are
   // re-walk/recovery scenarios where memoization should apply.
@@ -306,7 +347,9 @@ async function walkGraphOwned(
     }
     // Non-entry node — allow through even if completed (loop target).
     // Check predecessors are ready.
-    const activePreds = preds.filter((predId) => activeEdges.has(`${predId}→${n.id}`));
+    const activePreds = preds.filter(
+      (predId) => activeEdges.has(`${predId}→${n.id}`) || awaited.has(predId),
+    );
     // If no active edges yet (first walk), check ALL structural predecessors
     const predsToCheck = activePreds.length > 0 ? activePreds : preds;
     return predsToCheck.every((p) => completedNodeIds.has(p));
@@ -376,12 +419,27 @@ async function walkGraphOwned(
     // Use executedInThisWalk (not completedNodeIds) to gate dedup — this
     // allows loop targets from prior walks to re-execute while preventing
     // double execution within the same walk.
+    // A sibling branch another walker is executing has no edge in this walk's
+    // activeEdges, so re-read the steps: a live predecessor holds the join,
+    // and one that completed elsewhere is rehydrated for the join's inputs.
     const readyNext: WorkflowNode[] = [];
+    const batchSteps = nextBatch.size > 0 ? await getWorkflowRunStepsByRunId(runId) : [];
+    const batchAwaited = awaitedNodeIds(batchSteps, activeEdges);
+    const batchLatest = latestStepByNode(batchSteps);
     for (const [nodeId, node] of nextBatch) {
       if (executedInThisWalk.has(nodeId)) continue; // Already done in this walk
 
       const allPreds = getAllPredecessors(def, nodeId);
-      const activePreds = allPreds.filter((predId) => activeEdges.has(`${predId}→${nodeId}`));
+      for (const predId of allPreds) {
+        if (completedNodeIds.has(predId)) continue;
+        const latest = batchLatest.get(predId);
+        if (latest?.status !== "completed") continue;
+        completedNodeIds.add(predId);
+        if (latest.output !== undefined) ctx[predId] = latest.output;
+      }
+      const activePreds = allPreds.filter(
+        (predId) => activeEdges.has(`${predId}→${nodeId}`) || batchAwaited.has(predId),
+      );
       const allActivePredsCompleted = activePreds.every((p) => completedNodeIds.has(p));
 
       if (allActivePredsCompleted) {
@@ -405,6 +463,8 @@ async function walkGraphOwned(
     if (!run || run.status !== "running") return;
 
     const finalSteps = await getWorkflowRunStepsByRunId(runId);
+    // Another walker is still executing a branch; it finalizes the run.
+    if (hasRunningStep(finalSteps)) return;
     const hasWaitingSteps = finalSteps.some((s) => s.status === "waiting");
     const hasPendingRetries = finalSteps.some(
       (s) => s.status === "failed" && s.nextRetryAt != null,
@@ -451,6 +511,42 @@ async function walkGraphOwned(
       }
     }
   });
+}
+
+/** Each node's latest step. Steps arrive in insert order (startedAt ASC). */
+function latestStepByNode(steps: WorkflowRunStep[]): Map<string, WorkflowRunStep> {
+  const latest = new Map<string, WorkflowRunStep>();
+  for (const step of steps) latest.set(step.nodeId, step);
+  return latest;
+}
+
+/**
+ * Nodes a join must wait for even without an active edge to it: the node's
+ * latest step is running or waiting, or a predecessor routed to it and it has
+ * no step yet. A terminally failed node is not awaited, so partial failure
+ * still lets the join run. An older `running` row superseded by a newer one
+ * (crash recovery) and the `pending` row a user retry leaves behind are
+ * ignored because only the latest step counts.
+ */
+function awaitedNodeIds(steps: WorkflowRunStep[], activeEdges: Set<string>): Set<string> {
+  const latest = latestStepByNode(steps);
+  const awaited = new Set<string>();
+  for (const [nodeId, step] of latest) {
+    if (step.status === "running" || step.status === "waiting") awaited.add(nodeId);
+  }
+  for (const edge of activeEdges) {
+    const target = edge.slice(edge.indexOf("→") + 1);
+    if (!latest.has(target)) awaited.add(target);
+  }
+  return awaited;
+}
+
+/** True while some node's latest step is still executing. */
+export function hasRunningStep(steps: WorkflowRunStep[]): boolean {
+  for (const step of latestStepByNode(steps).values()) {
+    if (step.status === "running") return true;
+  }
+  return false;
 }
 
 /**
@@ -541,10 +637,26 @@ async function executeStep(
   // rides the INSERT itself — so the UNIQUE(idempotencyKey) index arbitrates
   // concurrent executions of the same node instead of an orphan step row
   // committing before a follow-up key UPDATE throws.
-  const dedup = await getDbClient().transaction(async () => {
+  let claimedStepId: string | undefined;
+  const claimStep = async () => {
     const run = await getWorkflowRun(runId);
     if (!run || (run.status !== "running" && run.status !== "waiting")) {
       return { halted: true as const };
+    }
+
+    // Another walker already started or finished this node for the same
+    // predecessor completions (two branch completions both walking the join,
+    // or a user retry reaching a branch the live walk is running). The
+    // row-count key below is always new, so only this read, inside the insert
+    // transaction, stops a second execution. Foreach re-enters its own
+    // non-terminal row below and keeps that path.
+    if (node.type !== "foreach") {
+      const current = await getCurrentStepForNode(runId, node.id, getAllPredecessors(def, node.id));
+      // A `running` row this process is not executing was orphaned by a
+      // crash; recovery must be able to run the node again.
+      if (current && (current.status !== "running" || executingSteps.has(current.id))) {
+        return { current };
+      }
     }
 
     // Count existing steps for this node to determine the current iteration.
@@ -584,10 +696,27 @@ async function executeStep(
         idempotencyKey,
       });
     }
+    // Registered before the transaction commits, so no other walker can see
+    // this `running` row without also seeing it owned.
+    claimedStepId = stepId;
+    executingSteps.add(stepId);
     return { existingStep, stepId, deduped: false };
-  });
+  };
+  const dedup = await getDbClient()
+    .transaction(claimStep)
+    .catch((err) => {
+      if (claimedStepId) executingSteps.delete(claimedStepId);
+      throw err;
+    });
 
   if ("halted" in dedup) return { outcome: "completed", successors: [] };
+  if ("current" in dedup && dedup.current) {
+    // The walker that owns the step routes its successors and finalizes the
+    // run; this one must not route them again.
+    if (dedup.current.status !== "completed") return { outcome: "waiting", successors: [] };
+    ctx[node.id] = dedup.current.output;
+    return { outcome: "completed", successors: [] };
+  }
 
   if (dedup.deduped && dedup.existingStep) {
     if (dedup.existingStep.status === "completed") {
@@ -601,11 +730,46 @@ async function executeStep(
     // Don't create a duplicate — just report as waiting.
     return { outcome: "waiting", successors: [] };
   }
-  const existingStep = dedup.existingStep;
-  const stepId = dedup.stepId;
+  try {
+    return await runClaimedStep(
+      def,
+      runId,
+      ctx,
+      node,
+      registry,
+      dedup.existingStep,
+      dedup.stepId,
+      workflowId,
+      options,
+    );
+  } finally {
+    executingSteps.delete(dedup.stepId);
+  }
+}
 
+/** Steps 3-10 of executeStep, for a step row this call inserted and owns. */
+async function runClaimedStep(
+  def: WorkflowDefinition,
+  runId: string,
+  ctx: Record<string, unknown>,
+  node: WorkflowNode,
+  registry: ExecutorRegistry,
+  existingStep: WorkflowRunStep | null | undefined,
+  stepId: string,
+  workflowId?: string,
+  options: WorkflowExecutionOptions = {},
+): Promise<StepResult> {
   // 3. Get executor
   const executor = registry.get(node.type);
+
+  // 3a. A system-one-decision node retries transient transport errors itself (config.maxRetries).
+  // Engine retries are not status-aware, so a policy here would re-send rejected
+  // requests and multiply paid attempts. Fail before any request is built.
+  const systemOneRetryProblems = systemOneRetryViolations(node);
+  if (systemOneRetryProblems.length > 0) {
+    await checkpointStepFailure(runId, stepId, systemOneRetryProblems.join("; "), 0);
+    return { outcome: "failed", successors: [] };
+  }
 
   // 3b. Build local interpolation context from explicit inputs mapping
   const interpolationCtx = buildNodeInterpolationCtx(node, ctx);
@@ -628,6 +792,7 @@ async function executeStep(
     value: interpolatedValue,
     unresolved,
     scriptBodyUnresolved,
+    strictUnresolved,
   } = interpolateNodeConfig(node, interpolationCtx);
   const interpolatedConfig = interpolatedValue as Record<string, unknown>;
   const executionCtx: Record<string, unknown> = { ...ctx, ...interpolationCtx };
@@ -635,6 +800,17 @@ async function executeStep(
   if (scriptBodyUnresolved && scriptBodyUnresolved.length > 0) {
     const errorMsg = scriptBodyInterpolationError(node.id, scriptBodyUnresolved);
     await checkpointStepFailure(runId, stepId, errorMsg, 0);
+    return { outcome: "failed", successors: [] };
+  }
+
+  // A paid, non-idempotent call must not go out with a blanked field.
+  if (strictUnresolved && strictUnresolved.length > 0) {
+    await checkpointStepFailure(
+      runId,
+      stepId,
+      systemOneUnresolvedError(node.id, strictUnresolved),
+      0,
+    );
     return { outcome: "failed", successors: [] };
   }
 
@@ -777,16 +953,10 @@ async function executeStep(
 
   // 8. Set nextPort from validation result for record-based routing
   // When validation determines pass/fail and the node uses port-based `next`,
-  // route to the correct port instead of activating all ports.
-  if (
-    validationResult?.passed !== undefined &&
-    !result.nextPort &&
-    node.next &&
-    typeof node.next === "object" &&
-    !Array.isArray(node.next)
-  ) {
-    result.nextPort = validationResult.passed ? "pass" : "fail";
-  }
+  // route to the correct port instead of activating all ports. An executor port
+  // that `next` does not declare (script's "success" vs `{ pass, fail }`) is
+  // overridden too, otherwise the branch would dead-end.
+  result.nextPort = resolveValidationPort(node.next, result.nextPort, validationResult?.passed);
 
   // 9. Checkpoint success
   await checkpointStep(runId, stepId, node.id, result, ctx);
@@ -932,7 +1102,36 @@ function buildScriptBodyCtx(
 export function interpolateNodeConfig(
   node: Pick<WorkflowNode, "type" | "config" | "inputs">,
   interpolationCtx: Record<string, unknown>,
-): { value: unknown; unresolved: string[]; scriptBodyUnresolved?: string[] } {
+): {
+  value: unknown;
+  unresolved: string[];
+  scriptBodyUnresolved?: string[];
+  /** Tokens that must resolve before dispatch; the caller fails the step when non-empty. */
+  strictUnresolved?: string[];
+} {
+  if (node.type === SYSTEM_ONE_DECISION_NODE_TYPE) {
+    // `state` and `questions` keep a whole-token reference's JSON type (an object
+    // stays an object; string interpolation would flatten it to JSON text). The
+    // resolved value is data, never re-interpolated, so a literal `{{` inside a
+    // lead's text is not read as another template. Every other field, and every
+    // unresolved token anywhere in the config, is strict: no blank reaches the API.
+    const { state, questions, ...rest } = node.config;
+    const restResult = deepInterpolate(rest, interpolationCtx);
+    const dynamic: Record<string, unknown> = {};
+    if (Object.hasOwn(node.config, "state")) dynamic.state = state;
+    if (Object.hasOwn(node.config, "questions")) dynamic.questions = questions;
+    const dynamicResult = deepInterpolate(dynamic, interpolationCtx, { preserveRawTokens: true });
+    const unresolved = [...restResult.unresolved, ...dynamicResult.unresolved];
+    return {
+      value: {
+        ...(restResult.value as Record<string, unknown>),
+        ...(dynamicResult.value as Record<string, unknown>),
+      },
+      unresolved,
+      strictUnresolved: unresolved,
+    };
+  }
+
   if (node.type === "foreach" && Object.hasOwn(node.config, "over")) {
     const { over, body, ...configWithoutOverAndBody } = node.config;
     const configResult = deepInterpolate(configWithoutOverAndBody, interpolationCtx);

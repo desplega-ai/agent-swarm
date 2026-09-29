@@ -16,6 +16,7 @@ import type {
   AppListItem,
   AppRow,
   ApprovalRequest,
+  ApprovalRequestSummariesResponse,
   ApprovalRequestsResponse,
   AppUserConfigResponse,
   AppUserConfigValue,
@@ -150,6 +151,8 @@ import type {
   Workflow,
   WorkflowRun,
   WorkflowRunStep,
+  WorkflowRunSummary,
+  WorkflowRunsPage,
   WorkflowRunWithSteps,
   WorkflowSummary,
   WorkflowsResponse,
@@ -255,6 +258,9 @@ export interface ModelsCatalogResponse {
   updatedAt: number | null;
   providers: LiveModelsCatalog;
 }
+
+/** Runs fetched per workflow for the all-workflows Runs tab. */
+export const ALL_WORKFLOW_RUNS_PER_WORKFLOW = 50;
 
 class ApiClient {
   private getHeaders(): HeadersInit {
@@ -422,6 +428,10 @@ class ApiClient {
     source?: string[];
     /** Exact requester user id, or the sentinel `none` for unattributed (NULL) rows. */
     requestedByUserId?: string;
+    /** Row projection; `timeline` is the narrow shape the dashboard timeline draws. */
+    fields?: "full" | "slim" | "timeline";
+    /** Ask for the filtered `total` (an extra COUNT(*)); only pagers need it. */
+    includeTotal?: boolean;
   }): Promise<TasksResponse> {
     const params = new URLSearchParams();
     if (filters?.status) params.set("status", filters.status);
@@ -439,6 +449,8 @@ class ApiClient {
     if (filters?.source && filters.source.length > 0)
       params.set("source", filters.source.join(","));
     if (filters?.requestedByUserId) params.set("requestedByUserId", filters.requestedByUserId);
+    if (filters?.fields) params.set("fields", filters.fields);
+    if (filters?.includeTotal) params.set("includeTotal", "true");
     const queryString = params.toString();
     const url = `${this.getBaseUrl()}/api/tasks${queryString ? `?${queryString}` : ""}`;
     const res = await fetch(url, { headers: this.getHeaders() });
@@ -962,7 +974,8 @@ class ApiClient {
     if (filters?.workflowId) params.set("workflowId", filters.workflowId);
     if (filters?.scriptName) params.set("scriptName", filters.scriptName);
     const usesAssetNamespaceFilter = !!(filters?.key || filters?.keyPrefix);
-    if (usesAssetNamespaceFilter) params.set("fields", "full");
+    // List views never render the full template; ask for the slim row.
+    params.set("fields", usesAssetNamespaceFilter ? "full" : "slim");
     const queryString = params.toString();
     const route = usesAssetNamespaceFilter ? "/api/schedules" : "/api/scheduled-tasks";
     const url = `${this.getBaseUrl()}${route}${queryString ? `?${queryString}` : ""}`;
@@ -1277,23 +1290,37 @@ class ApiClient {
     }
   }
 
-  async fetchWorkflowRuns(workflowId: string): Promise<WorkflowRun[]> {
-    const url = `${this.getBaseUrl()}/api/workflows/${workflowId}/runs`;
+  async fetchWorkflowRuns(
+    workflowId: string,
+    options: { limit?: number; offset?: number } = {},
+  ): Promise<WorkflowRunsPage> {
+    const query = new URLSearchParams();
+    if (options.limit !== undefined) query.set("limit", String(options.limit));
+    if (options.offset !== undefined) query.set("offset", String(options.offset));
+    const qs = query.size > 0 ? `?${query}` : "";
+    const url = `${this.getBaseUrl()}/api/workflows/${workflowId}/runs${qs}`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch workflow runs: ${res.status}`);
     return res.json();
   }
 
-  async fetchAllWorkflowRuns(): Promise<WorkflowRun[]> {
+  /**
+   * The newest `perWorkflowLimit` runs of every workflow, merged newest first.
+   * `capped` is true when some workflow has older runs than the ones returned.
+   */
+  async fetchAllWorkflowRuns(
+    perWorkflowLimit = ALL_WORKFLOW_RUNS_PER_WORKFLOW,
+  ): Promise<{ runs: WorkflowRunSummary[]; capped: boolean }> {
     const { workflows } = await this.fetchWorkflows();
-    const allRuns: WorkflowRun[] = [];
+    const runs: WorkflowRunSummary[] = [];
+    let capped = false;
     for (const w of workflows) {
-      const runs = await this.fetchWorkflowRuns(w.id);
-      allRuns.push(...runs);
+      const result = await this.fetchWorkflowRuns(w.id, { limit: perWorkflowLimit });
+      runs.push(...result.runs);
+      capped ||= result.page.hasMore;
     }
-    return allRuns.sort(
-      (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime(),
-    );
+    runs.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
+    return { runs, capped };
   }
 
   async fetchWorkflowRun(id: string): Promise<WorkflowRunWithSteps> {
@@ -2025,6 +2052,20 @@ class ApiClient {
     if (filters?.limit != null) params.set("limit", String(filters.limit));
     const qs = params.toString();
     const url = `${this.getBaseUrl()}/api/approval-requests${qs ? `?${qs}` : ""}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch approval requests: ${res.status}`);
+    return res.json();
+  }
+
+  /** List-view rows (`fields=slim`): no question bodies or answers, plus `questionCount`. */
+  async fetchApprovalRequestSummaries(filters?: {
+    status?: string;
+    limit?: number;
+  }): Promise<ApprovalRequestSummariesResponse> {
+    const params = new URLSearchParams({ fields: "slim" });
+    if (filters?.status) params.set("status", filters.status);
+    if (filters?.limit != null) params.set("limit", String(filters.limit));
+    const url = `${this.getBaseUrl()}/api/approval-requests?${params.toString()}`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch approval requests: ${res.status}`);
     return res.json();
@@ -2842,6 +2883,8 @@ class ApiClient {
     q?: string;
     /** When set, restrict results to sessions owned by this user. NULL rows are excluded. */
     requestedByUserId?: string;
+    /** Root tasks whose `contextKey` starts with this prefix (≥1.157.1). */
+    contextKeyPrefix?: string;
   }): Promise<SessionListItem[]> {
     const params = new URLSearchParams();
     if (opts?.limit != null) params.set("limit", String(opts.limit));
@@ -2849,6 +2892,7 @@ class ApiClient {
     if (opts?.source && opts.source.length > 0) params.set("source", opts.source.join(","));
     if (opts?.q && opts.q.length > 0) params.set("q", opts.q);
     if (opts?.requestedByUserId) params.set("requestedByUserId", opts.requestedByUserId);
+    if (opts?.contextKeyPrefix) params.set("contextKeyPrefix", opts.contextKeyPrefix);
     const qs = params.toString();
     const url = `${this.getBaseUrl()}/api/sessions${qs ? `?${qs}` : ""}`;
     const res = await fetch(url, { headers: this.getHeaders() });

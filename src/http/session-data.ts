@@ -13,7 +13,6 @@ import {
   getSessionCostsFiltered,
   getSessionLogsByTaskId,
   getTaskById,
-  getUsageDataVersion,
 } from "../be/db";
 import { recordSessionCost } from "../otel";
 import { incrementServerSessionsProcessed } from "../server-runtime-counters";
@@ -457,8 +456,7 @@ export async function handleSessionData(
       userId: parsed.query.userId || undefined,
       groupBy: parsed.query.groupBy || "both",
     } as const;
-    const version = await getUsageDataVersion();
-    const summary = await cachedUsageReport(`summary:${version}:${JSON.stringify(opts)}`, () =>
+    const summary = await cachedUsageReport(`summary:${JSON.stringify(opts)}`, () =>
       getSessionCostSummary(opts),
     );
     getSessionCostSummaryRoute.respond(res, 200, summary);
@@ -478,8 +476,7 @@ export async function handleSessionData(
       startDate: parsed.query.startDate || undefined,
       endDate: parsed.query.endDate || undefined,
     };
-    const version = await getUsageDataVersion();
-    const rows = await cachedUsageReport(`attribution:${version}:${JSON.stringify(opts)}`, () =>
+    const rows = await cachedUsageReport(`attribution:${JSON.stringify(opts)}`, () =>
       getAttributionByPerson(opts),
     );
     getAttributionByPersonRoute.respond(res, 200, { rows });

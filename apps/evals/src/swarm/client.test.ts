@@ -169,3 +169,64 @@ describe("SwarmClient memory endpoints (v6 §0.6/§0.7)", () => {
     expect(req.body).toEqual({ query: "the fact", limit: 5, scope: "all" });
   });
 });
+
+describe("SwarmClient.waitForQuiescence", () => {
+  /** Serve a scripted sequence of task lists; an Error entry makes that poll fail. */
+  function scriptTasks(seq: Array<Record<string, unknown>[] | Error>): { calls: number } {
+    const state = { calls: 0 };
+    globalThis.fetch = (async () => {
+      const step = seq[Math.min(state.calls, seq.length - 1)]!;
+      state.calls++;
+      if (step instanceof Error) return new Response("boom", { status: 500 });
+      return new Response(JSON.stringify({ tasks: step }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    return state;
+  }
+  const all = () => true;
+
+  test("returns open: [] once every relevant task is terminal", async () => {
+    const state = scriptTasks([
+      [
+        { id: "a", status: "in_progress" },
+        { id: "b", status: "completed" },
+      ],
+      [
+        { id: "a", status: "completed" },
+        { id: "b", status: "completed" },
+      ],
+    ]);
+    const client = new SwarmClient("http://stack.test", "swarm-key");
+    const r = await client.waitForQuiescence(all, { deadline: Date.now() + 5_000, intervalMs: 1 });
+    expect(r.open).toEqual([]);
+    expect(r.tasks).toHaveLength(2);
+    expect(state.calls).toBe(2);
+  });
+
+  test("returns the still-open ids at the deadline", async () => {
+    scriptTasks([
+      [
+        { id: "a", status: "in_progress" },
+        { id: "b", status: "pending" },
+        { id: "c", status: "failed" },
+      ],
+    ]);
+    const client = new SwarmClient("http://stack.test", "swarm-key");
+    const r = await client.waitForQuiescence(all, { deadline: Date.now() + 30, intervalMs: 5 });
+    expect(r.open.sort()).toEqual(["a", "b"]);
+  });
+
+  test("keeps polling through a thrown listAllTasks", async () => {
+    const state = scriptTasks([
+      new Error("blip"),
+      new Error("blip"),
+      [{ id: "a", status: "completed" }],
+    ]);
+    const client = new SwarmClient("http://stack.test", "swarm-key");
+    const r = await client.waitForQuiescence(all, { deadline: Date.now() + 5_000, intervalMs: 1 });
+    expect(r.open).toEqual([]);
+    expect(state.calls).toBe(3);
+  });
+});

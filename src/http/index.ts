@@ -15,6 +15,7 @@ import {
   upsertSwarmConfig,
 } from "../be/db";
 import { startDbRetention, stopDbRetention } from "../be/db-retention";
+import { startHumanFreeDrain, stopHumanFreeDrain } from "../be/human-free-drain";
 import {
   enqueueAuditRow,
   flushAuditBuffer,
@@ -488,6 +489,9 @@ async function shutdown() {
   // Stop opt-in session, agent-log, and event retention before closing SQLite.
   await stopDbRetention();
 
+  // Stop the human-free reclassification drain before closing SQLite.
+  stopHumanFreeDrain();
+
   // Stop scratch-script retention garbage collector
   stopScratchScriptGc();
 
@@ -595,8 +599,10 @@ try {
 // here surfaces the count in the boot log and makes the API ready to recompute
 // USD before the first POST /api/session-costs lands.
 try {
-  const { seedPricingFromModelsDev } = await import("../be/seed-pricing");
-  seedPricingFromModelsDev();
+  // Guarded per DB handle: `createServer()` (one per MCP session) calls the
+  // same helper, so seeding here is what keeps session init off this path.
+  const { ensurePricingSeeded } = await import("../be/boot-seeds");
+  ensurePricingSeeded();
   const { startPricingRefreshLoop } = await import("../be/pricing-refresh");
   startPricingRefreshLoop();
 } catch (err) {
@@ -604,8 +610,8 @@ try {
 }
 
 try {
-  const { ensureRbacSeedsSynced } = await import("../be/rbac-roles");
-  ensureRbacSeedsSynced();
+  const { ensureRbacSeeded } = await import("../be/boot-seeds");
+  ensureRbacSeeded();
 } catch (err) {
   console.error("[startup] Failed to sync RBAC seed rows:", err);
   // RBAC flag-on must fail closed; flag-off deployments should not be bricked
@@ -768,6 +774,10 @@ httpServer
     // Start the opt-in DB retention sweep after config hydration. Every key is
     // read on each tick, so config reloads take effect without a restart.
     await startDbRetention();
+
+    // Finish the human-free reclassification a request left queued (a very large
+    // task tree, or a restart mid-drain). Wakes on demand; see human-free-drain.ts.
+    startHumanFreeDrain();
 
     // (RBAC audit sink is wired pre-listen — see above httpServer.listen.)
 

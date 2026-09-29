@@ -558,16 +558,16 @@ export async function buildCodexConfig(
   // at `~/.codex/config.toml` (Phase 6). Repeating them here makes local dev
   // (no baseline file) behave identically to the Docker worker.
   //
-  // `features.hooks` / `features.plugin_hooks` enable Codex's hook system and
-  // the hooks contributed by installed Codex plugins (context-mode's plugin:
-  // routing injection, PreToolUse safety blocks, output capture).
+  // Keep ChatGPT apps/connectors disabled because their `codex_apps` tools use
+  // the worker's host OAuth identity. Hooks remain enabled for Codex steering
+  // and the installed context-mode plugin.
   return {
     model,
     approval_policy: "never",
     sandbox_mode: "danger-full-access",
     skip_git_repo_check: true,
     show_raw_agent_reasoning: false,
-    features: { hooks: true, plugin_hooks: true },
+    features: { apps: false, hooks: true, plugin_hooks: true },
     mcp_servers: mcpServers as CodexConfig,
     ...reasoningConfig,
   };

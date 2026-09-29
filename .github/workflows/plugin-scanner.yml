@@ -1,7 +1,10 @@
 name: HOL Plugin Scanner
 
 on:
+  # Push only on main: a bare push re-ran every PR commit (already covered by
+  # pull_request) and every gh-readonly-queue/* merge-queue branch.
   push:
+    branches: [main]
   pull_request:
 
 permissions:

@@ -9,7 +9,7 @@ import {
 import { parseAppDefinition } from "../apps/definition";
 import { appIndexKey, appsNamespace, createAppRow, purgeAppRows } from "../apps/row-store";
 import { deleteApp, getApp } from "../apps/store";
-import { closeDb, countKv, getDbClient, getKv, initDb } from "../be/db";
+import { closeDb, countKv, getDbClient, getKv, initDb, upsertKv } from "../be/db";
 import { handleApps } from "../http/apps";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 
@@ -476,6 +476,34 @@ describe("apps spike", () => {
     }
   });
 
+  test("numeric filters keep JS equality for integers beyond the safe range", async () => {
+    const appId = await createIdeasApp();
+    // SQLite reads the stored literal as an exact INTEGER while the bound JS
+    // number is the nearest double, so a SQL equality prefilter drops this row.
+    for (const values of [
+      { title: "Big", votes: 1000000000000000100 },
+      { title: "Fraction", votes: 0.1 },
+      { title: "Small", votes: 7 },
+    ]) {
+      await request(`/api/apps/${appId}/models/idea/rows`, {
+        method: "POST",
+        body: JSON.stringify({ values }),
+      });
+    }
+    for (const [raw, title] of [
+      ["1000000000000000100", "Big"],
+      ["1000000000000000128", "Big"],
+      ["0.1", "Fraction"],
+      ["7", "Small"],
+    ]) {
+      const result = await request<{ rows: Array<{ title: string }>; total: number }>(
+        `/api/apps/${appId}/models/idea/rows?filter.votes=${raw}`,
+      );
+      expect(result.status).toBe(200);
+      expect(result.body.rows.map((row) => row.title)).toEqual([title]);
+    }
+  });
+
   test("runs named queries with filter, sort, and limit", async () => {
     const definition = {
       ...ideasDefinition,
@@ -590,5 +618,32 @@ describe("apps spike", () => {
     expect(lateCreateOutcome).toBeDefined();
     expect(await lateCreateOutcome).toBe(true);
     expect(await countKv(appsNamespace(appId), {})).toBe(0);
+  });
+
+  test("app purge spans several delete batches and removes expired entries too", async () => {
+    const appId = await createIdeasApp();
+    const namespace = appsNamespace(appId);
+    for (let index = 0; index < 2_500; index++) {
+      await upsertKv({ namespace, key: `idea/row/${index}`, value: { index }, valueType: "json" });
+    }
+    await upsertKv({
+      namespace,
+      key: "idea/row/expired",
+      value: {},
+      valueType: "json",
+      expiresAt: Date.now() - 1,
+    });
+    await upsertKv({ namespace: "apps:other", key: "keep", value: "1", valueType: "json" });
+
+    await purgeAppRows(appId, ["idea"], async () => {
+      expect(await deleteApp(appId)).toBe(true);
+    });
+
+    const remaining = await getDbClient().get<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM kv_entries WHERE namespace = ?",
+      [namespace],
+    );
+    expect(remaining?.n).toBe(0);
+    expect(await getKv("apps:other", "keep")).not.toBeNull();
   });
 });

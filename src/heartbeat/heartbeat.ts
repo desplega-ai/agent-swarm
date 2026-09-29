@@ -6,6 +6,7 @@ import {
   assignUnassignedTaskPending,
   backfillSupersedeTaskResumeTaskId,
   buildRoutingAffinityFromAgent,
+  cascadeFailDependents,
   cleanupStaleSessions,
   createLogEntry,
   createTaskExtended,
@@ -16,6 +17,7 @@ import {
   getActiveTaskCount,
   getAllAgents,
   getDbClient,
+  getDependentTasks,
   getIdleWorkersWithCapacity,
   getLeadAgent,
   getPendingSteeringForTask,
@@ -25,6 +27,8 @@ import {
   getStalePinnedResumes,
   getStaleUnassignedAffinityTasks,
   getStalledInProgressTasks,
+  getSupersededTasksWithoutResume,
+  getSupersededTasksWithUnsettledDependents,
   getTaskById,
   getTaskStats,
   getTasksByStatus,
@@ -39,6 +43,7 @@ import {
   releaseStaleOfferedTasksForOfflineAgents,
   releaseStaleProcessingInbox,
   releaseStaleReviewingTasks,
+  settleSupersededTaskDependents,
   supersedeTask,
   updateAgentStatus,
 } from "../be/db";
@@ -63,6 +68,7 @@ import {
   resolveLeadOnlyRecoveryAssignment,
 } from "../tasks/worker-follow-up";
 import type { AgentTask } from "../types";
+import { isEnvFlagEnabled } from "../utils/env-flag";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { getExecutorRegistry } from "../workflows";
@@ -214,12 +220,30 @@ export const HEARTBEAT_RESUME_PIN_GRACE_MIN = (() => {
  */
 const POOL_AFFINITY_ESCALATION_MIN = Number(process.env.POOL_AFFINITY_ESCALATION_MIN) || 15;
 
-/** Heartbeat checklist interval: how often to check HEARTBEAT.md (default: 30 min) */
-const HEARTBEAT_CHECKLIST_INTERVAL_MS =
-  Number(process.env.HEARTBEAT_CHECKLIST_INTERVAL_MS) || 30 * 60 * 1000;
+const DEFAULT_HEARTBEAT_CHECKLIST_INTERVAL_MS = 30 * 60 * 1000;
 
-/** Whether to disable the heartbeat checklist entirely */
-const HEARTBEAT_CHECKLIST_DISABLE = Boolean(process.env.HEARTBEAT_CHECKLIST_DISABLE);
+/**
+ * Heartbeat checklist interval: how often to check HEARTBEAT.md (default: 30 min).
+ *
+ * An explicit `0` (or negative) turns the RECURRING checklist tick off; the
+ * one-shot boot triage still runs. Absent, empty, or non-numeric values fall
+ * back to the default (not `Number(x) || default`, which would coerce `0` to 30 min).
+ */
+function heartbeatChecklistIntervalMs(): number {
+  const raw = process.env.HEARTBEAT_CHECKLIST_INTERVAL_MS?.trim();
+  if (!raw) return DEFAULT_HEARTBEAT_CHECKLIST_INTERVAL_MS;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return DEFAULT_HEARTBEAT_CHECKLIST_INTERVAL_MS;
+  return Math.max(0, parsed);
+}
+
+/**
+ * Whether to disable the heartbeat checklist entirely (recurring tick AND boot
+ * triage). Parsed with the shared env-flag helper, so `"false"`/`"0"` keep it on.
+ */
+function isHeartbeatChecklistDisabled(): boolean {
+  return isEnvFlagEnabled("HEARTBEAT_CHECKLIST_DISABLE", false);
+}
 
 // ============================================================================
 // Types
@@ -272,6 +296,7 @@ export interface HeartbeatFindings {
 
 let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
 let checklistInterval: ReturnType<typeof setInterval> | null = null;
+let bootTriageTimeout: ReturnType<typeof setTimeout> | null = null;
 let isSweeping = false;
 let beforeHeartbeatSupersedeForTests: ((task: AgentTask) => void | Promise<void>) | null = null;
 
@@ -359,6 +384,10 @@ export async function codeLevelTriage(): Promise<HeartbeatFindings> {
 
   // 1. Detect and remediate stalled tasks (tiered: auto-fail dead workers)
   await detectAndRemediateStalledTasks(findings);
+
+  // 1.5. Give a resume to any task superseded without one (crash between
+  // the supersede write and the resume write).
+  await repairSupersededWithoutResume(findings);
 
   // 2. Check and fix worker health
   await checkWorkerHealth(findings);
@@ -506,6 +535,55 @@ async function detectAndRemediateStalledTasks(findings: HeartbeatFindings): Prom
   }
 }
 
+/** Repair window: skip in-flight supersedes, stop at a day of history. */
+const ORPHAN_SUPERSEDE_MIN_AGE_MS = 60 * 1000;
+const ORPHAN_SUPERSEDE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Supersede and resume creation are separate writes. If the API process dies
+ * between them, the task stays `superseded` with no resume and nothing else
+ * picks it up (the stall classifier only reads `in_progress`). This creates
+ * the missing resume. Found by the TLA+ model (specs/tla/heartbeat/).
+ */
+async function repairSupersededWithoutResume(findings: HeartbeatFindings): Promise<void> {
+  const now = Date.now();
+  const orphans = await getSupersededTasksWithoutResume(
+    new Date(now - ORPHAN_SUPERSEDE_MIN_AGE_MS).toISOString(),
+    new Date(now - ORPHAN_SUPERSEDE_MAX_AGE_MS).toISOString(),
+  );
+  for (const task of orphans) {
+    const resume =
+      task.agentId && getNextResumeGeneration(task) <= maxResumeGenerations()
+        ? await createResumeFollowUp({ parentId: task.id, reason: "crash_recovery" })
+        : null;
+    if (resume?.kind !== "created" || !task.agentId) {
+      // No resume will carry the work: its dependents fail as they would have.
+      await settleSupersededTaskDependents(task.id, null);
+      continue;
+    }
+    await backfillSupersedeTaskResumeTaskId(task.id, resume.task.id);
+    findings.autoResumedTasks.push({
+      taskId: task.id,
+      resumeTaskId: resume.task.id,
+      agentId: task.agentId,
+      reason: "repaired superseded task without resume",
+    });
+    console.log(
+      `[Heartbeat] Created missing resume ${resume.task.id.slice(0, 8)} for superseded task ${task.id.slice(0, 8)}`,
+    );
+  }
+
+  // A crash after the resume was created but before the backfill leaves
+  // dependents waiting on the superseded task; settle them onto that resume.
+  const unsettled = await getSupersededTasksWithUnsettledDependents(
+    new Date(now - ORPHAN_SUPERSEDE_MIN_AGE_MS).toISOString(),
+    new Date(now - ORPHAN_SUPERSEDE_MAX_AGE_MS).toISOString(),
+  );
+  for (const { taskId, resumeTaskId } of unsettled) {
+    await settleSupersededTaskDependents(taskId, resumeTaskId);
+  }
+}
+
 function isRemediationAction(value: unknown): value is RemediationAction {
   return typeof value === "string" && REMEDIATION_ACTIONS.has(value as RemediationAction);
 }
@@ -638,6 +716,7 @@ async function remediateCrashedWorkerTask(
       resume.kind === "skipped"
         ? `resume_creation_skipped_${resume.reason}`
         : "resume_creation_skipped_workflow";
+    await settleSupersededTaskDependents(task.id, null);
     const failed = await failTask(task.id, reason);
     if (failed) {
       findings.autoFailedTasks.push({
@@ -765,122 +844,130 @@ export async function runRebootSweep(): Promise<void> {
       // Clean up pre-boot stale session before failing (if it existed)
       if (session) await deleteActiveSession(task.id);
 
-      // Auto-fail the task
-      const failed = await failTask(task.id, reason);
+      // Auto-fail the task. Its dependents are settled in the `finally` below
+      // (re-pointed to the retry child, or cascade-failed when there is none)
+      // instead of by failTask's unconditional cascade.
+      const failed = await failTask(task.id, reason, { cascadeDependents: false });
       if (!failed) continue;
 
-      // Fix agent status
-      if ((await getActiveTaskCount(task.agentId)) === 0) {
-        await restoreAgentIdleAfterRemediation(task.agentId);
-      }
-
-      // Don't retry system-generated heartbeat tasks
-      if (SKIP_AUTO_RESUME_TYPES.has(task.taskType ?? "")) {
-        rebootAffectedTasks.push({ original: failed, retryTaskId: null });
-        continue;
-      }
-
-      // Auto-retry: create a replacement task with parentTaskId
       let retryTaskId: string | null = null;
+      try {
+        // Fix agent status
+        if ((await getActiveTaskCount(task.agentId)) === 0) {
+          await restoreAgentIdleAfterRemediation(task.agentId);
+        }
 
-      // A corrupt persisted affinity is never converted into an untagged
-      // retry by this independent recovery path.
-      if (task.routingAffinityInvalid) {
-        console.error(
-          `[Heartbeat] Reboot retry suppressed for ${task.id.slice(0, 8)}: invalid routing affinity`,
-        );
-        rebootAffectedTasks.push({ original: failed, retryTaskId: null });
-        continue;
-      }
+        // Don't retry system-generated heartbeat tasks
+        if (SKIP_AUTO_RESUME_TYPES.has(task.taskType ?? "")) {
+          rebootAffectedTasks.push({ original: failed, retryTaskId: null });
+          continue;
+        }
 
-      // Guard: only retry if parent doesn't already have a retry child
-      const existingRetry = await getDbClient().get<{ id: string }>(
-        `SELECT id FROM agent_tasks
+        // Auto-retry: create a replacement task with parentTaskId
+        // A corrupt persisted affinity is never converted into an untagged
+        // retry by this independent recovery path.
+        if (task.routingAffinityInvalid) {
+          console.error(
+            `[Heartbeat] Reboot retry suppressed for ${task.id.slice(0, 8)}: invalid routing affinity`,
+          );
+          rebootAffectedTasks.push({ original: failed, retryTaskId: null });
+          continue;
+        }
+
+        // Guard: only retry if parent doesn't already have a retry child
+        const existingRetry = await getDbClient().get<{ id: string }>(
+          `SELECT id FROM agent_tasks
            WHERE parentTaskId = ?
              AND status NOT IN ('completed', 'failed', 'cancelled')
            LIMIT 1`,
-        [task.id],
-      );
+          [task.id],
+        );
 
-      if (!existingRetry) {
-        try {
-          // Routing affinity (Phase 3): pin the retry child to the original
-          // agent when it still looks recoverable (row exists, not offline,
-          // has capacity) — the same gate `createResumeFollowUp` uses for its
-          // same-agent pin. This keeps the retry off the role-blind pool
-          // whenever the original worker is merely restarting. Always stamp
-          // a `routingAffinity` snapshot from the original agent — even on
-          // the pool-fallback leg (agent gone/offline/at-capacity) — so that
-          // leg is still role/capability-gated instead of role-blind.
-          let preferredAgentId: string | undefined;
-          let sourceCandidate = await getPinCandidateAgent(task.agentId);
-          if (sourceCandidate) {
-            const activeCount = await getActiveTaskCount(sourceCandidate.id);
-            const maxTasks = sourceCandidate.maxTasks ?? 1;
-            const hasCap = activeCount < maxTasks;
-            if (hasCap) {
-              preferredAgentId = sourceCandidate.id;
-            } else {
-              sourceCandidate = null;
-              console.warn(
-                `[Heartbeat] Reboot retry for task ${task.id.slice(0, 8)} NOT pinned: agent ${task.agentId.slice(0, 8)} at capacity (${activeCount}/${maxTasks}); falling back to affinity-gated pool`,
-              );
-            }
-          }
-
-          const leadOnly = task.routingAffinity?.leadOnly === true;
-          const authorization = await resolveLeadOnlyRecoveryAssignment(task, sourceCandidate);
-          if (leadOnly) preferredAgentId = authorization.agentId;
-
-          const tags = ["reboot-retry", "auto-generated"];
-          if (preferredAgentId !== undefined) tags.push(REBOOT_RETRY_PIN_TAG);
-          const sourceAffinity = (await buildRoutingAffinityFromAgent(task.agentId)) ?? undefined;
-          const routingAffinity = leadOnly
-            ? {
-                ...(sourceAffinity ?? task.routingAffinity),
-                capabilities:
-                  task.routingAffinity?.capabilities ?? sourceAffinity?.capabilities ?? [],
-                leadOnly: true,
+        if (!existingRetry) {
+          try {
+            // Routing affinity (Phase 3): pin the retry child to the original
+            // agent when it still looks recoverable (row exists, not offline,
+            // has capacity) — the same gate `createResumeFollowUp` uses for its
+            // same-agent pin. This keeps the retry off the role-blind pool
+            // whenever the original worker is merely restarting. Always stamp
+            // a `routingAffinity` snapshot from the original agent — even on
+            // the pool-fallback leg (agent gone/offline/at-capacity) — so that
+            // leg is still role/capability-gated instead of role-blind.
+            let preferredAgentId: string | undefined;
+            let sourceCandidate = await getPinCandidateAgent(task.agentId);
+            if (sourceCandidate) {
+              const activeCount = await getActiveTaskCount(sourceCandidate.id);
+              const maxTasks = sourceCandidate.maxTasks ?? 1;
+              const hasCap = activeCount < maxTasks;
+              if (hasCap) {
+                preferredAgentId = sourceCandidate.id;
+              } else {
+                sourceCandidate = null;
+                console.warn(
+                  `[Heartbeat] Reboot retry for task ${task.id.slice(0, 8)} NOT pinned: agent ${task.agentId.slice(0, 8)} at capacity (${activeCount}/${maxTasks}); falling back to affinity-gated pool`,
+                );
               }
-            : sourceAffinity;
+            }
 
-          const retryTask = await createTaskExtended(task.task, {
-            parentTaskId: task.id,
-            agentId: preferredAgentId,
-            routingReason:
-              preferredAgentId === undefined
-                ? undefined
-                : preferredAgentId === task.agentId
-                  ? "continuity"
-                  : "reroute_fault",
-            routingSource: preferredAgentId === undefined ? undefined : "engine_default",
-            tags,
-            priority: task.priority,
-            source: task.source,
-            taskType: task.taskType ?? undefined,
-            routingAffinity,
-          });
-          if (authorization.decision) {
-            await createLogEntry({
-              eventType: "task_recovery_authorization",
-              taskId: retryTask.id,
+            const leadOnly = task.routingAffinity?.leadOnly === true;
+            const authorization = await resolveLeadOnlyRecoveryAssignment(task, sourceCandidate);
+            if (leadOnly) preferredAgentId = authorization.agentId;
+
+            const tags = ["reboot-retry", "auto-generated"];
+            if (preferredAgentId !== undefined) tags.push(REBOOT_RETRY_PIN_TAG);
+            const sourceAffinity = (await buildRoutingAffinityFromAgent(task.agentId)) ?? undefined;
+            const routingAffinity = leadOnly
+              ? {
+                  ...(sourceAffinity ?? task.routingAffinity),
+                  capabilities:
+                    task.routingAffinity?.capabilities ?? sourceAffinity?.capabilities ?? [],
+                  leadOnly: true,
+                }
+              : sourceAffinity;
+
+            const retryTask = await createTaskExtended(task.task, {
+              parentTaskId: task.id,
               agentId: preferredAgentId,
-              metadata: {
-                leadOnly: true,
-                parentTaskId: task.id,
-                sourceAgentId: task.agentId,
-                decision: authorization.decision,
-              },
+              routingReason:
+                preferredAgentId === undefined
+                  ? undefined
+                  : preferredAgentId === task.agentId
+                    ? "continuity"
+                    : "reroute_fault",
+              routingSource: preferredAgentId === undefined ? undefined : "engine_default",
+              tags,
+              priority: task.priority,
+              source: task.source,
+              taskType: task.taskType ?? undefined,
+              // The retry re-runs the same work, so it keeps the creator's
+              // onCompleted/onFailed.
+              inheritParentFollowUpConfig: true,
+              routingAffinity,
             });
+            if (authorization.decision) {
+              await createLogEntry({
+                eventType: "task_recovery_authorization",
+                taskId: retryTask.id,
+                agentId: preferredAgentId,
+                metadata: {
+                  leadOnly: true,
+                  parentTaskId: task.id,
+                  sourceAgentId: task.agentId,
+                  decision: authorization.decision,
+                },
+              });
+            }
+            retryTaskId = retryTask.id;
+            console.log(`[Heartbeat] Reboot retry created: ${retryTaskId} (parent: ${task.id})`);
+          } catch (err) {
+            console.error(`[Heartbeat] Failed to create retry task for ${task.id}:`, err);
           }
-          retryTaskId = retryTask.id;
-          console.log(`[Heartbeat] Reboot retry created: ${retryTaskId} (parent: ${task.id})`);
-        } catch (err) {
-          console.error(`[Heartbeat] Failed to create retry task for ${task.id}:`, err);
         }
-      }
 
-      rebootAffectedTasks.push({ original: failed, retryTaskId });
+        rebootAffectedTasks.push({ original: failed, retryTaskId });
+      } finally {
+        await settleRebootSweptDependents(task.id, retryTaskId);
+      }
     }
 
     console.log(
@@ -888,6 +975,67 @@ export async function runRebootSweep(): Promise<void> {
     );
   } finally {
     isSweeping = false;
+  }
+}
+
+/** Statuses a dependent can hold before it ever started running. */
+const NEVER_STARTED_STATUSES = new Set([
+  "draft",
+  "backlog",
+  "unassigned",
+  "offered",
+  "reviewing",
+  "pending",
+]);
+
+/**
+ * Settle the dependents of a reboot-swept task. With a retry child, every
+ * never-started dependent has the swept id in `dependsOn` replaced by the
+ * retry id, so it waits on the retry instead of dying with `Blocked dependency
+ * … was failed`. The row keeps its id, agent, Slack fields, follow-up config,
+ * priority and parent. Anything still depending on the swept task afterwards
+ * (no retry, or a dependent that already started) cascade-fails as before.
+ */
+async function settleRebootSweptDependents(
+  sweptId: string,
+  retryTaskId: string | null,
+): Promise<void> {
+  try {
+    if (retryTaskId) {
+      for (const dep of await getDependentTasks(sweptId)) {
+        if (!NEVER_STARTED_STATUSES.has(dep.status)) continue;
+        const dependsOn = [
+          ...new Set(dep.dependsOn.map((id) => (id === sweptId ? retryTaskId : id))),
+        ];
+        // Status + membership predicates make the re-point a no-op if the
+        // dependent was claimed or re-pointed since it was read.
+        const row = await getDbClient().get<{ id: string }>(
+          `UPDATE agent_tasks
+              SET dependsOn = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            WHERE id = ? AND status = ?
+              AND EXISTS (SELECT 1 FROM json_each(agent_tasks.dependsOn) WHERE value = ?)
+            RETURNING id`,
+          [JSON.stringify(dependsOn), dep.id, dep.status, sweptId],
+        );
+        if (!row) continue;
+        try {
+          await createLogEntry({
+            eventType: "task_dependency_repointed",
+            taskId: dep.id,
+            agentId: dep.agentId ?? undefined,
+            oldValue: sweptId,
+            newValue: retryTaskId,
+            metadata: { reason: "reboot_retry" },
+          });
+        } catch {}
+        console.log(
+          `[Heartbeat] Reboot sweep: dependent ${dep.id.slice(0, 8)} re-pointed from ${sweptId.slice(0, 8)} to retry ${retryTaskId.slice(0, 8)}`,
+        );
+      }
+    }
+    await cascadeFailDependents(sweptId, "failed");
+  } catch (err) {
+    console.error(`[Heartbeat] Reboot sweep: settling dependents of ${sweptId} failed:`, err);
   }
 }
 
@@ -1725,19 +1873,26 @@ export async function createBootTriageTask(): Promise<void> {
 /**
  * Start the heartbeat checklist polling loop (separate from the infrastructure sweep).
  */
-export function startHeartbeatChecklist(intervalMs = HEARTBEAT_CHECKLIST_INTERVAL_MS): void {
-  if (HEARTBEAT_CHECKLIST_DISABLE) {
+export function startHeartbeatChecklist(intervalMs = heartbeatChecklistIntervalMs()): void {
+  if (isHeartbeatChecklistDisabled()) {
     console.log("[Heartbeat] Checklist disabled via HEARTBEAT_CHECKLIST_DISABLE");
     return;
   }
-  if (checklistInterval) {
+  if (checklistInterval || bootTriageTimeout) {
     return; // Already running
   }
 
-  console.log(`[Heartbeat] Checklist starting with ${intervalMs}ms interval`);
-
   // Boot triage at T+90s — after reboot sweep (T+5s) has completed and results are available
-  setTimeout(() => createBootTriageTask(), 90_000);
+  bootTriageTimeout = setTimeout(() => createBootTriageTask(), 90_000);
+
+  if (intervalMs <= 0) {
+    console.log(
+      "[Heartbeat] Recurring checklist off (HEARTBEAT_CHECKLIST_INTERVAL_MS=0); boot triage still scheduled",
+    );
+    return;
+  }
+
+  console.log(`[Heartbeat] Checklist starting with ${intervalMs}ms interval`);
 
   // Recurring checklist starts from the second interval onward
   checklistInterval = setInterval(() => {
@@ -1754,6 +1909,10 @@ export function startHeartbeatChecklist(intervalMs = HEARTBEAT_CHECKLIST_INTERVA
  * Stop the heartbeat checklist polling loop.
  */
 export function stopHeartbeatChecklist(): void {
+  if (bootTriageTimeout) {
+    clearTimeout(bootTriageTimeout);
+    bootTriageTimeout = null;
+  }
   if (checklistInterval) {
     clearInterval(checklistInterval);
     checklistInterval = null;

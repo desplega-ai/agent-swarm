@@ -482,6 +482,9 @@ describe("getBasePrompt: outputs section", () => {
     const result = await getBasePrompt({ ...minimalArgs, traits: localTraits });
     expect(result).toContain("## Outputs");
     expect(result).toContain(AGENT_FS_LINE);
+    expect(result).toContain(
+      "For a file anyone outside the swarm opens, use an `agent-fs share-create` link; `AGENT_FS_LIVE_URL` links are for signed-in teammates.",
+    );
     expect(result).not.toContain(NO_AGENT_FS_LINE);
   });
 
