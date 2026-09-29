@@ -595,8 +595,10 @@ try {
 // here surfaces the count in the boot log and makes the API ready to recompute
 // USD before the first POST /api/session-costs lands.
 try {
-  const { seedPricingFromModelsDev } = await import("../be/seed-pricing");
-  seedPricingFromModelsDev();
+  // Guarded per DB handle: `createServer()` (one per MCP session) calls the
+  // same helper, so seeding here is what keeps session init off this path.
+  const { ensurePricingSeeded } = await import("../be/boot-seeds");
+  ensurePricingSeeded();
   const { startPricingRefreshLoop } = await import("../be/pricing-refresh");
   startPricingRefreshLoop();
 } catch (err) {
@@ -604,8 +606,8 @@ try {
 }
 
 try {
-  const { ensureRbacSeedsSynced } = await import("../be/rbac-roles");
-  ensureRbacSeedsSynced();
+  const { ensureRbacSeeded } = await import("../be/boot-seeds");
+  ensureRbacSeeded();
 } catch (err) {
   console.error("[startup] Failed to sync RBAC seed rows:", err);
   // RBAC flag-on must fail closed; flag-off deployments should not be bricked
