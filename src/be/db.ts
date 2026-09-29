@@ -7539,7 +7539,8 @@ type WorkflowRunRow = {
   status: string;
   triggerType: string;
   triggerData: string | null;
-  context: string | null;
+  /** Absent from list rows: see `WORKFLOW_RUN_SUMMARY_COLUMNS`. */
+  context?: string | null;
   error: string | null;
   created_by: string | null;
   startedAt: string;
@@ -7667,7 +7668,17 @@ export type WorkflowRunListOptions = {
   status?: WorkflowRunStatus;
   limit?: number;
   offset?: number;
+  /**
+   * Read the run `context`. Off by default: it is the one large column, and
+   * `getWorkflowRun` serves it for a single run.
+   */
+  includeContext?: boolean;
 };
+
+// Everything but `context`. `triggerData` stays: it is small, and stored
+// scripts read it off list rows (dedupe by trigger, failure reports).
+const WORKFLOW_RUN_SUMMARY_COLUMNS =
+  "id, workflowId, status, triggerType, triggerData, error, created_by, startedAt, lastUpdatedAt, finishedAt";
 
 export type WorkflowRunPage = {
   runs: WorkflowRun[];
@@ -7700,8 +7711,9 @@ export async function listWorkflowRuns(
     params.push(options.offset);
   }
 
+  const columns = options.includeContext ? "*" : WORKFLOW_RUN_SUMMARY_COLUMNS;
   const rows = await getDbClient().query<WorkflowRunRow>(
-    `SELECT * FROM workflow_runs
+    `SELECT ${columns} FROM workflow_runs
        WHERE ${conditions.join(" AND ")}
        ORDER BY startedAt DESC, id DESC${pagination}`,
     params,
@@ -7729,7 +7741,7 @@ export async function countWorkflowRuns(
 export async function listWorkflowRunsPage(
   workflowId: string,
   options: Required<Pick<WorkflowRunListOptions, "limit" | "offset">> &
-    Pick<WorkflowRunListOptions, "status">,
+    Pick<WorkflowRunListOptions, "status" | "includeContext">,
 ): Promise<WorkflowRunPage> {
   const runs = await listWorkflowRuns(workflowId, options);
   const total = await countWorkflowRuns(workflowId, { status: options.status });

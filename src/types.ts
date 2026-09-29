@@ -2605,6 +2605,12 @@ export const WorkflowRunSchema = z
   .openapi("WorkflowRun");
 export type WorkflowRun = z.infer<typeof WorkflowRunSchema>;
 
+/** List row of a run: no `context`, which `GET /api/workflow-runs/{id}` serves. */
+export const WorkflowRunSummarySchema = WorkflowRunSchema.omit({ context: true }).openapi(
+  "WorkflowRunSummary",
+);
+export type WorkflowRunSummary = z.infer<typeof WorkflowRunSummarySchema>;
+
 // --- Script Workflow Runs ---
 
 export const ScriptRunStatusSchema = z.enum([
