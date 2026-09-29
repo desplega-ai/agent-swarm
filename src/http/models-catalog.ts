@@ -251,8 +251,9 @@ const recordHarnessSupport = route({
 
 /**
  * Resolve the caller and gate on `verb`; writes a 403 on denial. Refresh and overlay writes
- * (`models.catalog.write`) are lead, operator or user only; workers may only record harness
- * support (`models.harness-support.write`).
+ * (`models.catalog.write`) are lead or operator only. Harness support (`models.harness-support.write`)
+ * is a registered agent's report about its own CLI (bound to it by `callerOwnsSupportRow`) or an
+ * operator correction. Dashboard users can do neither.
  */
 async function ensureCatalogWriter(
   req: IncomingMessage,
@@ -287,7 +288,7 @@ async function ensureCatalogWriter(
       res,
       verb === "models.catalog.write"
         ? "Writing the model catalog requires the lead agent or an operator"
-        : "Recording harness model support requires an authenticated caller",
+        : "Recording harness model support requires a registered agent or an operator",
       403,
     );
     return null;

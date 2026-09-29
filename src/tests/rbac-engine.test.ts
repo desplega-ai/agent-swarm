@@ -86,6 +86,8 @@ const LEAD_OR_OPERATOR_OR_USER_VERBS: PermissionVerb[] = ["extension.write", "ex
 
 const LEAD_OR_OPERATOR_VERBS: PermissionVerb[] = ["models.catalog.write"];
 
+const AGENT_OR_OPERATOR_VERBS: PermissionVerb[] = ["models.harness-support.write"];
+
 const LEAD_OR_RESOURCE_OWNER_VERBS: PermissionVerb[] = [
   "memory.edit.any",
   "skill.update.any",
@@ -109,7 +111,6 @@ const ANY_AUTHENTICATED_VERBS: PermissionVerb[] = [
   "task.create.own",
   "favorite.write.own",
   "script.search",
-  "models.harness-support.write",
 ];
 
 const REQUESTER_OWNS_TASK_VERBS: PermissionVerb[] = [
@@ -183,6 +184,7 @@ describe("verb-group partition", () => {
       ...OPERATOR_ONLY_VERBS,
       ...LEAD_OR_OPERATOR_OR_USER_VERBS,
       ...LEAD_OR_OPERATOR_VERBS,
+      ...AGENT_OR_OPERATOR_VERBS,
     ];
     expect(new Set(grouped).size).toBe(grouped.length);
     expect(grouped.sort()).toEqual([...PERMISSION_VERBS].sort());
@@ -257,6 +259,23 @@ describe("lead-or-operator-or-user verbs", () => {
   };
   for (const verb of LEAD_OR_OPERATOR_OR_USER_VERBS) {
     test(`${verb}: lead, operator, or user allowed`, () => {
+      expectDecisions(verb, { kind: "none" }, expected);
+    });
+  }
+});
+
+describe("agent-or-operator verbs", () => {
+  const expected: Expected = {
+    lead: true,
+    worker: true,
+    ownerWorker: true,
+    creatorWorker: true,
+    userRequester: false,
+    foreignUser: false,
+    operator: true,
+  };
+  for (const verb of AGENT_OR_OPERATOR_VERBS) {
+    test(`${verb}: any registered agent or the operator allowed, dashboard users denied`, () => {
       expectDecisions(verb, { kind: "none" }, expected);
     });
   }

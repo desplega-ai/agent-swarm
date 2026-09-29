@@ -1,3 +1,4 @@
+export { modelDisplayName } from "./display.ts";
 export {
   buildClaudeShortnameMap,
   compareNewestFirst,
@@ -10,6 +11,17 @@ export {
 } from "./harness-models.ts";
 export { type ModelsDevOverlay, mergeCatalog } from "./merge.ts";
 export { type AliasSourceModel, buildClaudeAliasMap, resolveClaudeAlias } from "./model-alias.ts";
+export {
+  claudeCatalogModelId,
+  isReasoningHarness,
+  nearestReasoningLevel,
+  REASONING_EFFORT_LEVELS,
+  REASONING_HARNESSES,
+  type ReasoningEffortLevel,
+  type ReasoningHarnessName,
+  type ReasoningModelFacts,
+  reasoningLevelsFor,
+} from "./reasoning.ts";
 export {
   type AliasChannel,
   type AliasPolicy,

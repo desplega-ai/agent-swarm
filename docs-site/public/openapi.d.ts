@@ -2450,7 +2450,7 @@ export interface paths {
         head?: never;
         /**
          * Update an agent's runtime harness and default model
-         * @description Updates `agents.harness_provider` and agent-scoped runtime config. The settings apply to future provider sessions. For `model`, `reasoning_effort`, and `claude.transport`: omit the field to leave it unchanged, send `null` to clear the corresponding override, or send a value to set it.
+         * @description Updates `agents.harness_provider` and agent-scoped runtime config. The settings apply to future provider sessions. For `model`, `reasoning_effort`, and `claude.transport`: omit the field to leave it unchanged, send `null` to clear the corresponding override, or send a value to set it. A `model` the model catalog does not list is a 400 unless `allow_custom_model` is true. A `latest:` alias is not accepted here (aliases resolve for a task's model and for `MODEL_TIER_*` values); `reasoning_effort` must be one the harness and model support.
          */
         patch: {
             parameters: {
@@ -13416,6 +13416,7 @@ export interface paths {
                         model?: string;
                         /** @enum {string} */
                         modelTier?: "smol" | "regular" | "smart" | "ultra";
+                        allowCustomModel?: boolean;
                         /** @enum {string} */
                         scheduleType?: "recurring" | "one_time";
                         /** @enum {string} */
@@ -13795,6 +13796,7 @@ export interface paths {
                         model?: string | null;
                         /** @enum {string|null} */
                         modelTier?: "smol" | "regular" | "smart" | "ultra" | null;
+                        allowCustomModel?: boolean;
                         nextRunAt?: string | null;
                         /** @enum {string} */
                         targetType?: "agent-task" | "workflow" | "script";
@@ -13986,6 +13988,7 @@ export interface paths {
                         model?: string | null;
                         /** @enum {string|null} */
                         modelTier?: "smol" | "regular" | "smart" | "ultra" | null;
+                        allowCustomModel?: boolean;
                         nextRunAt?: string | null;
                         /** @enum {string} */
                         targetType?: "agent-task" | "workflow" | "script";
@@ -17374,6 +17377,7 @@ export interface paths {
                         model?: string;
                         /** @enum {string} */
                         modelTier?: "smol" | "regular" | "smart" | "ultra";
+                        allowCustomModel?: boolean;
                         /** @enum {string} */
                         effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
                         draft?: boolean;
@@ -17390,7 +17394,7 @@ export interface paths {
                         "application/json": components["schemas"]["AgentTask"];
                     };
                 };
-                /** @description Validation error, or agentId/offeredTo targets an extension identity */
+                /** @description Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), or agentId/offeredTo targets an extension identity */
                 400: {
                     headers: {
                         [name: string]: unknown;

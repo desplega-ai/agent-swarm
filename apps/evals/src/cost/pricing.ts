@@ -1,3 +1,4 @@
+import { modelDisplayName } from "@desplega/model-catalog";
 import type { HarnessProvider, TokenTotals } from "../types.ts";
 import {
   getCatalog,
@@ -28,7 +29,8 @@ async function loadCache(): Promise<ModelsDevCatalog> {
 function toPriced(id: string, m: ModelsDevModel): PricedModel {
   return {
     id,
-    name: m.name ?? id,
+    // models.dev files moving entries as "Claude Haiku 4.5 (latest)"; the suffix is not the name.
+    name: modelDisplayName(m.name) ?? id,
     reasoning: m.reasoning ?? false,
     toolCall: m.tool_call ?? false,
     context: m.limit?.context ?? null,

@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { closeDb, createAgent, initDb } from "../be/db";
 import { setAgentHarnessCliVersion } from "../be/harness-model-support";
 import {
@@ -10,12 +11,18 @@ import {
   resetModelCatalogRefreshGuardForTests,
 } from "../be/pricing-refresh";
 import { handleModelsCatalog } from "../http/models-catalog";
+import {
+  registerModelCatalogOverlayUpsertTool,
+  registerModelCatalogRefreshTool,
+} from "../tools/model-catalog";
+import type { User } from "../types";
 import { setRequestAuth } from "../utils/request-auth-context";
 import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-model-catalog-write-access.sqlite";
 const LEAD_ID = "11111111-1111-4111-8111-111111111111";
 const WORKER_ID = "22222222-2222-4222-8222-222222222222";
+const USER_ID = "33333333-3333-4333-8333-333333333333";
 
 async function removeDbFiles(path: string): Promise<void> {
   for (const suffix of ["", "-wal", "-shm"]) {
@@ -71,6 +78,10 @@ beforeAll(async () => {
   server = createServer((req, res) => {
     const kind = req.headers["x-test-auth"];
     if (kind === "operator") setRequestAuth(req, { kind: "operator", fingerprint: "test" });
+    // A dashboard session user: no admin flag, not an agent.
+    if (kind === "user") {
+      setRequestAuth(req, { kind: "user", userId: USER_ID, user: { id: USER_ID } as User });
+    }
     const url = new URL(req.url ?? "/", "http://localhost");
     const segments = url.pathname.split("/").filter(Boolean);
     void handleModelsCatalog(req, res, segments, url.searchParams).then((handled) => {
@@ -117,6 +128,9 @@ const SUPPORT = { harness: "codex", cliVersion: "9.9.9", modelId: "gpt-base", st
 const workerWithSharedKey = { "x-test-auth": "operator", "x-agent-id": WORKER_ID };
 const leadWithSharedKey = { "x-test-auth": "operator", "x-agent-id": LEAD_ID };
 const operatorOnly = { "x-test-auth": "operator" };
+const dashboardUser = { "x-test-auth": "user" };
+// A user session can also carry an X-Agent-ID header; the session must not turn it into an agent.
+const userClaimingWorker = { "x-test-auth": "user", "x-agent-id": WORKER_ID };
 
 describe("catalog write access", () => {
   test("a worker cannot force a refresh, even with the shared API key", async () => {
@@ -188,6 +202,97 @@ describe("catalog write access", () => {
     const body = { ...SUPPORT, cliVersion: "1.0.0" };
     const res = await call("PUT", "/api/models-catalog/harness-support", body, operatorOnly);
     expect(res.status).toBe(200);
+  });
+});
+
+describe("dashboard users", () => {
+  test("cannot force a refresh or write or delete overlay rows", async () => {
+    for (const headers of [dashboardUser, userClaimingWorker]) {
+      const refresh = await call("POST", "/api/models-catalog/refresh", { force: true }, headers);
+      expect(refresh.status).toBe(403);
+      const put = await call("PUT", "/api/models-catalog/overlay", OVERLAY, headers);
+      expect(put.status).toBe(403);
+      const del = await call(
+        "DELETE",
+        "/api/models-catalog/overlay",
+        { provider: OVERLAY.provider, modelId: OVERLAY.modelId },
+        headers,
+      );
+      expect(del.status).toBe(403);
+    }
+  });
+
+  test("cannot record harness support, for any tuple", async () => {
+    // The user tuple is a real one (a worker's own harness and CLI version), so the only thing
+    // that can stop it is the principal check, not the ownership binding.
+    for (const headers of [dashboardUser, userClaimingWorker]) {
+      const own = await call(
+        "PUT",
+        "/api/models-catalog/harness-support",
+        { ...SUPPORT, status: "unsupported" },
+        headers,
+      );
+      expect(own.status).toBe(403);
+      const other = await call(
+        "PUT",
+        "/api/models-catalog/harness-support",
+        { ...SUPPORT, cliVersion: "1.0.0", status: "unsupported" },
+        headers,
+      );
+      expect(other.status).toBe(403);
+    }
+    const rows = await call("GET", "/api/models-catalog/harness-support", undefined, {});
+    const body = (await rows.json()) as { rows: { status: string; modelId: string }[] };
+    expect(body.rows.some((r) => r.status === "unsupported" && r.modelId === "gpt-base")).toBe(
+      false,
+    );
+  });
+
+  test("an unauthenticated caller cannot record harness support", async () => {
+    const res = await call("PUT", "/api/models-catalog/harness-support", SUPPORT, {});
+    expect(res.status).toBe(403);
+  });
+});
+
+type RegisteredTool = { handler: (args: unknown, extra: unknown) => Promise<unknown> };
+
+function catalogTools(): Record<string, RegisteredTool> {
+  const toolServer = new McpServer({ name: "catalog-write-access-test", version: "1.0.0" });
+  registerModelCatalogRefreshTool(toolServer);
+  registerModelCatalogOverlayUpsertTool(toolServer);
+  return (toolServer as unknown as { _registeredTools: Record<string, RegisteredTool> })
+    ._registeredTools;
+}
+
+async function callTool(name: string, args: unknown, agentId?: string) {
+  const handler = catalogTools()[name]?.handler;
+  if (!handler) throw new Error(`Tool not registered: ${name}`);
+  return (await handler(args, {
+    sessionId: "catalog-write-access-test",
+    requestInfo: { headers: agentId ? { "x-agent-id": agentId } : {} },
+  })) as { isError?: boolean; content?: { text?: string }[] };
+}
+
+describe("MCP catalog tools", () => {
+  const overlayArgs = { ...OVERLAY, reason: "write-access test" };
+
+  test("a worker is denied both tools", async () => {
+    const refresh = await callTool("model-catalog-refresh", { force: true }, WORKER_ID);
+    expect(refresh.isError).toBe(true);
+    expect(refresh.content?.[0]?.text).toContain("requires the lead agent");
+    const overlay = await callTool("model-catalog-overlay-upsert", overlayArgs, WORKER_ID);
+    expect(overlay.isError).toBe(true);
+    expect(overlay.content?.[0]?.text).toContain("requires the lead agent");
+  });
+
+  test("a call without an agent identity is denied", async () => {
+    const overlay = await callTool("model-catalog-overlay-upsert", overlayArgs);
+    expect(overlay.isError).toBe(true);
+  });
+
+  test("the lead can write an overlay", async () => {
+    const overlay = await callTool("model-catalog-overlay-upsert", overlayArgs, LEAD_ID);
+    expect(overlay.isError).toBeFalsy();
   });
 });
 

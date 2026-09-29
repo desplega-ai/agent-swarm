@@ -392,8 +392,17 @@ export async function previewModelTiers(
 
 /**
  * Apply the claiming worker's CLI support (harness_model_support). Returns the
- * resolution to use, or `{ unsupported }` when an explicit task `model` is
- * rejected by this CLI and must fail fast.
+ * resolution to use, or `{ unsupported }` when a concrete pinned task `model`
+ * is rejected by this CLI and must fail fast.
+ *
+ * Anything that came from an alias or a tier means "the newest usable model",
+ * so it falls back to the newest model of the same family the CLI has not
+ * rejected: a `latest:` alias on the task itself, a worker or global tier
+ * value, or a tier default (including the Claude CLI shortnames `opus`,
+ * `sonnet`, ...). With no usable sibling left the resolution stays and the run
+ * reports the CLI's own error. Only a concrete id the task pinned fails fast,
+ * because that is the one case where silently running another model would
+ * betray the request.
  */
 async function applyCliSupport(
   resolution: TaskModelResolution,
@@ -403,7 +412,7 @@ async function applyCliSupport(
   if (!harness || !cliVersion || !CLI_PINNED_HARNESSES.has(harness)) return resolution;
   const status = await getHarnessModelSupport(harness, cliVersion, resolution.resolvedModel);
   if (status !== "unsupported") return resolution;
-  if (resolution.modelSource === "model") {
+  if (resolution.modelSource === "model" && !resolution.modelAlias) {
     return { unsupported: unsupportedModelMessage(harness, cliVersion, resolution.resolvedModel) };
   }
   const section = harnessCatalogSection(harness);

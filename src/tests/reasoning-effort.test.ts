@@ -243,3 +243,79 @@ describe("applyReasoningEffort — opencode-options shape", () => {
     });
   });
 });
+
+// The offered levels, the API's validation and the harness application all read the same
+// answer. This matrix pins it per (harness, model) so the swarm app's pickers, the runtime
+// PATCH and the run-time adapters cannot drift apart.
+describe("harness × model → effort matrix", () => {
+  const matrix: {
+    harness: "claude" | "codex" | "pi" | "opencode";
+    model: string;
+    levels: string[];
+  }[] = [
+    { harness: "claude", model: "claude-opus-5-5", levels: ["low", "medium", "high", "xhigh"] },
+    { harness: "claude", model: "claude-sonnet-5-5", levels: ["low", "medium", "high", "xhigh"] },
+    { harness: "claude", model: "claude-haiku-4-5", levels: ["off", "low", "medium", "high"] },
+    {
+      harness: "codex",
+      model: "gpt-5.6-sol",
+      levels: ["off", "low", "medium", "high", "xhigh", "max"],
+    },
+    { harness: "codex", model: "gpt-6-astra", levels: ["low", "medium", "high", "xhigh", "max"] },
+    { harness: "codex", model: "gpt-5.1-codex", levels: ["low", "medium", "high"] },
+    { harness: "pi", model: "openrouter/deepseek/deepseek-v4.1-flash", levels: ["low", "high"] },
+    {
+      harness: "pi",
+      model: "openrouter/anthropic/claude-opus-5.5",
+      levels: ["low", "medium", "high", "xhigh"],
+    },
+    {
+      harness: "opencode",
+      model: "openrouter/deepseek/deepseek-v4.1-flash",
+      levels: ["low", "high"],
+    },
+    { harness: "pi", model: "openrouter/qwen/qwen3-coder-flash", levels: [] },
+    { harness: "claude", model: "totally-custom-model-xyz", levels: [] },
+  ];
+
+  for (const { harness, model, levels } of matrix) {
+    test(`${harness} ${model}: ${levels.length > 0 ? levels.join(", ") : "no effort"}`, () => {
+      expect(reasoningCapability(harness, model).levels).toEqual(levels);
+      // Every offered level is applied, every other level is dropped: what a picker offers is what
+      // reaches the harness.
+      for (const level of REASONING_EFFORT_LEVELS) {
+        const applied = applyReasoningEffort(harness, model, level);
+        const takes = levels.includes(level);
+        // opencode has no explicit off, so its `off` is a noop even when offered.
+        const expectNoop = !takes || (harness === "opencode" && level === "off");
+        expect(applied.kind === "noop").toBe(expectNoop);
+      }
+    });
+  }
+});
+
+describe("Claude CLI shortnames (the tier defaults) take effort like the model they stand for", () => {
+  test("opus, sonnet, haiku and fable resolve to their newest catalog model", () => {
+    expect(reasoningCapability("claude", "opus")).toEqual(
+      reasoningCapability("claude", "claude-opus-5-5"),
+    );
+    expect(reasoningCapability("claude", "sonnet")).toEqual(
+      reasoningCapability("claude", "claude-sonnet-5-5"),
+    );
+    expect(reasoningCapability("claude", "haiku").levels).toContain("off");
+    expect(reasoningCapability("claude", "fable").supported).toBe(true);
+  });
+
+  test("a stored effort reaches the CLI when the resolved model is a shortname", () => {
+    expect(applyReasoningEffort("claude", "opus", "high")).toEqual({
+      kind: "claude-env",
+      env: { CLAUDE_CODE_EFFORT_LEVEL: "high" },
+    });
+    expect(applyReasoningEffort("claude", "opus", "max")).toEqual({ kind: "noop" });
+  });
+
+  test("shortnames mean nothing to the other harnesses", () => {
+    expect(reasoningCapability("codex", "opus").supported).toBe(false);
+    expect(reasoningCapability("pi", "opus").supported).toBe(false);
+  });
+});

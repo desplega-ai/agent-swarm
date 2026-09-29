@@ -27,6 +27,7 @@ import {
   releaseTask,
   updateTaskClaudeSessionId,
 } from "@/be/db";
+import { explicitModelErrorForAgent } from "@/be/model-validation";
 import { touchRuntimeInstance } from "@/be/multi-runtime";
 import { applyPreTaskCreate } from "@/extensions/apply-task-create";
 import { assertOwnsTask, ownerCtx, type ToolCtx } from "@/tools/task-tool-ctx";
@@ -98,6 +99,12 @@ export const taskActionInputSchema = z.object({
   modelTier: ModelTierSchema.optional().describe(
     "Portable model tier for the created task: 'smol', 'regular', 'smart', or 'ultra'. Resolved when a worker claims/runs the task. Only used with 'create' action.",
   ),
+  allowCustomModel: z
+    .boolean()
+    .optional()
+    .describe(
+      "Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only used with 'create' action.",
+    ),
   effort: ReasoningEffortSchema.optional().describe(
     "Reasoning effort for the created task: 'off', 'low', 'medium', 'high', 'xhigh', or 'max'. Only used with 'create' action.",
   ),
@@ -275,6 +282,11 @@ export async function taskActionHandler(
         agentId,
       );
     }
+    const modelError = await explicitModelErrorForAgent({
+      model: normalizedModel.model,
+      allowCustomModel: input.allowCustomModel,
+    });
+    if (modelError) return taskActionResult({ success: false, message: modelError }, agentId);
     try {
       assetKey = key
         ? await authorizeAssetKeyWrite(key, await resolveTaskAuditUserId(ctx.sourceTaskId, agentId))

@@ -145,3 +145,10 @@ describe("listHarnessModels", () => {
     expect(harnessIds.has("deepseek/deepseek-v4-pro")).toBe(false);
   });
 });
+
+describe("model labels", () => {
+  test("drop the models.dev (latest) suffix", async () => {
+    const names = (await listHarnessModels()).map((m) => m.name);
+    expect(names.some((n) => /\(latest\)/i.test(n))).toBe(false);
+  });
+});

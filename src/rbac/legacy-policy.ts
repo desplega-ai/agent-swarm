@@ -66,6 +66,17 @@ const leadOrOperator: LegacyRule = {
   evaluate: (principal) => principal.kind === "operator" || actsAsLead(principal),
 };
 
+/**
+ * Registered agents and the operator. Dashboard users are left out: a support row is a worker's
+ * report about its own CLI (or an operator correction), and no UI writes one.
+ */
+const agentOrOperator: LegacyRule = {
+  name: "agent-or-operator",
+  denyReason: "requires a registered agent or operator authentication",
+  evaluate: (principal) =>
+    principal.kind === "operator" || (principal.kind === "agent" && principal.agentId !== ""),
+};
+
 const extensionWrite: LegacyRule = {
   name: "extension-owner-or-elevated",
   denyReason: "requires extension owner, lead agent, operator, or user authentication",
@@ -210,6 +221,7 @@ export const LEGACY_RULES = {
   "operator-or-user": operatorOrUser,
   "lead-or-operator-or-user": leadOrOperatorOrUser,
   "lead-or-operator": leadOrOperator,
+  "agent-or-operator": agentOrOperator,
   "lead-only": leadOnly,
   "lead-or-task-creator": leadOrTaskCreator,
   "lead-or-resource-owner": leadOrResourceOwner,
@@ -258,7 +270,7 @@ export const LEGACY_POLICY = {
   "config.delete.any": leadOnly,
   "config.read.secrets": leadOnly,
   "models.catalog.write": leadOrOperator,
-  "models.harness-support.write": anyAuthenticated,
+  "models.harness-support.write": agentOrOperator,
   "skill.create.swarm": leadOnly,
   "skill.install.any": leadOnly,
   "skill.install.global": leadOnly,

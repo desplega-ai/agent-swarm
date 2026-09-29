@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { isAlias } from "@desplega/model-catalog";
 import { ensure } from "@desplega.ai/business-use";
 import { z } from "zod";
 import {
@@ -34,6 +35,7 @@ import {
   sanitizeModelTierOverrides,
   setAgentModelTierOverrides,
 } from "../be/model-tier-resolution";
+import { explicitModelError } from "../be/model-validation";
 import {
   getRuntimeInstanceById,
   listRuntimeInstancesForAgent,
@@ -259,7 +261,7 @@ const updateAgentRuntimeRoute = route({
   pattern: ["api", "agents", null, "runtime"],
   summary: "Update an agent's runtime harness and default model",
   description:
-    "Updates `agents.harness_provider` and agent-scoped runtime config. The settings apply to future provider sessions. For `model`, `reasoning_effort`, and `claude.transport`: omit the field to leave it unchanged, send `null` to clear the corresponding override, or send a value to set it.",
+    "Updates `agents.harness_provider` and agent-scoped runtime config. The settings apply to future provider sessions. For `model`, `reasoning_effort`, and `claude.transport`: omit the field to leave it unchanged, send `null` to clear the corresponding override, or send a value to set it. A `model` the model catalog does not list is a 400 unless `allow_custom_model` is true. A `latest:` alias is not accepted here (aliases resolve for a task's model and for `MODEL_TIER_*` values); `reasoning_effort` must be one the harness and model support.",
   tags: ["Agents"],
   params: z.object({ id: z.string() }),
   query: z.object({ repoId: z.string().optional() }),
@@ -1128,6 +1130,28 @@ export async function handleAgentsRest(
           },
           400,
         );
+        return true;
+      }
+    }
+
+    // An explicit model must be in the catalog unless the caller marks it custom
+    // (`allow_custom_model`). `null` clears the override and `undefined` leaves it.
+    if (typeof model === "string" && isAlias(model)) {
+      jsonError(
+        res,
+        `A latest: alias cannot be an agent's default model ("${model}"). Set the alias on a task, or as a MODEL_TIER_<PROVIDER>_<TIER> value.`,
+        400,
+      );
+      return true;
+    }
+    if (typeof model === "string") {
+      const modelError = await explicitModelError({
+        model,
+        allowCustomModel: allow_custom_model,
+        harnessProvider: harness_provider,
+      });
+      if (modelError) {
+        jsonError(res, modelError, 400);
         return true;
       }
     }

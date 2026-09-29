@@ -141,6 +141,93 @@ describe("claim-time CLI support", () => {
     expect(trigger?.task.resolvedModel).toBeUndefined();
   });
 
+  test("an explicit latest: alias on an unsupported model falls back, like a tier alias", async () => {
+    await recordHarnessModelSupport({
+      harness: "claude",
+      cliVersion: CLI,
+      modelId: "claude-opus-5-5",
+      status: "unsupported",
+    });
+    const w = await worker("w-explicit-alias");
+    const task = await createTaskExtended("aliased work", {
+      agentId: w.id,
+      model: "latest:anthropic/opus",
+    });
+    const trigger = await callPoll(w.id);
+    expect(trigger?.task.modelUnsupported).toBeUndefined();
+    expect(trigger?.task.resolvedModel).toBe("claude-opus-5");
+    expect(trigger?.task.modelSource).toBe("fallback:cli-unsupported");
+    // The alias the task named is still on the record.
+    expect(trigger?.task.modelAlias).toBe("latest:anthropic/opus");
+    const row = await getDbClient().get<{ modelAlias: string }>(
+      "SELECT modelAlias FROM agent_tasks WHERE id = ?",
+      [task.id],
+    );
+    expect(row?.modelAlias).toBe("latest:anthropic/opus");
+  });
+
+  test("an alias with no usable sibling keeps its resolution instead of failing the task", async () => {
+    for (const modelId of ["claude-opus-5-5", "claude-opus-5"]) {
+      await recordHarnessModelSupport({
+        harness: "claude",
+        cliVersion: CLI,
+        modelId,
+        status: "unsupported",
+      });
+    }
+    const w = await worker("w-no-sibling");
+    await createTaskExtended("aliased work", { agentId: w.id, model: "latest:anthropic/opus" });
+    const trigger = await callPoll(w.id);
+    expect(trigger?.task.modelUnsupported).toBeUndefined();
+    expect(trigger?.task.resolvedModel).toBe("claude-opus-5-5");
+    expect(trigger?.task.modelSource).toBe("model");
+  });
+
+  test("a tier default (CLI shortname) the CLI rejected falls back within its family", async () => {
+    await recordHarnessModelSupport({
+      harness: "claude",
+      cliVersion: CLI,
+      modelId: "opus",
+      status: "unsupported",
+    });
+    const w = await worker("w-tier-default");
+    await createTaskExtended("smart work", { agentId: w.id, modelTier: "smart" });
+    const trigger = await callPoll(w.id);
+    expect(trigger?.task.modelUnsupported).toBeUndefined();
+    expect(trigger?.task.resolvedModel).toBe("claude-opus-5-5");
+    expect(trigger?.task.modelSource).toBe("fallback:cli-unsupported");
+  });
+
+  test("a tier default shortname stays when only a catalog id was rejected: the CLI resolves it", async () => {
+    await recordHarnessModelSupport({
+      harness: "claude",
+      cliVersion: CLI,
+      modelId: "claude-opus-5-5",
+      status: "unsupported",
+    });
+    const w = await worker("w-shortname-ok");
+    await createTaskExtended("smart work", { agentId: w.id, modelTier: "smart" });
+    const trigger = await callPoll(w.id);
+    expect(trigger?.task.resolvedModel).toBe("opus");
+    expect(trigger?.task.modelSource).toBe("tier-default");
+  });
+
+  test("a concrete id from a tier config value falls back; only a pinned task model fails fast", async () => {
+    process.env.MODEL_TIER_CLAUDE_SMART = "claude-opus-5-5";
+    await recordHarnessModelSupport({
+      harness: "claude",
+      cliVersion: CLI,
+      modelId: "claude-opus-5-5",
+      status: "unsupported",
+    });
+    const w = await worker("w-tier-config");
+    await createTaskExtended("smart work", { agentId: w.id, modelTier: "smart" });
+    const trigger = await callPoll(w.id);
+    expect(trigger?.task.resolvedModel).toBe("claude-opus-5");
+    expect(trigger?.task.modelSource).toBe("fallback:cli-unsupported");
+    delete process.env.MODEL_TIER_CLAUDE_SMART;
+  });
+
   test("unknown support (no row) is allowed; other CLI versions are unaffected", async () => {
     await recordHarnessModelSupport({
       harness: "claude",

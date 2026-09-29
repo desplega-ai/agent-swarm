@@ -160,7 +160,7 @@ export const PERMISSIONS = {
   },
   "models.harness-support.write": {
     description:
-      "Record whether a pinned harness CLI version accepts a model (workers report their own probe results).",
+      "Record whether a pinned harness CLI version accepts a model (a worker reports its own probe results; the operator may correct any row).",
     namespace: "models",
   },
   "config.read.secrets": {

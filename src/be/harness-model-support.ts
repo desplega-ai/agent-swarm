@@ -13,7 +13,12 @@
  *
  * See runbooks/model-catalog.md.
  */
-import { harnessCatalogSection, harnessModelIds, modelFamilyKey } from "@desplega/model-catalog";
+import {
+  claudeCatalogModelId,
+  harnessCatalogSection,
+  harnessModelIds,
+  modelFamilyKey,
+} from "@desplega/model-catalog";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { getDbClient } from "./db";
 
@@ -118,7 +123,9 @@ export function unsupportedModelMessage(harness: string, cliVersion: string, mod
 
 /**
  * Newest model in the same family as `model` that this harness CLI has not
- * rejected. Null when the family has nothing else.
+ * rejected. Null when the family has nothing else. A Claude CLI shortname (the
+ * tier default `opus`) counts as the family of the model it stands for, so a
+ * rejected `opus` falls back to the newest usable `claude-opus-*`.
  */
 export async function fallbackForUnsupportedModel(
   harness: string,
@@ -127,7 +134,9 @@ export async function fallbackForUnsupportedModel(
   catalogSection: Record<string, { release_date?: string; status?: string; reasoning?: boolean }>,
 ): Promise<string | null> {
   if (!harnessCatalogSection(harness)) return null;
-  const family = modelFamilyKey(model);
+  const family = modelFamilyKey(
+    harness === "claude" ? claudeCatalogModelId(model, catalogSection) : model,
+  );
   const rejected = new Set(
     (await listHarnessModelSupport({ harness, cliVersion }))
       .filter((r) => r.status === "unsupported")
