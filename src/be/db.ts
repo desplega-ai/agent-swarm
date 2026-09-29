@@ -154,6 +154,7 @@ import {
   reservedRoleViolation,
   rowToAgent,
 } from "./db/agents";
+import { type ApprovalRequestListFilters, approvalRequestListClause } from "./db/approvals";
 import {
   computeContentHash,
   createContextVersion,
@@ -212,6 +213,7 @@ export {
   updateAgentStatus,
   updateAgentStatusFromCapacity,
 } from "./db/agents";
+export { type ApprovalRequestSummary, listApprovalRequestSummaries } from "./db/approvals";
 export {
   computeContentHash,
   createContextVersion,
@@ -9708,32 +9710,14 @@ export async function updateApprovalRequestNotifications(
   );
 }
 
-export async function listApprovalRequests(filters?: {
-  status?: string;
-  workflowRunId?: string;
-  limit?: number;
-}): Promise<ApprovalRequest[]> {
-  const conditions: string[] = [];
-  const params: (string | number)[] = [];
-
-  if (filters?.status) {
-    conditions.push("status = ?");
-    params.push(filters.status);
-  }
-  if (filters?.workflowRunId) {
-    conditions.push("workflowRunId = ?");
-    params.push(filters.workflowRunId);
-  }
-
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const limit = filters?.limit ?? 100;
-  params.push(limit);
-
+export async function listApprovalRequests(
+  filters?: ApprovalRequestListFilters,
+): Promise<ApprovalRequest[]> {
+  const { sql, params } = approvalRequestListClause(filters);
   const rows = await getDbClient().query<ApprovalRequestRow>(
-    `SELECT * FROM approval_requests ${where} ORDER BY createdAt DESC LIMIT ?`,
+    `SELECT * FROM approval_requests ${sql}`,
     params,
   );
-
   return rows.map(rowToApprovalRequest);
 }
 
@@ -12396,9 +12380,9 @@ export async function listTaskTemplates(opts?: {
 // ============================================================================
 
 /**
- * Walk the parent→child chain rooted at `rootTaskId` via recursive CTE.
- * Returns the chain ordered by `createdAt` (so the root is first; siblings
- * appear in creation order; grand-children after their parents).
+ * Walk the chain rooted at `rootTaskId`, ordered by `createdAt` (root first; `rowid` breaks
+ * ties as idx_agent_tasks_created did). `CROSS JOIN` keeps the chain as the outer loop: with
+ * a plain JOIN, SQLite scanned all of agent_tasks to skip the sort.
  */
 export async function getRootTaskChain(rootTaskId: string): Promise<AgentTask[]> {
   const rows = await getDbClient().query<AgentTaskRow>(
@@ -12408,9 +12392,9 @@ export async function getRootTaskChain(rootTaskId: string): Promise<AgentTask[]>
          SELECT t.id FROM agent_tasks t
          JOIN chain c ON t.parentTaskId = c.id
        )
-       SELECT t.* FROM agent_tasks t
-       JOIN chain ON chain.id = t.id
-       ORDER BY t.createdAt`,
+       SELECT t.* FROM chain
+       CROSS JOIN agent_tasks t ON t.id = chain.id
+       ORDER BY t.createdAt, t.rowid`,
     [rootTaskId],
   );
   return rows.map(rowToAgentTask);
