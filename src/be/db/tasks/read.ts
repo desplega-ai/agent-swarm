@@ -5,6 +5,7 @@ import type {
   AgentTaskSource,
   AgentTaskStatus,
   AgentTaskSummary,
+  AgentTaskTimelineItem,
   FollowUpConfig,
   ProviderName,
   ReasoningEffort,
@@ -116,6 +117,97 @@ export type AgentTaskRow = {
   totalCostUsd?: number | null;
   routingAffinity: string | null;
 };
+
+/**
+ * `task` as the list projections read it: the full text, or the UTF-8 byte
+ * prefix `TASK_PREVIEW_SQL` selects.
+ */
+type TaskPreviewSource = { task: string | Uint8Array | null };
+type AgentTaskListRow = Omit<AgentTaskRow, "task"> & TaskPreviewSource;
+
+/** Columns the slim list mapper reads; `task` may already be a SQL prefix. */
+type AgentTaskSummaryRow = Pick<
+  AgentTaskListRow,
+  | "id"
+  | "key"
+  | "agentId"
+  | "creatorAgentId"
+  | "task"
+  | "title"
+  | "status"
+  | "source"
+  | "taskType"
+  | "tags"
+  | "priority"
+  | "dependsOn"
+  | "offeredTo"
+  | "acceptedAt"
+  | "parentTaskId"
+  | "scheduleId"
+  | "model"
+  | "modelTier"
+  | "effort"
+  | "provider"
+  | "requestedByUserId"
+  | "progress"
+  | "createdAt"
+  | "lastUpdatedAt"
+  | "finishedAt"
+  | "peakContextPercent"
+  | "totalCostUsd"
+>;
+
+type AgentTaskTimelineRow = Pick<
+  AgentTaskListRow,
+  | "id"
+  | "agentId"
+  | "parentTaskId"
+  | "task"
+  | "title"
+  | "status"
+  | "createdAt"
+  | "lastUpdatedAt"
+  | "finishedAt"
+  | "peakContextTokens"
+  | "totalCostUsd"
+>;
+
+/**
+ * SQL column lists for the list projections. `task` is cut to the UTF-8 bytes
+ * that can hold one char past the preview length (a UTF-16 unit is at most 4
+ * bytes), so the JS side never materializes the full prompt, output or
+ * provider blobs. The cut runs on the BLOB: SQLite's text `substr` stops at
+ * the first embedded NUL, which the full-text preview keeps. `taskPreview`
+ * decodes the bytes and truncates them exactly as it would the full text (the
+ * extra char keeps the "…" marker; a code point split at the byte cut lands
+ * past it).
+ */
+const TASK_PREVIEW_BYTES = 4 * (TASK_PREVIEW_LENGTH + 1);
+const TASK_PREVIEW_SQL = `substr(CAST(agent_tasks.task AS BLOB), 1, ${TASK_PREVIEW_BYTES}) AS task`;
+// ignoreBOM keeps a leading U+FEFF, which the full-text preview keeps too.
+const taskPreviewDecoder = new TextDecoder("utf-8", { ignoreBOM: true });
+
+function taskPreview(task: TaskPreviewSource["task"]): string {
+  const text = task instanceof Uint8Array ? taskPreviewDecoder.decode(task) : task;
+  return dependencies.previewText(text, TASK_PREVIEW_LENGTH);
+}
+
+const LIST_COLUMNS = {
+  full: "agent_tasks.*",
+  slim: `agent_tasks.id, agent_tasks."key", agent_tasks.agentId, agent_tasks.creatorAgentId,
+    ${TASK_PREVIEW_SQL}, agent_tasks.title, agent_tasks.status, agent_tasks.source,
+    agent_tasks.taskType, agent_tasks.tags, agent_tasks.priority, agent_tasks.dependsOn,
+    agent_tasks.offeredTo, agent_tasks.acceptedAt, agent_tasks.parentTaskId,
+    agent_tasks.scheduleId, agent_tasks.model, agent_tasks.modelTier, agent_tasks.effort,
+    agent_tasks.provider, agent_tasks.requestedByUserId, agent_tasks.progress,
+    agent_tasks.createdAt, agent_tasks.lastUpdatedAt, agent_tasks.finishedAt,
+    agent_tasks.peakContextPercent`,
+  timeline: `agent_tasks.id, agent_tasks.agentId, agent_tasks.parentTaskId, ${TASK_PREVIEW_SQL},
+    agent_tasks.title, agent_tasks.status, agent_tasks.createdAt, agent_tasks.lastUpdatedAt,
+    agent_tasks.finishedAt, agent_tasks.peakContextTokens`,
+} as const;
+
+type TaskListFields = keyof typeof LIST_COLUMNS;
 
 export function rowToAgentTask(row: AgentTaskRow): AgentTask {
   let followUpConfig: FollowUpConfig | undefined;
@@ -251,36 +343,54 @@ export function rowToAgentTask(row: AgentTaskRow): AgentTask {
  * context-window fields). The preview is long enough for pool-triage; the full
  * brief is on `get-task-details` / `GET /api/tasks/{id}`.
  */
-export function rowToAgentTaskSummary(row: AgentTaskRow): AgentTaskSummary {
-  const t = rowToAgentTask(row);
+export function rowToAgentTaskSummary(row: AgentTaskSummaryRow): AgentTaskSummary {
   return {
-    id: t.id,
-    key: t.key,
-    agentId: t.agentId,
-    creatorAgentId: t.creatorAgentId,
-    task: dependencies.previewText(t.task, TASK_PREVIEW_LENGTH),
-    title: t.title,
-    status: t.status,
-    source: t.source,
-    taskType: t.taskType,
-    tags: t.tags,
-    priority: t.priority,
-    dependsOn: t.dependsOn,
-    offeredTo: t.offeredTo,
-    acceptedAt: t.acceptedAt,
-    parentTaskId: t.parentTaskId,
-    scheduleId: t.scheduleId,
-    model: t.model,
-    modelTier: t.modelTier,
-    effort: t.effort,
-    provider: t.provider,
-    requestedByUserId: t.requestedByUserId,
-    progress: t.progress,
-    createdAt: t.createdAt,
-    lastUpdatedAt: t.lastUpdatedAt,
-    finishedAt: t.finishedAt,
-    peakContextPercent: t.peakContextPercent,
-    totalCostUsd: t.totalCostUsd,
+    id: row.id,
+    key: row.key,
+    agentId: row.agentId,
+    creatorAgentId: row.creatorAgentId ?? undefined,
+    task: taskPreview(row.task),
+    title: row.title ?? undefined,
+    status: row.status,
+    source: row.source,
+    taskType: row.taskType ?? undefined,
+    tags: row.tags ? JSON.parse(row.tags) : [],
+    priority: row.priority ?? 50,
+    dependsOn: row.dependsOn ? JSON.parse(row.dependsOn) : [],
+    offeredTo: row.offeredTo ?? undefined,
+    acceptedAt: row.acceptedAt ?? undefined,
+    parentTaskId: row.parentTaskId ?? undefined,
+    scheduleId: row.scheduleId ?? undefined,
+    model: row.model ?? undefined,
+    modelTier: parseModelTier(row.modelTier) ?? undefined,
+    effort: ReasoningEffortSchema.safeParse(row.effort).success
+      ? (row.effort as ReasoningEffort)
+      : undefined,
+    provider: (row.provider as ProviderName | null) ?? undefined,
+    requestedByUserId: row.requestedByUserId ?? undefined,
+    progress: row.progress ?? undefined,
+    createdAt: row.createdAt,
+    lastUpdatedAt: row.lastUpdatedAt,
+    finishedAt: row.finishedAt ?? undefined,
+    peakContextPercent: row.peakContextPercent ?? undefined,
+    totalCostUsd: row.totalCostUsd ?? undefined,
+  };
+}
+
+/** Timeline list-row mapper: only what the dashboard timeline draws. */
+function rowToAgentTaskTimelineItem(row: AgentTaskTimelineRow): AgentTaskTimelineItem {
+  return {
+    id: row.id,
+    agentId: row.agentId,
+    parentTaskId: row.parentTaskId ?? undefined,
+    task: taskPreview(row.task),
+    title: row.title ?? undefined,
+    status: row.status,
+    createdAt: row.createdAt,
+    lastUpdatedAt: row.lastUpdatedAt,
+    finishedAt: row.finishedAt ?? undefined,
+    peakContextTokens: row.peakContextTokens ?? undefined,
+    totalCostUsd: row.totalCostUsd ?? undefined,
   };
 }
 
@@ -465,10 +575,14 @@ export function getAllTasks(
   filters: TaskFilters | undefined,
   opts: { slim: true },
 ): Promise<AgentTaskSummary[]>;
+export function getAllTasks(
+  filters: TaskFilters | undefined,
+  opts: { fields: "timeline" },
+): Promise<AgentTaskTimelineItem[]>;
 export async function getAllTasks(
   filters?: TaskFilters,
-  opts?: { slim?: boolean },
-): Promise<AgentTask[] | AgentTaskSummary[]> {
+  opts?: { slim?: boolean; fields?: "timeline" },
+): Promise<AgentTask[] | AgentTaskSummary[] | AgentTaskTimelineItem[]> {
   const conditions: string[] = [];
   const params: (string | AgentTaskStatus)[] = [];
 
@@ -571,16 +685,31 @@ export async function getAllTasks(
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const limit = filters?.limit ?? 25;
   const offset = filters?.offset ?? 0;
-  const orderBy =
+  const orderColumns =
     filters?.orderBy === "createdAt"
-      ? "createdAt DESC, rowid DESC"
-      : "lastUpdatedAt DESC, priority DESC";
-  const query = `SELECT agent_tasks.*,
+      ? ["createdAt DESC", "rowid DESC"]
+      : ["lastUpdatedAt DESC", "priority DESC"];
+  const fields: TaskListFields =
+    opts?.fields === "timeline" ? "timeline" : opts?.slim ? "slim" : "full";
+  // Page the rowids first, then read the projected columns and the cost
+  // subquery for that page only, so no candidate row's prompt/output blobs
+  // are materialized unless the row is on the page. The page query keeps the
+  // exact ORDER BY: a `rowid` tiebreak there makes SQLite drop the
+  // lastUpdatedAt index for a full scan. The outer sort adds it only to fix
+  // the order of exact ties inside the page.
+  const query = `WITH page AS (
+      SELECT rowid AS rid FROM agent_tasks ${whereClause}
+      ORDER BY ${orderColumns.join(", ")} LIMIT ${limit} OFFSET ${offset}
+    )
+    SELECT ${LIST_COLUMNS[fields]},
     (SELECT SUM(totalCostUsd) FROM session_costs WHERE session_costs.taskId = agent_tasks.id) AS totalCostUsd
-    FROM agent_tasks ${whereClause}
-    ORDER BY ${orderBy} LIMIT ${limit} OFFSET ${offset}`;
+    FROM page JOIN agent_tasks ON agent_tasks.rowid = page.rid
+    ORDER BY ${[...new Set([...orderColumns, "rowid DESC"])].map((column) => `agent_tasks.${column}`).join(", ")}`;
 
-  const rows = await getDbClient().query<AgentTaskRow>(query, params);
+  if (fields === "timeline") {
+    const rows = await getDbClient().query<AgentTaskTimelineRow>(query, params);
+    return rows.map(rowToAgentTaskTimelineItem);
+  }
 
   // Filter for ready tasks (dependencies met) if requested. Both the full and
   // the slim row shapes carry `id` + `dependsOn`, so the same predicate works.
@@ -596,12 +725,14 @@ export async function getAllTasks(
     return items.filter((_, i) => readyFlags[i]);
   };
 
-  if (opts?.slim) {
+  if (fields === "slim") {
+    const rows = await getDbClient().query<AgentTaskSummaryRow>(query, params);
     let tasks = rows.map(rowToAgentTaskSummary);
     if (filters?.readyOnly) tasks = await filterReady(tasks);
     return tasks;
   }
 
+  const rows = await getDbClient().query<AgentTaskRow>(query, params);
   let tasks = rows.map(rowToAgentTask);
   if (filters?.readyOnly) tasks = await filterReady(tasks);
   return tasks;

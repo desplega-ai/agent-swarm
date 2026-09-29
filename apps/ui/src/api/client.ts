@@ -427,6 +427,10 @@ class ApiClient {
     source?: string[];
     /** Exact requester user id, or the sentinel `none` for unattributed (NULL) rows. */
     requestedByUserId?: string;
+    /** Row projection; `timeline` is the narrow shape the dashboard timeline draws. */
+    fields?: "full" | "slim" | "timeline";
+    /** Ask for the filtered `total` (an extra COUNT(*)); only pagers need it. */
+    includeTotal?: boolean;
   }): Promise<TasksResponse> {
     const params = new URLSearchParams();
     if (filters?.status) params.set("status", filters.status);
@@ -444,6 +448,8 @@ class ApiClient {
     if (filters?.source && filters.source.length > 0)
       params.set("source", filters.source.join(","));
     if (filters?.requestedByUserId) params.set("requestedByUserId", filters.requestedByUserId);
+    if (filters?.fields) params.set("fields", filters.fields);
+    if (filters?.includeTotal) params.set("includeTotal", "true");
     const queryString = params.toString();
     const url = `${this.getBaseUrl()}/api/tasks${queryString ? `?${queryString}` : ""}`;
     const res = await fetch(url, { headers: this.getHeaders() });

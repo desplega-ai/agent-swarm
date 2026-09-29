@@ -206,7 +206,9 @@ describe("GET /api/tasks — requestedByUserId route wiring", () => {
       requestedByUserId: routeUserId,
     });
 
-    const res = await listTasks("&requestedByUserId=00000000-0000-4000-8000-000000000000");
+    const res = await listTasks(
+      "&requestedByUserId=00000000-0000-4000-8000-000000000000&includeTotal=true",
+    );
     expect(res.status).toBe(200);
     const body = (await res.json()) as { tasks: unknown[]; total: number };
     expect(body.tasks).toEqual([]);
