@@ -94,9 +94,18 @@ export function isOtelEnabled(): boolean {
   return otelConfigured();
 }
 
-export function isPollTracingEnabled(): boolean {
-  const v = (process.env.OTEL_TRACE_POLL ?? "").trim().toLowerCase();
+function envFlagEnabled(name: string): boolean {
+  const v = (process.env[name] ?? "").trim().toLowerCase();
   return v === "1" || v === "true" || v === "yes" || v === "on";
+}
+
+export function isPollTracingEnabled(): boolean {
+  return envFlagEnabled("OTEL_TRACE_POLL");
+}
+
+/** Mirror the API's console output to the OTLP collector as log records. Off by default. */
+export function isApiLogExportEnabled(): boolean {
+  return envFlagEnabled("OTEL_EXPORT_API_LOGS");
 }
 
 export async function initOtel(serviceRole = process.env.AGENT_ROLE || "api"): Promise<void> {
@@ -105,7 +114,9 @@ export async function initOtel(serviceRole = process.env.AGENT_ROLE || "api"): P
 
   try {
     const impl = await import("./otel-impl");
-    await impl.boot(serviceRole);
+    await impl.boot(serviceRole, {
+      exportConsoleLogs: serviceRole === "api" && isApiLogExportEnabled(),
+    });
     realWithSpan = impl.withSpan;
     realStartSpan = impl.startSpan;
     realWithRemoteContext = impl.withRemoteContext;

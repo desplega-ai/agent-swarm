@@ -8,7 +8,7 @@ import {
 } from "../be/db";
 import type { RetryPolicy } from "../types";
 import { checkpointStep, checkpointStepFailure, checkpointStepWaiting } from "./checkpoint";
-import { getSuccessors } from "./definition";
+import { getSuccessors, resolveValidationPort } from "./definition";
 import {
   buildNodeInterpolationCtx,
   holdWorkflowRun,
@@ -136,6 +136,7 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
               if (!waiting) continue;
             } else {
               // Success! Re-run validation if configured before checkpointing.
+              let validationPassed: boolean | undefined;
               if (node.validation) {
                 const validationResult = await runStepValidation(
                   registry,
@@ -172,7 +173,12 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
                   );
                   continue;
                 }
+                validationPassed = validationResult.passed;
               }
+
+              // Same port rule as executeStep step 8, so a retried script node
+              // with `next: { pass, fail }` does not dead-end on "success".
+              result.nextPort = resolveValidationPort(node.next, result.nextPort, validationPassed);
 
               // Validation passed (or no validation) — checkpoint and continue
               await checkpointStep(run.id, step.id, step.nodeId, result, ctx);

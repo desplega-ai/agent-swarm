@@ -25,7 +25,7 @@ import type { Workflow, WorkflowDefinition, WorkflowNode, WorkflowRunStep } from
 import { checkpointStep, checkpointStepFailure, checkpointStepWaiting } from "./checkpoint";
 import { loadCompletedStepRouting } from "./completed-step-routing";
 import { shouldSkipCooldown } from "./cooldown";
-import { findEntryNodes, getNextTargets, getSuccessors } from "./definition";
+import { findEntryNodes, getNextTargets, getSuccessors, resolveValidationPort } from "./definition";
 import type { AsyncExecutorResult } from "./executors/base";
 import type { ExecutorRegistry } from "./executors/registry";
 import { FOREACH_TERMINAL_STEP_STATUSES, resolveForeachParent } from "./foreach-join";
@@ -914,16 +914,10 @@ async function runClaimedStep(
 
   // 8. Set nextPort from validation result for record-based routing
   // When validation determines pass/fail and the node uses port-based `next`,
-  // route to the correct port instead of activating all ports.
-  if (
-    validationResult?.passed !== undefined &&
-    !result.nextPort &&
-    node.next &&
-    typeof node.next === "object" &&
-    !Array.isArray(node.next)
-  ) {
-    result.nextPort = validationResult.passed ? "pass" : "fail";
-  }
+  // route to the correct port instead of activating all ports. An executor port
+  // that `next` does not declare (script's "success" vs `{ pass, fail }`) is
+  // overridden too, otherwise the branch would dead-end.
+  result.nextPort = resolveValidationPort(node.next, result.nextPort, validationResult?.passed);
 
   // 9. Checkpoint success
   await checkpointStep(runId, stepId, node.id, result, ctx);
