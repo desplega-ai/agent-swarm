@@ -1412,8 +1412,19 @@ export interface WorkflowsResponse {
   workflows: WorkflowSummary[];
 }
 
-export interface WorkflowRunsResponse {
-  runs: WorkflowRun[];
+/** List row of a run: no `context`, which `GET /api/workflow-runs/{id}` serves. */
+export type WorkflowRunSummary = Omit<WorkflowRun, "context">;
+
+/** One page of `GET /api/workflows/{id}/runs`, newest first. */
+export interface WorkflowRunsPage {
+  runs: WorkflowRunSummary[];
+  page: {
+    limit: number;
+    offset: number;
+    total: number;
+    hasMore: boolean;
+    nextOffset?: number;
+  };
 }
 
 export type ScriptRunStatus =

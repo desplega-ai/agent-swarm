@@ -37,8 +37,8 @@ import type {
   TriggerConfig,
   WebhookVerification,
   WorkflowNode,
-  WorkflowRun,
   WorkflowRunStatus,
+  WorkflowRunSummary,
   WorkflowVersion,
 } from "@/api/types";
 import { AutomationParamsFields } from "@/components/automations/automation-params-fields";
@@ -47,6 +47,7 @@ import { CollapsibleDescription } from "@/components/shared/collapsible-descript
 import { CopyableField, CopyIconButton, SecretField } from "@/components/shared/copyable-fields";
 import { DataGrid } from "@/components/shared/data-grid";
 import { FavoriteButton } from "@/components/shared/favorite-button";
+import { ListPager, resolveListPage } from "@/components/shared/list-pager";
 import { StatusBadge } from "@/components/shared/status-badge";
 import {
   AlertDialog,
@@ -70,23 +71,53 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { JsonTree } from "@/components/workflows/json-tree";
 import { WorkflowGraph } from "@/components/workflows/workflow-graph";
 import { useTheme } from "@/hooks/use-theme";
-import { readBooleanParam, readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
+import {
+  readBooleanParam,
+  readNumberParam,
+  readStringParam,
+  useUrlSearchState,
+} from "@/hooks/use-url-search-state";
 import { isAutomationSetupError } from "@/lib/automation-setup";
 import { getConfig } from "@/lib/config";
 import { modelTierLabel } from "@/lib/model-tiers";
 import { monacoDarkTheme, monacoLightTheme } from "@/lib/monaco-themes";
 import { formatElapsed, formatSmartTime } from "@/lib/utils";
 
+const RUNS_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
+const DEFAULT_RUNS_PAGE_SIZE = 20;
+
 export default function WorkflowDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { searchParams, setParam } = useUrlSearchState();
+  const runsPage = readNumberParam(searchParams, "workflowRunsPage", 0, { min: 0 });
+  const runsPageSize = readNumberParam(
+    searchParams,
+    "workflowRunsPageSize",
+    DEFAULT_RUNS_PAGE_SIZE,
+    {
+      allowed: RUNS_PAGE_SIZE_OPTIONS,
+    },
+  );
   const { data: workflow, isLoading } = useWorkflow(id!);
-  const { data: runs, isLoading: runsLoading } = useWorkflowRuns(id!);
+  const { data: runsData, isLoading: runsLoading } = useWorkflowRuns(id!, {
+    limit: runsPageSize,
+    offset: runsPage * runsPageSize,
+  });
+  // A stale or hand-edited ?workflowRunsPage= past the last page moves back to
+  // the last one once the total is known.
+  const { page: runsListPage, stale: runsPageStale } = resolveListPage(
+    runsPage,
+    runsPageSize,
+    runsData?.page.total,
+  );
+  useEffect(() => {
+    if (runsPageStale) setParam("workflowRunsPage", runsListPage, { defaultValue: "0" });
+  }, [runsListPage, runsPageStale, setParam]);
   const updateWorkflow = useUpdateWorkflow();
   const deleteWorkflow = useDeleteWorkflow();
   const triggerWorkflow = useTriggerWorkflow();
   const favoriteToggle = useFavoriteToggle("workflow");
-  const { searchParams, setParam } = useUrlSearchState();
   const activeTab = readStringParam(searchParams, "tab", "definition");
   const selectedNodeId = readStringParam(searchParams, "node") || null;
   const focusedParam = readStringParam(searchParams, "param") || undefined;
@@ -132,13 +163,13 @@ export default function WorkflowDetailPage() {
     if (activeTab !== "setup") setActiveTab("setup");
   }, [activeTab, focusedParam, setActiveTab, workflow?.requiredParams]);
 
-  const runColumns = useMemo<ColDef<WorkflowRun>[]>(
+  const runColumns = useMemo<ColDef<WorkflowRunSummary>[]>(
     () => [
       {
         field: "status",
         headerName: "Status",
         width: 130,
-        cellRenderer: (params: { value: WorkflowRunStatus; data?: WorkflowRun }) =>
+        cellRenderer: (params: { value: WorkflowRunStatus; data?: WorkflowRunSummary }) =>
           isAutomationSetupError(params.data?.error) ? (
             <Badge
               variant="outline"
@@ -179,7 +210,7 @@ export default function WorkflowDetailPage() {
   );
 
   const onRunRowClicked = useCallback(
-    (event: RowClickedEvent<WorkflowRun>) => {
+    (event: RowClickedEvent<WorkflowRunSummary>) => {
       if (event.data) void navigate(`/workflow-runs/${event.data.id}`);
     },
     [navigate],
@@ -297,7 +328,7 @@ export default function WorkflowDetailPage() {
           <TabsTrigger value="definition">Definition</TabsTrigger>
           <TabsTrigger value="setup">Setup ({workflow.requiredParams?.length ?? 0})</TabsTrigger>
           <TabsTrigger value="triggers">Triggers ({workflow.triggers.length})</TabsTrigger>
-          <TabsTrigger value="runs">Runs ({runs?.length ?? 0})</TabsTrigger>
+          <TabsTrigger value="runs">Runs ({runsData?.page.total ?? 0})</TabsTrigger>
           <TabsTrigger value="versions">Versions</TabsTrigger>
         </TabsList>
 
@@ -383,14 +414,29 @@ export default function WorkflowDetailPage() {
         </TabsContent>
 
         {/* Runs tab */}
-        <TabsContent value="runs" className="flex flex-col flex-1 min-h-0">
+        <TabsContent value="runs" className="flex flex-col flex-1 min-h-0 gap-3">
           <DataGrid
-            rowData={runs ?? []}
+            rowData={runsData?.runs ?? []}
             columnDefs={runColumns}
             onRowClicked={onRunRowClicked}
-            loading={runsLoading}
+            loading={runsLoading || runsPageStale}
             emptyMessage="No runs yet"
-            paginationQueryKey="workflowRuns"
+            getRowId={(p) => p.data.id}
+            pagination={false}
+          />
+          <ListPager
+            page={runsListPage}
+            pageSize={runsPageSize}
+            total={runsData?.page.total ?? 0}
+            pageSizeOptions={RUNS_PAGE_SIZE_OPTIONS}
+            onPageChange={(next) => setParam("workflowRunsPage", next, { defaultValue: "0" })}
+            onPageSizeChange={(size) =>
+              setParam("workflowRunsPageSize", String(size), {
+                defaultValue: String(DEFAULT_RUNS_PAGE_SIZE),
+                reset: ["workflowRunsPage"],
+              })
+            }
+            emptyLabel="0 runs"
           />
         </TabsContent>
 

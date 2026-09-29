@@ -33,14 +33,14 @@ function tableExists(db: Database, table: string): boolean {
   );
 }
 
-describe("migration 173 model catalog, tier resolution and harness support", () => {
-  test("upgrades a pre-173 database in place and keeps existing agent and task rows", async () => {
+describe("migration 177 model catalog, tier resolution and harness support", () => {
+  test("upgrades a pre-177 database in place and keeps existing agent and task rows", async () => {
     await removeDb();
     const db = new Database(DB_PATH, { create: true });
     try {
       runMigrations(db);
 
-      // Roll the database back to the state before migration 173.
+      // Roll the database back to the state before migration 177.
       for (const table of [
         "model_catalog",
         "model_catalog_overlay",
@@ -56,7 +56,7 @@ describe("migration 173 model catalog, tier resolution and harness support", () 
       for (const column of ["modelTierOverrides", "harnessCliVersion"]) {
         db.run(`ALTER TABLE agents DROP COLUMN ${column}`);
       }
-      db.run("DELETE FROM _migrations WHERE version = 173");
+      db.run("DELETE FROM _migrations WHERE version = 177");
 
       db.run(
         `INSERT INTO agents (id, name, status, createdAt, lastUpdatedAt)
@@ -71,7 +71,7 @@ describe("migration 173 model catalog, tier resolution and harness support", () 
 
       expect(
         db
-          .query<{ version: number }, []>("SELECT version FROM _migrations WHERE version = 173")
+          .query<{ version: number }, []>("SELECT version FROM _migrations WHERE version = 177")
           .get(),
       ).not.toBeNull();
       for (const table of [

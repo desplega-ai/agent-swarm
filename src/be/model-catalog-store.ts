@@ -1,5 +1,5 @@
 /**
- * Persistent model catalog (migration 173).
+ * Persistent model catalog (migration 177).
  *
  * - `model_catalog`: models.dev rows for CATALOG_PROVIDER_IDS, rewritten on
  *   every full fetch by `src/be/pricing-refresh.ts`.

@@ -581,9 +581,11 @@ describe("script connections", () => {
       markMigrationApplied(database, "166_approval_request_auto_cancellation.sql");
       // 171 alters memory_retrieval, which this migration-112-only fixture does not create.
       markMigrationApplied(database, "171_memory_retrieval_relevance.sql");
-      // 173 alters agents and agent_tasks, which this migration-112-only fixture
+      // 175 indexes workflow_runs, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "175_workflow_runs_list_index.sql");
+      // 177 alters agents and agent_tasks, which this migration-112-only fixture
       // does not create.
-      markMigrationApplied(database, "173_model_catalog.sql");
+      markMigrationApplied(database, "177_model_catalog.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

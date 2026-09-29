@@ -1,9 +1,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import pkg from "../package.json";
+import { ensurePricingSeeded, ensureRbacSeeded } from "./be/boot-seeds";
 import { initDb } from "./be/db";
 import { startPricingRefreshLoop } from "./be/pricing-refresh";
-import { ensureRbacSeedsSynced } from "./be/rbac-roles";
-import { seedPricingFromModelsDev } from "./be/seed-pricing";
 import { isSteeringEnabled } from "./be/steering";
 import { registerGithubTaskReactions } from "./github/task-reactions";
 import { loadGlobalConfigsIntoEnv } from "./http/core";
@@ -312,14 +311,18 @@ export async function createServer(
   initDb(process.env.DATABASE_PATH);
 
   // Phase 2: project the vendored models.dev snapshot into the pricing table.
-  // Idempotent (INSERT OR IGNORE keyed on PK with effective_from=0); safe to
-  // call on every boot. See src/be/seed-pricing.ts for the projection logic
-  // and the manual-override constants for runtime-fee / ACU pricing.
-  seedPricingFromModelsDev();
+  // Idempotent (INSERT OR IGNORE keyed on PK with effective_from=0). This runs
+  // once per database handle, not once per MCP session: the seed is a
+  // synchronous 8.6 MB parse plus a write transaction, and createServer() runs
+  // on every `POST /mcp` session init. The HTTP boot path seeds first, so
+  // sessions normally skip it; standalone callers (stdio, tests) seed here.
+  // See src/be/seed-pricing.ts for the projection logic and the
+  // manual-override constants for runtime-fee / ACU pricing.
+  ensurePricingSeeded();
   startPricingRefreshLoop();
 
   try {
-    ensureRbacSeedsSynced();
+    ensureRbacSeeded();
   } catch (err) {
     console.error("[startup] Failed to sync RBAC seed rows:", err);
     // RBAC flag-on must fail closed; flag-off deployments should not be bricked

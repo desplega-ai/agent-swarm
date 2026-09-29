@@ -6,14 +6,14 @@ A model released for Claude Code or Codex becomes usable by tasks with no code c
 
 | Piece | Where | Role |
 |---|---|---|
-| `model_catalog` | SQLite, migration `173` | models.dev facts per provider and model: family, release date, context window, max output, reasoning efforts, pricing. |
-| `model_catalog_overlay` | SQLite, migration `173` | Hand-verified rows for models models.dev lacks or has incomplete. Overlay wins over models.dev. A row with `expiresWhenUpstreamMatches` is dropped once models.dev agrees. |
+| `model_catalog` | SQLite, migration `177` | models.dev facts per provider and model: family, release date, context window, max output, reasoning efforts, pricing. |
+| `model_catalog_overlay` | SQLite, migration `177` | Hand-verified rows for models models.dev lacks or has incomplete. Overlay wins over models.dev. A row with `expiresWhenUpstreamMatches` is dropped once models.dev agrees. |
 | Catalog refresh | `src/be/pricing-refresh.ts` | Boot plus every 12h, and on demand. ETag-aware. Upserts `model_catalog`; pricing rows follow it. |
 | Forced refresh | `POST /api/models-catalog/refresh { force }`, MCP `model-catalog-refresh` | Same as `pi update --models`. Lead agent or operator only (`models.catalog.write`); dashboard users are excluded until a UI needs it. A forced call is accepted once per minute; a second one inside that window returns `skipped-cooldown` with `retryAfterMs`. Concurrent refreshes share one fetch. |
 | Overlay write | `PUT`/`DELETE /api/models-catalog/overlay`, MCP `model-catalog-overlay-upsert` | Used by the verify task when models.dev lags. Same access as the forced refresh. |
 | Harness support write | `PUT /api/models-catalog/harness-support` | Workers record whether their pinned CLI version accepts a model (`models.harness-support.write`, registered agents and the operator only). An agent, the lead included, can only write the row for its own harness and the CLI version it registered; the operator can write any tuple, as the admin correction path. Dashboard users are denied. An `X-Agent-ID` always wins over the shared API key, so a worker never acts as the operator. |
 | Shared resolver | `packages/model-catalog` | Overlay merge, family parsing, `latest:` grammar, soak and preview rules. Used by the API, workers, the UI and evals. |
-| `harness_model_support` | SQLite, migration `173` | Whether a model runs on a given `claude`/`codex` CLI version. Workers report their CLI version on register and the outcome of a model's first run. |
+| `harness_model_support` | SQLite, migration `177` | Whether a model runs on a given `claude`/`codex` CLI version. Workers report their CLI version on register and the outcome of a model's first run. |
 
 Offline or with an empty table, every reader falls back to the committed `src/be/modelsdev-cache.json` snapshot.
 

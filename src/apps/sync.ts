@@ -1,5 +1,5 @@
 import * as z from "zod";
-import { deleteKv, getAllTasks, getKv, type TaskFilters, upsertKv } from "../be/db";
+import { deleteKv, getAllTasks, getDbClient, getKv, type TaskFilters, upsertKv } from "../be/db";
 import { listScriptConnections } from "../be/script-connections";
 import { getScriptById } from "../be/scripts/db";
 import { runSavedScriptAsAgent } from "../be/scripts/run-saved";
@@ -21,6 +21,7 @@ import {
   listAllAppRowsForMigrationUnlocked,
   patchAppRowUnlocked,
   withMutationLock,
+  yieldToEventLoop,
 } from "./row-store";
 import { appDefinitionNeedsRepair, getApp } from "./store";
 import { resolveSyncRunAs } from "./sync-run-as";
@@ -585,6 +586,45 @@ type ReconcileCounts = {
   staleSweepSkipped?: boolean;
 };
 
+type ReconcileTally = Omit<ReconcileCounts, "staleSweepSkipped">;
+
+/** Rows written per transaction. Big enough to amortize COMMIT, small enough
+ * that one chunk holds the event loop for milliseconds, not seconds. */
+export const RECONCILE_CHUNK_SIZE = 200;
+
+/**
+ * Apply `write` to `items` in transactions of RECONCILE_CHUNK_SIZE, yielding
+ * to the event loop between chunks. A chunk's tally lands in `counts` only
+ * after it commits, so a failing chunk rolls back its writes and its counts
+ * together while earlier chunks stay committed and counted.
+ */
+async function writeInChunks<T>(
+  items: readonly T[],
+  counts: ReconcileCounts,
+  write: (item: T, tally: ReconcileTally) => Promise<void>,
+): Promise<void> {
+  for (let start = 0; start < items.length; start += RECONCILE_CHUNK_SIZE) {
+    const chunk = items.slice(start, start + RECONCILE_CHUNK_SIZE);
+    const tally = await getDbClient().transaction(async () => {
+      const chunkTally: ReconcileTally = {
+        created: 0,
+        updated: 0,
+        refreshed: 0,
+        unchanged: 0,
+        markedStale: 0,
+      };
+      for (const item of chunk) await write(item, chunkTally);
+      return chunkTally;
+    });
+    counts.created += tally.created;
+    counts.updated += tally.updated;
+    counts.refreshed += tally.refreshed;
+    counts.unchanged += tally.unchanged;
+    counts.markedStale += tally.markedStale;
+    await yieldToEventLoop();
+  }
+}
+
 function reconcile(args: {
   appId: string;
   model: string;
@@ -594,13 +634,15 @@ function reconcile(args: {
   pull: PullResult;
   warnings: string[];
   /**
-   * Mutated write-by-write so a mid-pass failure still reports the row churn
-   * that actually committed — the writes are independent KV upserts, not a
-   * transaction, and a thrown error must not zero them out.
+   * Mutated chunk-by-chunk so a mid-pass failure still reports the row churn
+   * that actually committed: writes run in chunked transactions, and a thrown
+   * error must not zero out the chunks that landed before it.
    */
   counts: ReconcileCounts;
 }): Promise<void> {
   const { appId, model, sourceName, joinKey, pull, warnings, counts } = args;
+  // Lock order: the mutation lock is taken here, and every chunk transaction
+  // opens beneath it (see withMutationLock).
   return withMutationLock(appId, model, async () => {
     // Re-read under the lock: the pull ran unlocked, so the definition it was
     // planned against may be gone. Anything that moves the identity or the
@@ -639,7 +681,7 @@ function reconcile(args: {
     const actor = `sync:${sourceName}`;
     const seen = new Set<string>();
 
-    for (const record of pull.records) {
+    await writeInChunks(pull.records, counts, async (record, tally) => {
       if (seen.has(record.key)) {
         warn(warnings, `source returned duplicate key "${record.key}"; the last record wins`);
       }
@@ -655,8 +697,8 @@ function reconcile(args: {
           actor,
         });
         mine.set(record.key, created);
-        counts.created += 1;
-        continue;
+        tally.created += 1;
+        return;
       }
       const differs = Object.entries(values).some(
         ([name, value]) => !sameValue(existing[name], value),
@@ -671,12 +713,12 @@ function reconcile(args: {
       });
       if (!updated) {
         warn(warnings, `row "${existing.id}" vanished before it could be updated`);
-        continue;
+        return;
       }
       mine.set(record.key, updated);
-      if (differs) counts.updated += 1;
-      else counts.refreshed += 1;
-    }
+      if (differs) tally.updated += 1;
+      else tally.refreshed += 1;
+    });
 
     const unseen = [...mine.entries()]
       .filter(([key]) => !seen.has(key))
@@ -688,10 +730,10 @@ function reconcile(args: {
       warn(warnings, "pull reported an incomplete window; stale sweep skipped");
       return;
     }
-    for (const row of unseen) {
+    await writeInChunks(unseen, counts, async (row, tally) => {
       if (row.stale === true) {
-        counts.unchanged += 1;
-        continue;
+        tally.unchanged += 1;
+        return;
       }
       await patchAppRowUnlocked(
         appId,
@@ -710,8 +752,8 @@ function reconcile(args: {
           },
         },
       );
-      counts.markedStale += 1;
-    }
+      tally.markedStale += 1;
+    });
   });
 }
 
@@ -778,7 +820,7 @@ async function executePass(args: {
     return scrubbed;
   };
 
-  // Reconcile mutates this accumulator write-by-write, so the error path below
+  // Reconcile mutates this accumulator chunk-by-chunk, so the error path below
   // reports the churn that actually committed instead of the zero-count base.
   const counts: ReconcileCounts = {
     created: 0,
