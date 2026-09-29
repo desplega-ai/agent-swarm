@@ -70,7 +70,11 @@ export async function reportHarnessModelOutcome(opts: {
   const cliVersion = await cachedHarnessCliVersion(opts.harness);
   if (!cliVersion) return;
   const status =
-    opts.exitCode === 0 ? "ok" : isUnknownModelError(opts.failureReason) ? "unsupported" : null;
+    opts.exitCode === 0
+      ? "ok"
+      : isUnknownModelError(opts.failureReason, opts.model)
+        ? "unsupported"
+        : null;
   if (!status) return;
   const key = `${opts.harness}|${cliVersion}|${opts.model}`;
   if (status === "ok" && reported.has(key)) return;

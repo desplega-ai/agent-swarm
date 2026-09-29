@@ -393,7 +393,7 @@ export async function handleModelsCatalog(
       writer.agentId &&
       parsed.body.status === "unsupported" &&
       !(
-        isUnknownModelError(parsed.body.error) &&
+        isUnknownModelError(parsed.body.error, parsed.body.modelId) &&
         (await agentRanModel(writer.agentId, parsed.body.modelId))
       )
     ) {
