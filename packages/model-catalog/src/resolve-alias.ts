@@ -7,8 +7,10 @@ import type { ModelsDevCatalog } from "./types.ts";
  * Grammar: `latest:<section>/<target>[@stable|@any]`
  *   latest:anthropic/<family>  → newest undated `claude-*` id of that family
  *                                 (the same rule as buildClaudeAliasMap).
- *   latest:openrouter/<glob>   → newest id in the `openrouter` section matching
- *                                 the glob (`*` = any run of characters),
+ *   latest:openrouter/<vendor>/<glob>
+ *                              → newest id in the `openrouter` section matching
+ *                                 the glob (`*` = any run of characters) under
+ *                                 the literal `<vendor>/` namespace,
  *                                 returned with the `openrouter/` prefix pi and
  *                                 opencode expect in MODEL_OVERRIDE.
  *   latest:openai/<glob>       → newest id in the `openai` section matching the
@@ -55,6 +57,11 @@ export function isAlias(value: string): boolean {
 }
 
 const GLOB_TARGET_RE = /^[a-z0-9._:~*/-]+$/;
+/**
+ * An openrouter glob names its vendor literally (`deepseek/…`), so a catalog id can only match
+ * inside the vendor namespace the operator chose, never another vendor's.
+ */
+const OPENROUTER_VENDOR_RE = /^[a-z0-9._~-]+\//;
 
 /** Parse an alias string; null when it is not valid grammar. */
 export function parseAlias(alias: string): ParsedAlias | null {
@@ -77,6 +84,7 @@ export function parseAlias(alias: string): ParsedAlias | null {
   if (section === "anthropic") {
     return /^[a-z]+$/.test(target) ? { kind: "anthropic", family: target, channel } : null;
   }
+  if (section === "openrouter" && !OPENROUTER_VENDOR_RE.test(target)) return null;
   if (section === "openrouter" || section === "openai") {
     return GLOB_TARGET_RE.test(target) ? { kind: section, glob: target, channel } : null;
   }

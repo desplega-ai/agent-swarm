@@ -57,6 +57,14 @@ describe("isAlias / parseAlias", () => {
     expect(parseAlias("latest:anthropic/opus@beta")).toBeNull();
     expect(parseAlias("latest:google/gemini")).toBeNull();
   });
+  test("an openrouter glob must name its vendor literally", () => {
+    expect(parseAlias("latest:openrouter/deepseek/*")?.kind).toBe("openrouter");
+    expect(parseAlias("latest:openrouter/*")).toBeNull();
+    expect(parseAlias("latest:openrouter/*/deepseek-v4*")).toBeNull();
+    expect(parseAlias("latest:openrouter/deep*/v4")).toBeNull();
+    expect(parseAlias("latest:openrouter/deepseek-v4-flash")).toBeNull();
+    expect(resolveAlias("latest:openrouter/*flash", catalog)).toBeNull();
+  });
 });
 
 describe("legacy aliases resolve as before", () => {
