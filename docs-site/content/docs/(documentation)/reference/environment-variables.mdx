@@ -513,6 +513,7 @@ OpenTelemetry traces and OTLP metrics are disabled unless `OTEL_EXPORTER_OTLP_EN
 | `OTEL_SERVICE_NAME` | `agent-swarm-api` or `agent-swarm-worker` outside local compose | OpenTelemetry `service.name`. Set to `agent-swarm` everywhere to keep one service and split by `agentswarm.service.role` |
 | `OTEL_RESOURCE_ATTRIBUTES` | derived from `NODE_ENV` | Comma-separated resource attributes such as `deployment.environment=local,env=local,service.namespace=agent-swarm` |
 | `OTEL_TRACE_POLL` | OFF | When set to `1`/`true`, emits trace spans for the worker poll loop (`worker.poll`) and the `/api/poll` HTTP endpoint. Skip by default to reduce span volume. |
+| `OTEL_EXPORT_API_LOGS` | OFF | When set to `1`/`true` on the API, also exports its console output as OTLP log records to the same endpoint as traces, scrubbed of secrets. Read at startup. |
 
 ## Business-Use Instrumentation
 

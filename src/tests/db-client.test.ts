@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -425,5 +425,64 @@ describe("db-client transactions on a shared WAL file (second connection)", () =
     other.run("UPDATE counters SET n = n + 10 WHERE id = 1");
     const row = await fileClient.get<{ n: number }>("SELECT n FROM counters WHERE id = 1");
     expect(row?.n).toBe(11);
+  });
+});
+
+describe("db-client slow statement warning", () => {
+  // A recursive CTE is pure CPU inside one driver call, so it blocks the
+  // event loop the same way a slow production query does.
+  const SLOW_SQL = `/* ${"padding ".repeat(40)} */ WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < ?) SELECT count(*) AS n FROM c WHERE ? IS NOT NULL`;
+  const SLOW_ROWS = 3_000_000;
+  const PARAM_SECRET = "param-value-that-must-not-be-logged";
+
+  const slowWarnings = (spy: ReturnType<typeof spyOn>): string[] =>
+    spy.mock.calls
+      .map((args) => String(args[0]))
+      .filter((line) => line.includes("[db-client] slow sync statement"));
+
+  test("logs a statement that blocked the loop past 100ms, with truncated SQL and no params", async () => {
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const startedAt = performance.now();
+      const row = await client.get<{ n: number }>(SLOW_SQL, [SLOW_ROWS, PARAM_SECRET]);
+      const elapsedMs = performance.now() - startedAt;
+      expect(row?.n).toBe(SLOW_ROWS);
+      // Guard the premise: on a machine fast enough to finish under the
+      // threshold, the warning is correctly absent and this test says so.
+      expect(elapsedMs).toBeGreaterThan(100);
+      const lines = slowWarnings(warn);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toMatch(/blocked the event loop for \d+ms: \/\* padding/);
+      expect(lines[0]).not.toContain(PARAM_SECRET);
+      expect(lines[0]).not.toContain("WITH RECURSIVE");
+      expect(lines[0]?.endsWith("…")).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("logs a slow statement run inside a transaction", async () => {
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await client.transaction(async (tx) => {
+        await tx.get(SLOW_SQL, [SLOW_ROWS, PARAM_SECRET]);
+      });
+      const lines = slowWarnings(warn);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).not.toContain(PARAM_SECRET);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("does not log fast statements", async () => {
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await client.run("INSERT INTO items (name) VALUES (?)", ["fast"]);
+      await client.query("SELECT name FROM items");
+      expect(slowWarnings(warn)).toHaveLength(0);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

@@ -202,6 +202,102 @@ describe("db-client SQLITE_BUSY retry", () => {
     expect(Date.now() - started).toBeLessThan(500);
   });
 
+  describe("under the production 5000ms ambient busy_timeout", () => {
+    /** Largest gap between 5ms ticks while `work` runs: the longest the loop was frozen. */
+    async function maxLoopFreezeMs(work: () => Promise<unknown>): Promise<number> {
+      let last = performance.now();
+      let maxGap = 0;
+      const ticker = setInterval(() => {
+        const now = performance.now();
+        maxGap = Math.max(maxGap, now - last);
+        last = now;
+      }, 5);
+      try {
+        await work();
+        // One more tick so a freeze that ended on the last attempt is seen.
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      } finally {
+        clearInterval(ticker);
+      }
+      return maxGap;
+    }
+
+    beforeEach(() => {
+      main.exec("PRAGMA busy_timeout = 5000");
+    });
+
+    test("a contended write still succeeds via the async retry", async () => {
+      const released = holdWriteLock(300);
+      const freezeMs = await maxLoopFreezeMs(() =>
+        client.run("INSERT INTO items (name) VALUES (?)", ["contended"]),
+      );
+      await released;
+      const landed = await client.get<{ name: string }>(
+        "SELECT name FROM items WHERE name = 'contended'",
+      );
+      expect(landed?.name).toBe("contended");
+      // Every attempt spins at most attemptSpinMs (25ms) or finalAttemptSpinMs;
+      // the release happened during an async backoff sleep.
+      expect(freezeMs).toBeLessThan(1_000);
+    });
+
+    test("the final statement attempt spins finalAttemptSpinMs, not the ambient timeout", async () => {
+      const tight = createBunSqliteClient(() => main, {
+        maxWaitMs: 60,
+        backoffMs: [20, 20],
+        attemptSpinMs: 25,
+        finalAttemptSpinMs: 50,
+      });
+      // The holder releases on a timer, which cannot fire while the final
+      // attempt blocks the loop: pre-fix this froze for the full 5000ms.
+      const released = holdWriteLock(3_000);
+      let caught: unknown;
+      const startedAt = performance.now();
+      const freezeMs = await maxLoopFreezeMs(async () => {
+        try {
+          await tight.run("INSERT INTO items (name) VALUES (?)", ["never"]);
+        } catch (err) {
+          caught = err;
+        }
+      });
+      const wallMs = performance.now() - startedAt;
+      await released;
+      expect((caught as { code?: string }).code).toBe("SQLITE_BUSY");
+      expect(wallMs).toBeLessThan(2_000);
+      expect(freezeMs).toBeLessThan(1_000);
+      const row = main.query<{ timeout: number }, []>("PRAGMA busy_timeout").get();
+      expect(row?.timeout).toBe(5000);
+    });
+
+    test("the final BEGIN IMMEDIATE attempt spins finalAttemptSpinMs, not the ambient timeout", async () => {
+      const tight = createBunSqliteClient(() => main, {
+        maxWaitMs: 60,
+        backoffMs: [20, 20],
+        attemptSpinMs: 25,
+        finalAttemptSpinMs: 50,
+      });
+      const released = holdWriteLock(3_000);
+      let caught: unknown;
+      const startedAt = performance.now();
+      const freezeMs = await maxLoopFreezeMs(async () => {
+        try {
+          await tight.transaction(async (tx) => {
+            await tx.run("INSERT INTO items (name) VALUES (?)", ["never-tx"]);
+          });
+        } catch (err) {
+          caught = err;
+        }
+      });
+      const wallMs = performance.now() - startedAt;
+      await released;
+      expect((caught as { code?: string }).code).toBe("SQLITE_BUSY");
+      expect(wallMs).toBeLessThan(2_000);
+      expect(freezeMs).toBeLessThan(1_000);
+      const row = main.query<{ timeout: number }, []>("PRAGMA busy_timeout").get();
+      expect(row?.timeout).toBe(5000);
+    });
+  });
+
   test("reads proceed under an external write lock without needing the retry path", async () => {
     await client.run("INSERT INTO items (name) VALUES (?)", ["pre-existing"]);
     const released = holdWriteLock(150);
