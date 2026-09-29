@@ -52,6 +52,12 @@ const HUMAN_FREE_BASE_SQL = `(
       )`;
 
 /**
+ * Whether a task stays unattributed, so the parent's classification propagates
+ * to it: no requester, or one copied from the parent. Over the alias `task`.
+ */
+const UNATTRIBUTED_SQL = "(task.requestedByUserId IS NULL OR task.requestedByUserIdInherited = 1)";
+
+/**
  * The classification as a 0/1 expression over the aliases `task` (the row) and
  * `parent` (see above). `parentFlag` is the SQL expression for the parent's
  * already-decided flag: the stored column for a task classified on its own, the
@@ -60,8 +66,7 @@ const HUMAN_FREE_BASE_SQL = `(
 function humanFreeCase(parentFlag: string): string {
   return `CASE
         WHEN ${HUMAN_FREE_BASE_SQL} THEN 1
-        WHEN ${parentFlag} = 1
-          AND (task.requestedByUserId IS NULL OR task.requestedByUserIdInherited = 1) THEN 1
+        WHEN ${parentFlag} = 1 AND ${UNATTRIBUTED_SQL} THEN 1
         ELSE 0
       END`;
 }
@@ -109,39 +114,56 @@ export async function classifyTaskHumanFree(input: HumanFreeInput): Promise<bool
  * transaction, once the new state is written, with ids gathered BEFORE the
  * write when the write erases what identifies them (a cleared requester).
  *
- * The tree is walked top-down so each task reads its parent's new flag. Seeds
- * can be descendants of other seeds (a root and its inherited child both
- * lose the same requester), which yields two candidate rows for one task: the
- * seed row read a parent flag that may be stale, the walked row read the fresh
- * one. The row at the greatest depth came through the topmost seed, so it wins.
+ * The rule is a reachability query: a task is free when it classifies on its
+ * own, or when it is unattributed and its parent is free. So the new flags come
+ * from a fixpoint over the affected set, with no walk order to get wrong:
+ * `affected` is the seeds plus all descendants, and `free` starts from the
+ * affected tasks that are free on their own or hang off an unaffected free
+ * parent (its stored flag is current) and spreads to unattributed children. A
+ * parent inside `affected` is never read from the column, since that value may
+ * be exactly what is being fixed.
+ *
+ * Both sets are recursive over task ids alone, like the rule itself, so they
+ * cover a tree of any depth and still terminate on a parent cycle.
  * Returns how many stored flags changed.
  */
 export async function reclassifyTaskHumanFree(seedTaskIds: readonly string[]): Promise<number> {
   if (seedTaskIds.length === 0) return 0;
   const result = await getDbClient().run(
-    `WITH RECURSIVE reclassified(id, humanFree, depth) AS (
-        SELECT task.id, ${humanFreeCase("parent.isHumanFree")}, 0
-        FROM agent_tasks task
-        LEFT JOIN agent_tasks parent ON parent.id = task.parentTaskId
-        WHERE task.id IN (SELECT value FROM json_each(?))
+    `WITH RECURSIVE affected(id) AS (
+        SELECT value FROM json_each(?)
 
         UNION
 
-        SELECT task.id, ${humanFreeCase("reclassified.humanFree")}, reclassified.depth + 1
-        FROM reclassified
-        JOIN agent_tasks task ON task.parentTaskId = reclassified.id
+        SELECT task.id
+        FROM affected
+        JOIN agent_tasks task ON task.parentTaskId = affected.id
+      ),
+      free(id) AS (
+        SELECT task.id
+        FROM agent_tasks task
         LEFT JOIN agent_tasks parent ON parent.id = task.parentTaskId
-        WHERE reclassified.depth < 1000
+        WHERE task.id IN (SELECT id FROM affected)
+          AND (
+            ${HUMAN_FREE_BASE_SQL}
+            OR (
+              parent.isHumanFree = 1
+              AND parent.id NOT IN (SELECT id FROM affected)
+              AND ${UNATTRIBUTED_SQL}
+            )
+          )
+
+        UNION
+
+        SELECT task.id
+        FROM free
+        JOIN agent_tasks task ON task.parentTaskId = free.id
+        WHERE ${UNATTRIBUTED_SQL}
       )
       UPDATE agent_tasks
-      SET isHumanFree = decided.humanFree
-      FROM (
-        SELECT id, humanFree, MAX(depth) AS depth
-        FROM reclassified
-        GROUP BY id
-      ) AS decided
-      WHERE agent_tasks.id = decided.id
-        AND agent_tasks.isHumanFree != decided.humanFree`,
+      SET isHumanFree = CASE WHEN id IN (SELECT id FROM free) THEN 1 ELSE 0 END
+      WHERE id IN (SELECT id FROM affected)
+        AND isHumanFree != CASE WHEN id IN (SELECT id FROM free) THEN 1 ELSE 0 END`,
     [JSON.stringify(seedTaskIds)],
   );
   return result.changes;

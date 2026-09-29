@@ -324,4 +324,66 @@ describe("human-free flag stays correct when a classifying input changes", () =>
     expect(await reclassifyTaskHumanFree([root])).toBe(0);
     expect(await reclassifyTaskHumanFree([])).toBe(0);
   });
+
+  test("reclassify reaches descendants past 1,000 parent links", async () => {
+    const agent = await createAgent({
+      name: "Reclassify Deep Agent",
+      isLead: false,
+      status: "idle",
+    });
+    const root = await task("ordinary root");
+    // Task creation has no depth limit, so a follow-up chain can outgrow any
+    // fixed bound in the reclassification walk. 1,001 links put the leaf one
+    // past the old cutoff.
+    const chain: string[] = [root];
+    for (let i = 0; i < 1_001; i++) {
+      chain.push(await task(`link ${i}`, { parentTaskId: chain[chain.length - 1] }));
+    }
+    const leaf = chain[chain.length - 1];
+    const lastWithinOldCutoff = chain[1_000];
+    await createSessionCost({
+      sessionId: "reclassify-deep-leaf",
+      taskId: leaf,
+      agentId: agent.id,
+      totalCostUsd: 4,
+      durationMs: 1000,
+      numTurns: 1,
+      model: "opus",
+    });
+    expect(await flag(leaf)).toBe(false);
+    const before = (await getSessionCostSummary({ agentId: agent.id, groupBy: "day" })).totals;
+    expect(before.attributableCostUsd).toBe(4);
+    expect(before.excludedCostUsd).toBe(0);
+
+    await completeTask(root, "done", { addTags: ["heartbeat"] });
+
+    expect(await flag(root)).toBe(true);
+    expect(await flag(lastWithinOldCutoff)).toBe(true);
+    expect(await flag(leaf)).toBe(true);
+    const after = (await getSessionCostSummary({ agentId: agent.id, groupBy: "day" })).totals;
+    expect(after.attributableCostUsd).toBe(0);
+    expect(after.excludedCostUsd).toBe(4);
+    expect(after.excludedTaskCount).toBe(1);
+    await expectStoredMatchesRule();
+  }, 60_000);
+
+  test("reclassify terminates on a parent cycle and matches the rule", async () => {
+    const first = await task("cycle first");
+    const second = await task("cycle second", { parentTaskId: first });
+    const third = await task("cycle third", { parentTaskId: second });
+    // Nothing in the product writes a cycle, but the rule (a UNION over ids)
+    // is defined on one, so the reclassification must stay total on it.
+    await getDbClient().run("UPDATE agent_tasks SET parentTaskId = ? WHERE id = ?", [third, first]);
+    await getDbClient().run("UPDATE agent_tasks SET tags = ? WHERE id = ?", [
+      JSON.stringify(["heartbeat"]),
+      second,
+    ]);
+
+    expect(await reclassifyTaskHumanFree([first])).toBe(3);
+
+    for (const taskId of [first, second, third]) {
+      expect(await flag(taskId)).toBe(true);
+    }
+    await expectStoredMatchesRule();
+  });
 });
