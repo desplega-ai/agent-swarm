@@ -161,7 +161,7 @@ fi
 
 # List runs
 RUNS_JSON=$(api GET "/api/workflows/${WF_ID}/runs")
-RUN_IN_LIST=$(echo "$RUNS_JSON" | jq "[.[] | select(.id == \"$RUN_ID\")] | length")
+RUN_IN_LIST=$(echo "$RUNS_JSON" | jq "[.runs[] | select(.id == \"$RUN_ID\")] | length")
 if [ "$RUN_IN_LIST" = "1" ]; then pass "List runs contains our run"; else fail "List runs" "run not found"; fi
 
 # ===========================================================================

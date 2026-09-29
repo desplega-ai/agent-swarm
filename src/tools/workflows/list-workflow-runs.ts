@@ -85,6 +85,7 @@ export async function listWorkflowRunsHandler({
       status,
       limit,
       offset,
+      includeContext,
     });
     const resultRuns = includeContext ? runs : runs.map(slimRun);
     return toolOk(`Found ${runs.length} run(s) at offset ${page.offset} (${page.total} total).`, {

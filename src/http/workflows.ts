@@ -10,7 +10,6 @@ import {
   getWorkflowRunStepsByRunId,
   getWorkflowVersion,
   getWorkflowVersions,
-  listWorkflowRuns,
   listWorkflowRunsPage,
   listWorkflows,
   type updateWorkflow,
@@ -29,6 +28,7 @@ import {
   WorkflowRunSchema,
   WorkflowRunStatusSchema,
   WorkflowRunStepSchema,
+  WorkflowRunSummarySchema,
   WorkflowSchema,
   WorkflowVersionSchema,
 } from "../types";
@@ -68,9 +68,12 @@ const ExecutorTypeInfoSchema = z.object({
   outputSchema: z.record(z.string(), z.unknown()),
 });
 
+/** Page size when a caller sends no `limit`. */
+const DEFAULT_WORKFLOW_RUNS_LIMIT = 50;
+
 /** Mirrors `WorkflowRunPage` in src/be/db.ts. */
 const WorkflowRunPageSchema = z.object({
-  runs: z.array(WorkflowRunSchema),
+  runs: z.array(WorkflowRunSummarySchema),
   page: z.object({
     limit: z.number().int(),
     offset: z.number().int(),
@@ -273,7 +276,8 @@ const listWorkflowRunsRoute = route({
   method: "get",
   path: "/api/workflows/{id}/runs",
   pattern: ["api", "workflows", null, "runs"],
-  summary: "List runs for a workflow",
+  summary: "List runs for a workflow, newest first",
+  description: `Returns one page of runs without \`context\` (fetch it with GET /api/workflow-runs/{id}). \`limit\` defaults to ${DEFAULT_WORKFLOW_RUNS_LIMIT} and is capped at 100; follow \`page.nextOffset\` while \`page.hasMore\` is true.`,
   tags: ["Workflows"],
   params: z.object({ id: z.string() }),
   query: z.object({
@@ -283,8 +287,8 @@ const listWorkflowRunsRoute = route({
   }),
   responses: {
     200: {
-      description: "Workflow run list",
-      schema: z.union([z.array(WorkflowRunSchema), WorkflowRunPageSchema]),
+      description: "One page of workflow runs",
+      schema: WorkflowRunPageSchema,
     },
   },
 });
@@ -847,21 +851,12 @@ export async function handleWorkflows(
   if (listWorkflowRunsRoute.match(req.method, pathSegments)) {
     const parsed = await listWorkflowRunsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const paginationRequested =
-      parsed.query?.limit !== undefined || parsed.query?.offset !== undefined;
-    if (paginationRequested) {
-      const page = await listWorkflowRunsPage(parsed.params.id, {
-        status: parsed.query?.status,
-        limit: parsed.query?.limit ?? 20,
-        offset: parsed.query?.offset ?? 0,
-      });
-      listWorkflowRunsRoute.respond(res, 200, page);
-      return true;
-    }
-    // Preserve the pre-pagination response for the UI when limit/offset are
-    // omitted: a bare array containing every matching run.
-    const runs = await listWorkflowRuns(parsed.params.id, { status: parsed.query?.status });
-    listWorkflowRunsRoute.respond(res, 200, runs);
+    const page = await listWorkflowRunsPage(parsed.params.id, {
+      status: parsed.query?.status,
+      limit: parsed.query?.limit ?? DEFAULT_WORKFLOW_RUNS_LIMIT,
+      offset: parsed.query?.offset ?? 0,
+    });
+    listWorkflowRunsRoute.respond(res, 200, page);
     return true;
   }
 
