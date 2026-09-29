@@ -1,6 +1,6 @@
 # Heartbeat model: action map
 
-Every TLA+ action maps to the code path it models and the SQL guard it relies on. Line numbers are for `main` @ `f031fa8e`. A counterexample is only acted on if every step in its trace maps to a row here.
+Every TLA+ action maps to the code path it models and the SQL guard it relies on. Line numbers are for `main` @ `795526ca`. A counterexample is only acted on if every step in its trace maps to a row here.
 
 ## Heartbeat.tla (before model)
 
@@ -9,29 +9,29 @@ Line numbers are for `main` @ `f031fa8e`, before Reclaim replaced supersede/resu
 | TLA+ action | Code | Guard modeled | Abstraction |
 |---|---|---|---|
 | `ClaimRead(w,t)` | `src/http/poll.ts` auto-claim → `getUnassignedTaskIdsForAgent` | none (read) | Worker holds one task at a time. |
-| `ClaimWrite(w)` | `claimTask` `src/be/db.ts:2845` | `UPDATE … SET agentId=?, status='in_progress' WHERE id=? AND status='unassigned'` (`G_CLAIM_STATUS`) | Claim and start are one step, as in the poll path. |
-| `AcceptRead(w,t)` | `acceptTask` `src/be/db.ts:2928`, JS check `task.offeredTo !== agentId` | JS only | |
+| `ClaimWrite(w)` | `claimTask` `src/be/db.ts:2846` | `UPDATE … SET agentId=?, status='in_progress' WHERE id=? AND status='unassigned'` (`G_CLAIM_STATUS`) | Claim and start are one step, as in the poll path. |
+| `AcceptRead(w,t)` | `acceptTask` `src/be/db.ts:2929`, JS check `task.offeredTo !== agentId` | JS only | |
 | `AcceptWrite(w)` | `acceptTask` UPDATE | `WHERE id=? AND status IN ('offered','reviewing')`; `offeredTo` is not in the SQL | `reviewing` folded into `offered`. |
-| `Reject(t)` | `rejectTask` `src/be/db.ts:2979`; `releaseStaleOfferedTasksForOfflineAgents` `src/be/db.ts:3190` | `WHERE status IN ('offered','reviewing')` / `WHERE status='offered' AND offeree offline` | Both writes are identical in effect; enabled without the offline check (over-approximation). |
+| `Reject(t)` | `rejectTask` `src/be/db.ts:2980`; `releaseStaleOfferedTasksForOfflineAgents` `src/be/db.ts:3191` | `WHERE status IN ('offered','reviewing')` / `WHERE status='offered' AND offeree offline` | Both writes are identical in effect; enabled without the offline check (over-approximation). |
 | `ReOffer(t,w)` | **no code path** | — | `HYPO_REOFFER` only. `offeredTo` is set at creation only, so it never changes while a task is `offered`. |
 | `PollStart(w,t)` | `src/http/poll.ts:411` → `startTask` `src/be/db/tasks/write.ts:233` | `WHERE status='pending'` | |
-| `RegisterSession(w,t)` | `src/commands/runner.ts` POST `/api/active-sessions` → `insertActiveSession` `src/be/db.ts:6963` | `UNIQUE(taskId)` | Before provider spawn. |
-| `SessionBeat(w,t)` | `src/hooks/hook.ts:1168` PostToolUse → `heartbeatActiveSession` `src/be/db.ts:7019` | none | Tool activity only; no wall-clock ping. |
-| `Progress(w,t)` | `store-progress` → `updateTaskProgress` `src/be/db/tasks/write.ts:959` | **none**: `CASE WHEN status IN terminal THEN status ELSE 'in_progress'`, always bumps `lastUpdatedAt` | `ver` counts `lastUpdatedAt` writes. |
+| `RegisterSession(w,t)` | `src/commands/runner.ts` POST `/api/active-sessions` → `insertActiveSession` `src/be/db.ts:6964` | `UNIQUE(taskId)` | Before provider spawn. |
+| `SessionBeat(w,t)` | `src/hooks/hook.ts:1168` PostToolUse → `heartbeatActiveSession` `src/be/db.ts:7020` | none | Tool activity only; no wall-clock ping. |
+| `Progress(w,t)` | `store-progress` → `updateTaskProgress` `src/be/db/tasks/write.ts:967` | **none**: `CASE WHEN status IN terminal THEN status ELSE 'in_progress'`, always bumps `lastUpdatedAt` | `ver` counts `lastUpdatedAt` writes. |
 | `Complete(w,t)` | `completeTask` `src/be/db/tasks/write.ts:326` + session delete | `WHERE status NOT IN terminal` (`G_TERMINAL_CAS`) | Fail-by-worker behaves the same and is folded in. |
 | `AbortCancelled(w,t)` | `src/http/core.ts:536` `/cancelled-tasks` polled by the hook | returns only `status='cancelled'` | A superseded or failed task is **not** aborted. |
 | `WorkerCrash(w)` / `WorkerRestart(w)` | SIGKILL / container restart | — | A hard crash never sets the agent `offline` (runbook §1). |
 | `Age(t)` | wall-clock time | — | `stale[t]` = `lastUpdatedAt` older than the stall threshold. |
-| `HbRead(t)` | `detectAndRemediateStalledTasks` `src/heartbeat/heartbeat.ts:383`, `getStalledInProgressTasks` `src/be/db.ts:7093`, `decideRemediation` `:513` | `SELECT … WHERE status='in_progress' AND lastUpdatedAt < ?` | Case A (no session) and B (stale session) only; Case C only records. Steering grace and the extension hook are not modeled (they only skip). |
-| `HbWrite` | `supersedeTask` `src/be/db/tasks/write.ts:672` (via `heartbeat.ts:589`) or `failTask` `:439` (via `heartbeat.ts:568`) | `WHERE id=? AND status NOT IN terminal` (`G_TERMINAL_CAS`) `AND (? IS NULL OR lastUpdatedAt = ?)` with `expectedLastUpdatedAt` = the value `HbRead` saw (`G_STALL_CAS`, #1668) | Separate statement from `HbRead`. A progress write in between cancels the remediation until the next sweep. |
-| `HbResume` | `createResumeFollowUp` `src/tasks/worker-follow-up.ts:407` (via `heartbeat.ts:611`) | none; separate autocommit write | Pinned to the original agent (crash pin, not offline). |
-| `HbRepair(t)` | **proposed** (`FIX_ORPHAN_REPAIR`) | `status='superseded'` and no `resume` child | PR: repair sweep. |
-| `AutoAssign(t,w)` | `autoAssignPoolTasks` `src/heartbeat/heartbeat.ts:950` → `assignUnassignedTaskPending` | `WHERE id=? AND status='unassigned'`, in a transaction | Affinity and capacity checks abstracted to "idle worker". |
-| `Reaper(s)` | `escalateUnreclaimedResumes` `src/heartbeat/heartbeat.ts:1035` | `WHERE id=? AND status='pending'`, in a transaction with the reroute decision | Lead re-delegation collapsed into one new pending row. |
-| `CleanupSession(t)` | `cleanupStaleSessions` via `cleanupStaleResources` `src/heartbeat/heartbeat.ts:1186` | `DELETE … WHERE lastHeartbeatAt < 30 min` | |
+| `HbRead(t)` | `detectAndRemediateStalledTasks` `src/heartbeat/heartbeat.ts:390`, `getStalledInProgressTasks` `src/be/db.ts:7094`, `decideRemediation` `:554` | `SELECT … WHERE status='in_progress' AND lastUpdatedAt < ?` | Case A (no session) and B (stale session) only; Case C only records. Steering grace and the extension hook are not modeled (they only skip). |
+| `HbWrite` | `supersedeTask` `src/be/db/tasks/write.ts:680` (via `heartbeat.ts:630`) or `failTask` `:439` (via `heartbeat.ts:609`) | `WHERE id=? AND status NOT IN terminal` (`G_TERMINAL_CAS`) `AND (? IS NULL OR lastUpdatedAt = ?)` with `expectedLastUpdatedAt` = the value `HbRead` saw (`G_STALL_CAS`, #1668) | Separate statement from `HbRead`. A progress write in between cancels the remediation until the next sweep. |
+| `HbResume` | `createResumeFollowUp` `src/tasks/worker-follow-up.ts:407` (via `heartbeat.ts:652`) | none; separate autocommit write | Pinned to the original agent (crash pin, not offline). |
+| `HbRepair(t)` | `repairSupersededWithoutResume` `src/heartbeat/heartbeat.ts:526` (step 1.5 of `codeLevelTriage`, `:368`) → `getSupersededTasksWithoutResume` `src/be/db/tasks/read.ts:332` → `createResumeFollowUp` (#1670, `G_ORPHAN_REPAIR`) | `WHERE status='superseded' AND workflowRunStepId IS NULL AND finishedAt` between now-24 h and now-1 min `AND NOT EXISTS (child with taskType='resume')`; JS skips when the next generation exceeds `maxResumeGenerations()` | Runs only when no classifier step is in flight (`hb.pc = "idle"`, the 1 min floor). "No resume child" is "no child": a superseded task's only children in the model are resumes. The 24 h cap and the `POST /api/tasks/:id/supersede` path are not modeled. |
+| `AutoAssign(t,w)` | `autoAssignPoolTasks` `src/heartbeat/heartbeat.ts:1057` → `assignUnassignedTaskPending` | `WHERE id=? AND status='unassigned'`, in a transaction | Affinity and capacity checks abstracted to "idle worker". |
+| `Reaper(s)` | `escalateUnreclaimedResumes` `src/heartbeat/heartbeat.ts:1142` | `WHERE id=? AND status='pending'`, in a transaction with the reroute decision | Lead re-delegation collapsed into one new pending row. |
+| `CleanupSession(t)` | `cleanupStaleSessions` via `cleanupStaleResources` `src/heartbeat/heartbeat.ts:1293` | `DELETE … WHERE lastHeartbeatAt < 30 min` | |
 | `ApiCrash` / `ApiBoot` | API process restart; `__runId` boot epoch | — | In-flight heartbeat and HTTP steps are lost; worker processes keep running. At boot every `live` session becomes `prelive` (last heartbeat before boot). |
-| `RebootFail(t)` | `runRebootSweep` `src/heartbeat/heartbeat.ts:695` | skip if `lastUpdatedAt >= bootEpoch-5s` (`G_REBOOT_TOUCHED`), session heartbeat `>= bootEpoch-5s`, or session heartbeat younger than `STALL_THRESHOLD_STALE_HEARTBEAT_MIN` (15 min, `heartbeat.ts:759`, `G_REBOOT_HB_AGE`, #1669); else `failTask` (no CAS) | Read and write collapsed into one step (window is milliseconds). Session age is chosen per step (`hbOld`), constrained to `hbOld => stale[t]` because worker `lastUpdatedAt` writes come with a tool-call heartbeat. A task with no session row is still failed. `FIX_NO_REBOOT` removes the sweep. |
-| `RebootRetry` | `runRebootSweep` retry child `src/heartbeat/heartbeat.ts:835` | none; separate write | Generation restarts at 0 (retry children carry no `resume-generation` tag). |
+| `RebootFail(t)` | `runRebootSweep` `src/heartbeat/heartbeat.ts:736` | skip if `lastUpdatedAt >= bootEpoch-5s` (`G_REBOOT_TOUCHED`), session heartbeat `>= bootEpoch-5s`, or session heartbeat younger than `stallThresholdStaleHeartbeatMin()` (15 min, `heartbeat.ts:800`, `G_REBOOT_HB_AGE`, #1669); else `failTask(…, { cascadeDependents: false })` (no CAS, `heartbeat.ts:812`) | Read and write collapsed into one step (window is milliseconds). Session age is chosen per step (`hbOld`), constrained to `hbOld => stale[t]` because worker `lastUpdatedAt` writes come with a tool-call heartbeat. A task with no session row is still failed. `FIX_NO_REBOOT` removes the sweep. |
+| `RebootRetry` | `runRebootSweep` retry child `src/heartbeat/heartbeat.ts:890` | none; separate write | Generation restarts at 0 (retry children carry no `resume-generation` tag). Dependents are not modeled: #1664 re-points never-started dependents to the retry child, then cascade-fails the rest in a `finally` (`heartbeat.ts:927`). |
 
 ## HeartbeatSimple.tla (current code)
 
