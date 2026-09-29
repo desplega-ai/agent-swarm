@@ -26,9 +26,19 @@ import { isTerminalTaskStatus } from "../types";
  */
 export function staleAttemptWriteReason(
   task: AgentTask,
-  caller: { agentId: string; isLead?: boolean; runtimeInstanceId?: string | null },
+  caller: { agentId?: string | null; isLead?: boolean; runtimeInstanceId?: string | null },
 ): string | null {
   if (isTerminalTaskStatus(task.status)) return null;
+  // A caller that names no agent (`X-Agent-ID` absent) owns nothing. It keeps
+  // the legacy write on a row never reclaimed (attempt 0: one attempt only)
+  // and is refused on a reclaimed one, where it cannot prove it holds the
+  // current attempt and not the one the heartbeat took the row away from.
+  if (!caller.agentId) {
+    if ((task.attempt ?? 0) > 0) {
+      return `Task ${task.id} was reclaimed by the heartbeat (attempt ${task.attempt}, now ${task.status}); this call names no agent (X-Agent-ID), so it cannot prove it holds the current attempt. Stop working on it.`;
+    }
+    return null;
+  }
   const ownsRow = task.agentId === caller.agentId;
 
   // Reclaimed and not (yet) restarted by this agent: pending, back in the

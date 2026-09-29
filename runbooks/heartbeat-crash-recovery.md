@@ -203,9 +203,9 @@ flowchart TD
 - any non-lead write to a non-terminal row with `attempt > 0` that is not `in_progress` on the caller's agent (reclaimed and not yet restarted, back in the pool, or started by another agent);
 - a write to an `in_progress` row owned by the caller's agent from a runtime other than `attemptRuntimeId` (the replacement attempt runs in another runtime of the same agent).
 
-It guards `store-progress`, `defer-task` (before the schedule insert and the terminal write, in one transaction), the runner's `/finish`, `/pause`, `/supersede` and `/progress`, and `task-action release` (on a reclaimed `pending` row too). `DELETE /api/active-sessions/by-task/:id` deletes only the row the calling agent and runtime registered, so an old run's cleanup cannot remove the replacement's session. Leads keep their override on rows they do not own.
+It guards `store-progress`, `defer-task` (before the schedule insert and the terminal write, in one transaction), the runner's `/finish`, `/pause`, `/supersede` and `/progress`, and `task-action release` (on a reclaimed `pending` row too). `DELETE /api/active-sessions/by-task/:id` deletes only a row the caller registered, so an old run's cleanup cannot remove the replacement's session (see below for the reclaimed-row rule); the heartbeat's own delete is a separate server-side function that takes no caller identity. Leads keep their override on rows they do not own.
 
-A caller that sends no `X-Runtime-Instance-ID` is rejected on a reclaimed row (`attempt > 0`) that a runtime restarted: it cannot prove it holds the current attempt. On a never-reclaimed row (one attempt only) it keeps the status + agent check, so remote harnesses such as `claude-managed` (static MCP headers) keep working; after a reclaim their tool writes are refused and the runner's `/finish` settles the task. An attempt started without a runtime id (`attemptRuntimeId` NULL) falls back to the status + agent check. `/pause` and `/supersede` re-read the row and run the fence inside their write transaction. `/progress` is fenced when the caller sends `X-Agent-ID` (the runner sends it with its runtime id); a caller that names no agent, such as an older runner, is not. The session heartbeat is not fenced; it refreshes `lastHeartbeatAt` but cannot change status.
+A caller that sends no `X-Runtime-Instance-ID` is rejected on a reclaimed row (`attempt > 0`) that a runtime restarted: it cannot prove it holds the current attempt. On a never-reclaimed row (one attempt only) it keeps the status + agent check, so remote harnesses such as `claude-managed` (static MCP headers) keep working; after a reclaim their tool writes are refused and the runner's `/finish` settles the task. An attempt started without a runtime id (`attemptRuntimeId` NULL) falls back to the status + agent check. `/pause` and `/supersede` re-read the row and run the fence inside their write transaction. `/progress` follows the same rule: the runner sends `X-Agent-ID` and its runtime id, so it is fenced like the other writes; a caller that names no agent (an older runner, an artifact page) keeps the write on a never-reclaimed row and is refused with 403 on a reclaimed live one (`attempt > 0`), because it cannot prove it holds the current attempt. Session cleanup follows the same scoping: on a reclaimed live row `DELETE /api/active-sessions/by-task/:id` needs both `X-Agent-ID` and `X-Runtime-Instance-ID` and matches the session's runtime exactly, so an older runner's agent-only cleanup fails closed (`deleted: false`; the sweep's stale-session cleanup removes the row); on a never-reclaimed or finished row it keeps the agent match-or-unset-runtime scope. `claude-managed` is unaffected on both routes: its local runner sends the agent and runtime ids on every progress and cleanup call, and the cloud sandbox only reaches `/mcp`. The session heartbeat is not fenced; it refreshes `lastHeartbeatAt` but cannot change status.
 
 **Runner.** When the reclaimed row comes back to an agent that still runs the earlier attempt, the runner keeps the running copy and does not start a second one. When it starts a row with `attempt > 0`, it injects a resume preamble built from the task's own id (its earlier attempts' session logs).
 
@@ -283,9 +283,15 @@ worker write (caller agent, caller runtime):
             reject                              # replacement attempt runs in another runtime
         if no caller runtime and task.attempt > 0:
             reject                              # fail closed on a reclaimed row
+# /progress from a caller naming no agent: reject if task.attempt > 0 (live row), else legacy write
 # session cleanup:
-DELETE /api/active-sessions/by-task/:id  →  WHERE taskId AND agentId = caller
-                                             AND (runtime unknown OR row runtime = caller runtime)
+DELETE /api/active-sessions/by-task/:id
+    if task.attempt > 0 and task is not terminal:      # reclaimed live row
+        WHERE taskId AND agentId = caller AND runtimeInstanceId = caller runtime
+        (no caller agent or runtime: deleted = false)
+    else:                                              # legacy scope
+        WHERE taskId AND agentId = caller           (no caller agent: taskId only, as before)
+              AND (runtime unknown OR row runtime = caller runtime)
 ```
 
 ## 4. Routing affinity — producer/consumer contract

@@ -1326,18 +1326,17 @@ export async function handleTasks(
     // Attempt fence (src/tasks/attempt-fence.ts), on a fresh read in the write's
     // transaction: progress from an attempt the heartbeat reclaimed must not
     // refresh `lastUpdatedAt` on the replacement and hide its stall. A caller
-    // that names no agent keeps the pre-fence behavior (older runners).
+    // that names no agent keeps the pre-fence behavior only on a row never
+    // reclaimed (older runners); on a reclaimed row it is refused.
     const outcome = await getDbClient().transaction(
       async (): Promise<{ error: string; status: number } | null> => {
         const task = await getTaskById(parsed.params.id);
         if (!task) return { error: "Task not found", status: 404 };
-        if (myAgentId) {
-          const staleAttempt = staleAttemptWriteReason(task, {
-            agentId: myAgentId,
-            runtimeInstanceId,
-          });
-          if (staleAttempt) return { error: staleAttempt, status: 403 };
-        }
+        const staleAttempt = staleAttemptWriteReason(task, {
+          agentId: myAgentId,
+          runtimeInstanceId,
+        });
+        if (staleAttempt) return { error: staleAttempt, status: 403 };
         await updateTaskProgress(parsed.params.id, parsed.body.progress);
         return null;
       },

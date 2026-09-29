@@ -7,7 +7,7 @@ import {
   buildRoutingAffinityFromAgent,
   cleanupStaleSessions,
   createTaskExtended,
-  deleteActiveSession,
+  deleteActiveSessionServerSide,
   failTask,
   getActiveSessionForTask,
   getActiveTaskCount,
@@ -526,7 +526,7 @@ async function remediateStalledTask(
       agentId: task.agentId,
       reason: decision.reason,
     });
-    if (observedSessionHeartbeatAt !== null) await deleteActiveSession(task.id);
+    if (observedSessionHeartbeatAt !== null) await deleteActiveSessionServerSide(task.id);
     const message = `[Heartbeat] Auto-failed task ${task.id.slice(0, 8)}: ${decision.reason} (${opts.shortLabel})`;
     if (decision.reason === RESUME_BUDGET_EXHAUSTED_REASON) console.warn(message);
     else console.log(message);

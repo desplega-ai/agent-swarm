@@ -7002,28 +7002,68 @@ export async function insertActiveSession(session: {
 }
 
 /**
- * Delete a task's active session. `owner` scopes the delete to the session a
- * given agent (and, when known, runtime) registered: a runner cleaning up an
- * attempt the heartbeat reclaimed must not remove the replacement attempt's
- * session. Omit `owner` for server-side deletes (the heartbeat).
+ * Delete a task's active session on behalf of an HTTP caller (a runner's
+ * cleanup). The caller can only remove a session it registered: its cleanup
+ * can land after the heartbeat reclaimed the task and a replacement attempt
+ * registered a session for the same task id, under the same agent.
+ *
+ * On a row the heartbeat reclaimed (`attempt > 0`) and that is still live, the
+ * caller must name its agent AND runtime and match the session exactly. A
+ * caller that cannot say which runtime it is (an older runner, no
+ * `X-Runtime-Instance-ID`) may hold the attempt the row was taken away from,
+ * so it fails closed and the session is left for the heartbeat or the stale
+ * sweep. Rows never reclaimed (attempt 0), finished, or unknown keep the
+ * legacy scope: agent match, runtime match-or-unset.
+ *
+ * The check and the delete share one transaction, so a reclaim or restart
+ * cannot slip between them. The server's own deletes use
+ * `deleteActiveSessionServerSide`.
  */
 export async function deleteActiveSession(
   taskId: string,
-  owner?: { agentId: string; runtimeInstanceId?: string | null },
+  caller: { agentId?: string | null; runtimeInstanceId?: string | null },
 ): Promise<boolean> {
-  if (!owner) {
-    const result = await getDbClient().run("DELETE FROM active_sessions WHERE taskId = ?", [
-      taskId,
-    ]);
+  const agentId = caller.agentId ?? null;
+  const runtime = caller.runtimeInstanceId ?? null;
+  return await getDbClient().transaction(async () => {
+    const task = await getDbClient().get<{ status: string; attempt: number | null }>(
+      "SELECT status, attempt FROM agent_tasks WHERE id = ?",
+      [taskId],
+    );
+    const reclaimedLive =
+      !!task && (task.attempt ?? 0) > 0 && !isTerminalTaskStatus(task.status as AgentTaskStatus);
+    if (reclaimedLive) {
+      if (!agentId || !runtime) return false;
+      const result = await getDbClient().run(
+        "DELETE FROM active_sessions WHERE taskId = ? AND agentId = ? AND runtimeInstanceId = ?",
+        [taskId, agentId, runtime],
+      );
+      return result.changes > 0;
+    }
+    if (!agentId) {
+      const result = await getDbClient().run("DELETE FROM active_sessions WHERE taskId = ?", [
+        taskId,
+      ]);
+      return result.changes > 0;
+    }
+    const result = await getDbClient().run(
+      `DELETE FROM active_sessions
+         WHERE taskId = ? AND agentId = ?
+           AND (? IS NULL OR runtimeInstanceId IS NULL OR runtimeInstanceId = ?)`,
+      [taskId, agentId, runtime, runtime],
+    );
     return result.changes > 0;
-  }
-  const runtime = owner.runtimeInstanceId ?? null;
-  const result = await getDbClient().run(
-    `DELETE FROM active_sessions
-       WHERE taskId = ? AND agentId = ?
-         AND (? IS NULL OR runtimeInstanceId IS NULL OR runtimeInstanceId = ?)`,
-    [taskId, owner.agentId, runtime, runtime],
-  );
+  });
+}
+
+/**
+ * Trusted server-side delete of every active session of a task (the
+ * heartbeat, after it failed the task). Takes no caller identity and is never
+ * reachable from an HTTP route: identity-scoped cleanup goes through
+ * `deleteActiveSession`.
+ */
+export async function deleteActiveSessionServerSide(taskId: string): Promise<boolean> {
+  const result = await getDbClient().run("DELETE FROM active_sessions WHERE taskId = ?", [taskId]);
   return result.changes > 0;
 }
 

@@ -24,6 +24,7 @@ import {
   closeDb,
   createAgent,
   createTaskExtended,
+  deleteActiveSessionServerSide,
   getActiveSessionForTask,
   getChildTasks,
   getDbClient,
@@ -319,6 +320,83 @@ describe("runner progress is fenced (Superagent P2)", () => {
   });
 });
 
+describe("blocker 1 (re-review): a caller that names no identity cannot write a reclaimed row", () => {
+  const backdate = (taskId: string) =>
+    getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+      "2026-01-01T00:00:00.000Z",
+      taskId,
+    ]);
+
+  test("headerless /progress on the replacement's row is refused and leaves lastUpdatedAt alone", async () => {
+    const agent = await worker("fence-headerless-progress");
+    const task = await startedThenReclaimed(agent.id);
+    await startTask(task.id, { runtimeInstanceId: RUNTIME_B });
+    await backdate(task.id);
+    const before = await getTaskById(task.id);
+    expect(before?.status).toBe("in_progress");
+    expect(before?.lastUpdatedAt).toBe("2026-01-01T00:00:00.000Z");
+
+    const anonymous = await api(
+      "POST",
+      `/api/tasks/${task.id}/progress`,
+      {},
+      { progress: "obsolete runtime A" },
+    );
+    expect(anonymous.status).toBe(403);
+    const after = await getTaskById(task.id);
+    expect(after?.progress).toBe(before?.progress);
+    expect(after?.lastUpdatedAt).toBe("2026-01-01T00:00:00.000Z");
+
+    // A runtime header alone does not name an agent either.
+    const runtimeOnly = await api(
+      "POST",
+      `/api/tasks/${task.id}/progress`,
+      { "X-Runtime-Instance-ID": RUNTIME_B },
+      { progress: "no agent" },
+    );
+    expect(runtimeOnly.status).toBe(403);
+    expect((await getTaskById(task.id))?.lastUpdatedAt).toBe("2026-01-01T00:00:00.000Z");
+
+    // Control: the current attempt still proves ownership and writes.
+    const holder = await api("POST", `/api/tasks/${task.id}/progress`, as(agent.id, RUNTIME_B), {
+      progress: "replacement working",
+    });
+    expect(holder.status).toBe(200);
+    expect((await getTaskById(task.id))?.progress).toBe("replacement working");
+  });
+
+  test("headerless /progress on a reclaimed pending row is refused", async () => {
+    const agent = await worker("fence-headerless-progress-pending");
+    const task = await startedThenReclaimed(agent.id);
+    await backdate(task.id);
+
+    const anonymous = await api(
+      "POST",
+      `/api/tasks/${task.id}/progress`,
+      {},
+      { progress: "obsolete runtime A" },
+    );
+    expect(anonymous.status).toBe(403);
+    const after = await getTaskById(task.id);
+    expect(after?.status).toBe("pending");
+    expect(after?.lastUpdatedAt).toBe("2026-01-01T00:00:00.000Z");
+  });
+
+  test("headerless /progress on a reclaimed row that later finished is a no-op write, not a fence hit", async () => {
+    const agent = await worker("fence-headerless-progress-terminal");
+    const task = await startedThenReclaimed(agent.id);
+    await startTask(task.id, { runtimeInstanceId: RUNTIME_B });
+    const done = await api("POST", `/api/tasks/${task.id}/finish`, as(agent.id, RUNTIME_B), {
+      status: "completed",
+      output: "done",
+    });
+    expect(done.status).toBe(200);
+
+    const late = await api("POST", `/api/tasks/${task.id}/progress`, {}, { progress: "late" });
+    expect(late.status).toBe(200);
+  });
+});
+
 describe("release is fenced on a reclaimed pending row (Superagent P2)", () => {
   async function release(agentId: string, runtimeInstanceId: string, taskId: string) {
     const result = await finalizeSwarmToolResult(
@@ -472,6 +550,116 @@ describe("blocker 3: old-run cleanup does not delete the replacement's session",
     );
     expect(late.body.deleted).toBe(false);
     expect((await getActiveSessionForTask(task.id))?.runtimeInstanceId).toBe(RUNTIME_B);
+  });
+});
+
+describe("blocker 3 (re-review): cleanup that cannot name its runtime fails closed on a reclaimed row", () => {
+  const register = (agentId: string, taskId: string, runtime: string | null) =>
+    api("POST", "/api/active-sessions", as(agentId, runtime ?? "unused"), {
+      agentId,
+      taskId,
+      triggerType: "task_assigned",
+      ...(runtime ? { runtimeInstanceId: runtime } : {}),
+    });
+
+  test("the old runner's DELETE (X-Agent-ID only) leaves the replacement's session", async () => {
+    const agent = await worker("fence-legacy-cleanup");
+    const task = await startedThenReclaimed(agent.id);
+    await startTask(task.id, { runtimeInstanceId: RUNTIME_B });
+    await register(agent.id, task.id, RUNTIME_B);
+
+    // The exact request an older runner's `removeActiveSession` sends.
+    const legacy = await api("DELETE", `/api/active-sessions/by-task/${task.id}`, {
+      "X-Agent-ID": agent.id,
+    });
+    expect(legacy.status).toBe(200);
+    expect(legacy.body.deleted).toBe(false);
+    expect((await getActiveSessionForTask(task.id))?.runtimeInstanceId).toBe(RUNTIME_B);
+    expect((await getTaskById(task.id))?.status).toBe("in_progress");
+
+    // No identity at all is no better.
+    const anonymous = await api("DELETE", `/api/active-sessions/by-task/${task.id}`, {});
+    expect(anonymous.body.deleted).toBe(false);
+    expect(await getActiveSessionForTask(task.id)).not.toBeNull();
+
+    // Control: the replacement's own runtime still cleans up.
+    const own = await api(
+      "DELETE",
+      `/api/active-sessions/by-task/${task.id}`,
+      as(agent.id, RUNTIME_B),
+    );
+    expect(own.body.deleted).toBe(true);
+    expect(await getActiveSessionForTask(task.id)).toBeNull();
+  });
+
+  test("a session registered without a runtime is not a wildcard on a reclaimed row", async () => {
+    const agent = await worker("fence-unset-runtime-session");
+    const task = await startedThenReclaimed(agent.id);
+    await startTask(task.id, { runtimeInstanceId: RUNTIME_B });
+    await register(agent.id, task.id, null);
+
+    const legacy = await api("DELETE", `/api/active-sessions/by-task/${task.id}`, {
+      "X-Agent-ID": agent.id,
+    });
+    expect(legacy.body.deleted).toBe(false);
+    const stale = await api(
+      "DELETE",
+      `/api/active-sessions/by-task/${task.id}`,
+      as(agent.id, RUNTIME_A),
+    );
+    expect(stale.body.deleted).toBe(false);
+    expect(await getActiveSessionForTask(task.id)).not.toBeNull();
+  });
+
+  test("a never-reclaimed task keeps the legacy cleanup (claude-managed and older runners)", async () => {
+    const agent = await worker("fence-never-reclaimed-cleanup");
+    const task = await createTaskExtended("Never reclaimed", { agentId: agent.id });
+    await startTask(task.id, { runtimeInstanceId: RUNTIME_A });
+    expect((await getTaskById(task.id))?.attempt).toBe(0);
+    await register(agent.id, task.id, RUNTIME_A);
+
+    const legacy = await api("DELETE", `/api/active-sessions/by-task/${task.id}`, {
+      "X-Agent-ID": agent.id,
+    });
+    expect(legacy.body.deleted).toBe(true);
+    expect(await getActiveSessionForTask(task.id)).toBeNull();
+
+    // The same runner, sending both headers, cleans up too.
+    await register(agent.id, task.id, RUNTIME_A);
+    const own = await api(
+      "DELETE",
+      `/api/active-sessions/by-task/${task.id}`,
+      as(agent.id, RUNTIME_A),
+    );
+    expect(own.body.deleted).toBe(true);
+  });
+
+  test("a reclaimed row that finished releases its session to an agent-only DELETE", async () => {
+    const agent = await worker("fence-finished-cleanup");
+    const task = await startedThenReclaimed(agent.id);
+    await startTask(task.id, { runtimeInstanceId: RUNTIME_B });
+    await register(agent.id, task.id, RUNTIME_B);
+    await api("POST", `/api/tasks/${task.id}/finish`, as(agent.id, RUNTIME_B), {
+      status: "completed",
+      output: "done",
+    });
+
+    const legacy = await api("DELETE", `/api/active-sessions/by-task/${task.id}`, {
+      "X-Agent-ID": agent.id,
+    });
+    expect(legacy.body.deleted).toBe(true);
+    expect(await getActiveSessionForTask(task.id)).toBeNull();
+  });
+
+  test("the server-side delete (heartbeat) is a distinct path that takes no caller identity", async () => {
+    const agent = await worker("fence-server-side-cleanup");
+    const task = await startedThenReclaimed(agent.id);
+    await startTask(task.id, { runtimeInstanceId: RUNTIME_B });
+    await register(agent.id, task.id, RUNTIME_B);
+
+    expect(await deleteActiveSessionServerSide(task.id)).toBe(true);
+    expect(await getActiveSessionForTask(task.id)).toBeNull();
+    expect(await deleteActiveSessionServerSide(task.id)).toBe(false);
   });
 });
 

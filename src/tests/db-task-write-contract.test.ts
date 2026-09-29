@@ -177,6 +177,7 @@ value:createWorkflowRunStep
 value:createWorkflowVersion
 value:deleteActiveSession
 value:deleteActiveSessionById
+value:deleteActiveSessionServerSide
 value:deleteAgent
 value:deleteAgentMailInboxMapping
 value:deleteBudget

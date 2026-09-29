@@ -178,15 +178,15 @@ export async function handleActiveSessions(
   if (deleteSessionByTask.match(req.method, pathSegments)) {
     const parsed = await deleteSessionByTask.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    // A worker deletes only its own session (src/tasks/attempt-fence.ts): its
-    // cleanup can land after the heartbeat reclaimed the task and another
-    // attempt registered a session for the same task id.
-    const deleted = await deleteActiveSession(
-      parsed.params.taskId,
-      myAgentId
-        ? { agentId: myAgentId, runtimeInstanceId: headerRuntimeInstanceId(req) }
-        : undefined,
-    );
+    // A worker deletes only its own session: its cleanup can land after the
+    // heartbeat reclaimed the task and another attempt registered a session
+    // for the same task id. The caller's identity always scopes the delete,
+    // including a caller that sent none (the unscoped delete is the server's
+    // own `deleteActiveSessionServerSide`, not reachable from here).
+    const deleted = await deleteActiveSession(parsed.params.taskId, {
+      agentId: myAgentId,
+      runtimeInstanceId: headerRuntimeInstanceId(req),
+    });
     deleteSessionByTask.respond(res, 200, { deleted });
     return true;
   }
