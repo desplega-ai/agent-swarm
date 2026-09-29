@@ -12,8 +12,21 @@ on:
       - "package.json"
       - "bunfig.toml"
       - ".github/workflows/ui-e2e.yml"
+  # Same paths as pull_request: an unfiltered push to main ran the suite on every
+  # merge and most runs were cancelled by the next one. The nightly schedule still
+  # covers main in full.
   push:
     branches: [main]
+    paths:
+      - "apps/ui/**"
+      - "packages/ui-e2e/**"
+      - "scripts/e2e/**"
+      - "src/http/**"
+      - "src/be/**"
+      - "bun.lock"
+      - "package.json"
+      - "bunfig.toml"
+      - ".github/workflows/ui-e2e.yml"
   # Runs on main and is reported to the tracker as a nightly run.
   schedule:
     - cron: "0 3 * * *"
