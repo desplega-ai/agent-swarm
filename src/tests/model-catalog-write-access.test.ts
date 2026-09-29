@@ -217,6 +217,14 @@ describe("catalog write access", () => {
       workerWithSharedKey,
     );
     expect(noRejectionText.status).toBe(403);
+    // Rejection wording that does not name the reported model is not the CLI rejecting it.
+    const otherModelText = await call(
+      "PUT",
+      "/api/models-catalog/harness-support",
+      { ...rejection, error: "invalid model output from the summarizer tool" },
+      workerWithSharedKey,
+    );
+    expect(otherModelText.status).toBe(403);
     const ran = await call(
       "PUT",
       "/api/models-catalog/harness-support",

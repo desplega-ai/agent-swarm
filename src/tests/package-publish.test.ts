@@ -29,6 +29,35 @@ afterAll(async () => {
 });
 
 describe("published package", () => {
+  test("runtime dependencies never reference a private workspace package", async () => {
+    // The release step runs plain `npm publish`, which does not rewrite `workspace:*`, and a
+    // private workspace package is never on the registry: either one breaks `npm i` / `npx`.
+    // Workspace code the CLI needs is bundled into dist/cli.js, so it belongs in devDependencies.
+    const workspaceNames = new Set<string>();
+    for (const pattern of ["packages/*/package.json", "apps/*/package.json"]) {
+      for await (const file of new Bun.Glob(pattern).scan({ cwd: REPO_ROOT })) {
+        workspaceNames.add((await Bun.file(join(REPO_ROOT, file)).json()).name);
+      }
+    }
+    expect(workspaceNames.has("@desplega/model-catalog")).toBe(true);
+
+    const offenders: string[] = [];
+    for (const manifestPath of [
+      join(REPO_ROOT, "package.json"),
+      join(unpackDir, "package", "package.json"),
+    ]) {
+      const manifest = await Bun.file(manifestPath).json();
+      for (const field of ["dependencies", "optionalDependencies", "peerDependencies"]) {
+        for (const [name, spec] of Object.entries<string>(manifest[field] ?? {})) {
+          if (spec.startsWith("workspace:") || workspaceNames.has(name)) {
+            offenders.push(`${manifestPath} ${field} ${name}@${spec}`);
+          }
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
   test(
     "version and help work without Bun installed",
     async () => {

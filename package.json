@@ -169,6 +169,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.3.10",
     "@desplega.ai/slack-mock": "^0.4.0",
+    "@desplega/model-catalog": "workspace:*",
     "@faker-js/faker": "^10.4.0",
     "@opencode-ai/plugin": "1.18.33",
     "@types/bun": "latest",
@@ -186,7 +187,6 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "1.4.0",
-    "@desplega/model-catalog": "workspace:*",
     "@ai-sdk/openai": "^3.0.41",
     "@anthropic-ai/claude-agent-sdk": "0.3.285",
     "@anthropic-ai/sdk": "^0.93.0",

@@ -285,6 +285,42 @@ describe("worker outcome reporting", () => {
     expect(isUnknownModelError("rate limit reached")).toBe(false);
   });
 
+  test("with a model id, only a rejection that names that model counts", () => {
+    const rejection = "There's an issue with the selected model (claude-x). It may not exist.";
+    expect(isUnknownModelError(rejection, "claude-x")).toBe(true);
+    expect(isUnknownModelError(rejection, "CLAUDE-X")).toBe(true);
+    expect(isUnknownModelError("The model `gpt-9` does not exist", "gpt-9")).toBe(true);
+    expect(isUnknownModelError("unknown model 'gpt-9'\nstack trace", "gpt-9")).toBe(true);
+    // Rejection text for another model, or phrase-only text from an unrelated failure.
+    expect(isUnknownModelError(rejection, "claude-y")).toBe(false);
+    expect(isUnknownModelError("tool call failed: invalid model output", "claude-x")).toBe(false);
+    expect(isUnknownModelError("unknown model type in schema\nran claude-x fine", "claude-x")).toBe(
+      false,
+    );
+  });
+
+  test("an unrelated failure containing a rejection phrase does not report unsupported", async () => {
+    resetHarnessCliVersionForTests({ claude: CLI });
+    const bodies: unknown[] = [];
+    const fetchImpl = (async (_url: string, init: RequestInit) => {
+      bodies.push(JSON.parse(String(init.body)));
+      return new Response("{}", { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await reportHarnessModelOutcome({
+      apiUrl: "http://x",
+      agentId: "a",
+      harness: "claude",
+      fetchImpl,
+      model: "m1",
+      exitCode: 1,
+      failureReason: "Tool call failed: invalid model output from the summarizer",
+    });
+
+    expect(bodies).toEqual([]);
+    resetHarnessCliVersionForTests();
+  });
+
   test("sends unsupported on a model rejection, ok once on success, nothing on other failures", async () => {
     resetHarnessCliVersionForTests({ claude: CLI });
     const bodies: unknown[] = [];

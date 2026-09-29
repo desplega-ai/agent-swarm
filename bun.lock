@@ -13,7 +13,6 @@
         "@aws-sdk/client-bedrock": "3.1048.0",
         "@desplega.ai/business-use": "^0.4.2",
         "@desplega.ai/localtunnel": "^2.2.0",
-        "@desplega/model-catalog": "workspace:*",
         "@earendil-works/pi-agent-core": "^0.99.1",
         "@earendil-works/pi-ai": "^0.99.1",
         "@earendil-works/pi-coding-agent": "^0.99.1",
@@ -58,6 +57,7 @@
       "devDependencies": {
         "@biomejs/biome": "^2.3.10",
         "@desplega.ai/slack-mock": "^0.4.0",
+        "@desplega/model-catalog": "workspace:*",
         "@faker-js/faker": "^10.4.0",
         "@opencode-ai/plugin": "1.18.33",
         "@types/bun": "latest",
