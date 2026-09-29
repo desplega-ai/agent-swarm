@@ -187,6 +187,7 @@ export {
   getAgentById,
   getAgentDailyTaskCounts,
   getAgentHarnessProviders,
+  getAgentStatusCounts,
   getAllAgents,
   getLeadAgent,
   getRemainingCapacity,

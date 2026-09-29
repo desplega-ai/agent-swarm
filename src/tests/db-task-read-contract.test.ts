@@ -232,6 +232,7 @@ value:getAgentMailInboxMapping
 value:getAgentMailInboxMappingsByAgent
 value:getAgentMcpServers
 value:getAgentSkills
+value:getAgentStatusCounts
 value:getAgentWithTasks
 value:getAgentWorkingOnThread
 value:getAllAgentMailInboxMappings
