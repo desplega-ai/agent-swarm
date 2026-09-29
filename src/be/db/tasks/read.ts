@@ -118,9 +118,16 @@ export type AgentTaskRow = {
   routingAffinity: string | null;
 };
 
+/**
+ * `task` as the list projections read it: the full text, or the UTF-8 byte
+ * prefix `TASK_PREVIEW_SQL` selects.
+ */
+type TaskPreviewSource = { task: string | Uint8Array | null };
+type AgentTaskListRow = Omit<AgentTaskRow, "task"> & TaskPreviewSource;
+
 /** Columns the slim list mapper reads; `task` may already be a SQL prefix. */
 type AgentTaskSummaryRow = Pick<
-  AgentTaskRow,
+  AgentTaskListRow,
   | "id"
   | "key"
   | "agentId"
@@ -151,7 +158,7 @@ type AgentTaskSummaryRow = Pick<
 >;
 
 type AgentTaskTimelineRow = Pick<
-  AgentTaskRow,
+  AgentTaskListRow,
   | "id"
   | "agentId"
   | "parentTaskId"
@@ -166,12 +173,25 @@ type AgentTaskTimelineRow = Pick<
 >;
 
 /**
- * SQL column lists for the list projections. `task` is cut to one char past
- * the preview length: `previewText` then truncates it exactly as it would the
- * full text (the extra char keeps the "…" marker), so the JS side never
- * materializes the full prompt, output or provider blobs.
+ * SQL column lists for the list projections. `task` is cut to the UTF-8 bytes
+ * that can hold one char past the preview length (a UTF-16 unit is at most 4
+ * bytes), so the JS side never materializes the full prompt, output or
+ * provider blobs. The cut runs on the BLOB: SQLite's text `substr` stops at
+ * the first embedded NUL, which the full-text preview keeps. `taskPreview`
+ * decodes the bytes and truncates them exactly as it would the full text (the
+ * extra char keeps the "…" marker; a code point split at the byte cut lands
+ * past it).
  */
-const TASK_PREVIEW_SQL = `substr(agent_tasks.task, 1, ${TASK_PREVIEW_LENGTH + 1}) AS task`;
+const TASK_PREVIEW_BYTES = 4 * (TASK_PREVIEW_LENGTH + 1);
+const TASK_PREVIEW_SQL = `substr(CAST(agent_tasks.task AS BLOB), 1, ${TASK_PREVIEW_BYTES}) AS task`;
+// ignoreBOM keeps a leading U+FEFF, which the full-text preview keeps too.
+const taskPreviewDecoder = new TextDecoder("utf-8", { ignoreBOM: true });
+
+function taskPreview(task: TaskPreviewSource["task"]): string {
+  const text = task instanceof Uint8Array ? taskPreviewDecoder.decode(task) : task;
+  return dependencies.previewText(text, TASK_PREVIEW_LENGTH);
+}
+
 const LIST_COLUMNS = {
   full: "agent_tasks.*",
   slim: `agent_tasks.id, agent_tasks."key", agent_tasks.agentId, agent_tasks.creatorAgentId,
@@ -329,7 +349,7 @@ export function rowToAgentTaskSummary(row: AgentTaskSummaryRow): AgentTaskSummar
     key: row.key,
     agentId: row.agentId,
     creatorAgentId: row.creatorAgentId ?? undefined,
-    task: dependencies.previewText(row.task, TASK_PREVIEW_LENGTH),
+    task: taskPreview(row.task),
     title: row.title ?? undefined,
     status: row.status,
     source: row.source,
@@ -363,7 +383,7 @@ function rowToAgentTaskTimelineItem(row: AgentTaskTimelineRow): AgentTaskTimelin
     id: row.id,
     agentId: row.agentId,
     parentTaskId: row.parentTaskId ?? undefined,
-    task: dependencies.previewText(row.task, TASK_PREVIEW_LENGTH),
+    task: taskPreview(row.task),
     title: row.title ?? undefined,
     status: row.status,
     createdAt: row.createdAt,

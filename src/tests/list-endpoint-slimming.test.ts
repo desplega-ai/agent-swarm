@@ -11,6 +11,7 @@ import {
   getAgentById,
   getAllAgents,
   getAllTasks,
+  getDbClient,
   getScheduledTasks,
   initDb,
   listAllPages,
@@ -228,8 +229,12 @@ describe("list-endpoint slimming", () => {
   });
 
   test("getAllTasks — SQL-side preview matches truncating the full text", async () => {
-    // SQLite `substr` counts code points while JS slices UTF-16 units, so pin
-    // the boundary with astral (surrogate-pair) and multibyte characters.
+    // The SQL cut counts UTF-8 bytes while JS slices UTF-16 units, so pin the
+    // boundary with astral (surrogate-pair) and multibyte characters. SQLite's
+    // text functions stop at an embedded NUL, so pin that too, plus a leading
+    // BOM a default TextDecoder would strip. The BOM goes in as SQL bytes:
+    // bun:sqlite drops a leading BOM when it binds a string.
+    const agentId = "preview-parity-agent";
     const marker = "preview-parity-";
     const texts = [
       `${marker}${"a".repeat(285)}`, // exactly 300 units
@@ -238,15 +243,26 @@ describe("list-endpoint slimming", () => {
       `${marker}${"é".repeat(284)}😀`,
       `${marker}${"ñ".repeat(500)}`,
       `${marker}short`,
+      "a\u0000b",
+      `\u0000${"x".repeat(350)}`,
     ];
-    for (const text of texts) await createTaskExtended(text, { agentId: "slim-agent-1" });
+    for (const text of texts) await createTaskExtended(text, { agentId });
+    const bom = await createTaskExtended(`${marker}bom`, { agentId });
+    texts.push(`\uFEFF${marker}bom`);
+    await getDbClient().run(
+      "UPDATE agent_tasks SET task = CAST(x'EFBBBF' AS TEXT) || task WHERE id = ?",
+      [bom.id],
+    );
 
-    const slim = await getAllTasks({ search: marker, limit: 50 }, { slim: true });
-    const full = await getAllTasks({ search: marker, limit: 50 });
-    expect(slim.map((t) => t.id)).toEqual(full.map((t) => t.id));
-    for (const [i, row] of full.entries()) {
-      const expected = row.task.length > 300 ? `${row.task.slice(0, 300)}…` : row.task;
-      expect(slim[i]!.task).toBe(expected);
+    const full = await getAllTasks({ agentId, limit: 50 });
+    expect(full.map((t) => t.task).sort()).toEqual([...texts].sort());
+    for (const opts of [{ slim: true }, { fields: "timeline" as const }]) {
+      const rows = await getAllTasks({ agentId, limit: 50 }, opts);
+      expect(rows.map((t) => t.id)).toEqual(full.map((t) => t.id));
+      for (const [i, row] of full.entries()) {
+        const expected = row.task.length > 300 ? `${row.task.slice(0, 300)}…` : row.task;
+        expect(rows[i]!.task).toBe(expected);
+      }
     }
   });
 
