@@ -365,7 +365,7 @@ Set `humanReview` to define, in the same node, a confidence band whose answers g
 
 ### Other backends: laya
 
-`laya` (`@desplega/laya-server`, from laya-js) answers the same kind of question on `POST /v1/systemone`. Set `provider: laya`; no other node field changes.
+`laya` (`@desplega.ai/laya-server`, from laya-js) answers the same kind of question on `POST /v1/systemone`. Set `provider: laya`; no other node field changes.
 
 ```yaml
 - id: triage

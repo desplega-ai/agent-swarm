@@ -799,7 +799,7 @@ describe("resolveReviewedDecision", () => {
 // ─── A second backend on the same contract ──────────────────
 
 /**
- * What `@desplega/laya-server` returns from `POST /v1/systemone`: the
+ * What `@desplega.ai/laya-server` returns from `POST /v1/systemone`: the
  * `agent.predict` result (`SystemOneResult`) plus `routing`. Values follow a live
  * call to laya.agent-swarm.dev (2026-09-29): probabilities rounded to 4 places,
  * a fractional score, an entropy-based `confidence` next to `answer_confidence`
