@@ -27,7 +27,7 @@ import { loadCompletedStepRouting } from "./completed-step-routing";
 import { shouldSkipCooldown } from "./cooldown";
 import { findEntryNodes, getNextTargets, getSuccessors, resolveValidationPort } from "./definition";
 import type { AsyncExecutorResult } from "./executors/base";
-import { JEV_NODE_TYPE, jevRetryViolations, jevUnresolvedError } from "./executors/jev";
+import { SYSTEM_ONE_DECISION_NODE_TYPE, systemOneRetryViolations, systemOneUnresolvedError } from "./executors/system-one-decision";
 import type { ExecutorRegistry } from "./executors/registry";
 import { FOREACH_TERMINAL_STEP_STATUSES, resolveForeachParent } from "./foreach-join";
 import { getSecretInputKeys, redactSecretsForStorage, resolveInputs } from "./input";
@@ -151,7 +151,7 @@ export async function startWorkflowExecution(
     triggerType: options.triggerType ?? "manual",
   });
 
-  // An executor that cannot run (for example a jev node with no API key) fails
+  // An executor that cannot run (for example a system-one-decision node with no API key) fails
   // the run here, before any node has side effects, instead of partway through.
   const notReady = await findWorkflowReadinessProblems(workflow.definition, registry);
   if (notReady.length > 0) {
@@ -758,12 +758,12 @@ async function runClaimedStep(
   // 3. Get executor
   const executor = registry.get(node.type);
 
-  // 3a. A jev node retries transient transport errors itself (config.maxRetries).
+  // 3a. A system-one-decision node retries transient transport errors itself (config.maxRetries).
   // Engine retries are not status-aware, so a policy here would re-send rejected
   // requests and multiply paid attempts. Fail before any request is built.
-  const jevRetryProblems = jevRetryViolations(node);
-  if (jevRetryProblems.length > 0) {
-    await checkpointStepFailure(runId, stepId, jevRetryProblems.join("; "), 0);
+  const systemOneRetryProblems = systemOneRetryViolations(node);
+  if (systemOneRetryProblems.length > 0) {
+    await checkpointStepFailure(runId, stepId, systemOneRetryProblems.join("; "), 0);
     return { outcome: "failed", successors: [] };
   }
 
@@ -801,7 +801,7 @@ async function runClaimedStep(
 
   // A paid, non-idempotent call must not go out with a blanked field.
   if (strictUnresolved && strictUnresolved.length > 0) {
-    await checkpointStepFailure(runId, stepId, jevUnresolvedError(node.id, strictUnresolved), 0);
+    await checkpointStepFailure(runId, stepId, systemOneUnresolvedError(node.id, strictUnresolved), 0);
     return { outcome: "failed", successors: [] };
   }
 
@@ -1100,7 +1100,7 @@ export function interpolateNodeConfig(
   /** Tokens that must resolve before dispatch; the caller fails the step when non-empty. */
   strictUnresolved?: string[];
 } {
-  if (node.type === JEV_NODE_TYPE) {
+  if (node.type === SYSTEM_ONE_DECISION_NODE_TYPE) {
     // `state` and `questions` keep a whole-token reference's JSON type (an object
     // stays an object; string interpolation would flatten it to JSON text). The
     // resolved value is data, never re-interpolated, so a literal `{{` inside a

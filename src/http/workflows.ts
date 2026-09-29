@@ -53,7 +53,7 @@ const WorkflowWithFavoriteSchema = WorkflowSchema.extend({ favorite: z.boolean()
 
 /**
  * `Workflow` returned by a save (create / update / patch). `warnings` is present only when the
- * save succeeded but a node cannot run yet, e.g. a jev node whose provider key is not configured.
+ * save succeeded but a node cannot run yet, e.g. a system-one-decision node whose provider key is not configured.
  */
 const WorkflowSaveResponseSchema = WorkflowSchema.extend({
   warnings: z.array(z.string()).optional(),

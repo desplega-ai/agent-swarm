@@ -19,21 +19,21 @@ Use this skill when you need to change an existing workflow without breaking liv
 - Make routing explicit. Branching nodes should have named pass/fail routes, and silent skip paths should still produce an observable outcome when operators need to know what happened.
 - Wire inputs deliberately. Node executors receive the raw workflow context plus resolved `inputs` aliases, so a condition can use either a local alias or a node-id-prefixed path. Confirm the chosen path against the recorded step input.
 - Keep schemas tight. If an agent-task has an `outputSchema`, include the expected JSON shape in the task prompt and route it to a worker/provider that is known to return structured output correctly.
-- Prefer reusable script nodes for deterministic shared logic. Agent tasks are best for investigation or work that genuinely needs an LLM. For a bounded judgment, use `jev` (see Choosing a decider).
+- Prefer reusable script nodes for deterministic shared logic. Agent tasks are best for investigation or work that genuinely needs an LLM. For a bounded judgment, use `system-one-decision` (see Choosing a decider).
 - Scope parallel branches so they do not overwrite one another. Fan-out tasks should have separate context keys or branch-specific output fields.
 - Make retry paths idempotent. A rerun should detect existing artifacts, comments, PRs, or notifications and update or skip them rather than duplicating work.
 
 ### Choosing a decider
 
-When a node has to decide, pick the cheapest node that can decide. Use `jev` without being asked when the decision is a bounded judgment.
+When a node has to decide, pick the cheapest node that can decide. Use `system-one-decision` without being asked when the decision is a bounded judgment.
 
 | The decision is | Use |
 |---|---|
 | A fact: a count, PR state, flag, date, lookup, regex, or schema check | `script`, `property-match`, or `code-match` |
-| A bounded judgment: pass/fail, pick one of N, a score on a rubric, or the probability that a claim is true | `jev` |
+| A bounded judgment: pass/fail, pick one of N, a score on a rubric, or the probability that a claim is true | `system-one-decision` |
 | Free-form generation, or findings a later node reads | `raw-llm` or `agent-task` |
 
-Jev is weak at counting. For a hybrid, count in a `script` and pass the number to `jev` as part of `state`.
+Jev is weak at counting. For a hybrid, count in a `script` and pass the number to `system-one-decision` as part of `state`.
 
 ### `swarm-script` Timeout Limit
 
@@ -104,9 +104,9 @@ Use these shapes as a starting point, then confirm them against the current exec
 
 `validate` checks the named upstream node output. Supply either `schema` for a deterministic structural check or `prompt` for a judgment-based check. Its output is `{ pass, reasoning, confidence }`, routed through `pass` or `fail`.
 
-### `jev`
+### `system-one-decision`
 
-**Before you add the first `jev` node to a workflow, confirm its key works.** A node with no working key fails its whole run, and a save only warns. Do these in order and stop at the first failure:
+**Before you add the first `system-one-decision` node to a workflow, confirm its key works.** A node with no working key fails its whole run, and a save only warns. Do these in order and stop at the first failure:
 
 1. Pick the provider. `typesafe` (the default) needs the global secret `TYPESAFE_API_KEY`. `openrouter` needs `OPENROUTER_API_KEY`. Use the provider the requester named. If they named none, use `typesafe`. If its key is missing but the OpenRouter key exists, ask which to use rather than switching, because the two bill separate accounts.
 2. Check the key is set: `get-config` with `key` set to that name and no `includeSecrets`. A masked value (`********`) means a value exists. No entry means it is missing. Never pass `includeSecrets`, and never read the value.
@@ -117,7 +117,7 @@ Use these shapes as a starting point, then confirm them against the current exec
      "nodes": [
        {
          "id": "ping",
-         "type": "jev",
+         "type": "system-one-decision",
          "config": {
            "provider": "typesafe",
            "state": "ping",
@@ -131,14 +131,14 @@ Use these shapes as a starting point, then confirm them against the current exec
    }
    ```
 
-   A `completed` run means the key works. A `failed` run carries the reason: `<KEY> is not configured` (missing), or `<KEY> was rejected by <host> (HTTP 401)` (present but refused). If `create-workflow` says `jev` is an unregistered executor type, the node is not deployed on this swarm yet: stop and say so.
+   A `completed` run means the key works. A `failed` run carries the reason: `<KEY> is not configured` (missing), or `<KEY> was rejected by <host> (HTTP 401)` (present but refused). If `create-workflow` says `system-one-decision` is an unregistered executor type, the node is not deployed on this swarm yet: stop and say so.
 4. If the key is missing or was rejected, **do not build the node.** Ask a human for the key with `request-human-input` or in the thread. Name the exact key and where it goes: the Secrets page (Settings > Secrets). Never ask them to paste it into chat, a task, or a definition, and never write a key into a definition.
 
 Afterwards, a `warnings` entry on `create-workflow` or a patch tool means the key went missing since you checked. Treat it as step 4.
 
 ```json
 {
-  "type": "jev",
+  "type": "system-one-decision",
   "inputs": { "pr": "trigger.pullRequest" },
   "config": {
     "provider": "typesafe",
@@ -168,7 +168,7 @@ Afterwards, a `warnings` entry on `create-workflow` or a patch tool means the ke
 - `returns` repeats every question id and its type. A mismatch is rejected when the workflow is saved.
 - The output is `{ model, answers, usage }`. Read a field as `<node-id>.answers.<question>.<field>`, for example `qualification.answers.risk.confidence`. A `noul` answer is only `{ type, noul }` and has no confidence. A `choice` answer has `choice`, `probabilities`, and `confidence`. A `score` answer has `score`, `legend`, `probabilities`, and `confidence`.
 - A valid low-confidence answer is a success. Keep thresholds in the next node: `property-match` (`gt`, `lt`) or `code-match`, with the uncertain band routed to `human-in-the-loop`. Do not invent a global threshold.
-- Do not set `retry` or `validation.retry` on a `jev` node. It retries connection errors, 408, 429, and 5xx itself (`config.maxRetries`, 0 to 3, default 2) inside `config.timeoutMs` (default 30000). A 401, a 422, or an answer that fails validation ends after one attempt.
+- Do not set `retry` or `validation.retry` on a `system-one-decision` node. It retries connection errors, 408, 429, and 5xx itself (`config.maxRetries`, 0 to 3, default 2) inside `config.timeoutMs` (default 30000). A 401, a 422, or an answer that fails validation ends after one attempt.
 - The node reads its provider's key (`TYPESAFE_API_KEY` or `OPENROUTER_API_KEY`) server-side. The key never appears in the definition, the step output, or an error. A run whose key is missing fails before any node executes, and a 401 or 403 fails the step as `<KEY> was rejected`. An unresolved `{{token}}` fails the step before any request.
 
 ### `swarm-script`

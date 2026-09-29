@@ -5,7 +5,7 @@ import type {
   WorkflowNode,
   WorkflowPatch,
 } from "../types";
-import { jevRetryViolations, jevStaticShapeViolations } from "./executors/jev";
+import { systemOneRetryViolations, systemOneStaticShapeViolations } from "./executors/system-one-decision";
 import type { ExecutorRegistry } from "./executors/registry";
 
 /** Extract all target node IDs from a node's `next` field */
@@ -207,9 +207,9 @@ export function validateDefinition(
         `Node "${node.id}" human-in-the-loop config.questions must be an array or one exact {{interpolation}} token`,
       );
     }
-    // A jev node's question ids and return types are static, and it never carries
+    // A system-one-decision node's question ids and return types are static, and it never carries
     // an engine retry policy (it retries transient transport errors itself).
-    errors.push(...jevStaticShapeViolations(node), ...jevRetryViolations(node));
+    errors.push(...systemOneStaticShapeViolations(node), ...systemOneRetryViolations(node));
     if (node.type === "foreach") {
       validateForeachNode(node, errors);
       // A legacy `#` id may stay editable as a NORMAL node, but never as a foreach

@@ -21,19 +21,19 @@ import {
   type ExecutorResult,
 } from "../workflows/executors/base";
 import {
-  JEV_ENDPOINT,
-  JevConfigSchema,
-  JevExecutor,
-  type JevExecutorOptions,
-  JevOutputSchema,
-} from "../workflows/executors/jev";
+  SYSTEM_ONE_ENDPOINT,
+  SystemOneDecisionConfigSchema,
+  SystemOneDecisionExecutor,
+  type SystemOneDecisionExecutorOptions,
+  SystemOneDecisionOutputSchema,
+} from "../workflows/executors/system-one-decision";
 import { PropertyMatchExecutor } from "../workflows/executors/property-match";
 import { createExecutorRegistry, ExecutorRegistry } from "../workflows/executors/registry";
 import { findWorkflowReadinessProblems, workflowSaveWarnings } from "../workflows/readiness";
 import { retryFailedRun } from "../workflows/resume";
 import { interpolate } from "../workflows/template";
 
-const TEST_DB_PATH = "./test-workflow-jev.sqlite";
+const TEST_DB_PATH = "./test-workflow-system-one-decision.sqlite";
 // Shaped like a token but obviously fake; must never appear in any output or error.
 const API_KEY = "tsk_example-jev-test-key.0123456789";
 
@@ -86,10 +86,10 @@ function jsonResponse(body: unknown, status = 200, headers: Record<string, strin
   });
 }
 
-function makeExecutor(steps: TransportStep[], options: JevExecutorOptions = {}) {
+function makeExecutor(steps: TransportStep[], options: SystemOneDecisionExecutorOptions = {}) {
   const { calls, transport } = makeTransport(steps);
   const sleeps: number[] = [];
-  const executor = new JevExecutor(deps, {
+  const executor = new SystemOneDecisionExecutor(deps, {
     fetch: transport,
     getApiKey: async () => API_KEY,
     sleep: async (ms) => {
@@ -111,7 +111,7 @@ function meta(nodeId = "qualify") {
   };
 }
 
-async function runJev(executor: JevExecutor, config: Record<string, unknown>) {
+async function runSystemOne(executor: SystemOneDecisionExecutor, config: Record<string, unknown>) {
   return executor.run({ config, context: {}, meta: meta() });
 }
 
@@ -218,9 +218,9 @@ beforeEach(async () => {
 
 // ─── Config schema ──────────────────────────────────────────
 
-describe("jev config schema", () => {
+describe("system-one-decision config schema", () => {
   test("accepts a mixed-primitive call and applies defaults", () => {
-    const parsed = JevConfigSchema.parse({
+    const parsed = SystemOneDecisionConfigSchema.parse({
       state: "text",
       questions: { fit: { type: "noul", instructions: "Is it real?" } },
       returns: { fit: { type: "noul" } },
@@ -230,15 +230,15 @@ describe("jev config schema", () => {
     expect(parsed.model).toBeUndefined();
     expect(parsed.timeoutMs).toBe(30_000);
     expect(parsed.maxRetries).toBe(2);
-    expect(JevConfigSchema.safeParse(mixedConfig()).success).toBe(true);
+    expect(SystemOneDecisionConfigSchema.safeParse(mixedConfig()).success).toBe(true);
   });
 
   test("accepts structured state: string, string array, and JSON object", () => {
     for (const state of ["text", ["a", "b"], { nested: { list: [1, 2, 3] } }]) {
-      expect(JevConfigSchema.safeParse(mixedConfig({ state })).success).toBe(true);
+      expect(SystemOneDecisionConfigSchema.safeParse(mixedConfig({ state })).success).toBe(true);
     }
     for (const state of ["", [], 42, null]) {
-      expect(JevConfigSchema.safeParse(mixedConfig({ state })).success).toBe(false);
+      expect(SystemOneDecisionConfigSchema.safeParse(mixedConfig({ state })).success).toBe(false);
     }
   });
 
@@ -252,7 +252,7 @@ describe("jev config schema", () => {
       { outputSchema: { type: "object" } },
       { fallbackPort: "x" },
     ]) {
-      expect(JevConfigSchema.safeParse(mixedConfig(extra)).success).toBe(false);
+      expect(SystemOneDecisionConfigSchema.safeParse(mixedConfig(extra)).success).toBe(false);
     }
   });
 
@@ -261,7 +261,7 @@ describe("jev config schema", () => {
       questions: { fit: { type: "noul", instruction: "typo" } },
       returns: { fit: { type: "noul" } },
     });
-    expect(JevConfigSchema.safeParse(config).success).toBe(false);
+    expect(SystemOneDecisionConfigSchema.safeParse(config).success).toBe(false);
   });
 
   test("rejects out-of-range timeout and retry counts", () => {
@@ -271,13 +271,13 @@ describe("jev config schema", () => {
       { maxRetries: 4 },
       { maxRetries: -1 },
     ]) {
-      expect(JevConfigSchema.safeParse(mixedConfig(bad)).success).toBe(false);
+      expect(SystemOneDecisionConfigSchema.safeParse(mixedConfig(bad)).success).toBe(false);
     }
     expect(
-      JevConfigSchema.safeParse(mixedConfig({ timeoutMs: 1_000, maxRetries: 0 })).success,
+      SystemOneDecisionConfigSchema.safeParse(mixedConfig({ timeoutMs: 1_000, maxRetries: 0 })).success,
     ).toBe(true);
     expect(
-      JevConfigSchema.safeParse(mixedConfig({ timeoutMs: 300_000, maxRetries: 3 })).success,
+      SystemOneDecisionConfigSchema.safeParse(mixedConfig({ timeoutMs: 300_000, maxRetries: 3 })).success,
     ).toBe(true);
   });
 
@@ -307,7 +307,7 @@ describe("jev config schema", () => {
       [{ type: "noul", instructions: { rubric: ["a", "b"] } }, true],
     ];
     for (const [question, ok] of cases) {
-      expect(JevConfigSchema.safeParse(withQuestion(question)).success).toBe(ok);
+      expect(SystemOneDecisionConfigSchema.safeParse(withQuestion(question)).success).toBe(ok);
     }
   });
 
@@ -330,15 +330,15 @@ describe("jev config schema", () => {
     delete noReturns.returns;
 
     for (const config of [missing, extra, wrongType, noReturns]) {
-      expect(JevConfigSchema.safeParse(config).success).toBe(false);
+      expect(SystemOneDecisionConfigSchema.safeParse(config).success).toBe(false);
     }
-    const issue = JevConfigSchema.safeParse(wrongType);
+    const issue = SystemOneDecisionConfigSchema.safeParse(wrongType);
     expect(JSON.stringify(issue.error?.issues)).toContain("returns.fit.type");
   });
 
   test("rejects an empty question map and unsafe question ids", () => {
     const question = { type: "noul", instructions: "true?" };
-    expect(JevConfigSchema.safeParse(mixedConfig({ questions: {}, returns: {} })).success).toBe(
+    expect(SystemOneDecisionConfigSchema.safeParse(mixedConfig({ questions: {}, returns: {} })).success).toBe(
       false,
     );
     for (const id of ["1bad", "has space", "a.b", "", "constructor", "prototype", "toString"]) {
@@ -346,35 +346,35 @@ describe("jev config schema", () => {
         questions: { [id]: question },
         returns: { [id]: { type: "noul" } },
       });
-      expect(JevConfigSchema.safeParse(config).success).toBe(false);
+      expect(SystemOneDecisionConfigSchema.safeParse(config).success).toBe(false);
     }
     const proto = JSON.parse(
       `{"state":"x","questions":{"__proto__":{"type":"noul","instructions":"t"}},"returns":{"__proto__":{"type":"noul"}}}`,
     );
-    expect(JevConfigSchema.safeParse(proto).success).toBe(false);
+    expect(SystemOneDecisionConfigSchema.safeParse(proto).success).toBe(false);
     for (const id of ["fit", "_private", "a-b_c9", "Q1"]) {
       const config = mixedConfig({
         questions: { [id]: question },
         returns: { [id]: { type: "noul" } },
       });
-      expect(JevConfigSchema.safeParse(config).success).toBe(true);
+      expect(SystemOneDecisionConfigSchema.safeParse(config).success).toBe(true);
     }
   });
 });
 
 // ─── Request + success path ─────────────────────────────────
 
-describe("JevExecutor request and output", () => {
+describe("SystemOneDecisionExecutor request and output", () => {
   test("sends one state and the whole question map to the fixed TypeSafe endpoint", async () => {
     const { executor, calls } = makeExecutor([jsonResponse(mixedBody())]);
     const config = mixedConfig();
-    const result = await runJev(executor, config);
+    const result = await runSystemOne(executor, config);
 
     expect(result.status).toBe("success");
     expect(calls).toHaveLength(1);
     const call = calls[0]!;
     expect(call.url).toBe("https://api.typesafe.ai/v1/systemone");
-    expect(call.url).toBe(JEV_ENDPOINT);
+    expect(call.url).toBe(SYSTEM_ONE_ENDPOINT);
     expect(call.init.method).toBe("POST");
     expect(call.init.redirect).toBe("manual");
     expect(call.init.signal).toBeInstanceOf(AbortSignal);
@@ -393,7 +393,7 @@ describe("JevExecutor request and output", () => {
     const state = { deal: { size: 12000, tags: ["a", "b"], open: true, owner: null } };
     const config = mixedConfig({ state });
     delete config.model;
-    const result = await runJev(executor, config);
+    const result = await runSystemOne(executor, config);
 
     expect(result.status).toBe("success");
     expect(calls[0]?.body.model).toBe("jev-latest");
@@ -406,7 +406,7 @@ describe("JevExecutor request and output", () => {
     const { executor } = makeExecutor([
       jsonResponse(mixedBody(), 200, { "x-request-id": "req_abc-123" }),
     ]);
-    const result = await runJev(executor, mixedConfig());
+    const result = await runSystemOne(executor, mixedConfig());
 
     expect(result.status).toBe("success");
     expect(result.output).toEqual({
@@ -415,7 +415,7 @@ describe("JevExecutor request and output", () => {
       usage: { input_tokens: 400, output_tokens: 80 },
       requestId: "req_abc-123",
     });
-    expect(JevOutputSchema.safeParse(result.output).success).toBe(true);
+    expect(SystemOneDecisionOutputSchema.safeParse(result.output).success).toBe(true);
     expect(result.nextPort).toBeUndefined();
   });
 
@@ -432,7 +432,7 @@ describe("JevExecutor request and output", () => {
         returns: { [id]: (full.returns as Record<string, unknown>)[id] },
       });
       const { executor, calls } = makeExecutor([jsonResponse(withAnswers({ [id]: answer }))]);
-      const result = await runJev(executor, config);
+      const result = await runSystemOne(executor, config);
       expect(result.status).toBe("success");
       expect(Object.keys(result.output?.answers ?? {})).toEqual([id]);
       expect(Object.keys(calls[0]?.body.questions as object)).toEqual([id]);
@@ -446,7 +446,7 @@ describe("JevExecutor request and output", () => {
       questions: { fit: (mixedConfig().questions as Record<string, unknown>).fit },
       returns: { fit: { type: "noul" } },
     });
-    const result = await runJev(executor, fitOnly);
+    const result = await runSystemOne(executor, fitOnly);
 
     expect(result.status).toBe("success");
     expect(result.output?.answers.fit).toEqual({ type: "noul", noul: 0.5 });
@@ -457,7 +457,7 @@ describe("JevExecutor request and output", () => {
   test("a low-confidence answer is a successful evaluation", async () => {
     const lowConfidence = { ...choiceAnswer, confidence: 0.05 };
     const { executor } = makeExecutor([jsonResponse(withAnswers({ authority: lowConfidence }))]);
-    const result = await runJev(executor, authorityOnly);
+    const result = await runSystemOne(executor, authorityOnly);
     expect(result.status).toBe("success");
     expect((result.output?.answers.authority as { confidence: number }).confidence).toBe(0.05);
   });
@@ -465,10 +465,10 @@ describe("JevExecutor request and output", () => {
 
 // ─── Answer validation ──────────────────────────────────────
 
-describe("JevExecutor answer validation", () => {
+describe("SystemOneDecisionExecutor answer validation", () => {
   async function failsWith(body: unknown, expected: string, config = mixedConfig()) {
     const { executor } = makeExecutor([jsonResponse(body)]);
-    const result = await runJev(executor, config);
+    const result = await runSystemOne(executor, config);
     expect(result.status).toBe("failed");
     expect(result.output).toBeUndefined();
     expect(result.error).toContain(expected);
@@ -549,7 +549,7 @@ describe("JevExecutor answer validation", () => {
     const { executor } = makeExecutor([
       jsonResponse(withAnswers({ authority: { ...choiceAnswer, probabilities } })),
     ]);
-    const result = await runJev(executor, authorityOnly);
+    const result = await runSystemOne(executor, authorityOnly);
     expect(result.status).toBe("success");
     expect((result.output?.answers.authority as { probabilities: object }).probabilities).toEqual(
       probabilities,
@@ -578,7 +578,7 @@ describe("JevExecutor answer validation", () => {
     );
     const boundary = { ...scoreAnswer, score: 2 };
     const { executor } = makeExecutor([jsonResponse(withAnswers({ urgency: boundary }))]);
-    expect((await runJev(executor, scoreOnly)).status).toBe("success");
+    expect((await runSystemOne(executor, scoreOnly)).status).toBe("success");
   });
 
   test("rejects malformed success bodies and missing usage or model", async () => {
@@ -597,7 +597,7 @@ describe("JevExecutor answer validation", () => {
     const { executor, calls } = makeExecutor([
       new Response("<html>gateway</html>", { status: 200 }),
     ]);
-    const result = await runJev(executor, mixedConfig());
+    const result = await runSystemOne(executor, mixedConfig());
     expect(result.status).toBe("failed");
     expect(result.error).toContain("not valid JSON");
     // A bad success body is never retried: it would repeat a paid call.
@@ -608,7 +608,7 @@ describe("JevExecutor answer validation", () => {
     const { executor, calls, sleeps } = makeExecutor([
       jsonResponse(mixedBody({ usage: undefined })),
     ]);
-    const result = await runJev(executor, mixedConfig());
+    const result = await runSystemOne(executor, mixedConfig());
     expect(result.status).toBe("failed");
     expect(calls).toHaveLength(1);
     expect(sleeps).toEqual([]);
@@ -617,13 +617,13 @@ describe("JevExecutor answer validation", () => {
 
 // ─── Transport ──────────────────────────────────────────────
 
-describe("JevExecutor transport", () => {
+describe("SystemOneDecisionExecutor transport", () => {
   test("401 and 422 make exactly one attempt", async () => {
     for (const status of [401, 422]) {
       const { executor, calls, sleeps } = makeExecutor([
         jsonResponse({ error: { code: "invalid_request", message: "state: bad" } }, status),
       ]);
-      const result = await runJev(executor, mixedConfig());
+      const result = await runSystemOne(executor, mixedConfig());
       expect(result.status).toBe("failed");
       expect(result.error).toContain(`HTTP ${status}`);
       expect(calls).toHaveLength(1);
@@ -634,7 +634,7 @@ describe("JevExecutor transport", () => {
   test("other 4xx statuses are not retried", async () => {
     for (const status of [400, 403, 404, 413]) {
       const { executor, calls } = makeExecutor([jsonResponse({}, status)]);
-      const result = await runJev(executor, mixedConfig());
+      const result = await runSystemOne(executor, mixedConfig());
       expect(result.status).toBe("failed");
       expect(calls).toHaveLength(1);
     }
@@ -648,8 +648,8 @@ describe("JevExecutor transport", () => {
         { "x-request-id": "req_422" },
       ),
     ]);
-    const result = await runJev(executor, mixedConfig());
-    expect(result.error).toBe("Jev API returned HTTP 422 (invalid_request) [request req_422]");
+    const result = await runSystemOne(executor, mixedConfig());
+    expect(result.error).toBe("SystemOne API returned HTTP 422 (invalid_request) [request req_422]");
     expect(result.error).not.toContain("blocked");
   });
 
@@ -658,7 +658,7 @@ describe("JevExecutor transport", () => {
       jsonResponse({}, 429),
       jsonResponse(mixedBody()),
     ]);
-    const result = await runJev(executor, mixedConfig());
+    const result = await runSystemOne(executor, mixedConfig());
     expect(result.status).toBe("success");
     expect(calls).toHaveLength(2);
     expect(sleeps).toEqual([500]);
@@ -668,7 +668,7 @@ describe("JevExecutor transport", () => {
 
   test("529 exhausts maxRetries with exponential, jittered waits", async () => {
     const { executor, calls, sleeps } = makeExecutor([jsonResponse({}, 529)], { random: () => 1 });
-    const result = await runJev(executor, mixedConfig({ maxRetries: 2 }));
+    const result = await runSystemOne(executor, mixedConfig({ maxRetries: 2 }));
     expect(result.status).toBe("failed");
     expect(result.error).toContain("HTTP 529");
     expect(result.error).toContain("after 3 attempts");
@@ -676,13 +676,13 @@ describe("JevExecutor transport", () => {
     expect(sleeps).toEqual([500, 1000]);
 
     const lower = makeExecutor([jsonResponse({}, 529)], { random: () => 0 });
-    await runJev(lower.executor, mixedConfig({ maxRetries: 2 }));
+    await runSystemOne(lower.executor, mixedConfig({ maxRetries: 2 }));
     expect(lower.sleeps).toEqual([250, 500]);
   });
 
   test("maxRetries 0 makes a single attempt", async () => {
     const { executor, calls, sleeps } = makeExecutor([jsonResponse({}, 429)]);
-    const result = await runJev(executor, mixedConfig({ maxRetries: 0 }));
+    const result = await runSystemOne(executor, mixedConfig({ maxRetries: 0 }));
     expect(result.status).toBe("failed");
     expect(calls).toHaveLength(1);
     expect(sleeps).toEqual([]);
@@ -695,7 +695,7 @@ describe("JevExecutor transport", () => {
       new TypeError("fetch failed"),
     ]) {
       const { executor, calls } = makeExecutor([first, jsonResponse(mixedBody())]);
-      const result = await runJev(executor, mixedConfig());
+      const result = await runSystemOne(executor, mixedConfig());
       expect(result.status).toBe("success");
       expect(calls).toHaveLength(2);
     }
@@ -706,8 +706,8 @@ describe("JevExecutor transport", () => {
       code: "ECONNRESET",
     });
     const { executor } = makeExecutor([error], { random: () => 1 });
-    const result = await runJev(executor, mixedConfig({ maxRetries: 0 }));
-    expect(result.error).toBe("Jev request failed: network error (ECONNRESET)");
+    const result = await runSystemOne(executor, mixedConfig({ maxRetries: 0 }));
+    expect(result.error).toBe("SystemOne request failed: network error (ECONNRESET)");
     expect(result.error).not.toContain(API_KEY);
   });
 
@@ -716,7 +716,7 @@ describe("JevExecutor transport", () => {
       jsonResponse({}, 429, { "retry-after": "2" }),
       jsonResponse(mixedBody()),
     ]);
-    const result = await runJev(executor, mixedConfig());
+    const result = await runSystemOne(executor, mixedConfig());
     expect(result.status).toBe("success");
     expect(sleeps).toEqual([2000]);
   });
@@ -730,7 +730,7 @@ describe("JevExecutor transport", () => {
       ],
       { now: () => now },
     );
-    const result = await runJev(executor, mixedConfig());
+    const result = await runSystemOne(executor, mixedConfig());
     expect(result.status).toBe("success");
     expect(sleeps).toEqual([3000]);
   });
@@ -739,7 +739,7 @@ describe("JevExecutor transport", () => {
     const { executor, calls, sleeps } = makeExecutor([
       jsonResponse({}, 429, { "retry-after": "120" }),
     ]);
-    const result = await runJev(executor, mixedConfig({ timeoutMs: 30_000 }));
+    const result = await runSystemOne(executor, mixedConfig({ timeoutMs: 30_000 }));
     expect(result.status).toBe("failed");
     expect(result.error).toContain("HTTP 429");
     expect(result.error).toContain("does not fit");
@@ -751,11 +751,11 @@ describe("JevExecutor transport", () => {
     const { executor, calls } = makeExecutor([
       new Response(null, { status: 302, headers: { location: "https://evil.example/steal" } }),
     ]);
-    const result = await runJev(executor, mixedConfig());
+    const result = await runSystemOne(executor, mixedConfig());
     expect(result.status).toBe("failed");
     expect(result.error).toContain("redirect");
     expect(calls).toHaveLength(1);
-    expect(calls.every((call) => call.url === JEV_ENDPOINT)).toBe(true);
+    expect(calls.every((call) => call.url === SYSTEM_ONE_ENDPOINT)).toBe(true);
   });
 
   test("timeout aborts the in-flight request", async () => {
@@ -770,7 +770,7 @@ describe("JevExecutor transport", () => {
         }),
     ]);
     const started = Date.now();
-    const result = await runJev(executor, mixedConfig({ timeoutMs: 1_000 }));
+    const result = await runSystemOne(executor, mixedConfig({ timeoutMs: 1_000 }));
     expect(result.status).toBe("failed");
     expect(result.error).toContain("1000ms time budget");
     expect(aborted).toBe(true);
@@ -785,7 +785,7 @@ describe("JevExecutor transport", () => {
         new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve())),
     });
     const started = Date.now();
-    const result = await runJev(executor, mixedConfig({ timeoutMs: 1_000 }));
+    const result = await runSystemOne(executor, mixedConfig({ timeoutMs: 1_000 }));
     expect(result.status).toBe("failed");
     expect(result.error).toContain("time budget");
     expect(Date.now() - started).toBeLessThan(1_000);
@@ -795,7 +795,7 @@ describe("JevExecutor transport", () => {
 
 // ─── Credentials ────────────────────────────────────────────
 
-describe("JevExecutor credentials", () => {
+describe("SystemOneDecisionExecutor credentials", () => {
   test("reads only the global TYPESAFE_API_KEY swarm config row", async () => {
     await upsertSwarmConfig({
       scope: "global",
@@ -810,8 +810,8 @@ describe("JevExecutor credentials", () => {
       value: "agent-scoped-key-must-not-be-used",
     });
     const { calls, transport } = makeTransport([jsonResponse(mixedBody())]);
-    const executor = new JevExecutor(deps, { fetch: transport });
-    const result = await runJev(executor, mixedConfig());
+    const executor = new SystemOneDecisionExecutor(deps, { fetch: transport });
+    const result = await runSystemOne(executor, mixedConfig());
 
     expect(result.status).toBe("success");
     expect((calls[0]?.init.headers as Record<string, string>).authorization).toBe(
@@ -827,14 +827,14 @@ describe("JevExecutor credentials", () => {
       async () => "bad\nkey",
     ]) {
       const { executor, calls } = makeExecutor([jsonResponse(mixedBody())], { getApiKey: lookup });
-      const result = await runJev(executor, mixedConfig());
+      const result = await runSystemOne(executor, mixedConfig());
       expect(result.status).toBe("failed");
       expect(result.error).toContain("TYPESAFE_API_KEY");
       expect(calls).toHaveLength(0);
     }
 
     const { calls, transport } = makeTransport([jsonResponse(mixedBody())]);
-    const noRow = await runJev(new JevExecutor(deps, { fetch: transport }), mixedConfig());
+    const noRow = await runSystemOne(new SystemOneDecisionExecutor(deps, { fetch: transport }), mixedConfig());
     expect(noRow.status).toBe("failed");
     expect(noRow.error).toContain("not configured");
     expect(calls).toHaveLength(0);
@@ -846,7 +846,7 @@ describe("JevExecutor credentials", () => {
         throw new Error("Failed to decrypt config 'TYPESAFE_API_KEY' (id=row-1)");
       },
     });
-    const result = await runJev(executor, mixedConfig());
+    const result = await runSystemOne(executor, mixedConfig());
     expect(result.status).toBe("failed");
     expect(result.error).toBe("Could not read TYPESAFE_API_KEY from swarm config");
   });
@@ -858,24 +858,24 @@ describe("JevExecutor credentials", () => {
         random: () => 1,
       },
     );
-    const failed = await runJev(echoed.executor, mixedConfig({ maxRetries: 1 }));
+    const failed = await runSystemOne(echoed.executor, mixedConfig({ maxRetries: 1 }));
     expect(failed.status).toBe("failed");
     expect(JSON.stringify(failed)).not.toContain(API_KEY);
 
     const ok = makeExecutor([jsonResponse(mixedBody())]);
-    const succeeded = await runJev(ok.executor, mixedConfig());
+    const succeeded = await runSystemOne(ok.executor, mixedConfig());
     expect(JSON.stringify(succeeded)).not.toContain(API_KEY);
   });
 });
 
 // ─── Registry, discovery, authoring ─────────────────────────
 
-describe("jev registration and authoring", () => {
+describe("system-one-decision registration and authoring", () => {
   test("registers as an instant executor and derives discovery JSON Schemas", () => {
     const registry = createExecutorRegistry(deps);
-    expect(registry.has("jev")).toBe(true);
-    const info = registry.describe("jev");
-    expect(info.type).toBe("jev");
+    expect(registry.has("system-one-decision")).toBe(true);
+    const info = registry.describe("system-one-decision");
+    expect(info.type).toBe("system-one-decision");
     expect(info.mode).toBe("instant");
     // The refinements and the discriminated union must survive JSON Schema conversion.
     const config = info.configSchema as { required?: string[] };
@@ -887,7 +887,7 @@ describe("jev registration and authoring", () => {
 
   const qualifyNode = (overrides: Partial<WorkflowNode> = {}): WorkflowNode => ({
     id: "qualify",
-    type: "jev",
+    type: "system-one-decision",
     inputs: { lead: "trigger.lead" },
     config: mixedConfig({ state: "{{lead}}" }),
     ...overrides,
@@ -934,7 +934,7 @@ describe("jev registration and authoring", () => {
     expect(result.errors.join("\n")).toContain("config.questions must be an object");
   });
 
-  test("rejects an engine retry policy or a validation retry on a jev node", () => {
+  test("rejects an engine retry policy or a validation retry on a system-one-decision node", () => {
     const withRetry = validate(
       qualifyNode({ retry: { maxRetries: 2, strategy: "static", baseDelayMs: 0, maxDelayMs: 0 } }),
     );
@@ -960,7 +960,7 @@ describe("jev registration and authoring", () => {
     expect(zeroRetries).toEqual({ valid: true, errors: [] });
   });
 
-  test("the retry rule applies to jev nodes only", () => {
+  test("the retry rule applies to system-one-decision nodes only", () => {
     const node: WorkflowNode = {
       id: "x",
       type: "property-match",
@@ -973,9 +973,9 @@ describe("jev registration and authoring", () => {
 
 // ─── Interpolation ──────────────────────────────────────────
 
-describe("jev interpolation", () => {
+describe("system-one-decision interpolation", () => {
   const node = (config: Record<string, unknown>) => ({
-    type: "jev",
+    type: "system-one-decision",
     config,
     inputs: {},
   });
@@ -1028,7 +1028,7 @@ describe("jev interpolation", () => {
     );
   });
 
-  test("unresolved tokens anywhere in a jev config are strict", () => {
+  test("unresolved tokens anywhere in a system-one-decision config are strict", () => {
     const result = interpolateNodeConfig(
       node({
         model: "{{model}}",
@@ -1068,9 +1068,9 @@ class MarkerExecutor extends BaseExecutor<
   }
 }
 
-function engineRegistry(jev: JevExecutor): ExecutorRegistry {
+function engineRegistry(decision: SystemOneDecisionExecutor): ExecutorRegistry {
   const registry = new ExecutorRegistry();
-  registry.register(jev);
+  registry.register(decision);
   registry.register(new PropertyMatchExecutor(deps));
   registry.register(new MarkerExecutor(deps));
   return registry;
@@ -1089,7 +1089,7 @@ const gatedDefinition = (qualify: Partial<WorkflowNode> = {}): WorkflowDefinitio
   nodes: [
     {
       id: "qualify",
-      type: "jev",
+      type: "system-one-decision",
       inputs: { lead: "trigger.lead" },
       config: mixedConfig({ state: "{{lead}}" }),
       next: "gate",
@@ -1111,13 +1111,13 @@ const gatedDefinition = (qualify: Partial<WorkflowNode> = {}): WorkflowDefinitio
   ],
 });
 
-describe("jev in the workflow engine", () => {
+describe("system-one-decision in the workflow engine", () => {
   test("downstream aliases route on the answer, including to human review", async () => {
     const trigger = { lead: { name: "Ada", message: "Need workflow tooling now" } };
 
     const confident = makeTransport([jsonResponse(mixedBody())]);
     const registryA = engineRegistry(
-      new JevExecutor(deps, { fetch: confident.transport, getApiKey: async () => API_KEY }),
+      new SystemOneDecisionExecutor(deps, { fetch: confident.transport, getApiKey: async () => API_KEY }),
     );
     const runA = await startWorkflowExecution(
       await makeWorkflow(gatedDefinition()),
@@ -1146,7 +1146,7 @@ describe("jev in the workflow engine", () => {
       ),
     ]);
     const registryB = engineRegistry(
-      new JevExecutor(deps, { fetch: unsure.transport, getApiKey: async () => API_KEY }),
+      new SystemOneDecisionExecutor(deps, { fetch: unsure.transport, getApiKey: async () => API_KEY }),
     );
     const runB = await startWorkflowExecution(
       await makeWorkflow(gatedDefinition()),
@@ -1161,7 +1161,7 @@ describe("jev in the workflow engine", () => {
   test("an unresolved reference stops the step before any request is sent", async () => {
     const { calls, transport } = makeTransport([jsonResponse(mixedBody())]);
     const registry = engineRegistry(
-      new JevExecutor(deps, { fetch: transport, getApiKey: async () => API_KEY }),
+      new SystemOneDecisionExecutor(deps, { fetch: transport, getApiKey: async () => API_KEY }),
     );
     // `lead` is declared, but the trigger has no `lead`, so {{lead}} cannot resolve.
     const runId = await startWorkflowExecution(
@@ -1184,7 +1184,7 @@ describe("jev in the workflow engine", () => {
   test("a missing alias in a question description stops the step before any request", async () => {
     const { calls, transport } = makeTransport([jsonResponse(mixedBody())]);
     const registry = engineRegistry(
-      new JevExecutor(deps, { fetch: transport, getApiKey: async () => API_KEY }),
+      new SystemOneDecisionExecutor(deps, { fetch: transport, getApiKey: async () => API_KEY }),
     );
     const definition = gatedDefinition({
       inputs: { lead: "trigger.lead" },
@@ -1209,7 +1209,7 @@ describe("jev in the workflow engine", () => {
   test("a stored definition with an engine retry policy fails before dispatch", async () => {
     const { calls, transport } = makeTransport([jsonResponse({}, 500)]);
     const registry = engineRegistry(
-      new JevExecutor(deps, { fetch: transport, getApiKey: async () => API_KEY }),
+      new SystemOneDecisionExecutor(deps, { fetch: transport, getApiKey: async () => API_KEY }),
     );
     const definition = gatedDefinition({
       retry: { maxRetries: 3, strategy: "static", baseDelayMs: 0, maxDelayMs: 0 },
@@ -1235,7 +1235,7 @@ describe("jev in the workflow engine", () => {
       jsonResponse({ error: { code: "unauthorized" } }, 401),
     ]);
     const registry = engineRegistry(
-      new JevExecutor(deps, { fetch: transport, getApiKey: async () => API_KEY }),
+      new SystemOneDecisionExecutor(deps, { fetch: transport, getApiKey: async () => API_KEY }),
     );
     const runId = await startWorkflowExecution(
       await makeWorkflow(gatedDefinition()),
@@ -1273,7 +1273,7 @@ const openRouterBody = () =>
 
 function makeOpenRouterExecutor(steps: TransportStep[], env: NodeJS.ProcessEnv = {}) {
   const { calls, transport } = makeTransport(steps);
-  const executor = new JevExecutor(deps, {
+  const executor = new SystemOneDecisionExecutor(deps, {
     fetch: transport,
     env: { OPENROUTER_API_KEY: OPENROUTER_KEY, ...env },
     sleep: async () => {},
@@ -1282,14 +1282,14 @@ function makeOpenRouterExecutor(steps: TransportStep[], env: NodeJS.ProcessEnv =
   return { executor, calls };
 }
 
-describe("jev providers", () => {
+describe("system-one-decision providers", () => {
   test("a definition can name only a listed provider and carries no endpoint, header, or key", () => {
     for (const evil of ["https://evil.example", "typesafe.ai", "", "constructor"]) {
-      expect(JevConfigSchema.safeParse(mixedConfig({ provider: evil })).success).toBe(false);
+      expect(SystemOneDecisionConfigSchema.safeParse(mixedConfig({ provider: evil })).success).toBe(false);
     }
     // A definition cannot carry an endpoint, header, or key.
     for (const field of ["endpoint", "url", "headers", "apiKey"]) {
-      expect(JevConfigSchema.safeParse(mixedConfig({ [field]: "x" })).success).toBe(false);
+      expect(SystemOneDecisionConfigSchema.safeParse(mixedConfig({ [field]: "x" })).success).toBe(false);
     }
   });
 
@@ -1297,7 +1297,7 @@ describe("jev providers", () => {
     const registry = createExecutorRegistry(deps);
     const node = (provider: string): WorkflowNode => ({
       id: "qualify",
-      type: "jev",
+      type: "system-one-decision",
       inputs: { p: "trigger.p" },
       config: mixedConfig({ provider }),
     });
@@ -1309,10 +1309,10 @@ describe("jev providers", () => {
 
   test("typesafe sends to the TypeSafe host with the TypeSafe default model and no provider field", async () => {
     const { executor, calls } = makeExecutor([jsonResponse(mixedBody())]);
-    const result = await runJev(executor, mixedConfig({ model: undefined }));
+    const result = await runSystemOne(executor, mixedConfig({ model: undefined }));
 
     expect(result.status).toBe("success");
-    expect(calls[0]?.url).toBe(JEV_ENDPOINT);
+    expect(calls[0]?.url).toBe(SYSTEM_ONE_ENDPOINT);
     expect(calls[0]?.body.model).toBe("jev-latest");
     expect(Object.keys(calls[0]?.body ?? {}).sort()).toEqual(["model", "questions", "state"]);
   });
@@ -1320,7 +1320,7 @@ describe("jev providers", () => {
   test("openrouter sends the same request to the decisions endpoint with the OpenRouter key", async () => {
     const { executor, calls } = makeOpenRouterExecutor([jsonResponse(openRouterBody())]);
     const config = mixedConfig({ provider: "openrouter", model: undefined });
-    const result = await runJev(executor, config);
+    const result = await runSystemOne(executor, config);
 
     expect(result.status).toBe("success");
     expect(calls).toHaveLength(1);
@@ -1346,7 +1346,7 @@ describe("jev providers", () => {
 
   test("openrouter passes an explicit model slug through", async () => {
     const { executor, calls } = makeOpenRouterExecutor([jsonResponse(openRouterBody())]);
-    await runJev(executor, mixedConfig({ provider: "openrouter", model: "typesafe/jev-1.13" }));
+    await runSystemOne(executor, mixedConfig({ provider: "openrouter", model: "typesafe/jev-1.13" }));
     expect(calls[0]?.body.model).toBe("typesafe/jev-1.13");
   });
 
@@ -1354,18 +1354,18 @@ describe("jev providers", () => {
     const { executor } = makeOpenRouterExecutor([
       jsonResponse(withAnswers({ fit: noulAnswer, authority: choiceAnswer })),
     ]);
-    const result = await runJev(executor, mixedConfig({ provider: "openrouter" }));
+    const result = await runSystemOne(executor, mixedConfig({ provider: "openrouter" }));
     expect(result.status).toBe("failed");
     expect(result.error).toContain('missing the answer for question "urgency"');
   });
 
   test("openrouter never falls through to OPENAI_API_KEY", async () => {
     const { calls, transport } = makeTransport([jsonResponse(openRouterBody())]);
-    const executor = new JevExecutor(deps, {
+    const executor = new SystemOneDecisionExecutor(deps, {
       fetch: transport,
       env: { OPENAI_API_KEY: "sk-openai-example-0123456789" },
     });
-    const result = await runJev(executor, mixedConfig({ provider: "openrouter" }));
+    const result = await runSystemOne(executor, mixedConfig({ provider: "openrouter" }));
 
     expect(result.status).toBe("failed");
     expect(result.error).toContain("OPENROUTER_API_KEY is not configured");
@@ -1377,7 +1377,7 @@ describe("jev providers", () => {
     const { executor, calls } = makeOpenRouterExecutor([jsonResponse(openRouterBody())], {
       OPENROUTER_BASE_URL: "https://gateway.example.test/proxy/v1",
     });
-    const result = await runJev(executor, mixedConfig({ provider: "openrouter" }));
+    const result = await runSystemOne(executor, mixedConfig({ provider: "openrouter" }));
 
     expect(result.status).toBe("failed");
     expect(result.error).toContain("OPENROUTER_BASE_URL");
@@ -1396,13 +1396,13 @@ describe("jev providers", () => {
       isSecret: true,
     });
     const { calls, transport } = makeTransport([jsonResponse(mixedBody())]);
-    const executor = new JevExecutor(deps, { fetch: transport, env: {} });
+    const executor = new SystemOneDecisionExecutor(deps, { fetch: transport, env: {} });
 
-    const viaOpenRouter = await runJev(executor, mixedConfig({ provider: "openrouter" }));
+    const viaOpenRouter = await runSystemOne(executor, mixedConfig({ provider: "openrouter" }));
     expect(viaOpenRouter.error).toContain("OPENROUTER_API_KEY");
     expect(calls).toHaveLength(0);
 
-    const viaTypeSafe = await runJev(executor, mixedConfig({ provider: "typesafe" }));
+    const viaTypeSafe = await runSystemOne(executor, mixedConfig({ provider: "typesafe" }));
     expect(viaTypeSafe.status).toBe("success");
     expect((calls[0]?.init.headers as Record<string, string>).authorization).toBe(
       `Bearer ${API_KEY}`,
@@ -1413,11 +1413,11 @@ describe("jev providers", () => {
     const { calls: orCalls, transport: orTransport } = makeTransport([
       jsonResponse(openRouterBody()),
     ]);
-    const orExecutor = new JevExecutor(deps, {
+    const orExecutor = new SystemOneDecisionExecutor(deps, {
       fetch: orTransport,
       env: { OPENROUTER_API_KEY: OPENROUTER_KEY },
     });
-    const viaTypeSafeMissing = await runJev(orExecutor, mixedConfig({ provider: "typesafe" }));
+    const viaTypeSafeMissing = await runSystemOne(orExecutor, mixedConfig({ provider: "typesafe" }));
     expect(viaTypeSafeMissing.error).toContain("TYPESAFE_API_KEY is not configured");
     expect(orCalls).toHaveLength(0);
   });
@@ -1431,7 +1431,7 @@ describe("a key the host rejects", () => {
       const { executor, calls, sleeps } = makeExecutor([
         jsonResponse({ detail: { error_type: "authentication_error", message: API_KEY } }, status),
       ]);
-      const result = await runJev(executor, mixedConfig({ maxRetries: 3 }));
+      const result = await runSystemOne(executor, mixedConfig({ maxRetries: 3 }));
 
       expect(result.status).toBe("failed");
       expect(result.error).toContain(`TYPESAFE_API_KEY was rejected by TypeSafe (HTTP ${status}`);
@@ -1448,7 +1448,7 @@ describe("a key the host rejects", () => {
     const { executor, calls } = makeOpenRouterExecutor([
       jsonResponse({ error: { message: OPENROUTER_KEY, code: 401 } }, 401),
     ]);
-    const result = await runJev(executor, mixedConfig({ provider: "openrouter", maxRetries: 3 }));
+    const result = await runSystemOne(executor, mixedConfig({ provider: "openrouter", maxRetries: 3 }));
 
     expect(result.status).toBe("failed");
     expect(result.error).toContain("OPENROUTER_API_KEY was rejected by OpenRouter (HTTP 401");
@@ -1460,8 +1460,8 @@ describe("a key the host rejects", () => {
   test("other failures keep the generic message, not the key-rejected one", async () => {
     for (const status of [400, 402, 422, 500]) {
       const { executor } = makeExecutor([jsonResponse({ error: { code: "boom" } }, status)]);
-      const result = await runJev(executor, mixedConfig({ maxRetries: 0 }));
-      expect(result.error).toContain(`Jev API returned HTTP ${status}`);
+      const result = await runSystemOne(executor, mixedConfig({ maxRetries: 0 }));
+      expect(result.error).toContain(`SystemOne API returned HTTP ${status}`);
       expect(result.error).not.toContain("was rejected");
     }
   });
@@ -1469,7 +1469,7 @@ describe("a key the host rejects", () => {
 
 // ─── Readiness (before first use) ───────────────────────────
 
-describe("jev readiness before first use", () => {
+describe("system-one-decision readiness before first use", () => {
   test("no problem when the key is present", async () => {
     const { executor } = makeExecutor([jsonResponse(mixedBody())]);
     expect(await executor.checkReadiness([{ id: "a", config: mixedConfig() }])).toEqual([]);
@@ -1477,7 +1477,7 @@ describe("jev readiness before first use", () => {
 
   test("names the exact key for the provider each node uses", async () => {
     const { calls, transport } = makeTransport([jsonResponse(mixedBody())]);
-    const executor = new JevExecutor(deps, { fetch: transport, env: {} });
+    const executor = new SystemOneDecisionExecutor(deps, { fetch: transport, env: {} });
     const problems = await executor.checkReadiness([
       { id: "a", config: mixedConfig() },
       { id: "b", config: mixedConfig({ provider: "openrouter" }) },
@@ -1520,8 +1520,8 @@ describe("jev readiness before first use", () => {
     expect(problems[0]?.message).toBe("Could not read TYPESAFE_API_KEY from swarm config");
   });
 
-  test("a workflow with no jev node is ready without asking anyone", async () => {
-    const registry = engineRegistry(new JevExecutor(deps, { getApiKey: async () => null }));
+  test("a workflow with no system-one-decision node is ready without asking anyone", async () => {
+    const registry = engineRegistry(new SystemOneDecisionExecutor(deps, { getApiKey: async () => null }));
     expect(
       await findWorkflowReadinessProblems(
         { nodes: [{ id: "m", type: "marker", config: { label: "x" } }] },
@@ -1531,16 +1531,16 @@ describe("jev readiness before first use", () => {
   });
 
   test("a save warning names the key, where to set it, the node, and the consequence", async () => {
-    const registry = engineRegistry(new JevExecutor(deps, { getApiKey: async () => null }));
+    const registry = engineRegistry(new SystemOneDecisionExecutor(deps, { getApiKey: async () => null }));
     const warnings = await workflowSaveWarnings(gatedDefinition(), registry);
 
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain("TYPESAFE_API_KEY is not configured");
     expect(warnings[0]).toContain("Secrets page");
-    expect(warnings[0]).toContain('jev node "qualify"');
+    expect(warnings[0]).toContain('system-one-decision node "qualify"');
     expect(warnings[0]).toContain("fail before any node executes");
 
-    const ready = engineRegistry(new JevExecutor(deps, { getApiKey: async () => API_KEY }));
+    const ready = engineRegistry(new SystemOneDecisionExecutor(deps, { getApiKey: async () => API_KEY }));
     expect(await workflowSaveWarnings(gatedDefinition(), ready)).toEqual([]);
   });
 
@@ -1564,26 +1564,26 @@ describe("jev readiness before first use", () => {
 // ─── Run start ──────────────────────────────────────────────
 
 /** A marker runs first, so a run that started would leave a step behind. */
-const markerThenJev = (jev: Partial<WorkflowNode> = {}): WorkflowDefinition => ({
+const markerThenSystemOne = (overrides: Partial<WorkflowNode> = {}): WorkflowDefinition => ({
   nodes: [
     { id: "before", type: "marker", config: { label: "side effect" }, next: "qualify" },
     {
       id: "qualify",
-      type: "jev",
+      type: "system-one-decision",
       config: mixedConfig(),
       next: "after",
-      ...jev,
+      ...overrides,
     },
     { id: "after", type: "marker", config: { label: "done" } },
   ],
 });
 
-describe("run start with a jev node", () => {
+describe("run start with a system-one-decision node", () => {
   test("a missing key fails the run before any node executes", async () => {
     // Default key lookup (the swarm config row) with no row present.
     const { calls, transport } = makeTransport([jsonResponse(mixedBody())]);
-    const registry = engineRegistry(new JevExecutor(deps, { fetch: transport, env: {} }));
-    const runId = await startWorkflowExecution(await makeWorkflow(markerThenJev()), {}, registry);
+    const registry = engineRegistry(new SystemOneDecisionExecutor(deps, { fetch: transport, env: {} }));
+    const runId = await startWorkflowExecution(await makeWorkflow(markerThenSystemOne()), {}, registry);
 
     const run = await getWorkflowRun(runId);
     expect(run?.status).toBe("failed");
@@ -1591,8 +1591,8 @@ describe("run start with a jev node", () => {
     expect(run?.error).toContain("Run not started, no node executed");
     expect(run?.error).toContain("TYPESAFE_API_KEY is not configured");
     expect(run?.error).toContain("Secrets page");
-    expect(run?.error).toContain('jev node "qualify"');
-    // Not even the marker ahead of the jev node ran, and nothing was sent.
+    expect(run?.error).toContain('system-one-decision node "qualify"');
+    // Not even the marker ahead of the system-one-decision node ran, and nothing was sent.
     expect(await getWorkflowRunStepsByRunId(runId)).toHaveLength(0);
     expect(calls).toHaveLength(0);
   });
@@ -1606,9 +1606,9 @@ describe("run start with a jev node", () => {
       value: API_KEY,
       isSecret: true,
     });
-    const registry = engineRegistry(new JevExecutor(deps, { fetch: transport, env: {} }));
+    const registry = engineRegistry(new SystemOneDecisionExecutor(deps, { fetch: transport, env: {} }));
     const runId = await startWorkflowExecution(
-      await makeWorkflow(markerThenJev({ config: mixedConfig({ provider: "openrouter" }) })),
+      await makeWorkflow(markerThenSystemOne({ config: mixedConfig({ provider: "openrouter" }) })),
       {},
       registry,
     );
@@ -1629,8 +1629,8 @@ describe("run start with a jev node", () => {
       isSecret: true,
     });
     const { calls, transport } = makeTransport([jsonResponse(mixedBody())]);
-    const registry = engineRegistry(new JevExecutor(deps, { fetch: transport, env: {} }));
-    const runId = await startWorkflowExecution(await makeWorkflow(markerThenJev()), {}, registry);
+    const registry = engineRegistry(new SystemOneDecisionExecutor(deps, { fetch: transport, env: {} }));
+    const runId = await startWorkflowExecution(await makeWorkflow(markerThenSystemOne()), {}, registry);
 
     expect((await getWorkflowRun(runId))?.status).toBe("completed");
     expect((await getWorkflowRunStepsByRunId(runId)).map((s) => s.nodeId).sort()).toEqual([
@@ -1641,8 +1641,8 @@ describe("run start with a jev node", () => {
     expect(calls).toHaveLength(1);
   });
 
-  test("a definition without a jev node starts whether or not any key exists", async () => {
-    const registry = engineRegistry(new JevExecutor(deps, { env: {} }));
+  test("a definition without a system-one-decision node starts whether or not any key exists", async () => {
+    const registry = engineRegistry(new SystemOneDecisionExecutor(deps, { env: {} }));
     const runId = await startWorkflowExecution(
       await makeWorkflow({ nodes: [{ id: "only", type: "marker", config: { label: "x" } }] }),
       {},
@@ -1664,8 +1664,8 @@ describe("run start with a jev node", () => {
       jsonResponse({ detail: { error_type: "authentication_error" } }, 401),
       jsonResponse(mixedBody()),
     ]);
-    const registry = engineRegistry(new JevExecutor(deps, { fetch: transport, env: {} }));
-    const runId = await startWorkflowExecution(await makeWorkflow(markerThenJev()), {}, registry);
+    const registry = engineRegistry(new SystemOneDecisionExecutor(deps, { fetch: transport, env: {} }));
+    const runId = await startWorkflowExecution(await makeWorkflow(markerThenSystemOne()), {}, registry);
 
     // Distinct rejected-key error on the step; the marker ahead of it did run.
     const failedRun = await getWorkflowRun(runId);
@@ -1709,7 +1709,7 @@ describe("the workflow-iterate key probe", () => {
       jsonResponse(withAnswers({ ping: noulAnswer }, { model: "jev-1.13.0" })),
     ]);
     const node = definition.nodes[0] as WorkflowNode;
-    const result = await new JevExecutor(deps, {
+    const result = await new SystemOneDecisionExecutor(deps, {
       fetch: transport,
       getApiKey: async () => API_KEY,
     }).run({ config: node.config, context: {}, meta: meta("ping") });

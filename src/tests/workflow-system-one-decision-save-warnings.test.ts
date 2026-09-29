@@ -19,7 +19,7 @@ import type { Workflow, WorkflowDefinition } from "../types";
 import { initWorkflows, stopRetryPoller } from "../workflows";
 import { listenOnFreePort } from "./test-net";
 
-const TEST_DB_PATH = "./test-workflow-jev-save-warnings.sqlite";
+const TEST_DB_PATH = "./test-workflow-system-one-decision-save-warnings.sqlite";
 const KEY_VALUE = "tsk_example-save-warning-key.0123456789";
 
 // ─── MCP harness (same shape as workflow-mcp-trigger-schema.test.ts) ─────────
@@ -35,7 +35,7 @@ type ToolResult = {
 };
 
 function buildTools() {
-  const server = new McpServer({ name: "test-workflow-jev-save-warnings", version: "1.0.0" });
+  const server = new McpServer({ name: "test-workflow-system-one-decision-save-warnings", version: "1.0.0" });
   registerCreateWorkflowTool(server);
   registerUpdateWorkflowTool(server);
   registerPatchWorkflowTool(server);
@@ -94,7 +94,7 @@ async function http(method: string, path: string, body?: unknown) {
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
-const jevConfig = (overrides: Record<string, unknown> = {}) => ({
+const systemOneConfig = (overrides: Record<string, unknown> = {}) => ({
   state: "{{lead}}",
   questions: { fit: { type: "noul", instructions: "Is this a real lead?" } },
   returns: { fit: { type: "noul" } },
@@ -105,14 +105,14 @@ const plainDefinition = (): WorkflowDefinition => ({
   nodes: [{ id: "step", type: "agent-task", config: { template: "Hello" } }],
 });
 
-const jevDefinition = (config: Record<string, unknown> = {}): WorkflowDefinition => ({
+const systemOneDefinition = (config: Record<string, unknown> = {}): WorkflowDefinition => ({
   nodes: [
-    { id: "qualify", type: "jev", inputs: { lead: "trigger.lead" }, config: jevConfig(config) },
+    { id: "qualify", type: "system-one-decision", inputs: { lead: "trigger.lead" }, config: systemOneConfig(config) },
   ],
 });
 
 let nameCounter = 0;
-const uniqueName = () => `jev-save-${++nameCounter}-${Date.now()}`;
+const uniqueName = () => `system-one-save-${++nameCounter}-${Date.now()}`;
 
 const setTypeSafeKey = () =>
   upsertSwarmConfig({
@@ -124,7 +124,7 @@ const setTypeSafeKey = () =>
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
-describe("saving a workflow whose jev node has no working key", () => {
+describe("saving a workflow whose system-one-decision node has no working key", () => {
   let tools: ReturnType<typeof buildTools>;
   let server: Server;
   let savedOpenRouterKey: string | undefined;
@@ -160,7 +160,7 @@ describe("saving a workflow whose jev node has no working key", () => {
   // definition can be saved before a human has supplied the key.
 
   test("create-workflow saves and warns: names the key, where to set it, the node", async () => {
-    const result = await tools.create({ name: uniqueName(), definition: jevDefinition() });
+    const result = await tools.create({ name: uniqueName(), definition: systemOneDefinition() });
     const out = result.structuredContent;
 
     expect(out?.success).toBe(true);
@@ -172,14 +172,14 @@ describe("saving a workflow whose jev node has no working key", () => {
       expect(text).toContain("Secrets page");
     }
     expect(out?.message).toContain("Warning:");
-    expect(out?.warnings?.[0]).toContain('jev node "qualify"');
+    expect(out?.warnings?.[0]).toContain('system-one-decision node "qualify"');
     expect(JSON.stringify(result)).not.toContain(KEY_VALUE);
   });
 
   test("the warning names the key of the node's provider", async () => {
     const result = await tools.create({
       name: uniqueName(),
-      definition: jevDefinition({ provider: "openrouter" }),
+      definition: systemOneDefinition({ provider: "openrouter" }),
     });
     expect(result.structuredContent?.warnings?.[0]).toContain(
       "OPENROUTER_API_KEY is not configured",
@@ -187,32 +187,32 @@ describe("saving a workflow whose jev node has no working key", () => {
     expect(result.structuredContent?.warnings?.[0]).not.toContain("TYPESAFE_API_KEY");
   });
 
-  test("no warning once the key is configured, or when there is no jev node", async () => {
+  test("no warning once the key is configured, or when there is no system-one-decision node", async () => {
     const plain = await tools.create({ name: uniqueName(), definition: plainDefinition() });
     expect(plain.structuredContent?.success).toBe(true);
     expect(plain.structuredContent?.warnings).toBeUndefined();
     expect(plain.structuredContent?.message).not.toContain("Warning");
 
     await setTypeSafeKey();
-    const keyed = await tools.create({ name: uniqueName(), definition: jevDefinition() });
+    const keyed = await tools.create({ name: uniqueName(), definition: systemOneDefinition() });
     expect(keyed.structuredContent?.success).toBe(true);
     expect(keyed.structuredContent?.warnings).toBeUndefined();
 
     process.env.OPENROUTER_API_KEY = "sk-or-example-save-warning-key-0123456789";
     const openrouter = await tools.create({
       name: uniqueName(),
-      definition: jevDefinition({ provider: "openrouter" }),
+      definition: systemOneDefinition({ provider: "openrouter" }),
     });
     expect(openrouter.structuredContent?.warnings).toBeUndefined();
   });
 
-  test("update-workflow warns when the new definition adds a jev node, and on a rename", async () => {
+  test("update-workflow warns when the new definition adds a system-one-decision node, and on a rename", async () => {
     const created = await tools.create({ name: uniqueName(), definition: plainDefinition() });
     const id = created.structuredContent?.workflow?.id as string;
 
-    const withJev = await tools.update({ id, definition: jevDefinition() });
-    expect(withJev.structuredContent?.success).toBe(true);
-    expect(withJev.structuredContent?.warnings?.[0]).toContain("TYPESAFE_API_KEY");
+    const withSystemOne = await tools.update({ id, definition: systemOneDefinition() });
+    expect(withSystemOne.structuredContent?.success).toBe(true);
+    expect(withSystemOne.structuredContent?.warnings?.[0]).toContain("TYPESAFE_API_KEY");
 
     // A change that does not touch the definition still tells the author what is still true.
     const renamed = await tools.update({ id, name: uniqueName() });
@@ -224,14 +224,14 @@ describe("saving a workflow whose jev node has no working key", () => {
     expect(fixed.structuredContent?.warnings).toBeUndefined();
   });
 
-  test("patch-workflow warns when a jev node is created", async () => {
+  test("patch-workflow warns when a system-one-decision node is created", async () => {
     const created = await tools.create({ name: uniqueName(), definition: plainDefinition() });
     const id = created.structuredContent?.workflow?.id as string;
 
     const patched = await tools.patch({
       id,
       update: [{ nodeId: "step", node: { next: "qualify" } }],
-      create: [{ id: "qualify", type: "jev", config: jevConfig(), inputs: {} }],
+      create: [{ id: "qualify", type: "system-one-decision", config: systemOneConfig(), inputs: {} }],
     });
     expect(patched.structuredContent?.success).toBe(true);
     expect(patched.structuredContent?.warnings?.[0]).toContain("TYPESAFE_API_KEY");
@@ -240,14 +240,14 @@ describe("saving a workflow whose jev node has no working key", () => {
 
   test("patch-workflow-node warns when a node is switched to another provider", async () => {
     await setTypeSafeKey();
-    const created = await tools.create({ name: uniqueName(), definition: jevDefinition() });
+    const created = await tools.create({ name: uniqueName(), definition: systemOneDefinition() });
     const id = created.structuredContent?.workflow?.id as string;
     expect(created.structuredContent?.warnings).toBeUndefined();
 
     const patched = await tools.patchNode({
       id,
       nodeId: "qualify",
-      config: jevConfig({ provider: "openrouter" }),
+      config: systemOneConfig({ provider: "openrouter" }),
     });
     expect(patched.structuredContent?.success).toBe(true);
     expect(patched.structuredContent?.warnings?.[0]).toContain("OPENROUTER_API_KEY");
@@ -257,7 +257,7 @@ describe("saving a workflow whose jev node has no working key", () => {
   test("HTTP create, update, patch, and node patch carry the same warning", async () => {
     const created = await http("POST", "/api/workflows", {
       name: uniqueName(),
-      definition: jevDefinition(),
+      definition: systemOneDefinition(),
     });
     expect(created.status).toBe(201);
     expect(created.body.warnings).toHaveLength(1);
@@ -271,13 +271,13 @@ describe("saving a workflow whose jev node has no working key", () => {
     expect(updated.body.warnings?.[0]).toContain("TYPESAFE_API_KEY");
 
     const nodePatched = await http("PATCH", `/api/workflows/${id}/nodes/qualify`, {
-      config: jevConfig({ provider: "openrouter" }),
+      config: systemOneConfig({ provider: "openrouter" }),
     });
     expect(nodePatched.status).toBe(200);
     expect(nodePatched.body.warnings?.[0]).toContain("OPENROUTER_API_KEY");
 
     const patched = await http("PATCH", `/api/workflows/${id}`, {
-      update: [{ nodeId: "qualify", node: { config: jevConfig() } }],
+      update: [{ nodeId: "qualify", node: { config: systemOneConfig() } }],
     });
     expect(patched.status).toBe(200);
     expect(patched.body.warnings?.[0]).toContain("TYPESAFE_API_KEY");
@@ -288,7 +288,7 @@ describe("saving a workflow whose jev node has no working key", () => {
     expect(clean.body.warnings).toBeUndefined();
   });
 
-  test("HTTP create without a jev node has no warnings field", async () => {
+  test("HTTP create without a system-one-decision node has no warnings field", async () => {
     const created = await http("POST", "/api/workflows", {
       name: uniqueName(),
       definition: plainDefinition(),

@@ -11,7 +11,7 @@ export interface WorkflowReadinessProblem {
 
 /**
  * Ask every executor type a definition uses whether it can run right now, e.g.
- * whether the credential a `jev` node needs is configured. Types are checked in
+ * whether the credential a `system-one-decision` node needs is configured. Types are checked in
  * first-use order, one call per type. Unregistered types are skipped (definition
  * validation reports them). A check that throws is reported as a problem rather
  * than propagated, so a broken check can never crash a save or start a run blind.

@@ -992,7 +992,7 @@ describe("createExecutorRegistry", () => {
     expect(types).toContain("code-match");
     expect(types).toContain("notify");
     expect(types).toContain("raw-llm");
-    expect(types).toContain("jev");
+    expect(types).toContain("system-one-decision");
     expect(types).toContain("script");
     expect(types).toContain("swarm-script");
     expect(types).toContain("vcs");
@@ -1011,7 +1011,7 @@ describe("createExecutorRegistry", () => {
       "code-match",
       "notify",
       "raw-llm",
-      "jev",
+      "system-one-decision",
       "script",
       "swarm-script",
       "vcs",

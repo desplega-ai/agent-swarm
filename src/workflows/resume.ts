@@ -328,7 +328,7 @@ export async function retryFailedRun(runId: string, registry: ExecutorRegistry):
   const completedNodeIds = new Set(await getCompletedStepNodeIds(runId));
 
   // A retry re-executes the failed node and everything after it. Refuse before the
-  // run is reset when a node still to run cannot run (say, a jev node with no API
+  // run is reset when a node still to run cannot run (say, a system-one-decision node with no API
   // key), so the retry does not repeat side effects only to fail again downstream.
   const notReady = await findWorkflowReadinessProblems(
     { nodes: workflow.definition.nodes.filter((node) => !completedNodeIds.has(node.id)) },

@@ -20,7 +20,7 @@ const KNOWN_EXECUTOR_TYPES = new Set([
   "script",
   "swarm-script",
   "raw-llm",
-  "jev",
+  "system-one-decision",
   "validate",
   "property-match",
   "code-match",

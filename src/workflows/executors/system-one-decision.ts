@@ -8,33 +8,33 @@ import {
   type ExecutorResult,
 } from "./base";
 import {
-  JEV_DEFAULT_PROVIDER,
-  JEV_PROVIDER_IDS,
-  JEV_PROVIDERS,
-  type JevProvider,
-  type JevProviderId,
-  jevKeyRejectedMessage,
-  jevProviderOf,
-  resolveJevCredential,
-} from "./jev-providers";
+  SYSTEM_ONE_DEFAULT_PROVIDER,
+  SYSTEM_ONE_PROVIDER_IDS,
+  SYSTEM_ONE_PROVIDERS,
+  type SystemOneProvider,
+  type SystemOneProviderId,
+  systemOneKeyRejectedMessage,
+  systemOneProviderOf,
+  resolveSystemOneCredential,
+} from "./system-one-providers";
 
 // ─── Constants ──────────────────────────────────────────────
 
-export const JEV_NODE_TYPE = "jev";
+export const SYSTEM_ONE_DECISION_NODE_TYPE = "system-one-decision";
 
 /**
  * The TypeSafe host and its credential name, kept as named exports. The set of
- * hosts a node may reach is `JEV_PROVIDERS`: no endpoint, header, or key field
+ * hosts a node may reach is `SYSTEM_ONE_PROVIDERS`: no endpoint, header, or key field
  * exists in a definition, only `provider`, an id from that list.
  */
-export const JEV_ENDPOINT = JEV_PROVIDERS.typesafe.endpoint;
-export const JEV_API_KEY_CONFIG_KEY = JEV_PROVIDERS.typesafe.keyName;
+export const SYSTEM_ONE_ENDPOINT = SYSTEM_ONE_PROVIDERS.typesafe.endpoint;
+export const SYSTEM_ONE_API_KEY_CONFIG_KEY = SYSTEM_ONE_PROVIDERS.typesafe.keyName;
 
-export const JEV_DEFAULT_TIMEOUT_MS = 30_000;
-export const JEV_MIN_TIMEOUT_MS = 1_000;
-export const JEV_MAX_TIMEOUT_MS = 300_000;
-export const JEV_DEFAULT_MAX_RETRIES = 2;
-export const JEV_MAX_RETRIES_LIMIT = 3;
+export const SYSTEM_ONE_DEFAULT_TIMEOUT_MS = 30_000;
+export const SYSTEM_ONE_MIN_TIMEOUT_MS = 1_000;
+export const SYSTEM_ONE_MAX_TIMEOUT_MS = 300_000;
+export const SYSTEM_ONE_DEFAULT_MAX_RETRIES = 2;
+export const SYSTEM_ONE_MAX_RETRIES_LIMIT = 3;
 
 /** Choice: 2-255 options, Score: 2-10 levels (TypeSafe primitive limits; 2 is our authoring floor). */
 const CHOICE_MIN_OPTIONS = 2;
@@ -57,19 +57,19 @@ const ENGINE_RETRY_DEFAULT = 3;
 // ─── Config schema ──────────────────────────────────────────
 
 /** A description slot: string, JSON object, JSON array, or null (TypeSafe "advanced structure"). */
-const JevEntrySchema = z.union([
+const SystemOneEntrySchema = z.union([
   z.string(),
   z.null(),
   z.array(z.unknown()),
   z.record(z.string(), z.unknown()),
 ]);
 
-const JevInstructionsSchema = JevEntrySchema.refine(
+const SystemOneInstructionsSchema = SystemOneEntrySchema.refine(
   (value) => value !== null && !(typeof value === "string" && value.trim() === ""),
   { message: "instructions must not be null or blank" },
 );
 
-const JevStateSchema = z.union([
+const SystemOneStateSchema = z.union([
   z.string().min(1, "state must not be empty"),
   z.array(z.string()).min(1, "state must not be an empty array"),
   z.record(z.string(), z.unknown()),
@@ -77,9 +77,9 @@ const JevStateSchema = z.union([
 
 const NoulQuestionSchema = z.strictObject({
   type: z.literal("noul"),
-  instructions: JevInstructionsSchema,
+  instructions: SystemOneInstructionsSchema,
   criteria: z
-    .strictObject({ true: JevEntrySchema.optional(), false: JevEntrySchema.optional() })
+    .strictObject({ true: SystemOneEntrySchema.optional(), false: SystemOneEntrySchema.optional() })
     .refine((criteria) => criteria.true !== undefined || criteria.false !== undefined, {
       message: "noul criteria must describe at least one of true / false",
     })
@@ -88,8 +88,8 @@ const NoulQuestionSchema = z.strictObject({
 
 const ChoiceQuestionSchema = z.strictObject({
   type: z.literal("choice"),
-  instructions: JevInstructionsSchema,
-  criteria: z.record(z.string().min(1), JevEntrySchema).refine(
+  instructions: SystemOneInstructionsSchema,
+  criteria: z.record(z.string().min(1), SystemOneEntrySchema).refine(
     (criteria) => {
       const count = Object.keys(criteria).length;
       return count >= CHOICE_MIN_OPTIONS && count <= CHOICE_MAX_OPTIONS;
@@ -102,11 +102,11 @@ const ChoiceQuestionSchema = z.strictObject({
 
 const ScoreQuestionSchema = z.strictObject({
   type: z.literal("score"),
-  instructions: JevInstructionsSchema,
-  criteria: z.array(JevEntrySchema).min(SCORE_MIN_LEVELS).max(SCORE_MAX_LEVELS),
+  instructions: SystemOneInstructionsSchema,
+  criteria: z.array(SystemOneEntrySchema).min(SCORE_MIN_LEVELS).max(SCORE_MAX_LEVELS),
 });
 
-export const JevQuestionSchema = z.discriminatedUnion("type", [
+export const SystemOneQuestionSchema = z.discriminatedUnion("type", [
   NoulQuestionSchema,
   ChoiceQuestionSchema,
   ScoreQuestionSchema,
@@ -118,21 +118,21 @@ const RESERVED_QUESTION_IDS = new Set([
   "prototype",
 ]);
 
-const JevPrimitiveTypeSchema = z.enum(["noul", "choice", "score"]);
+const SystemOnePrimitiveTypeSchema = z.enum(["noul", "choice", "score"]);
 
-export const JevConfigSchema = z
+export const SystemOneDecisionConfigSchema = z
   .strictObject({
-    provider: z.enum(JEV_PROVIDER_IDS).default(JEV_DEFAULT_PROVIDER),
+    provider: z.enum(SYSTEM_ONE_PROVIDER_IDS).default(SYSTEM_ONE_DEFAULT_PROVIDER),
     /** Provider-specific model id. Unset means the provider's default. */
     model: z.string().min(1).optional(),
-    state: JevStateSchema,
+    state: SystemOneStateSchema,
     timeoutMs: z
       .number()
       .int()
-      .min(JEV_MIN_TIMEOUT_MS)
-      .max(JEV_MAX_TIMEOUT_MS)
-      .default(JEV_DEFAULT_TIMEOUT_MS),
-    maxRetries: z.number().int().min(0).max(JEV_MAX_RETRIES_LIMIT).default(JEV_DEFAULT_MAX_RETRIES),
+      .min(SYSTEM_ONE_MIN_TIMEOUT_MS)
+      .max(SYSTEM_ONE_MAX_TIMEOUT_MS)
+      .default(SYSTEM_ONE_DEFAULT_TIMEOUT_MS),
+    maxRetries: z.number().int().min(0).max(SYSTEM_ONE_MAX_RETRIES_LIMIT).default(SYSTEM_ONE_DEFAULT_MAX_RETRIES),
     questions: z.record(
       z
         .string()
@@ -140,9 +140,9 @@ export const JevConfigSchema = z
           QUESTION_ID_RE,
           "question ids must start with a letter or underscore and use only letters, digits, _ or -",
         ),
-      JevQuestionSchema,
+      SystemOneQuestionSchema,
     ),
-    returns: z.record(z.string(), z.strictObject({ type: JevPrimitiveTypeSchema })),
+    returns: z.record(z.string(), z.strictObject({ type: SystemOnePrimitiveTypeSchema })),
   })
   .superRefine((config, ctx) => {
     const questionIds = Object.keys(config.questions);
@@ -150,7 +150,7 @@ export const JevConfigSchema = z
       ctx.addIssue({
         code: "custom",
         path: ["questions"],
-        message: "jev needs at least one question",
+        message: "system-one-decision needs at least one question",
       });
     }
     for (const id of questionIds) {
@@ -187,8 +187,8 @@ export const JevConfigSchema = z
     }
   });
 
-export type JevConfig = z.infer<typeof JevConfigSchema>;
-export type JevQuestion = z.infer<typeof JevQuestionSchema>;
+export type SystemOneDecisionConfig = z.infer<typeof SystemOneDecisionConfigSchema>;
+export type SystemOneQuestion = z.infer<typeof SystemOneQuestionSchema>;
 
 // ─── Output schema ──────────────────────────────────────────
 
@@ -206,20 +206,20 @@ const ChoiceAnswerSchema = z.strictObject({
 const ScoreAnswerSchema = z.strictObject({
   type: z.literal("score"),
   score: z.number(),
-  legend: z.record(z.string(), JevEntrySchema),
+  legend: z.record(z.string(), SystemOneEntrySchema),
   probabilities: z.record(z.string(), Unit),
   confidence: Unit,
 });
 
-const JevAnswerSchema = z.discriminatedUnion("type", [
+const SystemOneAnswerSchema = z.discriminatedUnion("type", [
   NoulAnswerSchema,
   ChoiceAnswerSchema,
   ScoreAnswerSchema,
 ]);
 
-export const JevOutputSchema = z.object({
+export const SystemOneDecisionOutputSchema = z.object({
   model: z.string().min(1),
-  answers: z.record(z.string(), JevAnswerSchema),
+  answers: z.record(z.string(), SystemOneAnswerSchema),
   usage: z.object({
     input_tokens: z.number().int().min(0),
     output_tokens: z.number().int().min(0),
@@ -227,8 +227,8 @@ export const JevOutputSchema = z.object({
   requestId: z.string().optional(),
 });
 
-export type JevAnswer = z.infer<typeof JevAnswerSchema>;
-export type JevOutput = z.infer<typeof JevOutputSchema>;
+export type SystemOneAnswer = z.infer<typeof SystemOneAnswerSchema>;
+export type SystemOneDecisionOutput = z.infer<typeof SystemOneDecisionOutputSchema>;
 
 // ─── Engine-facing rules (authoring + runtime) ──────────────
 
@@ -237,42 +237,42 @@ interface RetryShape {
 }
 
 /**
- * Why a `jev` node may not carry an engine retry policy.
+ * Why a `system-one-decision` node may not carry an engine retry policy.
  *
  * The executor owns its transient retries (`config.maxRetries`). Engine retries
  * are not status-aware, so a node-level or validation retry would re-send 401 / 422
  * requests and multiply the attempt count. Returns one message per violation.
  */
-export function jevRetryViolations(node: {
+export function systemOneRetryViolations(node: {
   id: string;
   type: string;
   retry?: RetryShape | null;
   validation?: { retry?: RetryShape | null } | null;
 }): string[] {
-  if (node.type !== JEV_NODE_TYPE) return [];
+  if (node.type !== SYSTEM_ONE_DECISION_NODE_TYPE) return [];
   const violations: string[] = [];
   const attempts = (retry: RetryShape | null | undefined) =>
     retry ? (retry.maxRetries ?? ENGINE_RETRY_DEFAULT) : 0;
   if (attempts(node.retry) > 0) {
     violations.push(
-      `Node "${node.id}" (jev) must not set retry.maxRetries > 0: the jev executor retries transient transport errors itself (config.maxRetries), and engine retries would re-send rejected requests`,
+      `Node "${node.id}" (system-one-decision) must not set retry.maxRetries > 0: the system-one-decision executor retries transient transport errors itself (config.maxRetries), and engine retries would re-send rejected requests`,
     );
   }
   if (attempts(node.validation?.retry) > 0) {
     violations.push(
-      `Node "${node.id}" (jev) must not set validation.retry.maxRetries > 0: a validation-driven retry would send another paid request`,
+      `Node "${node.id}" (system-one-decision) must not set validation.retry.maxRetries > 0: a validation-driven retry would send another paid request`,
     );
   }
   return violations;
 }
 
 /** Static-shape rules that a per-field schema cannot express (question ids, return types, and the provider are static). */
-export function jevStaticShapeViolations(node: {
+export function systemOneStaticShapeViolations(node: {
   id: string;
   type: string;
   config: Record<string, unknown>;
 }): string[] {
-  if (node.type !== JEV_NODE_TYPE) return [];
+  if (node.type !== SYSTEM_ONE_DECISION_NODE_TYPE) return [];
   const violations: string[] = [];
   for (const field of ["questions", "returns"] as const) {
     const value = node.config[field];
@@ -281,34 +281,34 @@ export function jevStaticShapeViolations(node: {
       (typeof value !== "object" || value === null || Array.isArray(value))
     ) {
       violations.push(
-        `Node "${node.id}" (jev) config.${field} must be an object: question ids and return types are static, only state and descriptions may use {{tokens}}`,
+        `Node "${node.id}" (system-one-decision) config.${field} must be an object: question ids and return types are static, only state and descriptions may use {{tokens}}`,
       );
     }
   }
   const provider = node.config.provider;
   if (typeof provider === "string" && provider.includes("{{")) {
     violations.push(
-      `Node "${node.id}" (jev) config.provider must be a literal (${JEV_PROVIDER_IDS.join(", ")}), not a {{token}}: the provider decides which credential is checked before the run starts`,
+      `Node "${node.id}" (system-one-decision) config.provider must be a literal (${SYSTEM_ONE_PROVIDER_IDS.join(", ")}), not a {{token}}: the provider decides which credential is checked before the run starts`,
     );
   }
   return violations;
 }
 
-/** The engine fails a jev step before dispatch when any config token is unresolved. */
-export function jevUnresolvedError(nodeId: string, tokens: string[]): string {
+/** The engine fails a system-one-decision step before dispatch when any config token is unresolved. */
+export function systemOneUnresolvedError(nodeId: string, tokens: string[]): string {
   const rendered = [...new Set(tokens)].map((token) => `{{${token}}}`).join(", ");
   return (
-    `Jev node "${nodeId}" has unresolved interpolation token(s): ${rendered}. ` +
+    `SystemOne Decision node "${nodeId}" has unresolved interpolation token(s): ${rendered}. ` +
     "No request was sent. Declare the value in the node's inputs mapping or fix the path."
   );
 }
 
 // ─── Answer validation ──────────────────────────────────────
 
-class JevContractError extends Error {}
+class SystemOneContractError extends Error {}
 
 function fail(message: string): never {
-  throw new JevContractError(message);
+  throw new SystemOneContractError(message);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -349,7 +349,7 @@ function distribution(value: unknown, keys: string[], what: string): Record<stri
 }
 
 /** Check one raw provider answer against its declared question. Extra provider fields are dropped. */
-function validateAnswer(id: string, question: JevQuestion, raw: unknown): JevAnswer {
+function validateAnswer(id: string, question: SystemOneQuestion, raw: unknown): SystemOneAnswer {
   const at = `answer "${id}"`;
   if (!isRecord(raw)) fail(`${at} must be an object`);
   if (raw.type !== question.type) {
@@ -385,10 +385,10 @@ function validateAnswer(id: string, question: JevQuestion, raw: unknown): JevAns
         fail(`${at}.score must be a finite number between 0 and ${top}`);
       }
       if (!isRecord(raw.legend)) fail(`${at}.legend must be an object`);
-      const legend: Record<string, z.infer<typeof JevEntrySchema>> = {};
+      const legend: Record<string, z.infer<typeof SystemOneEntrySchema>> = {};
       for (const key of indices) {
         if (!Object.hasOwn(raw.legend, key)) fail(`${at}.legend is missing level ${key}`);
-        const entry = JevEntrySchema.safeParse(raw.legend[key]);
+        const entry = SystemOneEntrySchema.safeParse(raw.legend[key]);
         if (!entry.success) fail(`${at}.legend["${key}"] must be a string, object, array, or null`);
         legend[key] = entry.data;
       }
@@ -404,15 +404,15 @@ function validateAnswer(id: string, question: JevQuestion, raw: unknown): JevAns
 }
 
 /**
- * Turn a parsed provider body into the node output, or throw a JevContractError.
+ * Turn a parsed provider body into the node output, or throw a SystemOneContractError.
  * Success requires exactly one valid answer per declared question. Nothing is
  * synthesized or normalized.
  */
-export function validateJevResponse(
-  questions: Record<string, JevQuestion>,
+export function validateSystemOneResponse(
+  questions: Record<string, SystemOneQuestion>,
   body: unknown,
   requestId?: string,
-): JevOutput {
+): SystemOneDecisionOutput {
   if (!isRecord(body)) fail("response body must be a JSON object");
   if (typeof body.model !== "string" || body.model === "") {
     fail("response is missing the model that produced the answers");
@@ -429,7 +429,7 @@ export function validateJevResponse(
   if (unexpected.length > 0)
     fail(`response contains ${unexpected.length} answer(s) for undeclared questions`);
 
-  const answers: Record<string, JevAnswer> = {};
+  const answers: Record<string, SystemOneAnswer> = {};
   for (const id of declared) {
     if (!Object.hasOwn(body.answers, id))
       fail(`response is missing the answer for question "${id}"`);
@@ -437,7 +437,7 @@ export function validateJevResponse(
     if (!question) fail(`question "${id}" is not defined`);
     answers[id] = validateAnswer(id, question, body.answers[id]);
   }
-  if (declared.length === 0) fail("a jev call needs at least one question");
+  if (declared.length === 0) fail("a system-one-decision call needs at least one question");
 
   return {
     model: body.model,
@@ -449,11 +449,11 @@ export function validateJevResponse(
 
 // ─── Transport ──────────────────────────────────────────────
 
-export interface JevExecutorOptions {
+export interface SystemOneDecisionExecutorOptions {
   /** Transport. Tests inject a fake; production uses the global `fetch`. */
   fetch?: typeof fetch;
-  /** Credential lookup for any provider. Defaults to each provider's own source (see `JEV_PROVIDERS`). */
-  getApiKey?: (provider: JevProviderId) => Promise<string | null | undefined>;
+  /** Credential lookup for any provider. Defaults to each provider's own source (see `SYSTEM_ONE_PROVIDERS`). */
+  getApiKey?: (provider: SystemOneProviderId) => Promise<string | null | undefined>;
   /** Environment the OpenRouter credential is resolved from. Defaults to `process.env`. */
   env?: NodeJS.ProcessEnv;
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
@@ -522,15 +522,15 @@ function defaultSleep(ms: number, signal: AbortSignal): Promise<void> {
 
 // ─── Executor ───────────────────────────────────────────────
 
-export class JevExecutor extends BaseExecutor<typeof JevConfigSchema, typeof JevOutputSchema> {
-  readonly type = JEV_NODE_TYPE;
+export class SystemOneDecisionExecutor extends BaseExecutor<typeof SystemOneDecisionConfigSchema, typeof SystemOneDecisionOutputSchema> {
+  readonly type = SYSTEM_ONE_DECISION_NODE_TYPE;
   readonly mode = "instant" as const;
-  readonly configSchema = JevConfigSchema;
-  readonly outputSchema = JevOutputSchema;
+  readonly configSchema = SystemOneDecisionConfigSchema;
+  readonly outputSchema = SystemOneDecisionOutputSchema;
 
   constructor(
     deps: ExecutorDependencies,
-    private readonly options: JevExecutorOptions = {},
+    private readonly options: SystemOneDecisionExecutorOptions = {},
   ) {
     super(deps);
   }
@@ -546,15 +546,15 @@ export class JevExecutor extends BaseExecutor<typeof JevConfigSchema, typeof Jev
   override async checkReadiness(
     nodes: readonly ExecutorReadinessNode[],
   ): Promise<ExecutorReadinessProblem[]> {
-    const nodeIdsByProvider = new Map<JevProviderId, string[]>();
+    const nodeIdsByProvider = new Map<SystemOneProviderId, string[]>();
     for (const node of nodes) {
       // An unknown provider is a config error the schema reports; it names no credential.
-      const id = jevProviderOf(node.config);
+      const id = systemOneProviderOf(node.config);
       if (id) nodeIdsByProvider.set(id, [...(nodeIdsByProvider.get(id) ?? []), node.id]);
     }
     const problems: ExecutorReadinessProblem[] = [];
     for (const [id, nodeIds] of nodeIdsByProvider) {
-      const credential = await resolveJevCredential(
+      const credential = await resolveSystemOneCredential(
         id,
         this.providerContext(),
         this.options.getApiKey,
@@ -565,13 +565,13 @@ export class JevExecutor extends BaseExecutor<typeof JevConfigSchema, typeof Jev
   }
 
   protected async execute(
-    config: JevConfig,
+    config: SystemOneDecisionConfig,
     _context: Readonly<Record<string, unknown>>,
     _meta: ExecutorMeta,
-  ): Promise<ExecutorResult<JevOutput>> {
+  ): Promise<ExecutorResult<SystemOneDecisionOutput>> {
     const providerId = config.provider;
-    const provider: JevProvider = JEV_PROVIDERS[providerId];
-    const credential = await resolveJevCredential(
+    const provider: SystemOneProvider = SYSTEM_ONE_PROVIDERS[providerId];
+    const credential = await resolveSystemOneCredential(
       providerId,
       this.providerContext(),
       this.options.getApiKey,
@@ -593,16 +593,16 @@ export class JevExecutor extends BaseExecutor<typeof JevConfigSchema, typeof Jev
     try {
       parsed = JSON.parse(sent.text);
     } catch {
-      return { status: "failed", error: "Jev response was not valid JSON" };
+      return { status: "failed", error: "SystemOne response was not valid JSON" };
     }
     try {
       return {
         status: "success",
-        output: validateJevResponse(config.questions, parsed, sent.requestId),
+        output: validateSystemOneResponse(config.questions, parsed, sent.requestId),
       };
     } catch (err) {
-      if (err instanceof JevContractError) {
-        return { status: "failed", error: scrub(`Jev response failed validation: ${err.message}`) };
+      if (err instanceof SystemOneContractError) {
+        return { status: "failed", error: scrub(`SystemOne response failed validation: ${err.message}`) };
       }
       throw err;
     }
@@ -614,7 +614,7 @@ export class JevExecutor extends BaseExecutor<typeof JevConfigSchema, typeof Jev
    * other 4xx, redirects, or a bad success body (the caller validates that).
    */
   private async send(
-    providerId: JevProviderId,
+    providerId: SystemOneProviderId,
     apiKey: string,
     body: string,
     timeoutMs: number,
@@ -631,7 +631,7 @@ export class JevExecutor extends BaseExecutor<typeof JevConfigSchema, typeof Jev
     const timedOut = () =>
       ({
         ok: false,
-        error: `Jev request exceeded its ${timeoutMs}ms time budget`,
+        error: `SystemOne request exceeded its ${timeoutMs}ms time budget`,
       }) as const;
 
     try {
@@ -673,7 +673,7 @@ export class JevExecutor extends BaseExecutor<typeof JevConfigSchema, typeof Jev
 
   private async attemptOnce(
     doFetch: typeof fetch,
-    providerId: JevProviderId,
+    providerId: SystemOneProviderId,
     apiKey: string,
     body: string,
     signal: AbortSignal,
@@ -681,7 +681,7 @@ export class JevExecutor extends BaseExecutor<typeof JevConfigSchema, typeof Jev
   ): Promise<Attempt> {
     let res: Response;
     try {
-      res = await doFetch(JEV_PROVIDERS[providerId].endpoint, {
+      res = await doFetch(SYSTEM_ONE_PROVIDERS[providerId].endpoint, {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -698,7 +698,7 @@ export class JevExecutor extends BaseExecutor<typeof JevConfigSchema, typeof Jev
       const detail = typeof code === "string" && /^[A-Z0-9_]{3,40}$/.test(code) ? ` (${code})` : "";
       return {
         kind: "fail",
-        message: `Jev request failed: network error${detail}`,
+        message: `SystemOne request failed: network error${detail}`,
         retryable: true,
       };
     }
@@ -714,14 +714,14 @@ export class JevExecutor extends BaseExecutor<typeof JevConfigSchema, typeof Jev
         if (signal.aborted) return { kind: "timeout" };
         return {
           kind: "fail",
-          message: withId("Jev response body could not be read"),
+          message: withId("SystemOne response body could not be read"),
           retryable: true,
         };
       }
       if (text.length > MAX_RESPONSE_CHARS) {
         return {
           kind: "fail",
-          message: withId("Jev response exceeded the size limit"),
+          message: withId("SystemOne response exceeded the size limit"),
           retryable: false,
         };
       }
@@ -731,7 +731,7 @@ export class JevExecutor extends BaseExecutor<typeof JevConfigSchema, typeof Jev
     if (res.status >= 300 && res.status < 400) {
       return {
         kind: "fail",
-        message: withId(`Jev request was redirected (HTTP ${res.status}); redirects are refused`),
+        message: withId(`SystemOne request was redirected (HTTP ${res.status}); redirects are refused`),
         retryable: false,
       };
     }
@@ -747,7 +747,7 @@ export class JevExecutor extends BaseExecutor<typeof JevConfigSchema, typeof Jev
     if (res.status === 401 || res.status === 403) {
       return {
         kind: "fail",
-        message: withId(jevKeyRejectedMessage(providerId, res.status, code)),
+        message: withId(systemOneKeyRejectedMessage(providerId, res.status, code)),
         retryable: false,
       };
     }
@@ -755,7 +755,7 @@ export class JevExecutor extends BaseExecutor<typeof JevConfigSchema, typeof Jev
     const retryable = res.status === 408 || res.status === 429 || res.status >= 500;
     return {
       kind: "fail",
-      message: withId(`Jev API returned HTTP ${res.status}${detail}`),
+      message: withId(`SystemOne API returned HTTP ${res.status}${detail}`),
       retryable,
       retryAfterMs: retryable ? parseRetryAfter(res.headers.get("retry-after"), now()) : undefined,
     };

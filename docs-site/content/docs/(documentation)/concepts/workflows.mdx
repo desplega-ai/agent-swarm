@@ -28,7 +28,7 @@ The engine includes 13 built-in executor types:
 | `agent-task` | Create and delegate a task to a swarm agent |
 | `foreach` | Fan out one agent task per array item, wait for every child, and emit one aggregate result |
 | `raw-llm` | Call an LLM directly with a prompt template |
-| `jev` | Make typed decisions (probability, choice, score) over supplied state with TypeSafe's Jev model |
+| `system-one-decision` | Make typed decisions (probability, choice, score) over supplied state with TypeSafe's Jev model |
 | `vcs` | Version control operations (create PR, merge, etc.) |
 | `property-match` | Route based on matching properties in step input |
 | `code-match` | Route based on a custom JavaScript expression in a sandbox |
@@ -45,24 +45,24 @@ For `config.args`, values written as an **exact single token** such as `{{input.
 
 ### Choosing a decider
 
-When a node has to decide, use the cheapest node that can decide. Agents authoring workflows apply this rule by default, so you do not need to ask for `jev`.
+When a node has to decide, use the cheapest node that can decide. Agents authoring workflows apply this rule by default, so you do not need to ask for `system-one-decision`.
 
 | The decision is | Use |
 |---|---|
 | A fact: a count, PR state, flag, date, lookup, regex, or schema check | `script`, `property-match`, or `code-match` |
-| A bounded judgment: pass/fail, pick one of N, a score on a rubric, or the probability that a claim is true | `jev` |
+| A bounded judgment: pass/fail, pick one of N, a score on a rubric, or the probability that a claim is true | `system-one-decision` |
 | Free-form generation, or findings a later node reads | `raw-llm` or `agent-task` |
 
-Jev is weak at counting. For a hybrid, count in a `script` and pass the number to `jev` as part of `state`.
+Jev is weak at counting. For a hybrid, count in a `script` and pass the number to `system-one-decision` as part of `state`.
 
-### Jev decisions
+### SystemOne Decision
 
-A `jev` node sends one `state` and a map of questions to TypeSafe's Jev model and returns one validated answer per question. It reaches Jev through a `provider`: `typesafe` (the default) or `openrouter`. Each provider needs its own global secret, `TYPESAFE_API_KEY` or `OPENROUTER_API_KEY`. The key is read on the server and never appears in a definition, a step output, or an error.
+A `system-one-decision` node (display name "SystemOne Decision") sends one `state` and a map of questions to a typed-decisions model and returns one validated answer per question. The model is Jev today (`model` defaults to it); the node name is not model-specific. It reaches the model through a `provider`: `typesafe` (the default) or `openrouter`. Each provider needs its own global secret, `TYPESAFE_API_KEY` or `OPENROUTER_API_KEY`. The key is read on the server and never appears in a definition, a step output, or an error.
 
 ```json
 {
   "id": "qualify",
-  "type": "jev",
+  "type": "system-one-decision",
   "inputs": { "lead": "trigger.lead" },
   "config": {
     "provider": "typesafe",
@@ -90,14 +90,14 @@ A `jev` node sends one `state` and a map of questions to TypeSafe's Jev model an
 - Question types are `noul` (probability that a claim is true), `choice` (2 to 255 named options), and `score` (2 to 10 ordered levels). `returns` repeats each question id and type, and a mismatch is rejected when the workflow is saved.
 - The output is `{ model, answers, usage }`. A downstream node reads `<alias>.answers.<question>.<field>` through an `inputs` mapping. A `noul` answer is `{ type, noul }` with no confidence. `choice` and `score` answers carry `probabilities` and `confidence`.
 - A low-confidence answer is still a success. Put the threshold in the next node, such as `property-match` or `code-match`, and route the uncertain band to `human-in-the-loop`.
-- The node retries connection errors, 408, 429, and 5xx itself, up to `maxRetries` (0 to 3, default 2) within `timeoutMs` (default 30000). It never retries a 401, a 422, or an answer that fails validation. Do not set `retry` or `validation.retry` on a `jev` node.
+- The node retries connection errors, 408, 429, and 5xx itself, up to `maxRetries` (0 to 3, default 2) within `timeoutMs` (default 30000). It never retries a 401, a 422, or an answer that fails validation. Do not set `retry` or `validation.retry` on a `system-one-decision` node.
 - An unresolved `{{token}}` fails the step before the request is sent.
 
 #### Keys and preflight
 
-The swarm checks a `jev` node's key before first use. Set `TYPESAFE_API_KEY` or `OPENROUTER_API_KEY` as a global secret on the Secrets page (Settings > Secrets). Every message names the key for the node's provider.
+The swarm checks a `system-one-decision` node's key before first use. Set `TYPESAFE_API_KEY` or `OPENROUTER_API_KEY` as a global secret on the Secrets page (Settings > Secrets). Every message names the key for the node's provider.
 
-- **Saving a workflow** with a `jev` node whose key is missing succeeds and returns a warning: in the tool result message and `data.warnings` over MCP, and as `warnings` on the workflow body over HTTP. A save is not rejected, because definitions are also saved before a human has supplied the key and the key can change later.
+- **Saving a workflow** with a `system-one-decision` node whose key is missing succeeds and returns a warning: in the tool result message and `data.warnings` over MCP, and as `warnings` on the workflow body over HTTP. A save is not rejected, because definitions are also saved before a human has supplied the key and the key can change later.
 - **Starting a run** fails before any node executes when the key is missing. The run is recorded as `failed` with no steps and no request sent. Retrying a failed run is refused, and the run stays failed, while a node still to run needs a missing key.
 - **A key the provider refuses** (HTTP 401 or 403) fails the step with `<KEY> was rejected by <provider>` and is not retried.
 

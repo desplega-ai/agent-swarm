@@ -4,7 +4,7 @@ import type { BaseExecutor, ExecutorDependencies } from "./base";
 import { CodeMatchExecutor } from "./code-match";
 import { ForeachExecutor } from "./foreach";
 import { HumanInTheLoopExecutor } from "./human-in-the-loop";
-import { JevExecutor } from "./jev";
+import { SystemOneDecisionExecutor } from "./system-one-decision";
 import { NotifyExecutor } from "./notify";
 import { PropertyMatchExecutor } from "./property-match";
 import { RawLlmExecutor } from "./raw-llm";
@@ -70,7 +70,7 @@ export function createExecutorRegistry(deps: ExecutorDependencies): ExecutorRegi
   registry.register(new CodeMatchExecutor(deps));
   registry.register(new NotifyExecutor(deps));
   registry.register(new RawLlmExecutor(deps));
-  registry.register(new JevExecutor(deps));
+  registry.register(new SystemOneDecisionExecutor(deps));
   registry.register(new ScriptExecutor(deps));
   registry.register(new SwarmScriptExecutor(deps));
   registry.register(new VcsExecutor(deps));

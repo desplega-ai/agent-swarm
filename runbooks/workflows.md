@@ -221,23 +221,23 @@ Downstream nodes read the executor output from the node ID. The script's return 
 
 ## Choosing a decider
 
-When a node has to decide, pick the cheapest node that can decide. Use `jev` for bounded judgments without waiting to be asked.
+When a node has to decide, pick the cheapest node that can decide. Use `system-one-decision` for bounded judgments without waiting to be asked.
 
 | The decision is | Use |
 |---|---|
 | A fact: a count, PR state, flag, date, lookup, regex, or schema check | `script`, `property-match`, or `code-match` |
-| A bounded judgment: pass/fail, pick one of N, a score on a rubric, or the probability that a claim is true | `jev` |
+| A bounded judgment: pass/fail, pick one of N, a score on a rubric, or the probability that a claim is true | `system-one-decision` |
 | Free-form generation, or findings a later node reads | `raw-llm` or `agent-task` |
 
-Jev is weak at counting. For a hybrid, count in a `script` and pass the number to `jev` as part of `state`. The `workflow-iterate` skill carries the same rule for agents that edit workflows.
+Jev is weak at counting. For a hybrid, count in a `script` and pass the number to `system-one-decision` as part of `state`. The `workflow-iterate` skill carries the same rule for agents that edit workflows.
 
-## Jev nodes
+## SystemOne Decision nodes
 
-A `jev` node makes typed decisions with TypeSafe's Jev model, through TypeSafe directly or through OpenRouter (see Providers). It is an instant executor. One call sends one `state` and a map of questions, and the node returns one validated answer per question.
+A `system-one-decision` node makes typed decisions with TypeSafe's Jev model, through TypeSafe directly or through OpenRouter (see Providers). It is an instant executor. One call sends one `state` and a map of questions, and the node returns one validated answer per question.
 
 ```yaml
 - id: qualify
-  type: jev
+  type: system-one-decision
   inputs: { lead: "trigger.lead" }
   config:
     provider: typesafe # the default; or openrouter
@@ -263,7 +263,7 @@ A `jev` node makes typed decisions with TypeSafe's Jev model, through TypeSafe d
   next: gate
 ```
 
-### `jev` config
+### `system-one-decision` config
 
 - `provider`: `typesafe` (default) or `openrouter`. A literal, not a `{{token}}`, because it decides which key is checked before the run starts. See Providers.
 - `state` (required): text, a string array, or a JSON object. An exact `{{token}}` keeps the upstream JSON type; mixed text is interpolated as a string. Resolved content is never interpolated again.
@@ -278,7 +278,7 @@ A `jev` node makes typed decisions with TypeSafe's Jev model, through TypeSafe d
 
 The config has no endpoint, header, or key field, and unknown fields are rejected. The only host choice is `provider`, an id from a server-side list.
 
-### `jev` output
+### `system-one-decision` output
 
 ```json
 {
@@ -303,7 +303,7 @@ Downstream nodes read `<alias>.answers.<question>.<field>` through an `inputs` m
 | `typesafe` (default) | `https://api.typesafe.ai/v1/systemone` | `TYPESAFE_API_KEY` | `jev-latest` |
 | `openrouter` | `https://openrouter.ai/api/alpha/decisions` | `OPENROUTER_API_KEY` | `~typesafe/jev-latest` |
 
-Both hosts take the same request and return the same answers, so `returns`, the output shape, the validation rules, and thresholds are identical on either. The list lives in `JEV_PROVIDERS` (`src/workflows/executors/jev-providers.ts`); adding a host is one entry there. `openrouter` reads its key through `resolveWorkflowLlmConfig`, the resolver `raw-llm` uses, and never falls through to `OPENAI_API_KEY`.
+Both hosts take the same request and return the same answers, so `returns`, the output shape, the validation rules, and thresholds are identical on either. The list lives in `SYSTEM_ONE_PROVIDERS` (`src/workflows/executors/jev-providers.ts`); adding a host is one entry there. `openrouter` reads its key through `resolveWorkflowLlmConfig`, the resolver `raw-llm` uses, and never falls through to `OPENAI_API_KEY`.
 
 There is no fallback between providers. A node that names none uses `typesafe`, and it does not move to `openrouter` when the TypeSafe key is missing: the two accounts bill separately and use different model ids, and the key the preflight names must be the key the node uses. Switch by setting `provider`.
 
@@ -313,10 +313,10 @@ Use the decisions endpoint only. OpenRouter's `typesafe/jev-router` is a router 
 
 Each provider needs its key as a global secret (Settings > Secrets, or `set-config` with scope `global` and `isSecret` true). The swarm checks it before first use, and every message names the exact key for the node's provider and where to set it:
 
-- **Save** (`create-workflow`, `update-workflow`, `patch-workflow`, `patch-workflow-node`, and the matching HTTP routes): the save succeeds and returns a warning when a `jev` node's key is missing or unreadable. MCP puts it in the result message and `data.warnings`. HTTP adds `warnings` to the workflow body, only when there is one. It is a warning, not a rejection: definitions are also saved before a human has supplied the key (template installs, seeders, version restores, authoring ahead of a key request), and the key can change after any save, so a save-time gate would block valid work without guaranteeing anything.
-- **Run start**: a run of a definition with a `jev` node whose key is missing fails before any node executes, with the same named error. The run is recorded as `failed`, has no steps, and sends no request. This is the guarantee. It covers manual, schedule, webhook, and event triggers.
+- **Save** (`create-workflow`, `update-workflow`, `patch-workflow`, `patch-workflow-node`, and the matching HTTP routes): the save succeeds and returns a warning when a `system-one-decision` node's key is missing or unreadable. MCP puts it in the result message and `data.warnings`. HTTP adds `warnings` to the workflow body, only when there is one. It is a warning, not a rejection: definitions are also saved before a human has supplied the key (template installs, seeders, version restores, authoring ahead of a key request), and the key can change after any save, so a save-time gate would block valid work without guaranteeing anything.
+- **Run start**: a run of a definition with a `system-one-decision` node whose key is missing fails before any node executes, with the same named error. The run is recorded as `failed`, has no steps, and sends no request. This is the guarantee. It covers manual, schedule, webhook, and event triggers.
 - **Retry**: `retry-workflow-run` refuses, and leaves the run failed, when a node still to run needs a key that is missing.
-- **A key that exists but is refused**: a 401 or 403 fails the step with `<KEY> was rejected by <host> (HTTP <status>)` and tells the operator to replace it. It is not retried. Presence is what the run-start check can confirm without a paid call, so a wrong key still surfaces at the first `jev` step; the `workflow-iterate` skill has authors confirm the key with one cheap call before building the node.
+- **A key that exists but is refused**: a 401 or 403 fails the step with `<KEY> was rejected by <host> (HTTP <status>)` and tells the operator to replace it. It is not retried. Presence is what the run-start check can confirm without a paid call, so a wrong key still surfaces at the first `system-one-decision` step; the `workflow-iterate` skill has authors confirm the key with one cheap call before building the node.
 
 The key value never appears in a definition, a warning, a step output, or an error.
 
@@ -324,9 +324,9 @@ The key value never appears in a definition, a warning, a step output, or an err
 
 - A valid low-confidence answer is a successful evaluation. Keep the threshold in the next node: `property-match` (`gt`, `lt`, `eq`) or `code-match` for `>=`, and route the uncertain band to `human-in-the-loop`. There is no global threshold.
 - The executor retries connection errors, HTTP 408, 429, and 5xx (including 529) with exponential backoff and jitter, up to `maxRetries`. It honors `Retry-After` and fails instead of retrying early when the wait does not fit the budget. It never retries 401, 422, other 4xx, redirects, or an invalid success body.
-- A `jev` node must not set `retry` or `validation.retry`. Engine retries are not status-aware and would re-send rejected requests. Workflow create and update reject it, and a stored definition that has it fails the step before any request.
+- A `system-one-decision` node must not set `retry` or `validation.retry`. Engine retries are not status-aware and would re-send rejected requests. Workflow create and update reject it, and a stored definition that has it fails the step before any request.
 - The node reads its provider's key on the server (see Keys and preflight). Errors carry the HTTP status, a short error code, and the request id, not the provider's message or your state.
-- Any unresolved `{{token}}` in a `jev` config fails the step before the request, because the call is paid and not idempotent.
+- Any unresolved `{{token}}` in a `system-one-decision` config fails the step before the request, because the call is paid and not idempotent.
 
 ## Trigger requester attribution
 
