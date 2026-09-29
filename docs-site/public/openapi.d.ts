@@ -5763,6 +5763,12 @@ export interface paths {
                     since?: string;
                     until?: string;
                     limit?: number;
+                    /** @description Comma-separated event names; matches any of them (ANDed with `event`) */
+                    events?: string;
+                    /** @description Comma-separated `data.field` values, used with latestPerDataField */
+                    dataFields?: string;
+                    /** @description When true, return only the newest event per (event, data.field) pair for every name in `event`/`events` and every value in `dataFields` */
+                    latestPerDataField?: "true" | "false";
                 };
                 header?: never;
                 path?: never;
@@ -5778,7 +5784,21 @@ export interface paths {
                     content: {
                         "application/json": {
                             events: components["schemas"]["SwarmEvent"][];
+                            /**
+                             * @description Present only when the request asked for latestPerDataField=true
+                             * @enum {boolean}
+                             */
+                            latestPerDataField?: true;
                         };
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
             };

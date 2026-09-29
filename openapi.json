@@ -16729,6 +16729,40 @@
             "required": false,
             "name": "limit",
             "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated event names; matches any of them (ANDed with `event`)"
+            },
+            "required": false,
+            "description": "Comma-separated event names; matches any of them (ANDed with `event`)",
+            "name": "events",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated `data.field` values, used with latestPerDataField"
+            },
+            "required": false,
+            "description": "Comma-separated `data.field` values, used with latestPerDataField",
+            "name": "dataFields",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ],
+              "description": "When true, return only the newest event per (event, data.field) pair for every name in `event`/`events` and every value in `dataFields`"
+            },
+            "required": false,
+            "description": "When true, return only the newest event per (event, data.field) pair for every name in `event`/`events` and every value in `dataFields`",
+            "name": "latestPerDataField",
+            "in": "query"
           }
         ],
         "responses": {
@@ -16744,11 +16778,28 @@
                       "items": {
                         "$ref": "#/components/schemas/SwarmEvent"
                       }
+                    },
+                    "latestPerDataField": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ],
+                      "description": "Present only when the request asked for latestPerDataField=true"
                     }
                   },
                   "required": [
                     "events"
                   ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
