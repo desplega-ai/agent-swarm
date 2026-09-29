@@ -1146,8 +1146,17 @@ export interface ScheduledTask {
   favorite?: boolean;
 }
 
+/**
+ * `/api/scheduled-tasks?fields=slim` list row: the full `taskTemplate` is
+ * swapped for a bounded `taskTemplatePreview`. Read the template from
+ * `GET /api/schedules/{id}`.
+ */
+export type ScheduledTaskSummary = Omit<ScheduledTask, "taskTemplate"> & {
+  taskTemplatePreview?: string;
+};
+
 export interface ScheduledTasksResponse {
-  scheduledTasks: ScheduledTask[];
+  scheduledTasks: ScheduledTaskSummary[];
 }
 
 export type SwarmConfigScope = "global" | "agent" | "repo";
@@ -2205,6 +2214,20 @@ export interface ApprovalRequest {
 
 export interface ApprovalRequestsResponse {
   approvalRequests: ApprovalRequest[];
+}
+
+/**
+ * `/api/approval-requests?fields=slim` list row: question bodies, answers,
+ * approvers and notification targets are dropped; `questionCount` is added.
+ * Read the full request from `GET /api/approval-requests/{id}`.
+ */
+export type ApprovalRequestSummary = Omit<
+  ApprovalRequest,
+  "questions" | "approvers" | "responses" | "resolutionReason" | "notificationChannels"
+> & { questionCount: number };
+
+export interface ApprovalRequestSummariesResponse {
+  approvalRequests: ApprovalRequestSummary[];
 }
 
 // Skills

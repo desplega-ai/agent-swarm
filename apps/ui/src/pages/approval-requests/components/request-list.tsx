@@ -1,7 +1,7 @@
 import { ChevronRight } from "lucide-react";
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import type { ApprovalRequest } from "@/api/types";
+import type { ApprovalRequestSummary } from "@/api/types";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -18,8 +18,8 @@ const SOURCE_LABEL = { workflow: "Workflow", agent: "Agent", manual: "Manual" } 
 const COLUMNS =
   "md:grid md:grid-cols-[minmax(0,1fr)_120px_96px_90px_140px_110px] md:items-center md:gap-4";
 
-function questionCount(request: ApprovalRequest) {
-  const count = request.questions?.length ?? 0;
+function questionCount(request: ApprovalRequestSummary) {
+  const count = request.questionCount ?? 0;
   return `${count} ${count === 1 ? "question" : "questions"}`;
 }
 
@@ -30,7 +30,7 @@ function Row({
   onFocus,
   linkRef,
 }: {
-  request: ApprovalRequest;
+  request: ApprovalRequestSummary;
   /** The resolver's display name, or the stored reference when unknown. */
   resolverName: string | null;
   highlighted: boolean;
@@ -98,9 +98,9 @@ export function RequestList({
   loading,
   onOpen,
 }: {
-  rows: ApprovalRequest[];
+  rows: ApprovalRequestSummary[];
   loading: boolean;
-  onOpen: (request: ApprovalRequest) => void;
+  onOpen: (request: ApprovalRequestSummary) => void;
 }) {
   const [limit, setLimit] = useState(PAGE_SIZE);
   const [highlight, setHighlight] = useState(-1);

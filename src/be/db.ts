@@ -154,6 +154,7 @@ import {
   reservedRoleViolation,
   rowToAgent,
 } from "./db/agents";
+import { type ApprovalRequestListFilters, approvalRequestListClause } from "./db/approvals";
 import {
   computeContentHash,
   createContextVersion,
@@ -211,6 +212,7 @@ export {
   updateAgentStatus,
   updateAgentStatusFromCapacity,
 } from "./db/agents";
+export { type ApprovalRequestSummary, listApprovalRequestSummaries } from "./db/approvals";
 export {
   computeContentHash,
   createContextVersion,
@@ -9804,32 +9806,14 @@ export async function updateApprovalRequestNotifications(
   );
 }
 
-export async function listApprovalRequests(filters?: {
-  status?: string;
-  workflowRunId?: string;
-  limit?: number;
-}): Promise<ApprovalRequest[]> {
-  const conditions: string[] = [];
-  const params: (string | number)[] = [];
-
-  if (filters?.status) {
-    conditions.push("status = ?");
-    params.push(filters.status);
-  }
-  if (filters?.workflowRunId) {
-    conditions.push("workflowRunId = ?");
-    params.push(filters.workflowRunId);
-  }
-
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const limit = filters?.limit ?? 100;
-  params.push(limit);
-
+export async function listApprovalRequests(
+  filters?: ApprovalRequestListFilters,
+): Promise<ApprovalRequest[]> {
+  const { sql, params } = approvalRequestListClause(filters);
   const rows = await getDbClient().query<ApprovalRequestRow>(
-    `SELECT * FROM approval_requests ${where} ORDER BY createdAt DESC LIMIT ?`,
+    `SELECT * FROM approval_requests ${sql}`,
     params,
   );
-
   return rows.map(rowToApprovalRequest);
 }
 
