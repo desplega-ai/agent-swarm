@@ -95,7 +95,7 @@ export async function explicitModelError(check: ExplicitModelCheck): Promise<str
   const catalog = providers as CatalogSections;
   if (Object.keys(catalog).length === 0) return null;
   if (isKnownCatalogModel(model, catalog)) return null;
-  return `Unknown model "${model}": it is not in the model catalog. Use a catalog model id, a Claude CLI shortname (opus, sonnet, haiku, fable), a latest:<provider>/<family> alias, or modelTier. To run a custom model id anyway, set allowCustomModel: true.`;
+  return `Unknown model "${model}": it is not in the model catalog. Use a catalog model id, a Claude CLI shortname (opus, sonnet, haiku, fable), a latest:<provider>/<family> alias, or modelTier. To run a custom model id anyway, set allowCustomModel: true (allow_custom_model on the agent runtime).`;
 }
 
 /**

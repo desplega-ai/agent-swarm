@@ -1,3 +1,4 @@
+import { nearestReasoningLevel } from "@desplega/model-catalog";
 import { AlertTriangle, ArrowUpCircle, Save } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -47,6 +48,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ACP_TARGET_CATALOG } from "@/lib/acp-target-catalog";
 import {
+  effortAfterChange,
+  effortLevelsFor,
+  findKnownModel,
   findModelOption,
   HARNESS_LABEL,
   harnessSupportsModelSelection,
@@ -57,7 +61,6 @@ import {
   type ModelOption,
   modelGroupsForAcpTarget,
   modelGroupsForHarness,
-  nearestSupportedLevel,
   pickDefaultModelForHarness,
 } from "@/lib/agent-runtime-models";
 import { cn } from "@/lib/utils";
@@ -200,6 +203,14 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
     [harness, configs, envPresenceQuery.data, liveBedrockStatus, liveCatalog],
   );
   const modelOption = findModelOption(model, groups);
+  // Exactly what the API accepts for this harness and model (empty for a custom
+  // or unlisted model): the picker offers these and nothing else. An effort the
+  // pair cannot take is not sent, whatever the state still holds.
+  const effortLevels = useMemo(
+    () => effortLevelsFor(harness, model, liveCatalog),
+    [harness, model, liveCatalog],
+  );
+  const shownEffort: EffortValue = effort && effortLevels.includes(effort) ? effort : "";
   const acpModelGroups = useMemo(
     () => modelGroupsForAcpTarget(acpTarget, liveCatalog),
     [acpTarget, liveCatalog],
@@ -264,19 +275,15 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
     setClaudeTransport(persistedClaudeTransport ?? "inherit");
   }, [persistedClaudeTransport]);
 
-  // Clears `effort` whenever it ends up unsupported by the (possibly new)
-  // selected model, rather than silently coercing it to a supported value.
-  function clearEffortIfUnsupported(option: ModelOption | null) {
-    setEffort((current) => {
-      if (!current) return current;
-      if (option?.reasoningLevels && !option.reasoningLevels.includes(current)) return "";
-      return current;
-    });
+  // An effort the new (harness, model) pair cannot take resets to Auto rather
+  // than silently becoming a neighbouring level.
+  function resetUnsupportedEffort(nextHarness: LocalHarnessProvider, nextModel: string) {
+    setEffort((current) => effortAfterChange(current, nextHarness, nextModel, liveCatalog));
   }
 
   function changeModel(nextModel: string) {
     setModel(nextModel);
-    clearEffortIfUnsupported(findModelOption(nextModel, groups));
+    resetUnsupportedEffort(harness, nextModel);
   }
 
   function changeHarness(nextHarness: LocalHarnessProvider) {
@@ -289,13 +296,14 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
     );
     setHarness(nextHarness);
     if (nextHarness === "acp" && harness !== "acp") setAcpTarget("opencode");
-    if (!harnessSupportsModelSelection(nextHarness)) setEffort("");
     const nextModel = findModelOption(model, nextGroups)
       ? model
       : pickDefaultModelForHarness(nextHarness, nextGroups, liveCatalog);
     if (nextModel !== model) setModel(nextModel);
     if (harnessSupportsModelSelection(nextHarness)) {
-      clearEffortIfUnsupported(findModelOption(nextModel, nextGroups));
+      resetUnsupportedEffort(nextHarness, nextModel);
+    } else {
+      setEffort("");
     }
   }
 
@@ -308,8 +316,11 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
         id: agent.id,
         harnessProvider: harness,
         model: modelSelectionEnabled || acpSelected ? model.trim() || null : null,
-        allowCustomModel: modelSelectionEnabled && customMode && !modelOption,
-        reasoningEffort: modelSelectionEnabled ? effort || null : null,
+        // The API rejects a model the catalog does not list unless it is flagged custom. A model
+        // only a worker probe lists (a live Bedrock id) is in the picker but not in the catalog.
+        allowCustomModel:
+          modelSelectionEnabled && !findKnownModel(model.trim(), liveCatalog ?? undefined),
+        reasoningEffort: modelSelectionEnabled ? shownEffort || null : null,
         ...(acpSelected
           ? {
               acp:
@@ -554,11 +565,18 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
         <div className="space-y-1.5">
           <Label>Reasoning effort</Label>
           <ReasoningEffortToggle
-            value={effort}
+            value={shownEffort}
             onChange={setEffort}
-            levels={modelOption?.reasoningLevels}
+            levels={effortLevels}
             modelLabel={modelOption?.label ?? null}
           />
+          {effortLevels.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              {model.trim()
+                ? "No reasoning effort applies to this model: the catalog does not list it, or it does not reason."
+                : "Pick a model to set a reasoning effort."}
+            </p>
+          ) : null}
         </div>
       ) : null}
 
@@ -603,8 +621,11 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
           <>
             <span className="flex items-center gap-1.5">
               Effort:{" "}
-              <ReasoningEffortIcon level={effort || undefined} className="text-muted-foreground" />{" "}
-              <code>{effort ? REASONING_EFFORT_LABEL[effort] : AUTO_LABEL}</code>
+              <ReasoningEffortIcon
+                level={shownEffort || undefined}
+                className="text-muted-foreground"
+              />{" "}
+              <code>{shownEffort ? REASONING_EFFORT_LABEL[shownEffort] : AUTO_LABEL}</code>
             </span>
             <span className="flex items-center gap-1.5">
               Last effort:{" "}
@@ -701,8 +722,8 @@ function AcpAdvertisedOptions({ options }: { options: AcpSessionConfigOption[] |
 interface ReasoningEffortToggleProps {
   value: EffortValue;
   onChange: (next: EffortValue) => void;
-  /** Undefined = no capability data for the selected model — don't grey out anything. */
-  levels: ReadonlyArray<ReasoningEffortLevel> | undefined;
+  /** The levels the harness accepts for the selected model. Every other level is unavailable. */
+  levels: ReadonlyArray<ReasoningEffortLevel>;
   modelLabel: string | null;
 }
 
@@ -772,7 +793,7 @@ function ReasoningEffortToggle({
         description={AUTO_DESCRIPTION}
       />
       {REASONING_EFFORT_LEVELS.map((level) => {
-        const supported = levels ? levels.includes(level) : true;
+        const supported = levels.includes(level);
         const active = value === level;
 
         if (supported) {
@@ -790,7 +811,7 @@ function ReasoningEffortToggle({
           );
         }
 
-        const suggestion = levels?.length ? nearestSupportedLevel(level, levels) : null;
+        const suggestion = nearestReasoningLevel(level, levels);
         const unsupportedReason = `${modelLabel ?? "This model"} doesn't support "${REASONING_EFFORT_LABEL[level]}"${
           suggestion ? ` — use "${REASONING_EFFORT_LABEL[suggestion]}" instead.` : "."
         }`;

@@ -8,13 +8,15 @@ import {
   pricingModelOptions,
 } from "./agent-runtime-models";
 import { DIAL_LEVELS, type DialHarness, dialPrice, dialSetting } from "./model-dial";
+import { tierRows } from "./model-tier-fixtures";
 import { modelVendor } from "./model-vendor";
 import modelsCache from "./modelsdev-cache.json";
 
-// The UI keeps a few concrete model ids (the dial presets, the pi/opencode
-// default) and a table of vendor id patterns. None of them come from the
-// catalog, so these tests fail when the bundled catalog moves under them. A
-// failure here means: update the preset / pattern, do not loosen the test.
+// The UI keeps a few concrete model ids (the pi/opencode default) and a table of
+// vendor id patterns, and the dial reads the shipped model tier defaults
+// (`tierRows()` mirrors them). None of them come from the catalog, so these
+// tests fail when the bundled catalog moves under them. A failure here means:
+// update the default / pattern, do not loosen the test.
 
 type Snapshot = Record<string, { models: Record<string, { name?: string }> } | undefined>;
 const snapshot = modelsCache as unknown as Snapshot;
@@ -36,25 +38,32 @@ function live(sections: Record<string, Record<string, object>>): LiveModelsCatal
   ) as unknown as LiveModelsCatalog;
 }
 
-describe("dial presets against the bundled catalog", () => {
+describe("dial levels against the bundled catalog", () => {
   const harnesses: DialHarness[] = ["claude", "codex", "pi", "opencode"];
+  const tiers = tierRows();
 
   for (const harness of harnesses) {
     for (const level of DIAL_LEVELS) {
       test(`${harness} ${level} is a catalog model with a price and an effort`, () => {
-        const setting = dialSetting(harness, level, { openrouter: false });
-        expect(setting.custom).toBe(false);
-        expect(setting.effort).not.toBeNull();
-        expect(dialPrice(setting)).not.toBeNull();
+        const setting = dialSetting(harness, level, { openrouter: false, tiers });
+        expect(setting).not.toBeNull();
+        expect(setting?.custom).toBe(false);
+        expect(setting?.effort).not.toBeNull();
+        expect(dialPrice(setting as NonNullable<typeof setting>)).not.toBeNull();
       });
     }
   }
 
   for (const level of DIAL_LEVELS) {
     test(`dsh ${level} (OpenRouter) is listed by the OpenRouter catalog`, () => {
-      const { model } = dialSetting("dsh", level, { openrouter: true });
+      const model = dialSetting("dsh", level, { openrouter: true, tiers })?.model ?? "";
       expect(model.startsWith("openrouter/")).toBe(true);
       expect(snapshot.openrouter?.models[model.slice("openrouter/".length)]).toBeDefined();
+    });
+
+    test(`dsh ${level} (DeepSeek direct) is listed by the deepseek catalog`, () => {
+      const model = dialSetting("dsh", level, { openrouter: false, tiers })?.model ?? "";
+      expect(snapshot.deepseek?.models[model]).toBeDefined();
     });
   }
 });
@@ -153,26 +162,30 @@ describe("the live catalog wins over the bundled snapshot", () => {
   });
 
   test("dial settings follow the live catalog and are cached per catalog", () => {
-    const withoutLuna = live({ openai: { "gpt-6-sol": { name: "GPT-6 Sol", reasoning: true } } });
-    const context = { openrouter: false, catalog: withoutLuna };
-    // The snapshot lists gpt-6-luna; this live catalog does not, so it is custom there.
-    expect(dialSetting("codex", "cheap", { openrouter: false }).custom).toBe(false);
-    expect(dialSetting("codex", "cheap", context).custom).toBe(true);
+    const tiers = tierRows({ "codex:regular": "gpt-9-test" });
+    const withoutModel = live({ openai: { "gpt-9-other": { name: "Other", reasoning: true } } });
+    const context = { openrouter: false, tiers, catalog: withoutModel };
+    // The snapshot does not list gpt-9-test, nor does this live catalog: custom.
+    expect(dialSetting("codex", "cheap", context)?.custom).toBe(true);
     expect(dialSetting("codex", "cheap", context)).toBe(dialSetting("codex", "cheap", context));
     // A different catalog object is a different cache.
-    const withLuna = live({
-      openai: { "gpt-6-luna": { name: "GPT-6 Luna", reasoning: true, reasoning_options: [] } },
+    const withModel = live({
+      openai: { "gpt-9-test": { name: "GPT-9 Test", reasoning: true, reasoning_options: [] } },
     });
-    expect(dialSetting("codex", "cheap", { openrouter: false, catalog: withLuna }).custom).toBe(
-      false,
-    );
+    expect(
+      dialSetting("codex", "cheap", { openrouter: false, tiers, catalog: withModel })?.custom,
+    ).toBe(false);
   });
 
   test("dialPrice reads the live price", () => {
     const priced = live({ anthropic: { "claude-opus-5-5": { cost: { input: 1, output: 2 } } } });
-    const setting = dialSetting("claude", "optimal", { openrouter: false });
-    expect(dialPrice(setting, priced)).toEqual({ input: 1, output: 2 });
-    expect(dialPrice(setting)).not.toEqual({ input: 1, output: 2 });
+    const setting = dialSetting("claude", "optimal", { openrouter: false, tiers: tierRows() });
+    expect(setting?.model).toBe("claude-opus-5-5");
+    expect(dialPrice(setting as NonNullable<typeof setting>, priced)).toEqual({
+      input: 1,
+      output: 2,
+    });
+    expect(dialPrice(setting as NonNullable<typeof setting>)).not.toEqual({ input: 1, output: 2 });
   });
 });
 

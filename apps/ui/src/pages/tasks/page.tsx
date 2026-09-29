@@ -7,7 +7,7 @@ import { useScheduledTasks } from "@/api/hooks/use-schedules";
 import { useTaskTemplates } from "@/api/hooks/use-task-templates";
 import { useCreateTask, useTasks } from "@/api/hooks/use-tasks";
 import { useUsers } from "@/api/hooks/use-users";
-import { type AgentTask, REASONING_EFFORT_LEVELS } from "@/api/types";
+import type { AgentTask } from "@/api/types";
 import { FilterField, FiltersPopover } from "@/components/shared/filters-popover";
 import { ListPager } from "@/components/shared/list-pager";
 import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
@@ -47,6 +47,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { MODEL_TIER_OPTIONS } from "@/lib/model-tiers";
 import { taskListTitle } from "@/lib/task-title";
 import { formatRelativeTime } from "@/lib/utils";
+import { TaskEffortField } from "./task-effort-field";
 import { useStalePageCorrection } from "./use-stale-page-correction";
 
 interface TaskFormData {
@@ -106,6 +107,8 @@ function CreateTaskDialog({
   }, [open]);
 
   const leadAgent = agents?.find((a) => a.isLead) ?? agents?.[0];
+  const selectedAgent = agents?.find((a) => a.id === (form.agentId || leadAgent?.id));
+  const setEffort = useCallback((effort: string) => setForm((f) => ({ ...f, effort })), []);
 
   // Merge pending + running tasks for dependency picker
   const availableDeps = useMemo(() => {
@@ -226,25 +229,13 @@ function CreateTaskDialog({
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-2">
-              <Label>Reasoning Effort</Label>
-              <Select
-                value={form.effort}
-                onValueChange={(v) => setForm({ ...form, effort: v === "_none" ? "" : v })}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Agent default" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="_none">Agent default</SelectItem>
-                  {REASONING_EFFORT_LEVELS.map((level) => (
-                    <SelectItem key={level} value={level}>
-                      {level}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            <TaskEffortField
+              agent={selectedAgent}
+              tier={form.modelTier}
+              value={form.effort}
+              onChange={setEffort}
+              enabled={open}
+            />
             <div className="space-y-2">
               <Label>Dependencies</Label>
               {form.dependsOn.length > 0 && (

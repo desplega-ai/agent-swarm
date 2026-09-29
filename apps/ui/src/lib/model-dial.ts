@@ -1,5 +1,13 @@
-import type { ReasoningEffortLevel } from "@/api/types";
 import {
+  compareNewestFirst,
+  nearestReasoningLevel,
+  type ReasoningEffortLevel,
+} from "@desplega/model-catalog";
+import type { ModelTier, ModelTierPreview } from "@/api/types";
+import {
+  claudeModelId,
+  deepseekCatalogModels,
+  effortLevelsFor,
   findKnownModel,
   findModelOption,
   type LiveModelsCatalog,
@@ -7,13 +15,19 @@ import {
   type ModelCost,
   type ModelGroup,
   modelGroupsForHarness,
-  nearestSupportedLevel,
 } from "./agent-runtime-models";
+import { tierRowModel } from "./model-tiers";
 
 /**
  * The per-agent model dial of `/setup` step 4 (Agents): three levels per harness,
  * each a concrete `MODEL_OVERRIDE` plus a `REASONING_EFFORT_OVERRIDE`.
- * Values approved by Taras on 2026-09-24.
+ *
+ * The model of a level is the model of a Model Tier for that harness
+ * (`DIAL_TIER`, read from `GET /api/models-catalog/tiers`), so retuning a
+ * `MODEL_TIER_<PROVIDER>_<TIER>` key moves the dial with no code change. Only
+ * the effort intent per level is data here (`EFFORT_INTENT`), clamped to what
+ * the model accepts. Until the tier rows load the dial cannot answer: every
+ * lookup returns `null` and callers wait rather than write a guessed model.
  */
 export type DialLevel = "cheap" | "optimal" | "max";
 
@@ -23,6 +37,13 @@ export const DIAL_LEVEL_LABEL: Record<DialLevel, string> = {
   cheap: "Cheap",
   optimal: "Optimal",
   max: "Max",
+};
+
+/** The Model Tier whose model each dial level runs. */
+export const DIAL_TIER: Record<DialLevel, ModelTier> = {
+  cheap: "regular",
+  optimal: "smart",
+  max: "ultra",
 };
 
 /** Where an agent's stored model sits on the dial. `custom` = any other model. */
@@ -35,55 +56,35 @@ const DIAL_HARNESSES: readonly DialHarness[] = ["claude", "codex", "pi", "openco
 
 type EffortHarness = Exclude<DialHarness, "dsh">;
 
-interface Preset {
-  model: string;
-  /** The intended effort. `dialSetting` clamps it to what the model supports. */
-  effort: ReasoningEffortLevel;
-}
-
-const OPEN_HARNESS_PRESETS: Record<DialLevel, Preset> = {
-  cheap: { model: "openrouter/deepseek/deepseek-v4.1-flash", effort: "low" },
-  optimal: { model: "openrouter/z-ai/glm-5.3", effort: "medium" },
-  max: { model: "openrouter/anthropic/claude-opus-5.5", effort: "high" },
+/**
+ * The effort each level asks for. A product choice, not a model fact: the dial
+ * clamps it to the nearest level the model accepts (`effortLevelsFor`), so two
+ * levels can share a model and still differ by effort.
+ */
+const OPEN_HARNESS_EFFORT: Record<DialLevel, ReasoningEffortLevel> = {
+  cheap: "low",
+  optimal: "medium",
+  max: "high",
 };
 
-const PRESETS: Record<EffortHarness, Record<DialLevel, Preset>> = {
-  claude: {
-    cheap: { model: "claude-sonnet-5", effort: "medium" },
-    optimal: { model: "claude-opus-5-5", effort: "high" },
-    max: { model: "claude-fable-5-1", effort: "high" },
-  },
-  codex: {
-    cheap: { model: "gpt-6-luna", effort: "medium" },
-    optimal: { model: "gpt-6-sol", effort: "high" },
-    max: { model: "gpt-6-astra", effort: "xhigh" },
-  },
-  pi: OPEN_HARNESS_PRESETS,
-  opencode: OPEN_HARNESS_PRESETS,
+const EFFORT_INTENT: Record<EffortHarness, Record<DialLevel, ReasoningEffortLevel>> = {
+  claude: { cheap: "medium", optimal: "high", max: "high" },
+  codex: { cheap: "medium", optimal: "high", max: "xhigh" },
+  pi: OPEN_HARNESS_EFFORT,
+  opencode: OPEN_HARNESS_EFFORT,
 };
 
 /**
- * dsh reads `openrouter/<id>` with an OpenRouter key, or a bare DeepSeek id
- * with `DEEPSEEK_API_KEY` (`src/providers/dsh-adapter.ts`). No effort.
+ * Every id of the catalog's `deepseek` section (the bare ids dsh reads with
+ * `DEEPSEEK_API_KEY`, `src/providers/dsh-adapter.ts`) starts with it.
  */
-const DSH_MODELS: Record<"openrouter" | "deepseek", Record<DialLevel, string>> = {
-  openrouter: {
-    cheap: "openrouter/deepseek/deepseek-v4.1-flash",
-    optimal: "openrouter/deepseek/deepseek-v4-pro",
-    max: "openrouter/deepseek/deepseek-v4-pro",
-  },
-  deepseek: {
-    cheap: "deepseek-v4-flash",
-    optimal: "deepseek-v4-pro",
-    max: "deepseek-v4-pro",
-  },
-};
+const DEEPSEEK_PREFIX = "deepseek-";
 
 /** What a dial level writes for one harness. */
 export interface DialSetting {
   harness: DialHarness;
   model: string;
-  /** `null` clears `REASONING_EFFORT_OVERRIDE` (dsh, or no effort data for the model). */
+  /** `null` clears `REASONING_EFFORT_OVERRIDE` (dsh, or a model that takes no effort). */
   effort: ReasoningEffortLevel | null;
   /** The catalog does not list the model: the API stores it as a custom model. */
   custom: boolean;
@@ -97,46 +98,105 @@ export interface DialContext {
    * the API validates against. Absent while it loads: the bundled snapshot.
    */
   catalog?: LiveModelsCatalog | null;
+  /**
+   * The model tier rows (`GET /api/models-catalog/tiers`, `useModelTiers`).
+   * Absent while they load: the dial has no answer (`dialSetting` is `null`).
+   */
+  tiers?: readonly ModelTierPreview[] | null;
 }
 
 export function dialHarness(harness: string | null | undefined): DialHarness | null {
   return DIAL_HARNESSES.find((h) => h === harness) ?? null;
 }
 
+/** The model a dial level runs on `harness`: its tier's model. `null` when the tier names none. */
+function tierModel(
+  tiers: readonly ModelTierPreview[] | null | undefined,
+  harness: DialHarness,
+  level: DialLevel,
+): string | null {
+  return tierRowModel(tiers, harness, DIAL_TIER[level]);
+}
+
 /**
- * The supported level nearest to `level` (`nearestSupportedLevel`, the same
- * rule as the runtime settings). `null` when the model has no effort data:
- * the API rejects any level then.
+ * The DeepSeek-direct model for a dsh tier value: the newest model of the
+ * catalog's `deepseek` section that ends with the same family token (`flash`,
+ * `pro`) as the value. `null` when the value is not a DeepSeek model.
  */
-function clampEffort(
-  level: ReasoningEffortLevel,
-  levels: ReadonlyArray<ReasoningEffortLevel> | undefined,
-): ReasoningEffortLevel | null {
-  return levels ? nearestSupportedLevel(level, levels) : null;
+function deepseekModelFor(
+  value: string,
+  models: ReturnType<typeof deepseekCatalogModels>,
+): string | null {
+  const own = value.split("/").pop() ?? value;
+  if (!own.startsWith(DEEPSEEK_PREFIX)) return null;
+  const usable = Object.entries(models)
+    .filter(([id, model]) => id.startsWith(DEEPSEEK_PREFIX) && model.status !== "deprecated")
+    .map(([id, model]) => ({ id, release_date: model.release_date ?? null }));
+  const families = new Set(usable.map((model) => model.id.split("-").pop()));
+  // The last token of the value that names a family: `…-v4.1-flash` is flash,
+  // `…-v4-pro-0813` is pro.
+  const family = own
+    .split("-")
+    .reverse()
+    .find((token) => families.has(token));
+  if (!family) return null;
+  return (
+    usable.filter((model) => model.id.endsWith(`-${family}`)).sort(compareNewestFirst)[0]?.id ??
+    null
+  );
+}
+
+/**
+ * dsh without an OpenRouter key runs a bare DeepSeek id. A level whose tier is
+ * not a DeepSeek model (Max defaults to a Claude route) takes the nearest lower
+ * level's DeepSeek model.
+ */
+function deepseekDirectModel(level: DialLevel, context: DialContext): string | null {
+  const models = deepseekCatalogModels(context.catalog);
+  for (let i = DIAL_LEVELS.indexOf(level); i >= 0; i--) {
+    const value = tierModel(context.tiers, "dsh", DIAL_LEVELS[i]);
+    const model = value ? deepseekModelFor(value, models) : null;
+    if (model) return model;
+  }
+  return null;
 }
 
 // The API validates effort against the runtime catalog (the live `model_catalog`
 // plus overlay rows, the bundled snapshot offline: `src/providers/reasoning-effort.ts`),
-// so the clamp reads the live catalog when the context carries one. The inputs are
-// static per catalog (preset table + catalog), so both caches are keyed by the
-// catalog object: a refetched catalog with new data is a new object, and react-query
-// keeps the same object while the data is unchanged.
-interface CatalogCaches {
-  groups: Map<LocalHarnessProvider, ModelGroup[]>;
-  settings: Map<string, DialSetting>;
+// so the clamp reads the live catalog when the context carries one. The answer
+// depends on the catalog AND the tier rows, so the settings cache is keyed by
+// both objects: a refetched catalog or tier list with new data is a new object,
+// and react-query keeps the same object while the data is unchanged.
+const NO_CATALOG = {};
+const NO_TIERS = {};
+
+const groupCaches = new WeakMap<object, Map<LocalHarnessProvider, ModelGroup[]>>();
+const settingCaches = new WeakMap<object, WeakMap<object, Map<string, DialSetting | null>>>();
+
+function groupCacheFor(catalog: LiveModelsCatalog | null | undefined) {
+  const key = catalog ?? NO_CATALOG;
+  let cache = groupCaches.get(key);
+  if (!cache) {
+    cache = new Map();
+    groupCaches.set(key, cache);
+  }
+  return cache;
 }
 
-const snapshotCaches: CatalogCaches = { groups: new Map(), settings: new Map() };
-const liveCaches = new WeakMap<LiveModelsCatalog, CatalogCaches>();
-
-function cachesFor(catalog: LiveModelsCatalog | null | undefined): CatalogCaches {
-  if (!catalog) return snapshotCaches;
-  let caches = liveCaches.get(catalog);
-  if (!caches) {
-    caches = { groups: new Map(), settings: new Map() };
-    liveCaches.set(catalog, caches);
+function settingCacheFor(context: DialContext) {
+  const catalogKey = context.catalog ?? NO_CATALOG;
+  let byTiers = settingCaches.get(catalogKey);
+  if (!byTiers) {
+    byTiers = new WeakMap();
+    settingCaches.set(catalogKey, byTiers);
   }
-  return caches;
+  const tiersKey = context.tiers ?? NO_TIERS;
+  let cache = byTiers.get(tiersKey);
+  if (!cache) {
+    cache = new Map();
+    byTiers.set(tiersKey, cache);
+  }
+  return cache;
 }
 
 function catalogOption(
@@ -144,7 +204,7 @@ function catalogOption(
   model: string,
   catalog: LiveModelsCatalog | null | undefined,
 ) {
-  const { groups: cached } = cachesFor(catalog);
+  const cached = groupCacheFor(catalog);
   let groups = cached.get(harness);
   if (!groups) {
     groups = modelGroupsForHarness(harness, undefined, undefined, null, catalog);
@@ -153,39 +213,57 @@ function catalogOption(
   return findModelOption(model, groups);
 }
 
+/**
+ * What `level` writes for `harness`, or `null` when the tier rows are not
+ * loaded, or the level's tier has no model for the harness (no row, or a
+ * `latest:` alias that resolves to nothing).
+ */
 export function dialSetting(
   harness: DialHarness,
   level: DialLevel,
   context: DialContext,
-): DialSetting {
-  const { settings } = cachesFor(context.catalog);
+): DialSetting | null {
+  const settings = settingCacheFor(context);
   const key = `${harness}:${level}:${harness === "dsh" && context.openrouter}`;
   let setting = settings.get(key);
-  if (!setting) {
+  if (setting === undefined) {
     setting = computeSetting(harness, level, context);
     settings.set(key, setting);
   }
   return setting;
 }
 
-function computeSetting(harness: DialHarness, level: DialLevel, context: DialContext): DialSetting {
+function computeSetting(
+  harness: DialHarness,
+  level: DialLevel,
+  context: DialContext,
+): DialSetting | null {
   if (harness === "dsh") {
-    const model = DSH_MODELS[context.openrouter ? "openrouter" : "deepseek"][level];
-    return { harness, model, effort: null, custom: true };
+    const model = context.openrouter
+      ? tierModel(context.tiers, harness, level)
+      : deepseekDirectModel(level, context);
+    return model ? { harness, model, effort: null, custom: true } : null;
   }
-  const preset = PRESETS[harness][level];
-  const option = catalogOption(harness, preset.model, context.catalog);
+  const value = tierModel(context.tiers, harness, level);
+  if (!value) return null;
+  // The Claude tiers name CLI shortnames (`opus`): store the catalog id they stand for.
+  const model = harness === "claude" ? claudeModelId(value, context.catalog) : value;
+  const option = catalogOption(harness, model, context.catalog);
   return {
     harness,
-    model: preset.model,
-    effort: clampEffort(preset.effort, option?.reasoningLevels),
+    model,
+    // `null` when the model takes no effort: the API rejects any level then.
+    effort: nearestReasoningLevel(
+      EFFORT_INTENT[harness][level],
+      effortLevelsFor(harness, model, context.catalog),
+    ),
     custom: option === null,
   };
 }
 
 /**
  * The stored model and effort equal exactly what `setting` writes. A setting
- * without effort (dsh, or no effort data) matches only a cleared effort.
+ * without effort (dsh, or a model that takes none) matches only a cleared effort.
  */
 export function dialSettingApplied(
   setting: DialSetting,
@@ -198,7 +276,8 @@ export function dialSettingApplied(
 /**
  * Every level whose setting (in `context`) equals the stored model and
  * effort, in dial order. More than one when two levels write the same (dsh
- * Optimal and Max). dsh matches only the id form it writes in `context`.
+ * Optimal and Max). dsh matches only the id form it writes in `context`. None
+ * while the tier rows are not loaded.
  */
 export function dialMatches(
   harness: DialHarness,
@@ -207,9 +286,10 @@ export function dialMatches(
   context: DialContext,
 ): DialLevel[] {
   if (!model) return [];
-  return DIAL_LEVELS.filter((level) =>
-    dialSettingApplied(dialSetting(harness, level, context), model, effort),
-  );
+  return DIAL_LEVELS.filter((level) => {
+    const setting = dialSetting(harness, level, context);
+    return setting !== null && dialSettingApplied(setting, model, effort);
+  });
 }
 
 /**

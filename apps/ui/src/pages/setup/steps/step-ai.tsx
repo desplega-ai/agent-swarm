@@ -4,8 +4,9 @@ import { Link } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useConfigs } from "@/api/hooks/use-config-api";
 import { useEnvPresence } from "@/api/hooks/use-integrations-meta";
+import { useModelTiers } from "@/api/hooks/use-model-tiers";
 import { useModelsCatalog } from "@/api/hooks/use-models-catalog";
-import type { OnboardingAiMethod } from "@/api/types";
+import type { ModelTierPreview, OnboardingAiMethod } from "@/api/types";
 import { setupExitHref } from "@/components/onboarding/onboarding-redirect";
 import { Button } from "@/components/ui/button";
 import { AutosaveScopeContext, useAutosaveScope } from "@/hooks/use-autosave";
@@ -25,6 +26,9 @@ import {
 } from "./ai/model";
 import { OpenHarnessCard } from "./ai/open-harness-card";
 
+/** Stable, so a failed tier load does not rebuild the dial context on every render. */
+const NO_TIER_ROWS: ModelTierPreview[] = [];
+
 export function StepAi({ onboarding, act, setContinueBlocker }: StepProps) {
   const scope = useAutosaveScope(setContinueBlocker);
   const { data: agents = [] } = useAgents();
@@ -38,7 +42,14 @@ export function StepAi({ onboarding, act, setContinueBlocker }: StepProps) {
   const openrouter = hasRuntimeCredential("OPENROUTER_API_KEY", configs, presence);
   const { data: modelsCatalog } = useModelsCatalog();
   const catalog = modelsCatalog?.providers ?? null;
-  const dialContext = useMemo<DialContext>(() => ({ openrouter, catalog }), [openrouter, catalog]);
+  const tiersQuery = useModelTiers();
+  // A failed tier load leaves an empty list: no level carries over, and the
+  // switch changes only the harness (never a guessed model).
+  const tiers = tiersQuery.data ?? (tiersQuery.isError ? NO_TIER_ROWS : null);
+  const dialContext = useMemo<DialContext>(
+    () => ({ openrouter, catalog, tiers }),
+    [openrouter, catalog, tiers],
+  );
 
   const providers = onboarding.signals.providers;
   const rollups = useMemo(

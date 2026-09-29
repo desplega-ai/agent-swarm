@@ -7,7 +7,8 @@ import { api } from "@/api/client";
  * against the live catalog and reads the effective `MODEL_TIER_<PROVIDER>_<TIER>`
  * value, so the Configuration page previews the same answer a claim would get.
  * A saved tier value only takes effect on the server's debounced config reload,
- * so the query polls while the Configuration page is open.
+ * so the query polls while a consumer is mounted. Also read by the setup model
+ * dial (a level is a tier's model) and the Create Task effort picker.
  */
 export function useModelTiers() {
   return useQuery({

@@ -1,42 +1,19 @@
-import { buildClaudeShortnameMap, harnessModelIds } from "@desplega/model-catalog";
-import type { ProviderName, ReasoningEffortLevel, SwarmConfig } from "@/api/types";
+import {
+  buildClaudeShortnameMap,
+  claudeCatalogModelId,
+  harnessModelIds,
+  isReasoningHarness,
+  modelDisplayName,
+  type ReasoningEffortLevel,
+  reasoningLevelsFor,
+} from "@desplega/model-catalog";
+import type { ProviderName, SwarmConfig } from "@/api/types";
 import modelsCache from "./modelsdev-cache.json";
 
-/**
- * Local mirror of the value in `@/api/types` (kept type-only there). This
- * module is imported directly (via a relative path, no bundler) by backend
- * unit tests (`src/tests/agents-list-model-display.test.ts`,
- * `src/tests/bedrock-model-groups.test.ts`) — every other `@/api/types`
- * import in `ui/src/lib/` is `import type` for exactly this reason: a
- * non-type-only import needs the `@/` alias resolved at runtime, which plain
- * Bun module resolution (no Vite bundler) can't do.
- */
-const REASONING_EFFORT_LEVELS: readonly ReasoningEffortLevel[] = [
-  "off",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-];
-
-/**
- * Nearest supported level by canonical-order distance. On a tie the first
- * listed level wins (the lower one, as `levels` come in canonical order).
- * `null` when `levels` is empty.
- */
-export function nearestSupportedLevel(
-  level: ReasoningEffortLevel,
-  levels: ReadonlyArray<ReasoningEffortLevel>,
-): ReasoningEffortLevel | null {
-  if (levels.length === 0) return null;
-  const idx = REASONING_EFFORT_LEVELS.indexOf(level);
-  return [...levels].sort(
-    (a, b) =>
-      Math.abs(REASONING_EFFORT_LEVELS.indexOf(a) - idx) -
-      Math.abs(REASONING_EFFORT_LEVELS.indexOf(b) - idx),
-  )[0];
-}
+// Every `@/api/types` import here is `import type`: backend unit tests import
+// this module by relative path with no bundler (`src/tests/agents-list-model-display.test.ts`,
+// `src/tests/bedrock-model-groups.test.ts`), and a runtime `@/` import cannot
+// resolve there.
 
 export type LocalHarnessProvider = "claude" | "codex" | "pi" | "opencode" | "acp";
 
@@ -61,10 +38,10 @@ export interface ModelOption {
   /** ISO release date from the catalog, when it has one. */
   releaseDate?: string;
   /**
-   * Reasoning-effort levels this model supports, client-side mirror of the
-   * server's hybrid capability lookup (`src/providers/reasoning-effort.ts`).
-   * `undefined` means no capability data was found (custom/unknown model) —
-   * the effort selector should NOT grey out any segment in that case.
+   * The effort levels the harness this option was listed for accepts on this
+   * model (`reasoningLevelsFor`, the rule the API validates with). Empty when
+   * the model takes no effort. Absent on options built outside a harness list
+   * (`findKnownModel`): use `effortLevelsFor` when the harness is known.
    */
   reasoningLevels?: ReadonlyArray<ReasoningEffortLevel>;
 }
@@ -87,7 +64,7 @@ export interface ModelGroup {
 
 export type SnapshotProviderId = "openrouter" | "anthropic" | "openai" | "amazon-bedrock";
 
-type CatalogProviderId = SnapshotProviderId | "opencode";
+type CatalogProviderId = SnapshotProviderId | "opencode" | "deepseek";
 
 interface CachedReasoningOption {
   type: string;
@@ -120,7 +97,15 @@ interface CachedProvider {
  */
 export type LiveModelsCatalog = Partial<Record<CatalogProviderId, CachedProvider>>;
 
-const CACHE = modelsCache as Record<CatalogProviderId, CachedProvider | undefined>;
+const CACHE = modelsCache as unknown as Record<string, CachedProvider | undefined>;
+
+/** A provider section of `source`, or undefined for a key it does not own (never a prototype member). */
+function sectionOf(
+  source: Partial<Record<string, CachedProvider>> | null | undefined,
+  providerId: string,
+): CachedProvider | undefined {
+  return source && Object.hasOwn(source, providerId) ? source[providerId] : undefined;
+}
 
 /** The catalog facts every `ModelOption` carries, read from one catalog row. */
 function catalogFacts(
@@ -134,97 +119,94 @@ function catalogFacts(
   };
 }
 
-// --- Reasoning-effort capability mirror ---------------------------------------
-// Client-side mirror of the resolution order in `reasoningCapability()`
-// (`src/providers/reasoning-effort.ts`, Phase 1). Kept in sync by hand — see
-// that module's doc comment for the accepted-tradeoff rationale (same
-// duplication already accepted for the harness/model registry itself).
+// --- Reasoning-effort capability --------------------------------------------
+// The rule lives in `@desplega/model-catalog` (`reasoningLevelsFor`), shared with
+// the API, which rejects an effort outside it. This is only the catalog lookup.
 
-/** Shared-safe subset accepted by all four harnesses on at least their default models (see research doc). */
-const REASONING_FALLBACK_LEVELS: ReasoningEffortLevel[] = ["low", "medium", "high"];
-
-/** models.dev `reasoning_options[].type === "effort"` value → our normalized enum. `minimal` intentionally dropped. */
-const REASONING_EFFORT_VALUE_MAP: Partial<Record<string, ReasoningEffortLevel>> = {
-  none: "off",
-  low: "low",
-  medium: "medium",
-  high: "high",
-  xhigh: "xhigh",
-  max: "max",
-};
-
-function levelsFromReasoningOptions(
-  options: CachedReasoningOption[] | undefined,
-): ReasoningEffortLevel[] {
-  const effortEntry = options?.find((o) => o.type === "effort");
-  if (!effortEntry?.values?.length) return [];
-  const mapped = new Set(
-    effortEntry.values
-      .map((v) => REASONING_EFFORT_VALUE_MAP[v])
-      .filter((v): v is ReasoningEffortLevel => v !== undefined),
-  );
-  return REASONING_EFFORT_LEVELS.filter((level) => mapped.has(level));
-}
-
-function hasBudgetTokensOption(model: CachedModel): boolean {
-  return Boolean(model.reasoning_options?.some((o) => o.type === "budget_tokens"));
+/**
+ * A provider section as the API's runtime catalog holds it: the bundled
+ * snapshot overlaid by the live catalog, the live row winning per model id.
+ */
+function runtimeSectionModels(
+  providerId: string,
+  liveCatalog: LiveModelsCatalog | null | undefined,
+): Record<string, CachedModel> {
+  const snapshot = sectionOf(CACHE, providerId)?.models;
+  const live = sectionOf(liveCatalog, providerId)?.models;
+  return live ? { ...snapshot, ...live } : (snapshot ?? {});
 }
 
 /**
- * Harness-specific quirks the cache doesn't (fully) encode — mirrors
- * `applyHarnessOverrides()` server-side. Only fires for the literal `claude`/
- * `codex` harness values (direct models); `pi`/`opencode` selecting an
- * underlying Anthropic/OpenAI model never triggers these, matching the
- * backend (its override table also keys off the harness param, not the
- * model's provider).
+ * The reasoning-effort levels `harness` accepts for `modelId`: exactly what
+ * `PATCH /api/agents/:id/runtime` allows, so an effort picker offers these and
+ * nothing else. Empty for a harness with no effort control (acp, dsh, devin,
+ * claude-managed), a model the catalog does not list (custom strings), and a
+ * model that does not reason.
+ *
+ * `modelId` is the string the harness stores: a bare id for claude and codex
+ * (a Claude CLI shortname such as `opus` resolves to the newest model of its
+ * family), `<provider>/<id>` for pi and opencode.
  */
-function applyReasoningHarnessOverrides(
-  harness: LocalHarnessProvider,
-  modelId: string,
-  model: CachedModel,
-  levels: ReasoningEffortLevel[],
+export function effortLevelsFor(
+  harness: string,
+  modelId: string | null | undefined,
+  liveCatalog?: LiveModelsCatalog | null,
 ): ReasoningEffortLevel[] {
-  let result = levels;
-
-  if (harness === "claude" && hasBudgetTokensOption(model) && !result.includes("off")) {
-    result = ["off", ...result];
+  if (!modelId || !isReasoningHarness(harness)) return [];
+  let providerId: string;
+  let catalogId: string;
+  if (harness === "claude") {
+    providerId = "anthropic";
+    catalogId = claudeCatalogModelId(modelId, runtimeSectionModels(providerId, liveCatalog));
+  } else if (harness === "codex") {
+    providerId = "openai";
+    catalogId = modelId;
+  } else {
+    // The id may hold more slashes (`openrouter/google/gemini-3-flash-preview`).
+    const slash = modelId.indexOf("/");
+    if (slash <= 0) return [];
+    providerId = modelId.slice(0, slash);
+    catalogId = modelId.slice(slash + 1);
   }
-
-  if (harness !== "codex") {
-    result = result.filter((l) => l !== "max");
-  }
-
-  if (harness === "codex") {
-    const isCodexMax = /-codex-max$/.test(modelId);
-    const isCodexNonMax = /-codex$/.test(modelId) && !isCodexMax;
-    if (isCodexMax && !result.includes("xhigh")) {
-      result = [...result, "xhigh"];
-    }
-    if (isCodexNonMax) {
-      result = result.filter((l) => l !== "xhigh");
-    }
-  }
-
-  return REASONING_EFFORT_LEVELS.filter((level) => result.includes(level));
+  const facts =
+    sectionOf(liveCatalog, providerId)?.models?.[catalogId] ??
+    sectionOf(CACHE, providerId)?.models?.[catalogId];
+  return reasoningLevelsFor(harness, catalogId, facts);
 }
 
 /**
- * Client-side mirror of `reasoningCapability().levels` — returns `undefined`
- * when there's no usable capability data (unknown model, or `reasoning:
- * false`), which the effort selector treats as "don't grey out anything".
+ * The effort to keep when the harness or model changes: `current` when the new
+ * (harness, model) pair takes it, else `""` (Auto, no override). An effort the
+ * pair cannot take resets to Auto and is never coerced to a neighbour, so the
+ * operator sees the change instead of a level they did not pick.
  */
-function reasoningLevelsFromCache(
-  harness: LocalHarnessProvider,
-  modelId: string,
-  model: CachedModel | undefined,
-): ReadonlyArray<ReasoningEffortLevel> | undefined {
-  if (!model?.reasoning) return undefined;
+export function effortAfterChange(
+  current: ReasoningEffortLevel | "",
+  harness: string,
+  modelId: string | null | undefined,
+  liveCatalog?: LiveModelsCatalog | null,
+): ReasoningEffortLevel | "" {
+  if (!current) return "";
+  return effortLevelsFor(harness, modelId, liveCatalog).includes(current) ? current : "";
+}
 
-  let levels = levelsFromReasoningOptions(model.reasoning_options);
-  if (levels.length === 0) levels = [...REASONING_FALLBACK_LEVELS];
-  levels = applyReasoningHarnessOverrides(harness, modelId, model, levels);
+/**
+ * The catalog id a Claude CLI shortname (`opus`, `sonnet`, `fable`) stands for:
+ * the newest model of that family. A catalog id comes back unchanged.
+ */
+export function claudeModelId(modelId: string, liveCatalog?: LiveModelsCatalog | null): string {
+  return claudeCatalogModelId(modelId, runtimeSectionModels("anthropic", liveCatalog));
+}
 
-  return levels.length > 0 ? levels : undefined;
+/**
+ * The DeepSeek-direct catalog section (the bare ids dsh reads with
+ * `DEEPSEEK_API_KEY`). The API's live catalog does not carry it, so this is
+ * the bundled snapshot until it does.
+ */
+export function deepseekCatalogModels(
+  liveCatalog?: LiveModelsCatalog | null,
+): Record<string, CachedModel> {
+  return runtimeSectionModels("deepseek", liveCatalog);
 }
 
 export const LOCAL_HARNESSES: LocalHarnessProvider[] = ["claude", "codex", "pi", "opencode", "acp"];
@@ -263,10 +245,10 @@ function directModel(
 ): ModelOption {
   return {
     id: model.id,
-    label: model.name ?? humanizeModelId(model.id),
+    label: modelDisplayName(model.name) ?? humanizeModelId(model.id),
     ...meta,
     ...catalogFacts(model),
-    reasoningLevels: reasoningLevelsFromCache(harness, model.id, model),
+    reasoningLevels: reasoningLevelsFor(harness, model.id, model),
   };
 }
 
@@ -404,12 +386,12 @@ export function modelGroupsForHarness(
     const models: ModelOption[] = Object.values(cache?.models ?? {})
       .map((m) => ({
         id: `${providerId}/${m.id}`,
-        label: m.name ?? m.id,
+        label: modelDisplayName(m.name) ?? m.id,
         provider: meta.label,
         providerId: meta.iconKey,
         requiredKey: meta.requiredKey,
         ...catalogFacts(m),
-        reasoningLevels: reasoningLevelsFromCache(harness, m.id, m),
+        reasoningLevels: reasoningLevelsFor(harness, m.id, m),
       }))
       .sort((a, b) => a.label.localeCompare(b.label));
     return {
@@ -436,11 +418,11 @@ export function modelGroupsForHarness(
       // the snapshot doesn't know, which the selector treats as unrestricted).
       bedrockModels = liveBedrockStatus.models.map((m) => ({
         id: `amazon-bedrock/${m.id}`,
-        label: m.name,
+        label: modelDisplayName(m.name),
         provider: bedrockMeta.label,
         providerId: bedrockMeta.iconKey,
         requiredKey: bedrockMeta.requiredKey,
-        reasoningLevels: reasoningLevelsFromCache("pi", m.id, bedrockCache?.models[m.id]),
+        reasoningLevels: reasoningLevelsFor("pi", m.id, bedrockCache?.models[m.id]),
       }));
       bedrockEnabled = liveBedrockStatus.ready;
       // Probe ran but failed — surface the reason instead of a silent disable.
@@ -453,12 +435,12 @@ export function modelGroupsForHarness(
       bedrockModels = Object.values(bedrockCache?.models ?? {})
         .map((m) => ({
           id: `amazon-bedrock/${m.id}`,
-          label: m.name ?? m.id,
+          label: modelDisplayName(m.name) ?? m.id,
           provider: bedrockMeta.label,
           providerId: bedrockMeta.iconKey,
           requiredKey: bedrockMeta.requiredKey,
           ...catalogFacts(m),
-          reasoningLevels: reasoningLevelsFromCache("pi", m.id, m),
+          reasoningLevels: reasoningLevelsFor("pi", m.id, m),
         }))
         .sort((a, b) => a.label.localeCompare(b.label));
       // Unknown auth state before first worker report — treat as not enabled.
@@ -495,7 +477,7 @@ export function modelGroupsForAcpTarget(
   const opencodeModels: ModelOption[] = Object.values(opencodeCache?.models ?? {})
     .map((model) => ({
       id: `opencode/${model.id}`,
-      label: model.name ?? model.id,
+      label: modelDisplayName(model.name) ?? model.id,
       provider: opencodeCache?.name ?? "OpenCode Zen",
       providerId: null,
       requiredKey: "",
@@ -536,7 +518,7 @@ export function modelGroupsForSchedule(liveCatalog?: LiveModelsCatalog | null): 
       const model = anthropic[target];
       return {
         id: alias,
-        label: `${alias[0].toUpperCase()}${alias.slice(1)} (${model?.name ?? humanizeModelId(target)})`,
+        label: `${alias[0].toUpperCase()}${alias.slice(1)} (${modelDisplayName(model?.name) ?? humanizeModelId(target)})`,
         ...ANTHROPIC_META,
         provider: "Claude CLI alias",
         requiredKey: "",
@@ -625,7 +607,7 @@ export function findKnownModel(
     if (cached) {
       return {
         id: model,
-        label: cached.name ?? cached.id,
+        label: modelDisplayName(cached.name) ?? cached.id,
         provider: meta.label,
         providerId: meta.iconKey,
         requiredKey: meta.requiredKey,
@@ -689,7 +671,7 @@ function liveModelOption(
   };
   return {
     id,
-    label: model.name ?? model.id,
+    label: modelDisplayName(model.name) ?? model.id,
     provider: provider.name ?? providerId,
     providerId: iconByProvider[providerId] ?? null,
     requiredKey: "",
@@ -711,10 +693,12 @@ function findByLabel(raw: string, liveCatalog?: LiveModelsCatalog | null): Model
       for (const cached of Object.values(source[providerId]?.models ?? {})) {
         const name = (cached.name ?? "").toLowerCase().trim();
         if (!name) continue;
-        if (!lowered.includes(name)) continue;
+        // A harness reports "Claude Haiku 4.5" for models.dev's "Claude Haiku 4.5 (latest)".
+        const shown = (modelDisplayName(cached.name) ?? "").toLowerCase().trim();
+        if (!lowered.includes(name) && !lowered.includes(shown)) continue;
         return {
           id: `${providerId}/${cached.id}`,
-          label: cached.name ?? cached.id,
+          label: modelDisplayName(cached.name) ?? cached.id,
           provider: meta.label,
           providerId: meta.iconKey,
           requiredKey: meta.requiredKey,

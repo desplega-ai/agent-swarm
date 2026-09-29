@@ -1,3 +1,4 @@
+import { REASONING_EFFORT_LEVELS, type ReasoningEffortLevel } from "@desplega/model-catalog";
 import type { TaskCitation } from "../../../../src/utils/task-citations";
 // Backend types (mirrored from agent-swarm backend)
 export type AgentStatus = "idle" | "busy" | "offline" | "waiting_for_credentials";
@@ -53,9 +54,9 @@ export interface ModelTierPreview {
   resolvedModel: string | null;
   alias: string | null;
 }
-/** Mirrors `REASONING_EFFORT_LEVELS` in `src/providers/reasoning-effort.ts` (backend). */
-export const REASONING_EFFORT_LEVELS = ["off", "low", "medium", "high", "xhigh", "max"] as const;
-export type ReasoningEffortLevel = (typeof REASONING_EFFORT_LEVELS)[number];
+/** The effort enum, one definition shared with the API (`@desplega/model-catalog`). */
+export { REASONING_EFFORT_LEVELS };
+export type { ReasoningEffortLevel };
 
 export type AcpTarget = "opencode" | "custom";
 

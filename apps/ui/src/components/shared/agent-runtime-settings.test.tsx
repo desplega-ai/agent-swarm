@@ -1,10 +1,38 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { act, useLayoutEffect } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { Agent } from "../../api/types";
 
+// A DOM for the interaction tests at the end; removed after this file so other
+// files keep their server-render environment.
+GlobalRegistrator.register();
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+// react-dom reads the DOM when it first loads: import it after the DOM exists
+// (a static import would load it first and leave later files without events).
+const { createRoot } = await import("react-dom/client");
+// Radix picks a no-op layout effect when it first loads with no document.
+mock.module("@radix-ui/react-use-layout-effect", () => ({ useLayoutEffect }));
+afterAll(async () => {
+  await GlobalRegistrator.unregister();
+});
+
+/** Every `updateRuntime.mutate` payload, oldest first. */
+const saves: Array<Record<string, unknown>> = [];
+// Mocks of shared modules keep every export of the real module: in one `bun test`
+// process the first file to register a specifier fixes its export names, and a
+// later file importing another name fails to link.
+// The real hook modules import the API client, which reads `@/lib/config`.
+mock.module("@/lib/config", () => require("../../lib/config"));
 mock.module("@/api/hooks/use-agents", () => ({
+  ...require("../../api/hooks/use-agents"),
   useAgentRuntime: () => ({ data: runtimeMetadata, isError: runtimeError }),
-  useUpdateAgentRuntime: () => ({ mutate: () => {}, isPending: false }),
+  useUpdateAgentRuntime: () => ({
+    mutate: (input: Record<string, unknown>) => {
+      saves.push(input);
+    },
+    isPending: false,
+  }),
 }));
 let resolvedConfigs: Array<{ key: string; value: string }> = [];
 let runtimeMetadata:
@@ -21,6 +49,7 @@ let runtimeMetadata:
 let runtimeError = false;
 let envPresence: Record<string, boolean> = {};
 mock.module("@/api/hooks/use-config-api", () => ({
+  ...require("../../api/hooks/use-config-api"),
   useResolvedConfigs: () => ({ data: resolvedConfigs }),
 }));
 mock.module("@/api/hooks/use-feature-gate", () => ({
@@ -82,6 +111,7 @@ describe("AgentRuntimeSettings", () => {
     runtimeMetadata = undefined;
     runtimeError = false;
     envPresence = {};
+    saves.length = 0;
   });
 
   test("shows the inherited Claude transport and future-session guidance", () => {
@@ -331,5 +361,249 @@ describe("ACP harness presentation", () => {
       </TooltipProvider>,
     );
     expect(codex).not.toContain('data-testid="harness-transport-chip"');
+  });
+});
+
+// --- Reasoning effort: the picker offers what the harness and model accept ---
+
+const cliRuntime = {
+  claude: {
+    transport: null,
+    effectiveTransport: "cli" as const,
+    inheritedTransport: "cli" as const,
+    bridgeEffective: false,
+  },
+};
+const ALL_KEYS = {
+  ANTHROPIC_API_KEY: true,
+  OPENAI_API_KEY: true,
+  OPENROUTER_API_KEY: true,
+};
+
+async function mountSettings(harness: string) {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  await act(async () => {
+    root.render(
+      <TooltipProvider>
+        <AgentRuntimeSettings
+          agent={
+            {
+              id: "agent-1",
+              name: "Worker",
+              isLead: false,
+              status: "idle",
+              harnessProvider: harness,
+              createdAt: "",
+              lastUpdatedAt: "",
+            } as Agent
+          }
+        />
+      </TooltipProvider>,
+    );
+  });
+  return {
+    container,
+    unmount: async () => {
+      await act(async () => root.unmount());
+      container.remove();
+    },
+  };
+}
+
+/** The segments of the Reasoning effort control, by label. */
+function effortSegments(container: HTMLElement): Record<string, HTMLButtonElement> {
+  const label = [...container.querySelectorAll("label")].find(
+    (l) => l.textContent === "Reasoning effort",
+  );
+  const buttons = [...(label?.parentElement?.querySelectorAll("button") ?? [])];
+  return Object.fromEntries(buttons.map((b) => [b.textContent?.trim() ?? "", b]));
+}
+
+const enabled = (container: HTMLElement) =>
+  Object.entries(effortSegments(container))
+    .filter(([, button]) => !button.disabled)
+    .map(([name]) => name);
+
+const active = (container: HTMLElement) =>
+  Object.entries(effortSegments(container))
+    .filter(([, button]) => button.className.includes("bg-primary"))
+    .map(([name]) => name);
+
+async function click(element: Element | undefined | null) {
+  if (!element) throw new Error("nothing to click");
+  await act(async () => {
+    (element as HTMLElement).click();
+  });
+}
+
+/** Pick an option of a Radix select by the trigger's current text. */
+async function pickSelect(container: HTMLElement, triggerText: string, optionText: string) {
+  const trigger = [...container.querySelectorAll('button[role="combobox"]')].find((b) =>
+    b.textContent?.includes(triggerText),
+  );
+  await click(trigger);
+  await click(
+    [...document.querySelectorAll('[role="option"]')].find((o) =>
+      o.textContent?.includes(optionText),
+    ),
+  );
+}
+
+/** Pick a model in the model combobox (the trigger shows `current`). */
+async function pickModel(container: HTMLElement, current: string, next: string) {
+  const trigger = [...container.querySelectorAll("button[aria-expanded]")].find((b) =>
+    b.textContent?.includes(current),
+  );
+  await click(trigger);
+  await click(
+    [...document.querySelectorAll("[cmdk-item]")].find((item) => item.textContent?.includes(next)),
+  );
+}
+
+async function save(container: HTMLElement) {
+  await click([...container.querySelectorAll("button")].find((b) => b.textContent === "Save"));
+}
+
+describe("AgentRuntimeSettings reasoning effort", () => {
+  beforeEach(() => {
+    resolvedConfigs = [];
+    runtimeMetadata = cliRuntime;
+    runtimeError = false;
+    envPresence = ALL_KEYS;
+    saves.length = 0;
+    document.body.innerHTML = "";
+  });
+
+  test("offers exactly the levels of the model, and Auto", async () => {
+    resolvedConfigs = [{ key: "MODEL_OVERRIDE", value: "claude-haiku-4-5" }];
+    const view = await mountSettings("claude");
+    // Haiku 4.5 has a thinking budget: off, but no x-high.
+    expect(enabled(view.container)).toEqual(["Auto", "Off", "Low", "Medium", "High"]);
+    await view.unmount();
+  });
+
+  test("a Claude shortname resolves to its model's levels", async () => {
+    resolvedConfigs = [{ key: "MODEL_OVERRIDE", value: "opus" }];
+    const view = await mountSettings("claude");
+    expect(enabled(view.container)).toEqual(["Auto", "Low", "Medium", "High", "X-High"]);
+    await view.unmount();
+  });
+
+  test("Codex on a GPT-5.6 model takes max", async () => {
+    resolvedConfigs = [{ key: "MODEL_OVERRIDE", value: "gpt-5.6-sol" }];
+    const view = await mountSettings("codex");
+    expect(enabled(view.container)).toEqual([
+      "Auto",
+      "Off",
+      "Low",
+      "Medium",
+      "High",
+      "X-High",
+      "Max",
+    ]);
+    await view.unmount();
+  });
+
+  test("a custom or unlisted model offers only Auto and says why", async () => {
+    resolvedConfigs = [{ key: "MODEL_OVERRIDE", value: "my-custom-model" }];
+    const view = await mountSettings("claude");
+    expect(enabled(view.container)).toEqual(["Auto"]);
+    expect(view.container.textContent).toContain("No reasoning effort applies to this model");
+    await view.unmount();
+  });
+
+  test("saves a model the catalog lists without the custom flag, and one it lacks with it", async () => {
+    resolvedConfigs = [{ key: "MODEL_OVERRIDE", value: "claude-opus-5-5" }];
+    const listed = await mountSettings("claude");
+    await save(listed.container);
+    expect(saves.at(-1)).toMatchObject({ model: "claude-opus-5-5", allowCustomModel: false });
+    await listed.unmount();
+
+    resolvedConfigs = [{ key: "MODEL_OVERRIDE", value: "my-custom-model" }];
+    const custom = await mountSettings("claude");
+    await save(custom.container);
+    expect(saves.at(-1)).toMatchObject({ model: "my-custom-model", allowCustomModel: true });
+    await custom.unmount();
+  });
+
+  test("a stored effort the model cannot take is neither shown nor saved", async () => {
+    resolvedConfigs = [
+      { key: "MODEL_OVERRIDE", value: "claude-haiku-4-5" },
+      { key: "REASONING_EFFORT_OVERRIDE", value: "xhigh" },
+    ];
+    const view = await mountSettings("claude");
+    expect(active(view.container)).toEqual(["Auto"]);
+    await save(view.container);
+    expect(saves.at(-1)).toMatchObject({ harnessProvider: "claude", reasoningEffort: null });
+    await view.unmount();
+  });
+
+  test("switching the harness resets an effort the new harness cannot take", async () => {
+    resolvedConfigs = [
+      { key: "MODEL_OVERRIDE", value: "claude-opus-5-5" },
+      { key: "REASONING_EFFORT_OVERRIDE", value: "xhigh" },
+    ];
+    const view = await mountSettings("claude");
+    expect(active(view.container)).toEqual(["X-High"]);
+    // Pi lands on its default OpenRouter model, which has no x-high.
+    await pickSelect(view.container, "Claude", "Pi-Mono");
+    expect(active(view.container)).toEqual(["Auto"]);
+    expect(enabled(view.container)).not.toContain("X-High");
+    await save(view.container);
+    expect(saves.at(-1)).toMatchObject({ harnessProvider: "pi", reasoningEffort: null });
+    await view.unmount();
+  });
+
+  test("switching the harness keeps an effort the new pair still takes", async () => {
+    resolvedConfigs = [
+      { key: "MODEL_OVERRIDE", value: "claude-opus-5-5" },
+      { key: "REASONING_EFFORT_OVERRIDE", value: "high" },
+    ];
+    const view = await mountSettings("claude");
+    await pickSelect(view.container, "Claude", "Codex");
+    expect(active(view.container)).toEqual(["High"]);
+    await save(view.container);
+    expect(saves.at(-1)).toMatchObject({ harnessProvider: "codex", reasoningEffort: "high" });
+    await view.unmount();
+  });
+
+  test("switching to a harness without effort control clears it", async () => {
+    resolvedConfigs = [
+      { key: "MODEL_OVERRIDE", value: "claude-opus-5-5" },
+      { key: "REASONING_EFFORT_OVERRIDE", value: "high" },
+    ];
+    const view = await mountSettings("claude");
+    await pickSelect(view.container, "Claude", "ACP");
+    await save(view.container);
+    expect(saves.at(-1)).toMatchObject({ harnessProvider: "acp", reasoningEffort: null });
+    await view.unmount();
+  });
+
+  test("switching the model resets an effort the new model cannot take", async () => {
+    resolvedConfigs = [
+      { key: "MODEL_OVERRIDE", value: "claude-opus-5-5" },
+      { key: "REASONING_EFFORT_OVERRIDE", value: "xhigh" },
+    ];
+    const view = await mountSettings("claude");
+    expect(active(view.container)).toEqual(["X-High"]);
+    await pickModel(view.container, "Claude Opus 5.5", "Claude Haiku 4.5");
+    expect(active(view.container)).toEqual(["Auto"]);
+    expect(enabled(view.container)).toEqual(["Auto", "Off", "Low", "Medium", "High"]);
+    await save(view.container);
+    expect(saves.at(-1)).toMatchObject({ model: "claude-haiku-4-5", reasoningEffort: null });
+    await view.unmount();
+  });
+
+  test("switching the model keeps an effort the new model takes", async () => {
+    resolvedConfigs = [
+      { key: "MODEL_OVERRIDE", value: "claude-haiku-4-5" },
+      { key: "REASONING_EFFORT_OVERRIDE", value: "high" },
+    ];
+    const view = await mountSettings("claude");
+    await pickModel(view.container, "Claude Haiku 4.5", "Claude Opus 5.5");
+    expect(active(view.container)).toEqual(["High"]);
+    await view.unmount();
   });
 });
