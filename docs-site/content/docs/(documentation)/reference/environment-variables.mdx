@@ -76,8 +76,8 @@ Complete reference for all environment variables used by Agent Swarm.
 | `BUDGET_ADMISSION_DISABLED` | `false` | Operator escape hatch — set to `true` at process boot to make budget admission always return allowed, bypassing the agent/global/user daily-spend budget gates on task claiming. |
 | `MULTI_RUNTIME_ENABLED` | `true` | Lets several worker processes serve one logical agent. Set consistently on the API server and every worker; runtimes sharing an `AGENT_ID` need compatible workspace state. The agent-scoped `AGENT_MAX_TASKS` setting remains the shared logical task limit. |
 | `HEARTBEAT_INTERVAL_MS` | `90000` | Heartbeat sweep interval (ms) |
-| `HEARTBEAT_CHECKLIST_DISABLE` | `false` | Disables the periodic `HEARTBEAT.md` checklist polling loop (separate from the infrastructure sweep). |
-| `HEARTBEAT_CHECKLIST_INTERVAL_MS` | `1800000` | Interval (ms) between `HEARTBEAT.md` checklist checks (default 30 min). |
+| `HEARTBEAT_CHECKLIST_DISABLE` | `false` | Set to `true` or `1` to disable the periodic `HEARTBEAT.md` checklist polling loop and the boot-triage task (separate from the infrastructure sweep). `false` and `0` keep it on. |
+| `HEARTBEAT_CHECKLIST_INTERVAL_MS` | `1800000` | Interval (ms) between `HEARTBEAT.md` checklist checks (default 30 min). `0` turns the recurring check off; boot triage still runs. |
 | `HEARTBEAT_DISABLE` | `false` | Set to `true` to disable the heartbeat module |
 | `HEARTBEAT_STALL_THRESHOLD_MIN` | `30` | Minutes before an in-progress task is considered stalled |
 | `HEARTBEAT_STALL_NO_SESSION_MIN` | `5` | Minutes before an in-progress task with no active worker session is considered stalled |
