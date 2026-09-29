@@ -831,7 +831,7 @@ describe("worker task follow-up creation", () => {
     expect(rows[0]!.task).not.toContain("post the URL");
   });
 
-  test("inherits followUpConfig from parent task when child has no override", async () => {
+  test("a continuation inherits followUpConfig from its parent when it has no override", async () => {
     await createAgent({
       name: "follow-up-lead-inheritance",
       isLead: true,
@@ -851,6 +851,7 @@ describe("worker task follow-up creation", () => {
     const child = await createTaskExtended("Child task", {
       agentId: worker.id,
       parentTaskId: parent.id,
+      inheritParentFollowUpConfig: true,
     });
     await startTask(child.id);
 

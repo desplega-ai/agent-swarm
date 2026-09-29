@@ -90,6 +90,25 @@ afterAll(async () => {
 });
 
 describe("POST /api/tasks draft:true + /promote-draft (#1240)", () => {
+  test("a new UI session root (panel or /sessions) is source ui and assigned to the Lead", async () => {
+    // Shape the dashboard sends from both the /sessions composer and the
+    // contextual session panel: no agentId, source ui, a per-session key.
+    const created = await api("POST", "/api/tasks", {
+      task: "the chart legend is wrong",
+      source: "ui",
+      contextKey: "task:ui:workflow:w1:0b7c6e1a-5f38-4b47-9d42-1d7e7c6f0a11",
+    });
+
+    expect(created.status).toBe(201);
+    expect(created.body.source).toBe("ui");
+    expect(created.body.agentId).toBe(leadAgentId);
+    expect(created.body.status).toBe("pending");
+    expect(created.body.parentTaskId).toBeUndefined();
+    expect(created.body.contextKey).toBe(
+      "task:ui:workflow:w1:0b7c6e1a-5f38-4b47-9d42-1d7e7c6f0a11",
+    );
+  });
+
   test("a UI follow-up lands on the Lead without being stamped Lead-only", async () => {
     const worker = await createAgent({
       name: "session-parent-worker",

@@ -17,18 +17,24 @@ import {
 const LEAD_WORKER = 3;
 const REPORT_FILE = "/workspace/delegation-chain/final-report.md";
 
+/**
+ * Answer key (mirror of `fixtures/generate-delegation-chain-history.ts` output):
+ *   phase-one   completed count = 10
+ *   phase-two   top completed   = "Cut over the ledger service to the new region"
+ *   phase-three anomaly         = "Roll out the new pricing engine to EU customers"
+ */
 const FACTS = [
   {
     label: "phase-1-completed-count",
-    pattern: /completed[^\n]{0,40}\b21\b|\b21\b[^\n]{0,40}completed/i,
+    pattern: /completed[^\n]{0,40}\b10\b|\b10\b[^\n]{0,40}completed/i,
   },
   {
     label: "phase-2-top-task",
-    pattern: /rotate[\s\S]{0,60}payments[\s\S]{0,60}api[\s\S]{0,60}keys/i,
+    pattern: /ledger[\s\S]{0,60}(new )?region/i,
   },
   {
     label: "phase-3-anomaly",
-    pattern: /checkout[\s\S]{0,80}production|production[\s\S]{0,80}checkout/i,
+    pattern: /pricing engine[\s\S]{0,80}\bEU\b|\bEU\b[\s\S]{0,80}pricing engine/i,
   },
 ];
 
@@ -46,7 +52,7 @@ function leadResults(ctx: JudgeContext): string {
     .join("\n");
 }
 
-/** Statuses the seeded audit history carries (fixtures/generate-sql-audit-history.ts). */
+/** Statuses the seeded history carries (fixtures/generate-delegation-chain-history.ts). */
 const SEEDED_STATUSES = new Set(["completed", "failed", "cancelled"]);
 /** get-tasks args that narrow the list away from the seeded history. */
 const NARROWING_ARGS = [
@@ -134,7 +140,7 @@ const chainStructureCheck: DeterministicCheck = {
         const text = `${child.description}\n${child.result ?? ""}`;
         if (index === 0) return /completed/i.test(text);
         if (index === 1) return /completed|top|priority/i.test(text);
-        return /anomal|checkout|production/i.test(text);
+        return /anomal|pricing|contradict/i.test(text);
       })
       .filter(Boolean).length;
 
@@ -180,7 +186,7 @@ const PHASE_NAMES = ["phase-one", "phase-two", "phase-three"];
 const PHASE_TOPICS: RegExp[] = [
   /completed/i,
   /top|priority|highest/i,
-  /anomal|checkout|production/i,
+  /anomal|contradict|mismatch|claims? success/i,
 ];
 
 /** A single strict linear chain: child[0] has no internal dep, child[i] depends
@@ -285,7 +291,7 @@ export const delegationChain: Scenario = {
     "Lead-driven sequential delegation with dependsOn links, grading the child-task paper trail instead of raw audit ability.",
   workers: [{ name: "phase-one" }, { name: "phase-two" }, { name: "phase-three" }],
   lead: { name: "Lead", template: "lead" },
-  seed: { sqlDump: "sql-audit-history.sql" },
+  seed: { sqlDump: "delegation-chain-history.sql" },
   tasks: [
     {
       title: "Run a three-phase chained audit through workers",

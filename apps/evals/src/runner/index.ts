@@ -1080,6 +1080,7 @@ async function runAttemptOnce(opts: {
     let seedMemories: { requested: number; memoryIds: string[]; readinessMs: number } | null = null;
     if (
       scenario.seed?.memories?.length ||
+      scenario.seed?.scripts?.length ||
       scenario.seed?.exec?.length ||
       scenario.seed?.workerFailures?.length
     ) {
@@ -1126,6 +1127,23 @@ async function runAttemptOnce(opts: {
             readinessMs,
           };
           log(`[seed] memories searchable in ${readinessMs}ms`);
+        }
+
+        // 1b. Scripts: upsert each as worker 0 (agent scope) so it shows up in
+        // that worker's script catalog. A failed upsert fails the attempt.
+        for (const spec of scenario.seed?.scripts ?? []) {
+          const worker0 = stack.workers[0] as WorkerHandle;
+          const source = await Bun.file(
+            new URL(`../../scenarios/fixtures/${spec.sourceFile}`, import.meta.url),
+          ).text();
+          const res = await client.upsertAgentScript({
+            agentId: worker0.agentId,
+            name: spec.name,
+            source,
+            description: spec.description,
+            intent: spec.intent,
+          });
+          log(`[seed] script ${res.name} v${res.version} upserted for worker 0`);
         }
 
         // 2. Then seed.exec, in WORKER 0's sandbox — exec scripts may want to

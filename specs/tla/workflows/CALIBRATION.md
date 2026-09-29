@@ -30,6 +30,11 @@ row count, so the second key is new). d4753302 originally fixed this with a per-
 is sufficient") removed it. The model shows the gate is not sufficient. This is counterexample
 CX4 in FINDINGS.md, confirmed by a failing test.
 
+#1675 fixed CX4 (F3, `FixConcurrentJoin`). The calibration configs keep F3 off so they still
+model the code each historical fix was written against, and `Cal-d4753302-control.cfg` still
+finds CX4. The same control with `FixConcurrentJoin = TRUE` holds (3,554 distinct states,
+depth 38, re-checked on `main` @ `795526ca3`).
+
 ## Commands
 
 ```bash

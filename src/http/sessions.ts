@@ -144,6 +144,12 @@ const listSessions = route({
      * excluded. Omit to return every session (legacy / non-UI callers).
      */
     requestedByUserId: z.string().min(1).optional(),
+    /**
+     * When present, restrict results to root tasks whose `contextKey` starts
+     * with this literal prefix. The UI contextual session panel passes its page
+     * key plus a trailing `:` (e.g. `task:ui:workflow:abc:`).
+     */
+    contextKeyPrefix: z.string().min(1).optional(),
     /** `full` restores the legacy shape (full root `AgentTask`); default is slim. */
     fields: z.enum(["full", "slim"]).optional(),
   }),
@@ -235,18 +241,20 @@ export async function handleSessions(
       source: sources,
       q: parsed.query.q,
       requestedByUserId: parsed.query.requestedByUserId,
+      contextKeyPrefix: parsed.query.contextKeyPrefix,
     };
     // List responses default to slim (root is a task summary); `?fields=full` restores it.
     const sessions =
       parsed.query.fields === "full"
         ? await listRecentSessions(baseOpts)
         : await listRecentSessions({ ...baseOpts, slim: true });
-    // Filter-aware total: same `source`/`q`/`requestedByUserId` WHERE as the
-    // list query, so the UI pager reflects the filtered result set.
+    // Filter-aware total: same WHERE as the list query, so the UI pager
+    // reflects the filtered result set.
     const total = await countSessions({
       source: sources,
       q: parsed.query.q,
       requestedByUserId: parsed.query.requestedByUserId,
+      contextKeyPrefix: parsed.query.contextKeyPrefix,
     });
     listSessions.respond(res, 200, {
       sessions,

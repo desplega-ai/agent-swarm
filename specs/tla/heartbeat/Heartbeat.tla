@@ -1,7 +1,7 @@
 ---------------------------- MODULE Heartbeat ----------------------------
 (***************************************************************************)
 (* Server-side heartbeat + the task lifecycle it races with, as the code   *)
-(* behaves on main @ f031fa8e. Every action maps to file:line and the SQL  *)
+(* behaves on main @ 795526ca. Every action maps to file:line and the SQL  *)
 (* guard it models in ACTIONS.md. Time is abstracted: `stale[t]` means     *)
 (* "lastUpdatedAt older than the stall threshold", and `Age` sets it.     *)
 (*                                                                         *)
@@ -22,7 +22,7 @@ CONSTANTS
     G_REBOOT_TOUCHED, \* runRebootSweep: skip tasks claimed after boot
     G_STALL_CAS,      \* supersede/fail also WHERE lastUpdatedAt = observed (#1668)
     G_REBOOT_HB_AGE,  \* runRebootSweep: skip sessions younger than 15 min (#1669)
-    FIX_ORPHAN_REPAIR,\* proposed: sweep re-creates a missing resume
+    G_ORPHAN_REPAIR,  \* sweep re-creates a missing resume (#1670)
     FIX_NO_REBOOT,    \* proposed: delete runRebootSweep, rely on the classifier
     HYPO_REOFFER      \* hypothetical path that re-offers an unassigned task
 
@@ -276,10 +276,14 @@ HbResume ==
     /\ UNCHANGED <<offTo, ver, stale, sess, touched, running, alive, cl, acc, rb,
                    apiUp, wc, ac, liveKill, badAcc>>
 
-\* Proposed fix: a sweep repairs a superseded parent that has no child.
+\* repairSupersededWithoutResume (#1670), step 1.5 of the sweep: a superseded
+\* parent with no resume child gets one, within the resume budget. The 1 min
+\* floor keeps it off an in-flight supersede (hb.pc = "idle"); the 24 h cap is
+\* not modeled (the sweep runs well inside it).
 HbRepair(t) ==
-    /\ FIX_ORPHAN_REPAIR /\ apiUp /\ hb.pc = "idle"
-    /\ st[t] = "superseded" /\ ~\E s \in Tasks : par[s] = t
+    /\ G_ORPHAN_REPAIR /\ apiUp /\ hb.pc = "idle"
+    /\ st[t] = "superseded" /\ gen[t] < MaxGen
+    /\ ~\E s \in Tasks : par[s] = t
     /\ \E s \in Free : NewChild(s, t, own[t], gen[t] + 1, TRUE)
     /\ UNCHANGED <<offTo, ver, stale, sess, touched, running, alive, cl, acc, hb, rb,
                    apiUp, wc, ac, liveKill, badAcc>>
@@ -411,8 +415,9 @@ OneActive == Cardinality({t \in Tasks : st[t] \in Active}) <= 1
 NoLiveKill == ~liveKill
 
 \* S4 (safety form, current design): every superseded task has a child
-\* outside the in-flight resume step. L2 is the recovery form a repair sweep
-\* can satisfy.
+\* outside the in-flight resume step. An API crash between supersede and
+\* resume still breaks it; L2 is the recovery form the repair sweep (#1670)
+\* satisfies.
 SupersededHasResume ==
     \A t \in Tasks :
         (st[t] = "superseded" /\ ~(hb.pc = "resume" /\ hb.t = t))

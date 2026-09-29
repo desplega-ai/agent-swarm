@@ -56,6 +56,8 @@ export interface SteerComposerProps {
   /** Span the full available width (task-detail dock). Sessions chat omits it
    * and keeps the centered chat column. */
   fullWidth?: boolean;
+  /** Extra action-row buttons, passed to `ComposerDock`. */
+  extraActions?: React.ReactNode;
   className?: string;
 }
 
@@ -91,6 +93,7 @@ export function SteerComposer({
   placeholder,
   autoFocus,
   fullWidth,
+  extraActions,
   className,
 }: SteerComposerProps) {
   const { userId } = useCurrentUser();
@@ -176,6 +179,7 @@ export function SteerComposer({
       routeLabel={routeLabel}
       sendLabel={hasLiveDelivery ? "Send" : "Create follow-up task"}
       autoFocus={autoFocus}
+      extraActions={extraActions}
       modeControl={
         hasLiveDelivery ? (
           <SteerModeToggle

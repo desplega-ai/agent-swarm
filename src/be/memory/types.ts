@@ -72,6 +72,8 @@ export interface MemoryCandidate extends AgentMemory {
   compositeScore?: number;
   /** Search arm that surfaced the candidate. Memory `source` remains manual/file_index/etc. */
   retrievalSource?: MemoryRetrievalSource;
+  /** Graph candidates only: the candidate whose link surfaced this one. rerank() never ranks it above that parent. */
+  graphParentId?: string;
   /** True when `similarity` already includes source-aware recency decay. */
   recencyDecayApplied?: boolean;
   accessCount: number;

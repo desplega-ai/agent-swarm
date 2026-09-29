@@ -3,7 +3,6 @@ import { delegationChain } from "./delegation-chain.ts";
 import { delegationProbe } from "./delegation-probe.ts";
 import { scriptAuthoring } from "./script-authoring.ts";
 import { sqlAudit } from "./sql-audit.ts";
-import { structuredOutputAdherence } from "./structured-output-adherence.ts";
 import { toolRouting } from "./tool-routing.ts";
 import { workflowAuthoring } from "./workflow-authoring.ts";
 
@@ -12,6 +11,7 @@ import { workflowAuthoring } from "./workflow-authoring.ts";
 // structured output. Keep delegation-probe as the gold-standard behavioral eval
 // and sql-audit as the cheap smoke. Saturated / zero-pilot legacy scenarios are
 // left in source for historical reference but are no longer active registry ids.
+// structured-output-adherence is folded into tool-routing as a gate.
 export const scenarios: Scenario[] = [
   sqlAudit,
   delegationProbe,
@@ -19,7 +19,6 @@ export const scenarios: Scenario[] = [
   scriptAuthoring,
   delegationChain,
   toolRouting,
-  structuredOutputAdherence,
 ];
 
 // Cheap smoke default for `--scenarios` when none are passed. sql-audit is the

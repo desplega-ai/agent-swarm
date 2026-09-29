@@ -184,6 +184,20 @@ export const workflowAuthoring: Scenario = {
   description:
     "Author a multi-node workflow through the swarm workflow tool, grading the persisted DAG, input mappings, reusable swarm-script selection, and trigger schema.",
   workers: 1,
+  // The seeded global catalog has no lint/check script, so without this the
+  // swarm-script node had nothing sensible to point at and every attempt
+  // capped at 0.67 on a missing option, not a skill gap.
+  seed: {
+    scripts: [
+      {
+        name: "pr-checks",
+        description:
+          "Deterministic lint/check gate for a pull request: validates the repository and PR number and returns a pass/fail verdict with findings.",
+        intent: "Run deterministic PR lint/checks before an agent review step in a workflow.",
+        sourceFile: "pr-checks.script.ts",
+      },
+    ],
+  },
   tasks: [
     {
       title: "Create a deterministic PR-review workflow",
