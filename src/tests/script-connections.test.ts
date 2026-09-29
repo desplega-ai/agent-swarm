@@ -585,11 +585,11 @@ describe("script connections", () => {
       markMigrationApplied(database, "175_workflow_runs_list_index.sql");
       // 177 indexes events, which this migration-112-only fixture does not create.
       markMigrationApplied(database, "177_events_event_agent_created_index.sql");
-      // 179 and 180 alter agent_tasks, which this partial fixture creates without its columns.
-      markMigrationApplied(database, "179_agent_task_attempt.sql");
-      markMigrationApplied(database, "180_agent_task_attempt_runtime.sql");
       // 182 alters agent_tasks, which this migration-112-only fixture does not create.
       markMigrationApplied(database, "182_task_human_free_flag.sql");
+      // 185 and 186 alter agent_tasks, which this partial fixture creates without its columns.
+      markMigrationApplied(database, "185_agent_task_attempt.sql");
+      markMigrationApplied(database, "186_agent_task_attempt_runtime.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
