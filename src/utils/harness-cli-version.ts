@@ -4,6 +4,7 @@
  * (no DB). Probed once per process; null when the CLI is missing or silent.
  */
 import { isUnknownModelError } from "./harness-model-error";
+import { scrubSecrets } from "./secret-scrubber";
 
 const CLI_BINARY: Record<string, string> = { claude: "claude", codex: "codex" };
 const PROBE_TIMEOUT_MS = 10_000;
@@ -90,7 +91,7 @@ export async function reportHarnessModelOutcome(opts: {
           modelId: opts.model,
           status,
           ...(status === "unsupported" && opts.failureReason
-            ? { error: opts.failureReason.slice(0, 2000) }
+            ? { error: scrubSecrets(opts.failureReason).slice(0, 2000) }
             : {}),
         }),
       },

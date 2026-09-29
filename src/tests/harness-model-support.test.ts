@@ -286,4 +286,29 @@ describe("worker outcome reporting", () => {
     ]);
     resetHarnessCliVersionForTests();
   });
+
+  test("scrubs secrets from the failure text before it leaves the worker", async () => {
+    resetHarnessCliVersionForTests({ claude: CLI });
+    const token = "ghp_abcdefghijklmnopqrstuvwxyz0123456789";
+    const bodies: Array<{ error?: string }> = [];
+    const fetchImpl = (async (_url: string, init: RequestInit) => {
+      bodies.push(JSON.parse(String(init.body)));
+      return new Response("{}", { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await reportHarnessModelOutcome({
+      apiUrl: "http://x",
+      agentId: "a",
+      harness: "claude",
+      fetchImpl,
+      model: "m1",
+      exitCode: 1,
+      failureReason: `There's an issue with the selected model (m1). token=${token}`,
+    });
+
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]?.error).toContain("selected model");
+    expect(bodies[0]?.error).not.toContain(token);
+    resetHarnessCliVersionForTests();
+  });
 });
