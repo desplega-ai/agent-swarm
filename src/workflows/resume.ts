@@ -25,7 +25,7 @@ import {
 import { loadCompletedStepRouting } from "./completed-step-routing";
 import { FAILED_TASK_OUTPUT_PREFIX } from "./constants";
 import { getNextTargets } from "./definition";
-import { findReadyNodes, walkGraph } from "./engine";
+import { findReadyNodes, hasRunningStep, walkGraph } from "./engine";
 import type { WorkflowEventBus } from "./event-bus";
 import { workflowEventBus } from "./event-bus";
 import type { ExecutorRegistry } from "./executors/registry";
@@ -204,6 +204,13 @@ export async function finalizeOrWait(runId: string): Promise<void> {
   // finalized from a stale snapshot strands that branch.
   await getDbClient().transaction(async () => {
     const steps = await getWorkflowRunStepsByRunId(runId);
+    // A branch still executing belongs to a live walk, which finalizes the
+    // run itself; its finalizer only acts on a `running` run.
+    if (hasRunningStep(steps)) {
+      const run = await getWorkflowRun(runId);
+      if (run?.status === "waiting") await updateWorkflowRun(runId, { status: "running" });
+      return;
+    }
     const hasWaiting = steps.some((s) => s.status === "waiting");
     if (hasWaiting) {
       await updateWorkflowRun(runId, { status: "waiting" });
@@ -351,7 +358,15 @@ export async function retryFailedRun(runId: string, registry: ExecutorRegistry):
   if (!claimed) throw new Error("Run is not in failed state");
 
   // Resume from the failed node — use findReadyNodes for convergence safety.
-  const readyNodes = findReadyNodes(workflow.definition, completedNodeIds, activeEdges);
+  // findReadyNodes returns every node without a completed step, including a
+  // branch whose step is still running or waiting on its task. That branch is
+  // not the retry's to run: walking it again executes it twice.
+  const liveNodeIds = new Set(
+    steps.filter((s) => s.status === "running" || s.status === "waiting").map((s) => s.nodeId),
+  );
+  const readyNodes = findReadyNodes(workflow.definition, completedNodeIds, activeEdges).filter(
+    (n) => n.id === failedNode.id || !liveNodeIds.has(n.id),
+  );
 
   // Loop and foreach retry targets can be absent from readyNodes even when
   // active; include them explicitly, but never revive an untaken branch.

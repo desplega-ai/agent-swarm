@@ -446,6 +446,12 @@ export async function failTask(
      * cancels the remediation instead of being overwritten.
      */
     expectedLastUpdatedAt?: string;
+    /**
+     * `false` skips the dependent cascade. Only for a caller that settles the
+     * dependents itself — the reboot sweep re-points them to the retry child,
+     * then cascades whatever is left.
+     */
+    cascadeDependents?: boolean;
   } = {},
 ): Promise<AgentTask | null> {
   const oldTask = await getTaskById(id);
@@ -529,10 +535,12 @@ export async function failTask(
 
     // Cascade-fail any non-terminal tasks that depend on this one.
     // The cascade is recursive (transitive closure) and cycle-safe.
-    try {
-      await dependencies.cascadeFailDependents(id, "failed");
-    } catch (err) {
-      console.error("[failTask] cascade-fail dependents error:", err);
+    if (opts.cascadeDependents !== false) {
+      try {
+        await dependencies.cascadeFailDependents(id, "failed");
+      } catch (err) {
+        console.error("[failTask] cascade-fail dependents error:", err);
+      }
     }
   }
   return row ? rowToAgentTask(row) : null;

@@ -147175,6 +147175,36 @@
     "name": "Anthropic",
     "doc": "https://docs.anthropic.com/en/docs/about-claude/models",
     "models": {
+      "claude-sonnet-5-5": {
+        "id": "claude-sonnet-5-5",
+        "name": "Claude Sonnet 5.5",
+        "reasoning": true,
+        "reasoning_options": [
+          {
+            "type": "effort",
+            "values": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ]
+          }
+        ],
+        "knowledge": "2026-06",
+        "release_date": "2026-09-28",
+        "last_updated": "2026-09-28",
+        "cost": {
+          "input": 2,
+          "output": 10,
+          "cache_read": 0.2,
+          "cache_write": 2.5
+        },
+        "limit": {
+          "context": 1000000,
+          "output": 128000
+        }
+      },
       "claude-opus-5-5": {
         "id": "claude-opus-5-5",
         "name": "Claude Opus 5.5",

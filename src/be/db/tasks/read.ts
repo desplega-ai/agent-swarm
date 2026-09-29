@@ -322,6 +322,33 @@ export async function hasNonTerminalResumeChild(parentId: string): Promise<boole
 }
 
 /**
+ * Superseded tasks that never got a resume child. Both supersede paths
+ * (heartbeat remediation and `POST /api/tasks/:id/supersede`) supersede
+ * first and create the resume in a later, separate write, so a process
+ * crash between the two leaves this state. Workflow steps are failed, not
+ * superseded, and are excluded. `finishedBefore` keeps the sweep from racing
+ * an in-flight supersede; `finishedAfter` bounds how far back it repairs.
+ */
+export async function getSupersededTasksWithoutResume(
+  finishedBefore: string,
+  finishedAfter: string,
+): Promise<AgentTask[]> {
+  const rows = await getDbClient().query<AgentTaskRow>(
+    `SELECT * FROM agent_tasks t
+       WHERE t.status = 'superseded'
+         AND t.workflowRunStepId IS NULL
+         AND t.finishedAt < ?
+         AND t.finishedAt > ?
+         AND NOT EXISTS (
+           SELECT 1 FROM agent_tasks c WHERE c.parentTaskId = t.id AND c.taskType = 'resume'
+         )
+       ORDER BY t.finishedAt ASC`,
+    [finishedBefore, finishedAfter],
+  );
+  return rows.map(rowToAgentTask);
+}
+
+/**
  * True when a non-terminal `reroute-decision` child exists for `parentId`.
  *
  * Mirrors {@link hasNonTerminalResumeChild} but filters on

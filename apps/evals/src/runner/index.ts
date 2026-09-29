@@ -1368,6 +1368,19 @@ async function runAttemptOnce(opts: {
       log(`[task] waiting for ${created.id} (timeout ${Math.round(taskTimeoutMs / 1000)}s)`);
       tasks.push(await awaitTask(created.id));
     }
+    if (scenario.awaitSpawnedTasks) {
+      const upfront = new Set(tasks.map((t) => t.id));
+      const agentIds = new Set(
+        stack.workers.map((w) => w.agentId).filter((id): id is string => !!id),
+      );
+      log("[task] waiting for runtime-spawned tasks to settle");
+      const { open } = await client.waitForQuiescence(
+        (t) => classifyTaskOrigin(t, upfront, agentIds) === "run",
+        { deadline: tasksT0 + taskTimeoutMs, signal },
+      );
+      if (open.length > 0)
+        log(`[task] ${open.length} spawned task(s) still open at the deadline; grading as-is`);
+    }
     timings.tasksMs = Date.now() - tasksT0;
     recordAttemptTimings(attempt.id, timings);
     await updateAttempt(db, attempt.id, { taskIds: tasks.map((t) => t.id) });
