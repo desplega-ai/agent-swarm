@@ -1,7 +1,7 @@
 import { ClipboardCheck } from "lucide-react";
 import { type ReactNode, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { useApprovalRequests } from "@/api/hooks/use-approval-requests";
+import { useApprovalRequestSummaries } from "@/api/hooks/use-approval-requests";
 import { EmptyState } from "@/components/shared/empty-state";
 import { FilterField, FiltersPopover } from "@/components/shared/filters-popover";
 import { ListFilterBar } from "@/components/shared/list-filter-bar";
@@ -70,7 +70,7 @@ export default function ApprovalRequestsPage() {
     : "all";
   const navigate = useNavigate();
 
-  const { data: requests, isLoading } = useApprovalRequests({
+  const { data: requests, isLoading } = useApprovalRequestSummaries({
     status: statusFilter === "all" ? undefined : statusFilter,
     limit: APPROVAL_REQUESTS_LIST_LIMIT,
   });

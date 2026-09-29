@@ -189,6 +189,82 @@ export async function renderProfileSyncRejectionBanner(event: SwarmEvent): Promi
   return result.skipped ? null : result.text;
 }
 
+type LatestProfileSyncEvents = {
+  rejection: SwarmEvent | null;
+  reconciliation: SwarmEvent | null;
+};
+
+const PROFILE_SYNC_REJECTED = "system.profile_sync_rejected";
+const PROFILE_SYNC_RECONCILED = "system.profile_sync_reconciled";
+
+function profileSyncHeaders(config: Pick<ProfileSyncOptions, "agentId" | "apiKey">) {
+  return { Authorization: `Bearer ${config.apiKey}`, "X-Agent-ID": config.agentId };
+}
+
+/**
+ * One request for every field's latest rejection and reconciliation. Returns
+ * null when the API does not confirm `latestPerDataField` (an API that predates
+ * it ignores the parameters), so the caller falls back to per-field lookups.
+ */
+async function fetchLatestProfileSyncEventsBatched(
+  config: Pick<ProfileSyncOptions, "agentId" | "apiUrl" | "apiKey">,
+  fetchImpl: typeof fetch,
+): Promise<LatestProfileSyncEvents[] | null> {
+  const query = new URLSearchParams({
+    events: `${PROFILE_SYNC_REJECTED},${PROFILE_SYNC_RECONCILED}`,
+    dataFields: Object.keys(IDENTITY_FIELD_BUDGETS).join(","),
+    agentId: config.agentId,
+    latestPerDataField: "true",
+  });
+  const response = await fetchImpl(`${config.apiUrl}/api/events?${query}`, {
+    headers: profileSyncHeaders(config),
+  });
+  if (!response.ok) return null;
+  const payload = (await response.json()) as {
+    events?: SwarmEvent[];
+    latestPerDataField?: boolean;
+  };
+  if (payload.latestPerDataField !== true || !Array.isArray(payload.events)) return null;
+  const events = payload.events;
+  const latest = (event: string, field: string) =>
+    events.find((candidate) => candidate.event === event && candidate.data?.field === field) ??
+    null;
+  return (Object.keys(IDENTITY_FIELD_BUDGETS) as BudgetedIdentityField[]).map((field) => ({
+    rejection: latest(PROFILE_SYNC_REJECTED, field),
+    reconciliation: latest(PROFILE_SYNC_RECONCILED, field),
+  }));
+}
+
+/** Legacy path: one `limit=1` lookup per (field, event), for APIs without batching. */
+async function fetchLatestProfileSyncEventsPerField(
+  config: Pick<ProfileSyncOptions, "agentId" | "apiUrl" | "apiKey">,
+  fetchImpl: typeof fetch,
+): Promise<LatestProfileSyncEvents[]> {
+  return await Promise.all(
+    (Object.keys(IDENTITY_FIELD_BUDGETS) as BudgetedIdentityField[]).map(async (field) => {
+      const fetchLatestEvent = async (event: SwarmEvent["event"]): Promise<SwarmEvent | null> => {
+        const query = new URLSearchParams({
+          event,
+          agentId: config.agentId,
+          dataField: field,
+          limit: "1",
+        });
+        const response = await fetchImpl(`${config.apiUrl}/api/events?${query}`, {
+          headers: profileSyncHeaders(config),
+        });
+        if (!response.ok) return null;
+        const payload = (await response.json()) as { events?: SwarmEvent[] };
+        return payload.events?.[0] ?? null;
+      };
+      const [rejection, reconciliation] = await Promise.all([
+        fetchLatestEvent(PROFILE_SYNC_REJECTED),
+        fetchLatestEvent(PROFILE_SYNC_RECONCILED),
+      ]);
+      return { rejection, reconciliation };
+    }),
+  );
+}
+
 /** Fetch every field's latest unresolved rejection before a provider session. */
 export async function fetchProfileSyncRejectionBanner(
   config: Pick<ProfileSyncOptions, "agentId" | "apiUrl" | "apiKey" | "claudeMdPath">,
@@ -196,32 +272,9 @@ export async function fetchProfileSyncRejectionBanner(
   readFile: FileReader = readFileIfExists,
 ): Promise<string> {
   try {
-    const responses = await Promise.all(
-      (Object.keys(IDENTITY_FIELD_BUDGETS) as BudgetedIdentityField[]).map(async (field) => {
-        const fetchLatestEvent = async (event: SwarmEvent["event"]): Promise<SwarmEvent | null> => {
-          const query = new URLSearchParams({
-            event,
-            agentId: config.agentId,
-            dataField: field,
-            limit: "1",
-          });
-          const response = await fetchImpl(`${config.apiUrl}/api/events?${query}`, {
-            headers: {
-              Authorization: `Bearer ${config.apiKey}`,
-              "X-Agent-ID": config.agentId,
-            },
-          });
-          if (!response.ok) return null;
-          const payload = (await response.json()) as { events?: SwarmEvent[] };
-          return payload.events?.[0] ?? null;
-        };
-        const [rejection, reconciliation] = await Promise.all([
-          fetchLatestEvent("system.profile_sync_rejected"),
-          fetchLatestEvent("system.profile_sync_reconciled"),
-        ]);
-        return { rejection, reconciliation };
-      }),
-    );
+    const responses =
+      (await fetchLatestProfileSyncEventsBatched(config, fetchImpl)) ??
+      (await fetchLatestProfileSyncEventsPerField(config, fetchImpl));
     const latestEvents = responses.flatMap(({ rejection, reconciliation }) =>
       rejection ? [{ rejection, reconciliation }] : [],
     );

@@ -78,11 +78,15 @@ describe("profile sync rejection session warning", () => {
       fetchImpl,
     );
 
-    expect(requests[0]?.url).toContain("event=system.profile_sync_rejected");
-    expect(requests[0]?.url).toContain("agentId=agent-1");
-    expect(requests[0]?.url).toContain("limit=1");
-    expect(requests[0]?.url).toContain("dataField=soulMd");
+    // This mock predates latestPerDataField: the batched request is not
+    // confirmed, so the per-field lookups follow it.
+    expect(requests[0]?.url).toContain("latestPerDataField=true");
     expect(requests[0]?.headers.get("X-Agent-ID")).toBe("agent-1");
+    expect(requests[1]?.url).toContain("event=system.profile_sync_rejected");
+    expect(requests[1]?.url).toContain("agentId=agent-1");
+    expect(requests[1]?.url).toContain("limit=1");
+    expect(requests[1]?.url).toContain("dataField=soulMd");
+    expect(requests[1]?.headers.get("X-Agent-ID")).toBe("agent-1");
     expect(requests.at(-1)?.url).toBe("https://api.example.test/me");
     expect(result.injected).toBeTrue();
     expect(result.prompt).toContain("PERSISTED PROFILE SYNC REJECTION");

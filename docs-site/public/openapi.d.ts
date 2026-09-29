@@ -3141,13 +3141,17 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List approval requests with optional filters */
+        /**
+         * List approval requests with optional filters
+         * @description Returns full approval requests by default. Pass `fields=slim` for the list-view shape: `questions`, `approvers`, `responses`, `resolutionReason` and `notificationChannels` are dropped and `questionCount` is added. Fetch one request in full via `GET /api/approval-requests/{id}`.
+         */
         get: {
             parameters: {
                 query?: {
                     status?: string;
                     workflowRunId?: string;
                     limit?: number | null;
+                    fields?: "full" | "slim";
                 };
                 header?: never;
                 path?: never;
@@ -3212,6 +3216,22 @@ export interface paths {
                                 createdBy?: string;
                                 createdAt: string;
                                 updatedAt: string;
+                            }[] | {
+                                id: string;
+                                title: string;
+                                workflowRunId: string | null;
+                                workflowRunStepId: string | null;
+                                sourceTaskId: string | null;
+                                /** @enum {string} */
+                                status: "pending" | "approved" | "rejected" | "timeout" | "cancelled";
+                                resolvedBy: string | null;
+                                resolvedAt: string | null;
+                                timeoutSeconds: number | null;
+                                expiresAt: string | null;
+                                createdBy?: string;
+                                createdAt: string;
+                                updatedAt: string;
+                                questionCount: number;
                             }[];
                         };
                     };
@@ -5767,6 +5787,12 @@ export interface paths {
                     since?: string;
                     until?: string;
                     limit?: number;
+                    /** @description Comma-separated event names; matches any of them (ANDed with `event`) */
+                    events?: string;
+                    /** @description Comma-separated `data.field` values, used with latestPerDataField */
+                    dataFields?: string;
+                    /** @description When true, return only the newest event per (event, data.field) pair for every name in `event`/`events` and every value in `dataFields` */
+                    latestPerDataField?: "true" | "false";
                 };
                 header?: never;
                 path?: never;
@@ -5782,7 +5808,21 @@ export interface paths {
                     content: {
                         "application/json": {
                             events: components["schemas"]["SwarmEvent"][];
+                            /**
+                             * @description Present only when the request asked for latestPerDataField=true
+                             * @enum {boolean}
+                             */
+                            latestPerDataField?: true;
                         };
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
             };
@@ -16698,7 +16738,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List scheduled tasks */
+        /**
+         * List scheduled tasks
+         * @description Returns full schedules by default. Pass `fields=slim` for the list-view shape, which swaps the full `taskTemplate` for a bounded `taskTemplatePreview`. Fetch one schedule in full via `GET /api/schedules/{id}`.
+         */
         get: {
             parameters: {
                 query?: {
@@ -16709,6 +16752,7 @@ export interface paths {
                     targetType?: "agent-task" | "workflow" | "script";
                     workflowId?: string;
                     scriptName?: string;
+                    fields?: "full" | "slim";
                 };
                 header?: never;
                 path?: never;
@@ -16788,6 +16832,71 @@ export interface paths {
                                 createdBy?: string;
                                 updatedBy?: string;
                                 favorite?: boolean;
+                            }[] | {
+                                /** Format: uuid */
+                                id: string;
+                                /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
+                                key: string;
+                                name: string;
+                                description?: string;
+                                cronExpression?: string;
+                                intervalMs?: number;
+                                taskType?: string;
+                                /** @default [] */
+                                tags: string[];
+                                /** @default 50 */
+                                priority: number;
+                                targetAgentId?: string;
+                                /** @default true */
+                                enabled: boolean;
+                                /** Format: date-time */
+                                lastRunAt?: string;
+                                /** Format: date-time */
+                                nextRunAt?: string;
+                                createdByAgentId?: string;
+                                parentTaskId?: string;
+                                requestedDelayMs?: number;
+                                /** Format: date-time */
+                                requestedRunAt?: string;
+                                /** @default UTC */
+                                timezone: string;
+                                /** @default 0 */
+                                consecutiveErrors: number;
+                                /** Format: date-time */
+                                lastErrorAt?: string;
+                                lastErrorMessage?: string;
+                                model?: string;
+                                /** @enum {string} */
+                                modelTier?: "smol" | "regular" | "smart" | "ultra";
+                                /**
+                                 * @default recurring
+                                 * @enum {string}
+                                 */
+                                scheduleType: "recurring" | "one_time";
+                                /**
+                                 * @default agent-task
+                                 * @enum {string}
+                                 */
+                                targetType: "agent-task" | "workflow" | "script";
+                                /** Format: uuid */
+                                workflowId?: string;
+                                scriptName?: string;
+                                scriptArgs?: {
+                                    [key: string]: unknown;
+                                };
+                                params?: {
+                                    [key: string]: unknown;
+                                };
+                                requiredParams?: string[];
+                                requires?: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
+                                /** Format: date-time */
+                                createdAt: string;
+                                /** Format: date-time */
+                                lastUpdatedAt: string;
+                                createdBy?: string;
+                                updatedBy?: string;
+                                favorite: boolean;
+                                taskTemplatePreview: string;
                             }[];
                         };
                     };

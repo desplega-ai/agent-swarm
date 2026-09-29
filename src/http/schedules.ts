@@ -81,7 +81,7 @@ const scheduleWithOptionalFavoriteSchema = ScheduledTaskSchema.safeExtend({
 /** Slim list row — `taskTemplate` swapped for a bounded preview (see `ScheduledTaskSummary`). */
 const { taskTemplate: _omittedTaskTemplate, ...scheduleShapeWithoutTemplate } =
   ScheduledTaskSchema.shape;
-const scheduleSummaryWithFavoriteSchema = z.object({
+export const scheduleSummaryWithFavoriteSchema = z.object({
   ...scheduleShapeWithoutTemplate,
   taskTemplatePreview: z.string(),
   favorite: z.boolean(),

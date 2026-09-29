@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import type { Subprocess } from "bun";
+import { fetchProfileSyncRejectionBanner } from "../commands/profile-sync";
 import { getFreePort, SERVER_BOOT_HOOK_TIMEOUT_MS } from "./test-net";
 
 let TEST_PORT = 0;
@@ -267,6 +268,108 @@ describe("GET /api/events", () => {
     const { status, body } = await get("/api/events?agentId=nonexistent");
     expect(status).toBe(200);
     expect(body.events).toEqual([]);
+  });
+});
+
+describe("GET /api/events — latestPerDataField", () => {
+  const AGENT = "profile-sync-latest-agent";
+  const ids: Record<string, string> = {};
+
+  beforeAll(async () => {
+    const seed: [string, string, string][] = [
+      ["tools-old", "system.profile_sync_rejected", "toolsMd"],
+      ["claude-rejected", "system.profile_sync_rejected", "claudeMd"],
+      ["soul-reconciled", "system.profile_sync_reconciled", "soulMd"],
+      ["tools-new", "system.profile_sync_rejected", "toolsMd"],
+      ["claude-reconciled", "system.profile_sync_reconciled", "claudeMd"],
+      ["soul-rejected", "system.profile_sync_rejected", "soulMd"],
+    ];
+    for (const [key, event, field] of seed) {
+      const { body } = await post("/api/events", {
+        category: "system",
+        event,
+        status: event.endsWith("rejected") ? "error" : "ok",
+        source: "api",
+        agentId: AGENT,
+        data: { field, diskSize: 30_000, dbSize: 19_000, budget: 20_000, delta: 11_000 },
+      });
+      ids[key] = (body.event as { id: string }).id;
+      // createdAt has millisecond precision: keep the seed strictly ordered.
+      await Bun.sleep(5);
+    }
+    await post("/api/events", {
+      category: "system",
+      event: "system.profile_sync_conflict",
+      source: "api",
+      agentId: AGENT,
+      data: { field: "toolsMd" },
+    });
+  });
+
+  test("returns the newest event per (event, data.field) and confirms the mode", async () => {
+    const { status, body } = await get(
+      `/api/events?events=system.profile_sync_rejected,system.profile_sync_reconciled&dataFields=soulMd,claudeMd,toolsMd,identityMd&agentId=${AGENT}&latestPerDataField=true`,
+    );
+    expect(status).toBe(200);
+    expect(body.latestPerDataField).toBe(true);
+    const returned = (body.events as { id: string }[]).map((event) => event.id);
+    expect(returned).toEqual([
+      ids["soul-rejected"],
+      ids["claude-reconciled"],
+      ids["tools-new"],
+      ids["soul-reconciled"],
+      ids["claude-rejected"],
+    ]);
+  });
+
+  test("a single-event request keeps today's response shape", async () => {
+    const { status, body } = await get(
+      `/api/events?event=system.profile_sync_rejected&agentId=${AGENT}&dataField=toolsMd&limit=1`,
+    );
+    expect(status).toBe(200);
+    expect(Object.keys(body)).toEqual(["events"]);
+    expect((body.events as { id: string }[]).map((event) => event.id)).toEqual([ids["tools-new"]]);
+  });
+
+  test("rejects an unknown name in events", async () => {
+    const { status } = await get("/api/events?events=system.profile_sync_rejected,not.an.event");
+    expect(status).toBe(400);
+  });
+
+  test("rejects latestPerDataField without dataFields", async () => {
+    const { status } = await get(
+      "/api/events?events=system.profile_sync_rejected&latestPerDataField=true",
+    );
+    expect(status).toBe(400);
+  });
+
+  test("the profile-sync banner is identical through one batched call and 8 lookups", async () => {
+    const config = { apiUrl: BASE, apiKey: TEST_API_KEY, agentId: AGENT };
+    const eventRequests: string[] = [];
+    const recording = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/api/events") eventRequests.push(url.search);
+      return fetch(input, init);
+    }) as typeof fetch;
+    // Simulates an API that predates latestPerDataField: drop the confirmation.
+    const legacy = (async (input: string | URL | Request, init?: RequestInit) => {
+      const response = await recording(input, init);
+      if (!new URL(String(input)).searchParams.has("latestPerDataField")) return response;
+      const { latestPerDataField: _dropped, ...rest } = await response.json();
+      return new Response(JSON.stringify(rest), { status: response.status });
+    }) as typeof fetch;
+
+    const batched = await fetchProfileSyncRejectionBanner(config, recording);
+    const batchedCalls = eventRequests.length;
+    eventRequests.length = 0;
+    const perField = await fetchProfileSyncRejectionBanner(config, legacy);
+
+    expect(batchedCalls).toBe(1);
+    expect(eventRequests).toHaveLength(9);
+    expect(batched).toContain(ids["tools-new"] ?? "missing");
+    expect(batched).toContain(ids["soul-rejected"] ?? "missing");
+    expect(batched).not.toContain(ids["claude-rejected"] ?? "missing");
+    expect(batched).toBe(perField);
   });
 });
 
