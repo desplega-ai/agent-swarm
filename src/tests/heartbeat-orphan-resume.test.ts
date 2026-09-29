@@ -24,6 +24,7 @@ import {
   runRebootSweep,
   setBeforeHeartbeatSupersedeForTests,
 } from "../heartbeat/heartbeat";
+import { createResumeFollowUp } from "../tasks/worker-follow-up";
 
 const TEST_DB_PATH = "./test-heartbeat-orphan-resume.sqlite";
 
@@ -80,5 +81,52 @@ describe("Heartbeat orphaned supersede repair (TLA+ counterexample)", () => {
 
     expect((await getTaskById(task.id))?.status).toBe("superseded");
     expect(await getChildTasks(task.id)).toHaveLength(1);
+  });
+
+  // Crash after createResumeFollowUp, before backfillSupersedeTaskResumeTaskId.
+  test("a dependent left waiting on a superseded task with a resume is re-pointed on the next sweep", async () => {
+    const agent = await createAgent({ name: "crashed-worker", isLead: false, status: "idle" });
+    const task = await createTaskExtended("Work interrupted mid-backfill", { agentId: agent.id });
+    const dependent = await createTaskExtended("Waits on the interrupted work", {
+      agentId: agent.id,
+      dependsOn: [task.id],
+    });
+    await startTask(task.id);
+
+    await supersedeTask(task.id, { reason: "crash_recovery", resumeTaskId: null });
+    const resume = await createResumeFollowUp({ parentId: task.id, reason: "crash_recovery" });
+    if (resume.kind !== "created") throw new Error(`resume not created: ${resume.kind}`);
+    await getDbClient().run("UPDATE agent_tasks SET finishedAt = ? WHERE id = ?", [
+      new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+      task.id,
+    ]);
+
+    await runRebootSweep();
+    await codeLevelTriage();
+
+    const after = await getTaskById(dependent.id);
+    expect(after?.status).toBe("pending");
+    expect(after?.dependsOn).toEqual([resume.task.id]);
+    expect(await getChildTasks(task.id)).toHaveLength(1);
+  });
+
+  test("dependents of a superseded task that gets no resume are cascade-failed by the sweep", async () => {
+    const task = await createTaskExtended("Unassigned work superseded before any resume");
+    const dependent = await createTaskExtended("Waits on unassigned work", {
+      dependsOn: [task.id],
+    });
+
+    await supersedeTask(task.id, { reason: "manual", resumeTaskId: null });
+    expect((await getTaskById(dependent.id))?.status).toBe("unassigned");
+    await getDbClient().run("UPDATE agent_tasks SET finishedAt = ? WHERE id = ?", [
+      new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+      task.id,
+    ]);
+
+    await codeLevelTriage();
+
+    const after = await getTaskById(dependent.id);
+    expect(after?.status).toBe("failed");
+    expect(after?.failureReason).toContain("was superseded");
   });
 });

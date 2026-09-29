@@ -64,21 +64,22 @@ ffmpeg -y -i in.mp4 -filter:v "setpts=PTS/1.5,fps=30" -an \
 
 Speed-up is a post-process step: `record start` has no speed or human flag. Keep `fps=30` to preserve a steady 30 fps output rather than uneven frame drops at an inferred rate. `-an` disables audio because agent-browser recordings carry no audio track. The worker ships only `ffmpeg`, not `ffprobe`; inspect duration with `ffmpeg -i out-1.5x.mp4 2>&1 | grep Duration`.
 
-Add `--contact-sheet` to the start command for a timestamped PNG summary of visual changes. Recording needs `ffmpeg` on PATH; check `agent-browser doctor` before starting. Stop the recording before closing the browser so the video is saved. Upload the 1.5x file through the same agent-fs QA path and signed-URL steps as screenshots below, and link it in the PR body.
+Add `--contact-sheet` to the start command for a timestamped PNG summary of visual changes. Recording needs `ffmpeg` on PATH; check `agent-browser doctor` before starting. Stop the recording before closing the browser so the video is saved. Upload the 1.5x file through the same agent-fs QA path as screenshots below, and link it in the PR body.
 
 ## Step 3: share the screenshot through agent-fs
 
-Screenshots on the worker disk disappear with the task. Upload them to agent-fs under the qa path convention and share the signed URL. `--file` is binary-safe. `--content` is text-only and mangles PNGs.
+Screenshots on the worker disk disappear with the task. Upload them to agent-fs under the qa path convention. Use `share-create` when a person needs to open the file, and `signed-url` for raw embeds such as an image in GitHub PR markdown. `--file` is binary-safe. `--content` is text-only and mangles PNGs.
 
 ```bash
 agent-fs write thoughts/<agent-id>/qa/<topic>-screenshots/<name>.png \
   --file /tmp/<name>.png -m "<what it shows>"
 agent-fs stat thoughts/<agent-id>/qa/<topic>-screenshots/<name>.png --json        # confirm size > 0
-agent-fs signed-url thoughts/<agent-id>/qa/<topic>-screenshots/<name>.png --json  # 24h default, --expires-in up to 7d
+agent-fs share-create thoughts/<agent-id>/qa/<topic>-screenshots/<name>.png --json
+agent-fs signed-url thoughts/<agent-id>/qa/<topic>-screenshots/<name>.png --json  # raw URL for embeds; 24h default, --expires-in up to 7d
 ```
 
-- Embed the URL as `![caption](<url>)` in the PR body, review comment, Linear comment, or Slack message.
-- In `store-progress`, list the upload in the `attachments` field with `kind: "agent-fs"` and the path, and paste the signed URL in the progress text.
+- Embed the signed URL as `![caption](<url>)` in the PR body, review comment, Linear comment, or Slack message.
+- In `store-progress`, list the upload in the `attachments` field with `kind: "agent-fs"` and the path, and paste the `share-create` link for people who need to open the file.
 - If `agent-fs auth whoami` fails, report the local path, say the upload was skipped, and continue.
 
 The `artifacts` skill holds the full agent-fs recipe and the naming conventions.

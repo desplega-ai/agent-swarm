@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlinkSync } from "node:fs";
 import {
+  backfillSupersedeTaskResumeTaskId,
   cancelTask,
   cascadeFailDependents,
   closeDb,
@@ -230,7 +231,7 @@ describe("cascadeFailDependents", () => {
     expect(childAfter!.failureReason).toContain("was cancelled");
   });
 
-  test("supersedeTask cascades to dependents", async () => {
+  test("supersedeTask with a resume id re-points never-started dependents", async () => {
     const agent = await createAgent({
       name: "cascade-worker-6",
       isLead: false,
@@ -239,18 +240,163 @@ describe("cascadeFailDependents", () => {
     });
 
     const parent = await createTaskExtended("Parent supersede", { agentId: agent.id });
+    const other = await createTaskExtended("Other dependency", { agentId: agent.id });
     const child = await createTaskExtended("Child of superseded", {
+      agentId: agent.id,
+      dependsOn: [parent.id, other.id],
+    });
+    const resume = await createTaskExtended("Resume of parent", { agentId: agent.id });
+
+    await startTask(parent.id);
+    await supersedeTask(parent.id, { reason: "context limit", resumeTaskId: resume.id });
+
+    const childAfter = await getTaskById(child.id);
+    expect(childAfter!.status).toBe("pending");
+    expect(childAfter!.dependsOn).toEqual([resume.id, other.id]);
+
+    const log = await getDbClient().get<{ oldValue: string; newValue: string; metadata: string }>(
+      "SELECT oldValue, newValue, metadata FROM agent_log WHERE taskId = ? AND eventType = 'task_dependency_repointed'",
+      [child.id],
+    );
+    expect(log?.oldValue).toBe(parent.id);
+    expect(log?.newValue).toBe(resume.id);
+    expect(JSON.parse(log!.metadata).reason).toBe("supersede_resume");
+  });
+
+  test("supersedeTask without a resume id defers dependents until the backfill", async () => {
+    const agent = await createAgent({
+      name: "cascade-worker-6b",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+
+    const parent = await createTaskExtended("Parent supersede late resume", { agentId: agent.id });
+    const child = await createTaskExtended("Child of late-resumed", {
       agentId: agent.id,
       dependsOn: [parent.id],
     });
 
     await startTask(parent.id);
-    await supersedeTask(parent.id, { reason: "context limit", resumeTaskId: null });
+    await supersedeTask(parent.id, { reason: "graceful_shutdown", resumeTaskId: null });
+
+    // The window between supersede and resume creation must not fail it.
+    expect((await getTaskById(child.id))!.status).toBe("pending");
+
+    const resume = await createTaskExtended("Late resume", { agentId: agent.id });
+    await backfillSupersedeTaskResumeTaskId(parent.id, resume.id);
 
     const childAfter = await getTaskById(child.id);
+    expect(childAfter!.status).toBe("pending");
+    expect(childAfter!.dependsOn).toEqual([resume.id]);
+  });
+
+  test("supersede settle does not rewrite a dependent that already started", async () => {
+    const agent = await createAgent({
+      name: "cascade-worker-6c",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+
+    const parent = await createTaskExtended("Parent supersede started dep", {
+      agentId: agent.id,
+    });
+    const child = await createTaskExtended("Started child", {
+      agentId: agent.id,
+      dependsOn: [parent.id],
+    });
+    const resume = await createTaskExtended("Resume for started dep", { agentId: agent.id });
+
+    await startTask(parent.id);
+    await startTask(child.id);
+    await supersedeTask(parent.id, { reason: "context limit", resumeTaskId: resume.id });
+
+    const childAfter = await getTaskById(child.id);
+    expect(childAfter!.dependsOn).toEqual([parent.id]);
     expect(childAfter!.status).toBe("failed");
     expect(childAfter!.failureReason).toContain("was superseded");
   });
+
+  test("concurrent settlements of a shared dependent keep both replacements", async () => {
+    const agent = await createAgent({
+      name: "cascade-worker-6d",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+
+    const a = await createTaskExtended("Shared parent A", { agentId: agent.id });
+    const b = await createTaskExtended("Shared parent B", { agentId: agent.id });
+    const child = await createTaskExtended("Depends on A and B", {
+      agentId: agent.id,
+      dependsOn: [a.id, b.id],
+    });
+    const ra = await createTaskExtended("Resume of A", { agentId: agent.id });
+    const rb = await createTaskExtended("Resume of B", { agentId: agent.id });
+
+    for (const parent of [a, b]) {
+      await startTask(parent.id);
+      await supersedeTask(parent.id, { reason: "crash_recovery", resumeTaskId: null });
+    }
+    await Promise.all([
+      backfillSupersedeTaskResumeTaskId(a.id, ra.id),
+      backfillSupersedeTaskResumeTaskId(b.id, rb.id),
+    ]);
+
+    const childAfter = await getTaskById(child.id);
+    expect(childAfter!.status).toBe("pending");
+    expect(childAfter!.dependsOn).toEqual([ra.id, rb.id]);
+  });
+
+  // A dependent's status changes right after any read the settlement makes.
+  // An accept out of `offered` is still never-started and must be re-pointed;
+  // the claim-into-in_progress guard is covered by the started-dependent test.
+  for (const moveTo of ["reviewing", "pending"] as const) {
+    test(`settlement racing offered -> ${moveTo} still re-points the dependent`, async () => {
+      const agent = await createAgent({
+        name: `cascade-worker-6e-${moveTo}`,
+        isLead: false,
+        status: "idle",
+        capabilities: [],
+      });
+
+      const parent = await createTaskExtended("Parent of offered dep", { agentId: agent.id });
+      const child = await createTaskExtended("Offered child", {
+        agentId: agent.id,
+        dependsOn: [parent.id],
+      });
+      const resume = await createTaskExtended("Resume for offered dep", { agentId: agent.id });
+      const client = getDbClient();
+      await client.run("UPDATE agent_tasks SET status = 'offered' WHERE id = ?", [child.id]);
+      await startTask(parent.id);
+      await supersedeTask(parent.id, { reason: "crash_recovery", resumeTaskId: null });
+
+      const query = client.query.bind(client);
+      let raced = false;
+      client.query = (async (sql: string, params?: unknown[]) => {
+        const rows = (await query(sql, params as never)) as { id?: string; status?: string }[];
+        if (!raced && rows.some((r) => r.id === child.id && r.status === "offered")) {
+          raced = true;
+          await client.run("UPDATE agent_tasks SET status = ? WHERE id = ?", [moveTo, child.id]);
+        }
+        return rows;
+      }) as typeof client.query;
+      try {
+        await backfillSupersedeTaskResumeTaskId(parent.id, resume.id);
+      } finally {
+        client.query = query;
+      }
+      // No read to race (single-statement settlement): the accept lands after.
+      if (!raced) {
+        await client.run("UPDATE agent_tasks SET status = ? WHERE id = ?", [moveTo, child.id]);
+      }
+
+      const childAfter = await getTaskById(child.id);
+      expect(childAfter!.status).toBe(moveTo);
+      expect(childAfter!.dependsOn).toEqual([resume.id]);
+    });
+  }
 
   test("wide fan-out: multiple dependents all cascade-failed", async () => {
     const agent = await createAgent({

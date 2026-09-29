@@ -43,7 +43,7 @@ The swarm ships named scripts at global scope. Each one replaces a multi-step to
 | `complete-task` | `{ taskId, output }` | finish a task from inside a script |
 | `report-progress` | `{ taskId, note }` | a progress note from inside a script |
 | `swarm-overview` | `{}` | agents and task counts |
-| `Heartbeat Audit`, `boot-triage` | see `heartbeat-runbook` | the lead's heartbeat data gathering |
+| `schedule-health`, `task-failure-audit`, `boot-triage` | see `heartbeat-runbook` | the lead's heartbeat data gathering |
 
 ## Authoring contract
 

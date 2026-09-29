@@ -28,6 +28,7 @@ import {
   getStaleUnassignedAffinityTasks,
   getStalledInProgressTasks,
   getSupersededTasksWithoutResume,
+  getSupersededTasksWithUnsettledDependents,
   getTaskById,
   getTaskStats,
   getTasksByStatus,
@@ -42,6 +43,7 @@ import {
   releaseStaleOfferedTasksForOfflineAgents,
   releaseStaleProcessingInbox,
   releaseStaleReviewingTasks,
+  settleSupersededTaskDependents,
   supersedeTask,
   updateAgentStatus,
 } from "../be/db";
@@ -66,6 +68,7 @@ import {
   resolveLeadOnlyRecoveryAssignment,
 } from "../tasks/worker-follow-up";
 import type { AgentTask } from "../types";
+import { isEnvFlagEnabled } from "../utils/env-flag";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { getExecutorRegistry } from "../workflows";
@@ -217,12 +220,30 @@ export const HEARTBEAT_RESUME_PIN_GRACE_MIN = (() => {
  */
 const POOL_AFFINITY_ESCALATION_MIN = Number(process.env.POOL_AFFINITY_ESCALATION_MIN) || 15;
 
-/** Heartbeat checklist interval: how often to check HEARTBEAT.md (default: 30 min) */
-const HEARTBEAT_CHECKLIST_INTERVAL_MS =
-  Number(process.env.HEARTBEAT_CHECKLIST_INTERVAL_MS) || 30 * 60 * 1000;
+const DEFAULT_HEARTBEAT_CHECKLIST_INTERVAL_MS = 30 * 60 * 1000;
 
-/** Whether to disable the heartbeat checklist entirely */
-const HEARTBEAT_CHECKLIST_DISABLE = Boolean(process.env.HEARTBEAT_CHECKLIST_DISABLE);
+/**
+ * Heartbeat checklist interval: how often to check HEARTBEAT.md (default: 30 min).
+ *
+ * An explicit `0` (or negative) turns the RECURRING checklist tick off; the
+ * one-shot boot triage still runs. Absent, empty, or non-numeric values fall
+ * back to the default (not `Number(x) || default`, which would coerce `0` to 30 min).
+ */
+function heartbeatChecklistIntervalMs(): number {
+  const raw = process.env.HEARTBEAT_CHECKLIST_INTERVAL_MS?.trim();
+  if (!raw) return DEFAULT_HEARTBEAT_CHECKLIST_INTERVAL_MS;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return DEFAULT_HEARTBEAT_CHECKLIST_INTERVAL_MS;
+  return Math.max(0, parsed);
+}
+
+/**
+ * Whether to disable the heartbeat checklist entirely (recurring tick AND boot
+ * triage). Parsed with the shared env-flag helper, so `"false"`/`"0"` keep it on.
+ */
+function isHeartbeatChecklistDisabled(): boolean {
+  return isEnvFlagEnabled("HEARTBEAT_CHECKLIST_DISABLE", false);
+}
 
 // ============================================================================
 // Types
@@ -275,6 +296,7 @@ export interface HeartbeatFindings {
 
 let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
 let checklistInterval: ReturnType<typeof setInterval> | null = null;
+let bootTriageTimeout: ReturnType<typeof setTimeout> | null = null;
 let isSweeping = false;
 let beforeHeartbeatSupersedeForTests: ((task: AgentTask) => void | Promise<void>) | null = null;
 
@@ -530,10 +552,15 @@ async function repairSupersededWithoutResume(findings: HeartbeatFindings): Promi
     new Date(now - ORPHAN_SUPERSEDE_MAX_AGE_MS).toISOString(),
   );
   for (const task of orphans) {
-    if (!task.agentId) continue;
-    if (getNextResumeGeneration(task) > maxResumeGenerations()) continue;
-    const resume = await createResumeFollowUp({ parentId: task.id, reason: "crash_recovery" });
-    if (resume.kind !== "created") continue;
+    const resume =
+      task.agentId && getNextResumeGeneration(task) <= maxResumeGenerations()
+        ? await createResumeFollowUp({ parentId: task.id, reason: "crash_recovery" })
+        : null;
+    if (resume?.kind !== "created" || !task.agentId) {
+      // No resume will carry the work: its dependents fail as they would have.
+      await settleSupersededTaskDependents(task.id, null);
+      continue;
+    }
     await backfillSupersedeTaskResumeTaskId(task.id, resume.task.id);
     findings.autoResumedTasks.push({
       taskId: task.id,
@@ -544,6 +571,16 @@ async function repairSupersededWithoutResume(findings: HeartbeatFindings): Promi
     console.log(
       `[Heartbeat] Created missing resume ${resume.task.id.slice(0, 8)} for superseded task ${task.id.slice(0, 8)}`,
     );
+  }
+
+  // A crash after the resume was created but before the backfill leaves
+  // dependents waiting on the superseded task; settle them onto that resume.
+  const unsettled = await getSupersededTasksWithUnsettledDependents(
+    new Date(now - ORPHAN_SUPERSEDE_MIN_AGE_MS).toISOString(),
+    new Date(now - ORPHAN_SUPERSEDE_MAX_AGE_MS).toISOString(),
+  );
+  for (const { taskId, resumeTaskId } of unsettled) {
+    await settleSupersededTaskDependents(taskId, resumeTaskId);
   }
 }
 
@@ -679,6 +716,7 @@ async function remediateCrashedWorkerTask(
       resume.kind === "skipped"
         ? `resume_creation_skipped_${resume.reason}`
         : "resume_creation_skipped_workflow";
+    await settleSupersededTaskDependents(task.id, null);
     const failed = await failTask(task.id, reason);
     if (failed) {
       findings.autoFailedTasks.push({
@@ -1835,19 +1873,26 @@ export async function createBootTriageTask(): Promise<void> {
 /**
  * Start the heartbeat checklist polling loop (separate from the infrastructure sweep).
  */
-export function startHeartbeatChecklist(intervalMs = HEARTBEAT_CHECKLIST_INTERVAL_MS): void {
-  if (HEARTBEAT_CHECKLIST_DISABLE) {
+export function startHeartbeatChecklist(intervalMs = heartbeatChecklistIntervalMs()): void {
+  if (isHeartbeatChecklistDisabled()) {
     console.log("[Heartbeat] Checklist disabled via HEARTBEAT_CHECKLIST_DISABLE");
     return;
   }
-  if (checklistInterval) {
+  if (checklistInterval || bootTriageTimeout) {
     return; // Already running
   }
 
-  console.log(`[Heartbeat] Checklist starting with ${intervalMs}ms interval`);
-
   // Boot triage at T+90s — after reboot sweep (T+5s) has completed and results are available
-  setTimeout(() => createBootTriageTask(), 90_000);
+  bootTriageTimeout = setTimeout(() => createBootTriageTask(), 90_000);
+
+  if (intervalMs <= 0) {
+    console.log(
+      "[Heartbeat] Recurring checklist off (HEARTBEAT_CHECKLIST_INTERVAL_MS=0); boot triage still scheduled",
+    );
+    return;
+  }
+
+  console.log(`[Heartbeat] Checklist starting with ${intervalMs}ms interval`);
 
   // Recurring checklist starts from the second interval onward
   checklistInterval = setInterval(() => {
@@ -1864,6 +1909,10 @@ export function startHeartbeatChecklist(intervalMs = HEARTBEAT_CHECKLIST_INTERVA
  * Stop the heartbeat checklist polling loop.
  */
 export function stopHeartbeatChecklist(): void {
+  if (bootTriageTimeout) {
+    clearTimeout(bootTriageTimeout);
+    bootTriageTimeout = null;
+  }
   if (checklistInterval) {
     clearInterval(checklistInterval);
     checklistInterval = null;
