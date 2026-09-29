@@ -1011,7 +1011,6 @@ describe("createExecutorRegistry", () => {
       "code-match",
       "notify",
       "raw-llm",
-      "system-one-decision",
       "script",
       "swarm-script",
       "vcs",
@@ -1024,6 +1023,8 @@ describe("createExecutorRegistry", () => {
     expect(registry.get("foreach").mode).toBe("async");
     expect(registry.get("human-in-the-loop").mode).toBe("async");
     expect(registry.get("wait").mode).toBe("async");
+    // Answers at once, but waits when `humanReview` sends an answer to a person.
+    expect(registry.get("system-one-decision").mode).toBe("async");
   });
 
   test("get() retrieves the correct executor by type", () => {

@@ -28,7 +28,7 @@ The engine includes 13 built-in executor types:
 | `agent-task` | Create and delegate a task to a swarm agent |
 | `foreach` | Fan out one agent task per array item, wait for every child, and emit one aggregate result |
 | `raw-llm` | Call an LLM directly with a prompt template |
-| `system-one-decision` | Make typed decisions (probability, choice, score) over supplied state with TypeSafe's Jev model |
+| `system-one-decision` | Make typed decisions (probability, choice, score) over supplied state, with Jev by default. Can send uncertain answers to a person |
 | `vcs` | Version control operations (create PR, merge, etc.) |
 | `property-match` | Route based on matching properties in step input |
 | `code-match` | Route based on a custom JavaScript expression in a sandbox |
@@ -89,9 +89,28 @@ A `system-one-decision` node (display name "SystemOne Decision") sends one `stat
 - `provider` is `typesafe` (default) or `openrouter`, and must be a literal. `model` is that provider's own id (`jev-1.13.0` on `typesafe`, `typesafe/jev-1.13` on `openrouter`); unset means the provider's default. Both providers take the same request and return the same answers, so everything below holds on either. There is no fallback: a node that names no provider does not switch to `openrouter` when the TypeSafe key is missing.
 - Question types are `noul` (probability that a claim is true), `choice` (2 to 255 named options), and `score` (2 to 10 ordered levels). `returns` repeats each question id and type, and a mismatch is rejected when the workflow is saved.
 - The output is `{ model, answers, usage }`. A downstream node reads `<alias>.answers.<question>.<field>` through an `inputs` mapping. A `noul` answer is `{ type, noul }` with no confidence. `choice` and `score` answers carry `probabilities` and `confidence`.
-- A low-confidence answer is still a success. Put the threshold in the next node, such as `property-match` or `code-match`, and route the uncertain band to `human-in-the-loop`.
+- A low-confidence answer is still a success. To have a person review the uncertain ones, set `humanReview` (below). To route on a threshold yourself, put it in the next node, such as `property-match` or `code-match`, and route the uncertain band to `human-in-the-loop`.
 - The node retries connection errors, 408, 429, and 5xx itself, up to `maxRetries` (0 to 3, default 2) within `timeoutMs` (default 30000). It never retries a 401, a 422, or an answer that fails validation. Do not set `retry` or `validation.retry` on a `system-one-decision` node.
 - An unresolved `{{token}}` fails the step before the request is sent.
+
+#### Human review
+
+Set `humanReview` to define a confidence band in the same node. An answer whose confidence is inside the band goes to a person instead of passing straight through.
+
+```json
+"humanReview": {
+  "band": { "min": 0.5, "max": 0.8 },
+  "approvers": { "users": ["head-of-sales"], "policy": "any" },
+  "timeout": { "seconds": 86400, "action": "reject" }
+},
+"next": { "approved": "route", "rejected": "discard", "timeout": "escalate" }
+```
+
+- `band` is `min` and `max`, each 0 to 1, and both ends count as inside. `choice` and `score` answers are tested on the `confidence` they report. A `noul` answer reports none, so it is tested on `max(noul, 1 - noul)`. The number is the provider's own, so a band tuned on one model does not carry to another.
+- `approvers`, `timeout`, and `notifications` are the `human-in-the-loop` settings. The node raises the request through that executor: same approvers, `waiting` run state, Slack notification, and approval card. Nothing is built twice.
+- If any answer is in the band, the run waits. The card asks the person to accept or reject the decision, and asks one question for each answer in the band. Leave it empty to confirm what the model said, or pick another option to replace it. Answers outside the band stay the model's.
+- The output is the same `{ model, answers, usage }`, plus `review`. `review.status` is `not_required`, `approved`, `rejected`, or `timeout`. `review.questions.<id>` records the confidence tested, whether it was in the band, and `decidedBy` (`model` or `human`). When a person decided, `modelAnswer` keeps what the model said. Rejected and timed-out decisions leave `answers` as the model's.
+- `next` must be a port map with `approved` (every accepted answer, whether the model's or a person's) and optionally `rejected` and `timeout`. A string or list `next` is refused, because it would run the same nodes after a rejection.
 
 #### Keys and preflight
 

@@ -23,6 +23,21 @@ export interface ExecutorReadinessProblem {
   message: string;
 }
 
+// ─── Approval resolution ───────────────────────────────────
+
+/** A resolved approval request, as the resume and recovery paths see it. */
+export interface ResolvedApproval {
+  requestId: string;
+  status: "approved" | "rejected" | "timeout";
+  responses: Record<string, unknown> | null;
+}
+
+/** The step output and output port an executor chooses once its approval resolves. */
+export interface ApprovalOutcome {
+  output: unknown;
+  nextPort: string;
+}
+
 // ─── Input / Result Types ──────────────────────────────────
 
 export interface ExecutorInput {
@@ -72,6 +87,17 @@ export abstract class BaseExecutor<
     _nodes: readonly ExecutorReadinessNode[],
   ): Promise<ExecutorReadinessProblem[]> {
     return [];
+  }
+
+  /**
+   * An executor that parks its step on a human-in-the-loop approval decides the
+   * step's output and port once a person answers. `parkedOutput` is the step
+   * output it stored before it parked. Return null to keep the default: the
+   * human-in-the-loop output (`{ requestId, status, responses }`) on the port
+   * named after the status.
+   */
+  resolveApproval(_parkedOutput: unknown, _approval: ResolvedApproval): ApprovalOutcome | null {
+    return null;
   }
 
   /**

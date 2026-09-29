@@ -22,6 +22,7 @@ import {
   type ApprovalSlackClient,
   postApprovalCancellationUpdates,
 } from "./approval-notifications";
+import { shapeApprovalResolution } from "./approval-resolution";
 import { loadCompletedStepRouting } from "./completed-step-routing";
 import { FAILED_TASK_OUTPUT_PREFIX } from "./constants";
 import { getNextTargets } from "./definition";
@@ -532,15 +533,15 @@ async function resumeFromApprovalResolution(
     return;
   }
 
-  // Determine output port based on approval status
-  const nextPort =
-    event.status === "timeout" ? "timeout" : event.status === "rejected" ? "rejected" : "approved";
-
-  const stepOutput = {
-    requestId: event.requestId,
-    status: event.status,
-    responses: event.responses,
-  };
+  // Output and port for the approval status. A step parked by an executor other
+  // than human-in-the-loop shapes its own (see shapeApprovalResolution).
+  const { output: stepOutput, nextPort } = shapeApprovalResolution(
+    registry,
+    workflow.definition,
+    step.nodeId,
+    step.output,
+    { requestId: event.requestId, status: event.status, responses: event.responses },
+  );
 
   // Use port-based routing to determine the correct successors.
   // findReadyNodes without activeEdges would return ALL structural successors

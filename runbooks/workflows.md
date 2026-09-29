@@ -233,7 +233,7 @@ Jev is weak at counting. For a hybrid, count in a `script` and pass the number t
 
 ## SystemOne Decision nodes
 
-A `system-one-decision` node makes typed decisions with TypeSafe's Jev model, through TypeSafe directly or through OpenRouter (see Providers). It is an instant executor. One call sends one `state` and a map of questions, and the node returns one validated answer per question.
+A `system-one-decision` node (display name "SystemOne Decision") makes typed decisions with a decisions model, through TypeSafe directly or through OpenRouter (see Providers). The model is a config field and defaults to Jev; the node name is not tied to one model. It answers at once, and waits only when `humanReview` sends an answer to a person (see Human review). One call sends one `state` and a map of questions, and the node returns one validated answer per question.
 
 ```yaml
 - id: qualify
@@ -275,6 +275,7 @@ A `system-one-decision` node makes typed decisions with TypeSafe's Jev model, th
 - `model`: the provider's own model id. Unset means the provider's default (`jev-latest` on `typesafe`, `~typesafe/jev-latest` on `openrouter`). Pin a version for a calibrated workflow: `jev-1.13.0` on `typesafe`, `typesafe/jev-1.13` on `openrouter`.
 - `timeoutMs`: `1000` through `300000`, default `30000`. The executor stops its own request `250` ms before the step watchdog.
 - `maxRetries`: `0` through `3`, default `2`.
+- `humanReview` (optional): send answers the model is unsure about to a person. See Human review.
 
 The config has no endpoint, header, or key field, and unknown fields are rejected. The only host choice is `provider`, an id from a server-side list.
 
@@ -303,7 +304,7 @@ Downstream nodes read `<alias>.answers.<question>.<field>` through an `inputs` m
 | `typesafe` (default) | `https://api.typesafe.ai/v1/systemone` | `TYPESAFE_API_KEY` | `jev-latest` |
 | `openrouter` | `https://openrouter.ai/api/alpha/decisions` | `OPENROUTER_API_KEY` | `~typesafe/jev-latest` |
 
-Both hosts take the same request and return the same answers, so `returns`, the output shape, the validation rules, and thresholds are identical on either. The list lives in `SYSTEM_ONE_PROVIDERS` (`src/workflows/executors/jev-providers.ts`); adding a host is one entry there. `openrouter` reads its key through `resolveWorkflowLlmConfig`, the resolver `raw-llm` uses, and never falls through to `OPENAI_API_KEY`.
+Both hosts take the same request and return the same answers, so `returns`, the output shape, the validation rules, and thresholds are identical on either. The list lives in `SYSTEM_ONE_PROVIDERS` (`src/workflows/executors/system-one-providers.ts`); adding a host is one entry there. `openrouter` reads its key through `resolveWorkflowLlmConfig`, the resolver `raw-llm` uses, and never falls through to `OPENAI_API_KEY`.
 
 There is no fallback between providers. A node that names none uses `typesafe`, and it does not move to `openrouter` when the TypeSafe key is missing: the two accounts bill separately and use different model ids, and the key the preflight names must be the key the node uses. Switch by setting `provider`.
 
@@ -320,9 +321,67 @@ Each provider needs its key as a global secret (Settings > Secrets, or `set-conf
 
 The key value never appears in a definition, a warning, a step output, or an error.
 
+### Human review
+
+Set `humanReview` to define, in the same node, a confidence band whose answers go to a person instead of passing straight through. Absent, nothing changes.
+
+```yaml
+- id: qualify
+  type: system-one-decision
+  config:
+    # ...state, questions, returns as above
+    humanReview:
+      band: { min: 0.5, max: 0.8 }   # 0 to 1, both ends inside the band
+      approvers: { users: [head-of-sales], policy: any }
+      title: Check the lead           # optional
+      timeout: { seconds: 86400, action: reject }   # optional
+      notifications: [{ channel: slack, target: C0123456 }]   # optional
+  next: { approved: route, rejected: discard, timeout: escalate }
+```
+
+- **`band`** is `{ min, max }`, each `0` to `1`, `min <= max`. An answer is in the band when `min <= confidence <= max`. `approvers`, `timeout`, and `notifications` are the `human-in-the-loop` schemas, imported, not copied. `title` defaults to `Review decision: <node id>`.
+- **Which number is the confidence.** `choice` and `score` answers report `confidence`, and it is used as reported. A `noul` answer reports none, so the band is tested against `max(noul, 1 - noul)`, the probability of the side the model took. The `noul` answer stays `{ type, noul }`; the tested number is recorded in `review.questions`. The number is the provider's own, so a band tuned on one provider or model does not carry to another.
+- **Any answer in the band parks the node.** One approval request covers the whole node. It asks one `approval` question ("Accept these answers and continue?", id `$confirm`) and one question for each answer that is in the band: a `single-select` for `choice` (the options) and `score` (the levels), a `boolean` for `noul`. Answers outside the band are not asked and stay the model's. The card shows the model's answer and confidence, and the first 2000 characters of `state`, run through the secret scrubber.
+- **Approve** with an empty answer to confirm what the model said, or pick another option to replace it. A replaced `noul` becomes `1` or `0`, a person being certain. `probabilities`, `legend`, and `confidence` always describe the model and are never edited. **Reject**, or let `timeout` run out, and nobody has accepted an answer: `answers` stays the model's.
+- **Output.** The same `{ model, answers, usage }` a run without review returns, so downstream nodes read `<alias>.answers.<question>.<field>` on every path, plus a `review` block:
+
+  ```json
+  "review": {
+    "status": "approved",
+    "approvalRequestId": "…",
+    "questions": {
+      "fit":       { "confidence": 0.82, "inBand": false, "decidedBy": "model" },
+      "authority": { "confidence": 0.75, "inBand": true,  "decidedBy": "human", "modelAnswer": "buyer" }
+    }
+  }
+  ```
+
+  `status` is `not_required` (nothing in the band, no request raised), `approved`, `rejected`, or `timeout`. `decidedBy` says who produced the value in `answers[id]`. `modelAnswer` is kept when a person decided, so an override stays auditable. A response that names something outside the options is treated as `rejected` with `review.reason`, never as a confirmation.
+- **Ports.** With `humanReview`, `next` must be a port map: `approved` (required, carries every accepted answer, whether the model's or a person's, and every answer that never needed review), and optionally `rejected` and `timeout`. A string or list `next` is refused at authoring, because it would run the same successors after a rejection. A port `next` does not map ends that branch.
+- **Reuse, not a second path.** The node raises the request through the `human-in-the-loop` executor, so approvers, timeout, Slack notifications, the `waiting` run state, the dashboard card, and the sweep that times requests out are all that executor's. The only new piece is the hook a step can implement to shape its own output when its approval resolves (`BaseExecutor.resolveApproval`, applied by `src/workflows/approval-resolution.ts` from both the live resume path and the recovery sweep). `human-in-the-loop` does not implement it and behaves as before.
+- **The decision survives the wait.** The model's answer is stored on the waiting step before the request is raised. If the step is run again after its request exists (a crash between the two), the node reuses that stored decision and does not call the provider a second time. A step that has lost its stored decision fails with a message instead of asking again.
+- **Not included.** No per-question band or per-question approvers (split the node instead), no auto-approve above the band (an answer above `max` passes), and no change to the run view: a waiting step shows the stored decision and its approval card lives on the approvals page.
+
+### Other backends: laya
+
+`@desplega/laya` and `@desplega/laya-server` (laya-js, private and unpublished) answer the same kind of question, and their result maps onto this node's output without a schema change. No laya provider ships in this change and the node does not depend on laya-js.
+
+| This node | laya (`SystemOneResult`, `POST /v1/systemone`) |
+|---|---|
+| request `{ state, model, questions }` | the same body; `model` is a checkpoint name (`english`, `multilingual`, `typed-decisions`) or omitted to auto-route. laya-server also takes `max_len` and `head_max_len` |
+| question `{ type, instructions, criteria }` | the same shape. laya also accepts a list of labels for a `choice`. Limits differ: laya allows 100 choice options (node: 255) and 32 score levels (node: 10), and its docs advise against boolean-word labels such as `yes` |
+| `model` | `model` (`laya-rl-agent`) |
+| `answers.<q>` `choice` / `score` / `noul`, `probabilities`, `legend`, `confidence` | the same fields and types; `score` is the expected level, so fractional |
+| `usage` `{ input_tokens, output_tokens }` | the same; `usage.windows` from `predictLong` is dropped |
+| not kept | `routing`, `answer_confidence`, `action`, `low_confidence`: dropped by the validator, as any extra provider field is |
+
+Every row is checked by a test that feeds a laya-shaped result through the same validator and band (`src/tests/workflow-system-one-decision-review.test.ts`). The fixture is built from the laya-js source, not captured from a running server, because the checkpoints are private.
+
+Plugging laya in later is one `SYSTEM_ONE_PROVIDERS` entry plus two small changes to the provider interface, none of which touch the node type, its config, or its output. The endpoint has to come from a deployment setting because a laya server has no fixed host, and the key has to be optional because a laya server may run without a token. Two things need a decision from the laya side, not from this node: laya's `confidence` for `choice` and `score` is entropy-based (its `answer_confidence` is the max probability), so a band would be tuned on that number unless the provider maps `answer_confidence` into `confidence`; and where the server URL lives.
+
 ### Thresholds, retries, and credentials
 
-- A valid low-confidence answer is a successful evaluation. Keep the threshold in the next node: `property-match` (`gt`, `lt`, `eq`) or `code-match` for `>=`, and route the uncertain band to `human-in-the-loop`. There is no global threshold.
+- A valid low-confidence answer is a successful evaluation. To review the uncertain band, set `humanReview`. To route on a threshold yourself, keep it in the next node: `property-match` (`gt`, `lt`, `eq`) or `code-match` for `>=`, then `human-in-the-loop`. There is no global threshold.
 - The executor retries connection errors, HTTP 408, 429, and 5xx (including 529) with exponential backoff and jitter, up to `maxRetries`. It honors `Retry-After` and fails instead of retrying early when the wait does not fit the budget. It never retries 401, 422, other 4xx, redirects, or an invalid success body.
 - A `system-one-decision` node must not set `retry` or `validation.retry`. Engine retries are not status-aware and would re-send rejected requests. Workflow create and update reject it, and a stored definition that has it fails the step before any request.
 - The node reads its provider's key on the server (see Keys and preflight). Errors carry the HTTP status, a short error code, and the request id, not the provider's message or your state.

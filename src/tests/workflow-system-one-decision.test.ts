@@ -20,6 +20,8 @@ import {
   type ExecutorDependencies,
   type ExecutorResult,
 } from "../workflows/executors/base";
+import { PropertyMatchExecutor } from "../workflows/executors/property-match";
+import { createExecutorRegistry, ExecutorRegistry } from "../workflows/executors/registry";
 import {
   SYSTEM_ONE_ENDPOINT,
   SystemOneDecisionConfigSchema,
@@ -27,8 +29,6 @@ import {
   type SystemOneDecisionExecutorOptions,
   SystemOneDecisionOutputSchema,
 } from "../workflows/executors/system-one-decision";
-import { PropertyMatchExecutor } from "../workflows/executors/property-match";
-import { createExecutorRegistry, ExecutorRegistry } from "../workflows/executors/registry";
 import { findWorkflowReadinessProblems, workflowSaveWarnings } from "../workflows/readiness";
 import { retryFailedRun } from "../workflows/resume";
 import { interpolate } from "../workflows/template";
@@ -274,10 +274,12 @@ describe("system-one-decision config schema", () => {
       expect(SystemOneDecisionConfigSchema.safeParse(mixedConfig(bad)).success).toBe(false);
     }
     expect(
-      SystemOneDecisionConfigSchema.safeParse(mixedConfig({ timeoutMs: 1_000, maxRetries: 0 })).success,
+      SystemOneDecisionConfigSchema.safeParse(mixedConfig({ timeoutMs: 1_000, maxRetries: 0 }))
+        .success,
     ).toBe(true);
     expect(
-      SystemOneDecisionConfigSchema.safeParse(mixedConfig({ timeoutMs: 300_000, maxRetries: 3 })).success,
+      SystemOneDecisionConfigSchema.safeParse(mixedConfig({ timeoutMs: 300_000, maxRetries: 3 }))
+        .success,
     ).toBe(true);
   });
 
@@ -338,9 +340,9 @@ describe("system-one-decision config schema", () => {
 
   test("rejects an empty question map and unsafe question ids", () => {
     const question = { type: "noul", instructions: "true?" };
-    expect(SystemOneDecisionConfigSchema.safeParse(mixedConfig({ questions: {}, returns: {} })).success).toBe(
-      false,
-    );
+    expect(
+      SystemOneDecisionConfigSchema.safeParse(mixedConfig({ questions: {}, returns: {} })).success,
+    ).toBe(false);
     for (const id of ["1bad", "has space", "a.b", "", "constructor", "prototype", "toString"]) {
       const config = mixedConfig({
         questions: { [id]: question },
@@ -649,7 +651,9 @@ describe("SystemOneDecisionExecutor transport", () => {
       ),
     ]);
     const result = await runSystemOne(executor, mixedConfig());
-    expect(result.error).toBe("SystemOne API returned HTTP 422 (invalid_request) [request req_422]");
+    expect(result.error).toBe(
+      "SystemOne API returned HTTP 422 (invalid_request) [request req_422]",
+    );
     expect(result.error).not.toContain("blocked");
   });
 
@@ -834,7 +838,10 @@ describe("SystemOneDecisionExecutor credentials", () => {
     }
 
     const { calls, transport } = makeTransport([jsonResponse(mixedBody())]);
-    const noRow = await runSystemOne(new SystemOneDecisionExecutor(deps, { fetch: transport }), mixedConfig());
+    const noRow = await runSystemOne(
+      new SystemOneDecisionExecutor(deps, { fetch: transport }),
+      mixedConfig(),
+    );
     expect(noRow.status).toBe("failed");
     expect(noRow.error).toContain("not configured");
     expect(calls).toHaveLength(0);
@@ -871,12 +878,12 @@ describe("SystemOneDecisionExecutor credentials", () => {
 // ─── Registry, discovery, authoring ─────────────────────────
 
 describe("system-one-decision registration and authoring", () => {
-  test("registers as an instant executor and derives discovery JSON Schemas", () => {
+  test("registers as an async executor (it can wait for a reviewer) and derives discovery JSON Schemas", () => {
     const registry = createExecutorRegistry(deps);
     expect(registry.has("system-one-decision")).toBe(true);
     const info = registry.describe("system-one-decision");
     expect(info.type).toBe("system-one-decision");
-    expect(info.mode).toBe("instant");
+    expect(info.mode).toBe("async");
     // The refinements and the discriminated union must survive JSON Schema conversion.
     const config = info.configSchema as { required?: string[] };
     expect(config.required).toEqual(expect.arrayContaining(["state", "questions", "returns"]));
@@ -1117,7 +1124,10 @@ describe("system-one-decision in the workflow engine", () => {
 
     const confident = makeTransport([jsonResponse(mixedBody())]);
     const registryA = engineRegistry(
-      new SystemOneDecisionExecutor(deps, { fetch: confident.transport, getApiKey: async () => API_KEY }),
+      new SystemOneDecisionExecutor(deps, {
+        fetch: confident.transport,
+        getApiKey: async () => API_KEY,
+      }),
     );
     const runA = await startWorkflowExecution(
       await makeWorkflow(gatedDefinition()),
@@ -1146,7 +1156,10 @@ describe("system-one-decision in the workflow engine", () => {
       ),
     ]);
     const registryB = engineRegistry(
-      new SystemOneDecisionExecutor(deps, { fetch: unsure.transport, getApiKey: async () => API_KEY }),
+      new SystemOneDecisionExecutor(deps, {
+        fetch: unsure.transport,
+        getApiKey: async () => API_KEY,
+      }),
     );
     const runB = await startWorkflowExecution(
       await makeWorkflow(gatedDefinition()),
@@ -1285,11 +1298,15 @@ function makeOpenRouterExecutor(steps: TransportStep[], env: NodeJS.ProcessEnv =
 describe("system-one-decision providers", () => {
   test("a definition can name only a listed provider and carries no endpoint, header, or key", () => {
     for (const evil of ["https://evil.example", "typesafe.ai", "", "constructor"]) {
-      expect(SystemOneDecisionConfigSchema.safeParse(mixedConfig({ provider: evil })).success).toBe(false);
+      expect(SystemOneDecisionConfigSchema.safeParse(mixedConfig({ provider: evil })).success).toBe(
+        false,
+      );
     }
     // A definition cannot carry an endpoint, header, or key.
     for (const field of ["endpoint", "url", "headers", "apiKey"]) {
-      expect(SystemOneDecisionConfigSchema.safeParse(mixedConfig({ [field]: "x" })).success).toBe(false);
+      expect(SystemOneDecisionConfigSchema.safeParse(mixedConfig({ [field]: "x" })).success).toBe(
+        false,
+      );
     }
   });
 
@@ -1346,7 +1363,10 @@ describe("system-one-decision providers", () => {
 
   test("openrouter passes an explicit model slug through", async () => {
     const { executor, calls } = makeOpenRouterExecutor([jsonResponse(openRouterBody())]);
-    await runSystemOne(executor, mixedConfig({ provider: "openrouter", model: "typesafe/jev-1.13" }));
+    await runSystemOne(
+      executor,
+      mixedConfig({ provider: "openrouter", model: "typesafe/jev-1.13" }),
+    );
     expect(calls[0]?.body.model).toBe("typesafe/jev-1.13");
   });
 
@@ -1417,7 +1437,10 @@ describe("system-one-decision providers", () => {
       fetch: orTransport,
       env: { OPENROUTER_API_KEY: OPENROUTER_KEY },
     });
-    const viaTypeSafeMissing = await runSystemOne(orExecutor, mixedConfig({ provider: "typesafe" }));
+    const viaTypeSafeMissing = await runSystemOne(
+      orExecutor,
+      mixedConfig({ provider: "typesafe" }),
+    );
     expect(viaTypeSafeMissing.error).toContain("TYPESAFE_API_KEY is not configured");
     expect(orCalls).toHaveLength(0);
   });
@@ -1448,7 +1471,10 @@ describe("a key the host rejects", () => {
     const { executor, calls } = makeOpenRouterExecutor([
       jsonResponse({ error: { message: OPENROUTER_KEY, code: 401 } }, 401),
     ]);
-    const result = await runSystemOne(executor, mixedConfig({ provider: "openrouter", maxRetries: 3 }));
+    const result = await runSystemOne(
+      executor,
+      mixedConfig({ provider: "openrouter", maxRetries: 3 }),
+    );
 
     expect(result.status).toBe("failed");
     expect(result.error).toContain("OPENROUTER_API_KEY was rejected by OpenRouter (HTTP 401");
@@ -1521,7 +1547,9 @@ describe("system-one-decision readiness before first use", () => {
   });
 
   test("a workflow with no system-one-decision node is ready without asking anyone", async () => {
-    const registry = engineRegistry(new SystemOneDecisionExecutor(deps, { getApiKey: async () => null }));
+    const registry = engineRegistry(
+      new SystemOneDecisionExecutor(deps, { getApiKey: async () => null }),
+    );
     expect(
       await findWorkflowReadinessProblems(
         { nodes: [{ id: "m", type: "marker", config: { label: "x" } }] },
@@ -1531,7 +1559,9 @@ describe("system-one-decision readiness before first use", () => {
   });
 
   test("a save warning names the key, where to set it, the node, and the consequence", async () => {
-    const registry = engineRegistry(new SystemOneDecisionExecutor(deps, { getApiKey: async () => null }));
+    const registry = engineRegistry(
+      new SystemOneDecisionExecutor(deps, { getApiKey: async () => null }),
+    );
     const warnings = await workflowSaveWarnings(gatedDefinition(), registry);
 
     expect(warnings).toHaveLength(1);
@@ -1540,7 +1570,9 @@ describe("system-one-decision readiness before first use", () => {
     expect(warnings[0]).toContain('system-one-decision node "qualify"');
     expect(warnings[0]).toContain("fail before any node executes");
 
-    const ready = engineRegistry(new SystemOneDecisionExecutor(deps, { getApiKey: async () => API_KEY }));
+    const ready = engineRegistry(
+      new SystemOneDecisionExecutor(deps, { getApiKey: async () => API_KEY }),
+    );
     expect(await workflowSaveWarnings(gatedDefinition(), ready)).toEqual([]);
   });
 
@@ -1582,8 +1614,14 @@ describe("run start with a system-one-decision node", () => {
   test("a missing key fails the run before any node executes", async () => {
     // Default key lookup (the swarm config row) with no row present.
     const { calls, transport } = makeTransport([jsonResponse(mixedBody())]);
-    const registry = engineRegistry(new SystemOneDecisionExecutor(deps, { fetch: transport, env: {} }));
-    const runId = await startWorkflowExecution(await makeWorkflow(markerThenSystemOne()), {}, registry);
+    const registry = engineRegistry(
+      new SystemOneDecisionExecutor(deps, { fetch: transport, env: {} }),
+    );
+    const runId = await startWorkflowExecution(
+      await makeWorkflow(markerThenSystemOne()),
+      {},
+      registry,
+    );
 
     const run = await getWorkflowRun(runId);
     expect(run?.status).toBe("failed");
@@ -1606,7 +1644,9 @@ describe("run start with a system-one-decision node", () => {
       value: API_KEY,
       isSecret: true,
     });
-    const registry = engineRegistry(new SystemOneDecisionExecutor(deps, { fetch: transport, env: {} }));
+    const registry = engineRegistry(
+      new SystemOneDecisionExecutor(deps, { fetch: transport, env: {} }),
+    );
     const runId = await startWorkflowExecution(
       await makeWorkflow(markerThenSystemOne({ config: mixedConfig({ provider: "openrouter" }) })),
       {},
@@ -1629,8 +1669,14 @@ describe("run start with a system-one-decision node", () => {
       isSecret: true,
     });
     const { calls, transport } = makeTransport([jsonResponse(mixedBody())]);
-    const registry = engineRegistry(new SystemOneDecisionExecutor(deps, { fetch: transport, env: {} }));
-    const runId = await startWorkflowExecution(await makeWorkflow(markerThenSystemOne()), {}, registry);
+    const registry = engineRegistry(
+      new SystemOneDecisionExecutor(deps, { fetch: transport, env: {} }),
+    );
+    const runId = await startWorkflowExecution(
+      await makeWorkflow(markerThenSystemOne()),
+      {},
+      registry,
+    );
 
     expect((await getWorkflowRun(runId))?.status).toBe("completed");
     expect((await getWorkflowRunStepsByRunId(runId)).map((s) => s.nodeId).sort()).toEqual([
@@ -1664,8 +1710,14 @@ describe("run start with a system-one-decision node", () => {
       jsonResponse({ detail: { error_type: "authentication_error" } }, 401),
       jsonResponse(mixedBody()),
     ]);
-    const registry = engineRegistry(new SystemOneDecisionExecutor(deps, { fetch: transport, env: {} }));
-    const runId = await startWorkflowExecution(await makeWorkflow(markerThenSystemOne()), {}, registry);
+    const registry = engineRegistry(
+      new SystemOneDecisionExecutor(deps, { fetch: transport, env: {} }),
+    );
+    const runId = await startWorkflowExecution(
+      await makeWorkflow(markerThenSystemOne()),
+      {},
+      registry,
+    );
 
     // Distinct rejected-key error on the step; the marker ahead of it did run.
     const failedRun = await getWorkflowRun(runId);

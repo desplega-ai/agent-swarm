@@ -1,13 +1,23 @@
 import { z } from "zod";
 import type { ExecutorMeta } from "../../types";
+import { scrubSecrets } from "../../utils/secret-scrubber";
 import {
+  type ApprovalOutcome,
   BaseExecutor,
   type ExecutorDependencies,
   type ExecutorReadinessNode,
   type ExecutorReadinessProblem,
   type ExecutorResult,
+  type ResolvedApproval,
 } from "./base";
 import {
+  ApproverConfigSchema,
+  HITLTimeoutSchema,
+  HumanInTheLoopExecutor,
+  NotificationConfigSchema,
+} from "./human-in-the-loop";
+import {
+  resolveSystemOneCredential,
   SYSTEM_ONE_DEFAULT_PROVIDER,
   SYSTEM_ONE_PROVIDER_IDS,
   SYSTEM_ONE_PROVIDERS,
@@ -15,7 +25,6 @@ import {
   type SystemOneProviderId,
   systemOneKeyRejectedMessage,
   systemOneProviderOf,
-  resolveSystemOneCredential,
 } from "./system-one-providers";
 
 // ─── Constants ──────────────────────────────────────────────
@@ -50,6 +59,9 @@ const BACKOFF_CAP_MS = 8_000;
 const DISTRIBUTION_TOLERANCE = 0.02;
 const MAX_RESPONSE_CHARS = 1_048_576;
 const MAX_ERROR_BODY_CHARS = 65_536;
+
+/** Output ports of a node that sets `humanReview`, the same names `human-in-the-loop` uses. */
+const REVIEW_PORTS = ["approved", "rejected", "timeout"] as const;
 
 /** Engine-level retries default to 3 when a stored policy omits the count. */
 const ENGINE_RETRY_DEFAULT = 3;
@@ -112,6 +124,8 @@ export const SystemOneQuestionSchema = z.discriminatedUnion("type", [
   ScoreQuestionSchema,
 ]);
 
+const Unit = z.number().min(0).max(1);
+
 const QUESTION_ID_RE = /^[A-Za-z_][A-Za-z0-9_-]*$/;
 const RESERVED_QUESTION_IDS = new Set([
   ...Object.getOwnPropertyNames(Object.prototype),
@@ -119,6 +133,26 @@ const RESERVED_QUESTION_IDS = new Set([
 ]);
 
 const SystemOnePrimitiveTypeSchema = z.enum(["noul", "choice", "score"]);
+
+/**
+ * Send an answer to a person when the model is unsure. The approval machinery is
+ * the `human-in-the-loop` executor's: same approvers, timeout, notifications,
+ * `waiting` run state, and dashboard card. Only the band and the card content
+ * are this node's.
+ */
+const HumanReviewSchema = z.strictObject({
+  /** Review when `min <= confidence <= max`. Both ends count as in the band. */
+  band: z
+    .strictObject({ min: Unit, max: Unit })
+    .refine((band) => band.min <= band.max, { message: "band.min must not exceed band.max" }),
+  approvers: ApproverConfigSchema,
+  /** Card title. Defaults to `Review decision: <node id>`. */
+  title: z.string().min(1).optional(),
+  timeout: HITLTimeoutSchema.optional(),
+  notifications: z.array(NotificationConfigSchema).optional(),
+});
+
+export type SystemOneHumanReview = z.infer<typeof HumanReviewSchema>;
 
 export const SystemOneDecisionConfigSchema = z
   .strictObject({
@@ -132,7 +166,12 @@ export const SystemOneDecisionConfigSchema = z
       .min(SYSTEM_ONE_MIN_TIMEOUT_MS)
       .max(SYSTEM_ONE_MAX_TIMEOUT_MS)
       .default(SYSTEM_ONE_DEFAULT_TIMEOUT_MS),
-    maxRetries: z.number().int().min(0).max(SYSTEM_ONE_MAX_RETRIES_LIMIT).default(SYSTEM_ONE_DEFAULT_MAX_RETRIES),
+    maxRetries: z
+      .number()
+      .int()
+      .min(0)
+      .max(SYSTEM_ONE_MAX_RETRIES_LIMIT)
+      .default(SYSTEM_ONE_DEFAULT_MAX_RETRIES),
     questions: z.record(
       z
         .string()
@@ -143,6 +182,8 @@ export const SystemOneDecisionConfigSchema = z
       SystemOneQuestionSchema,
     ),
     returns: z.record(z.string(), z.strictObject({ type: SystemOnePrimitiveTypeSchema })),
+    /** Optional. Absent means every valid answer passes straight through. */
+    humanReview: HumanReviewSchema.optional(),
   })
   .superRefine((config, ctx) => {
     const questionIds = Object.keys(config.questions);
@@ -192,8 +233,6 @@ export type SystemOneQuestion = z.infer<typeof SystemOneQuestionSchema>;
 
 // ─── Output schema ──────────────────────────────────────────
 
-const Unit = z.number().min(0).max(1);
-
 const NoulAnswerSchema = z.strictObject({ type: z.literal("noul"), noul: Unit });
 
 const ChoiceAnswerSchema = z.strictObject({
@@ -217,6 +256,27 @@ const SystemOneAnswerSchema = z.discriminatedUnion("type", [
   ScoreAnswerSchema,
 ]);
 
+/** Present only when the node sets `humanReview`. */
+const ReviewQuestionSchema = z.strictObject({
+  /** The number the band was tested against (see `answerConfidence`). */
+  confidence: Unit,
+  inBand: z.boolean(),
+  /** Who produced the value in `answers[id]`. */
+  decidedBy: z.enum(["model", "human"]),
+  /** The model's own answer, kept when a person decided so an override stays auditable. */
+  modelAnswer: z.union([z.string(), z.number()]).optional(),
+});
+
+const ReviewSchema = z.strictObject({
+  /** `pending` is stored on the parked step only; a finished node never reports it. */
+  status: z.enum(["not_required", "pending", "approved", "rejected", "timeout"]),
+  /** The approval request a person answered, when one was raised. */
+  approvalRequestId: z.string().optional(),
+  /** Why an approved review was turned into `rejected`. */
+  reason: z.string().optional(),
+  questions: z.record(z.string(), ReviewQuestionSchema),
+});
+
 export const SystemOneDecisionOutputSchema = z.object({
   model: z.string().min(1),
   answers: z.record(z.string(), SystemOneAnswerSchema),
@@ -225,6 +285,7 @@ export const SystemOneDecisionOutputSchema = z.object({
     output_tokens: z.number().int().min(0),
   }),
   requestId: z.string().optional(),
+  review: ReviewSchema.optional(),
 });
 
 export type SystemOneAnswer = z.infer<typeof SystemOneAnswerSchema>;
@@ -271,6 +332,7 @@ export function systemOneStaticShapeViolations(node: {
   id: string;
   type: string;
   config: Record<string, unknown>;
+  next?: string | string[] | Record<string, string> | null;
 }): string[] {
   if (node.type !== SYSTEM_ONE_DECISION_NODE_TYPE) return [];
   const violations: string[] = [];
@@ -290,6 +352,28 @@ export function systemOneStaticShapeViolations(node: {
     violations.push(
       `Node "${node.id}" (system-one-decision) config.provider must be a literal (${SYSTEM_ONE_PROVIDER_IDS.join(", ")}), not a {{token}}: the provider decides which credential is checked before the run starts`,
     );
+  }
+  if (isRecord(node.config.humanReview) && node.next != null) {
+    // A rejection or a timeout must not run the same successors as an accepted answer.
+    // Only a port map can tell them apart, so a string or list `next` is refused.
+    if (typeof node.next === "string" || Array.isArray(node.next)) {
+      violations.push(
+        `Node "${node.id}" (system-one-decision) sets humanReview, so next must map output ports (${REVIEW_PORTS.join(", ")}): a single or list next would run the same successors after a rejection or a timeout`,
+      );
+    } else {
+      const ports = Object.keys(node.next);
+      const unknown = ports.filter((port) => !(REVIEW_PORTS as readonly string[]).includes(port));
+      if (unknown.length > 0) {
+        violations.push(
+          `Node "${node.id}" (system-one-decision) sets humanReview, so next ports must be ${REVIEW_PORTS.join(", ")}; got ${unknown.map((port) => `"${port}"`).join(", ")}`,
+        );
+      }
+      if (!ports.includes("approved")) {
+        violations.push(
+          `Node "${node.id}" (system-one-decision) sets humanReview, so next must define the "approved" port: it carries every answer that is accepted, by the model or by a person`,
+        );
+      }
+    }
   }
   return violations;
 }
@@ -447,6 +531,225 @@ export function validateSystemOneResponse(
   };
 }
 
+// ─── Human review ───────────────────────────────────────────
+
+type ReviewQuestions = z.infer<typeof ReviewSchema>["questions"];
+
+/** Approval question id. `$` cannot start a question id, so it never collides with one. */
+const REVIEW_CONFIRM_ID = "$confirm";
+const REVIEW_STATE_CHARS = 2_000;
+const REVIEW_LABEL_CHARS = 160;
+const REVIEW_OPTION_CHARS = 200;
+
+const round6 = (value: number) => Math.round(value * 1e6) / 1e6;
+
+/**
+ * The number `humanReview.band` is tested against. A `choice` or `score` answer
+ * reports `confidence`, and that is used as reported. A `noul` answer reports
+ * none, so it is the probability of the side the model took, max(P(true),
+ * P(false)). The output never gains a confidence field for it.
+ */
+export function answerConfidence(answer: SystemOneAnswer): number {
+  return answer.type === "noul"
+    ? round6(Math.max(answer.noul, 1 - answer.noul))
+    : answer.confidence;
+}
+
+function clip(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+/** A criterion or instruction is a string, an object, an array, or null. Show it as text. */
+function showEntry(entry: unknown, max: number): string {
+  return clip(typeof entry === "string" ? entry : (JSON.stringify(entry) ?? ""), max);
+}
+
+/** The model's own answer in a form that fits a review record. */
+function modelAnswerOf(answer: SystemOneAnswer): string | number {
+  return answer.type === "choice"
+    ? answer.choice
+    : answer.type === "score"
+      ? answer.score
+      : answer.noul;
+}
+
+/**
+ * The approval card a person answers. One `approval` question accepts or rejects
+ * the whole decision. Each answer in the band gets a question of the same kind,
+ * left empty to confirm what the model said or set to replace it.
+ */
+function buildReviewCard(
+  nodeId: string,
+  config: SystemOneDecisionConfig,
+  review: SystemOneHumanReview,
+  parked: SystemOneDecisionOutput,
+) {
+  const state = scrubSecrets(
+    typeof config.state === "string" ? config.state : (JSON.stringify(config.state) ?? ""),
+  );
+  const questions: Record<string, unknown>[] = [
+    {
+      id: REVIEW_CONFIRM_ID,
+      type: "approval",
+      label: "Accept these answers and continue?",
+      required: true,
+      description: `Model ${parked.model}. Input: ${clip(state, REVIEW_STATE_CHARS)}`,
+    },
+  ];
+  for (const [id, info] of Object.entries(parked.review?.questions ?? {})) {
+    if (!info.inBand) continue;
+    const question = config.questions[id];
+    const answer = parked.answers[id];
+    if (!question || !answer) continue;
+    const label = `${id}: ${showEntry(question.instructions, REVIEW_LABEL_CHARS)}`;
+    const said = `The model answered ${JSON.stringify(modelAnswerOf(answer))} at confidence ${info.confidence}.`;
+    if (question.type === "choice" && answer.type === "choice") {
+      questions.push({
+        id,
+        type: "single-select",
+        label,
+        required: false,
+        description: `${said} Leave empty to confirm it, or pick another option.`,
+        options: Object.entries(question.criteria).map(([value, entry]) => ({
+          value,
+          label: value,
+          ...(typeof entry === "string" && entry
+            ? { description: clip(entry, REVIEW_OPTION_CHARS) }
+            : {}),
+        })),
+      });
+    } else if (question.type === "score" && answer.type === "score") {
+      questions.push({
+        id,
+        type: "single-select",
+        label,
+        required: false,
+        description: `${said} Leave empty to confirm it, or pick a level.`,
+        options: question.criteria.map((entry, level) => ({
+          value: String(level),
+          label: `${level}: ${showEntry(entry, REVIEW_OPTION_CHARS)}`,
+        })),
+      });
+    } else if (question.type === "noul" && answer.type === "noul") {
+      questions.push({
+        id,
+        type: "boolean",
+        label,
+        required: false,
+        defaultValue: answer.noul >= 0.5,
+        description: `${said} The switch starts on the side the model took.`,
+      });
+    }
+  }
+  return {
+    title: review.title ?? `Review decision: ${nodeId}`,
+    questions,
+    approvers: review.approvers,
+    ...(review.timeout ? { timeout: review.timeout } : {}),
+    ...(review.notifications ? { notifications: review.notifications } : {}),
+  };
+}
+
+type HumanAnswer =
+  | { kind: "confirm" }
+  | { kind: "override"; answer: SystemOneAnswer }
+  | { kind: "invalid" };
+
+/** What a person's response to one in-band question means for the model's answer. */
+function readHumanAnswer(answer: SystemOneAnswer, response: unknown): HumanAnswer {
+  if (response === undefined || response === null || response === "") return { kind: "confirm" };
+  switch (answer.type) {
+    case "choice":
+      if (typeof response !== "string" || !Object.hasOwn(answer.probabilities, response)) {
+        return { kind: "invalid" };
+      }
+      return response === answer.choice
+        ? { kind: "confirm" }
+        : { kind: "override", answer: { ...answer, choice: response } };
+    case "score": {
+      if (typeof response !== "string" || !Object.hasOwn(answer.legend, response)) {
+        return { kind: "invalid" };
+      }
+      const level = Number(response);
+      return level === answer.score
+        ? { kind: "confirm" }
+        : { kind: "override", answer: { ...answer, score: level } };
+    }
+    case "noul":
+      if (typeof response !== "boolean") return { kind: "invalid" };
+      return response === answer.noul >= 0.5
+        ? { kind: "confirm" }
+        : { kind: "override", answer: { ...answer, noul: response ? 1 : 0 } };
+  }
+}
+
+/**
+ * Turn a resolved approval into the node's final output and port.
+ *
+ * - approved: answers a person confirmed or replaced are marked `decidedBy:
+ *   "human"`, with the model's own answer kept in `review.questions`. A person's
+ *   answer never touches `probabilities`, `legend`, or `confidence`: those always
+ *   describe the model. A replaced `noul` becomes 1 or 0, a person being certain.
+ * - rejected or timeout: nobody accepted an answer, so `answers` stays the
+ *   model's and the node leaves through the `rejected` or `timeout` port.
+ * - an approved response that names something outside the options is treated as
+ *   rejected, never as a confirmation.
+ *
+ * Returns null when the parked output is not a pending decision; the caller then
+ * falls back to the plain human-in-the-loop output so the run does not wedge.
+ */
+export function resolveReviewedDecision(
+  parkedOutput: unknown,
+  approval: ResolvedApproval,
+): ApprovalOutcome | null {
+  const parked = SystemOneDecisionOutputSchema.safeParse(parkedOutput);
+  if (!parked.success || parked.data.review?.status !== "pending") return null;
+  const decision = parked.data;
+  const parkedQuestions = decision.review?.questions ?? {};
+
+  const finish = (
+    status: ResolvedApproval["status"],
+    answers: SystemOneDecisionOutput["answers"],
+    questions: ReviewQuestions,
+    reason?: string,
+  ): ApprovalOutcome => ({
+    output: {
+      ...decision,
+      answers,
+      review: {
+        status,
+        approvalRequestId: approval.requestId,
+        ...(reason ? { reason } : {}),
+        questions,
+      },
+    } satisfies SystemOneDecisionOutput,
+    nextPort: status,
+  });
+
+  if (approval.status !== "approved") {
+    return finish(approval.status, decision.answers, parkedQuestions);
+  }
+
+  const answers = { ...decision.answers };
+  const questions: ReviewQuestions = { ...parkedQuestions };
+  for (const [id, info] of Object.entries(parkedQuestions)) {
+    const modelAnswer = decision.answers[id];
+    if (!info.inBand || !modelAnswer) continue;
+    const human = readHumanAnswer(modelAnswer, approval.responses?.[id]);
+    if (human.kind === "invalid") {
+      return finish(
+        "rejected",
+        decision.answers,
+        parkedQuestions,
+        `The response for "${id}" is not one of its options`,
+      );
+    }
+    if (human.kind === "override") answers[id] = human.answer;
+    questions[id] = { ...info, decidedBy: "human", modelAnswer: modelAnswerOf(modelAnswer) };
+  }
+  return finish("approved", answers, questions);
+}
+
 // ─── Transport ──────────────────────────────────────────────
 
 export interface SystemOneDecisionExecutorOptions {
@@ -522,9 +825,13 @@ function defaultSleep(ms: number, signal: AbortSignal): Promise<void> {
 
 // ─── Executor ───────────────────────────────────────────────
 
-export class SystemOneDecisionExecutor extends BaseExecutor<typeof SystemOneDecisionConfigSchema, typeof SystemOneDecisionOutputSchema> {
+export class SystemOneDecisionExecutor extends BaseExecutor<
+  typeof SystemOneDecisionConfigSchema,
+  typeof SystemOneDecisionOutputSchema
+> {
   readonly type = SYSTEM_ONE_DECISION_NODE_TYPE;
-  readonly mode = "instant" as const;
+  // Waits only when `humanReview` sends an answer to a person; otherwise it answers at once.
+  readonly mode = "async" as const;
   readonly configSchema = SystemOneDecisionConfigSchema;
   readonly outputSchema = SystemOneDecisionOutputSchema;
 
@@ -566,9 +873,18 @@ export class SystemOneDecisionExecutor extends BaseExecutor<typeof SystemOneDeci
 
   protected async execute(
     config: SystemOneDecisionConfig,
-    _context: Readonly<Record<string, unknown>>,
-    _meta: ExecutorMeta,
+    context: Readonly<Record<string, unknown>>,
+    meta: ExecutorMeta,
   ): Promise<ExecutorResult<SystemOneDecisionOutput>> {
+    if (config.humanReview) {
+      // A step that already raised its approval request (a crash between the request
+      // and the `waiting` state, then a re-run) must not buy a second decision.
+      const existing = await this.deps.db.getApprovalRequestByStepId(meta.stepId);
+      if (existing) {
+        return this.handOffToReviewer(config, await this.readParked(meta.stepId), context, meta);
+      }
+    }
+
     const providerId = config.provider;
     const provider: SystemOneProvider = SYSTEM_ONE_PROVIDERS[providerId];
     const credential = await resolveSystemOneCredential(
@@ -595,17 +911,120 @@ export class SystemOneDecisionExecutor extends BaseExecutor<typeof SystemOneDeci
     } catch {
       return { status: "failed", error: "SystemOne response was not valid JSON" };
     }
+    let decision: SystemOneDecisionOutput;
     try {
-      return {
-        status: "success",
-        output: validateSystemOneResponse(config.questions, parsed, sent.requestId),
-      };
+      decision = validateSystemOneResponse(config.questions, parsed, sent.requestId);
     } catch (err) {
       if (err instanceof SystemOneContractError) {
-        return { status: "failed", error: scrub(`SystemOne response failed validation: ${err.message}`) };
+        return {
+          status: "failed",
+          error: scrub(`SystemOne response failed validation: ${err.message}`),
+        };
       }
       throw err;
     }
+    if (!config.humanReview) return { status: "success", output: decision };
+    return this.reviewDecision(config, config.humanReview, decision, context, meta);
+  }
+
+  /**
+   * Test the answers against the band. Nothing in it: the decision passes with a
+   * `not_required` review. Something in it: store the decision on the step, then
+   * raise the approval request and wait.
+   */
+  private async reviewDecision(
+    config: SystemOneDecisionConfig,
+    review: SystemOneHumanReview,
+    decision: SystemOneDecisionOutput,
+    context: Readonly<Record<string, unknown>>,
+    meta: ExecutorMeta,
+  ): Promise<ExecutorResult<SystemOneDecisionOutput>> {
+    const questions: ReviewQuestions = {};
+    for (const [id, answer] of Object.entries(decision.answers)) {
+      const confidence = answerConfidence(answer);
+      questions[id] = {
+        confidence,
+        inBand: confidence >= review.band.min && confidence <= review.band.max,
+        decidedBy: "model",
+      };
+    }
+    if (!Object.values(questions).some((question) => question.inBand)) {
+      return {
+        status: "success",
+        output: { ...decision, review: { status: "not_required", questions } },
+        nextPort: "approved",
+      };
+    }
+    const parked: SystemOneDecisionOutput = {
+      ...decision,
+      review: { status: "pending", questions },
+    };
+    // The answer must survive the wait: the resume path reads it back from the step.
+    await this.deps.db.updateWorkflowRunStep(meta.stepId, { output: parked });
+    return this.handOffToReviewer(config, parked, context, meta);
+  }
+
+  private async readParked(stepId: string): Promise<SystemOneDecisionOutput | null> {
+    const step = await this.deps.db.getWorkflowRunStep(stepId);
+    const parked = SystemOneDecisionOutputSchema.safeParse(step?.output);
+    return parked.success && parked.data.review?.status === "pending" ? parked.data : null;
+  }
+
+  /**
+   * Raise the approval request through the `human-in-the-loop` executor, so
+   * approvers, timeout, notifications, idempotency, and the `waiting` state are
+   * its own. A request that is already answered comes back resolved here, and is
+   * shaped the way the resume path would shape it.
+   */
+  private async handOffToReviewer(
+    config: SystemOneDecisionConfig,
+    parked: SystemOneDecisionOutput | null,
+    context: Readonly<Record<string, unknown>>,
+    meta: ExecutorMeta,
+  ): Promise<ExecutorResult<SystemOneDecisionOutput>> {
+    if (!parked || !config.humanReview) {
+      return {
+        status: "failed",
+        error:
+          "The decision this step parked with is missing, so its approval cannot be resumed. Run the node again.",
+      };
+    }
+    const result = await new HumanInTheLoopExecutor(this.deps).run({
+      config: buildReviewCard(meta.nodeId, config, config.humanReview, parked),
+      context,
+      meta,
+    });
+    if (result.status === "failed") return { status: "failed", error: result.error };
+    // The approval is pending: the engine parks the step and the answer resumes it.
+    if ("async" in result) return result as ExecutorResult<SystemOneDecisionOutput>;
+
+    const answered = result.output;
+    const outcome = answered
+      ? this.resolveApproval(parked, {
+          requestId: answered.requestId,
+          status: answered.status as ResolvedApproval["status"],
+          responses: answered.responses,
+        })
+      : null;
+    if (!outcome) {
+      return {
+        status: "failed",
+        error: "The approval was answered but its result could not be applied",
+      };
+    }
+    return {
+      status: "success",
+      output: outcome.output as SystemOneDecisionOutput,
+      nextPort: outcome.nextPort,
+    };
+  }
+
+  /** Called by the resume and recovery paths when a person answers this node's approval. */
+  override resolveApproval(
+    parkedOutput: unknown,
+    approval: ResolvedApproval,
+  ): ApprovalOutcome | null {
+    return resolveReviewedDecision(parkedOutput, approval);
   }
 
   /**
@@ -731,7 +1150,9 @@ export class SystemOneDecisionExecutor extends BaseExecutor<typeof SystemOneDeci
     if (res.status >= 300 && res.status < 400) {
       return {
         kind: "fail",
-        message: withId(`SystemOne request was redirected (HTTP ${res.status}); redirects are refused`),
+        message: withId(
+          `SystemOne request was redirected (HTTP ${res.status}); redirects are refused`,
+        ),
         retryable: false,
       };
     }

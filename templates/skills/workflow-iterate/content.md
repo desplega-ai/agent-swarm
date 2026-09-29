@@ -104,7 +104,7 @@ Use these shapes as a starting point, then confirm them against the current exec
 
 `validate` checks the named upstream node output. Supply either `schema` for a deterministic structural check or `prompt` for a judgment-based check. Its output is `{ pass, reasoning, confidence }`, routed through `pass` or `fail`.
 
-### `system-one-decision`
+### `system-one-decision` (SystemOne Decision)
 
 **Before you add the first `system-one-decision` node to a workflow, confirm its key works.** A node with no working key fails its whole run, and a save only warns. Do these in order and stop at the first failure:
 
@@ -167,7 +167,8 @@ Afterwards, a `warnings` entry on `create-workflow` or a patch tool means the ke
 - Each question is `noul` (probability that a claim is true; optional `criteria: { true, false }`), `choice` (2 to 255 options; `criteria: { option: description }`), or `score` (2 to 10 ordered levels; `criteria: [level, ...]`).
 - `returns` repeats every question id and its type. A mismatch is rejected when the workflow is saved.
 - The output is `{ model, answers, usage }`. Read a field as `<node-id>.answers.<question>.<field>`, for example `qualification.answers.risk.confidence`. A `noul` answer is only `{ type, noul }` and has no confidence. A `choice` answer has `choice`, `probabilities`, and `confidence`. A `score` answer has `score`, `legend`, `probabilities`, and `confidence`.
-- A valid low-confidence answer is a success. Keep thresholds in the next node: `property-match` (`gt`, `lt`) or `code-match`, with the uncertain band routed to `human-in-the-loop`. Do not invent a global threshold.
+- A valid low-confidence answer is a success. To have a person review the uncertain ones, set `humanReview` on the node (below). To route on a threshold yourself, keep it in the next node: `property-match` (`gt`, `lt`) or `code-match`, with the uncertain band routed to `human-in-the-loop`. Do not invent a global threshold.
+- `humanReview: { band: { min, max }, approvers, title?, timeout?, notifications? }` sends an answer to a person when `min <= confidence <= max` (0 to 1, both ends inside). It raises a `human-in-the-loop` approval (same approvers, timeout, notifications, `waiting` run state), so use the same `approvers` shape. `choice` and `score` are tested on their `confidence`; a `noul` on `max(noul, 1 - noul)`. Any answer in the band makes the run wait. `next` must then be a port map: `approved` (required, every accepted answer), and optionally `rejected` and `timeout`; a string or list `next` is refused. The output stays `{ model, answers, usage }` on every path, plus `review` (`status`, and per question `confidence`, `inBand`, `decidedBy`). A person's answer replaces the model's in `answers`; `probabilities` and `confidence` stay the model's.
 - Do not set `retry` or `validation.retry` on a `system-one-decision` node. It retries connection errors, 408, 429, and 5xx itself (`config.maxRetries`, 0 to 3, default 2) inside `config.timeoutMs` (default 30000). A 401, a 422, or an answer that fails validation ends after one attempt.
 - The node reads its provider's key (`TYPESAFE_API_KEY` or `OPENROUTER_API_KEY`) server-side. The key never appears in the definition, the step output, or an error. A run whose key is missing fails before any node executes, and a 401 or 403 fails the step as `<KEY> was rejected`. An unresolved `{{token}}` fails the step before any request.
 

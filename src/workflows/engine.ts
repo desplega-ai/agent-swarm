@@ -27,8 +27,12 @@ import { loadCompletedStepRouting } from "./completed-step-routing";
 import { shouldSkipCooldown } from "./cooldown";
 import { findEntryNodes, getNextTargets, getSuccessors, resolveValidationPort } from "./definition";
 import type { AsyncExecutorResult } from "./executors/base";
-import { SYSTEM_ONE_DECISION_NODE_TYPE, systemOneRetryViolations, systemOneUnresolvedError } from "./executors/system-one-decision";
 import type { ExecutorRegistry } from "./executors/registry";
+import {
+  SYSTEM_ONE_DECISION_NODE_TYPE,
+  systemOneRetryViolations,
+  systemOneUnresolvedError,
+} from "./executors/system-one-decision";
 import { FOREACH_TERMINAL_STEP_STATUSES, resolveForeachParent } from "./foreach-join";
 import { getSecretInputKeys, redactSecretsForStorage, resolveInputs } from "./input";
 import { validateJsonSchema } from "./json-schema-validator";
@@ -801,7 +805,12 @@ async function runClaimedStep(
 
   // A paid, non-idempotent call must not go out with a blanked field.
   if (strictUnresolved && strictUnresolved.length > 0) {
-    await checkpointStepFailure(runId, stepId, systemOneUnresolvedError(node.id, strictUnresolved), 0);
+    await checkpointStepFailure(
+      runId,
+      stepId,
+      systemOneUnresolvedError(node.id, strictUnresolved),
+      0,
+    );
     return { outcome: "failed", successors: [] };
   }
 

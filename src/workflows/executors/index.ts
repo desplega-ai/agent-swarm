@@ -7,13 +7,13 @@ export {
   type ExecutorResult,
 } from "./base";
 export { CodeMatchExecutor } from "./code-match";
-export { SystemOneDecisionExecutor } from "./system-one-decision";
 export { NotifyExecutor } from "./notify";
 export { PropertyMatchExecutor } from "./property-match";
 export { RawLlmExecutor } from "./raw-llm";
 export { createExecutorRegistry, ExecutorRegistry } from "./registry";
 export { ScriptExecutor } from "./script";
 export { SwarmScriptExecutor } from "./swarm-script";
+export { SystemOneDecisionExecutor } from "./system-one-decision";
 export { ValidateExecutor } from "./validate";
 export { VcsExecutor } from "./vcs";
 export { WaitExecutor } from "./wait";

@@ -76,7 +76,10 @@ export const SYSTEM_ONE_PROVIDERS = {
 
 export type SystemOneProviderId = keyof typeof SYSTEM_ONE_PROVIDERS;
 
-export const SYSTEM_ONE_PROVIDER_IDS = Object.keys(SYSTEM_ONE_PROVIDERS) as [SystemOneProviderId, ...SystemOneProviderId[]];
+export const SYSTEM_ONE_PROVIDER_IDS = Object.keys(SYSTEM_ONE_PROVIDERS) as [
+  SystemOneProviderId,
+  ...SystemOneProviderId[],
+];
 
 export const SYSTEM_ONE_DEFAULT_PROVIDER: SystemOneProviderId = "typesafe";
 
@@ -85,7 +88,9 @@ export function isSystemOneProviderId(value: unknown): value is SystemOneProvide
 }
 
 /** Provider a raw node config selects. Undefined when the field is present but not a known id. */
-export function systemOneProviderOf(config: Record<string, unknown>): SystemOneProviderId | undefined {
+export function systemOneProviderOf(
+  config: Record<string, unknown>,
+): SystemOneProviderId | undefined {
   if (config.provider === undefined) return SYSTEM_ONE_DEFAULT_PROVIDER;
   return isSystemOneProviderId(config.provider) ? config.provider : undefined;
 }
@@ -114,7 +119,11 @@ export function systemOneKeyMalformedMessage(id: SystemOneProviderId): string {
 }
 
 /** A 401 or 403 from the host: the key exists but the host does not accept it. */
-export function systemOneKeyRejectedMessage(id: SystemOneProviderId, status: number, code?: string): string {
+export function systemOneKeyRejectedMessage(
+  id: SystemOneProviderId,
+  status: number,
+  code?: string,
+): string {
   const { label, keyName } = SYSTEM_ONE_PROVIDERS[id];
   const detail = code ? ` (${code})` : "";
   return (

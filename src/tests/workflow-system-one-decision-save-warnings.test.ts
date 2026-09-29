@@ -35,7 +35,10 @@ type ToolResult = {
 };
 
 function buildTools() {
-  const server = new McpServer({ name: "test-workflow-system-one-decision-save-warnings", version: "1.0.0" });
+  const server = new McpServer({
+    name: "test-workflow-system-one-decision-save-warnings",
+    version: "1.0.0",
+  });
   registerCreateWorkflowTool(server);
   registerUpdateWorkflowTool(server);
   registerPatchWorkflowTool(server);
@@ -107,7 +110,12 @@ const plainDefinition = (): WorkflowDefinition => ({
 
 const systemOneDefinition = (config: Record<string, unknown> = {}): WorkflowDefinition => ({
   nodes: [
-    { id: "qualify", type: "system-one-decision", inputs: { lead: "trigger.lead" }, config: systemOneConfig(config) },
+    {
+      id: "qualify",
+      type: "system-one-decision",
+      inputs: { lead: "trigger.lead" },
+      config: systemOneConfig(config),
+    },
   ],
 });
 
@@ -231,7 +239,9 @@ describe("saving a workflow whose system-one-decision node has no working key", 
     const patched = await tools.patch({
       id,
       update: [{ nodeId: "step", node: { next: "qualify" } }],
-      create: [{ id: "qualify", type: "system-one-decision", config: systemOneConfig(), inputs: {} }],
+      create: [
+        { id: "qualify", type: "system-one-decision", config: systemOneConfig(), inputs: {} },
+      ],
     });
     expect(patched.structuredContent?.success).toBe(true);
     expect(patched.structuredContent?.warnings?.[0]).toContain("TYPESAFE_API_KEY");

@@ -5,8 +5,11 @@ import type {
   WorkflowNode,
   WorkflowPatch,
 } from "../types";
-import { systemOneRetryViolations, systemOneStaticShapeViolations } from "./executors/system-one-decision";
 import type { ExecutorRegistry } from "./executors/registry";
+import {
+  systemOneRetryViolations,
+  systemOneStaticShapeViolations,
+} from "./executors/system-one-decision";
 
 /** Extract all target node IDs from a node's `next` field */
 export function getNextTargets(next: string | string[] | Record<string, string>): string[] {
