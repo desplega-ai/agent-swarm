@@ -7014,22 +7014,14 @@ export async function insertActiveSession(session: {
 }
 
 /**
- * Delete a task's active session on behalf of an HTTP caller (a runner's
- * cleanup). The caller can only remove a session it registered: its cleanup
+ * Delete a task's active session for an HTTP caller (a runner's cleanup). It
  * can land after the heartbeat reclaimed the task and a replacement attempt
- * registered a session for the same task id, under the same agent.
- *
- * On a row the heartbeat reclaimed (`attempt > 0`) and that is still live, the
- * caller must name its agent AND runtime and match the session exactly. A
- * caller that cannot say which runtime it is (an older runner, no
- * `X-Runtime-Instance-ID`) may hold the attempt the row was taken away from,
- * so it fails closed and the session is left for the heartbeat or the stale
- * sweep. Rows never reclaimed (attempt 0), finished, or unknown keep the
- * legacy scope: agent match, runtime match-or-unset.
- *
- * The check and the delete share one transaction, so a reclaim or restart
- * cannot slip between them. The server's own deletes use
- * `deleteActiveSessionServerSide`.
+ * registered a session under the same agent, so on a live reclaimed row
+ * (`attempt > 0`) the caller must name agent AND runtime and match exactly; one
+ * with no runtime (an older runner) fails closed and the heartbeat or stale
+ * sweep cleans up. Other rows keep the legacy scope: agent match, runtime
+ * match-or-unset. Check and delete share one transaction. Server-side deletes
+ * use `deleteActiveSessionServerSide`.
  */
 export async function deleteActiveSession(
   taskId: string,
@@ -7069,10 +7061,8 @@ export async function deleteActiveSession(
 }
 
 /**
- * Trusted server-side delete of every active session of a task (the
- * heartbeat, after it failed the task). Takes no caller identity and is never
- * reachable from an HTTP route: identity-scoped cleanup goes through
- * `deleteActiveSession`.
+ * Trusted server-side delete of a task's active sessions (the heartbeat, after
+ * it failed the task). No caller identity; never reachable from an HTTP route.
  */
 export async function deleteActiveSessionServerSide(taskId: string): Promise<boolean> {
   const result = await getDbClient().run("DELETE FROM active_sessions WHERE taskId = ?", [taskId]);
@@ -7188,14 +7178,12 @@ export async function getStalledInProgressTasks(
  * an agent that did not start them within `graceMin` minutes. Two kinds:
  *  - rows the heartbeat reclaimed (`attempt > 0`), and
  *  - resumes pinned to their original agent by the runner's graceful-shutdown
- *    supersede, or by the pre-Reclaim heartbeat (`crash-recovery-pin`,
- *    `reboot-retry-pin`). The literals match the tag constants in
- *    src/tasks/worker-follow-up.ts.
+ *    supersede or the pre-Reclaim heartbeat (`crash-recovery-pin`,
+ *    `reboot-retry-pin`; literals match src/tasks/worker-follow-up.ts).
  * A task assigned directly to a busy agent is not a pin and stays queued.
- * Grace is measured from `lastUpdatedAt`, the time the row became `pending`.
- * Lead-held pins are excluded here (the sweep never unpins them), so they
- * cannot fill the window. At most `limit` rows come back, oldest first; a
- * backlog drains across sweeps because each unpinned row leaves the set.
+ * Grace runs from `lastUpdatedAt`, when the row became `pending`. Lead-held
+ * pins are excluded (the sweep never unpins them) so they cannot fill the
+ * window. At most `limit` rows, oldest first; a backlog drains across sweeps.
  */
 export async function getUnclaimedPins(graceMin: number, limit = 100): Promise<AgentTask[]> {
   const cutoff = new Date(Date.now() - graceMin * 60 * 1000).toISOString();
