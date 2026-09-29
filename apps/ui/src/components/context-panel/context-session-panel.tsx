@@ -3,9 +3,9 @@
  * the current route and docks the panel on the right from `xl` up. Below
  * that, docking would leave the page too narrow (at 1024 px with the nav
  * open, about 270 px), so the panel opens as a sheet over the page instead:
- * up to 420 px wide on tablets, full screen on phones. Between `xl` and `2xl`
+ * up to 420 px wide on tablets, full screen on phones. From 1280 to 1439 px
  * the docked panel collapses the nav to icons while it is open, so the page
- * keeps about 850 px, and gives the nav back on close.
+ * keeps about 850 px instead of 640, and gives the nav back on close.
  * Everything else lives in `components/session-panel`.
  */
 
@@ -27,7 +27,7 @@ import {
 import { useContextPanel } from "./context-panel-state";
 
 const DOCK_QUERY = "(min-width: 1280px)";
-const WIDE_QUERY = "(min-width: 1536px)";
+const WIDE_QUERY = "(min-width: 1440px)";
 
 /** The page column (header, route content, footer): what "Add screenshot" captures. */
 const pageColumn = () => document.querySelector<HTMLElement>('[data-slot="sidebar-inset"]');
