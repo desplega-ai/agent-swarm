@@ -1,15 +1,6 @@
-name: Migration Conflict Check
+name: Migration Conflict Notification
 
 on:
-  pull_request:
-    branches:
-      - main
-  # The pull_request run only sees main as it was when the PR event fired.
-  # When main gains a migration later, the PR's green check goes stale and the
-  # collision would otherwise surface in the merge queue as a boot crash across
-  # four Merge Gate jobs. Re-running here fails the queue entry with the real
-  # message instead.
-  merge_group:
   # Sweep open PRs whenever main gains a migration, so a stale PR learns about
   # the collision before it enters the queue.
   push:
@@ -19,31 +10,8 @@ on:
       - "src/be/migrations/**"
 
 jobs:
-  migration-conflict:
-    name: Migration Conflict Check
-    if: github.event_name != 'push'
-    runs-on: ubuntu-latest
-    # Checkout only; GITHUB_TOKEN needs nothing else.
-    permissions:
-      contents: read
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # Full history so the script can diff migrations against the base branch.
-          fetch-depth: 0
-
-      - name: Check for duplicate and mutated migration numbers
-        env:
-          # merge_group carries refs/heads/<branch>; pull_request carries <branch>.
-          BASE_REF: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_ref || github.base_ref }}
-        run: |
-          MIGRATION_BASE_REF="origin/${BASE_REF#refs/heads/}" bash scripts/check-migration-conflicts.sh
-
   notify-stale-prs:
     name: Notify open PRs of new migration numbers on main
-    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: read

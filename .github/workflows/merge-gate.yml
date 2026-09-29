@@ -10,6 +10,13 @@ on:
   # https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue#triggering-merge-group-checks-with-github-actions
   merge_group:
 
+# A new push to a PR cancels that PR's superseded gate run. merge_group runs are
+# never cancelled: each queue entry has its own gh-readonly-queue ref, and
+# cancelling one would drop the PR from the queue.
+concurrency:
+  group: merge-gate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   detect-changes:
     name: Detect Changes
@@ -868,19 +875,27 @@ jobs:
         # `metric` legs load the built image into the local daemon and report its
         # uncompressed size to the ci-metrics swarm script (sticky PR diff comment).
         # See agent-fs docs/ci-metrics.md for the script contract.
+        # `cache-from` reads the amd64 BuildKit cache docker-and-deploy.yml pushes to
+        # GHCR on main (public packages, so fork PRs read it anonymously). Read-only:
+        # no cache-to here. A miss is non-fatal; buildx just builds cold.
         include:
           - dockerfile: Dockerfile
             target: ""
             metric: image.api
             timing: docker.api
+            cache-from: type=registry,ref=ghcr.io/desplega-ai/agent-swarm:buildcache-server-amd64
           - dockerfile: Dockerfile.worker
             target: worker-slim
             metric: image.worker-slim
             timing: docker.worker-slim
+            cache-from: |
+              type=registry,ref=ghcr.io/desplega-ai/agent-swarm-worker:buildcache-worker-slim-amd64
+              type=registry,ref=ghcr.io/desplega-ai/agent-swarm-worker:buildcache-worker-amd64
           - dockerfile: apps/evals/Dockerfile
             target: ""
             metric: ""
             timing: docker.evals
+            cache-from: ""
 
     steps:
       - name: Checkout repository
@@ -902,6 +917,7 @@ jobs:
           push: false
           load: ${{ matrix.metric != '' }}
           tags: test-image:latest
+          cache-from: ${{ matrix.cache-from }}
 
       # Each matrix leg reports independently. See agent-fs docs/ci-timings.md.
       # Skipped on merge_group events and forks (no secret); never blocks the gate.
@@ -1123,9 +1139,28 @@ jobs:
       - name: Check harness plugin descriptor versions
         run: bun run check:plugin-versions
 
+  # Run on every PR and merge queue group, even when no migration files changed.
+  # Use the event's exact base commit so the checker cannot skip checks if main moves.
+  migration-conflict-check:
+    name: Migration Conflict Check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The checker compares the candidate tree with the event's base commit.
+          fetch-depth: 0
+
+      - name: Check migration numbering and immutability
+        env:
+          MIGRATION_BASE_REF: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || github.event.pull_request.base.sha }}
+        run: bash scripts/check-migration-conflicts.sh
+
   gate:
     name: Merge Gate
-    needs: [detect-changes, restore-timings, lint-and-typecheck, test, e2e-contract, pi-skills-freshness, seed-skills, script-types-freshness, openapi-freshness, vendored-openapi, docker-build, ui-lint, template-workflow-validation, operator-skill]
+    needs: [detect-changes, restore-timings, lint-and-typecheck, test, e2e-contract, pi-skills-freshness, seed-skills, script-types-freshness, openapi-freshness, vendored-openapi, docker-build, ui-lint, template-workflow-validation, operator-skill, migration-conflict-check]
     if: always()
     runs-on: ubuntu-latest
     # No checkout, no API calls; the job only inspects `needs` results.

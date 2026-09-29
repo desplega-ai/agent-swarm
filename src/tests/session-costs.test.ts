@@ -1691,32 +1691,35 @@ describe("Session Costs API", () => {
       try {
         await getAttributionByPerson({ startDate: "2026-08-19", endDate: "2026-08-19" });
         const call = querySpy.mock.calls.find(([sql]) =>
-          String(sql).includes("task_tree(rootId, taskId, output)"),
+          String(sql).includes("task_tree(rootId, taskId)"),
         );
         const sql = String(call?.[0] ?? "");
-        const seed = sql.slice(0, sql.indexOf("task_tree(rootId, taskId, output)"));
+        const seed = sql.slice(0, sql.indexOf("task_tree(rootId, taskId)"));
 
         expect(seed).toContain("selected_roots");
         expect(seed).toContain("t.requestedByUserId IS NOT NULL");
         expect(seed).toContain("t.createdAt >= ?");
         expect(seed).toContain("t.createdAt < ?");
         expect(seed).toContain("t.parentTaskId IS NULL");
+        expect(seed).toContain("t.isHumanFree = 0");
         expect(seed).not.toContain("human_free_tasks");
         expect(sql).toMatch(
-          /task_tree\(rootId, taskId, output\) AS \(\s*SELECT id, id, output\s*FROM selected_roots/,
+          /task_tree\(rootId, taskId\) AS \(\s*SELECT id, id\s*FROM selected_roots/,
         );
+        // The recursion carries ids only; a task's output is read by id afterwards.
+        expect(sql).not.toContain("task_tree(rootId, taskId, output)");
         expect(sql.match(/\?/g)).toHaveLength(2);
 
+        // Reach reads the stored human-free flag; it walks no ancestry.
         const reachCall = querySpy.mock.calls.find(([preparedSql]) =>
-          String(preparedSql).includes("task_ancestry("),
+          String(preparedSql).includes("COUNT(DISTINCT t.agentId)"),
         );
         const reachSql = String(reachCall?.[0] ?? "");
-        const reachSeed = reachSql.slice(0, reachSql.indexOf("task_ancestry("));
-        expect(reachSeed).toContain("report_tasks");
-        expect(reachSeed).toContain("t.requestedByUserId IS NOT NULL");
-        expect(reachSeed).toContain("t.createdAt >= ?");
-        expect(reachSeed).toContain("t.createdAt < ?");
-        expect(reachSql).toContain("JOIN task_ancestry child ON parent.id = child.parentTaskId");
+        expect(reachSql).toContain("t.requestedByUserId IS NOT NULL");
+        expect(reachSql).toContain("t.createdAt >= ?");
+        expect(reachSql).toContain("t.createdAt < ?");
+        expect(reachSql).toContain("t.isHumanFree = 0");
+        expect(reachSql).not.toContain("RECURSIVE");
         expect(reachSql.match(/\?/g)).toHaveLength(2);
       } finally {
         querySpy.mockRestore();
@@ -2107,7 +2110,7 @@ describe("Session Costs API", () => {
       try {
         await getAttributionByPerson({});
         const call = querySpy.mock.calls.find(([sql]) =>
-          String(sql).includes("task_tree(rootId, taskId, output)"),
+          String(sql).includes("task_tree(rootId, taskId)"),
         );
         const sql = String(call?.[0] ?? "");
 

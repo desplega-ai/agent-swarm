@@ -9,6 +9,7 @@ import { PropertyMatchExecutor } from "./property-match";
 import { RawLlmExecutor } from "./raw-llm";
 import { ScriptExecutor } from "./script";
 import { SwarmScriptExecutor } from "./swarm-script";
+import { SystemOneDecisionExecutor } from "./system-one-decision";
 import { ValidateExecutor } from "./validate";
 import { VcsExecutor } from "./vcs";
 import { WaitExecutor } from "./wait";
@@ -69,6 +70,7 @@ export function createExecutorRegistry(deps: ExecutorDependencies): ExecutorRegi
   registry.register(new CodeMatchExecutor(deps));
   registry.register(new NotifyExecutor(deps));
   registry.register(new RawLlmExecutor(deps));
+  registry.register(new SystemOneDecisionExecutor(deps));
   registry.register(new ScriptExecutor(deps));
   registry.register(new SwarmScriptExecutor(deps));
   registry.register(new VcsExecutor(deps));

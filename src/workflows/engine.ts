@@ -25,13 +25,19 @@ import type { Workflow, WorkflowDefinition, WorkflowNode, WorkflowRunStep } from
 import { checkpointStep, checkpointStepFailure, checkpointStepWaiting } from "./checkpoint";
 import { loadCompletedStepRouting } from "./completed-step-routing";
 import { shouldSkipCooldown } from "./cooldown";
-import { findEntryNodes, getNextTargets, getSuccessors } from "./definition";
+import { findEntryNodes, getNextTargets, getSuccessors, resolveValidationPort } from "./definition";
 import type { AsyncExecutorResult } from "./executors/base";
 import type { ExecutorRegistry } from "./executors/registry";
+import {
+  SYSTEM_ONE_DECISION_NODE_TYPE,
+  systemOneRetryViolations,
+  systemOneUnresolvedError,
+} from "./executors/system-one-decision";
 import { FOREACH_TERMINAL_STEP_STATUSES, resolveForeachParent } from "./foreach-join";
 import { getSecretInputKeys, redactSecretsForStorage, resolveInputs } from "./input";
 import { validateJsonSchema } from "./json-schema-validator";
 import { getMaxWorkflowStepsPerRun } from "./limits";
+import { findWorkflowReadinessProblems, formatReadinessRunError } from "./readiness";
 import { deepInterpolate } from "./template";
 import { runStepValidation, type ValidationRunResult } from "./validation";
 
@@ -148,6 +154,18 @@ export async function startWorkflowExecution(
     nodeCount: workflow.definition.nodes.length,
     triggerType: options.triggerType ?? "manual",
   });
+
+  // An executor that cannot run (for example a system-one-decision node with no API key) fails
+  // the run here, before any node has side effects, instead of partway through.
+  const notReady = await findWorkflowReadinessProblems(workflow.definition, registry);
+  if (notReady.length > 0) {
+    await updateWorkflowRun(runId, {
+      status: "failed",
+      error: formatReadinessRunError(notReady),
+      finishedAt: new Date().toISOString(),
+    });
+    return runId;
+  }
 
   // Resolve inputs and merge into initial context
   const ctx: Record<string, unknown> = { trigger: triggerData };
@@ -744,6 +762,15 @@ async function runClaimedStep(
   // 3. Get executor
   const executor = registry.get(node.type);
 
+  // 3a. A system-one-decision node retries transient transport errors itself (config.maxRetries).
+  // Engine retries are not status-aware, so a policy here would re-send rejected
+  // requests and multiply paid attempts. Fail before any request is built.
+  const systemOneRetryProblems = systemOneRetryViolations(node);
+  if (systemOneRetryProblems.length > 0) {
+    await checkpointStepFailure(runId, stepId, systemOneRetryProblems.join("; "), 0);
+    return { outcome: "failed", successors: [] };
+  }
+
   // 3b. Build local interpolation context from explicit inputs mapping
   const interpolationCtx = buildNodeInterpolationCtx(node, ctx);
 
@@ -765,6 +792,7 @@ async function runClaimedStep(
     value: interpolatedValue,
     unresolved,
     scriptBodyUnresolved,
+    strictUnresolved,
   } = interpolateNodeConfig(node, interpolationCtx);
   const interpolatedConfig = interpolatedValue as Record<string, unknown>;
   const executionCtx: Record<string, unknown> = { ...ctx, ...interpolationCtx };
@@ -772,6 +800,17 @@ async function runClaimedStep(
   if (scriptBodyUnresolved && scriptBodyUnresolved.length > 0) {
     const errorMsg = scriptBodyInterpolationError(node.id, scriptBodyUnresolved);
     await checkpointStepFailure(runId, stepId, errorMsg, 0);
+    return { outcome: "failed", successors: [] };
+  }
+
+  // A paid, non-idempotent call must not go out with a blanked field.
+  if (strictUnresolved && strictUnresolved.length > 0) {
+    await checkpointStepFailure(
+      runId,
+      stepId,
+      systemOneUnresolvedError(node.id, strictUnresolved),
+      0,
+    );
     return { outcome: "failed", successors: [] };
   }
 
@@ -914,16 +953,10 @@ async function runClaimedStep(
 
   // 8. Set nextPort from validation result for record-based routing
   // When validation determines pass/fail and the node uses port-based `next`,
-  // route to the correct port instead of activating all ports.
-  if (
-    validationResult?.passed !== undefined &&
-    !result.nextPort &&
-    node.next &&
-    typeof node.next === "object" &&
-    !Array.isArray(node.next)
-  ) {
-    result.nextPort = validationResult.passed ? "pass" : "fail";
-  }
+  // route to the correct port instead of activating all ports. An executor port
+  // that `next` does not declare (script's "success" vs `{ pass, fail }`) is
+  // overridden too, otherwise the branch would dead-end.
+  result.nextPort = resolveValidationPort(node.next, result.nextPort, validationResult?.passed);
 
   // 9. Checkpoint success
   await checkpointStep(runId, stepId, node.id, result, ctx);
@@ -1069,7 +1102,36 @@ function buildScriptBodyCtx(
 export function interpolateNodeConfig(
   node: Pick<WorkflowNode, "type" | "config" | "inputs">,
   interpolationCtx: Record<string, unknown>,
-): { value: unknown; unresolved: string[]; scriptBodyUnresolved?: string[] } {
+): {
+  value: unknown;
+  unresolved: string[];
+  scriptBodyUnresolved?: string[];
+  /** Tokens that must resolve before dispatch; the caller fails the step when non-empty. */
+  strictUnresolved?: string[];
+} {
+  if (node.type === SYSTEM_ONE_DECISION_NODE_TYPE) {
+    // `state` and `questions` keep a whole-token reference's JSON type (an object
+    // stays an object; string interpolation would flatten it to JSON text). The
+    // resolved value is data, never re-interpolated, so a literal `{{` inside a
+    // lead's text is not read as another template. Every other field, and every
+    // unresolved token anywhere in the config, is strict: no blank reaches the API.
+    const { state, questions, ...rest } = node.config;
+    const restResult = deepInterpolate(rest, interpolationCtx);
+    const dynamic: Record<string, unknown> = {};
+    if (Object.hasOwn(node.config, "state")) dynamic.state = state;
+    if (Object.hasOwn(node.config, "questions")) dynamic.questions = questions;
+    const dynamicResult = deepInterpolate(dynamic, interpolationCtx, { preserveRawTokens: true });
+    const unresolved = [...restResult.unresolved, ...dynamicResult.unresolved];
+    return {
+      value: {
+        ...(restResult.value as Record<string, unknown>),
+        ...(dynamicResult.value as Record<string, unknown>),
+      },
+      unresolved,
+      strictUnresolved: unresolved,
+    };
+  }
+
   if (node.type === "foreach" && Object.hasOwn(node.config, "over")) {
     const { over, body, ...configWithoutOverAndBody } = node.config;
     const configResult = deepInterpolate(configWithoutOverAndBody, interpolationCtx);

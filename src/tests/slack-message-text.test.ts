@@ -240,6 +240,107 @@ describe("extractSlackMessageText", () => {
       expect(result).toContain("Details here");
     });
 
+    // Shape of a real multi-line human message: Slack sends mrkdwn `text` and a
+    // rich_text block with one element per styled run, mention and link.
+    const multiLineHumanMessage = {
+      text: "<@U0A1B2C3D> can you check the deploy?\n*It failed* twice &amp; the logs say:\n• timeout on <https://ci.example.com/run/42|run 42>\n• retry :fire:",
+      blocks: [
+        {
+          type: "rich_text",
+          elements: [
+            {
+              type: "rich_text_section",
+              elements: [
+                { type: "user", user_id: "U0A1B2C3D" },
+                { type: "text", text: " can you check the deploy?\n" },
+                { type: "text", text: "It failed", style: { bold: true } },
+                { type: "text", text: " twice & the logs say:\n" },
+              ],
+            },
+            {
+              type: "rich_text_list",
+              style: "bullet",
+              elements: [
+                {
+                  type: "rich_text_section",
+                  elements: [
+                    { type: "text", text: "timeout on " },
+                    { type: "link", url: "https://ci.example.com/run/42", text: "run 42" },
+                  ],
+                },
+                {
+                  type: "rich_text_section",
+                  elements: [
+                    { type: "text", text: "retry " },
+                    { type: "emoji", name: "fire" },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+
+    test("multi-line rich_text human message renders once, as the top-level text", () => {
+      const result = extractSlackMessageText(multiLineHumanMessage);
+      expect(result).toBe(multiLineHumanMessage.text);
+      expect(result.split("can you check the deploy?").length - 1).toBe(1);
+    });
+
+    test("single-line rich_text with a mention renders once and keeps the mention", () => {
+      const msg = {
+        text: "hey <@U0A1B2C3D> ship it",
+        blocks: [
+          {
+            type: "rich_text",
+            elements: [
+              {
+                type: "rich_text_section",
+                elements: [
+                  { type: "text", text: "hey " },
+                  { type: "user", user_id: "U0A1B2C3D" },
+                  { type: "text", text: " ship it" },
+                ],
+              },
+            ],
+          },
+        ],
+      };
+      expect(extractSlackMessageText(msg)).toBe("hey <@U0A1B2C3D> ship it");
+    });
+
+    test("negative control: rich_text that differs from top-level text keeps both", () => {
+      const msg = {
+        text: "Deploy summary",
+        blocks: [
+          {
+            type: "rich_text",
+            elements: [
+              {
+                type: "rich_text_section",
+                elements: [{ type: "text", text: "Deploy failed on step 3\nRolled back to v1.2" }],
+              },
+            ],
+          },
+        ],
+      };
+      expect(extractSlackMessageText(msg)).toBe(
+        "Deploy summary\nDeploy failed on step 3\nRolled back to v1.2",
+      );
+    });
+
+    test("negative control: rich_text dedupe leaves non-rich_text blocks in place", () => {
+      const msg = {
+        ...multiLineHumanMessage,
+        blocks: [
+          ...multiLineHumanMessage.blocks,
+          { type: "context", elements: [{ type: "mrkdwn", text: "Sent from CI bot" }] },
+        ],
+      };
+      expect(extractSlackMessageText(msg)).toBe(`${multiLineHumanMessage.text}\nSent from CI bot`);
+    });
+
     test("context block elements are captured", () => {
       const msg = {
         text: "",

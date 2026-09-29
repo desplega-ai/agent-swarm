@@ -6,15 +6,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.158.0] - 2026-09-29
+
 ### Added
-- Pending approval requests with no explicit timeout are auto-cancelled by the heartbeat after `APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS` days (default 7, `0` disables); a request that gates a running or waiting workflow run cancels that run too.
-- The heartbeat now times out standalone approval requests whose `expiresAt` passed, and notifies the requesting agent with a `hitl.timeout` follow-up task while its source task is still active.
-- Migration 166 adds the `idx_approval_requests_pending_created` index for the auto-cancel sweep.
-- `POST /api/approval-requests/{id}/cancel`, the `cancel-approval-request` MCP tool, the `approval_cancel` scripts SDK method, and a Discard button on the dashboard cancel a pending approval request.
+- Pending approval requests with no explicit timeout are auto-cancelled by the heartbeat after `APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS` days (default 7, `0` disables); a request that gates a running or waiting workflow run cancels that run too (#1663).
+- The heartbeat now times out standalone approval requests whose `expiresAt` passed, and notifies the requesting agent with a `hitl.timeout` follow-up task while its source task is still active (#1663).
+- Migration 166 adds the `idx_approval_requests_pending_created` index for the auto-cancel sweep (#1663).
+- `POST /api/approval-requests/{id}/cancel`, the `cancel-approval-request` MCP tool, the `approval_cancel` scripts SDK method, and a Discard button on the dashboard cancel a pending approval request (#1663).
+- `onboard` supports rootless Podman as an alternative container engine, selected with `--container-engine` or `AGENT_SWARM_CONTAINER_ENGINE` (`auto` prefers Docker) (#1658, #1662).
+- GitHub sender allowlist extension (#1667).
+- Claude Sonnet 5.5 in the model registries (#1679).
+- Read-only task Kanban board and agent activity heatmap in the dashboard (#1651).
+- Realtime cursors on pages (#1656).
+- Kanban, Calendar and ContributionGraph app blocks on Kibo components (#1648); Kibo Spinner, Avatar Stack, middle truncation and a Button status variant in the UI (#1644).
+- Evals: moving model aliases pinned at run creation, September 2026 models, and Sonnet 5.5 configs (#1657, #1643, #1677).
 
 ### Changed
-- An answer or a cancel that arrives after an approval request's `expiresAt` gets 409 and the request becomes `timeout`.
-- The `request-human-input` tool text and the workflow Slack card no longer say that a timeout auto-rejects; the request becomes `timeout`.
+- An answer or a cancel that arrives after an approval request's `expiresAt` gets 409 and the request becomes `timeout` (#1663).
+- The `request-human-input` tool text and the workflow Slack card no longer say that a timeout auto-rejects; the request becomes `timeout` (#1663).
+- Worker image bumps `@anthropic-ai/claude-code` 2.1.283 -> 2.1.284 (#1679).
+- Compose examples pull MinIO from the pgsty community image (#1654).
+- Vulnerable docs-site dependencies bumped (#1635).
+
+### Fixed
+- Heartbeat: stall remediation is a compare-and-swap on the observed `lastUpdatedAt` (#1668); the reboot sweep keeps tasks whose session heartbeat is recent (#1669); a task superseded without a resume gets one (#1670); reboot-swept dependents are re-pointed to the retry child (#1664).
+- Workflows: a step is claimed once per predecessor completion so racing walkers do not run a node twice (#1675); the join and the run hold while a sibling branch still executes (#1673); heartbeat recovery leaves a retry-pending step to the retry poller (#1678); the retry poller skips cancelled runs (#1666).
+- GitHub/GitLab webhooks ack extension-blocked task creation as skipped (#1660).
+- A live Slack Socket Mode connection is reported as verified (#1642).
+- `PricingProviderSchema` accepts the `dsh` provider (#1652); the UI labels the dsh harness and checks its provider (#1641).
+- Linear gets task output as one plain, uncollapsed comment (#1645).
+- `chunkContent` hard-split no longer loops forever (#1639).
+- Evals: broken checks in script-authoring, delegation-chain, tool-routing and workflow-authoring fixed, delegation-chain grading corrected, and the live catalog kept advisory (#1672, #1681, #1653).
 
 ## [1.157.0] - 2026-09-28
 

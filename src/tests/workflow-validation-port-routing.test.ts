@@ -8,7 +8,8 @@ import {
   getWorkflowRunStepsByRunId,
   initDb,
 } from "../be/db";
-import type { Workflow, WorkflowDefinition } from "../types";
+import type { Workflow, WorkflowDefinition, WorkflowNode } from "../types";
+import { loadCompletedStepRouting } from "../workflows/completed-step-routing";
 import { startWorkflowExecution } from "../workflows/engine";
 import { workflowEventBus } from "../workflows/event-bus";
 import {
@@ -44,6 +45,28 @@ class ObjectOutputExecutor extends BaseExecutor<
     config: z.infer<typeof ObjectOutputExecutor.schema>,
   ): Promise<ExecutorResult<z.infer<typeof ObjectOutputExecutor.outSchema>>> {
     return { status: "success", output: { approved: config.approved } };
+  }
+}
+
+/**
+ * Mimics the `script` / `swarm-script` executors: always emits `nextPort: "success"`.
+ */
+class SuccessPortExecutor extends BaseExecutor<
+  typeof SuccessPortExecutor.schema,
+  typeof SuccessPortExecutor.outSchema
+> {
+  static readonly schema = z.object({ approved: z.boolean() });
+  static readonly outSchema = z.object({ approved: z.boolean() });
+
+  readonly type = "success-port";
+  readonly mode = "instant" as const;
+  readonly configSchema = SuccessPortExecutor.schema;
+  readonly outputSchema = SuccessPortExecutor.outSchema;
+
+  protected async execute(
+    config: z.infer<typeof SuccessPortExecutor.schema>,
+  ): Promise<ExecutorResult<z.infer<typeof SuccessPortExecutor.outSchema>>> {
+    return { status: "success", output: { approved: config.approved }, nextPort: "success" };
   }
 }
 
@@ -101,6 +124,7 @@ function createTestRegistry(): ExecutorRegistry {
   const registry = new ExecutorRegistry();
   registry.register(new ObjectOutputExecutor(mockDeps));
   registry.register(new ReviewOutputExecutor(mockDeps));
+  registry.register(new SuccessPortExecutor(mockDeps));
   registry.register(new NoopExecutor(mockDeps));
   registry.register(new PropertyMatchExecutor(mockDeps));
   return registry;
@@ -398,5 +422,93 @@ describe("Validation Port Routing", () => {
     expect(run!.status).toBe("completed");
     expect(nodeIds).toContain("check");
     expect(nodeIds).toContain("after-check");
+  });
+});
+
+describe("Validation port routing when the executor emits its own port", () => {
+  function makeScriptLikeWorkflow(
+    approved: boolean,
+    next: WorkflowNode["next"],
+    withValidation = true,
+  ): WorkflowDefinition {
+    return {
+      nodes: [
+        {
+          id: "check",
+          type: "success-port",
+          config: { approved },
+          next,
+          ...(withValidation
+            ? {
+                validation: {
+                  executor: "property-match",
+                  config: {
+                    conditions: [{ field: "check.approved", op: "eq", value: true }],
+                  },
+                  mustPass: false,
+                },
+              }
+            : {}),
+        },
+        { id: "on-pass", type: "noop", config: {} },
+        { id: "on-fail", type: "noop", config: {} },
+        { id: "on-success", type: "noop", config: {} },
+      ],
+    };
+  }
+
+  async function runAndCollect(def: WorkflowDefinition) {
+    const workflow = await makeWorkflow(def);
+    const runId = await startWorkflowExecution(workflow, {}, registry);
+    const steps = await getWorkflowRunStepsByRunId(runId);
+    return { workflow, runId, steps, nodeIds: steps.map((s) => s.nodeId) };
+  }
+
+  test('script-like node + validation pass → "pass" port, checkpointed for resume', async () => {
+    const { workflow, runId, steps, nodeIds } = await runAndCollect(
+      makeScriptLikeWorkflow(true, { pass: "on-pass", fail: "on-fail" }),
+    );
+
+    expect(nodeIds).toContain("on-pass");
+    expect(nodeIds).not.toContain("on-fail");
+    expect(steps.find((s) => s.nodeId === "check")!.nextPort).toBe("pass");
+
+    // Recovery / resume rebuild active edges from the checkpointed nextPort.
+    const { activeEdges } = await loadCompletedStepRouting(
+      workflow.definition,
+      runId,
+      new Set(["check"]),
+    );
+    expect([...activeEdges]).toEqual(["check→on-pass"]);
+  });
+
+  test('script-like node + validation fail (mustPass: false) → "fail" port', async () => {
+    const { steps, nodeIds } = await runAndCollect(
+      makeScriptLikeWorkflow(false, { pass: "on-pass", fail: "on-fail" }),
+    );
+
+    expect(nodeIds).toContain("on-fail");
+    expect(nodeIds).not.toContain("on-pass");
+    expect(steps.find((s) => s.nodeId === "check")!.nextPort).toBe("fail");
+  });
+
+  test("executor port that is a key of next stays authoritative over validation", async () => {
+    const { steps, nodeIds } = await runAndCollect(
+      makeScriptLikeWorkflow(false, { success: "on-success", fail: "on-fail" }),
+    );
+
+    expect(nodeIds).toContain("on-success");
+    expect(nodeIds).not.toContain("on-fail");
+    expect(steps.find((s) => s.nodeId === "check")!.nextPort).toBe("success");
+  });
+
+  test("node without validation keeps the executor port", async () => {
+    const { steps, nodeIds } = await runAndCollect(
+      makeScriptLikeWorkflow(true, { pass: "on-pass", fail: "on-fail" }, false),
+    );
+
+    expect(nodeIds).not.toContain("on-pass");
+    expect(nodeIds).not.toContain("on-fail");
+    expect(steps.find((s) => s.nodeId === "check")!.nextPort).toBe("success");
   });
 });

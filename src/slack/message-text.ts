@@ -53,6 +53,34 @@ function collectRichTextParts(node: unknown, parts: string[]): void {
 }
 
 /**
+ * Turn top-level mrkdwn `text` into the plain text a rich_text block flattens
+ * to: drop `<…>` tokens (user/channel mentions, links, `<!here>`), which
+ * collectRichTextParts does not emit, then decode Slack's HTML escapes.
+ */
+function decodeMrkdwn(text: string): string {
+  return text
+    .replace(/<[^<>]*>/g, "")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+}
+
+/**
+ * Normalize text for the text-vs-rich_text equality check only (never for
+ * output): drop emoji shortcodes, quote and list markers, and mrkdwn style
+ * characters, which rich_text carries as element types or style flags rather
+ * than characters, then all whitespace, since flattening joins styled runs
+ * with newlines.
+ */
+function normalizeForDedupe(text: string): string {
+  return text
+    .replace(/:[a-z0-9_+'-]+:/gi, "")
+    .replace(/^[ \t]*(?:>|[•◦▪‣-]|\d+\.)[ \t]*/gm, "")
+    .replace(/[*_~`]/g, "")
+    .replace(/\s+/g, "");
+}
+
+/**
  * Return displayable text for a Slack message, combining ALL content layers.
  *
  * Collection order: msg.text → msg.attachments[] → msg.blocks[]
@@ -64,7 +92,8 @@ function collectRichTextParts(node: unknown, parts: string[]): void {
  *
  * Dedup: if `msg.text` is already contained verbatim in the combined
  * attachments+blocks body (fallback echoed in a block), it is omitted to avoid
- * printing it twice.
+ * printing it twice. A rich_text block whose content equals `msg.text` after
+ * normalization is omitted instead (see below).
  *
  * Block types extracted: section (text + fields), rich_text, header, context,
  * actions (button label + url as mrkdwn link).
@@ -123,6 +152,9 @@ export function extractSlackMessageText(msg: SlackMessageLike): string {
 
   // Block Kit blocks
   const blockParts: string[] = [];
+  // Index range of each rich_text block's parts inside blockParts, so a
+  // rich_text block that merely re-renders `msg.text` can be dropped below.
+  const richTextRanges: Array<[number, number]> = [];
   if (Array.isArray(msg.blocks) && msg.blocks.length > 0) {
     for (const rawBlock of msg.blocks) {
       if (rawBlock == null || typeof rawBlock !== "object") continue;
@@ -137,9 +169,11 @@ export function extractSlackMessageText(msg: SlackMessageLike): string {
           }
         }
       } else if (block.type === "rich_text" && Array.isArray(block.elements)) {
+        const start = blockParts.length;
         for (const el of block.elements) {
           collectRichTextParts(el, blockParts);
         }
+        if (blockParts.length > start) richTextRanges.push([start, blockParts.length]);
       } else if (block.type === "header") {
         if (block.text?.text) blockParts.push(block.text.text);
       } else if (block.type === "context" && Array.isArray(block.elements)) {
@@ -162,7 +196,27 @@ export function extractSlackMessageText(msg: SlackMessageLike): string {
     }
   }
 
-  const bodyText = [...attachmentParts, ...blockParts].filter(Boolean).join("\n");
+  // A human message carries the same content twice: `text` (mrkdwn) and a
+  // rich_text block. The block flattens to one part per styled run, so the
+  // per-line check below never matches a multi-line or formatted message and
+  // the whole message would render twice. When the rich_text content equals
+  // `text` after normalization, keep `text` (it also carries the mentions,
+  // links and emoji the rich_text flattening drops) and skip the blocks.
+  let bodyBlockParts = blockParts;
+  if (topText && richTextRanges.length > 0) {
+    const richText = richTextRanges
+      .map(([start, end]) => blockParts.slice(start, end).join("\n"))
+      .join("\n");
+    if (normalizeForDedupe(richText) === normalizeForDedupe(decodeMrkdwn(topText))) {
+      const dropped = new Set<number>();
+      for (const [start, end] of richTextRanges) {
+        for (let i = start; i < end; i++) dropped.add(i);
+      }
+      bodyBlockParts = blockParts.filter((_, i) => !dropped.has(i));
+    }
+  }
+
+  const bodyText = [...attachmentParts, ...bodyBlockParts].filter(Boolean).join("\n");
 
   // Include the top-level text unless it already appears as a complete line in the body.
   // Boundary-aware check: "hi".includes check would silently drop "hi" when the body
