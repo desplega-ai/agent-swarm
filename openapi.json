@@ -11897,6 +11897,7 @@
       },
       "get": {
         "summary": "List approval requests with optional filters",
+        "description": "Returns full approval requests by default. Pass `fields=slim` for the list-view shape: `questions`, `approvers`, `responses`, `resolutionReason` and `notificationChannels` are dropped and `questionCount` is added. Fetch one request in full via `GET /api/approval-requests/{id}`.",
         "tags": [
           "ApprovalRequests"
         ],
@@ -11932,6 +11933,18 @@
             "required": false,
             "name": "limit",
             "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "full",
+                "slim"
+              ]
+            },
+            "required": false,
+            "name": "fields",
+            "in": "query"
           }
         ],
         "responses": {
@@ -11943,260 +11956,357 @@
                   "type": "object",
                   "properties": {
                     "approvalRequests": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "string"
-                          },
-                          "title": {
-                            "type": "string"
-                          },
-                          "questions": {
-                            "type": "array",
-                            "items": {
-                              "type": "object",
-                              "properties": {
-                                "id": {
-                                  "type": "string"
-                                },
-                                "type": {
-                                  "type": "string",
-                                  "enum": [
-                                    "approval",
-                                    "text",
-                                    "single-select",
-                                    "multi-select",
-                                    "boolean"
-                                  ]
-                                },
-                                "label": {
-                                  "type": "string"
-                                },
-                                "required": {
-                                  "type": "boolean"
-                                },
-                                "description": {
-                                  "type": "string"
-                                },
-                                "placeholder": {
-                                  "type": "string"
-                                },
-                                "multiline": {
-                                  "type": "boolean"
-                                },
-                                "options": {
-                                  "type": "array",
-                                  "items": {
-                                    "type": "object",
-                                    "properties": {
-                                      "value": {
-                                        "type": "string"
-                                      },
-                                      "label": {
-                                        "type": "string"
-                                      },
-                                      "description": {
-                                        "type": "string"
-                                      }
-                                    },
-                                    "required": [
-                                      "value",
-                                      "label"
-                                    ]
-                                  }
-                                },
-                                "minSelections": {
-                                  "type": "integer",
-                                  "minimum": 0
-                                },
-                                "maxSelections": {
-                                  "type": "integer",
-                                  "minimum": 1
-                                },
-                                "defaultValue": {
-                                  "type": "boolean"
-                                }
-                              },
-                              "required": [
-                                "id",
-                                "type",
-                                "label"
-                              ]
-                            }
-                          },
-                          "workflowRunId": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "workflowRunStepId": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "sourceTaskId": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "approvers": {
+                      "anyOf": [
+                        {
+                          "type": "array",
+                          "items": {
                             "type": "object",
                             "properties": {
-                              "users": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "title": {
+                                "type": "string"
+                              },
+                              "questions": {
                                 "type": "array",
                                 "items": {
-                                  "type": "string"
-                                }
-                              },
-                              "roles": {
-                                "type": "array",
-                                "items": {
-                                  "type": "string"
-                                }
-                              },
-                              "policy": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "enum": [
-                                      "any"
-                                    ]
-                                  },
-                                  {
-                                    "type": "string",
-                                    "enum": [
-                                      "all"
-                                    ]
-                                  },
-                                  {
-                                    "type": "object",
-                                    "properties": {
-                                      "min": {
-                                        "type": "integer",
-                                        "minimum": 1
+                                  "type": "object",
+                                  "properties": {
+                                    "id": {
+                                      "type": "string"
+                                    },
+                                    "type": {
+                                      "type": "string",
+                                      "enum": [
+                                        "approval",
+                                        "text",
+                                        "single-select",
+                                        "multi-select",
+                                        "boolean"
+                                      ]
+                                    },
+                                    "label": {
+                                      "type": "string"
+                                    },
+                                    "required": {
+                                      "type": "boolean"
+                                    },
+                                    "description": {
+                                      "type": "string"
+                                    },
+                                    "placeholder": {
+                                      "type": "string"
+                                    },
+                                    "multiline": {
+                                      "type": "boolean"
+                                    },
+                                    "options": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "value": {
+                                            "type": "string"
+                                          },
+                                          "label": {
+                                            "type": "string"
+                                          },
+                                          "description": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "value",
+                                          "label"
+                                        ]
                                       }
                                     },
-                                    "required": [
-                                      "min"
+                                    "minSelections": {
+                                      "type": "integer",
+                                      "minimum": 0
+                                    },
+                                    "maxSelections": {
+                                      "type": "integer",
+                                      "minimum": 1
+                                    },
+                                    "defaultValue": {
+                                      "type": "boolean"
+                                    }
+                                  },
+                                  "required": [
+                                    "id",
+                                    "type",
+                                    "label"
+                                  ]
+                                }
+                              },
+                              "workflowRunId": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "workflowRunStepId": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "sourceTaskId": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "approvers": {
+                                "type": "object",
+                                "properties": {
+                                  "users": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "roles": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "policy": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "enum": [
+                                          "any"
+                                        ]
+                                      },
+                                      {
+                                        "type": "string",
+                                        "enum": [
+                                          "all"
+                                        ]
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "min": {
+                                            "type": "integer",
+                                            "minimum": 1
+                                          }
+                                        },
+                                        "required": [
+                                          "min"
+                                        ]
+                                      }
                                     ]
                                   }
+                                },
+                                "required": [
+                                  "policy"
                                 ]
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "pending",
+                                  "approved",
+                                  "rejected",
+                                  "timeout",
+                                  "cancelled"
+                                ]
+                              },
+                              "responses": {
+                                "type": [
+                                  "object",
+                                  "null"
+                                ],
+                                "additionalProperties": {}
+                              },
+                              "resolvedBy": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "resolvedAt": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "resolutionReason": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "timeoutSeconds": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ]
+                              },
+                              "expiresAt": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "notificationChannels": {
+                                "type": [
+                                  "array",
+                                  "null"
+                                ],
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "channel": {
+                                      "type": "string",
+                                      "enum": [
+                                        "slack",
+                                        "email"
+                                      ]
+                                    },
+                                    "target": {
+                                      "type": "string"
+                                    },
+                                    "messageTs": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "channel",
+                                    "target"
+                                  ]
+                                }
+                              },
+                              "createdBy": {
+                                "type": "string"
+                              },
+                              "createdAt": {
+                                "type": "string"
+                              },
+                              "updatedAt": {
+                                "type": "string"
                               }
                             },
                             "required": [
-                              "policy"
+                              "id",
+                              "title",
+                              "questions",
+                              "workflowRunId",
+                              "workflowRunStepId",
+                              "sourceTaskId",
+                              "approvers",
+                              "status",
+                              "responses",
+                              "resolvedBy",
+                              "resolvedAt",
+                              "resolutionReason",
+                              "timeoutSeconds",
+                              "expiresAt",
+                              "notificationChannels",
+                              "createdAt",
+                              "updatedAt"
                             ]
-                          },
-                          "status": {
-                            "type": "string",
-                            "enum": [
-                              "pending",
-                              "approved",
-                              "rejected",
-                              "timeout",
-                              "cancelled"
-                            ]
-                          },
-                          "responses": {
-                            "type": [
-                              "object",
-                              "null"
-                            ],
-                            "additionalProperties": {}
-                          },
-                          "resolvedBy": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "resolvedAt": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "resolutionReason": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "timeoutSeconds": {
-                            "type": [
-                              "number",
-                              "null"
-                            ]
-                          },
-                          "expiresAt": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "notificationChannels": {
-                            "type": [
-                              "array",
-                              "null"
-                            ],
-                            "items": {
-                              "type": "object",
-                              "properties": {
-                                "channel": {
-                                  "type": "string",
-                                  "enum": [
-                                    "slack",
-                                    "email"
-                                  ]
-                                },
-                                "target": {
-                                  "type": "string"
-                                },
-                                "messageTs": {
-                                  "type": "string"
-                                }
-                              },
-                              "required": [
-                                "channel",
-                                "target"
-                              ]
-                            }
-                          },
-                          "createdBy": {
-                            "type": "string"
-                          },
-                          "createdAt": {
-                            "type": "string"
-                          },
-                          "updatedAt": {
-                            "type": "string"
                           }
                         },
-                        "required": [
-                          "id",
-                          "title",
-                          "questions",
-                          "workflowRunId",
-                          "workflowRunStepId",
-                          "sourceTaskId",
-                          "approvers",
-                          "status",
-                          "responses",
-                          "resolvedBy",
-                          "resolvedAt",
-                          "resolutionReason",
-                          "timeoutSeconds",
-                          "expiresAt",
-                          "notificationChannels",
-                          "createdAt",
-                          "updatedAt"
-                        ]
-                      }
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "title": {
+                                "type": "string"
+                              },
+                              "workflowRunId": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "workflowRunStepId": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "sourceTaskId": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "pending",
+                                  "approved",
+                                  "rejected",
+                                  "timeout",
+                                  "cancelled"
+                                ]
+                              },
+                              "resolvedBy": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "resolvedAt": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "timeoutSeconds": {
+                                "type": [
+                                  "number",
+                                  "null"
+                                ]
+                              },
+                              "expiresAt": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "createdBy": {
+                                "type": "string"
+                              },
+                              "createdAt": {
+                                "type": "string"
+                              },
+                              "updatedAt": {
+                                "type": "string"
+                              },
+                              "questionCount": {
+                                "type": "integer"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "title",
+                              "workflowRunId",
+                              "workflowRunStepId",
+                              "sourceTaskId",
+                              "status",
+                              "resolvedBy",
+                              "resolvedAt",
+                              "timeoutSeconds",
+                              "expiresAt",
+                              "createdAt",
+                              "updatedAt",
+                              "questionCount"
+                            ]
+                          }
+                        }
+                      ]
                     }
                   },
                   "required": [
@@ -14180,6 +14290,17 @@
           {
             "schema": {
               "type": "string",
+              "minLength": 1,
+              "description": "Return only the entry with this exact key. Omit to return every resolved entry."
+            },
+            "required": false,
+            "description": "Return only the entry with this exact key. Omit to return every resolved entry.",
+            "name": "key",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
               "enum": [
                 "true",
                 "false"
@@ -14498,6 +14619,17 @@
             },
             "required": false,
             "name": "scopeId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Return only entries with this exact key. Omit to return every entry."
+            },
+            "required": false,
+            "description": "Return only entries with this exact key. Omit to return every entry.",
+            "name": "key",
             "in": "query"
           },
           {
@@ -16735,6 +16867,40 @@
             "required": false,
             "name": "limit",
             "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated event names; matches any of them (ANDed with `event`)"
+            },
+            "required": false,
+            "description": "Comma-separated event names; matches any of them (ANDed with `event`)",
+            "name": "events",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated `data.field` values, used with latestPerDataField"
+            },
+            "required": false,
+            "description": "Comma-separated `data.field` values, used with latestPerDataField",
+            "name": "dataFields",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ],
+              "description": "When true, return only the newest event per (event, data.field) pair for every name in `event`/`events` and every value in `dataFields`"
+            },
+            "required": false,
+            "description": "When true, return only the newest event per (event, data.field) pair for every name in `event`/`events` and every value in `dataFields`",
+            "name": "latestPerDataField",
+            "in": "query"
           }
         ],
         "responses": {
@@ -16750,11 +16916,28 @@
                       "items": {
                         "$ref": "#/components/schemas/SwarmEvent"
                       }
+                    },
+                    "latestPerDataField": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ],
+                      "description": "Present only when the request asked for latestPerDataField=true"
                     }
                   },
                   "required": [
                     "events"
                   ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -43833,6 +44016,7 @@
     "/api/scheduled-tasks": {
       "get": {
         "summary": "List scheduled tasks",
+        "description": "Returns full schedules by default. Pass `fields=slim` for the list-view shape, which swaps the full `taskTemplate` for a bounded `taskTemplatePreview`. Fetch one schedule in full via `GET /api/schedules/{id}`.",
         "tags": [
           "Stats"
         ],
@@ -43915,6 +44099,18 @@
             "required": false,
             "name": "scriptName",
             "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "full",
+                "slim"
+              ]
+            },
+            "required": false,
+            "name": "fields",
+            "in": "query"
           }
         ],
         "responses": {
@@ -43926,191 +44122,384 @@
                   "type": "object",
                   "properties": {
                     "scheduledTasks": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "string",
-                            "format": "uuid"
-                          },
-                          "key": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 255,
-                            "description": "Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form."
-                          },
-                          "name": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 100
-                          },
-                          "description": {
-                            "type": "string"
-                          },
-                          "cronExpression": {
-                            "type": "string"
-                          },
-                          "intervalMs": {
-                            "type": "integer",
-                            "exclusiveMinimum": 0
-                          },
-                          "taskTemplate": {
-                            "type": "string"
-                          },
-                          "taskType": {
-                            "type": "string",
-                            "maxLength": 50
-                          },
-                          "tags": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
+                      "anyOf": [
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "key": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255,
+                                "description": "Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form."
+                              },
+                              "name": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 100
+                              },
+                              "description": {
+                                "type": "string"
+                              },
+                              "cronExpression": {
+                                "type": "string"
+                              },
+                              "intervalMs": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0
+                              },
+                              "taskTemplate": {
+                                "type": "string"
+                              },
+                              "taskType": {
+                                "type": "string",
+                                "maxLength": 50
+                              },
+                              "tags": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                },
+                                "default": []
+                              },
+                              "priority": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 100,
+                                "default": 50
+                              },
+                              "targetAgentId": {
+                                "type": "string"
+                              },
+                              "enabled": {
+                                "type": "boolean",
+                                "default": true
+                              },
+                              "lastRunAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "nextRunAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "createdByAgentId": {
+                                "type": "string"
+                              },
+                              "parentTaskId": {
+                                "type": "string"
+                              },
+                              "requestedDelayMs": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0
+                              },
+                              "requestedRunAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "timezone": {
+                                "type": "string",
+                                "default": "UTC"
+                              },
+                              "consecutiveErrors": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "default": 0
+                              },
+                              "lastErrorAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "lastErrorMessage": {
+                                "type": "string"
+                              },
+                              "model": {
+                                "type": "string"
+                              },
+                              "modelTier": {
+                                "type": "string",
+                                "enum": [
+                                  "smol",
+                                  "regular",
+                                  "smart",
+                                  "ultra"
+                                ]
+                              },
+                              "scheduleType": {
+                                "type": "string",
+                                "enum": [
+                                  "recurring",
+                                  "one_time"
+                                ],
+                                "default": "recurring"
+                              },
+                              "targetType": {
+                                "type": "string",
+                                "enum": [
+                                  "agent-task",
+                                  "workflow",
+                                  "script"
+                                ],
+                                "default": "agent-task"
+                              },
+                              "workflowId": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "scriptName": {
+                                "type": "string"
+                              },
+                              "scriptArgs": {
+                                "type": "object",
+                                "additionalProperties": {}
+                              },
+                              "params": {
+                                "type": "object",
+                                "additionalProperties": {}
+                              },
+                              "requiredParams": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "requires": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "enum": [
+                                    "slack",
+                                    "github",
+                                    "linear",
+                                    "jira",
+                                    "gsc",
+                                    "agentmail",
+                                    "agentfs"
+                                  ]
+                                }
+                              },
+                              "createdAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "lastUpdatedAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "createdBy": {
+                                "type": "string"
+                              },
+                              "updatedBy": {
+                                "type": "string"
+                              },
+                              "favorite": {
+                                "type": "boolean"
+                              }
                             },
-                            "default": []
-                          },
-                          "priority": {
-                            "type": "integer",
-                            "minimum": 0,
-                            "maximum": 100,
-                            "default": 50
-                          },
-                          "targetAgentId": {
-                            "type": "string"
-                          },
-                          "enabled": {
-                            "type": "boolean",
-                            "default": true
-                          },
-                          "lastRunAt": {
-                            "type": "string",
-                            "format": "date-time"
-                          },
-                          "nextRunAt": {
-                            "type": "string",
-                            "format": "date-time"
-                          },
-                          "createdByAgentId": {
-                            "type": "string"
-                          },
-                          "parentTaskId": {
-                            "type": "string"
-                          },
-                          "requestedDelayMs": {
-                            "type": "integer",
-                            "exclusiveMinimum": 0
-                          },
-                          "requestedRunAt": {
-                            "type": "string",
-                            "format": "date-time"
-                          },
-                          "timezone": {
-                            "type": "string",
-                            "default": "UTC"
-                          },
-                          "consecutiveErrors": {
-                            "type": "integer",
-                            "minimum": 0,
-                            "default": 0
-                          },
-                          "lastErrorAt": {
-                            "type": "string",
-                            "format": "date-time"
-                          },
-                          "lastErrorMessage": {
-                            "type": "string"
-                          },
-                          "model": {
-                            "type": "string"
-                          },
-                          "modelTier": {
-                            "type": "string",
-                            "enum": [
-                              "smol",
-                              "regular",
-                              "smart",
-                              "ultra"
+                            "required": [
+                              "id",
+                              "key",
+                              "name",
+                              "createdAt",
+                              "lastUpdatedAt"
                             ]
-                          },
-                          "scheduleType": {
-                            "type": "string",
-                            "enum": [
-                              "recurring",
-                              "one_time"
-                            ],
-                            "default": "recurring"
-                          },
-                          "targetType": {
-                            "type": "string",
-                            "enum": [
-                              "agent-task",
-                              "workflow",
-                              "script"
-                            ],
-                            "default": "agent-task"
-                          },
-                          "workflowId": {
-                            "type": "string",
-                            "format": "uuid"
-                          },
-                          "scriptName": {
-                            "type": "string"
-                          },
-                          "scriptArgs": {
-                            "type": "object",
-                            "additionalProperties": {}
-                          },
-                          "params": {
-                            "type": "object",
-                            "additionalProperties": {}
-                          },
-                          "requiredParams": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          },
-                          "requires": {
-                            "type": "array",
-                            "items": {
-                              "type": "string",
-                              "enum": [
-                                "slack",
-                                "github",
-                                "linear",
-                                "jira",
-                                "gsc",
-                                "agentmail",
-                                "agentfs"
-                              ]
-                            }
-                          },
-                          "createdAt": {
-                            "type": "string",
-                            "format": "date-time"
-                          },
-                          "lastUpdatedAt": {
-                            "type": "string",
-                            "format": "date-time"
-                          },
-                          "createdBy": {
-                            "type": "string"
-                          },
-                          "updatedBy": {
-                            "type": "string"
-                          },
-                          "favorite": {
-                            "type": "boolean"
                           }
                         },
-                        "required": [
-                          "id",
-                          "key",
-                          "name",
-                          "createdAt",
-                          "lastUpdatedAt"
-                        ]
-                      }
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "key": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255,
+                                "description": "Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form."
+                              },
+                              "name": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 100
+                              },
+                              "description": {
+                                "type": "string"
+                              },
+                              "cronExpression": {
+                                "type": "string"
+                              },
+                              "intervalMs": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0
+                              },
+                              "taskType": {
+                                "type": "string",
+                                "maxLength": 50
+                              },
+                              "tags": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                },
+                                "default": []
+                              },
+                              "priority": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 100,
+                                "default": 50
+                              },
+                              "targetAgentId": {
+                                "type": "string"
+                              },
+                              "enabled": {
+                                "type": "boolean",
+                                "default": true
+                              },
+                              "lastRunAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "nextRunAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "createdByAgentId": {
+                                "type": "string"
+                              },
+                              "parentTaskId": {
+                                "type": "string"
+                              },
+                              "requestedDelayMs": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0
+                              },
+                              "requestedRunAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "timezone": {
+                                "type": "string",
+                                "default": "UTC"
+                              },
+                              "consecutiveErrors": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "default": 0
+                              },
+                              "lastErrorAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "lastErrorMessage": {
+                                "type": "string"
+                              },
+                              "model": {
+                                "type": "string"
+                              },
+                              "modelTier": {
+                                "type": "string",
+                                "enum": [
+                                  "smol",
+                                  "regular",
+                                  "smart",
+                                  "ultra"
+                                ]
+                              },
+                              "scheduleType": {
+                                "type": "string",
+                                "enum": [
+                                  "recurring",
+                                  "one_time"
+                                ],
+                                "default": "recurring"
+                              },
+                              "targetType": {
+                                "type": "string",
+                                "enum": [
+                                  "agent-task",
+                                  "workflow",
+                                  "script"
+                                ],
+                                "default": "agent-task"
+                              },
+                              "workflowId": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "scriptName": {
+                                "type": "string"
+                              },
+                              "scriptArgs": {
+                                "type": "object",
+                                "additionalProperties": {}
+                              },
+                              "params": {
+                                "type": "object",
+                                "additionalProperties": {}
+                              },
+                              "requiredParams": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "requires": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "enum": [
+                                    "slack",
+                                    "github",
+                                    "linear",
+                                    "jira",
+                                    "gsc",
+                                    "agentmail",
+                                    "agentfs"
+                                  ]
+                                }
+                              },
+                              "createdAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "lastUpdatedAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "createdBy": {
+                                "type": "string"
+                              },
+                              "updatedBy": {
+                                "type": "string"
+                              },
+                              "favorite": {
+                                "type": "boolean"
+                              },
+                              "taskTemplatePreview": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "key",
+                              "name",
+                              "createdAt",
+                              "lastUpdatedAt",
+                              "favorite",
+                              "taskTemplatePreview"
+                            ]
+                          }
+                        }
+                      ]
                     }
                   },
                   "required": [

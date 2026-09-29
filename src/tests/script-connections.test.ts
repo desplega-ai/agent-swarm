@@ -583,6 +583,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "171_memory_retrieval_relevance.sql");
       // 175 indexes workflow_runs, which this migration-112-only fixture does not create.
       markMigrationApplied(database, "175_workflow_runs_list_index.sql");
+      // 177 indexes events, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "177_events_event_agent_created_index.sql");
       // 179 and 180 alter agent_tasks, which this partial fixture creates without its columns.
       markMigrationApplied(database, "179_agent_task_attempt.sql");
       markMigrationApplied(database, "180_agent_task_attempt_runtime.sql");
