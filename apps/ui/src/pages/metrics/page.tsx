@@ -540,6 +540,7 @@ function WidgetCard({
               className="size-7"
               onClick={onExpand}
               title="Expand metric"
+              aria-label={`Expand metric ${widget.title}`}
             >
               <Expand className="size-3.5" />
             </Button>

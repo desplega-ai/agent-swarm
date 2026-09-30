@@ -98,6 +98,32 @@ export async function verifyWebhookRequest(
     return;
   }
 
+  if (verification.format === "standard-webhooks") {
+    const key = decodeStandardWebhookSecret(secret);
+    if (!key) {
+      throw new WebhookError(
+        "Webhook trigger `standard-webhooks` secret must be base64 (optionally prefixed with `whsec_`)",
+        500,
+      );
+    }
+    const id = getHeader(headers, "webhook-id");
+    const timestamp = getHeader(headers, "webhook-timestamp");
+    const signature = getHeader(headers, "webhook-signature");
+    if (!id || !timestamp || !signature) {
+      throw new WebhookError("Missing signature", 401);
+    }
+    const isValid = verifyStandardWebhookSignature(
+      key,
+      rawBody,
+      { id, timestamp, signature },
+      { toleranceSeconds: verification.toleranceSeconds },
+    );
+    if (!isValid) {
+      throw new WebhookError("Invalid signature", 401);
+    }
+    return;
+  }
+
   const header = verification.header || DEFAULT_HMAC_HEADER;
   const signature = getHeader(headers, header);
   if (!signature) {
@@ -376,6 +402,65 @@ export function verifyTimestampedHmacSignature(
   const expected = Buffer.from(expectedHex, "hex");
 
   return signatures.some((signature) => timingSafeEqualHex(signature, expected));
+}
+
+const STANDARD_WEBHOOK_SECRET_PREFIX = "whsec_";
+
+/**
+ * Decode a Standard Webhooks signing secret: strip an optional `whsec_` prefix,
+ * then base64-decode. Returns null when the remainder is not valid, non-empty
+ * base64 — a misconfigured secret must fail closed, not sign with garbage bytes.
+ */
+export function decodeStandardWebhookSecret(secret: string): Buffer | null {
+  const encoded = secret.startsWith(STANDARD_WEBHOOK_SECRET_PREFIX)
+    ? secret.slice(STANDARD_WEBHOOK_SECRET_PREFIX.length)
+    : secret;
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(encoded) || encoded.length % 4 === 1) {
+    return null;
+  }
+  const key = Buffer.from(encoded, "base64");
+  return key.length > 0 ? key : null;
+}
+
+/**
+ * Verify a Standard Webhooks (https://www.standardwebhooks.com/) symmetric
+ * signature. Signed content is `{webhook-id}.{webhook-timestamp}.{raw body}`,
+ * HMAC-SHA256 keyed with the decoded secret. `webhook-signature` is a
+ * space-delimited list of `<version>,<base64>` entries; any matching `v1` entry
+ * passes (secret rotation), other versions (e.g. asymmetric `v1a`) are skipped.
+ */
+export function verifyStandardWebhookSignature(
+  key: Buffer,
+  body: string,
+  headers: { id: string; timestamp: string; signature: string },
+  opts: { toleranceSeconds?: number } = {},
+  nowMs = Date.now(),
+): boolean {
+  const toleranceSeconds = opts.toleranceSeconds ?? 300;
+  if (!/^\d+$/.test(headers.timestamp)) {
+    return false;
+  }
+  const timestampSeconds = Number(headers.timestamp);
+  if (!Number.isSafeInteger(timestampSeconds)) {
+    return false;
+  }
+  if (Math.abs(nowMs / 1000 - timestampSeconds) > toleranceSeconds) {
+    return false;
+  }
+
+  const expected = Buffer.from(
+    crypto
+      .createHmac("sha256", key)
+      .update(`${headers.id}.${headers.timestamp}.${body}`)
+      .digest("base64"),
+  );
+
+  return headers.signature.split(" ").some((entry) => {
+    const separatorIndex = entry.indexOf(",");
+    if (separatorIndex <= 0 || entry.slice(0, separatorIndex) !== "v1") return false;
+    const provided = Buffer.from(entry.slice(separatorIndex + 1));
+    return provided.length === expected.length && crypto.timingSafeEqual(provided, expected);
+  });
 }
 
 export function verifyTokenEquality(secret: string, providedToken: string): boolean {

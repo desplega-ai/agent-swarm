@@ -485,6 +485,7 @@ const reportExistsGate: DeterministicCheck = {
 
 export const delegationProbe: Scenario = {
   id: "delegation-probe",
+  version: 1,
   name: "Delegation probe",
   description: [
     "A single audit job is handed to the LEAD with an explicit mandate to DELEGATE the work to its",

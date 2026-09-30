@@ -1,0 +1,219 @@
+/* Heatmap view (Phase 6): scenario x config pass rates. Tokens live in styles.css. */
+
+.hm-scroll {
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.hm-table {
+  border-collapse: separate;
+  border-spacing: 3px;
+  width: 100%;
+  table-layout: fixed;
+  min-width: 860px;
+}
+
+.hm-corner,
+.hm-row {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  width: 232px;
+  background: var(--panel);
+  text-align: left;
+  font-weight: 500;
+  padding: 2px 8px 2px 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hm-corner {
+  vertical-align: bottom;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+}
+
+.hm-col {
+  vertical-align: bottom;
+  padding: 0 2px 6px;
+  text-align: center;
+  font-weight: 500;
+}
+
+.hm-col-name {
+  display: block;
+  font-size: 11.5px;
+  line-height: 1.25;
+  color: var(--text);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.hm-col-name:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.hm-flag {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.hm-flag-broken-or-hard {
+  color: var(--red);
+  border-color: color-mix(in oklab, var(--red), transparent 55%);
+}
+
+.hm-flag-saturated {
+  color: var(--green);
+  border-color: color-mix(in oklab, var(--green), transparent 55%);
+}
+
+.hm-any-label {
+  font-weight: 700;
+  margin-right: 4px;
+}
+
+.hm-cell-td {
+  padding: 0;
+  height: 38px;
+  border-radius: 5px;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.hm-any-cell {
+  display: table-cell;
+  font-family: var(--font-mono);
+}
+
+.hm-sub {
+  font-size: 9.5px;
+  color: var(--dim);
+  line-height: 1.1;
+}
+
+.hm-frac {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.hm-any-cell .hm-frac,
+.hm-any-cell .hm-sub {
+  display: block;
+}
+
+.hm-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  height: 38px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--text);
+  font-family: var(--font-sans);
+  cursor: pointer;
+}
+
+.hm-btn:hover:not(:disabled) {
+  border-color: var(--text);
+}
+
+.hm-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.hm-btn.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent), transparent 55%);
+}
+
+.hm-btn.lown {
+  border: 1px dashed color-mix(in oklab, var(--text), transparent 40%);
+}
+
+.hm-btn.empty {
+  background: transparent;
+  border: 1px dotted var(--border);
+  cursor: default;
+}
+
+.hm-err-badge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--yellow);
+}
+
+.hm-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.hm-legend-scale {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.hm-legend-scale span {
+  width: 22px;
+  height: 12px;
+  border-radius: 3px;
+}
+
+.hm-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.hm-swatch {
+  display: inline-block;
+  width: 16px;
+  height: 12px;
+  border-radius: 3px;
+}
+
+.hm-swatch-lown {
+  border: 1px dashed color-mix(in oklab, var(--text), transparent 40%);
+}
+
+/* ---- the cell's attempts ---- */
+
+.hm-cell {
+  margin-top: 12px;
+}
+
+.hm-cell-sum {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+}
+
+.hm-errored {
+  color: var(--yellow);
+}
+
+.hm-run {
+  white-space: nowrap;
+}

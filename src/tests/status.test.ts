@@ -116,6 +116,7 @@ const ENV_KEYS_TO_RESET = [
   "AGENTMAIL_API_KEY",
   "AGENTMAIL_DISABLE",
   "SWARM_VERIFY_TTL_MS",
+  "ANONYMIZED_TELEMETRY",
 ];
 
 const savedEnv = new Map<string, string | undefined>();
@@ -219,6 +220,34 @@ describe("buildStatusPayload — identity", () => {
     process.env.SWARM_CLOUD = "1";
     const payload = await buildStatusPayload();
     expect(payload.identity.is_cloud).toBe(true);
+  });
+});
+
+// ─── Telemetry opt-out state ─────────────────────────────────────────────────
+
+describe("buildStatusPayload — telemetry", () => {
+  test("reports enabled by default (opt-out model)", async () => {
+    const payload = await buildStatusPayload();
+    expect(payload.telemetry).toEqual({ enabled: true });
+  });
+
+  test.each(["false", "0"])("reports disabled when ANONYMIZED_TELEMETRY=%s", async (value) => {
+    process.env.ANONYMIZED_TELEMETRY = value;
+    const payload = await buildStatusPayload();
+    expect(payload.telemetry).toEqual({ enabled: false });
+  });
+
+  test("reports enabled when ANONYMIZED_TELEMETRY=true", async () => {
+    process.env.ANONYMIZED_TELEMETRY = "true";
+    const payload = await buildStatusPayload();
+    expect(payload.telemetry).toEqual({ enabled: true });
+  });
+
+  test("follows the env at call time, matching the flag track() reads", async () => {
+    process.env.ANONYMIZED_TELEMETRY = "false";
+    expect((await buildStatusPayload()).telemetry?.enabled).toBe(false);
+    process.env.ANONYMIZED_TELEMETRY = "true";
+    expect((await buildStatusPayload()).telemetry?.enabled).toBe(true);
   });
 });
 

@@ -1,4 +1,12 @@
 import type {
+  CellResponse,
+  FrontierResponse,
+  HeatmapResponse,
+  LeaderboardResponse,
+  ReliabilityResponse,
+  SuitesResponse,
+} from "./lib/suite-analytics.ts";
+import type {
   AnalyticsResponse,
   AttemptDetail,
   AttemptJson,
@@ -244,10 +252,49 @@ export function getAnalytics(filter?: {
   return request(`/api/analytics${qs}`);
 }
 
+/** Suites with recorded attempts, plus the one the code defines today (`current`). */
+export function getSuites(): Promise<SuitesResponse> {
+  return request("/api/analytics/suites");
+}
+
+/** Score vs $/attempt and vs agent time for one suite version (Phase 4). */
+export function getFrontier(suite: string): Promise<FrontierResponse> {
+  return request(`/api/analytics/frontier?suite=${encodeURIComponent(suite)}`);
+}
+
+/** Per-config ranking for one suite version, in both tracks (Phase 4). */
+export function getLeaderboard(suite: string, k?: number): Promise<LeaderboardResponse> {
+  const params = new URLSearchParams({ suite });
+  if (k !== undefined) params.set("k", String(k));
+  return request(`/api/analytics/leaderboard?${params.toString()}`);
+}
+
 export function artifactUrl(id: string, opts?: { download?: boolean }): string {
   return `/api/artifacts/${encodeURIComponent(id)}${opts?.download ? "?download=1" : ""}`;
 }
 
 export function getArtifactText(id: string): Promise<string> {
   return requestText(artifactUrl(id));
+}
+
+/** Scenario x config pass fractions plus an "any config" row for one suite version (Phase 4). */
+export function getHeatmap(suite: string): Promise<HeatmapResponse> {
+  return request(`/api/analytics/heatmap?suite=${encodeURIComponent(suite)}`);
+}
+
+/** pass@k / pass^k curves and the per-run score trend for each config (Phase 4). */
+export function getReliability(suite: string, maxK?: number): Promise<ReliabilityResponse> {
+  const params = new URLSearchParams({ suite });
+  if (maxK !== undefined) params.set("maxK", String(maxK));
+  return request(`/api/analytics/reliability?${params.toString()}`);
+}
+
+/** The attempts behind one heatmap cell, newest run first. */
+export function getCell(
+  suite: string,
+  scenarioId: string,
+  configId: string,
+): Promise<CellResponse> {
+  const params = new URLSearchParams({ suite, scenario: scenarioId, config: configId });
+  return request(`/api/analytics/cell?${params.toString()}`);
 }

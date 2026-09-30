@@ -750,10 +750,11 @@ describe("getBasePrompt: tools and skills section", () => {
     expect(result).not.toContain("skills directory");
   });
 
-  test("keeps the section with only the deferred-tools line when no skills are installed", async () => {
+  test("keeps the section with direct-tool guidance when no skills are installed", async () => {
     const result = await getBasePrompt({ ...minimalArgs, skillsSummary: [] });
     expect(result).toContain(HEADER);
-    expect(result).toContain(DEFERRED_LINE);
+    expect(result).toContain("Swarm tools are already in your tool list.");
+    expect(result).not.toContain(DEFERRED_LINE);
     expect(result).not.toContain("Installed skills.");
     expect(result).not.toContain(DISCOVERY_LINE);
   });
@@ -1102,4 +1103,41 @@ describe("getBasePrompt: output hygiene", () => {
       expect(result).not.toMatch(/\n{3,}/);
     });
   }
+});
+
+describe("getBasePrompt: harness tool discovery", () => {
+  const deferred =
+    "Most swarm tools are deferred. Load one with your harness tool search before the first call.";
+
+  test("claude with native ToolSearch gets deferred-tool guidance", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      provider: "claude",
+      traits: { ...localTraits, hasToolSearch: true },
+    });
+    expect(result).toContain(deferred);
+    expect(result).not.toContain("Swarm tools are already in your tool list.");
+  });
+
+  test.each([
+    "pi",
+    "codex",
+    "claude-managed",
+    "opencode",
+    "acp",
+  ])("%s without tool search gets direct-tool guidance", async (provider) => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      provider,
+      traits: { ...localTraits, hasToolSearch: false },
+    });
+    expect(result).not.toContain(deferred);
+    expect(result).toContain("Swarm tools are already in your tool list.");
+  });
+
+  test("omitted tool-search capability defaults to direct tools", async () => {
+    const result = await getBasePrompt({ ...minimalArgs, traits: localTraits });
+    expect(result).not.toContain(deferred);
+    expect(result).toContain("Swarm tools are already in your tool list.");
+  });
 });

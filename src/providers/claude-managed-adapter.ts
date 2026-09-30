@@ -790,6 +790,7 @@ export class ClaudeManagedAdapter implements ProviderAdapter {
   // process is a thin SSE relay — no /workspace, no PM2, no agent-fs, no skills FS.
   readonly traits: ProviderTraits = {
     hasMcp: true,
+    hasToolSearch: false,
     hasLocalEnvironment: false,
     steerModes: ["steer", "queue"],
   };

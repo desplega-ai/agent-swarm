@@ -192,7 +192,7 @@ export default function ScheduleDetailPage() {
       </button>
 
       <div className="flex items-center gap-3 flex-wrap">
-        <h1 className="text-xl font-semibold">{schedule.name}</h1>
+        <h1 className="min-w-0 text-xl font-semibold break-words">{schedule.name}</h1>
         <div className="flex items-center gap-2">
           <Switch
             checked={schedule.enabled}
@@ -227,7 +227,9 @@ export default function ScheduleDetailPage() {
             {schedule.taskType}
           </Badge>
         )}
-        <div className="ml-auto flex items-center gap-1.5 shrink-0">
+        {/* On a phone the actions take their own row, left-aligned under the
+            badges, instead of hanging off the right edge. */}
+        <div className="flex w-full flex-wrap items-center gap-1.5 sm:ml-auto sm:w-auto sm:shrink-0">
           <FavoriteButton
             favorite={schedule.favorite}
             disabled={favoriteToggle.isPending}
@@ -284,7 +286,7 @@ export default function ScheduleDetailPage() {
 
             <TabsContent value="schedule" className="space-y-4">
               <div className="grid gap-4 md:grid-cols-2">
-                <Card>
+                <Card className="gap-2">
                   <CardHeader className="pb-2">
                     <CardTitle className="text-sm text-muted-foreground">Schedule Info</CardTitle>
                   </CardHeader>
@@ -374,7 +376,7 @@ export default function ScheduleDetailPage() {
                   </CardContent>
                 </Card>
 
-                <Card>
+                <Card className="gap-2">
                   <CardHeader className="pb-2">
                     <CardTitle className="text-sm text-muted-foreground">Timing</CardTitle>
                   </CardHeader>
@@ -412,7 +414,7 @@ export default function ScheduleDetailPage() {
               </div>
 
               {schedule.targetType === "workflow" ? (
-                <Card>
+                <Card className="gap-2">
                   <CardHeader className="pb-2">
                     <CardTitle className="text-sm text-muted-foreground">Linked Workflow</CardTitle>
                   </CardHeader>
@@ -430,7 +432,7 @@ export default function ScheduleDetailPage() {
                   </CardContent>
                 </Card>
               ) : schedule.targetType === "script" ? (
-                <Card>
+                <Card className="gap-2">
                   <CardHeader className="pb-2">
                     <CardTitle className="text-sm text-muted-foreground">Linked Script</CardTitle>
                   </CardHeader>
@@ -444,7 +446,7 @@ export default function ScheduleDetailPage() {
                   </CardContent>
                 </Card>
               ) : (
-                <Card>
+                <Card className="gap-2">
                   <CardHeader className="pb-2">
                     <CardTitle className="text-sm text-muted-foreground">Task Template</CardTitle>
                   </CardHeader>

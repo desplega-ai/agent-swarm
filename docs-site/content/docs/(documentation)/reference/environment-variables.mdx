@@ -90,6 +90,8 @@ Complete reference for all environment variables used by Agent Swarm.
 | `HEARTBEAT_RESUME_PIN_GRACE_MIN` | `10` | Grace window (minutes) a same-agent-pinned crash-recovery or graceful-shutdown resume waits before the reaper escalates it to a Lead re-delegation decision. Set to `0` to disable the reaper |
 | `RUNTIME_STALE_THRESHOLD_MIN` | `5` | Minutes without runtime traffic before an active runtime stops counting and the heartbeat sweep retires it. Used only when `MULTI_RUNTIME_ENABLED` is on. |
 | `APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS` | `7` | Days a pending approval request with no explicit timeout waits before the heartbeat cancels it. A request that gates a running or waiting workflow run cancels that run too. Set to `0` to disable |
+| `MODEL_LATEST_SOAK_DAYS` | `2` | Days a newly released model must age before a `latest:<provider>/<target>@stable` model-tier alias can resolve to it. `0` disables the soak. `@any` aliases ignore it |
+| `MODEL_AUTO_UPGRADE` | `true` | Set to `false` or `0` to freeze each `latest:` model-tier alias at its last recorded resolution (an alias never resolved before still resolves once). See [Model tiers](https://github.com/desplega-ai/agent-swarm/blob/main/runbooks/model-tiers.md) |
 | `WORKER_LIVENESS_WINDOW_SECONDS` | `30` | Seconds within which a worker's last-activity timestamp must be fresh to be treated as "online" for resume pre-assignment / same-agent crash-pin freshness checks |
 
 <Callout type="warn">
@@ -420,9 +422,9 @@ Identity envs that brand the swarm and gate cloud-only UX. All are read on every
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SWARM_CLOUD` | `false` | When `true`, marks the deployment as cloud-hosted. Surfaces Docs/Support/Billing items in the user-menu, suppresses the self-host marketing footer, and is sent as `metadata.is_cloud` (always present) on every anonymized telemetry event |
-| `SWARM_ORG_NAME` | `Swarm` | Sidebar header name. Also sent as `metadata.organization_name` on every anonymized telemetry event when set |
-| `SWARM_ORG_ID` | none | Stable org/tenant identifier exposed on `/status` as `identity.org_id` and sent as `metadata.organization_id` on every anonymized telemetry event when set. Set by the orchestrator on cloud deployments |
+| `SWARM_CLOUD` | `false` | When `true`, marks the deployment as cloud-hosted. Surfaces Docs/Support/Billing items in the user-menu, suppresses the self-host marketing footer, and is sent as `metadata.is_cloud` (always present) on every telemetry event |
+| `SWARM_ORG_NAME` | `Swarm` | Sidebar header name. Also sent as `metadata.organization_name` on every telemetry event when set |
+| `SWARM_ORG_ID` | none | Stable org/tenant identifier exposed on `/status` as `identity.org_id` and sent as `metadata.organization_id` on every telemetry event when set. Set by the orchestrator on cloud deployments |
 | `SWARM_ORG_LOGO_URL` | bundled `/logo.png` | Sidebar logo URL (any HTTPS URL). Falls back to the bundled logo if it fails to load |
 | `SWARM_BRAND_COLOR` | none | Tints the org name in the sidebar header (any CSS color, e.g. `#a855f7`) |
 | `SWARM_MARKETING_URL` | none | Self-host marketing footer link target. Suppressed when `SWARM_CLOUD=true` or `SWARM_HIDE_CLOUD_PROMO=true` |

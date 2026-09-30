@@ -241,9 +241,13 @@ export function PlaygroundPanel({ defaultAgentId }: { defaultAgentId?: string })
 
   const [source, setSource] = useState(PLAYGROUND_SOURCE);
   const [agentId, setAgentId] = useState(defaultAgentId ?? "");
+  const [agentMissing, setAgentMissing] = useState(false);
+  const agentTriggerRef = useRef<HTMLButtonElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [saveOpen, setSaveOpen] = useState(false);
   const [saveName, setSaveName] = useState("");
+  const [saveNameInvalid, setSaveNameInvalid] = useState(false);
+  const saveNameRef = useRef<HTMLInputElement>(null);
   const [selectedScriptId, setSelectedScriptId] = useState("");
   const [pendingScriptId, setPendingScriptId] = useState<string | null>(null);
   // Last loaded/saved source — the "clean" baseline for unsaved-edit detection.
@@ -279,15 +283,47 @@ export function PlaygroundPanel({ defaultAgentId }: { defaultAgentId?: string })
     void loadScript(id);
   }
 
+  // Run and Save as stay enabled without an agent: a click explains what is
+  // missing and focuses the picker instead of sitting behind a dead button.
+  function requireAgent(): boolean {
+    if (agentId) return true;
+    setAgentMissing(true);
+    agentTriggerRef.current?.focus();
+    return false;
+  }
+
+  function selectAgent(id: string) {
+    setAgentId(id);
+    setAgentMissing(false);
+  }
+
+  function runSource() {
+    if (!requireAgent()) return;
+    run.mutate(
+      { source, intent: "connections playground", agentId },
+      {
+        onError: (error) => toast.error(error instanceof Error ? error.message : String(error)),
+      },
+    );
+  }
+
   function openSaveDialog() {
+    if (!requireAgent()) return;
     const selected = scriptById.get(selectedScriptId);
     setSaveName(selected ? kebabCase(selected.name) : "playground-script");
+    setSaveNameInvalid(false);
     setSaveOpen(true);
   }
 
   async function submitSave() {
     const name = saveName.trim();
-    if (!name || !agentId) return;
+    if (!name) {
+      // Save stays enabled; an empty name explains itself on submit.
+      setSaveNameInvalid(true);
+      saveNameRef.current?.focus();
+      return;
+    }
+    if (!agentId) return;
     try {
       const saved = await upsert.mutateAsync({
         name,
@@ -349,8 +385,14 @@ export function PlaygroundPanel({ defaultAgentId }: { defaultAgentId?: string })
               Run as
               <InfoTip content="Scripts execute under this agent's identity (X-Agent-ID) — its scope determines which connections and credentials resolve." />
             </Label>
-            <Select value={agentId} onValueChange={setAgentId}>
-              <SelectTrigger className="w-44">
+            <Select value={agentId} onValueChange={selectAgent}>
+              <SelectTrigger
+                ref={agentTriggerRef}
+                className="w-44"
+                aria-label="Run as agent"
+                aria-invalid={agentMissing || undefined}
+                aria-describedby={agentMissing ? "playground-agent-error" : undefined}
+              >
                 <SelectValue placeholder="Select agent" />
               </SelectTrigger>
               <SelectContent>
@@ -361,23 +403,20 @@ export function PlaygroundPanel({ defaultAgentId }: { defaultAgentId?: string })
                 ))}
               </SelectContent>
             </Select>
-            <Button
-              size="sm"
-              onClick={() =>
-                run.mutate(
-                  { source, intent: "connections playground", agentId },
-                  {
-                    onError: (error) =>
-                      toast.error(error instanceof Error ? error.message : String(error)),
-                  },
-                )
-              }
-              disabled={!agentId || run.isPending}
-            >
+            {agentMissing ? (
+              <span
+                id="playground-agent-error"
+                role="alert"
+                className="text-xs text-status-error-strong"
+              >
+                Select an agent first
+              </span>
+            ) : null}
+            <Button size="sm" onClick={runSource} disabled={run.isPending}>
               <Play className="size-4" />
               Run
             </Button>
-            <Button size="sm" variant="outline" onClick={openSaveDialog} disabled={!agentId}>
+            <Button size="sm" variant="outline" onClick={openSaveDialog}>
               <Save className="size-4" />
               Save as
             </Button>
@@ -430,15 +469,30 @@ export function PlaygroundPanel({ defaultAgentId }: { defaultAgentId?: string })
             </DialogDescription>
           </DialogHeader>
           <Input
+            ref={saveNameRef}
             value={saveName}
-            onChange={(event) => setSaveName(event.target.value)}
+            onChange={(event) => {
+              setSaveName(event.target.value);
+              setSaveNameInvalid(false);
+            }}
             placeholder="my-script-name"
             aria-label="Script name"
+            aria-invalid={saveNameInvalid || undefined}
+            aria-describedby={saveNameInvalid ? "save-script-name-error" : undefined}
             autoFocus
             onKeyDown={(event) => {
               if (event.key === "Enter") void submitSave();
             }}
           />
+          {saveNameInvalid ? (
+            <p
+              id="save-script-name-error"
+              role="alert"
+              className="text-sm text-status-error-strong"
+            >
+              Enter a script name.
+            </p>
+          ) : null}
           <InlineError error={upsert.error} />
           <DialogFooter>
             <Button variant="outline" onClick={() => setSaveOpen(false)}>
@@ -446,7 +500,8 @@ export function PlaygroundPanel({ defaultAgentId }: { defaultAgentId?: string })
             </Button>
             <Button
               onClick={() => void submitSave()}
-              disabled={!saveName.trim() || upsert.isPending}
+              disabled={upsert.isPending}
+              status={upsert.isPending ? "loading" : "idle"}
             >
               Save
             </Button>

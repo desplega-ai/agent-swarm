@@ -10,10 +10,15 @@ export interface McpTool {
   name: string;
   description?: string;
   inputSchema: Record<string, unknown>;
+  /** JSON Schema of `structuredContent`, when the server declares one. */
+  outputSchema?: Record<string, unknown>;
+  /** Server metadata, e.g. `anthropic/alwaysLoad` from task tool manifests. */
+  _meta?: Record<string, unknown>;
 }
 
 export interface McpToolCallResult {
   content: Array<{ type: string; text?: string }>;
+  structuredContent?: Record<string, unknown>;
   isError?: boolean;
 }
 

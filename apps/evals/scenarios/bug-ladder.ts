@@ -350,6 +350,7 @@ const srcExists: DeterministicCheck = {
 
 export const bugLadder: Scenario = {
   id: "bug-ladder",
+  version: 1,
   name: "Bug ladder",
   description: [
     "Seeds a bun project at /workspace/ladder with a single source module (src/textkit.ts)",

@@ -149,7 +149,7 @@ function ChannelSidebar({
                 <AlertDialogTrigger asChild>
                   <button
                     type="button"
-                    className="h-4 w-4 shrink-0 inline-flex items-center justify-center rounded opacity-0 group-hover/ch:opacity-100 text-muted-foreground hover:text-status-error-strong transition-all"
+                    className="h-4 w-4 shrink-0 inline-flex items-center justify-center rounded opacity-0 group-hover/ch:opacity-100 text-muted-foreground hover:text-status-error-strong transition-[opacity,color]"
                     onClick={(e) => e.stopPropagation()}
                   >
                     <Trash2 className="h-3 w-3" />
@@ -379,7 +379,11 @@ function MessageInput({
 
   const handleSend = useCallback(() => {
     const trimmed = content.trim();
-    if (!trimmed) return;
+    // Send stays enabled on an empty draft; a click sends focus to the box.
+    if (!trimmed) {
+      textareaRef.current?.focus();
+      return;
+    }
     postMessage.mutate({
       content: trimmed,
       replyToId,
@@ -418,7 +422,8 @@ function MessageInput({
         <Button
           size="icon"
           onClick={handleSend}
-          disabled={!content.trim() || postMessage.isPending}
+          disabled={postMessage.isPending}
+          aria-label="Send message"
           className="shrink-0 h-9 w-9 bg-primary hover:bg-primary/90"
         >
           <Send className="h-3.5 w-3.5" />

@@ -1,0 +1,184 @@
+/* Reliability view (Phase 6): pass@1 against pass^k dumbbells and the run-to-run trend. Tokens live in styles.css. */
+
+.rel-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin-bottom: 8px;
+  font-size: 11.5px;
+  color: var(--dim);
+}
+
+.rel-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rel-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rel-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) minmax(160px, 1fr) 64px 64px 48px;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+}
+
+button.rel-row {
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  button.rel-row:hover {
+    background: var(--panel-2);
+  }
+}
+
+button.rel-row:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.rel-head {
+  padding-top: 0;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--dim);
+}
+
+.rel-cfg {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.rel-axis {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.rel-num {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.rel-num.tone-red {
+  color: var(--red);
+}
+
+/* dumbbell: two dots on a 0..100% track, joined by a bar */
+.rel-track {
+  position: relative;
+  height: 16px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--border), transparent 55%);
+}
+
+.rel-bar {
+  position: absolute;
+  top: 6px;
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--accent), transparent 55%);
+}
+
+.rel-dot {
+  position: absolute;
+  top: 2px;
+  width: 12px;
+  height: 12px;
+  margin-left: -6px;
+  border-radius: 999px;
+  border: 2px solid var(--panel);
+  box-sizing: border-box;
+}
+
+.rel-dot-static {
+  position: static;
+  display: inline-block;
+  margin-left: 0;
+}
+
+.rel-dot-at1 {
+  background: var(--dim);
+}
+
+.rel-dot-powk {
+  background: var(--accent);
+}
+
+/* which configs the trend draws */
+.rel-picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 10px;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.rel-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.rel-pick.on {
+  color: var(--text);
+  border-color: color-mix(in oklab, var(--text), transparent 60%);
+}
+
+.rel-pick:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.rel-pick:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+@media (max-width: 900px) {
+  .rel-row {
+    grid-template-columns: minmax(140px, 1fr) 56px 56px 40px;
+  }
+
+  .rel-row > .rel-track,
+  .rel-head > .rel-axis {
+    display: none;
+  }
+}

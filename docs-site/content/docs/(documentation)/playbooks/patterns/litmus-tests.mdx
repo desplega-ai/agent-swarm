@@ -5,7 +5,7 @@ description: A quality gate where one agent hard-rejects another agent's output 
 
 A quality gate where one agent hard-rejects another agent's output against explicit criteria — using a *different model family* so the judgment is genuinely independent.
 
-<Mermaid chart={`flowchart LR
+<Mermaid title="Litmus test: a writer agent on one model family produces output, a judge on a different family checks it, failures return to the writer, and passes ship." chart={`flowchart LR
   W["Writer / Generator<br/>(model family A)"] --> O["Output"]
   O --> J{"Litmus judge<br/>(model family B)"}
   J -- "fails criteria" --> W

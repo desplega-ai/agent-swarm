@@ -4835,7 +4835,7 @@ export interface paths {
         put?: never;
         /**
          * Locked keep-warm refresh sweep across all Codex OAuth pool slots
-         * @description Enumerates codex_oauth_* slots and refreshes any older than ~7 days through the same locked getValidCodexOAuth path used at task time. Skips slots already benched by codex-auth-expiry-watch.
+         * @description Enumerates codex_oauth_* slots and refreshes any older than ~7 days through the same locked getValidCodexOAuth path used at task time. Skips slots with a codex-auth-watch bench marker (auth-failure bench or codex-auth-expiry-watch).
          */
         post: {
             parameters: {
@@ -5208,6 +5208,78 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/keys/report-auth-failure": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record an auth failure for a pooled key; bench it after 2 in a row */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        keyType: string;
+                        keySuffix: string;
+                        keyIndex: number;
+                        /** Format: uuid */
+                        taskId?: string;
+                        scope?: string;
+                        scopeId?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Failure recorded */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                            consecutiveAuthFailures: number;
+                            benched: boolean;
+                            rateLimitedUntil: string | null;
+                        };
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/keys/report-rate-limit-windows": {
         parameters: {
             query?: never;
@@ -5323,6 +5395,7 @@ export interface paths {
                             totalKeys: number;
                             modelBlockedIndices?: number[];
                             earliestModelResetAt?: string | null;
+                            authFailureFence: number;
                         };
                     };
                 };
@@ -5413,6 +5486,8 @@ export interface paths {
                                 plan: string | null;
                                 /** @enum {string|null} */
                                 planSource: "manual" | "detected" | "estimated" | null;
+                                consecutiveAuthFailures: number;
+                                lastAuthFailureAt: string | null;
                                 modelLimits: {
                                     model: string;
                                     window: string;
@@ -5606,6 +5681,9 @@ export interface paths {
                         keySuffix: string;
                         scope?: string;
                         scopeId?: string;
+                        clearAuthBench?: boolean;
+                        keyIndex?: number;
+                        authFence?: number;
                     };
                 };
             };
@@ -10167,7 +10245,7 @@ export interface paths {
         };
         /**
          * Identity + setup readiness + live activity for the swarm dashboard
-         * @description Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set.
+         * @description Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set; telemetry reports the effective ANONYMIZED_TELEMETRY opt-out state.
          */
         get: {
             parameters: {
@@ -10252,6 +10330,9 @@ export interface paths {
                             }[];
                             /** @enum {string} */
                             health: "ok" | "degraded" | "broken";
+                            telemetry?: {
+                                enabled: boolean;
+                            };
                         };
                     };
                 };
@@ -17625,6 +17706,7 @@ export interface paths {
                         };
                         contextKey?: string;
                         requestedByUserId?: string;
+                        /** @description Concrete model override for this task, interpreted by the assignee's harness/provider. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected. */
                         model?: string;
                         /** @enum {string} */
                         modelTier?: "smol" | "regular" | "smart" | "ultra";
@@ -17846,6 +17928,15 @@ export interface paths {
                 };
                 /** @description Cannot cancel terminal task */
                 400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Agent caller is neither a lead nor the task creator */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -18394,6 +18485,15 @@ export interface paths {
                             /** @enum {boolean} */
                             success: true;
                         };
+                    };
+                };
+                /** @description Task is assigned to another agent */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
                 /** @description Task not found */
@@ -21320,6 +21420,14 @@ export interface paths {
                                 format: "token-equality";
                                 /** @description Header containing the shared token to compare */
                                 header: string;
+                            } | {
+                                /** @enum {string} */
+                                format: "standard-webhooks";
+                                /**
+                                 * @description Maximum allowed clock skew, in seconds, for the webhook-timestamp header
+                                 * @default 300
+                                 */
+                                toleranceSeconds?: number;
                             };
                         } | {
                             /** @enum {string} */
@@ -21484,6 +21592,14 @@ export interface paths {
                                 format: "token-equality";
                                 /** @description Header containing the shared token to compare */
                                 header: string;
+                            } | {
+                                /** @enum {string} */
+                                format: "standard-webhooks";
+                                /**
+                                 * @description Maximum allowed clock skew, in seconds, for the webhook-timestamp header
+                                 * @default 300
+                                 */
+                                toleranceSeconds?: number;
                             };
                         } | {
                             /** @enum {string} */
@@ -23630,6 +23746,14 @@ export interface components {
                     format: "token-equality";
                     /** @description Header containing the shared token to compare */
                     header: string;
+                } | {
+                    /** @enum {string} */
+                    format: "standard-webhooks";
+                    /**
+                     * @description Maximum allowed clock skew, in seconds, for the webhook-timestamp header
+                     * @default 300
+                     */
+                    toleranceSeconds: number;
                 };
             } | {
                 /** @enum {string} */
@@ -23838,6 +23962,14 @@ export interface components {
                     format: "token-equality";
                     /** @description Header containing the shared token to compare */
                     header: string;
+                } | {
+                    /** @enum {string} */
+                    format: "standard-webhooks";
+                    /**
+                     * @description Maximum allowed clock skew, in seconds, for the webhook-timestamp header
+                     * @default 300
+                     */
+                    toleranceSeconds: number;
                 };
             } | {
                 /** @enum {string} */
@@ -26517,6 +26649,7 @@ export interface operations {
                     dir?: string;
                     vcsRepo?: string;
                     model?: string;
+                    allowCustomModel?: boolean;
                     /** Format: uuid */
                     parentTaskId?: string;
                     requestedByUserId?: string;

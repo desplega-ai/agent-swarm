@@ -18,6 +18,7 @@ import { AgentAppearancePicker } from "@/components/shared/agent-appearance-pick
 import { AgentAvatar as AgentAvatarDisc } from "@/components/shared/agent-avatar";
 import { AgentRuntimeSettings } from "@/components/shared/agent-runtime-settings";
 import { HarnessCell } from "@/components/shared/harness-cell";
+import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
 import { StatusBadge } from "@/components/shared/status-badge";
 import {
   ignoreRowClickFromInteractives,
@@ -47,8 +48,10 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { readNumberParam, readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
-import { formatSmartTime } from "@/lib/utils";
+import { taskListTitle } from "@/lib/task-title";
+import { cn, formatRelativeTime, formatSmartTime } from "@/lib/utils";
 import { CredentialsPanel } from "./credentials-panel";
 import { RuntimeInstancesSection } from "./runtime-instances-section";
 
@@ -65,6 +68,11 @@ const AGENT_TABS = [
   "mcp-servers",
   "usage",
 ] as const;
+
+// Seven tabs do not fit a phone: the list scrolls sideways inside itself
+// instead of clipping the last tabs or widening the page.
+const SCROLLABLE_TABS_LIST =
+  "w-full justify-start overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:w-fit";
 
 const DOCUMENT_FIELDS: Array<{ field: MdField; tab: string; label: string }> = [
   { field: "soulMd", tab: "soul", label: "SOUL.md" },
@@ -138,19 +146,54 @@ function MarkdownDocumentEditor({
           {value}
         </pre>
       ) : (
-        <div className="rounded-md border border-dashed border-border/50 p-6 text-center">
-          <p className="text-sm text-muted-foreground italic">
-            No content yet — click Edit to add.
-          </p>
-        </div>
+        <EmptyPanel>No content yet. Click Edit to add it.</EmptyPanel>
       )}
     </div>
+  );
+}
+
+function EmptyPanel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center">
+      <p className="text-sm text-muted-foreground text-pretty">{children}</p>
+    </div>
+  );
+}
+
+/** Skill and MCP server rows: name and badges wrap, the action stays right. */
+function InstalledItemRow({
+  name,
+  description,
+  badges,
+  action,
+}: {
+  name: string;
+  description?: string | null;
+  badges: React.ReactNode;
+  action: React.ReactNode;
+}) {
+  return (
+    <Card className="gap-0 py-0">
+      <CardContent className="flex items-center gap-3 p-3">
+        <div className="min-w-0 flex-1 space-y-1">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <p className="font-medium text-sm break-words">{name}</p>
+            {badges}
+          </div>
+          {description ? (
+            <p className="text-xs text-muted-foreground line-clamp-2">{description}</p>
+          ) : null}
+        </div>
+        <div className="shrink-0">{action}</div>
+      </CardContent>
+    </Card>
   );
 }
 
 export default function AgentDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const { data: agent, isLoading } = useAgent(id!);
   const updateName = useUpdateAgentName();
   const updateProfile = useUpdateAgentProfile();
@@ -290,9 +333,11 @@ export default function AgentDetailPage() {
         </button>
       </div>
 
-      <div className="flex items-center gap-3 shrink-0">
+      {/* Name row wraps on a phone: role and status drop under the name
+          instead of squeezing it to one word per line. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 shrink-0">
         {editing ? (
-          <div className="flex items-center gap-2">
+          <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto">
             <AgentAppearancePicker
               avatar={agent.avatar}
               onChange={saveAvatar}
@@ -309,37 +354,54 @@ export default function AgentDetailPage() {
             <Input
               value={editName}
               onChange={(e) => setEditName(e.target.value)}
-              className="h-11 w-72 text-2xl font-semibold"
+              className="h-10 min-w-0 flex-1 text-xl font-semibold sm:h-11 sm:w-72 sm:flex-none sm:text-2xl"
               onKeyDown={(e) => {
                 if (e.key === "Enter") saveName();
                 if (e.key === "Escape") setEditing(false);
               }}
               autoFocus
             />
-            <Button size="icon" variant="ghost" onClick={saveName}>
+            <Button size="icon" variant="ghost" onClick={saveName} aria-label="Save name">
               <Check className="h-4 w-4" />
             </Button>
-            <Button size="icon" variant="ghost" onClick={() => setEditing(false)}>
+            <Button
+              size="icon"
+              variant="ghost"
+              onClick={() => setEditing(false)}
+              aria-label="Cancel rename"
+            >
               <X className="h-4 w-4" />
             </Button>
           </div>
         ) : (
-          <div className="flex items-center gap-2.5">
+          <div className="flex min-w-0 items-center gap-2.5">
             <AgentAvatarDisc agentId={id} agentName={agent.name} size="md" />
-            <h1 className="text-3xl font-bold tracking-tight">{agent.name}</h1>
-            <Button size="icon" variant="ghost" onClick={startEditing}>
+            <h1 className="min-w-0 break-words text-2xl font-bold tracking-tight text-balance sm:text-3xl">
+              {agent.name}
+            </h1>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="shrink-0"
+              onClick={startEditing}
+              aria-label="Rename agent"
+            >
               <Pencil className="h-4 w-4" />
             </Button>
           </div>
         )}
-        {agent.role && (
-          <span className="text-base text-muted-foreground font-medium">{agent.role}</span>
-        )}
-        <StatusBadge status={agent.status} size="md" />
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+          {agent.role && (
+            <span className="text-sm text-muted-foreground font-medium sm:text-base">
+              {agent.role}
+            </span>
+          )}
+          <StatusBadge status={agent.status} size="md" />
+        </div>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col flex-1 min-h-0">
-        <TabsList className="shrink-0">
+        <TabsList className={cn("shrink-0", SCROLLABLE_TABS_LIST)}>
           <TabsTrigger value="profile">Profile</TabsTrigger>
           <TabsTrigger value="credentials">Credentials</TabsTrigger>
           <TabsTrigger value="documents">Documents</TabsTrigger>
@@ -353,20 +415,23 @@ export default function AgentDetailPage() {
           <DetailPageBody
             main={
               <div className="space-y-4">
-                <Card>
+                <Card className="gap-0 py-0">
                   <CardContent className="p-4">
                     <DefinitionList>
-                      <InfoRow label="Harness">
-                        <HarnessCell
-                          harnessProvider={agent.harnessProvider}
-                          credStatus={agent.credStatus}
-                          claudeTransport={agent.claudeTransport}
-                        />
-                      </InfoRow>
+                      {/* An unreported harness rendered a lone "—" right above
+                          the Runtime harness picker. */}
+                      {agent.harnessProvider && (
+                        <InfoRow label="Harness">
+                          <HarnessCell
+                            harnessProvider={agent.harnessProvider}
+                            credStatus={agent.credStatus}
+                            claudeTransport={agent.claudeTransport}
+                          />
+                        </InfoRow>
+                      )}
                       <InfoRow label="Runtime">
                         <AgentRuntimeSettings agent={agent} />
                       </InfoRow>
-                      {agent.role && <InfoRow label="Role">{agent.role}</InfoRow>}
                       {agent.description && (
                         <InfoRow label="Description">{agent.description}</InfoRow>
                       )}
@@ -386,7 +451,7 @@ export default function AgentDetailPage() {
                     </DefinitionList>
                   </CardContent>
                 </Card>
-                <Card>
+                <Card className="gap-0 py-0">
                   <CardContent className="space-y-3 p-4">
                     <h3 className="font-medium text-sm">Task activity</h3>
                     <AgentActivityGraph agentId={agent.id} />
@@ -434,7 +499,7 @@ export default function AgentDetailPage() {
             onValueChange={setActiveDocType}
             className="flex flex-col flex-1 min-h-0"
           >
-            <TabsList className="shrink-0 w-full justify-start">
+            <TabsList className={cn("shrink-0", SCROLLABLE_TABS_LIST, "sm:w-full")}>
               {DOCUMENT_FIELDS.map(({ tab, label, field }) => {
                 const empty = !agent[field];
                 return (
@@ -464,8 +529,8 @@ export default function AgentDetailPage() {
         </TabsContent>
 
         <TabsContent value="tasks" className="flex flex-col flex-1 min-h-0 mt-4 gap-3">
-          <div className="flex items-center gap-3 shrink-0">
-            <div className="relative flex-1 max-w-sm">
+          <div className="flex flex-wrap items-center gap-2 shrink-0 sm:gap-3">
+            <div className="relative min-w-0 flex-1 basis-48 sm:max-w-sm">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 placeholder="Search tasks..."
@@ -483,7 +548,7 @@ export default function AgentDetailPage() {
                 })
               }
             >
-              <SelectTrigger className="w-[160px]">
+              <SelectTrigger className="w-[140px] sm:w-[160px]">
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
               <SelectContent>
@@ -496,19 +561,43 @@ export default function AgentDetailPage() {
                 <SelectItem value="superseded">Superseded</SelectItem>
               </SelectContent>
             </Select>
-            <div className="ml-auto">
-              <TasksColumnsMenu state={taskColumns} />
-            </div>
+            {isMobile ? null : (
+              <div className="ml-auto">
+                <TasksColumnsMenu state={taskColumns} />
+              </div>
+            )}
           </div>
 
-          <TasksTable
-            rowData={tasksData?.tasks ?? []}
-            loading={tasksLoading}
-            onRowClicked={onTaskClicked}
-            columns={taskColumns}
-            emptyMessage="No tasks for this agent"
-            pagination={false}
-          />
+          {/* The grid clips its columns at phone width; the tasks list page
+              renders the same rows as cards below md. */}
+          {isMobile ? (
+            <MobileList
+              label="Agent tasks"
+              loading={tasksLoading}
+              emptyMessage="No tasks for this agent"
+              className="min-h-0 overflow-y-auto"
+            >
+              {(tasksData?.tasks ?? []).map((task) => (
+                <MobileListRow
+                  key={task.id}
+                  to={`/tasks/${task.id}`}
+                  live={task.status === "in_progress"}
+                  title={taskListTitle(task)}
+                  status={<StatusBadge status={task.status} />}
+                  meta={[formatRelativeTime(task.createdAt)]}
+                />
+              ))}
+            </MobileList>
+          ) : (
+            <TasksTable
+              rowData={tasksData?.tasks ?? []}
+              loading={tasksLoading}
+              onRowClicked={onTaskClicked}
+              columns={taskColumns}
+              emptyMessage="No tasks for this agent"
+              pagination={false}
+            />
+          )}
 
           <div className="flex items-center justify-between shrink-0 text-sm text-muted-foreground">
             <span>
@@ -523,6 +612,7 @@ export default function AgentDetailPage() {
                 className="h-8 w-8"
                 disabled={taskPage === 0}
                 onClick={() => setParam("taskPage", taskPage - 1, { defaultValue: "0" })}
+                aria-label="Previous page"
               >
                 <ArrowLeft className="h-4 w-4" />
               </Button>
@@ -535,6 +625,7 @@ export default function AgentDetailPage() {
                 className="h-8 w-8"
                 disabled={taskPage >= taskTotalPages - 1}
                 onClick={() => setParam("taskPage", taskPage + 1, { defaultValue: "0" })}
+                aria-label="Next page"
               >
                 <ArrowLeft className="h-4 w-4 rotate-180" />
               </Button>
@@ -544,32 +635,33 @@ export default function AgentDetailPage() {
 
         <TabsContent value="skills" className="mt-4 overflow-y-auto">
           {agentSkillsList.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No skills installed for this agent.</p>
+            <EmptyPanel>No skills installed for this agent.</EmptyPanel>
           ) : (
             <div className="space-y-2">
               {agentSkillsList.map((skill: AgentSkill) => (
-                <Card key={skill.id}>
-                  <CardContent className="p-3 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div>
-                        <p className="font-medium text-sm">{skill.name}</p>
-                        <p className="text-xs text-muted-foreground">{skill.description}</p>
-                      </div>
+                <InstalledItemRow
+                  key={skill.id}
+                  name={skill.name}
+                  description={skill.description}
+                  badges={
+                    <>
                       <Badge variant="outline" size="tag">
                         {skill.type}
                       </Badge>
                       <Badge
                         variant="outline"
                         size="tag"
-                        className={`${
+                        className={
                           skill.isActive
                             ? "border-status-success/30 text-status-success-strong"
                             : "border-status-neutral/30 text-status-neutral-strong"
-                        }`}
+                        }
                       >
                         {skill.isActive ? "Active" : "Inactive"}
                       </Badge>
-                    </div>
+                    </>
+                  }
+                  action={
                     <Button
                       variant="destructive-outline"
                       size="sm"
@@ -577,8 +669,8 @@ export default function AgentDetailPage() {
                     >
                       Uninstall
                     </Button>
-                  </CardContent>
-                </Card>
+                  }
+                />
               ))}
             </div>
           )}
@@ -586,46 +678,43 @@ export default function AgentDetailPage() {
 
         <TabsContent value="mcp-servers" className="mt-4 overflow-y-auto">
           {agentMcpServersList.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No MCP servers installed for this agent.
-            </p>
+            <EmptyPanel>No MCP servers installed for this agent.</EmptyPanel>
           ) : (
             <div className="space-y-2">
               {agentMcpServersList.map((server: McpServerWithInstallInfo) => (
-                <Card key={server.id}>
-                  <CardContent className="p-3 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div>
-                        <p className="font-medium text-sm">{server.name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {server.description || server.transport}
-                        </p>
-                      </div>
+                <InstalledItemRow
+                  key={server.id}
+                  name={server.name}
+                  description={server.description || server.transport}
+                  badges={
+                    <>
                       <Badge
                         variant="outline"
                         size="tag"
-                        className={`${
+                        className={
                           server.transport === "stdio"
                             ? "border-action-default/30 text-action-default"
                             : server.transport === "http"
                               ? "border-action-delegate-to-agent/30 text-action-delegate-to-agent"
                               : "border-action-script/30 text-action-script"
-                        }`}
+                        }
                       >
                         {server.transport}
                       </Badge>
                       <Badge
                         variant="outline"
                         size="tag"
-                        className={`${
+                        className={
                           server.isActive
                             ? "border-status-success/30 text-status-success-strong"
                             : "border-status-neutral/30 text-status-neutral-strong"
-                        }`}
+                        }
                       >
                         {server.isActive ? "Active" : "Inactive"}
                       </Badge>
-                    </div>
+                    </>
+                  }
+                  action={
                     <Button
                       variant="destructive-outline"
                       size="sm"
@@ -635,8 +724,8 @@ export default function AgentDetailPage() {
                     >
                       Uninstall
                     </Button>
-                  </CardContent>
-                </Card>
+                  }
+                />
               ))}
             </div>
           )}

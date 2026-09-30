@@ -5,6 +5,9 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
 import * as realMemoryModule from "../be/memory";
+import { buildRecallQuery } from "../memory/recall-query";
+import { getTemplateDefinition } from "../prompts/registry";
+import "../tools/templates";
 import { SIMILARITY_THRESHOLD } from "../prompts/memories";
 import type { AgentMemory } from "../types";
 
@@ -72,11 +75,17 @@ function candidate(memoryFixture: AgentMemory, similarity: number) {
   };
 }
 
+let embeddedQuery = "";
+let searchedQuery = "";
+
 mock.module("../be/memory", () => ({
   getEmbeddingProvider: () => ({
     name: "test-embedding",
     dimensions: 3,
-    embed: async () => new Float32Array([1, 0, 0]),
+    embed: async (query: string) => {
+      embeddedQuery = query;
+      return new Float32Array([1, 0, 0]);
+    },
     embedBatch: async (texts: string[]) => texts.map(() => new Float32Array([1, 0, 0])),
   }),
   getMemoryStore: () => ({
@@ -104,6 +113,7 @@ mock.module("../be/memory", () => ({
       _agentId: string,
       options: import("../be/memory/types").MemorySearchOptions,
     ) => {
+      searchedQuery = options.queryText ?? "";
       if (options.queryText === "document recall") {
         return [candidate(memory, 0.95), candidate(memoryChunk, 0.9)];
       }
@@ -322,5 +332,119 @@ describe("memory HTTP recall capture gating", () => {
     expect(response.statusCode).toBe(200);
     expect(response.body.memory.id).toBe(memoryId);
     expect(await countRetrievals()).toBe(0);
+  });
+});
+
+function workerWrapper(event: "completed" | "failed", task = "", output = ""): string {
+  return getTemplateDefinition(`task.worker.${event}`)!.defaultBody.replace(
+    /{{(\w+)}}/g,
+    (_, key) =>
+      ({ task_desc: task, output_summary: output, failure_reason: output })[key as "task_desc"] ??
+      "",
+  );
+}
+
+describe("pre-task recall query", () => {
+  for (const event of ["completed", "failed"] as const) {
+    test(`${event} wrapper retains only task and output`, () => {
+      expect(buildRecallQuery(workerWrapper(event, "Fix memory recall", "Fixed the query"))).toBe(
+        "Fix memory recall\n\nFixed the query",
+      );
+      expect(buildRecallQuery(workerWrapper(event))).toBe("");
+    });
+  }
+
+  test("preserves output headings and embedded thread context once", () => {
+    const output =
+      "Result\n\nIMPORTANT: actual output heading\n<thread_context>Context</thread_context>";
+    expect(buildRecallQuery(workerWrapper("completed", "Task", output))).toBe(`Task\n\n${output}`);
+    expect(
+      buildRecallQuery(
+        workerWrapper(
+          "failed",
+          "Task",
+          "Reason\n\nDecide whether to reassign, retry, or handle the failure. Actual result",
+        ),
+      ),
+    ).toContain("Actual result");
+  });
+
+  test("creator instructions do not become recall content", () => {
+    for (const event of ["completed", "failed"] as const) {
+      const wrapper = workerWrapper(event).replace(
+        event === "completed" ? "Output:\n" : "Failure reason: ",
+        `${event === "completed" ? "Output:\n" : "Failure reason: "}\nAdditional instructions from the task creator:\nReview quickly\n`,
+      );
+      expect(buildRecallQuery(wrapper)).toBe("");
+    }
+  });
+
+  test("removes sibling context and preserves thread context", () => {
+    const thread = "<thread_context>Earlier user intent</thread_context>";
+    const query = `<sibling_tasks_in_progress>Unrelated task</sibling_tasks_in_progress>\n\n${workerWrapper("completed", "Fix recall", "Done")}\n\n${thread}`;
+    expect(buildRecallQuery(query)).toBe(`Fix recall\n\nDone\n\n${thread}`);
+    expect(buildRecallQuery(`User request\n${thread}`)).toBe(`User request\n${thread}`);
+    expect(buildRecallQuery("Worker task completed — partial text")).toBe(
+      "Worker task completed — partial text",
+    );
+  });
+
+  test("bounds long ASCII and multilingual queries without splitting code points", () => {
+    expect(buildRecallQuery("a".repeat(40000))).toBe("a".repeat(8191));
+    const query = buildRecallQuery("你好🙂مرحبا".repeat(10000));
+    expect(Buffer.byteLength(query)).toBeLessThanOrEqual(8191);
+    expect(query).not.toContain("�");
+    expect(Buffer.from(query).toString("utf8")).toBe(query);
+  });
+
+  test("bounds malformed near-wrappers before parsing", () => {
+    const malformed = workerWrapper("completed", "Task", '"\n\nOutput:\n'.repeat(200000)).replace(
+      '" for full details.',
+      '" missing suffix.',
+    );
+    const bounded = malformed.slice(0, 65536);
+    expect(buildRecallQuery(malformed)).toBe(buildRecallQuery(bounded));
+    expect(Buffer.byteLength(buildRecallQuery(malformed))).toBeLessThanOrEqual(8191);
+  });
+
+  test("long valid wrappers preserve content and truncate the embedding query", () => {
+    expect(buildRecallQuery(workerWrapper("completed", "Task", "a".repeat(20000)))).toBe(
+      `Task\n\n${"a".repeat(8185)}`,
+    );
+  });
+
+  test("HTTP prompt recall uses content for embedding and text search only", async () => {
+    const original = workerWrapper("completed", "Fix recall", "Done");
+    await callMemoryRoute(
+      "POST",
+      "/api/memory/search",
+      ["api", "memory", "search"],
+      { query: original },
+      { "x-memory-consumption": "prompt" },
+    );
+    expect(embeddedQuery).toBe("Fix recall\n\nDone");
+    expect(searchedQuery).toBe(embeddedQuery);
+    await callMemoryRoute("POST", "/api/memory/search", ["api", "memory", "search"], {
+      query: original,
+    });
+    expect(embeddedQuery).toBe(original);
+    expect(searchedQuery).toBe(original);
+  });
+
+  test("blank wrapper skips search and retrieval records", async () => {
+    embeddedQuery = "untouched";
+    searchedQuery = "untouched";
+    const before = await countRetrievals();
+    const response = await callMemoryRoute(
+      "POST",
+      "/api/memory/search",
+      ["api", "memory", "search"],
+      { query: workerWrapper("completed"), intent: "pre-task memory recall" },
+      { "x-memory-consumption": "prompt", "x-source-task-id": sourceTaskId },
+    );
+    expect(response.body.results).toEqual([]);
+    expect(embeddedQuery).toBe("untouched");
+    expect(searchedQuery).toBe("untouched");
+    expect(await countRetrievals()).toBe(before);
   });
 });

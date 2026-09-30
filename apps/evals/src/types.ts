@@ -94,6 +94,15 @@ export interface ConfigPreset {
   description: string;
   /** Catalog config ids (HarnessConfig.id); every entry must resolve. */
   configIds: string[];
+  /**
+   * Run plan this preset implies (Phase 3). Applied by the CLI and by POST
+   * /api/runs when the caller names the preset and leaves these fields unset.
+   */
+  runDefaults?: {
+    attemptsPerCell: number;
+    /** Hard cap on metered spend for the run, USD. */
+    maxMeteredUsd: number;
+  };
 }
 
 export interface TaskSpec {
@@ -162,6 +171,13 @@ export interface ScenarioSeed {
     /** Optional human label for logs/artifacts ("delete-input", "poison-result"). */
     label?: string;
   }[];
+  /**
+   * Per-worker seeding: shell `commands` run in `workers[entry.worker]`'s sandbox
+   * after `exec`, before `workerFailures`. Unlike `exec` (worker 0 only) this
+   * gives each teammate its own files, e.g. a reviewer's spec the coder never
+   * sees. Strict like `exec`: a non-zero exit fails the attempt as infra.
+   */
+  workerExec?: { worker: number; commands: string[] }[];
 }
 
 export interface LlmJudgeSpec {
@@ -326,11 +342,62 @@ export interface WorkerSpec {
   model?: string;
   /** Reserved runtime keys (AGENT_ID, API_KEY, HARNESS_PROVIDER, …) are rejected. */
   env?: Record<string, string>;
+  /**
+   * Declared profile, written by the runner through `PUT /api/agents/{id}/profile`
+   * after the stack boots and before any task exists. It is what a lead reads in
+   * `get-swarm` when it routes work (capability-routing). A failed write fails
+   * the attempt as infra, never as a model failure.
+   */
+  profile?: WorkerProfile;
+}
+
+export interface WorkerProfile {
+  role?: string;
+  description?: string;
+  capabilities?: string[];
+}
+
+/**
+ * Canned human for scenarios that expect `request-human-input` (human-in-loop).
+ * While tasks run, the runner answers every pending approval request of the
+ * attempt with this reply (see src/runner/human-input.ts for the per-question
+ * mapping), then keeps waiting until the follow-up work settles.
+ */
+export interface HumanInputSpec {
+  reply: string;
+  /**
+   * Scenario-owned answer for a structured question (select, boolean), so the
+   * canned human never contradicts its own reply (e.g. picks "include" on an
+   * email question because the reply says "do not include"). Return undefined,
+   * or a value the respond route would reject, to fall back to the generic
+   * mapping; the artifact marks every fallback.
+   */
+  answer?: (question: HumanQuestion) => unknown;
+}
+
+/** One `request-human-input` question (root src/tools/request-human-input.ts QuestionSchema). */
+export interface HumanQuestion {
+  id: string;
+  type: "approval" | "text" | "single-select" | "multi-select" | "boolean";
+  label: string;
+  required?: boolean;
+  description?: string;
+  options?: { value: string; label: string; description?: string }[];
+  minSelections?: number;
+  maxSelections?: number;
 }
 
 export interface Scenario {
   /** Stable slug, e.g. "memory-seeded-recall". */
   id: string;
+  /**
+   * Scenario version, a positive integer. Bump on ANY change to the prompt, a
+   * fixture or a check that could move a score. `scenarios/scenario-hashes.ts`
+   * pins a content hash per version and `scenarios/versioning.test.ts` fails when
+   * the content changes without a bump. Recorded on every attempt as
+   * `scenario_version`. See `scenarios/CHANGELOG.md`.
+   */
+  version: number;
   name: string;
   description?: string;
   seed?: ScenarioSeed;
@@ -375,6 +442,20 @@ export interface Scenario {
    * the lead like any member. The lead does NOT count toward the 3-worker cap.
    */
   lead?: WorkerSpec;
+  /**
+   * Single-agent baseline pairing (swarm-evals plan Q6). Set on a `<id>-solo`
+   * variant to the id of the swarm scenario it baselines: same brief and answer
+   * key, one worker, no lead, the same timeout and budgets, and a rubric made of
+   * the swarm scenario's outcome dimensions only. Build it with `soloVariant()`
+   * (scenarios/orchestration-utils.ts); `validateBaselinePairs` (src/registry.ts)
+   * rejects a pairing that drifts. See src/baseline.ts for the comparison.
+   */
+  baselineOf?: string;
+  /**
+   * Answer `request-human-input` with a canned reply (human-in-loop). Requires
+   * `awaitSpawnedTasks`: the answer arrives as a `hitl-follow-up` task.
+   */
+  humanInput?: HumanInputSpec;
 }
 
 /** Worker count for either `Scenario.workers` shape (v7 §9). */
@@ -655,6 +736,12 @@ export interface SandboxWorkerInfo {
   configId?: string | null;
   provider?: HarnessProvider | null;
   model?: string | null;
+  /**
+   * How the credential this member booted with bills: "subscription" (claude
+   * OAuth token, codex ChatGPT auth.json) or "metered" (an API key). Null/absent
+   * on rows written before it was recorded.
+   */
+  billing?: "subscription" | "metered" | null;
 }
 
 /**
@@ -847,6 +934,15 @@ export interface JudgeTrace {
 
 export type AttemptStatus = "pending" | "running" | "judging" | "passed" | "failed" | "error";
 
+/**
+ * Why an `error` attempt is excluded from scores (attempts.exclusion):
+ *   "cancelled"     - the attempt never finished because its run died, was cancelled or hit
+ *                     the metered cost cap; it says nothing about the model.
+ *   "harness-error" - the harness crashed (context overflow, provider error, no agent output
+ *                     before the timeout); a harness fault, not a model failure.
+ */
+export type AttemptExclusion = "cancelled" | "harness-error";
+
 export type RunStatus = "pending" | "running" | "done" | "failed" | "cancelled";
 
 export interface EvalRunRow {
@@ -865,6 +961,12 @@ export interface EvalRunRow {
    * absent. Null on runs created before efforts existed.
    */
   efforts?: Record<string, ReasoningEffortLevel> | null;
+  /**
+   * Hard cap on the run's metered spend in USD (see src/cost/billing.ts). Once
+   * finished attempts reach it, the runner starts no new attempt and marks the
+   * rest cancelled. Null = no cap (pre-cap runs).
+   */
+  maxMeteredUsd?: number | null;
   createdAt: string;
   finishedAt: string | null;
 }
@@ -876,6 +978,20 @@ export interface AttemptRow {
   configId: string;
   attemptIndex: number;
   status: AttemptStatus;
+  /** Scenario version the attempt ran (or was scheduled) at; null on pre-versioning rows. */
+  scenarioVersion?: number | null;
+  /**
+   * Suite version (e.g. "1.0") when the scenario at that version is a member of
+   * the suite manifest; null for off-suite runs and pre-versioning rows.
+   */
+  suiteVersion?: string | null;
+  /**
+   * Set when an attempt carries no signal about the model, so score and pass
+   * rate aggregates skip it. Always paired with `status = "error"` because the
+   * `attempts.status` CHECK constraint cannot take a new value additively.
+   * See {@link AttemptExclusion}. Null on scored attempts and pre-hygiene rows.
+   */
+  exclusion?: AttemptExclusion | null;
   retries: number;
   sandboxId: string | null;
   apiUrl: string | null;
@@ -988,6 +1104,10 @@ export interface AnalyticsGroupRollup {
   minCostUsd: number | null;
   maxCostUsd: number | null;
   avgDurationMs: number | null;
+  /** Mean agent time: time spent waiting on the swarm's tasks (`timings.tasksMs`), sandbox boot and seeding excluded. Null when no attempt has it. */
+  avgAgentMs: number | null;
+  /** Median of the same per-attempt agent times. */
+  medianAgentMs: number | null;
   tokens: AnalyticsTokenSums | null;
 }
 
@@ -1004,6 +1124,10 @@ export interface AnalyticsScatterPoint {
   avgScore: number | null;
   avgCostUsd: number | null;
   avgDurationMs: number | null;
+  /** Mean agent time: time spent waiting on the swarm's tasks (`timings.tasksMs`), sandbox boot and seeding excluded. Null when no attempt has it. */
+  avgAgentMs: number | null;
+  /** Median of the same per-attempt agent times. */
+  medianAgentMs: number | null;
   /** x axis: mean total tokens per token-bearing attempt; null → UI omits the point. */
   avgTotalTokens: number | null;
   totalTokens: number;
@@ -1037,6 +1161,10 @@ export interface AnalyticsCell {
   avgJudgeCostUsd: number | null;
   /** Mean over attempts with durationMs !== null. */
   avgDurationMs: number | null;
+  /** Mean agent time: time spent waiting on the swarm's tasks (`timings.tasksMs`), sandbox boot and seeding excluded. Null when no attempt has it. */
+  avgAgentMs: number | null;
+  /** Median of the same per-attempt agent times. */
+  medianAgentMs: number | null;
   /** Mean over attempts with score !== null. */
   avgScore: number | null;
   /** Newest run.createdAt touching this cell. */
@@ -1073,6 +1201,10 @@ export interface AnalyticsModel {
   /** $ per minute of work: Σcost / (Σduration/60000) over attempts having BOTH fields. */
   costPerMinute: number | null;
   avgDurationMs: number | null;
+  /** Mean agent time: time spent waiting on the swarm's tasks (`timings.tasksMs`), sandbox boot and seeding excluded. Null when no attempt has it. */
+  avgAgentMs: number | null;
+  /** Median of the same per-attempt agent times. */
+  medianAgentMs: number | null;
   /** v7 §6: min/max costUsd over priced attempts; null when 0 priced. */
   minCostUsd?: number | null;
   maxCostUsd?: number | null;
@@ -1098,6 +1230,10 @@ export interface AnalyticsSeriesPoint {
   avgCostUsd: number | null;
   avgJudgeCostUsd: number | null;
   avgDurationMs: number | null;
+  /** Mean agent time: time spent waiting on the swarm's tasks (`timings.tasksMs`), sandbox boot and seeding excluded. Null when no attempt has it. */
+  avgAgentMs: number | null;
+  /** Median of the same per-attempt agent times. */
+  medianAgentMs: number | null;
   /** First non-null among the cell's attempts, cleanVersion()ed. */
   apiVersion: string | null;
   workerVersion: string | null;

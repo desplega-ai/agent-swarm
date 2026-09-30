@@ -64,6 +64,7 @@ type:ExistingTrackerContextWorkReason
 type:InboxSummary
 type:InsertPricingRowInput
 type:InsertTaskAttachmentInput
+type:KeyAuthFailureResult
 type:KeyCostSummary
 type:KvJsonFieldEquals
 type:McpServerFilters
@@ -443,6 +444,7 @@ value:isExtensionAgent
 value:isPendingSlackMessage
 value:isPoolAffinityEnforcementEnabled
 value:isSettledSlackMessage
+value:isSlackThreadAwaitingHuman
 value:isSqliteVecAvailable
 value:kvPrefixUpperBound
 value:listAgentsWithCredStatusByProvider
@@ -464,6 +466,7 @@ value:listScriptRunJournalSteps
 value:listScriptRuns
 value:listSkillFileManifest
 value:listSkills
+value:listSlackThreadsAwaitingHuman
 value:listTaskTemplates
 value:listUserFavorites
 value:listWorkflowRuns
@@ -497,6 +500,7 @@ value:promoteDraftTask
 value:reassociateSessionLogs
 value:recordBudgetRefusalNotification
 value:recordInlineScriptRun
+value:recordKeyAuthFailure
 value:recordKeyRateLimitWindows
 value:recordKeyUsage
 value:recordSlackMessage

@@ -10,7 +10,7 @@
 
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { AssistantMessage, Config, Event as OpencodeEvent } from "@opencode-ai/sdk";
+import type { AssistantMessage, Config, Event as OpencodeEvent, TextPart } from "@opencode-ai/sdk";
 import { createOpencode } from "@opencode-ai/sdk";
 import {
   CONTEXT_FORMULA,
@@ -301,6 +301,13 @@ export class OpencodeSession implements ProviderSession {
   // Keep the latest snapshot per message so those replays do not double-count.
   private finalizedMessages = new Map<string, FinalizedMessageUsage>();
   private missingMessageIdCounter = 0;
+  // Assistant text for the runner's final-message capture (`trackAssistantText`),
+  // which is how codex tasks with an outputSchema get their final message
+  // validated. Text parts stream in around the message's own updates, so buffer
+  // the latest snapshot per part and emit per message once its role is known.
+  private textParts = new Map<string, Map<string, string>>();
+  private assistantMessageIds = new Set<string>();
+  private emittedText = new Map<string, string>();
   private startedAt = Date.now();
   private model: string;
   private agentId: string;
@@ -462,6 +469,7 @@ export class OpencodeSession implements ProviderSession {
       case "message.updated": {
         const msg = ev.properties.info;
         if (!isAssistantMessage(msg) || msg.sessionID !== this._sessionId) break;
+        if (typeof msg.id === "string") this.assistantMessageIds.add(msg.id);
         // Phase 9 fix: opencode fires `message.updated` repeatedly during a single
         // assistant turn (streaming text deltas, tool transitions, etc.) and only
         // populates `tokens`/`cost` on the FINAL update once `time.completed` is
@@ -487,6 +495,7 @@ export class OpencodeSession implements ProviderSession {
           cacheReadTokens: msg.tokens?.cache?.read ?? 0,
           cacheWriteTokens: msg.tokens?.cache?.write ?? 0,
         });
+        this.emitAssistantText(msg.id);
         if (!this.model && msg.modelID) this.model = msg.modelID;
 
         // Emit context_usage so the runner can POST /api/tasks/:id/context
@@ -521,6 +530,12 @@ export class OpencodeSession implements ProviderSession {
       }
 
       case "message.part.updated": {
+        // Text parts are matched to this session by their own `sessionID`
+        // (checked in `recordTextPart`), not by the tool branch's check below.
+        if (ev.properties.part?.type === "text") {
+          this.recordTextPart(ev.properties.part);
+          break;
+        }
         // Bridge opencode's part.state lifecycle to swarm's tool_start/tool_end
         // so the dashboard's Activity timeline mirrors what other providers
         // emit. We fire tool_start the first time we see a tool part (any
@@ -610,6 +625,36 @@ export class OpencodeSession implements ProviderSession {
       default:
         break;
     }
+  }
+
+  /** Keep the latest snapshot of a text part (`part.text` is cumulative). */
+  private recordTextPart(part: TextPart): void {
+    // Synthetic and ignored parts are opencode-injected context, not model output.
+    if (part.sessionID !== this._sessionId || part.synthetic || part.ignored) return;
+    if (typeof part.messageID !== "string" || typeof part.id !== "string") return;
+    let parts = this.textParts.get(part.messageID);
+    if (!parts) {
+      parts = new Map();
+      this.textParts.set(part.messageID, parts);
+    }
+    parts.set(part.id, part.text ?? "");
+    // A part can land after its message was finalized; re-emit the fuller text.
+    if (this.finalizedMessages.has(part.messageID)) this.emitAssistantText(part.messageID);
+  }
+
+  /**
+   * Emit an assistant message's text as a normal `message` event. Only assistant
+   * messages qualify, and unchanged text is not re-emitted (opencode replays
+   * finalized snapshots). The runner keeps the last non-empty one.
+   */
+  private emitAssistantText(messageId: string): void {
+    if (!this.assistantMessageIds.has(messageId)) return;
+    const parts = this.textParts.get(messageId);
+    if (!parts) return;
+    const text = [...parts.values()].join("").trim();
+    if (!text || this.emittedText.get(messageId) === text) return;
+    this.emittedText.set(messageId, text);
+    this.emit({ type: "message", role: "assistant", content: text, messageId });
   }
 
   private emitError(message: string): void {
@@ -719,6 +764,7 @@ export class OpencodeAdapter implements ProviderAdapter {
 
   readonly traits: ProviderTraits = {
     hasMcp: true,
+    hasToolSearch: false,
     // Same inline-resolver pattern as codex (`resolveSlashSkillPrompt`) — no
     // ambient skill awareness, so the system prompt enumerates them.
     nativeSkillDiscovery: false,
@@ -760,6 +806,12 @@ export class OpencodeAdapter implements ProviderAdapter {
         headers: {
           Authorization: `Bearer ${config.apiKey}`,
           "X-Agent-ID": config.agentId,
+          // Per-task identity, same as claude/codex. Without it `store-progress`
+          // has no default task, so the model must hand-type a UUID and can
+          // copy a sibling's or parent's id from the prompt. The config file
+          // and `opencode serve` are already per task, so this is not shared.
+          "X-Source-Task-Id": taskId,
+          ...(config.contextKey ? { "X-Context-Key": config.contextKey } : {}),
           ...(runtimeInstanceId ? { "X-Runtime-Instance-ID": runtimeInstanceId } : {}),
         },
       },

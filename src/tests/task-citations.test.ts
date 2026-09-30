@@ -249,10 +249,11 @@ describe("citation persistence and completion warnings", () => {
     "failed",
     "cancelled",
   ] as const)("only the assigned agent can insert or replace citations on a %s task", async (taskStatus) => {
+    // A lead: non-lead non-owners are refused outright (store-progress-ownership).
     const otherAgent = await createAgent({
       name: `Other citation agent ${taskStatus}`,
-      role: "worker",
-      isLead: false,
+      role: "lead",
+      isLead: true,
       status: "idle",
       capabilities: [],
     });

@@ -125,6 +125,7 @@ Send a task to a specific agent, create an unassigned task, or offer a task for 
 | `dir` | string | No | Working directory (absolute path) for the agent to start in |
 | `model` | string | No | Concrete model override for this task. Interpreted by the assignee's harness/provider and wins over `modelTier` when both are present. |
 | `modelTier` | string | No | Portable model intent for this task: `smol`, `regular`, `smart`, or `ultra`. Resolved at claim/run time by the assignee's harness/provider. Legacy shortnames map as `haiku→smol`, `sonnet→regular`, `opus→smart`, `fable→ultra`. |
+| `allowCustomModel` | boolean | No | Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only for ids the catalog cannot know yet (a fresh launch, a private deployment). |
 | `effort` | string | No | Reasoning effort for this task: `off`, `low`, `medium`, `high`, `xhigh`, or Codex-only `max` when the selected model supports it. |
 | `slackChannelId` | string | No | Slack channel ID for progress updates (auto-inherited if omitted) |
 | `slackThreadTs` | string | No | Slack thread timestamp (auto-inherited if omitted) |
@@ -264,6 +265,31 @@ Lead-only registry for typed script API connections. Supports OpenAPI-backed
 `ctx.api.<slug>.graphql(query, vars)`, and proxied MCP
 `ctx.mcp.<slug>.<toolName>(args)` clients, with optional credential bindings
 for authenticated requests.
+
+### model-catalog-refresh
+
+Lead-only. Refresh the swarm model catalog and pricing rows from models.dev. Without `force`, skips the network when the last check is under 4h old. A forced refresh is accepted once per minute; a second one inside that window returns `skipped-cooldown` with `retryAfterMs`.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `force` | boolean | No | Fetch even if the last check is under 4h old (default `false`) |
+
+### model-catalog-overlay-upsert
+
+Lead-only. Add or update hand-verified facts for one model, for example a launch models.dev has not listed yet. Overlay fields win over models.dev, and overlay prices fill pricing-table gaps so cost recompute prices the model. The row auto-expires once models.dev matches every fact you set.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `provider` | string | Yes | models.dev provider id: `anthropic`, `openai`, `openrouter`, `amazon-bedrock`, `opencode` |
+| `modelId` | string | Yes | Model id as models.dev keys it (e.g. `claude-opus-5-5`) |
+| `reason` | string | Yes | Why this overlay exists (source of the facts) |
+| `name` | string | No | Display name |
+| `releaseDate` | string | No | Release date, `YYYY-MM-DD` |
+| `contextWindow` | number | No | Context window, tokens |
+| `maxOutput` | number | No | Max output tokens |
+| `reasoningOptions` | array | No | Reasoning options, models.dev shape: `[{type, values?}]` |
+| `pricing` | object | No | USD per million tokens |
+| `verifiedBy` | string | No | Who verified the facts (URL, person, agent) |
 
 ## Prompt Template Tools
 
@@ -482,6 +508,7 @@ Manage tasks in the pool: create, claim, release, accept, reject, or move to/fro
 | `dir` | string | No | Working directory (absolute path) for the agent to start in (only used with `create` action) |
 | `model` | string | No | Concrete model override for the created task (only used with `create` action) |
 | `modelTier` | string | No | Portable model tier for the created task: `smol`, `regular`, `smart`, or `ultra` (only used with `create` action) |
+| `allowCustomModel` | boolean | No | Accept a `model` the model catalog does not list; without it an unknown model id is rejected (only used with `create` action) |
 | `effort` | string | No | Reasoning effort for the created task: `off`, `low`, `medium`, `high`, `xhigh`, or Codex-only `max` when supported |
 | `requiredCapabilities` | array | No | Capabilities required for routing the newly created task |
 | `leadOnly` | boolean | No | Structured authorization constraint for a newly created privileged task. Only Lead agents may claim it. |
@@ -555,7 +582,7 @@ Manage HTTP service discovery. Registry entries are keyed by the calling agent's
 
 ### create-schedule / list-schedules / update-schedule / patch-schedule / delete-schedule / run-schedule-now
 
-Manage recurring and one-time task automation. Any registered agent can update or delete schedules. Schedules now support native `targetType` routing: create an agent task (`agent-task`), trigger a workflow directly, or launch a saved catalog script. Agent-task schedules also support both a concrete `model` override and a portable `modelTier` (`smol`, `regular`, `smart`, `ultra`) that is passed through to the tasks they create.
+Manage recurring and one-time task automation. Any registered agent can update or delete schedules. Schedules now support native `targetType` routing: create an agent task (`agent-task`), trigger a workflow directly, or launch a saved catalog script. Agent-task schedules also support both a concrete `model` override and a portable `modelTier` (`smol`, `regular`, `smart`, `ultra`) that is passed through to the tasks they create. A `model` the model catalog does not list is rejected unless `allowCustomModel: true` is set.
 
 Schedules accept a logical asset `key`; tasks they create inherit that namespace. `list-schedules` supports exact `key` and subtree `keyPrefix` filters, while `update-schedule` and `patch-schedule` can move a schedule by updating its key.
 

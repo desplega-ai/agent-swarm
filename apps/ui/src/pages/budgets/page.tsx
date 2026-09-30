@@ -113,7 +113,7 @@ function SpendBar({ spend, budget }: { spend: number; budget: number | null }) {
       </div>
       <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
         <div
-          className={cn("h-full transition-all", spendBarColor(ratio))}
+          className={cn("h-full transition-[width,background-color]", spendBarColor(ratio))}
           // inline-style: dynamic computed width %
           style={{ width: `${pct}%` }}
         />
@@ -547,6 +547,7 @@ export default function BudgetsPage() {
                   })
                 }
                 title={row.budget ? "Edit budget" : "Set budget"}
+                aria-label={`${row.budget ? "Edit" : "Set"} budget for ${row.agent.name}`}
               >
                 <Pencil className="h-3.5 w-3.5" />
               </Button>
@@ -563,6 +564,7 @@ export default function BudgetsPage() {
                     })
                   }
                   title="Remove budget"
+                  aria-label={`Remove budget for ${row.agent.name}`}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </Button>
@@ -759,6 +761,7 @@ export default function BudgetsPage() {
                 className="h-7 w-7"
                 onClick={() => setPricingDeleteTarget(row)}
                 title="Delete row (typo correction)"
+                aria-label={`Delete ${row.tokenClass} price for ${row.model}`}
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>

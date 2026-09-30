@@ -46,6 +46,7 @@ import {
 } from "../types.ts";
 import { getApiKey } from "../utils/api-key.ts";
 import { computeBudgetBackoffMs } from "../utils/budget-backoff.ts";
+import { isCodexAuthFailureReason } from "../utils/codex-auth-failure.ts";
 import { getMcpBaseUrl } from "../utils/constants.ts";
 import { getContextWindowSize } from "../utils/context-window.ts";
 import {
@@ -65,6 +66,7 @@ import { refreshRuntimeModelCatalog } from "../utils/runtime-model-catalog.ts";
 import { resolveScriptsOnlyMode } from "../utils/scripts-only-mode.ts";
 import { scrubSecrets } from "../utils/secret-scrubber.ts";
 import { refreshSkillsIfChanged } from "../utils/skills-refresh.ts";
+import { guardSpawnModel } from "../utils/spawn-model-guard.ts";
 import { isSteeringEnabled } from "../utils/steering-enabled.ts";
 import { interpolate } from "../utils/template.ts";
 import { detectVcsProvider } from "../vcs/index.ts";
@@ -777,6 +779,16 @@ export interface ResolvedEnvResult {
 // Preserve the deployment value before config reloads mutate process.env.
 const deploymentMemoryRaters = process.env.MEMORY_RATERS;
 
+/**
+ * Container value (undefined when unset) of each RELOADABLE_ENV_KEYS entry a
+ * swarm_config row has overwritten in process.env, recorded before the first
+ * overwrite. A reload starts from process.env, so without this a deleted row
+ * would leave its value in place until the container restarts. Keys no row
+ * ever overwrote are absent and keep the container value. MEMORY_RATERS keeps
+ * its own deployment snapshot above.
+ */
+const rowOverriddenBootEnv = new Map<string, string | undefined>();
+
 export async function fetchResolvedEnv(
   apiUrl: string,
   apiKey: string,
@@ -827,6 +839,11 @@ export async function fetchResolvedEnv(
         // Only reset after a successful fetch so outages retain the current value.
         env.MEMORY_RATERS =
           baseEnv === process.env ? deploymentMemoryRaters : baseEnv.MEMORY_RATERS;
+        // Same for every other key a row overwrote: start from the container
+        // value, so a row that is gone no longer applies.
+        if (baseEnv === process.env) {
+          for (const [key, bootValue] of rowOverriddenBootEnv) env[key] = bootValue;
+        }
 
         if (data.configs?.length) {
           scriptsOnlyConfigValue = data.configs.find(
@@ -1049,7 +1066,7 @@ export async function provisionAgentFsAfterRegistration(opts: {
  *
  * - STEERING_ENABLED — read per-poll by `isSteeringEnabled()` and by the
  *   system-prompt builder; flipping it mid-run just gates a feature.
- * - ANONYMIZED_TELEMETRY — read per-event by `telemetry.isEnabled()`.
+ * - ANONYMIZED_TELEMETRY — read per-event by `isTelemetryEnabled()`.
  * - MEMORY_RATERS — read per hook/prompt invocation.
  * - TEMPLATE_REGISTRY_URL — read per registry fetch.
  * - SLACK_DISABLE — read by the prompt builder to gate the Slack tool section.
@@ -1073,6 +1090,9 @@ export const RELOADABLE_ENV_KEYS: ReadonlySet<string> = new Set([
   "TEMPLATE_REGISTRY_URL",
   "SLACK_DISABLE",
   "SWARM_ORG_NAME",
+  // pi reads these from process.env for its traits and its session.
+  "PI_TOOL_DEFERRAL",
+  "PI_CODEMODE",
 ]);
 
 /**
@@ -1109,11 +1129,20 @@ export function applyResolvedEnvToProcessEnv(
   const changed: string[] = [];
   for (const key of RELOADABLE_ENV_KEYS) {
     const next = freshEnv[key];
-    if (key === "MEMORY_RATERS" && next === undefined && process.env[key] !== undefined) {
+    if (
+      next === undefined &&
+      process.env[key] !== undefined &&
+      (key === "MEMORY_RATERS" || rowOverriddenBootEnv.has(key))
+    ) {
+      // A deleted row for a key the container never set. Keys no row
+      // overwrote stay as the container set them.
       delete process.env[key];
       changed.push(key);
     } else if (next !== undefined && next !== process.env[key]) {
       const previous = process.env[key];
+      if (key !== "MEMORY_RATERS" && !rowOverriddenBootEnv.has(key)) {
+        rowOverriddenBootEnv.set(key, previous);
+      }
       process.env[key] = next;
       changed.push(key);
       // Make a reload that blanks a previously-set value loud — silently
@@ -1779,14 +1808,19 @@ export async function resolveCodexOAuthCredentialInfo(
       const slots = await loadAllCodexOAuthSlots(apiUrl, apiKey);
       if (slots.length > 0) {
         let availableIndices: number[] | undefined;
+        let authFailureFence: number | undefined;
         try {
           const resp = await fetch(
             `${apiUrl}/api/keys/available?keyType=CODEX_OAUTH&totalKeys=${slots.length}`,
             { headers: { Authorization: `Bearer ${apiKey}` } },
           );
           if (resp.ok) {
-            const data = (await resp.json()) as { availableIndices: number[] };
+            const data = (await resp.json()) as {
+              availableIndices: number[];
+              authFailureFence?: number;
+            };
             availableIndices = data.availableIndices;
+            authFailureFence = data.authFailureFence;
             if (availableIndices.length < slots.length) {
               console.log(
                 `[credentials] CODEX_OAUTH: ${availableIndices.length}/${slots.length} slots available (${slots.length - availableIndices.length} rate-limited)`,
@@ -1827,7 +1861,10 @@ export async function resolveCodexOAuthCredentialInfo(
             },
             last_refresh: new Date(slotEntry.creds.expires).toISOString(),
           };
-          const sel = authJsonToCredentialSelection(authJson, selectedSlot, slots.length);
+          const sel = {
+            ...authJsonToCredentialSelection(authJson, selectedSlot, slots.length),
+            authFailureFence,
+          };
           console.log(
             `[credentials] Selected CODEX_OAUTH slot ${selectedSlot + 1}/${slots.length} [...${sel.keySuffix}]`,
           );
@@ -1901,6 +1938,46 @@ async function reportKeyRateLimit(
   }
 }
 
+/** Upper bound on each awaited credential-outcome report, so a slow API never stalls completions. */
+const KEY_OUTCOME_REPORT_TIMEOUT_MS = 5000;
+
+/** Report a Codex pool auth failure; the API benches after 2 in a row. Awaited, never throws. */
+async function reportKeyAuthFailure(
+  apiUrl: string,
+  apiKey: string,
+  keyType: string,
+  keySuffix: string,
+  keyIndex: number,
+  taskId: string,
+  timeoutMs = KEY_OUTCOME_REPORT_TIMEOUT_MS,
+): Promise<void> {
+  try {
+    const resp = await fetch(`${apiUrl}/api/keys/report-auth-failure`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({ keyType, keySuffix, keyIndex, taskId }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = (await resp.json()) as {
+      consecutiveAuthFailures: number;
+      benched: boolean;
+      rateLimitedUntil: string | null;
+    };
+    console.log(
+      `[credentials] Auth failure on ...${keySuffix}: ${data.consecutiveAuthFailures} in a row${
+        data.benched ? `; benched until ${data.rateLimitedUntil}` : ""
+      }`,
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(scrubSecrets(`[credentials] Failed to report auth failure: ${message}`));
+  }
+}
+
 /**
  * Reports rate-limit window telemetry for a key. Returns the underlying
  * fetch promise (does not swallow errors) so a caller that needs the post to
@@ -1950,12 +2027,14 @@ export async function reportKeyRateLimitWindows(
   }
 }
 
-/** Clear a stale rate-limit record after a successful task (fire-and-forget) */
+/** Clear a stale rate-limit record after a successful task. Bounded, never throws. */
 async function reportKeyClearRateLimit(
   apiUrl: string,
   apiKey: string,
   keyType: string,
   keySuffix: string,
+  authFence: number | undefined,
+  timeoutMs = KEY_OUTCOME_REPORT_TIMEOUT_MS,
 ): Promise<void> {
   try {
     const resp = await fetch(`${apiUrl}/api/keys/clear-rate-limit`, {
@@ -1964,7 +2043,11 @@ async function reportKeyClearRateLimit(
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify({ keyType, keySuffix }),
+      // A task that exited 0 proves the login works, so it may lift an auth bench.
+      // `authFence` (read before the task started) stops a late (timed-out) report,
+      // from this or any other worker, from clearing failures recorded after it.
+      body: JSON.stringify({ keyType, keySuffix, clearAuthBench: true, authFence }),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (resp.ok) {
       const data = (await resp.json()) as { cleared?: boolean };
@@ -1976,6 +2059,49 @@ async function reportKeyClearRateLimit(
     }
   } catch {
     // Non-blocking
+  }
+}
+
+/**
+ * Report a finished task's credential outcome: a success resets the auth-failure
+ * count (and lifts an auth bench); a counted Codex auth failure adds to it.
+ * Awaited by the caller before it processes the next completion, so the API sees
+ * success and failure reports in completion order. A success carries the
+ * `authFence` the task read before it started: when its report times out and
+ * lands late, the API keeps every auth failure recorded after that fence.
+ * Without a fence, a success clears only an ordinary rate limit. Bounded, never throws.
+ */
+export async function reportKeyCompletionOutcome(opts: {
+  apiUrl: string;
+  apiKey: string;
+  credential: { keyType: string; keySuffix: string; keyIndex: number; authFence?: number };
+  taskId: string;
+  exitCode: number;
+  failureReason: string | undefined;
+  timeoutMs?: number;
+}): Promise<void> {
+  const { apiUrl, apiKey, credential, taskId, exitCode, failureReason, timeoutMs } = opts;
+  if (exitCode === 0) {
+    await reportKeyClearRateLimit(
+      apiUrl,
+      apiKey,
+      credential.keyType,
+      credential.keySuffix,
+      credential.authFence,
+      timeoutMs,
+    );
+    return;
+  }
+  if (credential.keyType === "CODEX_OAUTH" && isCodexAuthFailureReason(failureReason)) {
+    await reportKeyAuthFailure(
+      apiUrl,
+      apiKey,
+      credential.keyType,
+      credential.keySuffix,
+      credential.keyIndex,
+      taskId,
+      timeoutMs,
+    );
   }
 }
 
@@ -2348,7 +2474,7 @@ export interface RunnerOptions {
 }
 
 /** Running task state for parallel execution */
-interface RunningTask {
+export interface RunningTask {
   taskId: string;
   session: ProviderSession;
   logFile: string;
@@ -2367,6 +2493,8 @@ interface RunningTask {
     keyType: string;
     keySuffix: string;
     keyIndex: number;
+    /** `authFailureFence` read before the task started (Codex pool only). */
+    authFence?: number;
   };
   /**
    * Harness provider this session was actually spawned/resumed on, snapshotted
@@ -2398,7 +2526,7 @@ interface RunningTask {
 }
 
 /** Runner state for tracking concurrent tasks */
-interface RunnerState {
+export interface RunnerState {
   activeTasks: Map<string, RunningTask>;
   maxConcurrent: number;
   startedAt: number;
@@ -3667,7 +3795,30 @@ async function spawnProviderProcess(
     );
   }
   const taskModel = opts.resolvedModel || taskModelSelection.model || "";
-  const model = taskModel || configModel || "";
+  // Never start a CLI with a model from another harness family (runbooks/model-tiers.md).
+  const spawnModel = guardSpawnModel({
+    taskModel,
+    configModel,
+    harness: opts.harnessProvider,
+    role: opts.role,
+  });
+  if (spawnModel.kind === "mismatch") {
+    console.warn(`[${opts.role}] ${spawnModel.reason}`);
+    if (realTaskId) {
+      await ensureTaskFinished(
+        { apiUrl: opts.apiUrl, apiKey: opts.apiKey, agentId: opts.agentId },
+        opts.role,
+        realTaskId,
+        1,
+        spawnModel.reason,
+        undefined,
+        opts.harnessProvider,
+      );
+    }
+    throw new Error(spawnModel.reason);
+  }
+  if (spawnModel.warning) console.warn(spawnModel.warning);
+  const model = spawnModel.model;
 
   // Resolve Codex OAuth pool slot BEFORE building ProviderSessionConfig so we
   // can pass codexSlot through and the adapter writes token refreshes back to
@@ -4436,6 +4587,7 @@ async function spawnProviderProcess(
         keyType: primarySelection.keyType,
         keySuffix: primarySelection.keySuffix,
         keyIndex: primarySelection.index,
+        authFence: primarySelection.authFailureFence,
       }
     : undefined;
 
@@ -4475,8 +4627,8 @@ async function spawnProviderProcess(
   return runningTask;
 }
 
-/** Check for completed processes and remove them from active tasks */
-async function checkCompletedProcesses(
+/** Check for completed processes and remove them from active tasks. Exported for tests. */
+export async function checkCompletedProcesses(
   state: RunnerState,
   role: string,
   apiConfig?: ApiConfig,
@@ -4623,6 +4775,18 @@ async function checkCompletedProcesses(
           );
         }
 
+        // Land the success reset or the auth-failure count (and a bench at 2)
+        // before this task finishes and before the next completion, so the API
+        // sees them in order and the next draw already skips a dead login.
+        await reportKeyCompletionOutcome({
+          apiUrl: apiConfig.apiUrl,
+          apiKey: apiConfig.apiKey,
+          credential: credentialInfo,
+          taskId,
+          exitCode: result.exitCode,
+          failureReason,
+        });
+
         const finalWindows = buildFinalRateLimitWindows(
           result.rateLimitWindows,
           outcome,
@@ -4703,15 +4867,6 @@ async function checkCompletedProcesses(
         });
       }
       state.tasksProcessed += 1;
-
-      if (result.exitCode === 0 && credentialInfo) {
-        reportKeyClearRateLimit(
-          apiConfig.apiUrl,
-          apiConfig.apiKey,
-          credentialInfo.keyType,
-          credentialInfo.keySuffix,
-        ).catch(() => {});
-      }
 
       ensure({
         id: "worker_process_finished",

@@ -100,7 +100,59 @@ export const CONFIG_PRESETS: ConfigPreset[] = [
     description: "Cheap smoke set for quick sanity runs.",
     configIds: ["claude-haiku", "pi-deepseek-flash", "pi-gemini-flash", "codex-5.6-luna"],
   },
+  // Phase 3 (swarm-evals plan v2): the scheduled tiers. Pinned config ids, not
+  // `latest:` aliases, so a model change is a deliberate edit here. No config
+  // carries a default reasoning effort, so each runs at its harness default and
+  // the attempt records the effort the harness reported applying. The caps are
+  // enforced by the runner (see src/cost/billing.ts for what counts as metered).
+  {
+    id: "nightly-canary",
+    label: "Nightly canary",
+    description: "Opus 5.5 + Codex 6 luna, 3 repeats, $2 metered cap.",
+    configIds: ["claude-opus-5.5", "codex-6-luna"],
+    runDefaults: { attemptsPerCell: 3, maxMeteredUsd: 2 },
+  },
+  {
+    id: "weekly-matrix",
+    label: "Weekly matrix",
+    description:
+      "Canary configs + Codex 6.1 sol + Codex 6 astra + DeepSeek V4.1 Flash, 5 repeats, $37 metered cap.",
+    // Claude and Codex run on subscription, so the cap is mostly E2B time:
+    // ~375 attempts: E2B ~$19 (measured $0.02-0.10 each) + judge ~$11 (~$0.03
+    // each) + DeepSeek tokens ~$1 = ~$31, plus 20%.
+    configIds: [
+      "claude-opus-5.5",
+      "codex-6.1-sol",
+      "codex-6-luna",
+      "codex-6-astra",
+      "pi-deepseek-v4.1-flash",
+    ],
+    runDefaults: { attemptsPerCell: 5, maxMeteredUsd: 37 },
+  },
 ];
+
+/**
+ * Run plan implied by the named presets: per field, the first preset (flag
+ * order) that sets it wins. Unknown ids throw, like expandPresetSelection.
+ */
+export function presetRunDefaults(presetIds: string[]): {
+  attemptsPerCell?: number;
+  maxMeteredUsd?: number;
+} {
+  const byId = new Map(CONFIG_PRESETS.map((p) => [p.id, p]));
+  const out: { attemptsPerCell?: number; maxMeteredUsd?: number } = {};
+  for (const id of presetIds) {
+    const preset = byId.get(id);
+    if (!preset) {
+      throw new Error(
+        `unknown preset "${id}" (available: ${CONFIG_PRESETS.map((p) => p.id).join(", ")})`,
+      );
+    }
+    out.attemptsPerCell ??= preset.runDefaults?.attemptsPerCell;
+    out.maxMeteredUsd ??= preset.runDefaults?.maxMeteredUsd;
+  }
+  return out;
+}
 
 /**
  * Frozen CLI expansion (v7.7 item 1): flag-order presets' config ids first

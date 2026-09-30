@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "1.158.0",
+    "version": "1.159.0",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -4815,6 +4815,26 @@
                             "format",
                             "header"
                           ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "format": {
+                              "type": "string",
+                              "enum": [
+                                "standard-webhooks"
+                              ]
+                            },
+                            "toleranceSeconds": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "default": 300,
+                              "description": "Maximum allowed clock skew, in seconds, for the webhook-timestamp header"
+                            }
+                          },
+                          "required": [
+                            "format"
+                          ]
                         }
                       ],
                       "description": "Optional webhook verification format. Omit to keep legacy HMAC-SHA256 behavior with fallback header scanning."
@@ -5442,6 +5462,26 @@
                           "required": [
                             "format",
                             "header"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "format": {
+                              "type": "string",
+                              "enum": [
+                                "standard-webhooks"
+                              ]
+                            },
+                            "toleranceSeconds": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "default": 300,
+                              "description": "Maximum allowed clock skew, in seconds, for the webhook-timestamp header"
+                            }
+                          },
+                          "required": [
+                            "format"
                           ]
                         }
                       ],
@@ -14935,7 +14975,7 @@
     "/api/oauth/keep-warm/codex": {
       "post": {
         "summary": "Locked keep-warm refresh sweep across all Codex OAuth pool slots",
-        "description": "Enumerates codex_oauth_* slots and refreshes any older than ~7 days through the same locked getValidCodexOAuth path used at task time. Skips slots already benched by codex-auth-expiry-watch.",
+        "description": "Enumerates codex_oauth_* slots and refreshes any older than ~7 days through the same locked getValidCodexOAuth path used at task time. Skips slots with a codex-auth-watch bench marker (auth-failure bench or codex-auth-expiry-watch).",
         "tags": [
           "OAuth"
         ],
@@ -15607,6 +15647,115 @@
         }
       }
     },
+    "/api/keys/report-auth-failure": {
+      "post": {
+        "summary": "Record an auth failure for a pooled key; bench it after 2 in a row",
+        "tags": [
+          "API Keys"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "keyType": {
+                    "type": "string"
+                  },
+                  "keySuffix": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 10
+                  },
+                  "keyIndex": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "taskId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "scope": {
+                    "type": "string"
+                  },
+                  "scopeId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "keyType",
+                  "keySuffix",
+                  "keyIndex"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Failure recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "consecutiveAuthFailures": {
+                      "type": "integer"
+                    },
+                    "benched": {
+                      "type": "boolean"
+                    },
+                    "rateLimitedUntil": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "consecutiveAuthFailures",
+                    "benched",
+                    "rateLimitedUntil"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/keys/report-rate-limit-windows": {
       "post": {
         "summary": "Record provider-emitted rate-limit window telemetry for an API key",
@@ -15827,12 +15976,16 @@
                         "string",
                         "null"
                       ]
+                    },
+                    "authFailureFence": {
+                      "type": "integer"
                     }
                   },
                   "required": [
                     "success",
                     "availableIndices",
-                    "totalKeys"
+                    "totalKeys",
+                    "authFailureFence"
                   ]
                 }
               }
@@ -16023,6 +16176,15 @@
                               null
                             ]
                           },
+                          "consecutiveAuthFailures": {
+                            "type": "integer"
+                          },
+                          "lastAuthFailureAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
                           "modelLimits": {
                             "type": "array",
                             "items": {
@@ -16078,6 +16240,8 @@
                           "rateLimitWindows",
                           "plan",
                           "planSource",
+                          "consecutiveAuthFailures",
+                          "lastAuthFailureAt",
                           "modelLimits",
                           "createdAt",
                           "updatedAt"
@@ -16350,6 +16514,17 @@
                   },
                   "scopeId": {
                     "type": "string"
+                  },
+                  "clearAuthBench": {
+                    "type": "boolean"
+                  },
+                  "keyIndex": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "authFence": {
+                    "type": "integer",
+                    "minimum": 0
                   }
                 },
                 "required": [
@@ -24798,7 +24973,7 @@
     "/status": {
       "get": {
         "summary": "Identity + setup readiness + live activity for the swarm dashboard",
-        "description": "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set.",
+        "description": "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set; telemetry reports the effective ANONYMIZED_TELEMETRY opt-out state.",
         "tags": [
           "Status"
         ],
@@ -25144,6 +25319,17 @@
                         "ok",
                         "degraded",
                         "broken"
+                      ]
+                    },
+                    "telemetry": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "enabled"
                       ]
                     }
                   },
@@ -38997,6 +39183,9 @@
                     "type": "string",
                     "minLength": 1
                   },
+                  "allowCustomModel": {
+                    "type": "boolean"
+                  },
                   "parentTaskId": {
                     "type": "string",
                     "format": "uuid"
@@ -46372,7 +46561,8 @@
                     "type": "string"
                   },
                   "model": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Concrete model override for this task, interpreted by the assignee's harness/provider. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected."
                   },
                   "modelTier": {
                     "type": "string",
@@ -46712,6 +46902,16 @@
           },
           "400": {
             "description": "Cannot cancel terminal task",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Agent caller is neither a lead nor the task creator",
             "content": {
               "application/json": {
                 "schema": {
@@ -47458,6 +47658,16 @@
                   "required": [
                     "success"
                   ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Task is assigned to another agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -52316,6 +52526,26 @@
                                     "format",
                                     "header"
                                   ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "format": {
+                                      "type": "string",
+                                      "enum": [
+                                        "standard-webhooks"
+                                      ]
+                                    },
+                                    "toleranceSeconds": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "default": 300,
+                                      "description": "Maximum allowed clock skew, in seconds, for the webhook-timestamp header"
+                                    }
+                                  },
+                                  "required": [
+                                    "format"
+                                  ]
                                 }
                               ],
                               "description": "Optional webhook verification format. Omit to keep legacy HMAC-SHA256 behavior with fallback header scanning."
@@ -52687,6 +52917,26 @@
                                   "required": [
                                     "format",
                                     "header"
+                                  ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "format": {
+                                      "type": "string",
+                                      "enum": [
+                                        "standard-webhooks"
+                                      ]
+                                    },
+                                    "toleranceSeconds": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "default": 300,
+                                      "description": "Maximum allowed clock skew, in seconds, for the webhook-timestamp header"
+                                    }
+                                  },
+                                  "required": [
+                                    "format"
                                   ]
                                 }
                               ],

@@ -4,33 +4,37 @@
   --bg: oklch(0.141 0.005 285.823); /* dashboard background dark (zinc-950) */
   --panel: oklch(0.21 0.006 285.885); /* card dark */
   --panel-2: oklch(0.274 0.006 286.033); /* secondary dark */
-  --border: oklch(1 0 0 / 12%);
+  --border: oklch(1 0 0 / 10%); /* DESIGN.md border */
   --text: oklch(0.985 0 0);
   --dim: oklch(0.705 0.015 286.067); /* muted-foreground dark */
   --accent: oklch(0.769 0.188 70.08); /* brand primary — amber-500 */
-  --green: #34d399;
-  --red: #f87171;
-  --yellow: #facc15;
-  --blue: #38bdf8;
-  --orange: #fb923c;
+  /* status colors = DESIGN.md status-* tokens (dark); the short names are kept
+     so call sites stay unchanged */
+  --green: oklch(0.78 0.1 163); /* status-success */
+  --red: oklch(0.74 0.11 22); /* status-error */
+  --yellow: oklch(0.86 0.09 95); /* status-pending */
+  --blue: oklch(0.78 0.09 235); /* status-info */
+  --orange: oklch(0.79 0.1 55); /* status-warning */
   --font-sans: "Space Grotesk", system-ui, sans-serif;
   --font-mono: "Space Mono", ui-monospace, SFMono-Regular, monospace;
-  --app-header-h: 41px; /* measured .app-header height — sticky offsets (v7.6 §C3) */
+  --app-header-h: 41px; /* one-row .app-header height; App.tsx keeps it live when the header wraps */
 }
 
 :root[data-theme="light"] {
   --bg: #fafafa;
   --panel: #ffffff;
   --panel-2: #f4f4f5;
-  --border: #e4e4e7;
+  --border: oklch(0.92 0.004 286.32); /* DESIGN.md border (light) */
   --text: oklch(0.141 0.005 285.823);
   --dim: #71717a;
   --accent: oklch(0.555 0.163 48.998); /* brand primary light — amber ~700 */
-  --green: #10b981;
-  --red: #ef4444;
-  --yellow: #eab308;
-  --blue: #0ea5e9;
-  --orange: #f97316;
+  /* light mode uses the status-*-strong tokens: these colors are mostly text
+     and marks on neutral surfaces, which DESIGN.md reserves the strong set for */
+  --green: oklch(0.5 0.09 163); /* status-success-strong */
+  --red: oklch(0.51 0.14 25); /* status-error-strong */
+  --yellow: oklch(0.55 0.09 90); /* status-pending-strong */
+  --blue: oklch(0.5 0.09 240); /* status-info-strong */
+  --orange: oklch(0.53 0.11 50); /* status-warning-strong */
 }
 
 * {
@@ -92,8 +96,9 @@ textarea {
   top: 0;
   z-index: 20;
   display: flex;
+  flex-wrap: wrap; /* narrow viewports: controls drop to a new line, never off-screen */
   align-items: center;
-  gap: 16px;
+  gap: 8px 16px;
   padding: 8px 16px;
   background: var(--panel);
   border-bottom: 1px solid var(--border);
@@ -117,6 +122,7 @@ textarea {
 
 .nav-pills {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
@@ -349,7 +355,7 @@ table.data thead th {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--dim);
-  padding: 3px 8px;
+  padding: 6px 8px;
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
 }
@@ -361,8 +367,10 @@ table.data td {
   white-space: nowrap;
 }
 
-table.data tbody tr:hover {
-  background: var(--panel-2);
+@media (hover: hover) {
+  table.data tbody tr:hover {
+    background: var(--panel-2);
+  }
 }
 
 table.data tbody tr.clickable {
@@ -383,6 +391,7 @@ table.data .align-center {
 }
 
 .dt-sort {
+  position: relative;
   background: none;
   border: none;
   padding: 0;
@@ -391,6 +400,14 @@ table.data .align-center {
   text-transform: inherit;
   letter-spacing: inherit;
   cursor: pointer;
+}
+
+/* The label is 10.5px text; stretch the hit area over the header cell's
+   padding so the target is ≥24px tall without changing the layout. */
+.dt-sort::after {
+  content: "";
+  position: absolute;
+  inset: -6px -8px;
 }
 
 .dt-sort:hover {
@@ -733,7 +750,10 @@ textarea:focus-visible,
 .btn:focus-visible,
 .dt-sort:focus-visible,
 .jv-toggle:focus-visible,
-.theme-toggle:focus-visible {
+.theme-toggle:focus-visible,
+.pill:focus-visible,
+.tab:focus-visible,
+.dt-cell:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
@@ -1232,6 +1252,15 @@ table.matrix td.matrix-cell.selected {
   max-width: 100%;
 }
 
+/* keep a header ⓘ above the sort button's stretched hit area */
+table.data thead th .tooltip {
+  position: relative;
+}
+
+.dt-empty .btn {
+  margin-left: 10px;
+}
+
 /* single-animation rule (item 7): StatusBadge activeLabel — ONE spinner + static text */
 .status-live {
   display: inline-flex;
@@ -1331,9 +1360,14 @@ table.matrix.mini td.mm-cell {
   line-height: 1;
 }
 
-tr:hover .dt-chevron,
 tr[aria-expanded="true"] .dt-chevron {
   color: var(--text);
+}
+
+@media (hover: hover) {
+  tr:hover .dt-chevron {
+    color: var(--text);
+  }
 }
 
 tr.dt-expand-row > td {
@@ -1342,8 +1376,10 @@ tr.dt-expand-row > td {
   white-space: normal;
 }
 
-tr.dt-expand-row:hover {
-  background: none;
+@media (hover: hover) {
+  tr.dt-expand-row:hover {
+    background: none;
+  }
 }
 
 /* ---- confirm dialog (item 12) ---- */

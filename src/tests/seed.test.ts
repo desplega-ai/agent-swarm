@@ -112,6 +112,8 @@ describe("seeder harness — versioning rule", () => {
     expect(result.skippedUserModified).toBe(1);
     // The user's edit survived — the harness did not clobber it.
     expect(upstream.get("a")).toBe("h-user-edit");
+    // Seed state keeps the original baseline, so the edit stays detectable.
+    expect((await getSeedState("preserve-test", "a"))?.seededHash).toBe("h-a1");
   });
 
   test("pre-existing entity identical to source with no seed state -> adopted as no-op", async () => {
@@ -129,6 +131,29 @@ describe("seeder harness — versioning rule", () => {
     const second = await runSeeder(seeder, { quiet: true });
     expect(second.updated).toBe(1);
     expect(upstream.get("x")).toBe("h-x2");
+  });
+
+  test("edited then reset to current source -> re-baselined, and later source changes apply", async () => {
+    const source = new Map([["r", "h-A"]]);
+    const upstream = new Map<string, string>();
+    const seeder = makeFakeSeeder("reset-test", source, upstream);
+
+    await runSeeder(seeder, { quiet: true }); // seededHash=A, live=A
+    source.set("r", "h-B"); // source moves to B
+    upstream.set("r", "h-B"); // live was edited, then reset to byte-identical B
+
+    const first = await runSeeder(seeder, { quiet: true });
+    expect(first.updated).toBe(0);
+    expect(first.skippedUnchanged).toBe(1);
+    expect(first.skippedUserModified).toBe(0);
+    expect((await getSeedState("reset-test", "r"))?.seededHash).toBe("h-B");
+
+    source.set("r", "h-C"); // a later upstream change must now land
+    const second = await runSeeder(seeder, { quiet: true });
+    expect(second.updated).toBe(1);
+    expect(second.skippedUserModified).toBe(0);
+    expect(upstream.get("r")).toBe("h-C");
+    expect((await getSeedState("reset-test", "r"))?.seededHash).toBe("h-C");
   });
 
   test("pre-existing entity differing from source with no seed state -> preserved (conservative)", async () => {
