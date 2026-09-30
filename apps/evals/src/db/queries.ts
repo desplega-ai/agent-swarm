@@ -1,6 +1,7 @@
 import type { Client, Row } from "@libsql/client";
 import type {
   ArtifactRow,
+  AttemptExclusion,
   AttemptRow,
   AttemptStatus,
   CostSource,
@@ -26,6 +27,7 @@ function rowToRun(r: Row): EvalRunRow {
     concurrency: Number(r.concurrency),
     judgeModel: (r.judge_model as string) ?? null,
     efforts: parseJsonColumn<Record<string, ReasoningEffortLevel>>(r.efforts_json),
+    maxMeteredUsd: r.max_metered_usd == null ? null : Number(r.max_metered_usd),
     createdAt: r.created_at as string,
     finishedAt: (r.finished_at as string) ?? null,
   };
@@ -48,6 +50,9 @@ function rowToAttempt(r: Row): AttemptRow {
     configId: r.config_id as string,
     attemptIndex: Number(r.attempt_index),
     status: r.status as AttemptStatus,
+    scenarioVersion: r.scenario_version == null ? null : Number(r.scenario_version),
+    suiteVersion: (r.suite_version as string) ?? null,
+    exclusion: (r.exclusion as AttemptExclusion) ?? null,
     retries: Number(r.retries),
     sandboxId: (r.sandbox_id as string) ?? null,
     apiUrl: (r.api_url as string) ?? null,
@@ -109,12 +114,14 @@ export async function createRun(
     judgeModel?: string;
     /** Effective effort per config id (see `planRunEfforts`); `{}` when no config has one. */
     efforts?: Record<string, ReasoningEffortLevel>;
+    /** Hard cap on metered spend in USD; omit for no cap. */
+    maxMeteredUsd?: number;
   },
 ): Promise<void> {
   await db.execute({
     sql: `INSERT INTO eval_runs
-            (id, name, scenario_ids, config_ids, attempts_per_cell, concurrency, judge_model, efforts_json)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            (id, name, scenario_ids, config_ids, attempts_per_cell, concurrency, judge_model, efforts_json, max_metered_usd)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     args: [
       run.id,
       run.name ?? null,
@@ -124,6 +131,7 @@ export async function createRun(
       run.concurrency,
       run.judgeModel ?? null,
       JSON.stringify(run.efforts ?? {}),
+      run.maxMeteredUsd ?? null,
     ],
   });
 }
@@ -149,12 +157,31 @@ export async function listRuns(db: Client): Promise<EvalRunRow[]> {
 
 export async function insertAttempt(
   db: Client,
-  a: { id: string; runId: string; scenarioId: string; configId: string; attemptIndex: number },
+  a: {
+    id: string;
+    runId: string;
+    scenarioId: string;
+    configId: string;
+    attemptIndex: number;
+    /** Version of the scenario at scheduling time (see scenarios/suite.ts). */
+    scenarioVersion?: number | null;
+    /** Suite version when the scenario at that version is in the manifest. */
+    suiteVersion?: string | null;
+  },
 ): Promise<void> {
   await db.execute({
-    sql: `INSERT OR IGNORE INTO attempts (id, run_id, scenario_id, config_id, attempt_index)
-          VALUES (?, ?, ?, ?, ?)`,
-    args: [a.id, a.runId, a.scenarioId, a.configId, a.attemptIndex],
+    sql: `INSERT OR IGNORE INTO attempts
+            (id, run_id, scenario_id, config_id, attempt_index, scenario_version, suite_version)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    args: [
+      a.id,
+      a.runId,
+      a.scenarioId,
+      a.configId,
+      a.attemptIndex,
+      a.scenarioVersion ?? null,
+      a.suiteVersion ?? null,
+    ],
   });
 }
 
@@ -163,6 +190,9 @@ export async function updateAttempt(
   id: string,
   patch: Partial<{
     status: AttemptStatus;
+    exclusion: AttemptExclusion | null;
+    scenarioVersion: number | null;
+    suiteVersion: string | null;
     retries: number;
     sandboxId: string | null;
     apiUrl: string | null;
@@ -190,6 +220,9 @@ export async function updateAttempt(
   const args: (string | number | null)[] = [];
   const map: Record<string, string> = {
     status: "status",
+    exclusion: "exclusion",
+    scenarioVersion: "scenario_version",
+    suiteVersion: "suite_version",
     retries: "retries",
     sandboxId: "sandbox_id",
     apiUrl: "api_url",
@@ -268,12 +301,37 @@ export async function listAttemptsByScenario(
   return res.rows.map(rowToAttempt);
 }
 
-/** Reset errored attempts to pending so `resume` retries them (e.g. after a bug fix). */
+/**
+ * Reset errored attempts to pending so `resume` retries them (e.g. after a bug fix).
+ * Also clears `exclusion`: a retried attempt is a real attempt again, and cancelled
+ * attempts (dead run, cost cap) come back through here too.
+ */
 export async function resetErrorAttempts(db: Client, runId: string): Promise<number> {
   const res = await db.execute({
-    sql: `UPDATE attempts SET status = 'pending', retries = 0, error = NULL,
+    sql: `UPDATE attempts SET status = 'pending', retries = 0, error = NULL, exclusion = NULL,
           started_at = NULL, finished_at = NULL WHERE run_id = ? AND status = 'error'`,
     args: [runId],
+  });
+  return res.rowsAffected;
+}
+
+/**
+ * Close out attempts that will never finish: `pending`/`running`/`judging` rows of a run
+ * that is no longer executing. They end as `error` with `exclusion = 'cancelled'` (the
+ * status CHECK cannot take a new value additively), so they no longer read as work in
+ * flight and never count toward a score. `resume` resets them to `pending`.
+ * `runId` omitted = every run (boot: nothing is executing in a fresh process).
+ */
+export async function cancelUnfinishedAttempts(
+  db: Client,
+  opts: { reason: string; runId?: string },
+): Promise<number> {
+  const res = await db.execute({
+    sql: `UPDATE attempts
+          SET status = 'error', exclusion = 'cancelled', error = ?,
+              finished_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+          WHERE status IN ('pending','running','judging')${opts.runId ? " AND run_id = ?" : ""}`,
+    args: opts.runId ? [opts.reason, opts.runId] : [opts.reason],
   });
   return res.rowsAffected;
 }

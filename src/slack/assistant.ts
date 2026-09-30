@@ -14,6 +14,7 @@ import {
 } from "./inbound-files";
 import { ensureSlackThreadTree, isSlackRenderV2Enabled } from "./render-v2";
 import { hasOtherUserMention } from "./router";
+import { markSlackSessionProcessing } from "./session-status";
 import { bufferThreadMessage, getBufferMessageCount } from "./thread-buffer";
 // Side-effect import: registers all Slack event templates in the in-memory registry
 import "./templates";
@@ -65,7 +66,18 @@ export function createAssistant(): Assistant {
       // Wrap setStatus/setTitle to swallow all errors gracefully.
       // These calls can fail for various reasons (no_permission when the thread
       // wasn't started by the assistant, network errors, etc.), so we log and continue.
+      // With the v2 renderer Slack's native session status carries the "working"
+      // state for the whole ask (see session-status.ts), so the legacy free-text
+      // status below is only the fallback when the native call is unavailable.
+      let statusThread: { channelId: string; threadTs: string } | undefined;
       const safeSetStatus = async (status: string) => {
+        if (
+          statusThread &&
+          isSlackRenderV2Enabled() &&
+          (await markSlackSessionProcessing({ ...statusThread, client }))
+        ) {
+          return;
+        }
         try {
           await setStatus(status);
         } catch (error) {
@@ -85,6 +97,7 @@ export function createAssistant(): Assistant {
         const msg = message as unknown as Record<string, unknown>;
         const threadTs = (msg.thread_ts as string) || message.ts;
         const channelId = message.channel;
+        statusThread = { channelId, threadTs };
         const messageText = (msg.text as string) || "";
         // `file_share` messages land here too: an image sent with no caption
         // arrives with empty `text` and everything in `files`.

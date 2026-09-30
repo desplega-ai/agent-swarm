@@ -183,3 +183,192 @@ export function bootstrapDiffCI(
   const hi = percentileSorted(diffs, 1 - alpha / 2);
   return { lo, hi, diff, significant: lo > 0 || hi < 0 };
 }
+
+/**
+ * Unbiased pass^k estimator for one cell: the probability that ALL of `k`
+ * attempts drawn without replacement from `total` observed attempts pass, given
+ * `passed` of them did. C(passed, k) / C(total, k), computed as a product so it
+ * stays finite for any n.
+ *
+ * Null when `k` is not a positive integer, `passed` is out of range, or the cell
+ * has fewer than `k` attempts (the estimator is undefined there, not zero).
+ * Sanity: k = 1 is the plain pass rate; passed < k is 0; passed = total is 1.
+ */
+export function passPowK(passed: number, total: number, k: number): number | null {
+  if (!Number.isInteger(k) || k < 1 || passed < 0 || passed > total || total < k) return null;
+  if (passed < k) return 0;
+  let p = 1;
+  for (let i = 0; i < k; i++) p *= (passed - i) / (total - i);
+  return p;
+}
+
+/**
+ * Unbiased pass@k estimator: the probability that AT LEAST ONE of `k` attempts
+ * drawn without replacement from `total` passes. 1 - C(total - passed, k) / C(total, k).
+ * Null under the same conditions as {@link passPowK}.
+ */
+export function passAtK(passed: number, total: number, k: number): number | null {
+  if (!Number.isInteger(k) || k < 1 || passed < 0 || passed > total || total < k) return null;
+  const failed = total - passed;
+  if (failed < k) return 1;
+  let allFail = 1;
+  for (let i = 0; i < k; i++) allFail *= (failed - i) / (total - i);
+  return 1 - allFail;
+}
+
+/** Mean of the non-empty strata's means: each scenario counts once, however many attempts it has. */
+function macroMean(strata: number[][]): number | null {
+  let sum = 0;
+  let n = 0;
+  for (const s of strata) {
+    if (s.length === 0) continue;
+    sum += mean(s);
+    n += 1;
+  }
+  return n === 0 ? null : sum / n;
+}
+
+/** One bootstrap replicate of {@link macroMean}: resample each stratum with replacement. */
+function resampledMacroMean(strata: number[][], rng: () => number): number | null {
+  let sum = 0;
+  let n = 0;
+  for (const s of strata) {
+    const m = s.length;
+    if (m === 0) continue;
+    let acc = 0;
+    for (let j = 0; j < m; j++) acc += s[Math.floor(rng() * m)]!;
+    sum += acc / m;
+    n += 1;
+  }
+  return n === 0 ? null : sum / n;
+}
+
+export interface StratifiedInterval extends BootstrapInterval {
+  /** Macro mean over the non-empty strata; null when there are none. */
+  mean: number | null;
+}
+
+/**
+ * Bootstrap CI for a suite score: the mean of per-scenario means.
+ *
+ * `strata` holds one array of attempt scores per scenario. The suite's scenarios
+ * are fixed, so only the attempts inside each scenario are resampled (stratified
+ * bootstrap); the CI then reflects attempt-to-attempt noise and not which
+ * scenarios happened to be chosen. Each scenario counts once, so a config with
+ * extra attempts on one scenario is not pulled toward it.
+ *
+ * Seeded like {@link bootstrapCI}. No strata → mean null, CI [0, 0]. Strata of one
+ * attempt each cannot vary, so the CI collapses to the mean (callers flag low n).
+ */
+export function stratifiedBootstrapCI(
+  strata: number[][],
+  opts: BootstrapOptions = {},
+): StratifiedInterval {
+  const iters = opts.iters ?? 2000;
+  const alpha = opts.alpha ?? 0.05;
+  const point = macroMean(strata);
+  if (point === null) return { mean: null, lo: 0, hi: 0, method: "bootstrap" };
+  const rng = mulberry32(opts.seed ?? 0xc0ffee);
+  const means: number[] = new Array(iters);
+  for (let i = 0; i < iters; i++) means[i] = resampledMacroMean(strata, rng) ?? point;
+  means.sort((a, b) => a - b);
+  return {
+    mean: point,
+    lo: clamp01(percentileSorted(means, alpha / 2)),
+    hi: clamp01(percentileSorted(means, 1 - alpha / 2)),
+    method: "bootstrap",
+  };
+}
+
+/** Bootstrap spread of one group's rank; 1 is best. */
+export interface RankSpread {
+  /** Lower percentile of the rank, rounded down to a whole rank. */
+  lo: number;
+  /** Upper percentile of the rank, rounded up to a whole rank. */
+  hi: number;
+  /** Median rank across replicates (ties share the average rank, so it can be x.5). */
+  median: number;
+}
+
+/**
+ * How stable each group's rank is. `groups[g]` is group g's strata (see
+ * {@link stratifiedBootstrapCI}). Every replicate resamples every group and ranks
+ * the groups by macro mean (highest = rank 1, tied groups share the average of
+ * the ranks they span), so a leaderboard can print "rank 2, could be 1 to 4".
+ *
+ * Groups with no data get `null`. Seeded, so the same input gives the same spread.
+ */
+export function bootstrapRankSpread(
+  groups: number[][][],
+  opts: BootstrapOptions = {},
+): (RankSpread | null)[] {
+  const iters = opts.iters ?? 2000;
+  const alpha = opts.alpha ?? 0.05;
+  const live = groups.map((g, i) => (macroMean(g) === null ? -1 : i)).filter((i) => i >= 0);
+  const out: (RankSpread | null)[] = groups.map(() => null);
+  if (live.length === 0) return out;
+  const rng = mulberry32(opts.seed ?? 0xc0ffee);
+  const ranks = live.map(() => new Array<number>(iters));
+  const draw: number[] = new Array(live.length);
+  for (let it = 0; it < iters; it++) {
+    for (let li = 0; li < live.length; li++) {
+      draw[li] = resampledMacroMean(groups[live[li]!]!, rng) ?? 0;
+    }
+    for (let li = 0; li < live.length; li++) {
+      let greater = 0;
+      let equal = 0;
+      for (let lj = 0; lj < live.length; lj++) {
+        if (lj === li) continue;
+        const d = draw[lj]! - draw[li]!;
+        if (d > 1e-12) greater += 1;
+        else if (d >= -1e-12) equal += 1;
+      }
+      ranks[li]![it] = 1 + greater + equal / 2;
+    }
+  }
+  for (let li = 0; li < live.length; li++) {
+    const sorted = ranks[li]!.sort((a, b) => a - b);
+    out[live[li]!] = {
+      lo: Math.floor(percentileSorted(sorted, alpha / 2)),
+      hi: Math.ceil(percentileSorted(sorted, 1 - alpha / 2)),
+      median: percentileSorted(sorted, 0.5),
+    };
+  }
+  return out;
+}
+
+/**
+ * Paired bootstrap CI for the mean of `a[i] - b[i]`, resampling the PAIRS.
+ *
+ * Unlike {@link bootstrapDiffCI}, which resamples the two groups independently,
+ * this keeps each pair together, so a shared difficulty (the same scenario is
+ * hard for both configs) cancels instead of widening the interval. Pass one pair
+ * per scenario to resample scenarios, not attempts. `a` and `b` must be the same
+ * length and index-aligned. Bounds are not clamped: a difference can be negative.
+ *
+ * Edge: empty input → diff 0, CI [0, 0], not significant.
+ */
+export function pairedBootstrapDiffCI(
+  a: number[],
+  b: number[],
+  opts: BootstrapOptions = {},
+): DiffInterval {
+  if (a.length !== b.length) throw new Error("pairedBootstrapDiffCI: a and b must be aligned");
+  const n = a.length;
+  if (n === 0) return { lo: 0, hi: 0, diff: 0, significant: false };
+  const iters = opts.iters ?? 2000;
+  const alpha = opts.alpha ?? 0.05;
+  const d = a.map((x, i) => x - b[i]!);
+  const diff = mean(d);
+  const rng = mulberry32(opts.seed ?? 0xc0ffee);
+  const diffs: number[] = new Array(iters);
+  for (let i = 0; i < iters; i++) {
+    let acc = 0;
+    for (let j = 0; j < n; j++) acc += d[Math.floor(rng() * n)]!;
+    diffs[i] = acc / n;
+  }
+  diffs.sort((x, y) => x - y);
+  const lo = percentileSorted(diffs, alpha / 2);
+  const hi = percentileSorted(diffs, 1 - alpha / 2);
+  return { lo, hi, diff, significant: lo > 0 || hi < 0 };
+}

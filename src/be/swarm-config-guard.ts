@@ -290,6 +290,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     return null;
   },
   ...booleanValidators([
+    "SWARM_DEV_MODE",
     "MULTI_RUNTIME_ENABLED",
     "STEERING_ENABLED",
     "MEMORY_HYBRID_SEARCH",
@@ -299,6 +300,8 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     "POOL_AFFINITY_ENFORCEMENT",
     "SCRIPTS_ONLY_MCP",
     "TASK_TOOL_PRELOAD_ENABLED",
+    "PI_TOOL_DEFERRAL",
+    "PI_CODEMODE",
     "SLACK_DISABLE",
     "SLACK_RENDER_V2",
     "SLACK_RENDER_V2_DELEGATION",

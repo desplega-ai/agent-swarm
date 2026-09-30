@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "1.158.0",
+    "version": "1.159.0",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -4817,6 +4817,26 @@
                             "format",
                             "header"
                           ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "format": {
+                              "type": "string",
+                              "enum": [
+                                "standard-webhooks"
+                              ]
+                            },
+                            "toleranceSeconds": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "default": 300,
+                              "description": "Maximum allowed clock skew, in seconds, for the webhook-timestamp header"
+                            }
+                          },
+                          "required": [
+                            "format"
+                          ]
                         }
                       ],
                       "description": "Optional webhook verification format. Omit to keep legacy HMAC-SHA256 behavior with fallback header scanning."
@@ -5444,6 +5464,26 @@
                           "required": [
                             "format",
                             "header"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "format": {
+                              "type": "string",
+                              "enum": [
+                                "standard-webhooks"
+                              ]
+                            },
+                            "toleranceSeconds": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "default": 300,
+                              "description": "Maximum allowed clock skew, in seconds, for the webhook-timestamp header"
+                            }
+                          },
+                          "required": [
+                            "format"
                           ]
                         }
                       ],
@@ -25150,7 +25190,7 @@
     "/status": {
       "get": {
         "summary": "Identity + setup readiness + live activity for the swarm dashboard",
-        "description": "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set, plus the Comb settings (COMB_ENABLED, the browser-facing agent-fs URL, the shared org and drive ids, and the agent-fs user id of the swarm service account).",
+        "description": "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set, plus the Comb settings (COMB_ENABLED, the browser-facing agent-fs URL, the shared org and drive ids, and the agent-fs user id of the swarm service account); telemetry reports the effective ANONYMIZED_TELEMETRY opt-out state.",
         "tags": [
           "Status"
         ],
@@ -25540,6 +25580,17 @@
                         "ok",
                         "degraded",
                         "broken"
+                      ]
+                    },
+                    "telemetry": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "enabled"
                       ]
                     }
                   },
@@ -39393,6 +39444,9 @@
                     "type": "string",
                     "minLength": 1
                   },
+                  "allowCustomModel": {
+                    "type": "boolean"
+                  },
                   "parentTaskId": {
                     "type": "string",
                     "format": "uuid"
@@ -44779,13 +44833,17 @@
                     },
                     "multiRuntimeEnabled": {
                       "type": "boolean"
+                    },
+                    "devMode": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
                     "agents",
                     "tasks",
                     "steeringEnabled",
-                    "multiRuntimeEnabled"
+                    "multiRuntimeEnabled",
+                    "devMode"
                   ]
                 }
               }
@@ -46421,7 +46479,8 @@
                     "type": "string"
                   },
                   "model": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Concrete model override for this task, interpreted by the assignee's harness/provider. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected."
                   },
                   "modelTier": {
                     "type": "string",
@@ -46761,6 +46820,16 @@
           },
           "400": {
             "description": "Cannot cancel terminal task",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Agent caller is neither a lead nor the task creator",
             "content": {
               "application/json": {
                 "schema": {
@@ -47507,6 +47576,16 @@
                   "required": [
                     "success"
                   ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Task is assigned to another agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -52365,6 +52444,26 @@
                                     "format",
                                     "header"
                                   ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "format": {
+                                      "type": "string",
+                                      "enum": [
+                                        "standard-webhooks"
+                                      ]
+                                    },
+                                    "toleranceSeconds": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "default": 300,
+                                      "description": "Maximum allowed clock skew, in seconds, for the webhook-timestamp header"
+                                    }
+                                  },
+                                  "required": [
+                                    "format"
+                                  ]
                                 }
                               ],
                               "description": "Optional webhook verification format. Omit to keep legacy HMAC-SHA256 behavior with fallback header scanning."
@@ -52736,6 +52835,26 @@
                                   "required": [
                                     "format",
                                     "header"
+                                  ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "format": {
+                                      "type": "string",
+                                      "enum": [
+                                        "standard-webhooks"
+                                      ]
+                                    },
+                                    "toleranceSeconds": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "default": 300,
+                                      "description": "Maximum allowed clock skew, in seconds, for the webhook-timestamp header"
+                                    }
+                                  },
+                                  "required": [
+                                    "format"
                                   ]
                                 }
                               ],

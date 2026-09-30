@@ -9,6 +9,7 @@
  *
  * Versioning rule (per item, evaluated against the `seed_state` table):
  *   - upstream entity absent              -> create
+ *   - upstream identical to source        -> no-op (seed state re-baselined)
  *   - upstream pristine + source changed  -> update
  *   - upstream pristine + source same     -> no-op
  *   - upstream user-modified              -> never overwrite (preserve)

@@ -175,6 +175,19 @@ bun run test:root -- src/tests/memory-rater-e2e.test.ts               # step-7: 
   including `explicit-self`.
 - `src/hooks/hook.ts` — LlmRater piggyback in the summary path.
 
+## Pre-task recall query
+
+The runner marks pre-task searches with `X-Memory-Consumption: prompt`. Only
+that search branch removes sibling-task blocks and reduces the default worker
+completed/failed follow-up wrappers to task description and output (or failure
+reason), preserving `<thread_context>`. The task description itself is unchanged.
+Input is capped at 65536 UTF-8 bytes before sibling removal or wrapper parsing.
+Wrapper content uses linear delimiter searches; oversized or malformed wrappers
+fall back to bounded text. The query uses a conservative 8191 UTF-8 byte cap,
+preserving Unicode code points,
+to stay below the embedding input token limit without a tokenizer dependency.
+An empty content query returns no results without recording retrievals.
+
 ## Trigger paths
 
 This runbook applies when modifying:

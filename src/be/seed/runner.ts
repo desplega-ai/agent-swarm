@@ -10,6 +10,7 @@ import type { Seeder, SeederResult, SeederRunOptions } from "./types";
 /**
  * Apply one seeder. Idempotent and version-aware:
  *   - upstream absent              -> create
+ *   - upstream identical to src    -> no-op (re-baselines seed state)
  *   - upstream pristine, src moved -> update
  *   - upstream pristine, src same  -> no-op
  *   - upstream user-modified       -> preserve (never overwrite)
@@ -38,24 +39,29 @@ export async function runSeeder(seeder: Seeder, opts?: SeederRunOptions): Promis
       }
 
       const state = await getSeedState(seeder.kind, item.key);
+
+      if (upstream === item.contentHash) {
+        // Live copy is byte-identical to the current source, so there is nothing
+        // user-authored to lose. Treat it as in sync regardless of seed state:
+        // adopt an unrecorded entity, and re-baseline one whose recorded hash
+        // drifted (edited, then reset to source) so the next source change is
+        // detectable as an update instead of being preserved forever.
+        if (state?.seededHash !== item.contentHash) {
+          await recordSeedState(seeder.kind, item.key, item.contentHash);
+        }
+        result.skippedUnchanged += 1;
+        continue;
+      }
+
       // "Pristine" = the live upstream copy still matches what we last seeded.
       // With no recorded state (first run after this framework landed, or a
-      // pre-existing entity) we can only treat it as pristine when it is
-      // byte-identical to the source — otherwise we conservatively assume a
-      // user authored it and must not be clobbered.
-      const pristine = state ? upstream === state.seededHash : upstream === item.contentHash;
+      // pre-existing entity) the live copy already differs from source here, so
+      // we conservatively assume a user authored it and must not clobber it.
+      const pristine = state ? upstream === state.seededHash : false;
 
       if (!pristine) {
         // A user changed the upstream copy since our last seed — preserve it.
         result.skippedUserModified += 1;
-        continue;
-      }
-
-      if (upstream === item.contentHash) {
-        // Neither side changed. Adopt an unrecorded-but-identical entity so the
-        // next source change is correctly detectable as an update.
-        if (!state) await recordSeedState(seeder.kind, item.key, item.contentHash);
-        result.skippedUnchanged += 1;
         continue;
       }
 

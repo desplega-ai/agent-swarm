@@ -163,6 +163,7 @@ export class DshAdapter implements ProviderAdapter {
   readonly name = "dsh";
   readonly traits: ProviderTraits = {
     hasMcp: false,
+    hasToolSearch: false,
     nativeSkillDiscovery: false,
     hasLocalEnvironment: true,
     steerModes: [],

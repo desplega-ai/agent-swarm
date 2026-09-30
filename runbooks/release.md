@@ -71,6 +71,18 @@ failed promotion can leave partially updated tags; it fails the job before
 deployment. Rerunning the current main workflow retries promotion. A newer main
 commit arriving after the guard waits for the lock before its own promotion.
 
+The deploy step is `scripts/dokploy-deploy.ts`. `compose.deploy` only queues the
+job; Dokploy creates the deployment record when its worker starts it, and that
+start can lag the trigger by minutes. The script waits up to 7 minutes for any
+record newer than the pre-trigger baseline, re-triggers up to 3 times if none
+appears (a deploy of an unchanged `:latest` finishes in seconds), then follows
+the records to a terminal status. It fails only when no record ever appears or
+the newest one ends `error`/`cancelled`. Tunables: `DOKPLOY_RECORD_WAIT_SECONDS`,
+`DOKPLOY_MAX_TRIGGERS`, `DOKPLOY_COMPLETION_TIMEOUT_SECONDS`. Before redeploying by
+hand after a red run, list the compose's deployments (or run
+`bun scripts/dokploy-deploy.ts --check` with `DOKPLOY_URL`, `DOKPLOY_COMPOSE_ID`,
+`DOKPLOY_TOKEN` set): a late record means the deploy is still coming.
+
 When first rolling out this workflow, let runs using the old workflow finish
 before relying on the lock: their manifest jobs still write moving tags outside it.
 

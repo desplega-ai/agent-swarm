@@ -238,6 +238,7 @@ const structuredOutputGate: DeterministicCheck = {
 
 export const toolRouting: Scenario = {
   id: "tool-routing",
+  version: 1,
   name: "Tool routing",
   description:
     "Behavioral scenario: a worker must discover the handoff conventions from memory, read the seeded task history through swarm tools, and carry the right facts into KV and a follow-up task.",

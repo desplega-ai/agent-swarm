@@ -290,6 +290,8 @@ Operator-tunable env vars are surfaced on the dashboard **Settings → Configura
 
 <important if="you are writing or running tests, drafting a plan with verification / E2E / QA steps, or preparing a frontend PR (apps/ui/, apps/templates-ui/)">
 
+Read [DESIGN.md](./DESIGN.md) before UI work.
+
 Hub: [runbooks/testing.md](./runbooks/testing.md) — routes to LOCAL_TESTING.md, agent-browser UI verification, swarm-local-e2e skill, memory tests, Slack E2E.
 
 Hard rules:

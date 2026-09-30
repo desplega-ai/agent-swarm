@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { createClient } from "@libsql/client";
-import { ANALYTICS_SQL, parseFilterCsv } from "./server.ts";
+import {
+  ANALYTICS_SQL,
+  mapAnalyticsRow,
+  parseFilterCsv,
+  SUITE_ANALYTICS_SQL,
+} from "./analytics-source.ts";
 
 /**
  * ANALYTICS_SQL extracts worker_version straight out of attempts.sandbox_json.
@@ -56,7 +61,7 @@ async function setupDb() {
        config_id TEXT NOT NULL, attempt_index INTEGER NOT NULL, status TEXT NOT NULL,
        score REAL, cost_usd REAL, cost_source TEXT, judge_cost_usd REAL,
        duration_ms INTEGER, tokens_json TEXT, sandbox_json TEXT, resolved_model TEXT,
-       reasoning_effort TEXT
+       reasoning_effort TEXT, exclusion TEXT, timings_json TEXT, suite_version TEXT
      )`,
   );
   await db.execute(
@@ -103,6 +108,57 @@ describe("ANALYTICS_SQL worker_version extraction", () => {
     expect(rows[2]!.worker_version).toBeNull(); // v2 with null capture
     expect(rows[3]!.worker_version).toBeNull(); // malformed JSON → json_valid guard
     expect(rows[4]!.worker_version).toBeNull(); // sandbox_json never written
+    db.close();
+  });
+});
+
+describe("ANALYTICS_SQL agent time and exclusion (Phase 3)", () => {
+  test("agent_ms is timings_json.tasksMs (null when absent or malformed); exclusion passes through", async () => {
+    const db = await setupDb();
+    const insert = (id: string, index: number, timings: string | null, exclusion: string | null) =>
+      db.execute({
+        sql: `INSERT INTO attempts (id, run_id, scenario_id, config_id, attempt_index, status, timings_json, exclusion)
+              VALUES (?, 'run-1', 's1', 'c1', ?, 'passed', ?, ?)`,
+        args: [id, index, timings, exclusion],
+      });
+    await insert("t-ok", 0, JSON.stringify({ bootMs: 50_000, tasksMs: 61_000, checksMs: 2 }), null);
+    await insert("t-null-tasks", 1, JSON.stringify({ bootMs: 50_000, tasksMs: null }), null);
+    await insert("t-garbage", 2, "not-json{", "cancelled");
+    await insert("t-missing", 3, null, "harness-error");
+    const rows = (await db.execute(ANALYTICS_SQL)).rows;
+    expect(rows.map((r) => r.agent_ms)).toEqual([61_000, null, null, null]);
+    expect(rows.map((r) => r.exclusion)).toEqual([null, null, "cancelled", "harness-error"]);
+    db.close();
+  });
+});
+
+describe("SUITE_ANALYTICS_SQL suite scoping (Phase 4)", () => {
+  test("binds one suite version; off-suite (NULL) and other-suite rows never match", async () => {
+    const db = await setupDb();
+    const insert = (id: string, index: number, suite: string | null) =>
+      db.execute({
+        sql: `INSERT INTO attempts (id, run_id, scenario_id, config_id, attempt_index, status, suite_version)
+              VALUES (?, 'run-1', 's1', 'c1', ?, 'passed', ?)`,
+        args: [id, index, suite],
+      });
+    await insert("s-1a", 0, "1.0");
+    await insert("s-1b", 1, "1.0");
+    await insert("s-2", 2, "2.0");
+    await insert("s-null", 3, null);
+
+    const one = await db.execute({ sql: SUITE_ANALYTICS_SQL, args: ["1.0"] });
+    expect(one.rows.map((r) => r.suite_version)).toEqual(["1.0", "1.0"]);
+    expect(one.rows.map((r) => mapAnalyticsRow(r).suiteVersion)).toEqual(["1.0", "1.0"]);
+    const none = await db.execute({ sql: SUITE_ANALYTICS_SQL, args: ["9.9"] });
+    expect(none.rows).toHaveLength(0);
+    // The unscoped query still returns everything, with the column mapped.
+    const all = await db.execute(ANALYTICS_SQL);
+    expect(all.rows.map((r) => mapAnalyticsRow(r).suiteVersion)).toEqual([
+      "1.0",
+      "1.0",
+      "2.0",
+      null,
+    ]);
     db.close();
   });
 });

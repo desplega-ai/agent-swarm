@@ -120,7 +120,11 @@ const REQUESTER_OWNS_TASK_VERBS: PermissionVerb[] = [
   "task.action.own",
 ];
 
-const COMPOSITE_VERBS: PermissionVerb[] = ["memory.delete.any", "task.fs.mutate"];
+const COMPOSITE_VERBS: PermissionVerb[] = [
+  "memory.delete.any",
+  "task.fs.mutate",
+  "task.progress.write",
+];
 
 // ── Resource fixtures ────────────────────────────────────────────────────────
 
@@ -542,6 +546,36 @@ describe("task.fs.mutate composite (operator OR user OR lead OR assignee OR crea
       foreignUser: true, // any authenticated user passes (fs.ts canMutateTask)
       operator: true,
     });
+  });
+});
+
+describe("task.progress.write composite (operator OR user OR lead OR assignee OR unassigned)", () => {
+  test("the creator and an unrelated worker are denied on an assigned task", () => {
+    expectDecisions("task.progress.write", TASK_RESOURCE, {
+      lead: true,
+      worker: false,
+      ownerWorker: true, // assignee (task.agentId)
+      creatorWorker: false,
+      userRequester: true,
+      foreignUser: true,
+      operator: true,
+    });
+  });
+
+  test("any agent may write an unassigned task", () => {
+    expectDecisions(
+      "task.progress.write",
+      { kind: "task", taskId: "task-2", agentId: null },
+      {
+        lead: true,
+        worker: true,
+        ownerWorker: true,
+        creatorWorker: true,
+        userRequester: true,
+        foreignUser: true,
+        operator: true,
+      },
+    );
   });
 });
 

@@ -176,6 +176,13 @@
   background: var(--text);
 }
 
+/* an errored attempt is a ring, not a filled red dot: it was never graded */
+.rd-dot.err {
+  background: transparent;
+  border: 1.5px solid var(--red);
+  box-sizing: border-box;
+}
+
 /* ---- cell summary band (v7 §2.2 — rendered only when attemptsPerCell > 1) ---- */
 
 .rd-cellsum {
@@ -223,8 +230,10 @@
   white-space: nowrap;
 }
 
-a.rd-cellsum-row:hover {
-  background: var(--panel-2);
+@media (hover: hover) {
+  a.rd-cellsum-row:hover {
+    background: var(--panel-2);
+  }
 }
 
 .rd-cellsum-head {
@@ -324,8 +333,10 @@ a.rd-cellsum-row:hover {
   border-radius: 4px;
 }
 
-.rd-taskrow:hover {
-  background: var(--panel-2);
+@media (hover: hover) {
+  .rd-taskrow:hover {
+    background: var(--panel-2);
+  }
 }
 
 .rd-taskrow-glyph {
@@ -631,8 +642,10 @@ a.rd-cellsum-row:hover {
   border-radius: 4px;
 }
 
-.wf-row:hover {
-  background: var(--panel-2);
+@media (hover: hover) {
+  .wf-row:hover {
+    background: var(--panel-2);
+  }
 }
 
 .wf-label {
@@ -675,8 +688,10 @@ a.rd-cellsum-row:hover {
 
 /* Row-scoped bar rules stay below the base rule, keeping .wf-bar selectors in
    ascending specificity order. */
-.wf-row:hover .wf-bar {
-  filter: brightness(1.3);
+@media (hover: hover) {
+  .wf-row:hover .wf-bar {
+    filter: brightness(1.3);
+  }
 }
 
 .wf-row.sub .wf-bar {
@@ -1269,8 +1284,10 @@ a.rd-cellsum-row:hover {
   border-radius: 3px;
 }
 
-.rd-log-row:hover {
-  background: var(--panel-2);
+@media (hover: hover) {
+  .rd-log-row:hover {
+    background: var(--panel-2);
+  }
 }
 
 .rd-log-ts {

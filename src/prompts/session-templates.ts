@@ -346,14 +346,35 @@ registerTemplate({
 });
 
 registerTemplate({
+  eventType: "system.agent.tool_discovery.search",
+  header: "",
+  defaultBody:
+    "Most swarm tools are deferred. Load one with your harness tool search before the first call.",
+  variables: [],
+  category: "system",
+});
+
+registerTemplate({
+  eventType: "system.agent.tool_discovery.direct",
+  header: "",
+  defaultBody: "Swarm tools are already in your tool list.",
+  variables: [],
+  category: "system",
+});
+
+registerTemplate({
   eventType: "system.agent.tools_skills",
   header: "",
   defaultBody: `
 ## Tools and skills
 
-Most swarm tools are deferred. Load one with your harness tool search before the first call.
+{{tool_discovery}}
 {{skills}}{{mcp_servers}}`,
   variables: [
+    {
+      name: "tool_discovery",
+      description: "Harness-specific guidance for discovering swarm tools.",
+    },
     {
       name: "skills",
       description:

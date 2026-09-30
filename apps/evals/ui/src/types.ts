@@ -459,16 +459,41 @@ export interface WorkerSpecJson {
 }
 
 /** Mirrors SerializedScenario v4 (v6 §0.10 + v7 §9 `workerSpecs` + §12 `lead`). */
+/** Plain-English scenario card (mirrors evals/scenarios/cards.ts). */
+export interface ScenarioCardJson {
+  /** What the scenario claims to test, in one sentence. */
+  summary: string;
+  /** What the agent is asked to do. */
+  agentDoes: string;
+  /** What earns points and what gates a pass. */
+  scoredBy: string;
+  tags: {
+    topology: "single-agent" | "swarm";
+    flow: "parallel" | "sequential";
+    kind: "regression" | "capability";
+  };
+  /** Oldest first, one line per scenario version. */
+  changelog: { version: number; note: string }[];
+}
+
 export interface ScenarioJson {
   id: string;
+  /** Scenario version; bumped on any prompt, fixture or check change. */
+  version?: number;
   name: string;
   description: string | null;
+  /** Card text and tags; null/absent on older servers or an unregistered card. */
+  card?: ScenarioCardJson | null;
+  /** `swarm-evals@1.0` when this scenario version belongs to the frozen suite. */
+  suite?: string | null;
   /** Worker COUNT booted per attempt (default 1) — either workers shape. */
   workers: number;
   /** v7 §9: per-worker specs; null/absent = homogeneous numeric shape. */
   workerSpecs?: WorkerSpecJson[] | null;
   /** v7 §12: optional lead member; null/absent = no lead. */
   lead?: WorkerSpecJson | null;
+  /** Swarm scenario id this single-agent baseline pairs with; null/absent otherwise. */
+  baselineOf?: string | null;
   tasks: { title: string; description: string; worker: number | "lead"; dependsOn: number[] }[];
   seed: { exec: string[]; sqlDump: string | null; memories: string[] } | null;
   timeoutMs: number;

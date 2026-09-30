@@ -16,10 +16,12 @@ import { startWorkflowExecution } from "../workflows/engine";
 import { BaseExecutor, type ExecutorResult } from "../workflows/executors/base";
 import { ExecutorRegistry } from "../workflows/executors/registry";
 import {
+  decodeStandardWebhookSecret,
   handleEventTrigger,
   handleWebhookTrigger,
   logOpenWebhookTriggers,
   verifyHmacSignature,
+  verifyStandardWebhookSignature,
   verifyTimestampedHmacSignature,
   verifyTokenEquality,
   WebhookError,
@@ -208,6 +210,169 @@ describe("verifyTokenEquality", () => {
   test("wrong-length non-matching token fails without throwing", () => {
     expect(() => verifyTokenEquality("shared-token", "short")).not.toThrow();
     expect(verifyTokenEquality("shared-token", "short")).toBe(false);
+  });
+});
+
+// Official vector from github.com/standard-webhooks/standard-webhooks
+// (libraries/javascript/src/webhook.test.ts, "sign function works").
+const SW_SECRET = "MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw";
+const SW_MSG_ID = "msg_p5jXN8AQM9LWM0D4loKWxJek";
+const SW_TIMESTAMP = 1614265330;
+const SW_PAYLOAD = '{"test": 2432232314}';
+const SW_EXPECTED_SIGNATURE = "v1,g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE=";
+
+function signStandardWebhook(secret: string, id: string, timestamp: number, body: string): string {
+  const key = Buffer.from(secret.replace(/^whsec_/, ""), "base64");
+  const digest = crypto.createHmac("sha256", key).update(`${id}.${timestamp}.${body}`);
+  return `v1,${digest.digest("base64")}`;
+}
+
+describe("verifyStandardWebhookSignature", () => {
+  const key = decodeStandardWebhookSecret(SW_SECRET)!;
+  const nowMs = SW_TIMESTAMP * 1000;
+  const headers = (signature: string, timestamp = SW_TIMESTAMP) => ({
+    id: SW_MSG_ID,
+    timestamp: String(timestamp),
+    signature,
+  });
+
+  test("official test vector passes", () => {
+    expect(signStandardWebhook(SW_SECRET, SW_MSG_ID, SW_TIMESTAMP, SW_PAYLOAD)).toBe(
+      SW_EXPECTED_SIGNATURE,
+    );
+    expect(
+      verifyStandardWebhookSignature(key, SW_PAYLOAD, headers(SW_EXPECTED_SIGNATURE), {}, nowMs),
+    ).toBe(true);
+  });
+
+  test("secret decodes the same with and without the whsec_ prefix", () => {
+    expect(decodeStandardWebhookSecret(`whsec_${SW_SECRET}`)).toEqual(key);
+    expect(
+      verifyStandardWebhookSignature(
+        decodeStandardWebhookSecret(`whsec_${SW_SECRET}`)!,
+        SW_PAYLOAD,
+        headers(SW_EXPECTED_SIGNATURE),
+        {},
+        nowMs,
+      ),
+    ).toBe(true);
+  });
+
+  test("invalid or empty secrets decode to null", () => {
+    expect(decodeStandardWebhookSecret("whsec_")).toBeNull();
+    expect(decodeStandardWebhookSecret("")).toBeNull();
+    expect(decodeStandardWebhookSecret("not base64!")).toBeNull();
+  });
+
+  test("tampered body fails", () => {
+    expect(
+      verifyStandardWebhookSignature(
+        key,
+        '{"test": 2432232315}',
+        headers(SW_EXPECTED_SIGNATURE),
+        {},
+        nowMs,
+      ),
+    ).toBe(false);
+  });
+
+  test("re-serialized JSON body fails (verification is over raw bytes)", () => {
+    const reserialized = JSON.stringify(JSON.parse(SW_PAYLOAD));
+    expect(
+      verifyStandardWebhookSignature(key, reserialized, headers(SW_EXPECTED_SIGNATURE), {}, nowMs),
+    ).toBe(false);
+  });
+
+  test("wrong secret fails", () => {
+    const wrong = decodeStandardWebhookSecret(Buffer.alloc(24, 7).toString("base64"))!;
+    expect(
+      verifyStandardWebhookSignature(wrong, SW_PAYLOAD, headers(SW_EXPECTED_SIGNATURE), {}, nowMs),
+    ).toBe(false);
+  });
+
+  test("tampered webhook-id fails", () => {
+    expect(
+      verifyStandardWebhookSignature(
+        key,
+        SW_PAYLOAD,
+        { ...headers(SW_EXPECTED_SIGNATURE), id: "msg_other" },
+        {},
+        nowMs,
+      ),
+    ).toBe(false);
+  });
+
+  test("stale timestamp beyond the default 5 minute tolerance fails", () => {
+    const stale = SW_TIMESTAMP - 301;
+    const signature = signStandardWebhook(SW_SECRET, SW_MSG_ID, stale, SW_PAYLOAD);
+    expect(
+      verifyStandardWebhookSignature(key, SW_PAYLOAD, headers(signature, stale), {}, nowMs),
+    ).toBe(false);
+    const edge = SW_TIMESTAMP - 300;
+    const edgeSignature = signStandardWebhook(SW_SECRET, SW_MSG_ID, edge, SW_PAYLOAD);
+    expect(
+      verifyStandardWebhookSignature(key, SW_PAYLOAD, headers(edgeSignature, edge), {}, nowMs),
+    ).toBe(true);
+  });
+
+  test("future timestamp beyond tolerance fails", () => {
+    const future = SW_TIMESTAMP + 301;
+    const signature = signStandardWebhook(SW_SECRET, SW_MSG_ID, future, SW_PAYLOAD);
+    expect(
+      verifyStandardWebhookSignature(key, SW_PAYLOAD, headers(signature, future), {}, nowMs),
+    ).toBe(false);
+  });
+
+  test("custom toleranceSeconds is honored", () => {
+    const stale = SW_TIMESTAMP - 600;
+    const signature = signStandardWebhook(SW_SECRET, SW_MSG_ID, stale, SW_PAYLOAD);
+    expect(
+      verifyStandardWebhookSignature(
+        key,
+        SW_PAYLOAD,
+        headers(signature, stale),
+        { toleranceSeconds: 900 },
+        nowMs,
+      ),
+    ).toBe(true);
+  });
+
+  test("garbled timestamp fails", () => {
+    expect(
+      verifyStandardWebhookSignature(
+        key,
+        SW_PAYLOAD,
+        { ...headers(SW_EXPECTED_SIGNATURE), timestamp: "not-a-number" },
+        {},
+        nowMs,
+      ),
+    ).toBe(false);
+  });
+
+  test("multiple signatures pass when one v1 entry matches", () => {
+    const list = [
+      "v1,Ceo5qEr07ixe2NLpvHk3FH9bwy/WavXrAFQ/9tdO6mc=",
+      "v2,Ceo5qEr07ixe2NLpvHk3FH9bwy/WavXrAFQ/9tdO6mc=",
+      SW_EXPECTED_SIGNATURE,
+      "v1a,hnO3f9T8Ytu9HwrXslvumlUpqtNVqkhqw/enGzPCXe5BdqzCInXqYXFymVJaA7AZdpXwVLPo3mNl8EM+m7TBAg==",
+    ].join(" ");
+    expect(verifyStandardWebhookSignature(key, SW_PAYLOAD, headers(list), {}, nowMs)).toBe(true);
+  });
+
+  test("a matching digest under a non-v1 version fails", () => {
+    const digest = SW_EXPECTED_SIGNATURE.slice("v1,".length);
+    expect(
+      verifyStandardWebhookSignature(key, SW_PAYLOAD, headers(`v2,${digest}`), {}, nowMs),
+    ).toBe(false);
+    expect(verifyStandardWebhookSignature(key, SW_PAYLOAD, headers(digest), {}, nowMs)).toBe(false);
+  });
+
+  test("empty or partial signatures fail without throwing", () => {
+    for (const signature of ["", "v1,", "v1,dawfeoifkpqwoekfpqoekf", "v1"]) {
+      expect(verifyStandardWebhookSignature(key, SW_PAYLOAD, headers(signature), {}, nowMs)).toBe(
+        false,
+      );
+    }
   });
 });
 
@@ -614,6 +779,136 @@ describe("handleWebhookTrigger — verification formats", () => {
     }
   });
 
+  describe("standard-webhooks", () => {
+    const secret = `whsec_${Buffer.alloc(32, 3).toString("base64")}`;
+
+    async function makeStandardWorkflow(hmacSecret = secret): Promise<Workflow> {
+      return makeWorkflow({
+        triggers: [{ type: "webhook", hmacSecret, verification: { format: "standard-webhooks" } }],
+      });
+    }
+
+    function standardHeaders(body: string, signingSecret = secret): Record<string, string> {
+      const id = `msg_${crypto.randomUUID()}`;
+      const timestamp = Math.floor(Date.now() / 1000);
+      return {
+        "webhook-id": id,
+        "webhook-timestamp": String(timestamp),
+        "webhook-signature": signStandardWebhook(signingSecret, id, timestamp, body),
+      };
+    }
+
+    async function expectRejected(
+      workflowId: string,
+      body: string,
+      headers: Record<string, string>,
+      statusCode: number,
+    ): Promise<void> {
+      try {
+        await handleWebhookTrigger(workflowId, body, headers, registry);
+        expect(true).toBe(false);
+      } catch (err) {
+        expect(err).toBeInstanceOf(WebhookError);
+        expect((err as WebhookError).statusCode).toBe(statusCode);
+      }
+    }
+
+    test("starts the workflow for a correctly signed request", async () => {
+      const workflow = await makeStandardWorkflow();
+      const body = '{"event_type":"note.updated", "data": {"id":"not_123"}}';
+
+      const result = await handleWebhookTrigger(workflow.id, body, standardHeaders(body), registry);
+
+      const run = await getWorkflowRun(result.runId);
+      expect(run!.triggerData).toEqual({ event_type: "note.updated", data: { id: "not_123" } });
+    });
+
+    test("accepts a secret stored without the whsec_ prefix and mixed-case headers", async () => {
+      const workflow = await makeStandardWorkflow(secret.slice("whsec_".length));
+      const body = '{"event":"plain-secret"}';
+      const headers = standardHeaders(body);
+
+      const result = await handleWebhookTrigger(
+        workflow.id,
+        body,
+        {
+          "Webhook-Id": headers["webhook-id"]!,
+          "Webhook-Timestamp": headers["webhook-timestamp"]!,
+          "Webhook-Signature": headers["webhook-signature"]!,
+        },
+        registry,
+      );
+
+      expect(result.runId).toBeDefined();
+    });
+
+    test("resolves a secret.NAME reference", async () => {
+      const name = `SW_SECRET_${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+      await upsertSwarmConfig({ scope: "global", key: name, value: secret, isSecret: true });
+      const workflow = await makeStandardWorkflow(secretRef(name));
+      const body = '{"event":"secret-ref"}';
+
+      const result = await handleWebhookTrigger(workflow.id, body, standardHeaders(body), registry);
+
+      expect(result.runId).toBeDefined();
+    });
+
+    test("rejects a tampered body", async () => {
+      const workflow = await makeStandardWorkflow();
+      const headers = standardHeaders('{"event":"original"}');
+      await expectRejected(workflow.id, '{"event":"tampered"}', headers, 401);
+    });
+
+    test("rejects a signature made with a different secret", async () => {
+      const workflow = await makeStandardWorkflow();
+      const body = '{"event":"wrong-secret"}';
+      const other = `whsec_${Buffer.alloc(32, 9).toString("base64")}`;
+      await expectRejected(workflow.id, body, standardHeaders(body, other), 401);
+    });
+
+    test("rejects stale and future timestamps", async () => {
+      const workflow = await makeStandardWorkflow();
+      const body = '{"event":"replay"}';
+      const now = Math.floor(Date.now() / 1000);
+      for (const timestamp of [now - 3600, now + 3600]) {
+        await expectRejected(
+          workflow.id,
+          body,
+          {
+            "webhook-id": "msg_replay",
+            "webhook-timestamp": String(timestamp),
+            "webhook-signature": signStandardWebhook(secret, "msg_replay", timestamp, body),
+          },
+          401,
+        );
+      }
+    });
+
+    test("rejects a request missing any required header", async () => {
+      const workflow = await makeStandardWorkflow();
+      const body = '{"event":"missing-header"}';
+      const headers = standardHeaders(body);
+      for (const name of ["webhook-id", "webhook-timestamp", "webhook-signature"]) {
+        const partial = { ...headers };
+        delete partial[name];
+        await expectRejected(workflow.id, body, partial, 401);
+      }
+    });
+
+    test("ignores signatures on legacy fallback headers", async () => {
+      const workflow = await makeStandardWorkflow();
+      const body = '{"event":"fallback"}';
+      const { "webhook-signature": signature, ...rest } = standardHeaders(body);
+      await expectRejected(workflow.id, body, { ...rest, "x-webhook-signature": signature! }, 401);
+    });
+
+    test("fails closed with 500 when the configured secret is not base64", async () => {
+      const workflow = await makeStandardWorkflow("whsec_not base64!");
+      const body = '{"event":"bad-secret"}';
+      await expectRejected(workflow.id, body, standardHeaders(body), 500);
+    });
+  });
+
   test("verification configured without hmacSecret fails closed instead of accepting the request", async () => {
     // Bypasses the create/update Zod schema (which now also rejects this shape) to
     // exercise the runtime guard directly — e.g. for data written before this fix,
@@ -865,6 +1160,31 @@ describe("TriggerConfigSchema", () => {
     });
 
     expect(result.success).toBe(true);
+  });
+
+  test("accepts standard-webhooks verification and defaults its tolerance to 300s", () => {
+    const result = TriggerConfigSchema.safeParse({
+      type: "webhook",
+      hmacSecret: "secret.STANDARD_WEBHOOK_SECRET",
+      verification: { format: "standard-webhooks" },
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success && result.data.type === "webhook") {
+      expect(result.data.verification).toEqual({
+        format: "standard-webhooks",
+        toleranceSeconds: 300,
+      });
+    }
+  });
+
+  test("rejects standard-webhooks verification without hmacSecret", () => {
+    const result = TriggerConfigSchema.safeParse({
+      type: "webhook",
+      verification: { format: "standard-webhooks" },
+    });
+
+    expect(result.success).toBe(false);
   });
 
   test("accepts a webhook trigger with neither hmacSecret nor verification (intentionally unauthenticated)", () => {

@@ -13,7 +13,7 @@ import type {
 } from "../types.ts";
 import type { JudgeLiveHandle } from "./live-registry.ts";
 
-const DEFAULT_JUDGE_MODEL = "deepseek/deepseek-v4-pro";
+export const DEFAULT_JUDGE_MODEL = "deepseek/deepseek-v4-pro";
 
 const VerdictSchema = z.object({
   score: z

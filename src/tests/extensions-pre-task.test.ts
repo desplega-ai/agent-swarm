@@ -428,6 +428,79 @@ export default extension;
     ]);
   });
 
+  test("a hook that rewrites the model or assignee into a harness mismatch is blocked", async () => {
+    const claude = await createAgent({
+      name: "pre-task-claude",
+      isLead: false,
+      status: "idle",
+      harnessProvider: "claude",
+    });
+    const codex = await createAgent({
+      name: "pre-task-codex",
+      isLead: false,
+      status: "idle",
+      harnessProvider: "codex",
+    });
+    const hook = (data: Record<string, unknown>) =>
+      `import type { SwarmExtension } from "swarm-extension";
+const extension: SwarmExtension = (api) => {
+  api.on("pre.task.create", () => ({ action: "modify", data: ${JSON.stringify(data)} }));
+};
+export default extension;
+`;
+
+    const reroute = await installSource("reroute-to-codex", hook({ agentId: codex.id }));
+    const rerouted = await postTask({
+      task: "opus task rerouted to codex",
+      agentId: claude.id,
+      routingReason: "human_pinned",
+      model: "claude-opus-5-5",
+    });
+    expect(rerouted.status).toBe(422);
+    expect(String(rerouted.body.error)).toContain("claude-opus-5-5");
+    expect(String(rerouted.body.error)).toContain("codex");
+    expect(rerouted.body.extension).toEqual({ id: reroute.id, name: "reroute-to-codex" });
+
+    const caller = await createAgent({
+      name: "pre-task-model-caller",
+      isLead: false,
+      status: "idle",
+    });
+    const server = new McpServer({ name: "pre-task-model-guard", version: "1.0.0" });
+    registerSendTaskTool(server);
+    const sent = await registeredSendTask(server).handler(
+      {
+        ...sendTaskArgs("opus tool task rerouted to codex"),
+        agentId: claude.id,
+        routingReason: "human_pinned",
+        routingNote: "test pins the claude agent",
+        model: "claude-opus-5-5",
+      },
+      { sessionId: "pre-task-model-guard", requestInfo: { headers: { "x-agent-id": caller.id } } },
+    );
+    expect(sent.isError).toBe(true);
+    expect(JSON.stringify(sent)).toContain("reroute-to-codex");
+
+    await stopExtensionRuntime();
+    await getDbClient().run("DELETE FROM extensions");
+    await installSource("pin-opus", hook({ model: "claude-opus-5-5" }));
+    const repinned = await postTask({
+      task: "codex task pinned to opus",
+      agentId: codex.id,
+      routingReason: "human_pinned",
+    });
+    expect(repinned.status).toBe(422);
+    expect(String(repinned.body.error)).toContain("claude-opus-5-5");
+
+    const compatible = await postTask({
+      task: "claude task pinned to opus",
+      agentId: claude.id,
+      routingReason: "human_pinned",
+    });
+    expect(compatible.status).toBe(201);
+    expect(compatible.body.model).toBe("claude-opus-5-5");
+  });
+
   test("extension tool calls derive their origin and skip the creating extension", async () => {
     const creator = await installAndEnable("rewrite-task-priority");
     await installAndEnable("block-tasks-from-source", {

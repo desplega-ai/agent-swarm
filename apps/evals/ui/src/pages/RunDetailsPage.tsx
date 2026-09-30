@@ -18,6 +18,7 @@ import {
   getRun,
   resumeRun,
 } from "../api.ts";
+import { AttemptOutcome } from "../components/AttemptOutcome.tsx";
 import { ConfigChip } from "../components/ConfigChip.tsx";
 import { useConfirm } from "../components/ConfirmDialog.tsx";
 import { CrownIcon } from "../components/CrownIcon.tsx";
@@ -609,7 +610,10 @@ export default function RunDetailsPage(props: {
                       title={`Attempt #${a.attemptIndex} · ${info.label}`}
                       onClick={() => navigate(`#/runs/${runId}/attempts/${a.id}`)}
                     >
-                      <span className={`rd-dot ${info.tone}`} />#{a.attemptIndex}
+                      <span
+                        className={a.status === "error" ? "rd-dot red err" : `rd-dot ${info.tone}`}
+                      />
+                      #{a.attemptIndex}
                     </button>
                   );
                 })}
@@ -617,6 +621,9 @@ export default function RunDetailsPage(props: {
             ) : null}
           </div>
 
+          {attempt !== null ? (
+            <AttemptOutcome status={attempt.status} score={attempt.score} judgments={judgments} />
+          ) : null}
           <AttemptSummary
             attempt={attempt}
             selId={selId}

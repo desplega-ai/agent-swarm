@@ -87,6 +87,21 @@ export function runtimeCatalogSection(provider: string): Record<string, RuntimeC
   return merged;
 }
 
+/**
+ * The sections the harness-compatibility guard (`harnessModelMismatch`) reads: the two
+ * sections the pinned harnesses talk to. Sync, so worker spawn and config validation
+ * can judge a model without a round trip.
+ */
+export function runtimeHarnessSections(): Record<
+  "anthropic" | "openai",
+  { models: Record<string, RuntimeCatalogModel> }
+> {
+  return {
+    anthropic: { models: runtimeCatalogSection("anthropic") },
+    openai: { models: runtimeCatalogSection("openai") },
+  };
+}
+
 export function runtimeCatalogModel(
   provider: string,
   modelId: string,

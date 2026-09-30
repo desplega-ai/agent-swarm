@@ -386,7 +386,7 @@ Tasks may carry an optional JSON Schema on `outputSchema` that the agent's final
 | `claude` | Yes | Via MCP `store-progress`; CLI extraction fallback if missed |
 | `claude-managed` | Yes | Via MCP `store-progress` |
 | `codex` | Yes | Via MCP `store-progress` |
-| `opencode` | Yes | Via MCP `store-progress` |
+| `opencode` | Yes | Via MCP `store-progress`; the runner also validates the final assistant message, as it does for `codex` |
 | `pi` (`pi-mono`) | Yes | Via MCP `store-progress` |
 | `devin` | Yes | Via MCP `store-progress` when `HAS_MCP=true`; otherwise the runner validates direct `providerOutput` before finishing the task |
 
@@ -602,6 +602,7 @@ The swarm API exposes its MCP server at `{apiUrl}/mcp`. Tools are defined under 
 | **Claude** | Discovers an existing `.mcp.json` (walking up from `cwd`), injects `X-Source-Task-Id` into the `agent-swarm` entry, writes a per-session copy to `/tmp/mcp-<taskId>.json`, launches CLI with `--mcp-config <path> --strict-mcp-config`. | [`claude-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-adapter.ts) L117–184, L251 |
 | **Pi** | Constructs `McpHttpClient(apiUrl, apiKey, agentId, taskId)`, calls `listTools()`, wraps each as a pi-mono `ToolDefinition` with prefix `mcp__<name>__`. | [`pi-mono-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/pi-mono-adapter.ts) L410–421, [`pi-mono-mcp-client.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/pi-mono-mcp-client.ts) L53 |
 | **Codex** | `buildCodexConfig` registers `mcp_servers["agent-swarm"] = { url: "{apiUrl}/mcp", http_headers: { Authorization, X-Agent-ID, X-Source-Task-Id }, bearer_token_env_var, startup_timeout_sec }`. Passed to `new Codex({ config })`. | [`codex-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-adapter.ts) L132–243, L857–861 |
+| **opencode** | `createSession` writes `mcp.swarm = { type: "remote", url: "{apiUrl}/mcp", headers: { Authorization, X-Agent-ID, X-Source-Task-Id, X-Context-Key, X-Runtime-Instance-ID } }` into the per-task `/tmp/opencode-<taskId>.json` that its own `opencode serve` reads. `X-Context-Key` is sent only when the task has one. | [`opencode-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/opencode-adapter.ts) |
 
 ### Required headers
 
@@ -681,11 +682,37 @@ If the runner reuses an existing repo clone that has local changes, `ensureRepoF
   Template resolution goes over HTTP (`configureHttpResolver(apiUrl, apiKey)` at `runner.ts:2206`) to obey the API/worker DB boundary. Prompt files under `src/prompts/` must remain pure — no `bun:sqlite` or `src/be/db` imports. Enforced by `scripts/check-db-boundary.sh`.
 </Callout>
 
+Swarm tool-discovery guidance follows the adapter's `hasToolSearch` trait (false when omitted). Claude Code sets it to true for native ToolSearch. Codex, OpenCode, ACP, Claude Managed, Devin, and dsh set it to false. pi sets it to the value of `PI_TOOL_DEFERRAL` (below); MCP-enabled sessions receive guidance that swarm tools are already in the tool list. This trait changes prompt text only, not tool registration.
+
+### pi tool deferral
+
+pi SDK sessions load none of pi's built-in extensions, so by default every swarm tool is declared to the model up front. With `PI_TOOL_DEFERRAL=true` the pi adapter:
+
+- marks each swarm tool `exposure: "direct"` when it is in `CORE_TOOLS` (`src/tools/tool-config.ts`) or the server sent `_meta["anthropic/alwaysLoad"]` for it (task tool manifests), and `exposure: "deferred"` otherwise;
+- adds `createToolSearchExtension()` to the session and `+tool_search` to its default tools;
+- reports `hasToolSearch: true`, so the prompt tells the model to load tools through its tool search.
+
+Swarm tools carry `namespace: { name: "agent-swarm" }` and, when the server declares one, their `outputSchema`; results pass `structuredContent` through to pi alongside the text. Tool names do not change.
+
+The flag defaults to `false`. Loading a deferred tool changes the tool set mid-session, and pi falls back to a transcript checkpoint for providers that cannot represent that change, which can invalidate the prompt cache. Pilot it on one pi agent with agent-scoped configuration (`PI_TOOL_DEFERRAL=true`) and compare against a pi agent on the same model: context tokens at session start, cost per task, and cache-read tokens as a share of input tokens. The worker picks the value up on its next task.
+
+### pi codemode
+
+`PI_CODEMODE=true` adds pi's codemode tool: a QuickJS sandbox inside the worker process in which the model's JavaScript calls tools (`await tools.get_task_details({ taskId })`) in any order or in parallel and returns only the result. The adapter uses `createCodemodeExtension({ mode: "on", models: false })` and `+codemode`:
+
+- `mode: "on"` keeps every declared tool declared, so lifecycle tools (`store-progress`, `send-task`, …) are still called directly. `mode: "only"` is never used.
+- `models: false` keeps model calls out of scripts, where they would bypass the session's cost accounting.
+- Scripts receive a tool's `structuredContent` when the tool declares an `outputSchema`, which every swarm tool does.
+- Nested calls go through pi's tool pipeline, so the swarm `tool_call` hooks (cancellation, loop detection) still see them.
+- `createBoundedCodemodeExtension` caps each script: a 120 s deadline (pi's default is none, and it also overrides a longer `timeout_ms` in the script's `// @options` line), 32 nested tool calls, and 4 running at once. Hitting a limit, or cancelling the task, aborts the sandbox signal, which interrupts the QuickJS worker and fails the codemode call.
+
+The flag is the only switch: when it is on, every pi session gets codemode, whatever the task's model or tier. Our July scripts-only eval found small models degrade as coordinators when they must work through scripts, so pilot it on an agent that runs a capable model. Leave the flag off unless you are piloting it, and compare tool calls per task and cost against a pi agent without it.
+
 ### How each adapter delivers the prompt
 
 - **Claude** — CLI flag: `cmd.push("--append-system-prompt", this.config.systemPrompt)` at [`claude-adapter.ts:245–247`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-adapter.ts).
 - **Codex** — written into `AGENTS.md` in `cwd` inside a `<swarm_system_prompt>` block. The Codex SDK has no `--append-system-prompt` equivalent; this file is the only channel. Entry: `writeCodexAgentsMd(config.cwd, config.systemPrompt)` at [`codex-adapter.ts:761`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-adapter.ts); implementation at [`codex-agents-md.ts:56–119`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-agents-md.ts). If an `AGENTS.md` exists, the block is prepended; otherwise stacked atop any `CLAUDE.md`. Cleanup in the session `finally` at `codex-adapter.ts:738`.
-- **Pi** — SDK parameter: `new DefaultResourceLoader({ appendSystemPrompt: [config.systemPrompt], ... })` passed via `CreateAgentSessionOptions` at [`pi-mono-adapter.ts:508–519`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/pi-mono-adapter.ts).
+- **Pi** — SDK parameter: `new DefaultResourceLoader({ appendSystemPrompt: [config.systemPrompt], extensionFactories, ... })` passed via `CreateAgentSessionOptions` in [`pi-mono-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/pi-mono-adapter.ts). The adapter must `await resourceLoader.reload()` first: `createAgentSession` only reloads a loader it builds itself, and an unloaded loader contributes no appended prompt and no extensions. The adapter's `SettingsManager` sets `projectTrusted: false`, because the cwd is a task repo clone: the repo's `.pi/extensions`, packages, settings and `SYSTEM.md` never load into the worker process.
 
 ### What this means for a new provider
 
@@ -897,7 +924,7 @@ Authorization: Bearer {apiKey}
 Then:
 
 - **Claude** writes `/tmp/mcp-<taskId>.json` and passes it via `--mcp-config` (`claude-adapter.ts` L46–183).
-- **Pi** instantiates an `McpHttpClient` per HTTP/SSE server and registers tools prefixed `mcp__<name>__` (`pi-mono-adapter.ts` L408–493).
+- **Pi** hands them to pi's built-in MCP extension (`createMcpExtension()`): `toPiMcpServers` maps stdio servers to `{ command, args, env }` and HTTP/SSE servers to streamable HTTP `{ url, headers }`, and the swarm hook extension calls `pi.registerMcpServer()` for each on `session_start` (the adapter calls `session.bindExtensions({})` to emit it). Tools are named `mcp__<name>__<tool>` with `direct` exposure. The extension's config loader is replaced, so `~/.pi/agent/mcp.json` and a repo's `.pi/mcp.json` are never read. Resolved header and env values are escaped (`$` → `$$`, leading `!` → `$!`) because pi treats `!…` as a shell command and expands `$VAR`. The swarm server itself stays on the adapter's own `McpHttpClient`, which carries the per-session `X-Agent-ID`, `X-Source-Task-Id` and `X-Runtime-Instance-ID` headers.
 - **Codex** builds a structured `mcp_servers` object for `new Codex({ config })` (`codex-adapter.ts` L132–243).
 
 Always include the swarm's own MCP server with an `X-Source-Task-Id` header so nested tool calls attribute back correctly.

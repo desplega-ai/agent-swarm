@@ -12,6 +12,8 @@
  * Pure module: no IO, no Bun APIs.
  */
 
+import { isAlias, parseAlias } from "./resolve-alias.ts";
+
 /** Minimal per-model facts the filters read. */
 export interface HarnessCatalogModel {
   release_date?: string | null;
@@ -155,4 +157,80 @@ export function buildClaudeShortnameMap(
   const out: Record<string, string> = {};
   for (const [alias, model] of best) out[alias] = model.id;
   return out;
+}
+
+/** Catalog sections as the guard reads them (a subset of `ModelsDevCatalog`). */
+export type HarnessCatalogSections = Record<
+  string,
+  { models?: Record<string, HarnessCatalogModel> } | undefined
+>;
+
+/** Claude CLI context-window suffix (`sonnet[1m]`): the CLI reads it, the catalog does not list it. */
+const CONTEXT_SUFFIX_RE = /\[1m\]$/i;
+const MAX_EXAMPLE_IDS = 8;
+
+/**
+ * Null when `model` runs on `harness`, else the reason. Only the pinned
+ * harnesses (claude, claude-managed, codex) are judged; every other harness,
+ * and an id the catalog does not know at all, passes (the catalog membership
+ * check decides those). Legacy shortnames and `modelTier` never reach here as
+ * a cross-harness problem: a bare `opus` on codex is unknown to every section.
+ *
+ * Pure: no IO, so the worker can call it with the runtime catalog.
+ */
+export function harnessModelMismatch(
+  model: string,
+  harness: string | null | undefined,
+  sections: HarnessCatalogSections,
+  context: { agentName?: string | null; agentId?: string | null } = {},
+): string | null {
+  const section = harness ? harnessCatalogSection(harness) : null;
+  if (!harness || !section) return null;
+  const id = model.trim().replace(CONTEXT_SUFFIX_RE, "");
+  if (!id) return null;
+  const own = sections[section]?.models ?? {};
+  const fail = () => harnessMismatchMessage(model.trim(), harness, section, own, context);
+
+  if (isAlias(id)) {
+    const parsed = parseAlias(id);
+    // Bad grammar is the alias check's job, not this one.
+    if (!parsed) return null;
+    return parsed.kind === section ? null : fail();
+  }
+
+  let bare = id;
+  const slash = id.indexOf("/");
+  if (slash > 0) {
+    if (id.slice(0, slash) !== section) return fail();
+    // The harness's own namespace: judge the rest like a bare id, so an
+    // uncatalogued id defers to the caller's custom-model check.
+    bare = id.slice(slash + 1);
+  }
+
+  if (section === "anthropic" && Object.hasOwn(buildClaudeShortnameMap(own), bare)) return null;
+  if (Object.hasOwn(own, bare)) {
+    return isHarnessCatalogModel(harness, bare, own[bare]) ? null : fail();
+  }
+  for (const [name, other] of Object.entries(sections)) {
+    if (name === section) continue;
+    if (other?.models && Object.hasOwn(other.models, bare)) return fail();
+  }
+  return null;
+}
+
+function harnessMismatchMessage(
+  model: string,
+  harness: string,
+  section: string,
+  own: Record<string, HarnessCatalogModel>,
+  context: { agentName?: string | null; agentId?: string | null },
+): string {
+  const agent = context.agentId
+    ? ` of agent "${context.agentName ?? context.agentId}" (${context.agentId})`
+    : "";
+  const ids = harnessModelIds(harness, own);
+  const extra = ids.length - MAX_EXAMPLE_IDS;
+  const examples =
+    ids.slice(0, MAX_EXAMPLE_IDS).join(", ") + (extra > 0 ? ` and ${extra} more` : "");
+  return `Model "${model}" does not run on the ${harness} harness${agent}. The ${harness} harness accepts ${section} catalog models, for example: ${examples}. Use modelTier (smol, regular, smart, ultra) for portable intent, or omit model and let the assignee resolve it.`;
 }

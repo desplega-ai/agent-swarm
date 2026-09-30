@@ -1,0 +1,255 @@
+/* Public benchmark page (/benchmark). */
+
+.bm-header {
+  gap: 20px;
+}
+
+.bm-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  flex: 1;
+  font-size: 13px;
+}
+
+.bm-nav a {
+  color: var(--dim);
+  text-decoration: none;
+}
+
+.bm-nav a:hover {
+  color: var(--text);
+}
+
+.bm-version {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.bm-version select {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font: inherit;
+}
+
+.bm-main {
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.bm-hero {
+  padding: 8px 0 20px;
+}
+
+.bm-hero h1 {
+  margin: 0 0 10px;
+  font-size: 28px;
+}
+
+.bm-hero p {
+  margin: 4px 0;
+  max-width: 820px;
+  line-height: 1.5;
+}
+
+.bm-section {
+  margin-bottom: 16px;
+}
+
+.bm-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.bm-section-head h2 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.bm-lede {
+  margin: 6px 0 12px;
+  font-size: 13px;
+  max-width: 860px;
+  line-height: 1.5;
+}
+
+table.data.bm-table {
+  width: 100%;
+  table-layout: auto;
+}
+
+table.data.bm-table td {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  vertical-align: top;
+}
+
+.bm-table .num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.bm-ci,
+.bm-spread {
+  font-size: 11px;
+}
+
+.bm-sig {
+  font-weight: 700;
+}
+
+.bm-swatch {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  margin-right: 7px;
+  vertical-align: middle;
+}
+
+.bm-legend {
+  display: flex;
+  gap: 16px;
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+.bm-legend-item {
+  display: inline-flex;
+  align-items: center;
+}
+
+.bm-tip {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.bm-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 12px;
+}
+
+.bm-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: var(--panel-2);
+  font-size: 13px;
+}
+
+.bm-card header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.bm-card p {
+  margin: 8px 0;
+  line-height: 1.45;
+}
+
+.bm-card-meta {
+  font-size: 12px;
+}
+
+.bm-kind {
+  font-size: 11px;
+  border-radius: 999px;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.bm-kind-swarm {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.bm-kind-solo-baseline {
+  color: var(--dim);
+}
+
+.bm-dims {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.bm-dims span {
+  font-size: 11px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+.bm-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 16px;
+  font-size: 13px;
+  margin: 10px 0 14px;
+}
+
+.bm-facts dt {
+  color: var(--dim);
+}
+
+.bm-facts dd {
+  margin: 0;
+}
+
+.bm-limits {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.bm-methodology {
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.bm-canary {
+  font-size: 11px;
+  padding: 16px 0 32px;
+  text-align: center;
+}
+
+.bm-empty {
+  padding: 48px 0;
+  text-align: center;
+  color: var(--dim);
+}
+
+.bm-empty a {
+  color: var(--accent);
+}
+
+/* logged-in viewers only: the way back into the evals app */
+.bm-app-link {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--dim);
+  font-size: 12px;
+  line-height: 1;
+  padding: 5px 9px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.bm-app-link:hover {
+  color: var(--text);
+  background: var(--panel-2);
+}

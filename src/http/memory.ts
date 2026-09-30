@@ -24,6 +24,7 @@ import { rerank } from "../be/memory/reranker";
 import { getRetrievalsForAgent, hasRetrievalForTask } from "../be/memory/retrieval-store";
 import { getUsefulnessStats } from "../be/memory/usefulness-stats";
 import { shouldPersistAutomaticTaskMemory } from "../memory/automatic-task-gate";
+import { buildRecallQuery } from "../memory/recall-query";
 import { memoryRelevance, SIMILARITY_THRESHOLD } from "../prompts/memories";
 import { can } from "../rbac";
 import { AgentMemorySchema, AgentMemoryScopeSchema, AgentMemorySourceSchema } from "../types";
@@ -666,7 +667,17 @@ export async function handleMemory(
     const parsed = await searchMemory.parse(req, res, pathSegments, new URLSearchParams());
     if (!parsed) return true;
 
-    const { query, intent, limit, scope, source } = parsed.body;
+    const { query: originalQuery, intent, limit, scope, source } = parsed.body;
+    const consumptionHeader = req.headers["x-memory-consumption"];
+    const consumptionMode = Array.isArray(consumptionHeader)
+      ? consumptionHeader[0]
+      : consumptionHeader;
+    const query = consumptionMode === "prompt" ? buildRecallQuery(originalQuery) : originalQuery;
+
+    if (consumptionMode === "prompt" && !query) {
+      searchMemory.respond(res, 200, { results: [] });
+      return true;
+    }
 
     try {
       const provider = getEmbeddingProvider();
@@ -689,10 +700,6 @@ export async function handleMemory(
         isLead: false,
       });
       const resultLimit = Math.min(limit, 20);
-      const consumptionHeader = req.headers["x-memory-consumption"];
-      const consumptionMode = Array.isArray(consumptionHeader)
-        ? consumptionHeader[0]
-        : consumptionHeader;
       // Prompt recall injects only rows above the relevance gate, so the gate
       // must pick the slots, not trim them afterwards: eligible rows fill the
       // cap first (in composite order), ineligible rows only the remainder.

@@ -376,6 +376,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
     icon: Cpu,
     entries: [
       {
+        key: "SWARM_DEV_MODE",
+        label: "Dev mode",
+        description:
+          "Bypass dashboard version checks for deployments that follow main. Keep the API current with the dashboard. Shows a DEV badge.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}ui/configuration#dev-mode`,
+      },
+      {
         key: "CLAUDE_TRANSPORT",
         label: "Default Claude transport",
         description:
@@ -402,6 +411,24 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         kind: "json",
         defaultValue: "{}",
         docsUrl: `${DOCS}ui/configuration`,
+      },
+      {
+        key: "PI_TOOL_DEFERRAL",
+        label: "Defer pi swarm tools (pilot)",
+        description:
+          "pi workers only. Keep the core lifecycle tools and any task-manifest tools in the tool list, and load the rest through pi's tool_search. Cuts the tool schema sent with every pi session. Off by default: pilot it on one agent first and compare cost and cache hits. Takes effect on the worker's next task.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}guides/harness-providers`,
+      },
+      {
+        key: "PI_CODEMODE",
+        label: "pi codemode (pilot)",
+        description:
+          "pi workers only. Add pi's codemode tool, a JavaScript sandbox in the worker whose scripts call tools, so one call can fan out many tool calls. Declared tools stay declared. Applies to every pi session when on. Off by default. Takes effect on the worker's next task.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}guides/harness-providers`,
       },
       {
         key: "SCRIPTS_ONLY_MCP",

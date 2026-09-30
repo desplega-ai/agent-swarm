@@ -3,7 +3,6 @@ import { explicitModelErrorForAgent } from "../../be/model-validation";
 import { applyPreTaskCreate } from "../../extensions/apply-task-create";
 import { workflowContextKey } from "../../tasks/context-key";
 import { TaskCreationBlockedError } from "../../tasks/errors";
-import { withSiblingAwareness } from "../../tasks/sibling-awareness";
 import type { ExecutorMeta } from "../../types";
 import {
   FollowUpConfigSchema,
@@ -137,15 +136,17 @@ export class AgentTaskExecutor extends BaseExecutor<
         contextKey: workflowContextKey({ workflowRunId: meta.runId }),
       },
       origin: "workflow",
+      allowCustomModel: config.allowCustomModel,
     });
     if (preCreate.kind === "blocked") {
       throw new TaskCreationBlockedError(preCreate.reason, preCreate.extension);
     }
-    const { description: taskDescription, options: taskOptions } = await withSiblingAwareness(
-      preCreate.description,
-      preCreate.options,
-    );
-    const task = await db.createTaskExtended(taskDescription, taskOptions);
+    // No sibling awareness: every task of a run shares this contextKey, so its
+    // siblings are the engine's own parallel steps, not new user input. The
+    // block handed each child its siblings' task ids, and one child completed
+    // a sibling's task with its own report. It would also wire parentTaskId to
+    // a concurrent same-agent sibling's session.
+    const task = await db.createTaskExtended(preCreate.description, preCreate.options);
 
     // 4. Return async result — engine will pause the workflow
     return {

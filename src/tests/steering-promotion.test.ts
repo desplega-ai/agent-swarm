@@ -18,6 +18,7 @@ import {
 } from "../be/db";
 import { buildResumeContextPreamble } from "../commands/context-preamble";
 import { codeLevelTriage } from "../heartbeat/heartbeat";
+import { handlePoll } from "../http/poll";
 
 const TEST_DB_PATH = `./test-steering-promotion-${process.pid}.sqlite`;
 
@@ -92,6 +93,56 @@ describe("steering promotion on terminal tasks", () => {
       task: "preserve this instruction",
       taskType: "follow-up",
     });
+  });
+
+  test("a promoted steer on a Codex agent carries no model or tier, so the claim records none and the adapter default applies", async () => {
+    const codexId = (
+      await createAgent({
+        name: "steering codex",
+        isLead: false,
+        status: "idle",
+        maxTasks: 2,
+        harnessProvider: "codex",
+      })
+    ).id;
+    const task = await createTaskExtended("codex parent", {
+      agentId: codexId,
+      model: "gpt-6-luna",
+    });
+    expect((await startTask(task.id))?.status).toBe("in_progress");
+    await createSteeringMessage({
+      taskId: task.id,
+      body: "steer after reboot",
+      mode: "queue",
+      source: "api",
+      createdByKind: "system",
+    });
+    expect((await failTask(task.id, "reboot sweep"))?.status).toBe("failed");
+    const [promoted] = await getSteeringMessagesForTask(task.id);
+    const followUp = await getTaskById(promoted!.promotedTaskId!);
+    expect(followUp?.agentId).toBe(codexId);
+    expect(followUp?.model ?? null).toBeNull();
+    expect(followUp?.modelTier ?? null).toBeNull();
+
+    let body = "";
+    const req = {
+      method: "GET",
+      url: "/api/poll",
+      headers: { "x-agent-id": codexId },
+    } as unknown as Parameters<typeof handlePoll>[0];
+    const res = {
+      setHeader() {},
+      writeHead() {},
+      end(chunk?: string) {
+        body = chunk ?? "";
+      },
+    } as unknown as Parameters<typeof handlePoll>[1];
+    await handlePoll(req, res, ["api", "poll"], new URLSearchParams(), codexId);
+    const trigger = (JSON.parse(body) as { trigger: Record<string, any> | null }).trigger;
+    expect(trigger?.type).toBe("task_assigned");
+    expect(trigger?.taskId).toBe(followUp!.id);
+    expect(trigger?.task.resolvedModel).toBeUndefined();
+    expect(trigger?.task.modelUnsupported).toBeUndefined();
   });
 
   test("promotion bypasses disabled follow-up configuration", async () => {

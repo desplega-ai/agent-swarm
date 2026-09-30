@@ -148,6 +148,7 @@ const FACTS: GradedFact[] = [
 
 export const memoryDistractor: Scenario = {
   id: "memory-distractor",
+  version: 1,
   name: "Memory distractor",
   description: [
     "Seeds three swarm-scope memories carrying the canonical Halberd deploy config (host, region,",

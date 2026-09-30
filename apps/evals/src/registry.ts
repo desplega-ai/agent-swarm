@@ -1,6 +1,9 @@
 import { getAaForConfig } from "../configs/aa.ts";
 import { configs } from "../configs/index.ts";
+import { type ScenarioCard, scenarioCard } from "../scenarios/cards.ts";
 import { scenarios } from "../scenarios/index.ts";
+import { SUITE_ID, suiteVersionFor } from "../scenarios/suite.ts";
+import { soloVariantId } from "./baseline.ts";
 import { validateConfigModel } from "./cost/resolve-alias.ts";
 import { normalizeOutcome } from "./normalize-outcome.ts";
 import type { Registry } from "./runner/index.ts";
@@ -89,6 +92,22 @@ function validateWorkerSpec(
       errors.push(`${label}.env key "${key}" must match ${ENV_KEY_RE}`);
     } else if (WORKER_SPEC_RESERVED_ENV.has(key)) {
       errors.push(`${label}.env key "${key}" is reserved by the boot path`);
+    }
+  }
+  if (spec.profile !== undefined) {
+    const { role, description, capabilities } = spec.profile;
+    if (role === undefined && description === undefined && capabilities === undefined) {
+      errors.push(`${label}.profile must set role, description or capabilities`);
+    }
+    // The swarm API's profile route caps role at 100 chars.
+    if (role !== undefined && (role.trim().length === 0 || role.length > 100)) {
+      errors.push(`${label}.profile.role must be 1..100 chars`);
+    }
+    if (description !== undefined && description.trim().length === 0) {
+      errors.push(`${label}.profile.description must be non-empty when present`);
+    }
+    if (capabilities?.some((c) => typeof c !== "string" || c.trim().length === 0)) {
+      errors.push(`${label}.profile.capabilities entries must be non-empty strings`);
     }
   }
 }
@@ -190,6 +209,9 @@ function validateDimensions(
 export function validateScenario(s: Scenario): string[] {
   const errors: string[] = [];
   const names = new Set<string>();
+  if (!Number.isInteger(s.version) || s.version < 1) {
+    errors.push(`version must be a positive integer, got ${s.version}`);
+  }
   if (Array.isArray(s.workers)) {
     // WorkerSpec[] shape (v7 §9): 1..MAX entries; identity/env rules per spec.
     if (s.workers.length < 1 || s.workers.length > MAX_WORKERS) {
@@ -273,6 +295,18 @@ export function validateScenario(s: Scenario): string[] {
       }
     });
   }
+  s.seed?.workerExec?.forEach((entry, i) => {
+    if (!Number.isInteger(entry.worker) || entry.worker < 0 || entry.worker >= workers) {
+      errors.push(`seed.workerExec[${i}].worker ${entry.worker} out of range [0, ${workers - 1}]`);
+    }
+    if (entry.commands.length === 0) errors.push(`seed.workerExec[${i}].commands is empty`);
+  });
+  if (s.humanInput !== undefined) {
+    if (s.humanInput.reply.trim().length === 0) errors.push("humanInput.reply must be non-empty");
+    // The answer arrives as a hitl-follow-up task; without this the runner
+    // grades as soon as the upfront task ends, before the work resumes.
+    if (!s.awaitSpawnedTasks) errors.push("humanInput requires awaitSpawnedTasks");
+  }
   // OutcomeSpec v2 (v8.0): weighted graded dimensions.
   if (s.outcome.dimensions !== undefined) {
     const hasBudget = s.budgetUsd !== undefined || s.budgetMs !== undefined;
@@ -284,6 +318,63 @@ export function validateScenario(s: Scenario): string[] {
   }
   if (s.budgetMs !== undefined && !(s.budgetMs > 0)) {
     errors.push(`budgetMs must be > 0 when present, got ${s.budgetMs}`);
+  }
+  return errors;
+}
+
+/**
+ * Cross-scenario rules for single-agent baselines (plan Q6). A `-solo` variant
+ * is only a fair baseline while it stays in lockstep with its swarm scenario:
+ * one worker and no lead, the same timeout and budgets, the same version, and a
+ * rubric whose every dimension also exists in the swarm rubric at the same
+ * weight (so the comparison in src/baseline.ts scores both on the same
+ * dimensions). Returns violations prefixed by the offending scenario id.
+ */
+export function validateBaselinePairs(all: Scenario[]): string[] {
+  const errors: string[] = [];
+  const byId = new Map(all.map((s) => [s.id, s]));
+  for (const solo of all) {
+    if (solo.baselineOf === undefined) continue;
+    const at = `scenario "${solo.id}"`;
+    const swarm = byId.get(solo.baselineOf);
+    if (!swarm) {
+      errors.push(`${at}: baselineOf "${solo.baselineOf}" is not a registered scenario`);
+      continue;
+    }
+    if (solo.id !== soloVariantId(swarm.id)) {
+      errors.push(`${at}: a baseline of "${swarm.id}" must be named "${soloVariantId(swarm.id)}"`);
+    }
+    if (swarm.baselineOf !== undefined) {
+      errors.push(`${at}: baselineOf "${swarm.id}" is itself a baseline`);
+    }
+    if (swarm.lead === undefined) {
+      errors.push(`${at}: baselineOf "${swarm.id}" has no lead, so it is not a swarm scenario`);
+    }
+    if (solo.lead !== undefined) errors.push(`${at}: a solo baseline must not have a lead`);
+    if (scenarioWorkerCount(solo.workers) !== 1) {
+      errors.push(`${at}: a solo baseline must boot exactly 1 worker`);
+    }
+    if (solo.seed?.workerFailures?.length) {
+      errors.push(`${at}: a solo baseline must not inject worker failures`);
+    }
+    for (const key of ["version", "timeoutMs", "budgetUsd", "budgetMs"] as const) {
+      if (solo[key] !== swarm[key]) {
+        errors.push(
+          `${at}: ${key} ${solo[key]} differs from "${swarm.id}" (${swarm[key]}); a baseline runs at the same budget`,
+        );
+      }
+    }
+    const swarmDims = new Map(normalizeOutcome(swarm.outcome).dimensions.map((d) => [d.name, d]));
+    for (const dim of normalizeOutcome(solo.outcome).dimensions) {
+      const twin = swarmDims.get(dim.name);
+      if (!twin) {
+        errors.push(`${at}: dimension "${dim.name}" does not exist in "${swarm.id}"`);
+      } else if (twin.weight !== dim.weight) {
+        errors.push(
+          `${at}: dimension "${dim.name}" weight ${dim.weight} differs from "${swarm.id}" (${twin.weight})`,
+        );
+      }
+    }
   }
   return errors;
 }
@@ -327,6 +418,7 @@ export function loadRegistry(): Registry {
       violations.push(`scenario "${scenario.id}": ${error}`);
     }
   }
+  violations.push(...validateBaselinePairs(scenarios));
   for (const config of configs) {
     for (const error of validateConfigModel(config)) {
       violations.push(`config "${config.id}": ${error}`);
@@ -359,6 +451,8 @@ export interface SerializedWorkerSpec {
  */
 export interface SerializedScenario {
   id: string;
+  /** Scenario version (bumped on any prompt, fixture or check change). */
+  version: number;
   name: string;
   description: string | null;
   /** Worker COUNT for either Scenario.workers shape (back-compat). */
@@ -367,6 +461,12 @@ export interface SerializedScenario {
   workerSpecs: SerializedWorkerSpec[] | null;
   /** Null when the scenario defines no lead (v7 §12). */
   lead: SerializedWorkerSpec | null;
+  /** Swarm scenario id this single-agent baseline pairs with (plan Q6); null otherwise. */
+  baselineOf: string | null;
+  /** Plain-English card (summary, what the agent does, how it is scored, tags, changelog); null when none is registered. */
+  card: ScenarioCard | null;
+  /** `swarm-evals@1.0` when this scenario version is in the suite manifest, else null. */
+  suite: string | null;
   tasks: {
     title: string;
     description: string;
@@ -418,11 +518,18 @@ export function serializeScenario(s: Scenario): SerializedScenario {
   const normalized = normalizeOutcome(s.outcome);
   return {
     id: s.id,
+    version: s.version,
     name: s.name,
     description: s.description ?? null,
     workers: scenarioWorkerCount(s.workers),
     workerSpecs: Array.isArray(s.workers) ? s.workers.map(serializeWorkerSpec) : null,
     lead: s.lead ? serializeWorkerSpec(s.lead) : null,
+    baselineOf: s.baselineOf ?? null,
+    card: scenarioCard(s.id),
+    suite:
+      suiteVersionFor(s.id, s.version) === null
+        ? null
+        : `${SUITE_ID}@${suiteVersionFor(s.id, s.version)}`,
     tasks: s.tasks.map((t) => ({
       title: t.title,
       description: t.description,

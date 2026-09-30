@@ -1974,6 +1974,28 @@ function getWebhookVerificationDisplay(trigger: TriggerConfig): {
     };
   }
 
+  if (verification.format === "standard-webhooks") {
+    return {
+      formatLabel: "standard-webhooks",
+      header: "webhook-signature",
+      toleranceSeconds: verification.toleranceSeconds ?? 300,
+      secretLabel: "Signing secret",
+      hint: (
+        <>
+          Standard Webhooks sender: sign{" "}
+          <code className="font-mono">
+            &lt;webhook-id&gt;.&lt;webhook-timestamp&gt;.&lt;raw body&gt;
+          </code>{" "}
+          with HMAC-SHA256 keyed by the base64 secret (<code className="font-mono">whsec_</code>{" "}
+          prefix optional), then send{" "}
+          <code className="font-mono">webhook-signature: v1,&lt;base64&gt;</code> with the{" "}
+          <code className="font-mono">webhook-id</code> and{" "}
+          <code className="font-mono">webhook-timestamp</code> headers.
+        </>
+      ),
+    };
+  }
+
   if (verification.format === "token-equality") {
     return {
       formatLabel: "token-equality",

@@ -19,6 +19,7 @@ import {
 } from "@/types";
 import { getExecutorRegistry } from "@/workflows";
 import { validateDefinition } from "@/workflows/definition";
+import { workflowModelErrors } from "@/workflows/model-validation";
 import { withSaveWarnings, workflowSaveWarnings } from "@/workflows/readiness";
 
 export const registerCreateWorkflowTool = (server: McpServer) => {
@@ -50,7 +51,8 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
         "- WEBHOOK VERIFICATION: Webhook triggers use hmacSecret for all verification formats. " +
         "Omit verification for legacy HMAC-SHA256 over the raw body with fallback header scanning; " +
         "or set verification to { format: 'hmac-sha256', header }, { format: 'timestamped-hmac-sha256', header, toleranceSeconds? }, " +
-        "or { format: 'token-equality', header }. Example: { type: 'webhook', hmacSecret: 'secret.SUPERAGENT_WEBHOOK_SECRET', " +
+        "{ format: 'token-equality', header }, or { format: 'standard-webhooks', toleranceSeconds? } " +
+        "(standardwebhooks.com: webhook-id/webhook-timestamp/webhook-signature headers, hmacSecret is the whsec_ signing secret). Example: { type: 'webhook', hmacSecret: 'secret.SUPERAGENT_WEBHOOK_SECRET', " +
         "verification: { format: 'timestamped-hmac-sha256', header: 'X-Superagent-Signature', toleranceSeconds: 300 } }.\n" +
         "- WAIT NODE: type 'wait' pauses a workflow for a duration or until a named workflowEventBus event arrives. " +
         "See runbooks/workflows.md#wait-nodes for config shapes, ordering caveats, and built-in event names.",
@@ -67,7 +69,7 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
           .array(TriggerConfigSchema)
           .optional()
           .describe(
-            "Optional trigger configurations (webhook, schedule, event). Webhook verification formats: legacy omitted verification, hmac-sha256, timestamped-hmac-sha256, token-equality.",
+            "Optional trigger configurations (webhook, schedule, event). Webhook verification formats: legacy omitted verification, hmac-sha256, timestamped-hmac-sha256, token-equality, standard-webhooks.",
           ),
         cooldown: CooldownConfigSchema.optional().describe(
           "Optional cooldown configuration to prevent re-triggering too frequently",
@@ -129,6 +131,10 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
         const validation = validateDefinition(definition, getExecutorRegistry());
         if (!validation.valid) {
           return toolErr(`Invalid definition: ${validation.errors.join("; ")}`);
+        }
+        const modelErrors = await workflowModelErrors(definition);
+        if (modelErrors.length > 0) {
+          return toolErr(`Invalid definition: ${modelErrors.join("; ")}`);
         }
 
         const createdBy =
