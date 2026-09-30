@@ -58,6 +58,7 @@
         "@biomejs/biome": "^2.3.10",
         "@desplega.ai/slack-mock": "^0.4.0",
         "@desplega/model-catalog": "workspace:*",
+        "@desplega/telemetry-contract": "workspace:*",
         "@faker-js/faker": "^10.4.0",
         "@opencode-ai/plugin": "1.18.33",
         "@types/bun": "latest",
@@ -188,6 +189,14 @@
     },
     "packages/model-catalog": {
       "name": "@desplega/model-catalog",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@types/bun": "^1.2.0",
+        "typescript": "^5.9.0",
+      },
+    },
+    "packages/telemetry-contract": {
+      "name": "@desplega/telemetry-contract",
       "version": "0.1.0",
       "devDependencies": {
         "@types/bun": "^1.2.0",
@@ -380,6 +389,8 @@
     "@desplega.ai/slack-mock": ["@desplega.ai/slack-mock@0.4.0", "", { "bin": { "slack-mock": "dist/cli.js" } }, "sha512-2wGXzipl94S4+czfLLjyoNmOEwmhE4XgX7QflU+mTqHoJL9c8eKciygeoQLYhfgpfa2DyfCR+mhbmsV8s8khhQ=="],
 
     "@desplega/model-catalog": ["@desplega/model-catalog@workspace:packages/model-catalog"],
+
+    "@desplega/telemetry-contract": ["@desplega/telemetry-contract@workspace:packages/telemetry-contract"],
 
     "@dnd-kit/accessibility": ["@dnd-kit/accessibility@3.1.1", "", { "dependencies": { "tslib": "^2.0.0" }, "peerDependencies": { "react": ">=16.8.0" } }, "sha512-2P+YgaXF+gRsIihwwY1gCsQSYnu9Zyj2py8kY5fFvUM1qm2WA2u639R6YNVfU4GWr+ZM5mqEsfHZZLoRONbemw=="],
 
