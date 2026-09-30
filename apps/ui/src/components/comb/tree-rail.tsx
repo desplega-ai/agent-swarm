@@ -4,6 +4,7 @@ import { type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { agentFsLsQuery, useAgentFsAccess } from "@/api/hooks/use-agent-fs";
 import { PinnedList } from "@/components/comb/pinned-list";
+import { MiddleTruncation } from "@/components/ui/middle-truncation";
 import { ancestorFolders, type CombLocation, combPath, parentFolder } from "@/lib/comb/paths";
 import { type FolderListing, flattenTree, visibleFolders } from "@/lib/comb/tree";
 import { cn } from "@/lib/utils";
@@ -210,6 +211,8 @@ function DriveTree({
               to={combPath({ orgId, driveId, path: row.path })}
               role="treeitem"
               data-path={row.path}
+              // The visible name can be cut in the middle. The full name stays the item's name.
+              aria-label={row.name}
               aria-level={row.level}
               aria-setsize={row.setsize}
               aria-posinset={row.posinset}
@@ -225,7 +228,7 @@ function DriveTree({
               className="flex min-w-0 flex-1 items-center gap-1.5 rounded py-1 outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
             >
               <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-              <span className="truncate">{row.name}</span>
+              <MiddleTruncation>{row.name}</MiddleTruncation>
             </Link>
           </div>
         );

@@ -10,6 +10,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { MiddleTruncation } from "@/components/ui/middle-truncation";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   type CombLocation,
@@ -48,7 +49,8 @@ export function PinnedList({
       </h3>
       <ul className="flex flex-col gap-px text-sm">
         {pins.map((pin) => {
-          const label = pinLabel(pin.path);
+          // The icon marks folders, so the tree's list drops the trailing "/".
+          const label = pinLabel(pin.path).replace(/\/$/, "");
           const selected = pin.path === location.path;
           const Icon = isFolderPath(pin.path) ? Folder : File;
           return (
@@ -63,12 +65,15 @@ export function PinnedList({
                 <TooltipTrigger asChild>
                   <Link
                     to={combPath(pin)}
+                    // The visible label can be cut in the middle.
+                    aria-label={label}
                     aria-current={selected ? "page" : undefined}
                     onClick={onNavigate}
                     className="flex min-w-0 flex-1 items-center gap-1.5 rounded py-1 pl-1.5 outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
                   >
                     <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-                    <span className="truncate">{label}</span>
+                    {/* The tooltip shows the full path, so no native title. */}
+                    <MiddleTruncation title={undefined}>{label}</MiddleTruncation>
                   </Link>
                 </TooltipTrigger>
                 <TooltipContent side="right">{pin.path}</TooltipContent>
