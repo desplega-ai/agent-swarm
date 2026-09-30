@@ -135,6 +135,7 @@ const riskSchema = {
 
 export const structuredOutputAdherence: Scenario = {
   id: "structured-output-adherence",
+  version: 1,
   name: "Structured output adherence",
   description:
     "Apply explicit release rules to a four-service snapshot and complete with nested JSON matching the task outputSchema. Grades shape and the rule-derived answer key.",

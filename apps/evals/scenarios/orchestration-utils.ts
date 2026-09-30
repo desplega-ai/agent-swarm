@@ -1,6 +1,50 @@
+import { soloVariantId } from "../src/baseline.ts";
 import { parseToolUses, type ToolUse, toolUseMatches } from "../src/judge/session-log-parse.ts";
 import type { SessionLogRow } from "../src/swarm/client.ts";
-import type { CheckResult, JudgeContext, SwarmTask } from "../src/types.ts";
+import type {
+  CheckResult,
+  JudgeContext,
+  OutcomeSpec,
+  Scenario,
+  SwarmTask,
+  TaskSpec,
+  WorkerSpec,
+} from "../src/types.ts";
+
+export interface SoloVariantSpec {
+  /**
+   * The lone worker's task: the SAME brief and answer key as the swarm lead's,
+   * with only the orchestration instructions (delegate, split, recover) removed.
+   */
+  task: Omit<TaskSpec, "worker" | "dependsOn">;
+  /** The swarm rubric's outcome dimensions only, read from worker 0. */
+  outcome: OutcomeSpec;
+  worker?: WorkerSpec;
+}
+
+/**
+ * Derive the single-agent baseline of a swarm scenario (plan Q6): one worker, no
+ * lead, the swarm scenario's seed minus its worker-failure injection (there is
+ * no teammate to break), and the same version, timeout and budgets, so the two
+ * can only drift apart through `spec`. `validateBaselinePairs` checks the rest.
+ */
+export function soloVariant(swarm: Scenario, spec: SoloVariantSpec): Scenario {
+  const { workerFailures: _noTeammate, ...seed } = swarm.seed ?? {};
+  return {
+    id: soloVariantId(swarm.id),
+    version: swarm.version,
+    baselineOf: swarm.id,
+    name: `${swarm.name} (solo baseline)`,
+    description: `Single-agent baseline of ${swarm.id}: the same brief and answer key, one worker, no lead, the same timeout and budgets. Graded on the swarm rubric's outcome dimensions only.`,
+    workers: [spec.worker ?? {}],
+    seed: Object.keys(seed).length > 0 ? seed : undefined,
+    tasks: [{ ...spec.task, worker: 0 }],
+    outcome: spec.outcome,
+    timeoutMs: swarm.timeoutMs,
+    budgetUsd: swarm.budgetUsd,
+    budgetMs: swarm.budgetMs,
+  };
+}
 
 export function safeStringify(value: unknown): string {
   if (typeof value === "string") return value;

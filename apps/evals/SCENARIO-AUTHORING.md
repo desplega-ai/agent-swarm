@@ -77,10 +77,16 @@ A scenario is a `Scenario` object (`src/types.ts:302`) exported from `scenarios/
 
 The task `description` is **scenario data** — author it inline in the module (like delegation-probe and distributed-audit do). This is NOT the `src/prompts/` template-registry rule (that governs runner/hook/provider prompts in the main repo, not eval scenario text).
 
-### Registration — two places, both required
+### Registration — required places
 
 1. Import + append to the `scenarios` array in **`scenarios/index.ts`**.
 2. Add the `id` to **`EXPECTED_IDS`** in `scenarios/scenarios.test.ts` (line ~40). `scenarios.test.ts` asserts the registry keys exactly equal `EXPECTED_IDS` — forget step 2 and the suite fails.
+3. Set `version: 1` on the scenario, list it in **`scenarios/suite.ts`**, and pin its hash in **`scenarios/scenario-hashes.ts`** (`bun scripts/scenario-hash.ts <id>`). Add a line to `scenarios/CHANGELOG.md`. Later, ANY prompt, fixture or check change bumps `version`, appends a new hash and adds a changelog line; `scenarios/versioning.test.ts` fails otherwise.
+4. Write a reference fixture in **`scenarios/grader-fixtures/<id>.ts`** and register it in `grader-fixtures/index.ts`. `scenarios/grader-validation.test.ts` requires it and checks that a do-nothing agent cannot pass and your reference solution cannot fail (see §10 for the synthetic-context pattern; `grader-validation-support.ts` has `makeContext`, `toolCallRows`, `gradeOffline`).
+
+### Swarm scenarios ship with a single-agent baseline
+
+A swarm scenario (one with a `lead`) should come with a `<id>-solo` variant so a result can say how much the swarm adds (plan Q6). Derive it with `soloVariant(swarm, { task, outcome, worker? })` from `scenarios/orchestration-utils.ts` and register both. The helper keeps the pair in lockstep: one worker, no lead, the swarm's seed minus `workerFailures`, the same `version`, `timeoutMs`, `budgetUsd` and `budgetMs`, and `baselineOf` set. Write the solo `task` as the lead's brief with only the orchestration instructions swapped out, and the solo `outcome` as the swarm rubric's outcome dimensions (same names and weights), read from worker 0. `validateBaselinePairs` (`src/registry.ts`) fails the registry on any drift. `bun src/cli.ts show <runId>` prints Δscore on the shared quality dimensions (efficiency excluded), the token multiple and Δagent time for each pair the run covers (`src/baseline.ts`). Worked examples: `fanout-research.ts`, `worker-recovery.ts`.
 
 Every scenario is **shape-validated at registry load** (`validateScenario`, `src/registry.ts`): bad definitions fail `bun src/cli.ts registry` / server boot with the full violation list. Run `bun src/cli.ts registry` as your first sanity check after authoring.
 

@@ -708,6 +708,55 @@ describe("phase 1 broken-check regressions", () => {
     expect(detail).not.toContain("zeroed");
   });
 
+  test("delegation-chain orders children by dependency depth, whatever order the API lists them in", () => {
+    const one: SwarmTask = { id: "c1", title: "one", description: "d", status: "completed" };
+    const two: SwarmTask = { ...one, id: "c2", title: "two", dependsOn: ["c1"] };
+    const three: SwarmTask = { ...one, id: "c3", title: "three", dependsOn: ["c2"] };
+    // All 6 listing orders (the API lists newest first, i.e. three, two, one). The old
+    // pairwise comparator ordered 3 of these wrongly, failing a correct chain.
+    const perms = [
+      [one, two, three],
+      [one, three, two],
+      [two, one, three],
+      [two, three, one],
+      [three, one, two],
+      [three, two, one],
+    ];
+    for (const listed of perms) {
+      expect(chain.childOrder(listed).map((t) => t.id)).toEqual(["c1", "c2", "c3"]);
+    }
+  });
+
+  test("delegation-chain childOrder tolerates a dependency cycle and unknown dependencies", () => {
+    const a: SwarmTask = {
+      id: "a",
+      title: "a",
+      description: "d",
+      status: "completed",
+      dependsOn: ["b"],
+    };
+    const b: SwarmTask = {
+      id: "b",
+      title: "b",
+      description: "d",
+      status: "completed",
+      dependsOn: ["a"],
+    };
+    const c: SwarmTask = {
+      id: "c",
+      title: "c",
+      description: "d",
+      status: "completed",
+      dependsOn: ["gone"],
+    };
+    expect(
+      chain
+        .childOrder([a, b, c])
+        .map((t) => t.id)
+        .sort(),
+    ).toEqual(["a", "b", "c"]);
+  });
+
   test("delegation-chain still zeroes a lead that reads the seeded history", async () => {
     for (const input of [{ status: "completed", limit: 100 }, { limit: 50 }]) {
       const tasks: SwarmTask[] = [

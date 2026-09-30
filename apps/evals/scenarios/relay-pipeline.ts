@@ -192,6 +192,7 @@ const sourceExists: DeterministicCheck = {
 
 export const relayPipeline: Scenario = {
   id: "relay-pipeline",
+  version: 1,
   name: "Relay pipeline",
   description: [
     "Three workers form a chained transform pipeline. Worker A reads a random per-attempt source",

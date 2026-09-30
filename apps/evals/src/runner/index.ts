@@ -1,7 +1,16 @@
 import type { Client } from "@libsql/client";
+import { suiteVersionFor } from "../../scenarios/suite.ts";
+import {
+  attemptMeteredUsd,
+  configBilling,
+  e2bUsdPerSandboxHour,
+  subscriptionConfigConcurrency,
+} from "../cost/billing.ts";
 import { recomputeCost, recomputeCostMulti } from "../cost/recompute.ts";
 import {
+  cancelUnfinishedAttempts,
   clearAttemptResults,
+  getAttempt,
   getRun,
   insertArtifact,
   insertAttempt,
@@ -73,6 +82,11 @@ import {
   type WorkerRosterEntry,
   type WorkerSpec,
 } from "../types.ts";
+import {
+  classifyFailureReason,
+  classifyNoOutputTimeout,
+  HarnessCrashError,
+} from "./harness-crash.ts";
 import { applyRunConfigPins, ensureRunConfigPins } from "./run-configs.ts";
 import { applyRunEfforts } from "./run-efforts.ts";
 import { topoOrder } from "./topo.ts";
@@ -212,8 +226,10 @@ export class JudgeInfraError extends Error {
  * Uniform post-`waitForTask` classification (both creation modes), frozen
  * order (v6 §9.4): 1) infra-signature check — throws InfraTaskFailureError,
  * short-circuiting the whole attempt body (no log/cost waits, no judge spend)
- * and riding the per-attempt retry; 2) cascade-skip classification — a
- * dependent failed by the server's dependency cascade gets `skipped: true`.
+ * and riding the per-attempt retry; 2) harness-crash check (Phase 3) — throws
+ * HarnessCrashError, same short-circuit, ends as `error` + `harness-error`;
+ * 3) cascade-skip classification — a dependent failed by the server's
+ * dependency cascade gets `skipped: true`.
  */
 export function processTerminalTask<T extends SwarmTask>(
   task: T,
@@ -229,6 +245,10 @@ export function processTerminalTask<T extends SwarmTask>(
         `infra failure (${sig.id}): task ${task.id} failed with "${reason.slice(0, 300)}". ${sig.hint}`,
       );
     }
+    // A harness or provider fault (context overflow, dead provider stream) is
+    // not a model failure: end the attempt as `error`, excluded from scores.
+    const crash = classifyFailureReason(reason);
+    if (crash) throw new HarnessCrashError(crash, task.id);
     if (CASCADE_SKIP_RE.test(reason)) {
       log(`[task] ${task.id} skipped (failed dependency)`);
       return { ...task, skipped: true };
@@ -527,6 +547,14 @@ export async function killAllActiveStacks(): Promise<void> {
 type RunSandboxSweeper = typeof sweepRunSandboxes;
 type RunnerLog = (msg: string) => void;
 
+/** `attempts.error` text of an attempt reaped after its run died (boot reaper). */
+export const CANCEL_REASON_DEAD_RUN =
+  "cancelled: the run stopped before this attempt finished (swept at boot); excluded from scores";
+const CANCEL_REASON_RUN_CANCELLED =
+  "cancelled: the run was cancelled before this attempt finished; excluded from scores";
+const cancelReasonCostCap = (capUsd: number, spentUsd: number): string =>
+  `cancelled: the run's metered cost cap of $${capUsd.toFixed(2)} was reached ($${spentUsd.toFixed(2)} spent); excluded from scores`;
+
 /**
  * A fresh server process has an empty active-runs map. Any DB row still marked
  * running at boot is therefore orphaned by a previous process and must not stay
@@ -545,6 +573,11 @@ export async function reconcileOrphanedRuns(
       `run ${run.id} was left "running" by a previous process (orphaned) - swept ${swept} sandbox(es), marked failed. POST /api/runs/${run.id}/resume to continue it.`,
     );
   }
+  // Nothing is executing in a fresh process, so every attempt still pending,
+  // running or judging belongs to a dead run. Close them out; resume resets them.
+  const reaped = await cancelUnfinishedAttempts(db, { reason: CANCEL_REASON_DEAD_RUN });
+  if (reaped > 0)
+    log(`reaped ${reaped} unfinished attempt(s) of dead runs (cancelled, excluded from scores)`);
   return orphanedRuns.length;
 }
 
@@ -556,6 +589,7 @@ export async function forceCancelInactiveRun(
 ): Promise<number> {
   const swept = await sweep(runId, log);
   await setRunStatus(db, runId, "cancelled");
+  await cancelUnfinishedAttempts(db, { runId, reason: CANCEL_REASON_RUN_CANCELLED });
   return swept;
 }
 
@@ -568,10 +602,27 @@ export function attemptId(
   return `${runId}_${scenarioId}_${configId}_${index}`;
 }
 
-export async function ensureAttemptRows(db: Client, runId: string): Promise<void> {
+/** Scenario + suite version an attempt of `scenario` runs at (suite null when off-manifest). */
+export function attemptVersions(scenario: Pick<Scenario, "id" | "version"> | undefined): {
+  scenarioVersion: number | null;
+  suiteVersion: string | null;
+} {
+  if (!scenario) return { scenarioVersion: null, suiteVersion: null };
+  return {
+    scenarioVersion: scenario.version,
+    suiteVersion: suiteVersionFor(scenario.id, scenario.version),
+  };
+}
+
+export async function ensureAttemptRows(
+  db: Client,
+  runId: string,
+  scenarios?: ReadonlyMap<string, Pick<Scenario, "id" | "version">>,
+): Promise<void> {
   const run = await getRun(db, runId);
   if (!run) throw new Error(`run ${runId} not found`);
   for (const scenarioId of run.scenarioIds) {
+    const versions = attemptVersions(scenarios?.get(scenarioId));
     for (const configId of run.configIds) {
       for (let i = 0; i < run.attemptsPerCell; i++) {
         await insertAttempt(db, {
@@ -580,6 +631,7 @@ export async function ensureAttemptRows(db: Client, runId: string): Promise<void
           scenarioId,
           configId,
           attemptIndex: i,
+          ...versions,
         });
       }
     }
@@ -709,7 +761,7 @@ const SEED_OUTPUT_CLIP = 20_000;
  * failure detail separates real failures from cascade-skipped dependents
  * (v6 §9.4 frozen format: `<n> failed: <titles> · <m> skipped (failed dependency): <titles>`).
  */
-function tasksCompletedCheck(tasks: SwarmTask[]): DeterministicCheck {
+export function tasksCompletedCheck(tasks: SwarmTask[]): DeterministicCheck {
   const label = (t: SwarmTask): string => {
     const name = t.title || `task ${t.id}`;
     const timedOut = (t as { timedOut?: boolean }).timedOut;
@@ -1046,6 +1098,11 @@ async function runAttemptOnce(opts: {
     status: "running",
     startedAt: new Date().toISOString(),
     error: null,
+    // Stamp the version the attempt actually runs at (rows from before
+    // versioning, or a run resumed after a bump, carry NULL or the old one).
+    ...attemptVersions(scenario),
+    // A re-run of an excluded attempt (resume) is a real attempt again.
+    exclusion: null,
     // A retry must not keep the previous try's roster (its sandboxes are dead).
     workersJson: null,
     reasoningEffort: config.reasoningEffort ?? null,
@@ -1483,6 +1540,11 @@ async function runAttemptOnce(opts: {
     recordAttemptTimings(attempt.id, timings);
     log(`[logs] captured ${logRows.length} session-log row(s) in ${logCapture.ms}ms`);
 
+    // A task that timed out with no session-log row never ran: a harness fault,
+    // not a model failure. Bail before cost capture and judging (no judge spend).
+    const noOutput = classifyNoOutputTimeout(activeTasks, logRows);
+    if (noOutput) throw new HarnessCrashError(noOutput.crash, noOutput.task.id);
+
     // 1. harness-reported session-cost rows (stability-polled, per-task waits in
     // parallel). claude on an OAuth subscription never posts a priced row (zero
     // rows, or a single cost-0 "unpriced" one) — the stability wait can't change
@@ -1902,6 +1964,8 @@ async function runAttemptOnce(opts: {
 
     await updateAttempt(db, attempt.id, {
       status: passed ? "passed" : "failed",
+      // A scored attempt is never excluded (guards a sweep racing an in-flight attempt).
+      exclusion: null,
       passed,
       score,
       costUsd,
@@ -1945,7 +2009,7 @@ async function runAttemptOnce(opts: {
   }
 }
 
-async function runAttemptWithRetry(opts: {
+export async function runAttemptWithRetry(opts: {
   db: Client;
   attempt: AttemptRow;
   registry: Registry;
@@ -1953,8 +2017,11 @@ async function runAttemptWithRetry(opts: {
   judgeModel: string | null;
   signal?: AbortSignal;
   log: (msg: string) => void;
+  /** Test seam: the single-try executor. */
+  runOnce?: typeof runAttemptOnce;
 }): Promise<void> {
   const { db, attempt, registry } = opts;
+  const runOnce = opts.runOnce ?? runAttemptOnce;
   // Own lines ([error]/[retry]) also flow into the live registry — pushAttemptLog
   // no-ops once runAttemptOnce's finally has already cleared the entry.
   const log = (msg: string): void => {
@@ -1973,7 +2040,7 @@ async function runAttemptWithRetry(opts: {
   }
   for (let retry = attempt.retries; ; retry++) {
     try {
-      await runAttemptOnce({
+      await runOnce({
         db,
         attempt,
         scenario,
@@ -1992,7 +2059,9 @@ async function runAttemptWithRetry(opts: {
       // status `error` (NOT `failed`); everything else keeps the stack for
       // debuggability.
       const message =
-        err instanceof InfraTaskFailureError || err instanceof JudgeInfraError
+        err instanceof InfraTaskFailureError ||
+        err instanceof JudgeInfraError ||
+        err instanceof HarnessCrashError
           ? err.message
           : err instanceof Error
             ? (err.stack ?? err.message)
@@ -2006,7 +2075,9 @@ async function runAttemptWithRetry(opts: {
         await updateAttempt(db, attempt.id, { status: "pending", retries: retry });
         return;
       }
-      if (retry >= opts.maxRetries) {
+      // A prompt that overflows the model's window overflows again on a fresh sandbox.
+      const retryable = !(err instanceof HarnessCrashError && !err.crash.retryable);
+      if (retry >= opts.maxRetries || !retryable) {
         if (orphanedLog.length > 0) {
           // Terminal error before the stack existed (no redact available — the
           // boot log carries no secrets beyond throwaway sandbox ids). Best-effort.
@@ -2024,6 +2095,11 @@ async function runAttemptWithRetry(opts: {
         }
         await updateAttempt(db, attempt.id, {
           status: "error",
+          // Harness faults carry no signal about the model: excluded from scores.
+          exclusion:
+            err instanceof HarnessCrashError || err instanceof InfraTaskFailureError
+              ? "harness-error"
+              : null,
           retries: retry,
           error: message.slice(0, 4000),
           finishedAt: new Date().toISOString(),
@@ -2036,19 +2112,53 @@ async function runAttemptWithRetry(opts: {
   }
 }
 
-async function pool<T>(
+/**
+ * Run `fn` over `items` with at most `concurrency` in flight. `keyed` adds a
+ * per-key ceiling (per-config concurrency): a worker takes the first queued
+ * item whose key has a free slot, and waits when every queued item is blocked
+ * on its key's limit.
+ */
+export async function pool<T>(
   items: T[],
   concurrency: number,
   fn: (item: T) => Promise<void>,
   shouldStop?: () => boolean,
+  keyed?: { keyOf: (item: T) => string; limitOf: (key: string) => number },
 ): Promise<void> {
   const queue = [...items];
+  const active = new Map<string, number>();
+  let waiters: (() => void)[] = [];
+  const wake = (): void => {
+    const pending = waiters;
+    waiters = [];
+    for (const resume of pending) resume();
+  };
   const workers = Array.from({ length: Math.max(1, concurrency) }, async () => {
     while (true) {
       if (shouldStop?.()) return;
-      const item = queue.shift();
+      let index = 0;
+      if (keyed) {
+        index = queue.findIndex((candidate) => {
+          const key = keyed.keyOf(candidate);
+          return (active.get(key) ?? 0) < Math.max(1, keyed.limitOf(key));
+        });
+        if (index === -1) {
+          if (queue.length === 0) return;
+          // Every queued item waits on a per-key limit; a running item frees one.
+          await new Promise<void>((resolve) => waiters.push(resolve));
+          continue;
+        }
+      }
+      const [item] = queue.splice(index, 1);
       if (item === undefined) return;
-      await fn(item);
+      const key = keyed?.keyOf(item) ?? "";
+      active.set(key, (active.get(key) ?? 0) + 1);
+      try {
+        await fn(item);
+      } finally {
+        active.set(key, (active.get(key) ?? 1) - 1);
+        wake();
+      }
     }
   });
   await Promise.all(workers);
@@ -2068,8 +2178,13 @@ export async function executeRun(opts: {
   /** Abort starting new attempts (cancel / Ctrl-C). In-flight stacks are killed by the caller. */
   signal?: AbortSignal;
   log?: (msg: string) => void;
+  /** Test seams: the per-attempt executor and the leaked-sandbox sweeper. */
+  runAttempt?: typeof runAttemptWithRetry;
+  sweep?: RunSandboxSweeper;
 }): Promise<void> {
   const { db, runId, signal } = opts;
+  const runAttempt = opts.runAttempt ?? runAttemptWithRetry;
+  const sweepSandboxes = opts.sweep ?? sweepRunSandboxes;
   const baseLog = opts.log ?? ((msg: string) => console.log(msg));
   const run = await getRun(db, runId);
   if (!run) throw new Error(`run ${runId} not found`);
@@ -2085,11 +2200,11 @@ export async function executeRun(opts: {
     baseLog(`config ${configId}: reasoning effort ${effort}`);
   }
 
-  await ensureAttemptRows(db, runId);
+  await ensureAttemptRows(db, runId, registry.scenarios);
   await setRunStatus(db, runId, "running");
 
   // A previous execution may have died mid-attempt and leaked its sandboxes.
-  const swept = await sweepRunSandboxes(runId, baseLog);
+  const swept = await sweepSandboxes(runId, baseLog);
   if (swept > 0) baseLog(`swept ${swept} leaked sandbox(es) from a previous execution`);
 
   const unfinished = await listUnfinishedAttempts(db, runId);
@@ -2097,11 +2212,45 @@ export async function executeRun(opts: {
     `run ${runId}: ${unfinished.length} attempt(s) to execute (concurrency ${run.concurrency})`,
   );
 
+  // Metered cost cap. Spend so far (a resumed run carries its earlier attempts)
+  // plus every attempt that finishes here; once it reaches the cap the runner
+  // starts nothing new and cancels the rest. In-flight attempts finish, so the
+  // final spend can pass the cap by up to `concurrency` attempts' worth.
+  const cap = run.maxMeteredUsd ?? null;
+  const usdPerSandboxHour = e2bUsdPerSandboxHour();
+  const billingFor = (configId: string) =>
+    configBilling(registry.configs.get(configId) ?? { provider: "pi" });
+  let meteredUsd = 0;
+  if (cap !== null) {
+    for (const prior of await listAttempts(db, runId)) {
+      meteredUsd += attemptMeteredUsd(prior, billingFor(prior.configId), usdPerSandboxHour);
+    }
+    baseLog(`metered cost cap $${cap.toFixed(2)}; $${meteredUsd.toFixed(2)} spent so far`);
+  }
+  let capLogged = false;
+
+  // A subscription config shares one rate-limit window across the whole run.
+  const subscriptionLimit = subscriptionConfigConcurrency();
   await pool(
     unfinished,
     run.concurrency,
-    (attempt) =>
-      runAttemptWithRetry({
+    async (attempt) => {
+      if (cap !== null && meteredUsd >= cap) {
+        if (!capLogged) {
+          capLogged = true;
+          baseLog(
+            `metered cost cap $${cap.toFixed(2)} reached ($${meteredUsd.toFixed(2)} spent) — cancelling the remaining attempts`,
+          );
+        }
+        await updateAttempt(db, attempt.id, {
+          status: "error",
+          exclusion: "cancelled",
+          error: cancelReasonCostCap(cap, meteredUsd),
+          finishedAt: new Date().toISOString(),
+        });
+        return;
+      }
+      await runAttempt({
         db,
         attempt,
         registry,
@@ -2110,13 +2259,32 @@ export async function executeRun(opts: {
         signal,
         log: (msg) =>
           baseLog(`[${attempt.scenarioId} × ${attempt.configId} #${attempt.attemptIndex}] ${msg}`),
-      }),
+      });
+      if (cap !== null) {
+        const finished = await getAttempt(db, attempt.id);
+        if (finished) {
+          meteredUsd += attemptMeteredUsd(
+            finished,
+            billingFor(finished.configId),
+            usdPerSandboxHour,
+          );
+        }
+      }
+    },
     () => signal?.aborted ?? false,
+    {
+      keyOf: (attempt) => attempt.configId,
+      limitOf: (configId) =>
+        billingFor(configId) === "subscription" ? subscriptionLimit : Number.POSITIVE_INFINITY,
+    },
   );
 
   if (signal?.aborted) {
+    // Attempts cancelled mid-flight were reset to pending; close them and the
+    // never-started ones out so a cancelled run leaves no work in flight.
+    await cancelUnfinishedAttempts(db, { runId, reason: CANCEL_REASON_RUN_CANCELLED });
     await setRunStatus(db, runId, "cancelled");
-    baseLog(`run ${runId} cancelled — unfinished attempts stay pending; resume to continue`);
+    baseLog(`run ${runId} cancelled — unfinished attempts marked cancelled; resume to continue`);
     return;
   }
   const attempts = await listAttempts(db, runId);

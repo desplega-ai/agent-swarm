@@ -866,3 +866,78 @@ describe("buildAnalytics — reasoning effort", () => {
     expect(res.matrix.reduce((acc, c) => acc + c.attempts, 0)).toBe(5);
   });
 });
+
+describe("buildAnalytics — agent time (Phase 3)", () => {
+  test("agent time averages and medians over attempts that recorded it; duration stays the total", () => {
+    const res = buildAnalytics(
+      [
+        // boot + seed + judging dominate the total; agent time is the tasks phase only.
+        row({ durationMs: 300_000, agentMs: 60_000 }),
+        row({ durationMs: 200_000, agentMs: 90_000 }),
+        row({ durationMs: 100_000, agentMs: 300_000 }),
+        row({ durationMs: 500_000 }), // old row: no timings -> no agent time, not 0
+      ],
+      registry,
+    );
+    const cell = res.matrix[0]!;
+    expect(cell.avgDurationMs).toBe(275_000);
+    expect(cell.avgAgentMs).toBe(150_000);
+    expect(cell.medianAgentMs).toBe(90_000);
+    const model = res.models[0]!;
+    expect(model.avgAgentMs).toBe(150_000);
+    expect(model.medianAgentMs).toBe(90_000);
+  });
+
+  test("median of an even count is the mean of the middle pair; empty is null, never NaN", () => {
+    const even = buildAnalytics(
+      [row({ agentMs: 10 }), row({ agentMs: 20 }), row({ agentMs: 40 }), row({ agentMs: 1000 })],
+      registry,
+    );
+    expect(even.matrix[0]!.medianAgentMs).toBe(30);
+    const none = buildAnalytics([row({ durationMs: 5 })], registry);
+    expect(none.matrix[0]!.avgAgentMs).toBeNull();
+    expect(none.matrix[0]!.medianAgentMs).toBeNull();
+    expect(nonFinitePaths(none)).toEqual([]);
+  });
+});
+
+describe("buildAnalytics — excluded attempts (Phase 3)", () => {
+  test("a cancelled attempt is not an attempt: not counted, not an error, never graded", () => {
+    const res = buildAnalytics(
+      [
+        row({ status: "passed", score: 1 }),
+        row({ status: "failed", score: 0 }),
+        row({ status: "error", exclusion: "cancelled" }),
+        row({ status: "error", exclusion: "cancelled" }),
+      ],
+      registry,
+    );
+    const cell = res.matrix[0]!;
+    expect(cell.attempts).toBe(2);
+    expect(cell.errors).toBe(0);
+    expect(cell.passRate).toBe(0.5);
+  });
+
+  test("a harness crash stays visible as an error but is excluded from the pass rate and the mean score", () => {
+    const res = buildAnalytics(
+      [
+        row({ status: "passed", score: 1 }),
+        row({ status: "failed", score: 0 }),
+        row({ status: "error", exclusion: "harness-error" }),
+      ],
+      registry,
+    );
+    const cell = res.matrix[0]!;
+    expect(cell.attempts).toBe(3);
+    expect(cell.errors).toBe(1);
+    expect(cell.graded).toBe(2);
+    expect(cell.passRate).toBe(0.5);
+    expect(cell.avgScore).toBe(0.5);
+  });
+
+  test("a config whose every attempt was cancelled leaves the matrix entirely", () => {
+    const res = buildAnalytics([row({ status: "error", exclusion: "cancelled" })], registry);
+    expect(res.matrix).toEqual([]);
+    expect(res.configIds).toEqual([]);
+  });
+});
