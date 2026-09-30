@@ -21,11 +21,20 @@ import { CommentComposer, READ_ONLY_MESSAGE, useHasDraft } from "./comment-compo
 import { useCommentContext } from "./comment-context";
 import { QuoteExcerpt } from "./quote-excerpt";
 
-/** A comment body: plain text, with each `@swarm` token and each `@name` of `mentions` as a chip. */
-function CommentBody({ body, mentions }: { body: string; mentions?: CommentMention[] }) {
+/**
+ * Comment text with each `@swarm` token as a chip. `renderText` renders the
+ * text between the tokens (plain text by default).
+ */
+export function SwarmMarkedText({
+  text,
+  renderText = (part) => part,
+}: {
+  text: string;
+  renderText?: (text: string, index: number) => ReactNode;
+}) {
   return (
-    <p className="whitespace-pre-wrap break-words text-sm">
-      {splitSwarmMarkers(body).map((segment, index) =>
+    <>
+      {splitSwarmMarkers(text).map((segment, index) =>
         segment.kind === "swarm" ? (
           <span
             key={index}
@@ -34,15 +43,29 @@ function CommentBody({ body, mentions }: { body: string; mentions?: CommentMenti
             {segment.text}
           </span>
         ) : (
-          splitMentions(segment.text, mentions).map((part, partIndex) =>
+          <Fragment key={index}>{renderText(segment.text, index)}</Fragment>
+        ),
+      )}
+    </>
+  );
+}
+
+/** A comment body: plain text, with each `@swarm` token and each `@name` of `mentions` as a chip. */
+function CommentBody({ body, mentions }: { body: string; mentions?: CommentMention[] }) {
+  return (
+    <p className="whitespace-pre-wrap break-words text-sm">
+      <SwarmMarkedText
+        text={body}
+        renderText={(text, index) =>
+          splitMentions(text, mentions).map((part, partIndex) =>
             part.kind === "mention" ? (
               <MentionChip key={`${index}.${partIndex}`} text={part.text} mention={part.mention} />
             ) : (
               <Fragment key={`${index}.${partIndex}`}>{part.text}</Fragment>
             ),
           )
-        ),
-      )}
+        }
+      />
     </p>
   );
 }

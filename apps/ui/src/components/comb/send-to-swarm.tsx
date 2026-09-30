@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { CombSendError } from "@/api/client";
 import { useSendCombReviewBatch } from "@/api/hooks/use-agent-fs";
 import type { CombRepairedComment, CombSkippedComment, CombSkipReason } from "@/api/types";
+import { SwarmMarkedText } from "@/components/comb/comment-thread";
 import { useAuthorLabel } from "@/components/comb/use-author-label";
 import { useCombServiceUserId } from "@/components/comb/use-comb-service-user";
 import { Button } from "@/components/ui/button";
@@ -264,7 +265,9 @@ function SendBatchDialog({
                       {lineRangeLabel(thread.lineStart, thread.lineEnd) ?? "File"}
                     </span>
                   </span>
-                  <span className="line-clamp-2 break-words text-sm">{thread.body}</span>
+                  <span className="line-clamp-2 break-words text-sm">
+                    <SwarmMarkedText text={thread.body} />
+                  </span>
                 </span>
               </label>
             </li>
