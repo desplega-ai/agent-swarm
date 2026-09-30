@@ -1,9 +1,9 @@
 import { AlertCircle, FileX } from "lucide-react";
-import { type ReactNode, useReducer, useRef } from "react";
+import { type ReactNode, useCallback, useReducer, useRef } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { useAgentFsLs, useAgentFsStat } from "@/api/hooks/use-agent-fs";
+import { useCombLayout } from "@/components/comb/comb-layout";
 import { CommentRail } from "@/components/comb/comment-rail";
-import { FileHeader } from "@/components/comb/file-header";
 import { renderMentionPicker } from "@/components/comb/mention-picker";
 import { ReviewChangesButton } from "@/components/comb/review/review-changes-button";
 import { ReviewPanel, ReviewRangeNotice } from "@/components/comb/review/review-panel";
@@ -13,11 +13,11 @@ import { ViewerSkeleton } from "@/components/comb/viewers/viewer-skeleton";
 import { EmptyState } from "@/components/shared/empty-state";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
 import { AgentFsError } from "@/lib/agent-fs/client";
 import type { StatResult } from "@/lib/agent-fs/types";
 import { combPath, type DrivePath, parentFolder } from "@/lib/comb/paths";
 import { DIFF_PARAM, parseDiffRange, reviewRangeNotice } from "@/lib/comb/review";
+import { cn } from "@/lib/utils";
 
 /**
  * One file: the header, then the viewer in its own scroll pane. A folder URL
@@ -54,34 +54,48 @@ export function FileView({ file }: { file: DrivePath }) {
   return <FileViewSkeleton />;
 }
 
-/** The loaded frame while `stat` loads: header lines, the viewer pane, and the rail column. */
+/** The loaded frame while `stat` loads: the viewer pane and the comment panel's column. */
 function FileViewSkeleton() {
+  const layout = useCombLayout();
+  const inline = layout?.inline ?? true;
+  const railOpen = layout?.right.open ?? true;
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3" aria-busy="true">
-      {/* The file name shows on phones only, like the loaded header. */}
-      <div className="flex min-h-8 flex-col justify-center gap-1.5">
-        <Skeleton className="h-4 w-40 sm:hidden" />
-        <Skeleton className="h-3 w-56" />
+    <div className="flex min-h-0 flex-1 gap-3" aria-busy="true">
+      <div className={VIEWER_PANE}>
+        <ViewerSkeleton />
       </div>
-      <div className="flex min-h-0 flex-1 gap-4">
-        <div className="min-h-[24rem] min-w-0 flex-1 overflow-auto rounded-xl border border-border bg-card lg:min-h-0">
-          <ViewerSkeleton />
-        </div>
+      {inline ? (
         <div
           aria-hidden
-          className="hidden w-72 shrink-0 rounded-xl border border-border bg-card lg:block xl:w-80"
+          className={cn(
+            "shrink-0",
+            railOpen ? "w-72 rounded-xl border border-border bg-card xl:w-80" : "w-11",
+          )}
         />
-      </div>
+      ) : null}
     </div>
   );
 }
+
+// The viewer scroll pane. The outline scrolls a heading to its top, 16px below the edge.
+const VIEWER_PANE =
+  "min-h-[24rem] min-w-0 flex-1 overflow-auto rounded-xl border border-border bg-card lg:min-h-0 [&_:is(h1,h2,h3,h4,h5,h6)]:scroll-mt-4";
 
 // step-10: the review (`?diff=`) replaces the file in the viewer pane.
 const VIEWER_PARAMS = [DIFF_PARAM];
 
 function FileBody({ file, stat }: { file: DrivePath; stat: StatResult }) {
-  // Comment anchors, selection, and highlights live in the viewer pane.
+  // Comment anchors, selection, and highlights live in the viewer pane. The
+  // page layout gets it too: the outline scrolls it.
   const viewerRef = useRef<HTMLDivElement>(null);
+  const setViewer = useCombLayout()?.setViewer;
+  const setViewerRef = useCallback(
+    (element: HTMLDivElement | null) => {
+      viewerRef.current = element;
+      setViewer?.(element);
+    },
+    [setViewer],
+  );
   // step-10: one read-only flag for the rail and the review. A 403 on any write sets it.
   const [readOnly, markReadOnly] = useReducer(() => true, false);
   // step-10: `?diff=<from>..<to>` shows the review (the diff) in place of the
@@ -91,53 +105,47 @@ function FileBody({ file, stat }: { file: DrivePath; stat: StatResult }) {
   const notice = requested ? reviewRangeNotice(requested, file.path, stat) : null;
   const review = notice ? null : requested;
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3">
-      <FileHeader file={file} stat={stat} />
-      <div className="flex min-h-0 flex-1 gap-4">
-        <div
-          ref={viewerRef}
-          className="min-h-[24rem] min-w-0 flex-1 overflow-auto rounded-xl border border-border bg-card lg:min-h-0"
-        >
-          {review ? (
-            <ReviewPanel
-              key={`${review.from}..${review.to}`}
-              file={file}
-              stat={stat}
-              range={review}
-              readOnly={readOnly}
-              onReadOnly={markReadOnly}
-            />
-          ) : (
-            <>
-              {notice ? <ReviewRangeNotice message={notice} /> : null}
-              <FileViewer file={file} stat={stat} />
-            </>
-          )}
-        </div>
-        {/* Comment rail (step-7). Mount points: threadActions, railHeaderActions, renderComposerExtras. */}
-        <CommentRail
-          file={file}
-          stat={stat}
-          viewerRef={viewerRef}
-          // step-8: "@" mention picker in every composer.
-          renderComposerExtras={renderMentionPicker}
-          // step-10: the shared read-only flag and the review param.
-          readOnly={readOnly}
-          onReadOnly={markReadOnly}
-          viewerParams={VIEWER_PARAMS}
-          // step-9 "Send to swarm" and step-10 "Review changes (vX → vY)" on each thread.
-          threadActions={(thread) => (
-            <>
-              <SendThreadButton file={file} thread={thread} />
-              <ReviewChangesButton file={file} stat={stat} thread={thread} />
-            </>
-          )}
-          // step-9: "Send N" for every open @swarm thread of the file.
-          railHeaderActions={({ open }) => (
-            <SendBatchButton drive={file} scopePath={file.path} threads={open} compact />
-          )}
-        />
+    <div className="flex min-h-0 flex-1 gap-3">
+      <div ref={setViewerRef} className={VIEWER_PANE}>
+        {review ? (
+          <ReviewPanel
+            key={`${review.from}..${review.to}`}
+            file={file}
+            stat={stat}
+            range={review}
+            readOnly={readOnly}
+            onReadOnly={markReadOnly}
+          />
+        ) : (
+          <>
+            {notice ? <ReviewRangeNotice message={notice} /> : null}
+            <FileViewer file={file} stat={stat} />
+          </>
+        )}
       </div>
+      {/* Comment rail (step-7). Mount points: threadActions, railHeaderActions, renderComposerExtras. */}
+      <CommentRail
+        file={file}
+        stat={stat}
+        viewerRef={viewerRef}
+        // step-8: "@" mention picker in every composer.
+        renderComposerExtras={renderMentionPicker}
+        // step-10: the shared read-only flag and the review param.
+        readOnly={readOnly}
+        onReadOnly={markReadOnly}
+        viewerParams={VIEWER_PARAMS}
+        // step-9 "Send to swarm" and step-10 "Review changes (vX → vY)" on each thread.
+        threadActions={(thread) => (
+          <>
+            <SendThreadButton file={file} thread={thread} />
+            <ReviewChangesButton file={file} stat={stat} thread={thread} />
+          </>
+        )}
+        // step-9: "Send N" for every open @swarm thread of the file.
+        railHeaderActions={({ open }) => (
+          <SendBatchButton drive={file} scopePath={file.path} threads={open} compact />
+        )}
+      />
     </div>
   );
 }

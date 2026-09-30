@@ -34,6 +34,7 @@ import { COMMENT_LIST_MAX, commentAuthorNames } from "@/lib/comb/comments";
 import type { DomTextSpace } from "@/lib/comb/dom-text-space";
 import { browserStorage, type OutboxEntry, sweepExpiredDrafts } from "@/lib/comb/drafts";
 import { getFileKind } from "@/lib/comb/file-kinds";
+import { PANELS_INLINE_QUERY } from "@/lib/comb/panels";
 import type { DrivePath } from "@/lib/comb/paths";
 import {
   CommentComposer,
@@ -50,6 +51,7 @@ import { CommentHighlights } from "./comment-highlights";
 import { CommentThread } from "./comment-thread";
 import { QuoteExcerpt } from "./quote-excerpt";
 import { SelectionCommentButton } from "./selection-comment-button";
+import { CommentPanel } from "./side-panels";
 import { type CommentOutbox, useCommentOutbox } from "./use-comment-outbox";
 import { useDomTextSpace } from "./use-dom-text-space";
 
@@ -57,8 +59,8 @@ type RailTab = "open" | "resolved";
 
 const NO_THREADS: CommentListEntry[] = [];
 
-// The rail sits beside the viewer from `lg` up. Below that it is a bottom sheet.
-const WIDE_QUERY = "(min-width: 1024px)";
+// The rail sits beside the viewer from `md` up (a collapsible panel). Below that it is a bottom sheet.
+const WIDE_QUERY = PANELS_INLINE_QUERY;
 
 /** Scroll the viewer pane to a comment's passage. False when it has none. */
 function scrollToPassage(
@@ -312,12 +314,10 @@ export function CommentRail({
       />
       <SelectionCommentButton rootRef={viewerRef} space={space} onPendingChange={setPending} />
       {wide ? (
-        <aside
-          aria-label="Comments"
-          className="flex w-72 shrink-0 flex-col overflow-hidden rounded-xl border border-border bg-card xl:w-80"
-        >
+        // The collapsible outer container (title row, collapse, icon strip): side-panels.tsx.
+        <CommentPanel openCount={open.length} notSent={notSent}>
           {rail}
-        </aside>
+        </CommentPanel>
       ) : (
         <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
           <SheetTrigger asChild>

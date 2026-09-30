@@ -34,18 +34,17 @@ export function VersionsMenu({ file, stat }: { file: DrivePath; stat: StatResult
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
-            size="sm"
-            variant="outline"
+            size="icon-sm"
+            variant="ghost"
             aria-disabled="true"
             aria-label="Versions"
             className="aria-disabled:opacity-50"
             onClick={(event) => event.preventDefault()}
           >
             <History />
-            <span className="hidden sm:inline">Versions</span>
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Only one version so far</TooltipContent>
+        <TooltipContent side="bottom">Only one version so far</TooltipContent>
       </Tooltip>
     );
   }
@@ -61,12 +60,16 @@ export function VersionsMenu({ file, stat }: { file: DrivePath; stat: StatResult
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button size="sm" variant="outline" aria-label="Versions">
-          <History />
-          <span className="hidden sm:inline">Versions</span>
-        </Button>
-      </DropdownMenuTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <Button size="icon-sm" variant="ghost" aria-label="Versions">
+              <History />
+            </Button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">Versions</TooltipContent>
+      </Tooltip>
       <DropdownMenuContent align="end" className="max-h-80 w-72">
         <DropdownMenuLabel className="text-xs text-muted-foreground">
           Compare with v{current}

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { StatusIcon, type StatusTone } from "@/components/shared/status-icon";
+import type { StatusTone } from "@/components/shared/status-icon";
 import { Badge } from "@/components/ui/badge";
 import { type LiveState, useAgentFs } from "@/contexts/agent-fs-context";
 import { commentCombPath } from "@/lib/comb/comments";
@@ -17,6 +17,15 @@ const TONE: Record<LiveState, StatusTone> = {
   stopped: "warning",
   paused: "saved",
   off: "saved",
+};
+
+const TITLE: Record<LiveState, string> = {
+  live: "Live",
+  connecting: "Connecting",
+  retrying: "Reconnecting",
+  stopped: "Polling",
+  paused: "Paused",
+  off: "Polling",
 };
 
 function liveReason(state: LiveState, hasStream: boolean, relayed: boolean): string {
@@ -41,21 +50,22 @@ function liveReason(state: LiveState, hasStream: boolean, relayed: boolean): str
 }
 
 /**
- * "Live" while the drive's change stream is up, "Polling" otherwise. The
- * reason is the `StatusIcon` label: its tooltip, its focus stop, and its
- * polite live region.
+ * The change stream's state in words: "Live" while the drive's change stream
+ * is up, otherwise how Comb keeps the view fresh, with the reason.
  */
-export function LiveIndicator() {
+export function useLiveStatus(): {
+  live: boolean;
+  tone: StatusTone;
+  title: string;
+  reason: string;
+} {
   const { liveState, liveRelayed, features } = useAgentFs();
-  return (
-    <span className="flex items-center gap-1.5 text-muted-foreground text-xs">
-      <StatusIcon
-        tone={TONE[liveState]}
-        label={liveReason(liveState, features.has("change-stream"), liveRelayed)}
-      />
-      {liveState === "live" ? "Live" : "Polling"}
-    </span>
-  );
+  return {
+    live: liveState === "live",
+    tone: TONE[liveState],
+    title: TITLE[liveState],
+    reason: liveReason(liveState, features.has("change-stream"), liveRelayed),
+  };
 }
 
 const UPDATED_CHIP_MS = 10_000;

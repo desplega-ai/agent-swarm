@@ -6,7 +6,7 @@ import { type DrivePath, pinIdFor } from "@/lib/comb/paths";
 const PIN_LABELS = { add: "Pin to sidebar", remove: "Unpin" };
 
 /** Star that pins a Comb file or folder to the sidebar (a favorite of type `agent-fs-path`). */
-export function PinButton({ target }: { target: DrivePath }) {
+export function PinButton({ target, className }: { target: DrivePath; className?: string }) {
   const pins = useFavorites("agent-fs-path");
   const toggle = useFavoriteToggle("agent-fs-path");
   // An API without pins rejects the item type. Show no star then.
@@ -19,6 +19,7 @@ export function PinButton({ target }: { target: DrivePath }) {
       favorite={pinned}
       disabled={!pins.data || toggle.isPending}
       labels={PIN_LABELS}
+      className={className}
       onToggle={() =>
         toggle.mutate(
           { itemId, favorite: !pinned },
