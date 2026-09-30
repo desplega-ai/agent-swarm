@@ -3084,6 +3084,86 @@ export async function buildRequesterProfilePrompt(
   return result.skipped ? "" : result.text.trim();
 }
 
+/** A non-2xx answer from `POST /api/agents`; carries the status for retry triage. */
+export class AgentRegistrationHttpError extends Error {
+  readonly status: number;
+  readonly body: string;
+  constructor(status: number, body: string) {
+    super(`Failed to register agent: ${status} ${body}`);
+    this.name = "AgentRegistrationHttpError";
+    this.status = status;
+    this.body = body;
+  }
+}
+
+/**
+ * Whether a boot registration failure is worth retrying. A freshly deployed
+ * API can answer `500 {"error":"database is locked"}` for minutes while boot
+ * work holds the SQLite write lock, and is unreachable while it restarts;
+ * both clear on their own. A 4xx (bad key, bad payload) never will.
+ */
+export function isRetryableRegistrationError(err: unknown): boolean {
+  if (err instanceof AgentRegistrationHttpError) {
+    return (
+      err.status >= 500 ||
+      err.status === 408 ||
+      err.status === 429 ||
+      /database is locked/i.test(err.body)
+    );
+  }
+  // Anything else escaped fetch itself: connection refused, reset, DNS, timeout.
+  return true;
+}
+
+export const REGISTRATION_RETRY_BUDGET_MS = 5 * 60_000;
+const REGISTRATION_RETRY_BASE_DELAY_MS = 2_000;
+const REGISTRATION_RETRY_MAX_DELAY_MS = 30_000;
+
+/**
+ * Boot registration with bounded exponential backoff (2s doubling to 30s,
+ * with jitter) inside a total wall-clock budget. Throws the last error on a
+ * non-retryable failure or once the next wait would overrun the budget, so
+ * the caller still exits and a restart policy can take over.
+ */
+export async function registerAgentWithRetry(
+  register: () => Promise<{ serverCapabilities?: string[] }>,
+  opts: {
+    label: string;
+    budgetMs?: number;
+    baseDelayMs?: number;
+    maxDelayMs?: number;
+    sleep?: (ms: number) => Promise<void>;
+    now?: () => number;
+  },
+): Promise<{ serverCapabilities?: string[] }> {
+  const budgetMs = opts.budgetMs ?? REGISTRATION_RETRY_BUDGET_MS;
+  const baseDelayMs = opts.baseDelayMs ?? REGISTRATION_RETRY_BASE_DELAY_MS;
+  const maxDelayMs = opts.maxDelayMs ?? REGISTRATION_RETRY_MAX_DELAY_MS;
+  const sleep = opts.sleep ?? ((ms: number) => Bun.sleep(ms));
+  const now = opts.now ?? Date.now;
+  const startedAt = now();
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await register();
+    } catch (err) {
+      if (!isRetryableRegistrationError(err)) throw err;
+      const backoff = Math.min(maxDelayMs, baseDelayMs * 2 ** (attempt - 1));
+      const delay = Math.round(backoff * (0.8 + Math.random() * 0.4));
+      const elapsed = now() - startedAt;
+      if (elapsed + delay > budgetMs) {
+        console.error(
+          `[${opts.label}] Registration still failing after ${attempt} attempts in ${Math.round(elapsed / 1000)}s; giving up`,
+        );
+        throw err;
+      }
+      console.warn(
+        `[${opts.label}] Registration attempt ${attempt} failed (${err}); retrying in ${Math.round(delay / 1000)}s`,
+      );
+      await sleep(delay);
+    }
+  }
+}
+
 /** Register agent via HTTP API. Exported so tests can exercise the real boot ordering. */
 export async function registerAgent(opts: {
   apiUrl: string;
@@ -3141,7 +3221,7 @@ export async function registerAgent(opts: {
 
   if (!response.ok) {
     const error = await response.text();
-    throw new Error(`Failed to register agent: ${response.status} ${error}`);
+    throw new AgentRegistrationHttpError(response.status, error);
   }
 
   // The register response carries the SERVER's enabled capability flags (which
@@ -5484,18 +5564,22 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     }
   };
   try {
-    const reg = await registerAgent({
-      apiUrl,
-      apiKey,
-      agentId,
-      name: agentName,
-      role,
-      isLead,
-      capabilities,
-      maxTasks: maxConcurrent,
-      harnessProvider: bootProvider,
-      runtimeInstanceId,
-    });
+    const reg = await registerAgentWithRetry(
+      () =>
+        registerAgent({
+          apiUrl,
+          apiKey,
+          agentId,
+          name: agentName,
+          role,
+          isLead,
+          capabilities,
+          maxTasks: maxConcurrent,
+          harnessProvider: bootProvider,
+          runtimeInstanceId,
+        }),
+      { label: role },
+    );
     lastServerCapsRefreshAt = Date.now();
     // Rebuilds the prompt immediately: the initial build above ran before
     // registration (serverCapabilities unknown), and the later identity
