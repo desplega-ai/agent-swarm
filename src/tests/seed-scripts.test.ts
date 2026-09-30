@@ -211,6 +211,55 @@ describe("seed-scripts catalog", () => {
     ).toHaveLength(200);
   });
 
+  test("task-failure-audit projects failure reasons into schedule-group samples", async () => {
+    let projectionArgs: Record<string, unknown> | undefined;
+    const result = await taskFailureAudit(
+      { days: 1, groupBy: "schedule", publishPage: false },
+      {
+        swarm: {
+          async task_list() {
+            return {
+              success: true,
+              data: {
+                tasks: [
+                  { id: "failed-superseded", status: "failed", scheduleId: "schedule-a" },
+                  { id: "failed-unscheduled", status: "failed" },
+                ],
+              },
+            };
+          },
+          async db_query(args: Record<string, unknown>) {
+            projectionArgs = args;
+            return {
+              success: true,
+              data: {
+                columns: ["id", "failureReason"],
+                rows: [
+                  ["failed-superseded", "superseded_workflow_task: newer run owns this step"],
+                  ["failed-unscheduled", "cancelled by operator"],
+                ],
+              },
+            };
+          },
+        },
+      },
+    );
+
+    expect(projectionArgs?.params).toEqual(["failed-superseded", "failed-unscheduled"]);
+    expect(result.groups).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: "schedule-a",
+          untrustedWorkerTextSample: "superseded_workflow_task: newer run owns this step",
+        }),
+        expect.objectContaining({
+          key: "(not scheduled)",
+          untrustedWorkerTextSample: "cancelled by operator",
+        }),
+      ]),
+    );
+  });
+
   test("task-failure-audit rejects scan limits above its hard cap", async () => {
     let taskListCalls = 0;
     const result = await taskFailureAudit(

@@ -83,32 +83,32 @@ export default async function taskFailureAudit(args: any, ctx: any) {
   const tasks: any = payload && Array.isArray(payload.tasks) ? payload.tasks : [];
 
   const failureReasons = new Map<string, string>();
-  if (groupBy === "reason") {
-    const tasksNeedingReason = tasks.filter((task: any) => !task.failureReason && task.id);
-    const taskIds = tasksNeedingReason.map((task: any) => task.id as string);
-    if (taskIds.length > 0) {
-      const placeholders = taskIds.map(() => "?").join(", ");
-      const reasonResult: any = await ctx.swarm.db_query({
-        sql: `SELECT id, failureReason FROM agent_tasks WHERE id IN (${placeholders})`,
-        params: taskIds,
-      });
-      const reasonPayload: any = reasonResult?.data ?? reasonResult;
-      if (
-        reasonResult?.success === false ||
-        reasonPayload?.success === false ||
-        reasonPayload?.error
-      ) {
-        return { error: "failure reason projection failed with status " + reasonResult?.status };
-      }
-      if (reasonPayload?.truncated) {
-        return {
-          error: `failure reason projection truncated (${reasonPayload.rows?.length ?? 0} of ${reasonPayload.total ?? "unknown"} rows)`,
-        };
-      }
-      for (const row of rowsToObjects(reasonResult)) {
-        if (typeof row?.id === "string" && typeof row.failureReason === "string") {
-          failureReasons.set(row.id, row.failureReason);
-        }
+  // Projected for every groupBy mode: task_list omits failureReason, and
+  // schedule/agent groups still need a populated sample.
+  const tasksNeedingReason = tasks.filter((task: any) => !task.failureReason && task.id);
+  const taskIds = tasksNeedingReason.map((task: any) => task.id as string);
+  if (taskIds.length > 0) {
+    const placeholders = taskIds.map(() => "?").join(", ");
+    const reasonResult: any = await ctx.swarm.db_query({
+      sql: `SELECT id, failureReason FROM agent_tasks WHERE id IN (${placeholders})`,
+      params: taskIds,
+    });
+    const reasonPayload: any = reasonResult?.data ?? reasonResult;
+    if (
+      reasonResult?.success === false ||
+      reasonPayload?.success === false ||
+      reasonPayload?.error
+    ) {
+      return { error: "failure reason projection failed with status " + reasonResult?.status };
+    }
+    if (reasonPayload?.truncated) {
+      return {
+        error: `failure reason projection truncated (${reasonPayload.rows?.length ?? 0} of ${reasonPayload.total ?? "unknown"} rows)`,
+      };
+    }
+    for (const row of rowsToObjects(reasonResult)) {
+      if (typeof row?.id === "string" && typeof row.failureReason === "string") {
+        failureReasons.set(row.id, row.failureReason);
       }
     }
   }
