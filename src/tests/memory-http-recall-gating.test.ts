@@ -397,6 +397,22 @@ describe("pre-task recall query", () => {
     expect(Buffer.from(query).toString("utf8")).toBe(query);
   });
 
+  test("bounds malformed near-wrappers before parsing", () => {
+    const malformed = workerWrapper("completed", "Task", '"\n\nOutput:\n'.repeat(200000)).replace(
+      '" for full details.',
+      '" missing suffix.',
+    );
+    const bounded = malformed.slice(0, 65536);
+    expect(buildRecallQuery(malformed)).toBe(buildRecallQuery(bounded));
+    expect(Buffer.byteLength(buildRecallQuery(malformed))).toBeLessThanOrEqual(8191);
+  });
+
+  test("long valid wrappers preserve content and truncate the embedding query", () => {
+    expect(buildRecallQuery(workerWrapper("completed", "Task", "a".repeat(20000)))).toBe(
+      `Task\n\n${"a".repeat(8185)}`,
+    );
+  });
+
   test("HTTP prompt recall uses content for embedding and text search only", async () => {
     const original = workerWrapper("completed", "Fix recall", "Done");
     await callMemoryRoute(
