@@ -9,6 +9,7 @@ import {
   type DomTextSpace,
   type NewCommentAnchor,
 } from "@/lib/comb/dom-text-space";
+import { getFileKind } from "@/lib/comb/file-kinds";
 import { CommentComposer } from "./comment-composer";
 import { useCommentContext } from "./comment-context";
 import { QuoteExcerpt } from "./quote-excerpt";
@@ -45,7 +46,7 @@ export function SelectionCommentButton({
   space,
   onPendingChange,
 }: SelectionCommentButtonProps) {
-  const { readOnly, renderComposerExtras } = useCommentContext();
+  const { file, readOnly, renderComposerExtras } = useCommentContext();
   const [selected, setSelected] = useState<Selected | null>(null);
   const composing = selected?.anchor != null;
   const composingRef = useRef(false);
@@ -184,7 +185,10 @@ export function SelectionCommentButton({
       >
         {selected?.anchor ? (
           <div className="flex flex-col gap-2">
-            <QuoteExcerpt text={selected.anchor.quote?.exact ?? ""} />
+            <QuoteExcerpt
+              text={selected.anchor.quote?.exact ?? ""}
+              mono={getFileKind(file.path) !== "markdown"}
+            />
             <CommentComposer
               target={{ kind: "anchor", anchor: selected.anchor }}
               placeholder="Comment on this passage"

@@ -33,6 +33,7 @@ import type { AnchorResolution } from "@/lib/comb/comment-anchor";
 import { COMMENT_LIST_MAX, commentAuthorNames } from "@/lib/comb/comments";
 import type { DomTextSpace } from "@/lib/comb/dom-text-space";
 import { browserStorage, type OutboxEntry, sweepExpiredDrafts } from "@/lib/comb/drafts";
+import { getFileKind } from "@/lib/comb/file-kinds";
 import type { DrivePath } from "@/lib/comb/paths";
 import {
   CommentComposer,
@@ -559,13 +560,17 @@ function OutboxCard({
   /** This tab is sending it now: Retry and Discard wait. */
   sending: boolean;
 }) {
+  const { file } = useCommentContext();
   const label = `${sending ? "Sending" : "Not sent"}${entry.params.parentId ? " (reply)" : ""}`;
   return (
-    <article className="flex flex-col gap-2 rounded-lg border border-dashed border-status-error/40 bg-card p-3">
+    <article className="flex flex-col gap-2 rounded-lg border border-dashed border-status-error/40 bg-surface p-3">
       <div className="flex items-center justify-between gap-2 text-xs">
         <Tooltip>
           <TooltipTrigger asChild>
-            <span className="flex items-center gap-1.5 font-medium text-status-error-strong">
+            <span
+              tabIndex={0}
+              className="flex items-center gap-1.5 rounded-sm font-medium text-status-error-strong outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+            >
               <CloudOff className="size-3.5" aria-hidden />
               {label}
             </span>
@@ -593,7 +598,12 @@ function OutboxCard({
           </Button>
         </div>
       </div>
-      {entry.params.quote?.exact ? <QuoteExcerpt text={entry.params.quote.exact} /> : null}
+      {entry.params.quote?.exact ? (
+        <QuoteExcerpt
+          text={entry.params.quote.exact}
+          mono={getFileKind(file.path) !== "markdown"}
+        />
+      ) : null}
       <p className="whitespace-pre-wrap break-words text-sm">{entry.params.body}</p>
     </article>
   );

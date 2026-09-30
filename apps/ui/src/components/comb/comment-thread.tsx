@@ -12,6 +12,7 @@ import { AgentFsError } from "@/lib/agent-fs/client";
 import type { CommentEntry, CommentListEntry, CommentMention } from "@/lib/agent-fs/types";
 import { type AnchorResolution, commentQuote } from "@/lib/comb/comment-anchor";
 import { lineRangeLabel } from "@/lib/comb/comments";
+import { getFileKind } from "@/lib/comb/file-kinds";
 import { sentReplyTaskId, splitSwarmMarkers } from "@/lib/comb/markers";
 import { splitMentions } from "@/lib/comb/mentions";
 import { formatRelative } from "@/lib/relative-time";
@@ -215,7 +216,7 @@ export function CommentThread({
       onMouseEnter={() => onHover(thread.id)}
       onMouseLeave={() => onHover(null)}
       className={cn(
-        "hover-linger flex flex-col gap-2 rounded-lg border border-border bg-card p-3 transition-colors hover:bg-accent/40",
+        "hover-linger flex flex-col gap-2 rounded-lg border border-border bg-surface p-3 transition-[background-color] hover:bg-accent/40",
         hovered && "bg-accent/60",
         active && "border-primary/60",
       )}
@@ -239,7 +240,15 @@ export function CommentThread({
           {badge ? (
             <Tooltip>
               <TooltipTrigger asChild>
-                <Badge variant="outline" size="tag" className={cn("gap-1", badge.className)}>
+                <Badge
+                  variant="outline"
+                  size="tag"
+                  tabIndex={0}
+                  className={cn(
+                    "gap-1 outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+                    badge.className,
+                  )}
+                >
                   <TriangleAlert className="size-2.5" aria-hidden />
                   {badge.label}
                 </Badge>
@@ -276,7 +285,11 @@ export function CommentThread({
           title="Show in the file"
           className="rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
         >
-          <QuoteExcerpt text={quote} struck={anchor?.status === "lost"} />
+          <QuoteExcerpt
+            text={quote}
+            struck={anchor?.status === "lost"}
+            mono={getFileKind(file.path) !== "markdown"}
+          />
         </button>
       ) : null}
 

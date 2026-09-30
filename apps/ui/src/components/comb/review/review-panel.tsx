@@ -41,6 +41,7 @@ import { AgentFsError } from "@/lib/agent-fs/client";
 import type { StatResult } from "@/lib/agent-fs/types";
 import { commentQuote } from "@/lib/comb/comment-anchor";
 import { diffHasChanges } from "@/lib/comb/diff-lines";
+import { getFileKind } from "@/lib/comb/file-kinds";
 import type { DrivePath } from "@/lib/comb/paths";
 import {
   canRevert,
@@ -236,6 +237,8 @@ export function ReviewPanel({ file, stat, range, readOnly, onReadOnly }: ReviewP
           <div className="flex flex-wrap items-center gap-2">
             <QuoteExcerpt
               text={commentQuote(thread)?.exact ?? thread.body}
+              // Only a quote from the file is machine text. The body is human text.
+              mono={commentQuote(thread) !== undefined && getFileKind(file.path) !== "markdown"}
               className="min-w-48 flex-1"
             />
             {readOnly ? null : (
