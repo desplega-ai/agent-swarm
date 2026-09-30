@@ -7,7 +7,7 @@
 # ("Scheduled runs") for the service side.
 #
 #   canary  -> preset nightly-canary  (Opus 5.5 + Codex 6 luna, 9 scenarios x 3, $2 cap)
-#   weekly  -> preset weekly-matrix   (+ Codex 6 astra + DeepSeek V4.1 Flash, whole suite x 5, $12 cap)
+#   weekly  -> preset weekly-matrix   (+ Codex 6.1 sol + Codex 6 astra + DeepSeek V4.1 Flash, whole suite x 5, $37 cap)
 #
 # Repo settings this needs (none of them exist until someone adds them):
 #   secret   EVALS_API_KEY            the evals service's EVALS_API_KEY (bearer token for /api/*)

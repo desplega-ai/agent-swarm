@@ -742,6 +742,12 @@ export interface SandboxWorkerInfo {
   configId?: string | null;
   provider?: HarnessProvider | null;
   model?: string | null;
+  /**
+   * How the credential this member booted with bills: "subscription" (claude
+   * OAuth token, codex ChatGPT auth.json) or "metered" (an API key). Null/absent
+   * on rows written before it was recorded.
+   */
+  billing?: "subscription" | "metered" | null;
 }
 
 /**

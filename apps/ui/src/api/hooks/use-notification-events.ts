@@ -17,9 +17,15 @@
  * Both piggyback on `FeedbackInput.message` as a small structured string
  * since the feedback schema has no dedicated "event" field; if `/v1/feedback`
  * grows one, switch these to it instead of the message convention.
+ *
+ * Opt-out: `trackEvent` is background analytics, so it honours the server's
+ * effective `ANONYMIZED_TELEMETRY` flag (`/status` → `telemetry.enabled`) and
+ * sends nothing when the operator turned telemetry off. `notifyUs` is NOT
+ * gated: it only fires when the user types their email and submits it.
  */
 import { useConfigs } from "@/api/hooks/use-config-api";
 import { useSubmitFeedback } from "@/api/hooks/use-feedback";
+import type { StatusResponse } from "@/api/types";
 import { useStatusContext } from "@/app/status-context";
 import { useCurrentUser } from "@/contexts/current-user-context";
 
@@ -27,6 +33,19 @@ const DEFAULT_FEEDBACK_ENDPOINT = "https://proxy.desplega.sh/v1/feedback";
 const FEEDBACK_ENDPOINT_CONFIG_KEY = "feedback_endpoint";
 
 export type NotificationEventAction = "view" | "submit" | "dismiss" | "already_have_one";
+
+/**
+ * Whether background notification events may leave the browser.
+ *
+ * - `undefined` (`/status` not resolved yet): no. We can't know the opt-out
+ *   yet, and a dropped analytics event costs less than a leaked one.
+ * - `null` (older API without `/status`) or a payload without `telemetry`:
+ *   yes, matching the server default (on unless `ANONYMIZED_TELEMETRY=false`).
+ */
+export function isEventTrackingEnabled(status: StatusResponse | null | undefined): boolean {
+  if (status === undefined) return false;
+  return status?.telemetry?.enabled !== false;
+}
 
 export function useNotificationEvents() {
   const status = useStatusContext();
@@ -46,6 +65,7 @@ export function useNotificationEvents() {
     emailDomain?: string,
   ) {
     if (!currentUser.userId) return;
+    if (!isEventTrackingEnabled(status.data)) return;
     submitFeedback.mutate({
       submission_id: crypto.randomUUID(),
       user_id: currentUser.userId,

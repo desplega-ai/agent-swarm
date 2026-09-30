@@ -35,7 +35,7 @@ import {
   sanitizeModelTierOverrides,
   setAgentModelTierOverrides,
 } from "../be/model-tier-resolution";
-import { explicitModelError } from "../be/model-validation";
+import { explicitModelError, harnessModelErrorFor } from "../be/model-validation";
 import {
   getRuntimeInstanceById,
   listRuntimeInstancesForAgent,
@@ -674,6 +674,19 @@ export async function handleAgentRegister(
           parsed.body.harness_provider !== existingAgent.harnessProvider
         ) {
           await setAgentHarnessProvider(existingAgent.id, parsed.body.harness_provider);
+          // The agent-scope MODEL_OVERRIDE may still name the old harness family. The worker
+          // falls back to its adapter default at spawn; the row stays for a human to fix.
+          const harness = parsed.body.harness_provider;
+          const override = (
+            await getSwarmConfigs({ scope: "agent", scopeId: agentId, key: "MODEL_OVERRIDE" })
+          )[0]?.value;
+          if (override && (await harnessModelErrorFor(override, harness))) {
+            getDbClient().afterCommit(() => {
+              console.warn(
+                `[agents] MODEL_OVERRIDE ${override} of agent ${agentId} does not run on its new ${harness} harness (was ${existingAgent.harnessProvider ?? "unset"}); update or clear it`,
+              );
+            });
+          }
         }
         await resetEmptyPollCount(existingAgent.id);
         if (multiRuntime && parsed.body.runtimeInstanceId) {

@@ -16,12 +16,17 @@
  * (`credentialsForConfig` in src/swarm/sandbox.ts), never from the provider
  * name alone:
  *   - claude: OAuth token present -> subscription; else ANTHROPIC_API_KEY -> metered.
- *   - codex:  the sandbox only receives OPENAI_API_KEY, which bills per token,
- *             so it is metered unless EVALS_CODEX_BILLING=subscription says the
- *             key fronts a flat plan.
+ *   - codex:  a ChatGPT auth.json from the swarm's codex_oauth slot
+ *             (src/swarm/codex-auth.ts) -> subscription; else OPENAI_API_KEY -> metered.
  *   - pi / opencode: OpenRouter or provider API keys -> metered.
+ *
+ * bootStack records each member's billing from what it actually installed
+ * (`SandboxWorkerInfo.billing`); {@link attemptMeteredUsd} prefers that record.
+ * {@link configBilling} predicts the same answer before boot, for the
+ * per-config concurrency limit and for rows written before the record existed.
  */
 
+import { codexOAuthSource } from "../swarm/codex-auth.ts";
 import type { AttemptRow, HarnessConfig } from "../types.ts";
 
 export type Billing = "subscription" | "metered";
@@ -59,7 +64,7 @@ export function configBilling(
     case "claude":
       return env.CLAUDE_CODE_OAUTH_TOKEN ? "subscription" : "metered";
     case "codex":
-      return env.EVALS_CODEX_BILLING === "subscription" ? "subscription" : "metered";
+      return codexOAuthSource(env) ? "subscription" : "metered";
     default:
       return "metered";
   }
@@ -95,14 +100,28 @@ export function estimateSandboxUsd(
 }
 
 /**
- * Metered dollars one attempt spent: agent cost only when the config is billed
- * per token, plus judge and sandbox time. Unpriced (null) parts count as 0.
+ * Billing the attempt's members recorded at boot: subscription only when every
+ * member ran on a subscription credential. Null when any member has no record
+ * (rows written before bootStack recorded it).
+ */
+export function recordedBilling(sandbox: AttemptRow["sandbox"]): Billing | null {
+  const workers = sandbox?.workers ?? [];
+  if (workers.length === 0 || workers.some((w) => !w.billing)) return null;
+  return workers.every((w) => w.billing === "subscription") ? "subscription" : "metered";
+}
+
+/**
+ * Metered dollars one attempt spent: agent cost only when the attempt was
+ * billed per token, plus judge and sandbox time. Unpriced (null) parts count
+ * as 0. `fallbackBilling` applies only when the attempt carries no recorded
+ * billing ({@link recordedBilling}).
  */
 export function attemptMeteredUsd(
   attempt: Pick<AttemptRow, "costUsd" | "judgeCostUsd" | "durationMs" | "sandbox">,
-  billing: Billing,
+  fallbackBilling: Billing,
   flatUsdPerSandboxHour: number | null = null,
 ): number {
+  const billing = recordedBilling(attempt.sandbox) ?? fallbackBilling;
   const agent = billing === "metered" ? (attempt.costUsd ?? 0) : 0;
   return agent + (attempt.judgeCostUsd ?? 0) + estimateSandboxUsd(attempt, flatUsdPerSandboxHour);
 }

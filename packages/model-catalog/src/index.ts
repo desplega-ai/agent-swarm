@@ -4,8 +4,10 @@ export {
   compareNewestFirst,
   HARNESS_CATALOG_SECTION,
   type HarnessCatalogModel,
+  type HarnessCatalogSections,
   harnessCatalogSection,
   harnessModelIds,
+  harnessModelMismatch,
   isHarnessCatalogModel,
   modelFamilyKey,
 } from "./harness-models.ts";

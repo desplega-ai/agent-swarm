@@ -132,7 +132,7 @@ export const sendTaskInputSchema = z
       .min(1)
       .optional()
       .describe(
-        "Concrete model override for this task, interpreted by the assignee's harness/provider. This does not switch providers. Prefer modelTier for portable intent.",
+        "Concrete model override for this task, interpreted by the assignee's harness/provider. This does not switch providers. Prefer modelTier for portable intent. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected.",
       ),
     modelTier: ModelTierSchema.optional().describe(
       "Portable model tier for this task: 'smol', 'regular', 'smart', or 'ultra'. Resolved at claim/run time using the assignee's harness/provider. Legacy model shortnames map as haiku→smol, sonnet→regular, opus→smart, fable→ultra.",
@@ -321,12 +321,6 @@ export async function sendTaskHandler(
 
   const effectiveVcsRepo = vcsRepo;
   const normalizedModel = splitLegacyModelAlias({ model, modelTier });
-  const modelError = await explicitModelErrorForAgent({
-    model: normalizedModel.model,
-    allowCustomModel,
-    agentId,
-  });
-  if (modelError) return toolErr(modelError, { data: { yourAgentId: creatorAgentId } });
 
   // Auto-default parentTaskId to caller's current task for tree tracking
   const effectiveParentTaskId = parentTaskId ?? sourceTaskId;
@@ -394,6 +388,14 @@ export async function sendTaskHandler(
       effectiveAgentId = effectiveParentTask.agentId;
     }
   }
+  // Judge the model against the harness that will actually run it, including the
+  // parent auto-route target.
+  const modelError = await explicitModelErrorForAgent({
+    model: normalizedModel.model,
+    allowCustomModel,
+    agentId: effectiveAgentId,
+  });
+  if (modelError) return toolErr(modelError, { data: { yourAgentId: creatorAgentId } });
   const effectiveRoutingReason =
     agentId !== undefined ? routingReason : effectiveAgentId ? "continuity" : undefined;
   const effectiveRoutingNote = effectiveRoutingReason ? routingNote : undefined;
@@ -441,6 +443,7 @@ export async function sendTaskHandler(
     options: requestedTaskOptions,
     origin: "mcp",
     requestInfo: ctx.kind === "owner" ? ctx.requestInfo : undefined,
+    allowCustomModel,
   });
   if (preCreate.kind === "blocked") {
     return toolErr(preCreate.reason, {

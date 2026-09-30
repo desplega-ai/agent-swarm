@@ -34,6 +34,7 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { type TSchema, Type } from "typebox";
+import "./pi-codemode-runtime";
 import { CORE_TOOLS } from "../tools/tool-config";
 import { classifyAwsSdkError } from "../utils/aws-error-classifier";
 import { parseEnvFlag } from "../utils/env-flag";

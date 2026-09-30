@@ -3333,9 +3333,15 @@ const ELIGIBILITY_SCAN_CAP = Number(process.env.ELIGIBILITY_SCAN_CAP) || 500;
  * JSON-parsing `routingAffinity` in SQL) until `limit` eligible tasks are
  * found or the pool is exhausted, capped at `ELIGIBILITY_SCAN_CAP` rows
  * scanned so a pool full of ineligible tasks can't turn every poll into an
- * unbounded scan.
+ * unbounded scan. `accept` adds a caller-side filter (e.g. harness model
+ * compatibility) that runs inside the scan, so rejected rows do not use up
+ * the `limit`.
  */
-export async function getUnassignedTaskIdsForAgent(agentId: string, limit = 10): Promise<string[]> {
+export async function getUnassignedTaskIdsForAgent(
+  agentId: string,
+  limit = 10,
+  accept?: (task: AgentTask) => boolean | Promise<boolean>,
+): Promise<string[]> {
   const agent = await getAgentById(agentId);
   if (!agent) return [];
 
@@ -3352,7 +3358,7 @@ export async function getUnassignedTaskIdsForAgent(agentId: string, limit = 10):
 
     for (const row of rows) {
       const task = rowToAgentTask(row);
-      if (isAgentEligibleForTask(agent, task)) {
+      if (isAgentEligibleForTask(agent, task) && (!accept || (await accept(task)))) {
         eligible.push(task.id);
         if (eligible.length >= limit) break;
       }
