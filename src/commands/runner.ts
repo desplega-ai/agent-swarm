@@ -38,7 +38,6 @@ import { initTelemetry, telemetry } from "../telemetry.ts";
 import {
   type ModelTierOverrides,
   type ProviderName,
-  parseModelTier,
   parseWorkerModelTierOverrides,
   type ReasoningEffort,
   type RepoGuidelines,
@@ -3742,8 +3741,6 @@ async function spawnProviderProcess(
     codexSlot: oauthIsPoolBacked ? oauthSelection?.index : undefined,
     contextKey: opts.contextKey,
     reasoningEffort: reasoningEffortOverride,
-    // Tier label only when the tier chose the model; an explicit model wins.
-    modelTier: opts.model ? undefined : parseModelTier(opts.modelTier),
   };
 
   // Create the long-lived `worker.session` span up front so the provider

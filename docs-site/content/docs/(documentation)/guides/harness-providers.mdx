@@ -705,7 +705,7 @@ The flag defaults to `false`. Loading a deferred tool changes the tool set mid-s
 - Scripts receive a tool's `structuredContent` when the tool declares an `outputSchema`, which every swarm tool does.
 - Nested calls go through pi's tool pipeline, so the swarm `tool_call` hooks (cancellation, loop detection) still see them.
 
-Codemode is gated to the `smart` and `ultra` tiers (`ProviderSessionConfig.modelTier`, set only when the tier picked the model). Our July scripts-only eval found small models degrade as coordinators when they must work through scripts. Leave the flag off unless you are piloting it, and compare tool calls per task and cost against a pi agent without it.
+The flag is the only switch: when it is on, every pi session gets codemode, whatever the task's model or tier. Our July scripts-only eval found small models degrade as coordinators when they must work through scripts, so pilot it on an agent that runs a capable model. Leave the flag off unless you are piloting it, and compare tool calls per task and cost against a pi agent without it.
 
 ### How each adapter delivers the prompt
 

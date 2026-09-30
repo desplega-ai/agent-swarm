@@ -169,9 +169,8 @@ The system prompt switches to the tool-search guidance in the same task. See
 
 ## pi codemode
 
-`PI_CODEMODE` defaults to `false` and only affects `pi` workers. When it is `true`, pi sessions
-for tasks with the `smart` or `ultra` model tier get pi's `codemode` tool. Tasks with an explicit
-model, no tier, or a smaller tier never do. See
+`PI_CODEMODE` defaults to `false` and only affects `pi` workers. When it is `true`, every pi
+session gets pi's `codemode` tool. See
 [Harness providers](/docs/guides/harness-providers#pi-codemode).
 
 ## Seeded automation auto-enable

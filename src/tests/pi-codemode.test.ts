@@ -4,24 +4,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentSession, ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import {
-  isPiCodemodeActive,
+  isPiCodemodeEnabled,
   PiMonoAdapter,
   piDefaultToolAdditions,
   piExtensionFactories,
 } from "../providers/pi-mono-adapter";
-import type { ModelTier } from "../types";
 
-describe("PI_CODEMODE tier gate", () => {
-  const tiers: Array<ModelTier | undefined> = ["smol", "regular", "smart", "ultra", undefined];
-
-  test("flag off: codemode stays off on every tier", () => {
-    for (const tier of tiers) expect(isPiCodemodeActive(tier, {})).toBe(false);
+describe("PI_CODEMODE flag", () => {
+  test("off by default and for false values", () => {
+    expect(isPiCodemodeEnabled({})).toBe(false);
+    expect(isPiCodemodeEnabled({ PI_CODEMODE: "false" })).toBe(false);
   });
 
-  test("flag on: only smart and ultra tiers get codemode", () => {
-    const env = { PI_CODEMODE: "true" };
-    const active = tiers.map((tier) => isPiCodemodeActive(tier, env));
-    expect(active).toEqual([false, false, true, true, false]);
+  test("on when true", () => {
+    expect(isPiCodemodeEnabled({ PI_CODEMODE: "true" })).toBe(true);
   });
 });
 
@@ -58,7 +54,7 @@ describe("PiMonoAdapter.createSession — codemode", () => {
     process.env.OPENROUTER_API_KEY = "example-test-key";
     // The session prompts on creation; keep that request off the network.
     process.env.OPENROUTER_BASE_URL = "http://127.0.0.1:9/api/v1";
-    process.env.PI_CODEMODE = "true";
+    delete process.env.PI_CODEMODE;
     delete process.env.PI_TOOL_DEFERRAL;
   });
   afterEach(() => {
@@ -69,7 +65,7 @@ describe("PiMonoAdapter.createSession — codemode", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  async function activeTools(modelTier: ModelTier | undefined): Promise<string[]> {
+  async function activeTools(): Promise<string[]> {
     const server = Bun.serve({
       port: 0,
       async fetch(req) {
@@ -94,7 +90,6 @@ describe("PiMonoAdapter.createSession — codemode", () => {
         prompt: "hello",
         systemPrompt: "",
         model: "openrouter/google/gemini-3-flash-preview",
-        modelTier,
         role: "worker",
         agentId: "test-agent",
         taskId: "test-task",
@@ -111,15 +106,17 @@ describe("PiMonoAdapter.createSession — codemode", () => {
     }
   }
 
-  test("smart tier: codemode is added and swarm tools stay declared", async () => {
-    const active = await activeTools("smart");
+  test("flag on: codemode is added and swarm tools stay declared", async () => {
+    process.env.PI_CODEMODE = "true";
+    const active = await activeTools();
     expect(active).toContain("codemode");
     expect(active).toContain("store-progress");
     expect(active).toContain("create-page");
   });
 
-  test("regular tier or no tier: no codemode", async () => {
-    expect(await activeTools("regular")).not.toContain("codemode");
-    expect(await activeTools(undefined)).not.toContain("codemode");
+  test("flag off: no codemode", async () => {
+    expect(await activeTools()).not.toContain("codemode");
+    process.env.PI_CODEMODE = "false";
+    expect(await activeTools()).not.toContain("codemode");
   });
 });

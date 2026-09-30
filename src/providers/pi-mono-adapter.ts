@@ -35,7 +35,6 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { type TSchema, Type } from "typebox";
 import { CORE_TOOLS } from "../tools/tool-config";
-import type { ModelTier } from "../types";
 import { classifyAwsSdkError } from "../utils/aws-error-classifier";
 import { parseEnvFlag } from "../utils/env-flag";
 import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
@@ -334,21 +333,11 @@ export function isPiToolDeferralEnabled(env: NodeJS.ProcessEnv = process.env): b
 
 /**
  * `PI_CODEMODE`: add pi's codemode tool (a harness-side JS sandbox whose
- * scripts call tools) next to the declared tools. Off by default, and only
- * for smart/ultra tiers: small models coordinate worse through scripts.
+ * scripts call tools) next to the declared tools, on every pi session.
+ * Off by default.
  */
 export function isPiCodemodeEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return parseEnvFlag(env.PI_CODEMODE, false);
-}
-
-/** Tiers codemode runs on. Tasks with an explicit model or no tier stay off. */
-export const PI_CODEMODE_TIERS: ReadonlySet<ModelTier> = new Set(["smart", "ultra"]);
-
-export function isPiCodemodeActive(
-  modelTier: ModelTier | undefined,
-  env: NodeJS.ProcessEnv = process.env,
-): boolean {
-  return isPiCodemodeEnabled(env) && modelTier !== undefined && PI_CODEMODE_TIERS.has(modelTier);
 }
 
 /**
@@ -1149,7 +1138,7 @@ export interface PiSessionFeatures {
   toolDeferral: boolean;
   /** The agent has installed MCP servers for pi's MCP extension to connect. */
   installedMcp?: boolean;
-  /** PI_CODEMODE is on and the task tier allows it. */
+  /** PI_CODEMODE is on. */
   codemode?: boolean;
 }
 
@@ -1373,10 +1362,10 @@ export class PiMonoAdapter implements ProviderAdapter {
     const features: PiSessionFeatures = {
       toolDeferral: deferTools,
       installedMcp: Object.keys(piMcpServers).length > 0,
-      codemode: isPiCodemodeActive(config.modelTier),
+      codemode: isPiCodemodeEnabled(),
     };
     if (features.codemode) {
-      console.log(`\x1b[2m[${config.role}]\x1b[0m codemode on (tier ${config.modelTier})`);
+      console.log(`\x1b[2m[${config.role}]\x1b[0m codemode on`);
     }
 
     // 5. Create resource loader with system prompt + extensions. SDK sessions
