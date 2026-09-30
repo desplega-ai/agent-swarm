@@ -271,7 +271,7 @@ function Reply({
         <Link
           to={`/tasks/${taskId}`}
           onClick={(event) => event.stopPropagation()}
-          className="flex items-center gap-1.5 text-sm text-primary underline-offset-2 hover:underline"
+          className="flex items-center gap-1.5 text-sm text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
         >
           <Send className="size-3.5 shrink-0" aria-hidden />
           Sent to the swarm · task <span className="font-mono text-xs">{taskId.slice(0, 8)}</span>
