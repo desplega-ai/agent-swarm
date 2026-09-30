@@ -457,3 +457,179 @@
 .sc-raw-body {
   margin-top: 8px;
 }
+
+/* ---- Phase 6: plain-English scenario cards ---- */
+
+.sc-filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-bottom: 12px;
+  font-size: 12px;
+}
+
+.sc-filters .an-seg {
+  margin-right: 10px;
+}
+
+.sc-count {
+  margin-left: auto;
+  font-family: var(--font-mono);
+}
+
+.sc-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 12px;
+}
+
+.sc-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.sc-tile:hover {
+  border-color: var(--accent);
+}
+
+.sc-tile:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.sc-tile-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.sc-tile-name {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.sc-tile-ver {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.sc-tile-id {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.sc-tile-summary {
+  flex: 1;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.sc-tile-foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.sc-tags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.sc-tag {
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 10.5px;
+  color: var(--dim);
+  cursor: default;
+}
+
+.sc-tag-swarm {
+  color: var(--accent);
+  border-color: color-mix(in oklab, var(--accent), transparent 55%);
+}
+
+.sc-tag-regression {
+  color: var(--green);
+  border-color: color-mix(in oklab, var(--green), transparent 55%);
+}
+
+.sc-suite {
+  font-size: 10.5px;
+}
+
+.sc-card-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+
+.sc-card-head .panel-title {
+  margin: 0;
+}
+
+.sc-card-summary {
+  margin: 10px 0 14px;
+  font-size: 15px;
+  line-height: 1.45;
+  font-weight: 500;
+}
+
+.sc-card-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 14px 24px;
+}
+
+.sc-card-cols p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.sc-card-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+}
+
+.sc-changelog {
+  margin-top: 14px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.sc-changelog summary {
+  cursor: pointer;
+  width: fit-content;
+  font-size: 11.5px;
+  color: var(--dim);
+  user-select: none;
+}
+
+.sc-changelog summary:hover {
+  color: var(--text);
+}
+
+.sc-changelog-list {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
