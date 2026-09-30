@@ -3,6 +3,7 @@ import { FolderTrail } from "@/components/comb/breadcrumbs";
 import { DownloadButton, OpenInAgentFsButton } from "@/components/comb/file-actions";
 import { UpdatedChip } from "@/components/comb/live-indicator";
 import { PinButton } from "@/components/comb/pin-button";
+import { PresenceAvatars } from "@/components/comb/presence-avatars";
 import { VersionsMenu } from "@/components/comb/review/versions-menu";
 import { useAuthorLabel } from "@/components/comb/use-author-label";
 import { MiddleTruncation } from "@/components/ui/middle-truncation";
@@ -58,12 +59,16 @@ function FileFacts({ file, stat }: { file: DrivePath; stat: StatResult }) {
   );
 }
 
-/** The file's actions as icon buttons: Versions, Pin, Download, Open in agent-fs. */
+/**
+ * The other people on the file, then its actions as icon buttons: Versions,
+ * Pin, Download, Open in agent-fs.
+ */
 export function FileActions({ file }: { file: DrivePath }) {
   const stat = useFileStat(file);
   if (!stat) return null;
   return (
     <>
+      <PresenceAvatars path={file.path} version={stat.currentVersion} />
       {/* step-10: Versions menu (compare an older version with the current one). */}
       <VersionsMenu file={file} stat={stat} />
       <PinButton target={file} className="size-8" />

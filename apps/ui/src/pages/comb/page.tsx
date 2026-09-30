@@ -9,6 +9,7 @@ import { OpenInAgentFsButton } from "@/components/comb/file-actions";
 import { FileActions, FileSubtitle, FileTitle } from "@/components/comb/file-header";
 import { FileView } from "@/components/comb/file-view";
 import { FolderView } from "@/components/comb/folder-view";
+import { CombPresenceProvider } from "@/components/comb/presence-context";
 import { LeftPanel, LeftPanelSheet } from "@/components/comb/side-panels";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageSkeleton } from "@/components/shared/page-skeleton";
@@ -116,7 +117,14 @@ function ConnectedView() {
   return (
     // Panel state is per swarm: a new API URL starts from its own stored state.
     <CombLayoutProvider key={apiUrl} location={location}>
-      <CombWorkspace location={location} />
+      {/* One presence connection per drive (other people's avatars and cursors). */}
+      <CombPresenceProvider
+        key={`${location.orgId}/${location.driveId}`}
+        orgId={location.orgId}
+        driveId={location.driveId}
+      >
+        <CombWorkspace location={location} />
+      </CombPresenceProvider>
     </CombLayoutProvider>
   );
 }

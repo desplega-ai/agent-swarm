@@ -2763,6 +2763,31 @@ class ApiClient {
     return (await res.json()) as WhoamiResponse;
   }
 
+  /**
+   * A one-shot ticket for the realtime socket (a browser WebSocket cannot send
+   * `Authorization`). Single use, 60 s. The error carries the HTTP `status`.
+   */
+  async fetchRealtimeTicket(): Promise<string> {
+    const res = await fetch(`${this.getBaseUrl()}/api/realtime/ticket`, {
+      method: "POST",
+      headers: this.getHeaders(),
+    });
+    if (!res.ok) {
+      throw Object.assign(new Error(`Failed to get a realtime ticket: ${res.status}`), {
+        status: res.status,
+      });
+    }
+    return ((await res.json()) as { ticket: string }).ticket;
+  }
+
+  /** The realtime socket URL for a ticket. The dev proxy forwards `/api` upgrades. */
+  realtimeSocketUrl(ticket: string): string {
+    const url = new URL(`${this.getBaseUrl() || window.location.origin}/api/realtime`);
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    url.searchParams.set("ticket", ticket);
+    return url.toString();
+  }
+
   async listUsers(opts?: { recentEvents?: number }): Promise<User[]> {
     const qs = new URLSearchParams();
     if (opts?.recentEvents !== undefined) qs.set("recentEvents", String(opts.recentEvents));

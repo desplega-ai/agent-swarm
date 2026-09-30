@@ -15,6 +15,7 @@ import {
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
@@ -25,15 +26,18 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useAgentFs } from "@/contexts/agent-fs-context";
 import { cn } from "@/lib/utils";
 import { useLiveStatus } from "./live-indicator";
+import { usePresenceControl } from "./presence-context";
 
 /**
  * The agent-fs account at the right end of the Comb header: initials with a
  * dot (green while the change stream is live). The menu says who is
- * connected and how the view stays fresh, and holds Disconnect.
+ * connected and how the view stays fresh, and holds "Show cursors" (other
+ * people's pointers and selections) and Disconnect.
  */
 export function CombAccountMenu() {
   const { me, disconnect } = useAgentFs();
   const status = useLiveStatus();
+  const presence = usePresenceControl();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const name = me?.displayName || me?.email || "agent-fs";
   const email = me?.displayName && me.email ? me.email : null;
@@ -81,6 +85,19 @@ export function CombAccountMenu() {
             <p className="text-xs text-muted-foreground">{status.reason}</p>
           </div>
           <DropdownMenuSeparator />
+          {presence ? (
+            <>
+              <DropdownMenuCheckboxItem
+                checked={presence.showCursors}
+                onCheckedChange={(checked) => presence.setShowCursors(checked === true)}
+                // The menu stays open, so the new state shows.
+                onSelect={(event) => event.preventDefault()}
+              >
+                Show cursors
+              </DropdownMenuCheckboxItem>
+              <DropdownMenuSeparator />
+            </>
+          ) : null}
           <DropdownMenuItem variant="destructive" onSelect={() => setConfirmOpen(true)}>
             <Unplug />
             Disconnect

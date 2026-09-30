@@ -107,6 +107,20 @@
   --color-action-code-match: oklch(0.795 0.184 86.047);       /* yellow-500 — condition */
   --color-action-raw-llm: oklch(0.685 0.169 237.323);         /* sky-500 — condition */
 
+  /* Comb presence: one color per person (lib/comb/presence.ts `peerColor`),
+     for avatars, pointers, and selections. No orange, amber (the brand
+     voice), or yellow. Fills take `peer-foreground` text: at least 4.5:1 in
+     both themes and 3:1 against the page (lib/comb/presence.test.ts). */
+  --color-peer-1: oklch(0.52 0.16 25);
+  --color-peer-2: oklch(0.52 0.16 350);
+  --color-peer-3: oklch(0.52 0.16 320);
+  --color-peer-4: oklch(0.52 0.16 290);
+  --color-peer-5: oklch(0.52 0.16 260);
+  --color-peer-6: oklch(0.52 0.1 230);
+  --color-peer-7: oklch(0.52 0.08 190);
+  --color-peer-8: oklch(0.52 0.14 150);
+  --color-peer-foreground: oklch(0.985 0 0);
+
   /* Motion — the two named curves of the motion doctrine (DESIGN.md § Motion).
      swift: the iOS-sheet curve, for large surfaces (sheets, drawers).
      snappy: fast-start ease-out, for small user-initiated UI (menus, reveals). */
@@ -211,6 +225,16 @@
   --color-action-property-match: oklch(0.828 0.189 84.429);   /* amber-400 */
   --color-action-code-match: oklch(0.852 0.199 91.936);       /* yellow-400 */
   --color-action-raw-llm: oklch(0.746 0.16 232.661);          /* sky-400 */
+
+  --color-peer-1: oklch(0.79 0.12 25);
+  --color-peer-2: oklch(0.79 0.13 350);
+  --color-peer-3: oklch(0.79 0.13 320);
+  --color-peer-4: oklch(0.79 0.11 290);
+  --color-peer-5: oklch(0.79 0.1 260);
+  --color-peer-6: oklch(0.79 0.13 230);
+  --color-peer-7: oklch(0.79 0.13 190);
+  --color-peer-8: oklch(0.79 0.13 150);
+  --color-peer-foreground: oklch(0.141 0.005 285.823);
 }
 
 :root {
@@ -558,6 +582,33 @@ summary {
 }
 .comb-comment-fallback-active {
   background-color: color-mix(in oklch, var(--color-primary) 22%, transparent);
+}
+
+/* Comb presence: other people's selections in their color
+ * (components/comb/presence-layer.tsx). One highlight per palette slot. */
+::highlight(comb-peer-1) {
+  background-color: color-mix(in oklch, var(--color-peer-1) 26%, transparent);
+}
+::highlight(comb-peer-2) {
+  background-color: color-mix(in oklch, var(--color-peer-2) 26%, transparent);
+}
+::highlight(comb-peer-3) {
+  background-color: color-mix(in oklch, var(--color-peer-3) 26%, transparent);
+}
+::highlight(comb-peer-4) {
+  background-color: color-mix(in oklch, var(--color-peer-4) 26%, transparent);
+}
+::highlight(comb-peer-5) {
+  background-color: color-mix(in oklch, var(--color-peer-5) 26%, transparent);
+}
+::highlight(comb-peer-6) {
+  background-color: color-mix(in oklch, var(--color-peer-6) 26%, transparent);
+}
+::highlight(comb-peer-7) {
+  background-color: color-mix(in oklch, var(--color-peer-7) 26%, transparent);
+}
+::highlight(comb-peer-8) {
+  background-color: color-mix(in oklch, var(--color-peer-8) 26%, transparent);
 }
 
 /* Chat message markdown prose */
