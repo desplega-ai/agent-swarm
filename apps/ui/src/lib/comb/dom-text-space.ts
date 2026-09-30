@@ -1,9 +1,12 @@
 // Ported from agent-fs `live/src/lib/dom-text-space.ts` (agent-fs commit
 // 08e7d89). Adaptations: the walker also skips `data-comb-skip` elements and
 // Streamdown chrome (`isSkippedElement`), text viewer rows (`data-comb-row`)
-// end with exactly one "\n", `offsetToLineEnd` is new, and `anchorFromRange`
-// comes from live/ `MarkdownViewer.tsx` (`targetFromDom`, with the line range
-// fix described there). `rehypeSourceLines` lives in `rehype-source-lines.ts`.
+// end with exactly one "\n", `offsetToLineEnd` is new, the walk joins the
+// text once (no `endsWith` on a growing string), `pointToOffset` looks text
+// nodes up in a map and binary-searches element boundaries (syntax
+// highlighting makes one text node per token), and `anchorFromRange` comes
+// from live/ `MarkdownViewer.tsx` (`targetFromDom`, with the line range fix
+// described there). `rehypeSourceLines` lives in `rehype-source-lines.ts`.
 //
 // Relative imports only: `bun:test` runs this from the repo root.
 
@@ -102,17 +105,39 @@ interface Block {
  */
 export const TEXT_ROW_ATTR = "data-comb-row";
 
+/**
+ * The text space of `root`. A block may hold its text in any number of inline
+ * elements: a highlighted code row or fence has one text node per token, and
+ * the space reads them in document order as one run of text.
+ */
 export function buildDomTextSpace(root: HTMLElement): DomTextSpace {
-  let text = "";
+  // The text is collected in parts and joined once. Reading the end of a
+  // string built with `+=` (`endsWith`) makes V8 flatten it every time, which
+  // cost 190 ms for a 7,000-line file. `length` and `last` track the end.
+  const parts: string[] = [];
+  let length = 0;
+  let last = "";
+  const append = (s: string) => {
+    parts.push(s);
+    length += s.length;
+    last = s[s.length - 1];
+  };
+  /** A block starts or ends: separate it from text before it with one "\n". */
+  const breakLine = () => {
+    if (length > 0 && last !== "\n") append("\n");
+  };
+  // Every text node in document order, and each one's start offset by node.
   const segments: Segment[] = [];
+  const segmentStart = new Map<Text, number>();
   const blocks: Block[] = [];
 
   const walk = (node: Node) => {
     if (node.nodeType === Node.TEXT_NODE) {
       const data = (node as Text).data;
       if (data) {
-        segments.push({ node: node as Text, start: text.length });
-        text += data;
+        segments.push({ node: node as Text, start: length });
+        segmentStart.set(node as Text, length);
+        append(data);
       }
       return;
     }
@@ -120,18 +145,19 @@ export function buildDomTextSpace(root: HTMLElement): DomTextSpace {
     const el = node as HTMLElement;
     if (isSkippedElement(el)) return;
     const isBlock = BLOCK_TAGS.has(el.tagName);
-    if (isBlock && text && !text.endsWith("\n")) text += "\n";
-    const start = text.length;
+    if (isBlock) breakLine();
+    const start = length;
     for (let child = el.firstChild; child; child = child.nextSibling) walk(child);
-    const ls = el.dataset.lineStart;
-    const le = el.dataset.lineEnd;
+    const ls = el.getAttribute("data-line-start");
+    const le = el.getAttribute("data-line-end");
     if (ls && le) {
-      blocks.push({ el, start, end: text.length, lineStart: Number(ls), lineEnd: Number(le) });
+      blocks.push({ el, start, end: length, lineStart: Number(ls), lineEnd: Number(le) });
     }
-    if (el.hasAttribute(TEXT_ROW_ATTR)) text += "\n";
-    else if (isBlock && text && !text.endsWith("\n")) text += "\n";
+    if (el.hasAttribute(TEXT_ROW_ATTR)) append("\n");
+    else if (isBlock) breakLine();
   };
   walk(root);
+  const text = parts.join("");
 
   const segmentAt = (offset: number): number => {
     // Last segment starting at or before `offset`.
@@ -181,8 +207,8 @@ export function buildDomTextSpace(root: HTMLElement): DomTextSpace {
     },
     pointToOffset(node, offset) {
       if (node.nodeType === Node.TEXT_NODE) {
-        const seg = segments.find((s) => s.node === node);
-        if (seg) return seg.start + Math.min(offset, seg.node.data.length);
+        const start = segmentStart.get(node as Text);
+        if (start !== undefined) return start + Math.min(offset, (node as Text).data.length);
       }
       // Element boundary (e.g. triple-click): the first text after the point.
       const probe = document.createRange();
@@ -192,10 +218,16 @@ export function buildDomTextSpace(root: HTMLElement): DomTextSpace {
         return null;
       }
       probe.collapse(true);
-      for (const seg of segments) {
-        if (probe.comparePoint(seg.node, 0) >= 0) return seg.start;
+      // Segments are in document order: a binary search finds the first one at
+      // or after the point (a highlighted file has thousands, one per token).
+      let lo = 0;
+      let hi = segments.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (probe.comparePoint(segments[mid].node, 0) >= 0) hi = mid;
+        else lo = mid + 1;
       }
-      return text.length;
+      return lo < segments.length ? segments[lo].start : text.length;
     },
     lineRangeToOffsets(a, b) {
       const hits = innermost(blocks.filter((bl) => bl.lineStart <= b && bl.lineEnd >= a));

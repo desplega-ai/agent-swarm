@@ -211,3 +211,224 @@ describe("dom-text-space", () => {
     expect(isSkippedElement(el("<p></p>"))).toBe(false);
   });
 });
+
+// Syntax highlighting (`code-tokens.tsx`) splits a line into one text node per
+// token: a colored token is a span, a plain token is bare text. `tok` marks a
+// colored token, a bare string is plain.
+const tok = (text: string) => ({ text });
+type Part = string | { text: string };
+
+const SOURCE = ["const s = z.object({", "  ids: z.array(z.string()),", "});"];
+const TOKENS: Part[][] = [
+  [tok("const"), " s ", tok("="), " z", tok("."), tok("object"), tok("("), tok("{")],
+  [
+    "  ids",
+    tok(":"),
+    " z",
+    tok("."),
+    tok("array"),
+    tok("("),
+    "z",
+    tok("."),
+    tok("string"),
+    tok("("),
+    tok(")"),
+    tok(")"),
+    tok(","),
+  ],
+  [tok("}"), tok(")"), tok(";")],
+];
+
+function tokenHtml(parts: Part[]): string {
+  return parts
+    .map((p) =>
+      typeof p === "string" ? p : `<span style="color: rgb(86, 156, 214)">${p.text}</span>`,
+    )
+    .join("");
+}
+
+/** A highlighted text viewer row: gutter, then the line's token spans and bare text. */
+function tokenRow(line: number, parts: Part[]): string {
+  return `<div data-line-start="${line}" data-line-end="${line}" data-comb-row=""><span aria-hidden="true" data-comb-skip="">${line}</span><span>${tokenHtml(parts)}</span></div>`;
+}
+
+const plainPane = () => mount(SOURCE.map((text, i) => row(i + 1, text)).join(""));
+const tokenPane = () => mount(TOKENS.map((parts, i) => tokenRow(i + 1, parts)).join(""));
+
+/** The text node that holds `text` in row `line` (the `nth` match, 0-based). */
+function textNode(root: HTMLElement, line: number, text: string, nth = 0): Text {
+  const walker = document.createTreeWalker(
+    root.querySelector(`[data-line-start="${line}"] > span:last-child`) as Node,
+    NodeFilter.SHOW_TEXT,
+  );
+  let seen = 0;
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if ((node as Text).data === text && seen++ === nth) return node as Text;
+  }
+  throw new Error(`row ${line} has no text node "${text}"`);
+}
+
+describe("dom-text-space over highlighted code (one text node per token)", () => {
+  test("the token rows read as the file's own text, line by line", () => {
+    for (const [i, parts] of TOKENS.entries()) {
+      expect(parts.map((p) => (typeof p === "string" ? p : p.text)).join("")).toBe(SOURCE[i]);
+    }
+    const space = buildDomTextSpace(tokenPane());
+    expect(space.text).toBe(`${SOURCE.join("\n")}\n`);
+    expect(space.text).toBe(buildDomTextSpace(plainPane()).text);
+    expect(space.offsetToLine(space.text.indexOf("array"))).toBe(2);
+    const [start, end] = space.lineRangeToOffsets(2, 2) ?? [0, 0];
+    expect(space.text.slice(start, end)).toBe(SOURCE[1]);
+  });
+
+  test("a selection across tokens gives the same anchor as on the plain rows", () => {
+    const tokens = tokenPane();
+    // From inside "array" to inside "string": five text nodes in between.
+    const onTokens = anchorFromRange(
+      buildDomTextSpace(tokens),
+      rangeOf([textNode(tokens, 2, "array"), 2], [textNode(tokens, 2, "string"), 3]),
+    );
+    const plain = plainPane();
+    const line = rowText(plain, 2);
+    const onPlain = anchorFromRange(
+      buildDomTextSpace(plain),
+      rangeOf([line, SOURCE[1].indexOf("array") + 2], [line, SOURCE[1].indexOf("string") + 3]),
+    );
+    expect(onTokens?.quote?.exact).toBe("ray(z.str");
+    expect(onTokens).toEqual(onPlain);
+    expect([onTokens?.lineStart, onTokens?.lineEnd]).toEqual([2, 2]);
+  });
+
+  test("a selection across highlighted rows spans their lines", () => {
+    const root = tokenPane();
+    const anchor = anchorFromRange(
+      buildDomTextSpace(root),
+      rangeOf([textNode(root, 1, "object"), 0], [textNode(root, 3, ")"), 1]),
+    );
+    expect(anchor?.quote?.exact).toBe("object({\n  ids: z.array(z.string()),\n})");
+    expect([anchor?.lineStart, anchor?.lineEnd]).toEqual([1, 3]);
+  });
+
+  test("an anchor made on plain rows paints the same passage on token rows", () => {
+    const plain = plainPane();
+    const created = anchorFromRange(
+      buildDomTextSpace(plain),
+      rangeOf([rowText(plain, 2), 7], [rowText(plain, 2), SOURCE[1].length - 1]),
+    );
+    if (!created?.quote) throw new Error("no anchor");
+    expect(created.quote.exact).toBe("z.array(z.string())");
+
+    const tokens = tokenPane();
+    const space = buildDomTextSpace(tokens);
+    const resolved = resolveAnchor(space, {
+      quote: created.quote,
+      lineStart: created.lineStart,
+      lineEnd: created.lineEnd,
+    });
+    expect(resolved.status).toBe("anchored");
+    if (resolved.start == null || resolved.end == null) throw new Error("not placed");
+    const range = space.toRange(resolved.start, resolved.end);
+    // The painted range starts in the " z" text node and ends in the ")" token.
+    expect(range?.startContainer).toBe(textNode(tokens, 2, " z"));
+    expect(range?.startOffset).toBe(1);
+    expect(range?.endContainer).toBe(textNode(tokens, 2, ")", 1));
+    expect(range?.toString()).toBe("z.array(z.string())");
+  });
+
+  test("at a token boundary a range starts in the next token and ends in the previous one", () => {
+    const root = tokenPane();
+    const space = buildDomTextSpace(root);
+    const boundary = "const".length;
+    const range = space.toRange(boundary, boundary + " s ".length);
+    expect(range?.startContainer).toBe(textNode(root, 1, " s "));
+    expect(range?.startOffset).toBe(0);
+    expect(range?.endContainer).toBe(textNode(root, 1, " s "));
+    expect(range?.endOffset).toBe(3);
+    const tail = space.toRange(0, boundary);
+    expect(tail?.endContainer).toBe(textNode(root, 1, "const"));
+    expect(tail?.endOffset).toBe(5);
+  });
+
+  test("element boundaries inside token rows map to the first text after them", () => {
+    const root = tokenPane();
+    const space = buildDomTextSpace(root);
+    const line2 = root.querySelector('[data-line-start="2"] > span:last-child') as Element;
+    const line2Start = space.text.indexOf(SOURCE[1]);
+    // Before each child of the line: the offset where that child's text starts.
+    let offset = line2Start;
+    for (const [i, part] of TOKENS[1].entries()) {
+      expect([i, space.pointToOffset(line2, i)]).toEqual([i, offset]);
+      offset += (typeof part === "string" ? part : part.text).length;
+    }
+    // After the last child: the next row's first text (past the row's "\n").
+    expect(space.pointToOffset(line2, line2.childNodes.length)).toBe(space.text.indexOf(SOURCE[2]));
+    expect(space.pointToOffset(root, root.childNodes.length)).toBe(space.text.length);
+  });
+
+  test("many token rows: every row boundary and token node maps to its offset", () => {
+    const lines = Array.from({ length: 120 }, (_, i) => `let v${i} = f(${i}, "s${i}");`);
+    const parts = (i: number): Part[] => [
+      tok("let"),
+      ` v${i} `,
+      tok("="),
+      " ",
+      tok("f"),
+      tok("("),
+      tok(String(i)),
+      tok(","),
+      " ",
+      tok(`"s${i}"`),
+      tok(")"),
+      tok(";"),
+    ];
+    const root = mount(lines.map((_, i) => tokenRow(i + 1, parts(i))).join(""));
+    const space = buildDomTextSpace(root);
+    expect(space.text).toBe(`${lines.join("\n")}\n`);
+    let lineStart = 0;
+    for (const [i, line] of lines.entries()) {
+      // The row's first child is the skipped gutter: the text starts after it.
+      expect(space.pointToOffset(root.children[i], 0)).toBe(lineStart);
+      const number = textNode(root, i + 1, String(i));
+      expect(space.pointToOffset(number, 1)).toBe(lineStart + line.indexOf(`(${i}`) + 2);
+      lineStart += line.length + 1;
+    }
+  });
+
+  test("a highlighted markdown fence keeps its text, its line stamps, and its anchors", () => {
+    const fence = (body: string) =>
+      [
+        '<p data-line-start="1" data-line-end="1">Intro.</p>',
+        `<pre data-line-start="3" data-line-end="6"><code class="language-ts">${body}</code></pre>`,
+        '<p data-line-start="8" data-line-end="8">After.</p>',
+      ].join("");
+    const plain = mount(fence("const a = 1;\nlet b;\n"));
+    const tokens = mount(
+      fence(
+        `${tokenHtml([tok("const"), " a ", tok("="), " ", tok("1"), tok(";")])}\n${tokenHtml([tok("let"), " b", tok(";")])}\n`,
+      ),
+    );
+    const space = buildDomTextSpace(tokens);
+    expect(space.text).toBe(buildDomTextSpace(plain).text);
+    expect(space.text).toBe("Intro.\nconst a = 1;\nlet b;\nAfter.\n");
+
+    // From inside "= 1" on the first code line to inside "let" on the second.
+    const code = tokens.querySelector("code") as Element;
+    const walker = document.createTreeWalker(code, NodeFilter.SHOW_TEXT);
+    const nodes: Text[] = [];
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) nodes.push(n as Text);
+    const one = nodes.find((n) => n.data === "1") as Text;
+    const let_ = nodes.find((n) => n.data === "let") as Text;
+    const anchor = anchorFromRange(space, rangeOf([one, 0], [let_, 2]));
+    expect(anchor?.quote?.exact).toBe("1;\nle");
+    expect([anchor?.lineStart, anchor?.lineEnd]).toEqual([3, 6]);
+
+    const plainCode = plain.querySelector("code")?.firstChild as Text;
+    const onPlain = anchorFromRange(
+      buildDomTextSpace(plain),
+      rangeOf([plainCode, "const a = ".length], [plainCode, "const a = 1;\nle".length]),
+    );
+    expect(anchor).toEqual(onPlain);
+    const resolved = resolveAnchor(space, { quote: onPlain?.quote });
+    expect(space.toRange(resolved.start ?? 0, resolved.end ?? 0)?.toString()).toBe("1;\nle");
+  });
+});
