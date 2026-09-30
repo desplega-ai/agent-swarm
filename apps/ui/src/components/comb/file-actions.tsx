@@ -23,7 +23,14 @@ function clickLink(href: string, download?: string) {
  * storage answers an `app` link) the raw bytes load with the human's key into
  * a temporary blob link.
  */
-export function DownloadButton({ file }: { file: DrivePath }) {
+export function DownloadButton({
+  file,
+  variant = "outline",
+}: {
+  file: DrivePath;
+  /** `default` where Download is the state's one next action (no preview). */
+  variant?: "outline" | "default";
+}) {
   const { client } = useAgentFsAccess();
   const [pending, setPending] = useState(false);
 
@@ -53,7 +60,7 @@ export function DownloadButton({ file }: { file: DrivePath }) {
   return (
     <Button
       size="sm"
-      variant="outline"
+      variant={variant}
       onClick={() => void download()}
       disabled={pending || !client}
       aria-label="Download"

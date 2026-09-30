@@ -13,6 +13,7 @@ import { ViewerSkeleton } from "@/components/comb/viewers/viewer-skeleton";
 import { EmptyState } from "@/components/shared/empty-state";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { AgentFsError } from "@/lib/agent-fs/client";
 import type { StatResult } from "@/lib/agent-fs/types";
 import { combPath, type DrivePath, parentFolder } from "@/lib/comb/paths";
@@ -50,7 +51,29 @@ export function FileView({ file }: { file: DrivePath }) {
       </AlertCallout>
     );
   }
-  return <ViewerSkeleton />;
+  return <FileViewSkeleton />;
+}
+
+/** The loaded frame while `stat` loads: header lines, the viewer pane, and the rail column. */
+function FileViewSkeleton() {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-3" aria-busy="true">
+      {/* The file name shows on phones only, like the loaded header. */}
+      <div className="flex min-h-8 flex-col justify-center gap-1.5">
+        <Skeleton className="h-4 w-40 sm:hidden" />
+        <Skeleton className="h-3 w-56" />
+      </div>
+      <div className="flex min-h-0 flex-1 gap-4">
+        <div className="min-h-[24rem] min-w-0 flex-1 overflow-auto rounded-xl border border-border bg-card lg:min-h-0">
+          <ViewerSkeleton />
+        </div>
+        <div
+          aria-hidden
+          className="hidden w-72 shrink-0 rounded-xl border border-border bg-card lg:block xl:w-80"
+        />
+      </div>
+    </div>
+  );
 }
 
 // step-10: the review (`?diff=`) replaces the file in the viewer pane.
@@ -130,7 +153,7 @@ function FolderRedirect({ file, children }: { file: DrivePath; children: ReactNo
   if (listing.data && listing.data.entries.length > 0) {
     return <Navigate to={combPath(folder)} replace />;
   }
-  if (listing.isPending) return <ViewerSkeleton />;
+  if (listing.isPending) return <FileViewSkeleton />;
   return children;
 }
 
@@ -141,7 +164,7 @@ function FileNotFound({ file }: { file: DrivePath }) {
       title="File not found"
       description={`${file.path} is not in this drive. It may have moved or been deleted.`}
       action={
-        <Button asChild size="sm" variant="outline">
+        <Button asChild size="sm">
           <Link to={combPath({ ...file, path: parentFolder(file.path) })}>Open the folder</Link>
         </Button>
       }

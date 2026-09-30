@@ -106,17 +106,6 @@ export function FolderView({ folder }: { folder: DrivePath }) {
     );
   }
 
-  if (listing.data && rows.length === 0) {
-    return (
-      <EmptyState
-        icon={FolderOpen}
-        title={folder.path === "/" ? "The drive is empty" : "This folder is empty"}
-        description="Files that agents write here show up in this list."
-        fullPage
-      />
-    );
-  }
-
   const count = listing.data ? `${rows.length} ${rows.length === 1 ? "item" : "items"}` : "";
 
   return (
@@ -132,7 +121,14 @@ export function FolderView({ folder }: { folder: DrivePath }) {
           </>
         }
       />
-      {isMobile ? (
+      {listing.data && rows.length === 0 ? (
+        <EmptyState
+          icon={FolderOpen}
+          title={folder.path === "/" ? "The drive is empty" : "This folder is empty"}
+          description="Files that agents write here show up in this list."
+          fullPage
+        />
+      ) : isMobile ? (
         <MobileList label="Folder contents" loading={listing.isPending} emptyMessage="Empty folder">
           {rows.map((row) => (
             <MobileListRow

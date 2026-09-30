@@ -45,7 +45,7 @@ export function MediaGate({
         }
         action={
           <>
-            <DownloadButton file={file} />
+            <DownloadButton file={file} variant="default" />
             <OpenInAgentFsButton target={file} />
           </>
         }

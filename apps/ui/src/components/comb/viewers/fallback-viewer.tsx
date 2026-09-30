@@ -18,7 +18,7 @@ export default function FallbackViewer({
       description={tooLarge ? `${facts}. Download the file to read it.` : facts}
       action={
         <>
-          <DownloadButton file={file} />
+          <DownloadButton file={file} variant="default" />
           <OpenInAgentFsButton target={file} />
         </>
       }

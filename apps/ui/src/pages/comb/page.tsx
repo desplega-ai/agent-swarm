@@ -69,7 +69,7 @@ export default function CombPage() {
           }
           action={
             <>
-              <Button size="sm" variant="outline" onClick={agentFs.retry}>
+              <Button size="sm" onClick={agentFs.retry}>
                 Retry
               </Button>
               <RouteOpenInAgentFs />
