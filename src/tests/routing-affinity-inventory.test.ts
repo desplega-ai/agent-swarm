@@ -58,6 +58,17 @@ const EXPECTED_INVENTORY: InventoryEntry[] = [
     },
   },
   {
+    file: "src/slack/outcome-actions.ts",
+    owner: "createRetryTask",
+    syntax: "PropertyAssignment",
+    count: 1,
+    kind: "producer",
+    dispatchProof: {
+      file: "src/tests/slack-outcome-actions.test.ts",
+      text: "a retry of a lead-only task stays lead-only on the same agent",
+    },
+  },
+  {
     file: "src/tasks/worker-follow-up.ts",
     owner: "createPoolStarvationDecisionTask",
     syntax: "PropertyAssignment",

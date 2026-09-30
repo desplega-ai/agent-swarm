@@ -445,6 +445,26 @@ describe("retry handler", () => {
     expect(files.map((file) => [file.name, file.intent])).toEqual([["brief.pdf", "user-upload"]]);
   });
 
+  test("a retry of a lead-only task stays lead-only on the same agent", async () => {
+    const { agent, task } = await slackTask("retry-lead-only", {
+      routingAffinity: { capabilities: [], leadOnly: true },
+    });
+    await startTask(task.id);
+    await failTask(task.id, "Worker crashed");
+    await actionHandlers.get("retry_task")!({
+      ack,
+      client: fakeClient,
+      action: { type: "button", value: task.id },
+      body: { user: { id: "U_ASKER" } },
+    });
+    const retry = (await getAllTasks()).find((t) => t.id !== task.id && t.task === task.task);
+    expect(retry).toMatchObject({
+      agentId: agent.id,
+      status: "pending",
+      routingAffinity: { leadOnly: true },
+    });
+  });
+
   test("does nothing for a task that did not fail", async () => {
     const { task } = await slackTask("retry-live");
     await actionHandlers.get("retry_task")!({
