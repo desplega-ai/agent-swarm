@@ -14,19 +14,24 @@ mock.module("@/components/ui/kbd", () => require("../ui/kbd"));
 mock.module("@/components/ui/textarea", () => require("../ui/textarea"));
 mock.module("@/lib/comb/comments", () => require("../../lib/comb/comments"));
 mock.module("@/lib/comb/drafts", () => require("../../lib/comb/drafts"));
+mock.module("@/lib/comb/mentions", () => require("../../lib/comb/mentions"));
 
-// `comment-add`: records the params, then fails with `nextError` when set.
+// `comment-add` and `comment-update`: record the params, then fail with
+// `nextError` when set.
 let nextError: unknown = null;
 const sent: unknown[] = [];
+const updated: unknown[] = [];
+const recorder = (into: unknown[]) => () => ({
+  isPending: false,
+  mutateAsync: async (params: unknown) => {
+    into.push(params);
+    if (nextError) throw nextError;
+    return {};
+  },
+});
 mock.module("@/api/hooks/use-agent-fs", () => ({
-  useAddComment: () => ({
-    isPending: false,
-    mutateAsync: async (params: unknown) => {
-      sent.push(params);
-      if (nextError) throw nextError;
-      return {};
-    },
-  }),
+  useAddComment: recorder(sent),
+  useUpdateComment: recorder(updated),
 }));
 
 const { createRoot } = await import("react-dom/client");
@@ -37,6 +42,7 @@ const { CommentComposer } = await import("./comment-composer");
 const { draftStorageKey, writeDraft } = await import("../../lib/comb/drafts");
 const { collectMentionIds } = await import("../../lib/comb/mentions");
 type ComposerExtrasContext = import("./comment-composer").ComposerExtrasContext;
+type ComposerTarget = import("./comment-composer").ComposerTarget;
 
 const toastError = spyOn(toast, "error").mockImplementation(() => 0);
 const toastWarning = spyOn(toast, "warning").mockImplementation(() => 0);
@@ -55,7 +61,11 @@ const SCOPE = {
 };
 
 async function renderComposer(
-  opts: { readOnly?: boolean; renderComposerExtras?: (ctx: ComposerExtrasContext) => null } = {},
+  opts: {
+    readOnly?: boolean;
+    renderComposerExtras?: (ctx: ComposerExtrasContext) => null;
+    target?: ComposerTarget;
+  } = {},
 ) {
   const outboxAdds: Array<[unknown, string]> = [];
   const markReadOnly = mock(() => {});
@@ -81,7 +91,7 @@ async function renderComposer(
     root.render(
       <CommentContextProvider value={value}>
         <CommentComposer
-          target={{ kind: "file" }}
+          target={opts.target ?? { kind: "file" }}
           onClose={onClose}
           renderComposerExtras={opts.renderComposerExtras}
         />
@@ -91,7 +101,7 @@ async function renderComposer(
   return { container, root, outboxAdds, markReadOnly, onClose };
 }
 
-async function typeAndSend(container: HTMLElement, text: string) {
+async function typeText(container: HTMLElement, text: string) {
   const textarea = container.querySelector("textarea");
   if (!textarea) throw new Error("no textarea");
   const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
@@ -99,14 +109,18 @@ async function typeAndSend(container: HTMLElement, text: string) {
     setter?.call(textarea, text);
     textarea.dispatchEvent(new Event("input", { bubbles: true }));
   });
+}
+
+async function typeAndSend(container: HTMLElement, text: string) {
+  await typeText(container, text);
   await clickSend(container);
 }
 
-async function clickSend(container: HTMLElement) {
+async function clickSend(container: HTMLElement, label = "Send") {
   const send = [...container.querySelectorAll("button")].find((b) =>
-    b.textContent?.includes("Send"),
+    b.textContent?.includes(label),
   );
-  if (!send) throw new Error("no Send button");
+  if (!send) throw new Error(`no ${label} button`);
   await act(async () => send.click());
 }
 
@@ -221,6 +235,85 @@ describe("CommentComposer picked mentions (step-8)", () => {
       ],
     ]);
     expect(localStorage.getItem(draftKey)).toBeNull();
+    await act(async () => root.unmount());
+  });
+});
+
+describe("CommentComposer edit", () => {
+  beforeEach(() => {
+    nextError = null;
+    sent.length = 0;
+    updated.length = 0;
+    localStorage.clear();
+  });
+
+  const ann = { userId: "u-ann", displayName: "Ann Lee", email: "ann@x.io" };
+  const saved = {
+    id: "c-1",
+    path: "comb-qa/notes.md",
+    body: "@Ann Lee can you check?",
+    mentions: [ann],
+    author: "user-1",
+    resolved: false,
+    replyCount: 0,
+    createdAt: "2026-09-30T10:00:00.000Z",
+    updatedAt: "2026-09-30T10:00:00.000Z",
+  };
+  const mentionExtras = (ctx: ComposerExtrasContext) => {
+    ctx.sendParamsRef.current = (text) => {
+      const mentions = collectMentionIds(text, ctx.picked);
+      return mentions.length > 0 ? { mentions } : {};
+    };
+    return null;
+  };
+
+  test("starts from the saved text and saves with comment-update, keeping its mentions", async () => {
+    const { container, onClose, root } = await renderComposer({
+      target: { kind: "edit", comment: saved },
+      renderComposerExtras: mentionExtras,
+    });
+    expect(container.querySelector("textarea")?.value).toBe(saved.body);
+    await typeText(container, "@Ann Lee can you check the table?");
+    await clickSend(container, "Save");
+    expect(updated).toEqual([
+      { id: "c-1", body: "@Ann Lee can you check the table?", mentions: ["u-ann"] },
+    ]);
+    expect(sent).toEqual([]);
+    expect(onClose).toHaveBeenCalledTimes(1);
+    // An edit keeps no draft.
+    expect(localStorage.length).toBe(0);
+    await act(async () => root.unmount());
+  });
+
+  test("a removed mention token clears the stored mentions", async () => {
+    const { container, root } = await renderComposer({
+      target: { kind: "edit", comment: saved },
+      renderComposerExtras: mentionExtras,
+    });
+    await typeText(container, "can you check?");
+    await clickSend(container, "Save");
+    expect(updated).toEqual([{ id: "c-1", body: "can you check?", mentions: [] }]);
+    await act(async () => root.unmount());
+  });
+
+  test("without the mention picker the stored mentions stay as they are", async () => {
+    const { container, root } = await renderComposer({ target: { kind: "edit", comment: saved } });
+    await typeText(container, "@Ann Lee please check");
+    await clickSend(container, "Save");
+    expect(updated).toEqual([{ id: "c-1", body: "@Ann Lee please check" }]);
+    await act(async () => root.unmount());
+  });
+
+  test("a failed save shows inline and keeps the editor, with no outbox entry", async () => {
+    nextError = new AgentFsError(0, "NETWORK", "offline");
+    const { container, onClose, outboxAdds, root } = await renderComposer({
+      target: { kind: "edit", comment: saved },
+    });
+    await typeText(container, "new text");
+    await clickSend(container, "Save");
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe("offline");
+    expect(outboxAdds).toEqual([]);
+    expect(onClose).not.toHaveBeenCalled();
     await act(async () => root.unmount());
   });
 });

@@ -11,6 +11,7 @@ import {
   insertMention,
   labelMembers,
   markMentionsRead,
+  mentionPicks,
   mentionRoute,
   pickableMembers,
   pickerItems,
@@ -284,6 +285,25 @@ describe("splitMentions", () => {
     expect(splitMentions("@bob and me@ann", [ann])).toEqual([
       { kind: "text", text: "@bob and me@ann" },
     ]);
+  });
+});
+
+describe("mentionPicks", () => {
+  const ann = { userId: "u-ann", email: "ann@x.io", displayName: "Ann Lee" };
+  const bob = { userId: "u-bob", email: "bob@x.io", displayName: null };
+
+  test("maps each mention token of a saved comment to its user id", () => {
+    const picks = mentionPicks("@Ann Lee and @bob, please check", [ann, bob]);
+    expect([...picks]).toEqual([
+      ["Ann Lee", "u-ann"],
+      ["bob", "u-bob"],
+    ]);
+    // An edit that keeps a token keeps its mention. A removed token drops it.
+    expect(collectMentionIds("@Ann Lee, please check", picks)).toEqual(["u-ann"]);
+  });
+
+  test("is empty without mentions", () => {
+    expect(mentionPicks("@Ann Lee hi", undefined).size).toBe(0);
   });
 });
 

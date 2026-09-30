@@ -532,9 +532,10 @@ summary {
 
 /* Comb comment passages (components/comb/comment-highlights.tsx). The CSS
  * Custom Highlight API paints text ranges. `-moved` marks a passage found
- * after the text changed. `-active` is the selected or hovered thread and the
- * passage a new comment is written on. Browsers without the API get the
- * `-fallback` classes on the blocks instead. */
+ * after the text changed. `-pending` marks an `@swarm` comment not sent yet
+ * (the info tone of the `@swarm` chip). `-active` is the selected or hovered
+ * thread and the passage a new comment is written on. Browsers without the
+ * API get the `-fallback` classes on the blocks instead. */
 ::highlight(comb-comment) {
   background-color: color-mix(in oklch, var(--color-primary) 16%, transparent);
 }
@@ -542,11 +543,18 @@ summary {
   background-color: color-mix(in oklch, var(--color-status-warning) 24%, transparent);
   text-decoration: underline dotted var(--color-status-warning-strong);
 }
+::highlight(comb-comment-pending) {
+  background-color: color-mix(in oklch, var(--color-status-info) 28%, transparent);
+  text-decoration: underline dashed var(--color-status-info-strong);
+}
 ::highlight(comb-comment-active) {
   background-color: color-mix(in oklch, var(--color-primary) 34%, transparent);
 }
 .comb-comment-fallback {
   background-color: color-mix(in oklch, var(--color-primary) 10%, transparent);
+}
+.comb-comment-fallback-pending {
+  background-color: color-mix(in oklch, var(--color-status-info) 14%, transparent);
 }
 .comb-comment-fallback-active {
   background-color: color-mix(in oklch, var(--color-primary) 22%, transparent);

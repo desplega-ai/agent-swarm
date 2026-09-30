@@ -1,5 +1,13 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { CloudOff, Lock, MessageSquare, MessageSquarePlus, RefreshCw, X } from "lucide-react";
+import {
+  CloudOff,
+  Lock,
+  MessageSquare,
+  MessageSquarePlus,
+  RefreshCw,
+  SearchX,
+  X,
+} from "lucide-react";
 import { useReducedMotion } from "motion/react";
 import {
   type ReactNode,
@@ -28,13 +36,29 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useCommentAnchors } from "@/hooks/use-comment-anchors";
 import { useConfig } from "@/hooks/use-config";
 import { useMediaQuery } from "@/hooks/use-media-query";
-import type { CommentAddParams, CommentListEntry, StatResult } from "@/lib/agent-fs/types";
+import type {
+  CommentAddParams,
+  CommentEntry,
+  CommentListEntry,
+  StatResult,
+} from "@/lib/agent-fs/types";
 import type { AnchorResolution } from "@/lib/comb/comment-anchor";
 import { COMMENT_LIST_MAX, commentAuthorNames } from "@/lib/comb/comments";
 import type { DomTextSpace } from "@/lib/comb/dom-text-space";
 import { browserStorage, type OutboxEntry, sweepExpiredDrafts } from "@/lib/comb/drafts";
 import { getFileKind } from "@/lib/comb/file-kinds";
 import type { DrivePath } from "@/lib/comb/paths";
+import {
+  type CommentFilter,
+  countByFilter,
+  type FilterFacts,
+  filterThreads,
+  isQueryEmpty,
+  searchNeedle,
+  threadMatchesFilter,
+  threadMatchesSearch,
+} from "@/lib/comb/thread-filter";
+import type { ThreadSwarmState } from "@/lib/comb/thread-status";
 import {
   CommentComposer,
   type ComposerExtrasContext,
@@ -48,10 +72,20 @@ import {
 } from "./comment-context";
 import { CommentHighlights } from "./comment-highlights";
 import { CommentThread } from "./comment-thread";
+import { PassageMarkers } from "./passage-markers";
 import { QuoteExcerpt } from "./quote-excerpt";
+import {
+  CommentSearch,
+  FilterMenu,
+  FilterSummary,
+  PendingSummary,
+  SearchToggle,
+} from "./rail-filters";
 import { SelectionCommentButton } from "./selection-comment-button";
+import { useAuthorLabel } from "./use-author-label";
 import { type CommentOutbox, useCommentOutbox } from "./use-comment-outbox";
 import { useDomTextSpace } from "./use-dom-text-space";
+import { useThreadSwarmStates } from "./use-thread-swarm-states";
 
 type RailTab = "open" | "resolved";
 
@@ -81,7 +115,11 @@ export interface CommentRailProps {
   viewerRef: RefObject<HTMLElement | null>;
   /** Thread actions mount point: step-9 "Send to swarm", step-10 "Review changes". */
   threadActions?: (thread: CommentListEntry) => ReactNode;
-  /** Rail header mount point: step-9 "Send N to swarm". `open` = the open threads. */
+  /**
+   * Rail header mount point: step-9 "Send N to swarm". `open` = the open
+   * threads. It shows in the "N pending" summary, which is there only while
+   * pending comments exist.
+   */
   railHeaderActions?: (ctx: { file: DrivePath; open: CommentListEntry[] }) => ReactNode;
   /** Composer mount point: step-8 mention picker. Every composer of the file gets it. */
   renderComposerExtras?: (ctx: ComposerExtrasContext) => ReactNode;
@@ -101,10 +139,15 @@ export interface CommentRailProps {
 }
 
 /**
- * Comments on one file: the right-hand rail (Open / Resolved threads, a
- * file-level composer, the "Not sent" outbox), the text-selection "Comment"
- * button, and the passage highlights in the viewer pane. Below `lg` the rail
- * is a bottom sheet.
+ * Comments on one file: the right-hand rail (Open / Resolved threads, search
+ * and filters, the "N pending" summary, a file-level composer, the "Not sent"
+ * outbox), the text-selection "Comment" button, and the passage highlights
+ * and processing markers in the viewer pane. Below `lg` the rail is a bottom
+ * sheet.
+ *
+ * The search and the filter are local state, not URL params: typing would
+ * write the URL on every key, and a deep link (`?comment=`) must always show
+ * its thread. The rail mounts per file, so they reset on a new file.
  */
 export function CommentRail({
   file,
@@ -126,6 +169,33 @@ export function CommentRail({
   const authorNames = useMemo(() => commentAuthorNames(threads), [threads]);
   const queryClient = useQueryClient();
   const reduceMotion = useReducedMotion() ?? false;
+
+  // Search and filters. The same match decides the list and the highlights.
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<CommentFilter>("all");
+  const authorLabel = useAuthorLabel(file);
+  const authorName = useCallback(
+    (entry: CommentEntry) => entry.authorDisplayName || authorLabel(entry.author),
+    [authorLabel],
+  );
+  const states = useThreadSwarmStates(open);
+  const facts = useMemo<FilterFacts>(
+    () => ({ me: access.userId, states }),
+    [access.userId, states],
+  );
+  const needle = searchNeedle(search);
+  const shownOpen = useMemo(
+    () => filterThreads(open, { needle, filter }, facts, authorName),
+    [open, needle, filter, facts, authorName],
+  );
+  const shownResolved = useMemo(
+    () => filterThreads(resolved, { needle, filter }, facts, authorName),
+    [resolved, needle, filter, facts, authorName],
+  );
+  const clearFilters = useCallback(() => {
+    setSearch("");
+    setFilter("all");
+  }, []);
 
   // Expired drafts of any file go once the rail mounts.
   useEffect(() => sweepExpiredDrafts(browserStorage(), Date.now()), []);
@@ -208,7 +278,7 @@ export function CommentRail({
 
   // Deep link `?comment=<id>`: once the thread loads, open its tab (and the
   // sheet on narrow layouts) and select it. Scroll to its passage as soon as
-  // the passage resolves.
+  // the passage resolves. A search or filter that hides it is cleared.
   const linkedId = searchParams.get("comment");
   useEffect(() => {
     if (!linkedId) return;
@@ -218,6 +288,12 @@ export function CommentRail({
       if (!thread) return;
       setTab(thread.resolved ? "resolved" : "open");
       setActiveId(linkedId);
+      if (
+        !threadMatchesFilter(thread, filter, facts) ||
+        !threadMatchesSearch(thread, needle, authorName)
+      ) {
+        clearFilters();
+      }
       if (!wide && !viewerState) setSheetOpen(true);
       link = { id: linkedId, scrolled: false };
       linkRef.current = link;
@@ -225,7 +301,20 @@ export function CommentRail({
     if (!link.scrolled && scrollToPassage(space, anchors.get(linkedId), reduceMotion)) {
       link.scrolled = true;
     }
-  }, [linkedId, threads, anchors, space, wide, reduceMotion, viewerState]);
+  }, [
+    linkedId,
+    threads,
+    anchors,
+    space,
+    wide,
+    reduceMotion,
+    viewerState,
+    filter,
+    facts,
+    needle,
+    authorName,
+    clearFilters,
+  ]);
 
   // step-10: a review opened (from "Review changes" in the sheet): the sheet gives way to it.
   useEffect(() => {
@@ -250,13 +339,36 @@ export function CommentRail({
     return () => window.removeEventListener("online", onOnline);
   }, [retryAll]);
 
-  const paintIds = useMemo(() => new Set(open.map((thread) => thread.id)), [open]);
+  // The page matches the list: only the open threads the search and the
+  // filter show are painted, pending ones in their own style, processing
+  // ones with a marker.
+  const paintIds = useMemo(() => new Set(shownOpen.map((thread) => thread.id)), [shownOpen]);
+  const [pendingIds, processingIds] = useMemo(() => {
+    const byKind = { pending: new Set<string>(), processing: new Set<string>() };
+    for (const thread of shownOpen) {
+      const state = states.get(thread.id);
+      if (state) byKind[state.kind].add(thread.id);
+    }
+    return [byKind.pending, byKind.processing] as const;
+  }, [shownOpen, states]);
+  const pendingCount = useMemo(
+    () => open.filter((thread) => states.get(thread.id)?.kind === "pending").length,
+    [open, states],
+  );
+  // The selected card stays emphasized only while the list shows it.
+  const activeShown = useMemo(
+    () =>
+      activeId !== null &&
+      (shownOpen.some((thread) => thread.id === activeId) ||
+        shownResolved.some((thread) => thread.id === activeId)),
+    [activeId, shownOpen, shownResolved],
+  );
   const emphasizedIds = useMemo(() => {
     const ids = new Set<string>();
-    if (activeId) ids.add(activeId);
+    if (activeId && activeShown) ids.add(activeId);
     if (hover?.from === "card") ids.add(hover.id);
     return ids;
-  }, [activeId, hover]);
+  }, [activeId, activeShown, hover]);
 
   const context = useMemo<CommentContextValue>(
     () => ({
@@ -271,12 +383,38 @@ export function CommentRail({
     [file, scope, outbox, readOnly, onReadOnly, authorNames, renderComposerExtras],
   );
 
+  const counts = useMemo(
+    () => countByFilter(tab === "open" ? open : resolved, needle, facts, authorName),
+    [tab, open, resolved, needle, facts, authorName],
+  );
+  const railQuery: RailQuery = {
+    search,
+    onSearch: setSearch,
+    filter,
+    onFilter: setFilter,
+    counts,
+    active: !isQueryEmpty({ needle, filter }),
+    clear: clearFilters,
+  };
+
   const rail = (
     <RailBody
       tab={tab}
       onTabChange={setTab}
-      open={open}
-      resolved={resolved}
+      open={shownOpen}
+      resolved={shownResolved}
+      totals={{ open: open.length, resolved: resolved.length }}
+      query={railQuery}
+      states={states}
+      pendingCount={pendingCount}
+      onShowPending={() => {
+        if (filter === "pending") {
+          setFilter("all");
+        } else {
+          setFilter("pending");
+          setTab("open");
+        }
+      }}
       truncated={query.data?.truncated ?? false}
       loading={query.isPending}
       // A failed poll keeps the threads it already has on screen.
@@ -301,6 +439,7 @@ export function CommentRail({
         space={space}
         anchors={anchors}
         paintIds={paintIds}
+        pendingIds={pendingIds}
         emphasizedIds={emphasizedIds}
         pending={pending}
         onHover={(id) =>
@@ -310,6 +449,7 @@ export function CommentRail({
         }
         onActivate={activate}
       />
+      <PassageMarkers rootRef={viewerRef} space={space} anchors={anchors} ids={processingIds} />
       <SelectionCommentButton rootRef={viewerRef} space={space} onPendingChange={setPending} />
       {wide ? (
         <aside
@@ -347,11 +487,34 @@ export function CommentRail({
   );
 }
 
+/** The rail's search and filter (local state of `CommentRail`). */
+interface RailQuery {
+  search: string;
+  onSearch: (search: string) => void;
+  filter: CommentFilter;
+  onFilter: (filter: CommentFilter) => void;
+  /** Threads per filter in the current tab, with the search applied. */
+  counts: Record<CommentFilter, number>;
+  /** The search or the filter hides threads. */
+  active: boolean;
+  clear: () => void;
+}
+
 interface RailBodyProps {
   tab: RailTab;
   onTabChange: (tab: RailTab) => void;
+  /** The open threads the search and the filter show. */
   open: CommentListEntry[];
+  /** The resolved threads the search and the filter show. */
   resolved: CommentListEntry[];
+  /** All threads per tab, before the search and the filter. */
+  totals: Record<RailTab, number>;
+  query: RailQuery;
+  states: ReadonlyMap<string, ThreadSwarmState>;
+  /** Open `@swarm` threads not sent yet (all of them, not only the shown ones). */
+  pendingCount: number;
+  /** "N pending": show the pending threads (or all again). */
+  onShowPending: () => void;
   /** Only the newest `COMMENT_LIST_MAX` threads are listed. */
   truncated: boolean;
   loading: boolean;
@@ -373,6 +536,11 @@ function RailBody({
   onTabChange,
   open,
   resolved,
+  totals,
+  query,
+  states,
+  pendingCount,
+  onShowPending,
   truncated,
   loading,
   error,
@@ -391,6 +559,10 @@ function RailBody({
   const hasFileDraft = useHasDraft({ kind: "file" });
   const [composing, setComposing] = useState(hasFileDraft);
   const threads = tab === "open" ? open : resolved;
+  // The body remounts when the sheet reopens or the layout changes: a search
+  // that is still on keeps its field open.
+  const [searchOpen, setSearchOpen] = useState(() => query.search !== "");
+  const bodyRef = useRef<HTMLDivElement>(null);
 
   // A closed file-level composer gives focus back to its button.
   const fileButtonRef = useRef<HTMLButtonElement>(null);
@@ -401,9 +573,24 @@ function RailBody({
     fileButtonRef.current?.focus();
   }, [composing]);
 
+  // Closing the search clears it.
+  const { onSearch } = query;
+  const closeSearch = useCallback(
+    (refocus: boolean) => {
+      setSearchOpen(false);
+      onSearch("");
+      if (refocus) {
+        requestAnimationFrame(() =>
+          bodyRef.current?.querySelector<HTMLElement>("[data-comb-search-toggle]")?.focus(),
+        );
+      }
+    },
+    [onSearch],
+  );
+
   return (
     <>
-      <div className="flex shrink-0 flex-col gap-2 border-b border-border-subtle p-3">
+      <div ref={bodyRef} className="flex shrink-0 flex-col gap-2 border-b border-border-subtle p-3">
         <Tabs value={tab} onValueChange={(value) => onTabChange(value as RailTab)}>
           <TabsList className="w-full">
             <TabsTrigger value="open">
@@ -414,7 +601,7 @@ function RailBody({
             </TabsTrigger>
           </TabsList>
         </Tabs>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
           {readOnly ? (
             <p className="flex flex-1 items-center gap-1.5 text-xs text-muted-foreground">
               <Lock className="size-3.5 shrink-0" aria-hidden />
@@ -425,7 +612,7 @@ function RailBody({
               ref={fileButtonRef}
               size="sm"
               variant="outline"
-              className="flex-1"
+              className="mr-1 flex-1"
               onClick={() => setComposing(true)}
               disabled={composing}
             >
@@ -433,9 +620,20 @@ function RailBody({
               Comment on file
             </Button>
           )}
-          {/* Rail header actions mount point (step-9 Send N to swarm). */}
-          {header}
+          <SearchToggle
+            open={searchOpen}
+            active={query.search.trim() !== ""}
+            onToggle={() => (searchOpen ? closeSearch(false) : setSearchOpen(true))}
+          />
+          <FilterMenu value={query.filter} counts={query.counts} onChange={query.onFilter} />
         </div>
+        {searchOpen ? (
+          <CommentSearch
+            value={query.search}
+            onChange={query.onSearch}
+            onClose={() => closeSearch(true)}
+          />
+        ) : null}
         {composing ? (
           <CommentComposer
             target={{ kind: "file" }}
@@ -449,6 +647,16 @@ function RailBody({
           />
         ) : null}
       </div>
+      {pendingCount > 0 ? (
+        <PendingSummary
+          count={pendingCount}
+          showing={query.filter === "pending"}
+          onShow={onShowPending}
+        >
+          {/* Rail header actions mount point (step-9 Send N to swarm). */}
+          {header}
+        </PendingSummary>
+      ) : null}
       {/* Both tabs: a comment that did not post is never out of sight. */}
       <OutboxList />
       <div ref={listRef} className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-3">
@@ -457,6 +665,14 @@ function RailBody({
             Showing the newest {COMMENT_LIST_MAX.toLocaleString()} threads.
           </p>
         ) : null}
+        {query.active && !loading && !error && threads.length > 0 ? (
+          <FilterSummary
+            filter={query.filter}
+            shown={threads.length}
+            total={totals[tab]}
+            onClear={query.clear}
+          />
+        ) : null}
         {loading ? (
           <>
             <Skeleton className="h-24 w-full" />
@@ -464,6 +680,21 @@ function RailBody({
           </>
         ) : error ? (
           <p className="text-xs text-status-error-strong">{error.message}</p>
+        ) : threads.length === 0 && query.active && totals[tab] > 0 ? (
+          <EmptyState
+            icon={SearchX}
+            title="No matching comments"
+            description={
+              totals[tab] === 1
+                ? `The ${tab} comment does not match.`
+                : `None of the ${totals[tab]} ${tab} comments match.`
+            }
+            action={
+              <Button size="sm" onClick={query.clear}>
+                Clear filters
+              </Button>
+            }
+          />
         ) : threads.length === 0 ? (
           <EmptyState
             icon={MessageSquare}
@@ -487,6 +718,7 @@ function RailBody({
               onActivate={onActivate}
               onHover={onCardHover}
               actions={threadActions?.(thread)}
+              swarmState={states.get(thread.id)}
             />
           ))
         )}

@@ -5,17 +5,22 @@ import { useFolderThreads } from "@/api/hooks/use-agent-fs";
 import { SendBatchButton } from "@/components/comb/send-to-swarm";
 import { useAuthorLabel } from "@/components/comb/use-author-label";
 import { useCombServiceUserId } from "@/components/comb/use-comb-service-user";
-import { Badge } from "@/components/ui/badge";
 import { useAgentFs } from "@/contexts/agent-fs-context";
 import type { CommentListEntry } from "@/lib/agent-fs/types";
 import { commentCombPath } from "@/lib/comb/comments";
-import { hasSwarmMarker, isSentToSwarm } from "@/lib/comb/markers";
+import { isSentToSwarm } from "@/lib/comb/markers";
 import { combPath, type DrivePath } from "@/lib/comb/paths";
+import type { ThreadSwarmState } from "@/lib/comb/thread-status";
+import { SwarmStateTag } from "./swarm-state";
+import { useThreadSwarmStates } from "./use-thread-swarm-states";
+
+const NO_THREADS: CommentListEntry[] = [];
 
 /**
- * The folder's "Open comments" panel: open threads grouped by file, with
- * "Send N to swarm" for the whole folder. Hidden when agent-fs lacks the
- * `comment-path-prefix` feature or the folder has no open comments.
+ * The folder's "Open comments" panel: open threads grouped by file, each with
+ * its swarm state (Pending, Processing, or Sent), and "Send N to swarm" for
+ * the whole folder. Hidden when agent-fs lacks the `comment-path-prefix`
+ * feature or the folder has no open comments.
  */
 export function FolderComments({ folder }: { folder: DrivePath }) {
   const { features } = useAgentFs();
@@ -24,6 +29,7 @@ export function FolderComments({ folder }: { folder: DrivePath }) {
   const authorLabel = useAuthorLabel(folder);
   const serviceUserId = useCombServiceUserId();
   const threads = query.data?.threads;
+  const states = useThreadSwarmStates(threads ?? NO_THREADS);
 
   const groups = useMemo(() => {
     const byPath = new Map<string, CommentListEntry[]>();
@@ -74,19 +80,10 @@ export function FolderComments({ folder }: { folder: DrivePath }) {
                       {thread.authorDisplayName || authorLabel(thread.author)}
                     </span>
                     <span className="min-w-0 flex-1 truncate">{thread.body}</span>
-                    {isSentToSwarm(thread, serviceUserId) ? (
-                      <Badge variant="outline" size="tag" className="shrink-0">
-                        Sent
-                      </Badge>
-                    ) : hasSwarmMarker(thread.body) ? (
-                      <Badge
-                        variant="outline"
-                        size="tag"
-                        className="shrink-0 border-status-info/40 text-status-info-strong"
-                      >
-                        @swarm
-                      </Badge>
-                    ) : null}
+                    <FolderThreadState
+                      state={states.get(thread.id)}
+                      sent={isSentToSwarm(thread, serviceUserId)}
+                    />
                   </Link>
                 </li>
               ))}
@@ -96,4 +93,17 @@ export function FolderComments({ folder }: { folder: DrivePath }) {
       </div>
     </section>
   );
+}
+
+/** Pending or Processing, else "Sent" for a thread the swarm got (and answered or finished). */
+function FolderThreadState({
+  state,
+  sent,
+}: {
+  state: ThreadSwarmState | undefined;
+  sent: boolean;
+}) {
+  if (state) return <SwarmStateTag state={state} />;
+  if (!sent) return null;
+  return <span className="shrink-0 text-xs text-muted-foreground">Sent</span>;
 }
