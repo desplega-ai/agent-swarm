@@ -190,7 +190,7 @@ async function discoverToolFiles(): Promise<string[]> {
 
   for await (const file of glob.scan(TOOLS_DIR)) {
     // Skip utility files and index files
-    if (file === "utils.ts" || file.endsWith("index.ts")) continue;
+    if (file === "utils.ts" || file === "index.ts") continue;
     files.push(file.replace(".ts", ""));
   }
 

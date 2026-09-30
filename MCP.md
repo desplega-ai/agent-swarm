@@ -293,6 +293,7 @@ Sends a task to a specific agent, creates an unassigned task for the pool, or of
 | `vcsRepo` | `string` | No | - | VCS repo identifier (e.g., 'desplega-ai/agent-swarm' for GitHub or 'group/project' for GitLab). Links the task to a registered repo for workspace context. |
 | `model` | `string` | No | - | Concrete model override for this task, interpreted by the assignee's harness/provider. This does not switch providers. Prefer modelTier for portable intent. |
 | `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Portable model tier for this task: 'smol', 'regular', 'smart', or 'ultra'. Resolved at claim/run time using the assignee's harness/provider. Legacy model shortnames map as haiku→smol, sonnet→regular, opus→smart, fable→ultra. |
+| `allowCustomModel` | `boolean` | No | - | Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only for ids the catalog cannot know yet (a fresh launch, a private deployment). |
 | `effort` | `off \| low \| medium \| high \| xhigh \| max` | No | - | Reasoning effort for this task: 'off', 'low', 'medium', 'high', 'xhigh', or 'max'. If omitted, the assignee's REASONING_EFFORT_OVERRIDE/default applies. |
 | `allowDuplicate` | `boolean` | No | false | If true, skip duplicate detection and create the task even if a similar one exists. |
 | `slackChannelId` | `string` | No | - | Slack channel ID to post progress updates to. Use this to propagate Slack context when delegating from a Slack thread. |
@@ -461,6 +462,7 @@ Perform task pool operations: create unassigned tasks, claim/release tasks from 
 | `dir` | `string` | No | - | Working directory (absolute path) for the agent to start in. Only used with 'create' action. |
 | `model` | `string` | No | - | Concrete model override for the created task, interpreted by the claiming worker's harness/provider. This does not switch providers. Only used with 'create' action. |
 | `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Portable model tier for the created task: 'smol', 'regular', 'smart', or 'ultra'. Resolved when a worker claims/runs the task. Only used with 'create' action. |
+| `allowCustomModel` | `boolean` | No | - | Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only used with 'create' action. |
 | `effort` | `off \| low \| medium \| high \| xhigh \| max` | No | - | Reasoning effort for the created task: 'off', 'low', 'medium', 'high', 'xhigh', or 'max'. Only used with 'create' action. |
 | `requiredCapabilities` | `array` | No | - | Capabilities required for pool routing. |
 | `leadOnly` | `boolean` | No | false | Structured authorization constraint: only Lead agents may claim this privileged task. |
@@ -557,11 +559,32 @@ Advanced, lead-only management for standalone scripts-runtime credential broker 
 
 ### model-catalog-refresh
 
-*Documentation not available*
+**Refresh Model Catalog**
+
+Refresh the swarm model catalog (and pricing rows) from models.dev, like `pi update --models`. Without force, skips the network when the last check is under 4h old. A forced refresh is accepted once per minute; a second one inside that window returns `skipped-cooldown` with `retryAfterMs`. Lead agent only. Returns the status, model count, and newly added provider/modelId keys.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `force` | `boolean` | No | - | Fetch even if the last check is under 4h old (default false). Rate limited to one per minute. |
 
 ### model-catalog-overlay-upsert
 
-*Documentation not available*
+**Upsert Model Catalog Overlay**
+
+Add or update hand-verified facts for one model (e.g. a launch models.dev has not listed yet). Overlay fields win over models.dev; overlay prices fill pricing-table gaps so cost recompute prices the model. The row auto-expires once models.dev matches every fact you set.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `provider` | `string` | Yes | - | models.dev provider id: anthropic, openai, openrouter, amazon-bedrock, opencode. |
+| `modelId` | `string` | Yes | - | Model id as models.dev keys it (e.g. claude-opus-5-5). |
+| `name` | `string` | No | - | Display name. |
+| `releaseDate` | `string` | No | - | Release date, YYYY-MM-DD. |
+| `contextWindow` | `number` | No | - | Context window, tokens. |
+| `maxOutput` | `number` | No | - | Max output tokens. |
+| `reasoningOptions` | `array` | No | - | Reasoning options, models.dev shape: [{type, values?}]. |
+| `pricing` | `object` | No | - | USD per million tokens. |
+| `reason` | `string` | Yes | - | Why this overlay exists (source of the facts). |
+| `verifiedBy` | `string` | No | - | Who verified the facts (URL, person, agent). |
 
 ## Scripts Tools
 
@@ -1003,6 +1026,7 @@ Create a new scheduled task. For recurring: provide cronExpression or intervalMs
 | `enabled` | `boolean` | No | true | Whether the schedule is enabled (default: true) |
 | `model` | `string` | No | - | Concrete model override for tasks created by this schedule. Interpreted by each assignee's harness/provider and does not switch providers. Prefer modelTier for portable intent. |
 | `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Portable model tier for tasks created by this schedule: 'smol', 'regular', 'smart', or 'ultra'. Resolved by each assignee's harness/provider at run time. |
+| `allowCustomModel` | `boolean` | No | - | Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only for ids the catalog cannot know yet. |
 
 ### defer-task
 
@@ -1049,6 +1073,7 @@ Update an existing scheduled task. Any registered agent can update schedules.
 | `enabled` | `boolean` | No | - | Enable or disable the schedule |
 | `model` | `string` | No | - | Concrete model override for tasks created by this schedule. Set to null to clear. |
 | `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Portable model tier for tasks created by this schedule. Set to null to clear. |
+| `allowCustomModel` | `boolean` | No | - | Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only for ids the catalog cannot know yet. |
 
 ### patch-schedule
 
@@ -1078,6 +1103,7 @@ Patch an existing scheduled task by shallow-merging provided fields over the cur
 | `enabled` | `boolean` | No | - | Enable or disable the schedule |
 | `model` | `string` | No | - | Concrete model override for tasks created by this schedule. Set to null to clear. |
 | `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Portable model tier for tasks created by this schedule. Set to null to clear. |
+| `allowCustomModel` | `boolean` | No | - | Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only for ids the catalog cannot know yet. |
 
 ### delete-schedule
 
