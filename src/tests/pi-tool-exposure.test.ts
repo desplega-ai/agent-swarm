@@ -233,6 +233,7 @@ describe("PiMonoAdapter.createSession — tool deferral wiring", () => {
           model: undefined,
           subscribe: () => () => {},
           dispose: () => {},
+          bindExtensions: async () => {},
         },
       };
     }) as typeof piCodingAgent.createAgentSession);

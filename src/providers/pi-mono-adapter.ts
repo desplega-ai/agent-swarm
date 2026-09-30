@@ -17,12 +17,14 @@ import type {
   AgentToolResult,
   CreateAgentSessionOptions,
   ExtensionFactory,
+  McpServerConfig,
   SessionStats,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import {
   type AgentSession,
   createAgentSession,
+  createMcpExtension,
   createToolSearchExtension,
   DefaultResourceLoader,
   getAgentDir,
@@ -34,6 +36,7 @@ import { type TSchema, Type } from "typebox";
 import { CORE_TOOLS } from "../tools/tool-config";
 import { classifyAwsSdkError } from "../utils/aws-error-classifier";
 import { parseEnvFlag } from "../utils/env-flag";
+import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
 import { swarmRuntimeInstanceId } from "../utils/multi-runtime";
 import { DEFAULT_OPENROUTER_BASE_URL, getOpenRouterBaseUrl } from "../utils/openrouter-base-url";
 import { scrubSecrets } from "../utils/secret-scrubber";
@@ -1123,6 +1126,19 @@ export class PiMonoSession implements ProviderSession {
 /** Per-session pi feature switches resolved from flags. */
 export interface PiSessionFeatures {
   toolDeferral: boolean;
+  /** The agent has installed MCP servers for pi's MCP extension to connect. */
+  installedMcp?: boolean;
+}
+
+/**
+ * pi's MCP extension with config files disabled. Servers come only from
+ * `pi.registerMcpServer` (the swarm hook): a stray `~/.pi/agent/mcp.json` or
+ * a repo's `.pi/mcp.json` must never add servers to a swarm session.
+ */
+export function createSwarmMcpExtension(): ExtensionFactory {
+  return createMcpExtension({
+    loadConfig: () => ({ servers: [], errors: [], autoEnableCodemode: false }),
+  });
 }
 
 /** Extension factories for a pi session: ours first, then pi built-ins the flags turn on. */
@@ -1132,7 +1148,58 @@ export function piExtensionFactories(
 ): ExtensionFactory[] {
   const factories: ExtensionFactory[] = [swarmExtension];
   if (features.toolDeferral) factories.push(createToolSearchExtension());
+  if (features.installedMcp) factories.push(createSwarmMcpExtension());
   return factories;
+}
+
+/**
+ * Escape a literal for pi's config-value resolver, which runs values that
+ * start with `!` as shell commands and expands `$VAR`. Header and env values
+ * from the API are resolved secrets, never templates.
+ */
+function escapePiConfigValue(value: string): string {
+  const escaped = value.replace(/\$/g, () => "$$");
+  return escaped.startsWith("!") ? `$${escaped}` : escaped;
+}
+
+function escapeValues(values: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!values || typeof values !== "object") return out;
+  for (const [key, value] of Object.entries(values as Record<string, unknown>)) {
+    if (typeof value === "string") out[key] = escapePiConfigValue(value);
+  }
+  return out;
+}
+
+/**
+ * Map installed servers (`fetchInstalledMcpServers(..., "claude")` entries)
+ * to pi MCP configs. pi speaks stdio and streamable HTTP; `sse` entries map to
+ * HTTP, which is how the previous pi client already reached them. Tools stay
+ * `direct`, as before: the prompt lists these servers as in the tool list.
+ */
+export function toPiMcpServers(
+  installed: Record<string, Record<string, unknown>> | null,
+): Record<string, McpServerConfig> {
+  const servers: Record<string, McpServerConfig> = {};
+  for (const [name, entry] of Object.entries(installed ?? {})) {
+    if (typeof entry.command === "string") {
+      servers[name] = {
+        type: "stdio",
+        command: entry.command,
+        args: Array.isArray(entry.args) ? entry.args.map(String) : [],
+        env: escapeValues(entry.env),
+        exposure: "direct",
+      };
+    } else if (typeof entry.url === "string") {
+      servers[name] = {
+        type: "http",
+        url: entry.url,
+        headers: escapeValues(entry.headers),
+        exposure: "direct",
+      };
+    }
+  }
+  return servers;
 }
 
 /** `defaultTools` additions (`+name`) that activate the built-in tools above. */
@@ -1233,74 +1300,19 @@ export class PiMonoAdapter implements ProviderAdapter {
       } catch (err) {
         console.warn(`\x1b[33m[${config.role}] Failed to discover MCP tools: ${err}\x1b[0m`);
       }
+    }
 
-      // 2b. Discover tools from installed MCP servers (HTTP/SSE transport only)
-      try {
-        const mcpServersRes = await fetch(
-          `${config.apiUrl}/api/agents/${config.agentId}/mcp-servers?resolveSecrets=true`,
-          {
-            headers: {
-              Authorization: `Bearer ${config.apiKey}`,
-              "X-Agent-ID": config.agentId,
-            },
-          },
-        );
-        if (mcpServersRes.ok) {
-          const mcpServersData = (await mcpServersRes.json()) as {
-            servers: Array<{
-              name: string;
-              transport: string;
-              url?: string;
-              headers?: string;
-              isActive: boolean;
-              isEnabled: boolean;
-              resolvedHeaders?: Record<string, string>;
-            }>;
-          };
-          const httpServers = mcpServersData.servers.filter(
-            (s) =>
-              s.isActive &&
-              s.isEnabled &&
-              (s.transport === "http" || s.transport === "sse") &&
-              s.url,
-          );
-
-          for (const srv of httpServers) {
-            try {
-              const srvClient = new McpHttpClient(srv.url!, "", "");
-              srvClient.useRawUrl = true;
-              // Build custom headers from static headers + resolved secret headers
-              let parsedHeaders: Record<string, string> = {};
-              try {
-                parsedHeaders = srv.headers ? JSON.parse(srv.headers) : {};
-              } catch {
-                // invalid JSON
-              }
-              srvClient.customHeaders = {
-                ...parsedHeaders,
-                ...(srv.resolvedHeaders || {}),
-              };
-              await srvClient.initialize();
-              const srvTools = await srvClient.listTools();
-              // Prefix tool names with mcp__<server-name>__ to avoid conflicts
-              const prefixed = mcpToolsToDefinitions(srvClient, srvTools).map((t) => ({
-                ...t,
-                name: `mcp__${srv.name}__${t.name}`,
-              }));
-              customTools.push(...prefixed);
-              console.log(
-                `\x1b[2m[${config.role}]\x1b[0m Discovered ${srvTools.length} tools from MCP server "${srv.name}"`,
-              );
-            } catch (srvErr) {
-              console.warn(
-                `\x1b[33m[${config.role}] Failed to discover tools from MCP server "${srv.name}": ${srvErr}\x1b[0m`,
-              );
-            }
-          }
-        }
-      } catch {
-        // Non-fatal — installed MCP server tool discovery is optional
-      }
+    // 2b. Installed MCP servers (stdio and HTTP) go to pi's own MCP extension,
+    // which registers their tools as mcp__<server>__<tool>.
+    const installedMcpServers =
+      config.apiUrl && config.apiKey && config.agentId
+        ? await fetchInstalledMcpServers(config.apiUrl, config.apiKey, config.agentId, "claude")
+        : null;
+    const piMcpServers = toPiMcpServers(installedMcpServers);
+    if (Object.keys(piMcpServers).length > 0) {
+      console.log(
+        `\x1b[2m[${config.role}]\x1b[0m Registering ${Object.keys(piMcpServers).length} installed MCP server(s) with pi`,
+      );
     }
 
     const sessionEnv = config.env ?? process.env;
@@ -1327,6 +1339,7 @@ export class PiMonoAdapter implements ProviderAdapter {
       taskId: config.taskId,
       isLead: config.role === "lead",
       env: sessionEnv,
+      mcpServers: piMcpServers,
     });
 
     // 5. Create resource loader with system prompt + extensions. SDK sessions
@@ -1335,7 +1348,10 @@ export class PiMonoAdapter implements ProviderAdapter {
       cwd: config.cwd,
       agentDir: getAgentDir(),
       systemPrompt: config.systemPrompt,
-      extensionFactories: piExtensionFactories(swarmExtension, { toolDeferral: deferTools }),
+      extensionFactories: piExtensionFactories(swarmExtension, {
+        toolDeferral: deferTools,
+        installedMcp: Object.keys(piMcpServers).length > 0,
+      }),
     });
     // tool_search registers inactive; `+` adds it to the default tool set.
     const extraDefaultTools = piDefaultToolAdditions({ toolDeferral: deferTools });
@@ -1359,8 +1375,11 @@ export class PiMonoAdapter implements ProviderAdapter {
       ...reasoningSessionOptions,
     };
 
-    // 7. Create the session
+    // 7. Create the session. bindExtensions emits session_start, which the
+    // SDK never does on its own: the swarm hook and pi's MCP extension (which
+    // connects the installed servers) both run on it.
     const { session } = await createAgentSession(sessionOptions);
+    await session.bindExtensions({});
 
     return new PiMonoSession(session, config, createdSymlink, appliedReasoningEffort);
   }

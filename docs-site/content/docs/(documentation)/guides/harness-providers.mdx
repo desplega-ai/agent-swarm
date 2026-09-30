@@ -912,7 +912,7 @@ Authorization: Bearer {apiKey}
 Then:
 
 - **Claude** writes `/tmp/mcp-<taskId>.json` and passes it via `--mcp-config` (`claude-adapter.ts` L46–183).
-- **Pi** instantiates an `McpHttpClient` per HTTP/SSE server and registers tools prefixed `mcp__<name>__` (`pi-mono-adapter.ts` L408–493).
+- **Pi** hands them to pi's built-in MCP extension (`createMcpExtension()`): `toPiMcpServers` maps stdio servers to `{ command, args, env }` and HTTP/SSE servers to streamable HTTP `{ url, headers }`, and the swarm hook extension calls `pi.registerMcpServer()` for each on `session_start` (the adapter calls `session.bindExtensions({})` to emit it). Tools are named `mcp__<name>__<tool>` with `direct` exposure. The extension's config loader is replaced, so `~/.pi/agent/mcp.json` and a repo's `.pi/mcp.json` are never read. Resolved header and env values are escaped (`$` → `$$`, leading `!` → `$!`) because pi treats `!…` as a shell command and expands `$VAR`. The swarm server itself stays on the adapter's own `McpHttpClient`, which carries the per-session `X-Agent-ID`, `X-Source-Task-Id` and `X-Runtime-Instance-ID` headers.
 - **Codex** builds a structured `mcp_servers` object for `new Codex({ config })` (`codex-adapter.ts` L132–243).
 
 Always include the swarm's own MCP server with an `X-Source-Task-Id` header so nested tool calls attribute back correctly.

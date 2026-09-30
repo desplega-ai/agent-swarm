@@ -122,6 +122,8 @@ MCP tools return `isError` on the wire `CallToolResult` (see [runbooks/mcp-tool-
 
 On success the pi wrapper also returns the server's `structuredContent` next to the text, and sets `outputSchema` from `tools/list`. pi never sends `structuredContent` to the model; codemode scripts receive it instead of text. pi does not validate `outputSchema`, so our loose `z.looseObject` schemas pass as plain JSON Schema.
 
+**pi installed MCP servers** go through pi's MCP extension, not our client: the adapter maps them with `toPiMcpServers` and the swarm hook registers them on `session_start`. The adapter must call `session.bindExtensions({})`, since the SDK never emits `session_start` by itself. Keep the replaced `loadConfig` so pi never reads `mcp.json` files, and keep escaping resolved values with `escapePiConfigValue`.
+
 **pi tool deferral** (`PI_TOOL_DEFERRAL`, default off): non-core swarm tools get `exposure: "deferred"` and the session adds pi's `tool_search`. The adapter's `traits` getter reads the same flag for `hasToolSearch`, so the prompt and the session agree. Keep both reads on `process.env`. Pilot procedure: the harness-providers guide, section "pi tool deferral".
 
 ## Live task steering
