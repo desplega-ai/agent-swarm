@@ -7,6 +7,7 @@ import { FileHeader } from "@/components/comb/file-header";
 import { renderMentionPicker } from "@/components/comb/mention-picker";
 import { ReviewChangesButton } from "@/components/comb/review/review-changes-button";
 import { ReviewPanel, ReviewRangeNotice } from "@/components/comb/review/review-panel";
+import { SendBatchButton, SendThreadButton } from "@/components/comb/send-to-swarm";
 import { FileViewer } from "@/components/comb/viewers/file-viewer";
 import { ViewerSkeleton } from "@/components/comb/viewers/viewer-skeleton";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -97,12 +98,20 @@ function FileBody({ file, stat }: { file: DrivePath; stat: StatResult }) {
           viewerRef={viewerRef}
           // step-8: "@" mention picker in every composer.
           renderComposerExtras={renderMentionPicker}
-          // step-10: the shared read-only flag, the review param, and "Review changes (vX → vY)".
+          // step-10: the shared read-only flag and the review param.
           readOnly={readOnly}
           onReadOnly={markReadOnly}
           viewerParams={VIEWER_PARAMS}
+          // step-9 "Send to swarm" and step-10 "Review changes (vX → vY)" on each thread.
           threadActions={(thread) => (
-            <ReviewChangesButton file={file} stat={stat} thread={thread} />
+            <>
+              <SendThreadButton file={file} thread={thread} />
+              <ReviewChangesButton file={file} stat={stat} thread={thread} />
+            </>
+          )}
+          // step-9: "Send N" for every open @swarm thread of the file.
+          railHeaderActions={({ open }) => (
+            <SendBatchButton drive={file} scopePath={file.path} threads={open} compact />
           )}
         />
       </div>

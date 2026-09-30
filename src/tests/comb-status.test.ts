@@ -110,6 +110,43 @@ describe("/status agent_fs.comb", () => {
       live_url: "https://live.example.com",
       org_id: "org-1",
       drive_id: "drive-1",
+      service_user_id: null,
     });
+  });
+
+  test("service_user_id is the bootstrap key's agent-fs user, asked once", async () => {
+    let meCalls = 0;
+    const agentFs = Bun.serve({
+      port: 0,
+      fetch: (request) => {
+        if (new URL(request.url).pathname !== "/auth/me") return new Response("", { status: 404 });
+        meCalls++;
+        return request.headers.get("authorization") === "Bearer af_boot"
+          ? Response.json({ userId: "svc-user", email: "swarm-admin@agent-fs.local" })
+          : Response.json({ error: "UNAUTHORIZED" }, { status: 401 });
+      },
+    });
+    try {
+      process.env.AGENT_FS_API_URL = `http://localhost:${agentFs.port}`;
+      process.env.API_AGENT_FS_API_KEY = "af_boot";
+      process.env.AGENT_FS_DEFAULT_ORG_ID = "org-1";
+      process.env.AGENT_FS_DEFAULT_DRIVE_ID = "drive-1";
+
+      // Comb off: no lookup.
+      expect((await comb()).service_user_id).toBeNull();
+      expect(meCalls).toBe(0);
+
+      process.env.COMB_ENABLED = "true";
+      expect((await comb()).service_user_id).toBe("svc-user");
+      expect((await comb()).service_user_id).toBe("svc-user");
+      expect(meCalls).toBe(1);
+
+      // A rejected key reports null instead of failing /status.
+      process.env.API_AGENT_FS_API_KEY = "af_other";
+      resetFileStorageProvider();
+      expect((await comb()).service_user_id).toBeNull();
+    } finally {
+      agentFs.stop(true);
+    }
   });
 });

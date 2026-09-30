@@ -73,6 +73,15 @@ describe("sent marker", () => {
     expect(sentReplyTaskId({ author: "human" }, sent)).toBe(TASK_ID);
   });
 
+  test("with a known service account, only its marker reply counts", () => {
+    const bySwarm = { body: `[comb:sent task=${TASK_ID}]`, author: "svc" };
+    const byOther = { body: `[comb:sent task=${TASK_ID}]`, author: "x" };
+    expect(isSentToSwarm({ author: "human", replies: [bySwarm] }, "svc")).toBe(true);
+    expect(isSentToSwarm({ author: "human", replies: [byOther] }, "svc")).toBe(false);
+    expect(sentReplyTaskId({ author: "human" }, byOther, "svc")).toBeNull();
+    expect(sentReplyTaskId({ author: "human" }, bySwarm, "svc")).toBe(TASK_ID);
+  });
+
   test("the thread's own author cannot mark it as sent", () => {
     const own = { body: `[comb:sent task=${TASK_ID}]`, author: "human" };
     expect(isSentToSwarm({ author: "human", replies: [own] })).toBe(false);

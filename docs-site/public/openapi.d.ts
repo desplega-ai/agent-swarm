@@ -4890,6 +4890,168 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/comb/review-batches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send agent-fs comments to the swarm as one lead task
+         * @description Comb's 'Send to swarm'. The server reads each comment again from agent-fs with its bootstrap key, skips replies, resolved comments, and comments already sent, and creates ONE task for the lead. Each sent comment gets a `[comb:sent task=<id>]` reply from the swarm service account. A comment is sent at most once. When an earlier send lost its reply, the batch posts that reply again (`repaired`). Answers 404 while COMB_ENABLED is off.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        orgId: string;
+                        driveId: string;
+                        commentIds: string[];
+                        scopePath: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description No new task: the batch only posted missing 'sent' replies again */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            taskId: string | null;
+                            sent: string[];
+                            skipped: {
+                                id: string;
+                                /** @enum {string} */
+                                reason: "not-found" | "reply" | "resolved" | "already-sent";
+                                taskId?: string;
+                            }[];
+                            repaired: {
+                                id: string;
+                                taskId: string;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Task created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            taskId: string | null;
+                            sent: string[];
+                            skipped: {
+                                id: string;
+                                /** @enum {string} */
+                                reason: "not-found" | "reply" | "resolved" | "already-sent";
+                                taskId?: string;
+                            }[];
+                            repaired: {
+                                id: string;
+                                taskId: string;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Invalid body, or not the swarm drive */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Caller cannot create tasks */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Comb is not enabled */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Nothing to send (every comment was skipped) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            skipped: {
+                                id: string;
+                                /** @enum {string} */
+                                reason: "not-found" | "reply" | "resolved" | "already-sent";
+                                taskId?: string;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Task creation blocked by an extension */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description agent-fs could not read a comment */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description agent-fs or the swarm drive is not set up, or an operator disabled a Comb review template */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            skipped: {
+                                id: string;
+                                /** @enum {string} */
+                                reason: "not-found" | "reply" | "resolved" | "already-sent";
+                                taskId?: string;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tasks/{id}/context": {
         parameters: {
             query?: never;
@@ -10167,7 +10329,7 @@ export interface paths {
         };
         /**
          * Identity + setup readiness + live activity for the swarm dashboard
-         * @description Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set, plus the Comb settings (COMB_ENABLED, the browser-facing agent-fs URL, and the shared org and drive ids).
+         * @description Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set, plus the Comb settings (COMB_ENABLED, the browser-facing agent-fs URL, the shared org and drive ids, and the agent-fs user id of the swarm service account).
          */
         get: {
             parameters: {
@@ -10230,6 +10392,7 @@ export interface paths {
                                     live_url: string;
                                     org_id: string | null;
                                     drive_id: string | null;
+                                    service_user_id: string | null;
                                 };
                             };
                             automations: {
@@ -15278,7 +15441,7 @@ export interface paths {
                                      * @default mcp
                                      * @enum {string}
                                      */
-                                    source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira";
+                                    source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb";
                                     taskType?: string;
                                     /** @default [] */
                                     tags: string[];
@@ -17413,7 +17576,7 @@ export interface paths {
                                  * @default mcp
                                  * @enum {string}
                                  */
-                                source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira";
+                                source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb";
                                 taskType?: string;
                                 /** @default [] */
                                 tags: string[];
@@ -17506,7 +17669,7 @@ export interface paths {
                         /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
                         key?: string;
                         /** @enum {string} */
-                        source?: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira";
+                        source?: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb";
                         outputSchema?: {
                             [key: string]: unknown;
                         };
@@ -22271,7 +22434,7 @@ export interface components {
              * @default mcp
              * @enum {string}
              */
-            source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira";
+            source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb";
             /** @enum {string} */
             routingReason?: "skill" | "continuity" | "overflow" | "human_pinned" | "reroute_fault";
             /**

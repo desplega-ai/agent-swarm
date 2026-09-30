@@ -125,7 +125,7 @@ const DOT_SEGMENT_RE = /^(?:\.|%2e){1,2}$/i;
  * never mixes its ID with a default. A "." or ".." segment returns null: the
  * browser would resolve it to a path outside the drive.
  */
-function agentFsFileRoute(opts: AgentFsFileRef): string | null {
+export function agentFsFileRoute(opts: AgentFsFileRef): string | null {
   const path = opts.path?.trim();
   if (!path) return null;
   const rowOrgId = opts.orgId?.trim();

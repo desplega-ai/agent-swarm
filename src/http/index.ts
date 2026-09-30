@@ -66,6 +66,7 @@ import { handleAssets } from "./assets";
 import { handleBudgets } from "./budgets";
 import { handleCodexOAuthDevice } from "./codex-oauth-device";
 import { handleCodexOAuthKeepWarm } from "./codex-oauth-keep-warm";
+import { handleComb } from "./comb";
 import { handleConfig } from "./config";
 import { handleContext } from "./context";
 import { handleCore, loadGlobalConfigsIntoEnv } from "./core";
@@ -347,6 +348,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleApps(req, res, pathSegments, queryParams, myAgentId),
         () => handleConfig(req, res, pathSegments, queryParams),
         () => handleFs(req, res, pathSegments, queryParams, myAgentId),
+        () => handleComb(req, res, pathSegments, queryParams, myAgentId),
         () => handleKv(req, res, pathSegments, queryParams),
         () => handleRooms(req, res, pathSegments, queryParams),
         () => handleRealtimeAsset(req, res),

@@ -17,6 +17,7 @@ declare module "swarm-extension" {
       | "system"
       | "linear"
       | "jira"
+      | "comb"
       | undefined;
     routingReason?:
       | "skill"
@@ -125,7 +126,8 @@ declare module "swarm-extension" {
       | "gitlab"
       | "system"
       | "linear"
-      | "jira";
+      | "jira"
+      | "comb";
     tags: string[];
     priority: number;
     dependsOn: string[];

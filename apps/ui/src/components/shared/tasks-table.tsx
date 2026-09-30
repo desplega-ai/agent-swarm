@@ -5,6 +5,7 @@ import {
   ChevronDown,
   Code2,
   FlaskConical,
+  FolderOpen,
   GitBranch,
   Github,
   Gitlab,
@@ -128,6 +129,7 @@ const SOURCE_ICON: Record<string, IconCmp> = {
   workflow: Workflow,
   linear: Code2,
   jira: Globe,
+  comb: FolderOpen,
 };
 
 function SourcePill({ value }: { value: string | undefined }) {

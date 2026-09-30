@@ -4,12 +4,14 @@ import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { useResolveComment } from "@/api/hooks/use-agent-fs";
 import { useAuthorLabel } from "@/components/comb/use-author-label";
+import { useCombServiceUserId } from "@/components/comb/use-comb-service-user";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { AgentFsError } from "@/lib/agent-fs/client";
 import type { CommentEntry, CommentListEntry, CommentMention } from "@/lib/agent-fs/types";
 import { type AnchorResolution, commentQuote } from "@/lib/comb/comment-anchor";
+import { lineRangeLabel } from "@/lib/comb/comments";
 import { sentReplyTaskId, splitSwarmMarkers } from "@/lib/comb/markers";
 import { splitMentions } from "@/lib/comb/mentions";
 import { formatRelative } from "@/lib/relative-time";
@@ -78,7 +80,8 @@ function Byline({ entry, children }: { entry: CommentEntry; children?: ReactNode
 }
 
 function Reply({ thread, reply }: { thread: CommentListEntry; reply: CommentEntry }) {
-  const taskId = sentReplyTaskId(thread, reply);
+  const serviceUserId = useCombServiceUserId();
+  const taskId = sentReplyTaskId(thread, reply, serviceUserId);
   return (
     <li className="flex flex-col gap-1 py-2">
       <Byline entry={reply} />
@@ -173,10 +176,7 @@ export function CommentThread({
   const lineEnd = anchor?.lineStart != null ? anchor.lineEnd : thread.lineEnd;
   const badge = anchor && anchor.status !== "anchored" ? ANCHOR_BADGES[anchor.status] : null;
   const fileLevel = !quote && thread.lineStart == null;
-  const lines =
-    lineStart && anchor?.status !== "lost"
-      ? `L${lineStart}${lineEnd && lineEnd !== lineStart ? `-${lineEnd}` : ""}`
-      : null;
+  const lines = anchor?.status !== "lost" ? lineRangeLabel(lineStart, lineEnd) : null;
 
   // A closed reply box gives focus back to the Reply button.
   const replyButtonRef = useRef<HTMLButtonElement>(null);

@@ -27,7 +27,8 @@ export type AgentTaskSource =
   | "schedule"
   | "workflow"
   | "linear"
-  | "jira";
+  | "jira"
+  | "comb";
 export type RoutingReason = "skill" | "continuity" | "overflow" | "human_pinned" | "reroute_fault";
 export type ChannelType = "public" | "dm";
 export type ModelTier = "smol" | "regular" | "smart" | "ultra";
@@ -2758,6 +2759,44 @@ export interface StatusComb {
   /** The swarm's shared agent-fs org and drive. */
   org_id: string | null;
   drive_id: string | null;
+  /**
+   * agent-fs user id of the swarm service account, which writes the
+   * "[comb:sent ...]" replies. Null when unknown. Absent on older APIs.
+   */
+  service_user_id?: string | null;
+}
+
+/** Why "Send to swarm" left a comment out (`POST /api/comb/review-batches`). */
+export type CombSkipReason = "not-found" | "reply" | "resolved" | "already-sent";
+
+export interface CombSkippedComment {
+  id: string;
+  reason: CombSkipReason;
+  /** The task an "already-sent" comment went to, when known. */
+  taskId?: string;
+}
+
+/** A comment of an earlier send whose missing "sent" reply this send posted. */
+export interface CombRepairedComment {
+  id: string;
+  taskId: string;
+}
+
+export interface CombReviewBatchInput {
+  orgId: string;
+  driveId: string;
+  /** agent-fs root comment ids, 1 to 50. */
+  commentIds: string[];
+  /** The file or folder the batch is sent from ("/docs/a.md", "/docs/"). */
+  scopePath: string;
+}
+
+export interface CombReviewBatchResult {
+  /** The new task. Null when the send only posted missing "sent" replies again (HTTP 200). */
+  taskId: string | null;
+  sent: string[];
+  skipped: CombSkippedComment[];
+  repaired: CombRepairedComment[];
 }
 
 export interface StatusAgentFs {
