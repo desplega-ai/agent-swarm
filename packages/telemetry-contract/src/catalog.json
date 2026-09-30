@@ -1,0 +1,1329 @@
+{
+  "definitions": {
+    "trigger_surface": {
+      "type": "string",
+      "description": "Surface that started a chain of work: agent-swarm's AgentTaskSourceSchema values plus other.",
+      "enum": [
+        "slack",
+        "ui",
+        "api",
+        "mcp",
+        "github",
+        "gitlab",
+        "linear",
+        "jira",
+        "agentmail",
+        "schedule",
+        "workflow",
+        "system",
+        "other"
+      ]
+    }
+  },
+  "common_properties": {
+    "agent-swarm": {
+      "swarmVersion": {
+        "type": "string",
+        "description": "agent-swarm version. Legacy key kept during the v1 window; v2 carries context.swarm_version."
+      },
+      "is_cloud": {
+        "type": "boolean",
+        "description": "Legacy key kept during the v1 window; v2 carries context.deployment."
+      },
+      "is_e2b": {
+        "type": "boolean",
+        "description": "Legacy key kept during the v1 window; v2 carries context.deployment."
+      },
+      "install_method": {
+        "type": "string",
+        "description": "Legacy key kept during the v1 window; v2 carries context.install_method."
+      },
+      "has_embedding_key": {
+        "type": "boolean",
+        "description": "An embedding API key is configured."
+      },
+      "has_slack_channel": {
+        "type": "boolean",
+        "description": "A Slack channel is configured."
+      },
+      "has_email_channel": {
+        "type": "boolean",
+        "description": "An email channel is configured."
+      },
+      "has_notification_channel": {
+        "type": "boolean",
+        "description": "A notification channel is configured."
+      }
+    }
+  },
+  "events": [
+    {
+      "product": "agent-swarm",
+      "event": "task.created",
+      "description": "A task was created.",
+      "since": "2026-09-30",
+      "source": "api-server",
+      "properties": {
+        "taskId": {
+          "type": "string",
+          "required": true
+        },
+        "trigger_surface": {
+          "ref": "trigger_surface",
+          "required": true,
+          "description": "Surface that started the whole chain of work: the source of the root task."
+        },
+        "task_source": {
+          "ref": "trigger_surface",
+          "required": true,
+          "description": "agent_tasks.source of this task itself."
+        },
+        "provider": {
+          "type": "string"
+        },
+        "harnessVariant": {
+          "type": "string"
+        },
+        "harnessVersion": {
+          "type": "string"
+        },
+        "hasParent": {
+          "type": "boolean",
+          "required": true
+        },
+        "has_repo": {
+          "type": "boolean",
+          "required": true
+        },
+        "priority": {
+          "type": "integer",
+          "required": true
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "task.started",
+      "description": "A task started running.",
+      "since": "2026-09-30",
+      "source": "api-server",
+      "properties": {
+        "taskId": {
+          "type": "string",
+          "required": true
+        },
+        "trigger_surface": {
+          "ref": "trigger_surface",
+          "required": true,
+          "description": "Surface that started the whole chain of work: the source of the root task."
+        },
+        "task_source": {
+          "ref": "trigger_surface",
+          "required": true,
+          "description": "agent_tasks.source of this task itself."
+        },
+        "agentId": {
+          "type": "string",
+          "required": true
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "task.claimed",
+      "description": "An agent claimed a task.",
+      "since": "2026-09-30",
+      "source": "api-server",
+      "properties": {
+        "taskId": {
+          "type": "string",
+          "required": true
+        },
+        "trigger_surface": {
+          "ref": "trigger_surface",
+          "required": true,
+          "description": "Surface that started the whole chain of work: the source of the root task."
+        },
+        "task_source": {
+          "ref": "trigger_surface",
+          "required": true,
+          "description": "agent_tasks.source of this task itself."
+        },
+        "agentId": {
+          "type": "string",
+          "required": true
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "task.completed",
+      "description": "A task completed.",
+      "since": "2026-09-30",
+      "source": "api-server",
+      "properties": {
+        "taskId": {
+          "type": "string",
+          "required": true
+        },
+        "trigger_surface": {
+          "ref": "trigger_surface",
+          "required": true,
+          "description": "Surface that started the whole chain of work: the source of the root task."
+        },
+        "task_source": {
+          "ref": "trigger_surface",
+          "required": true,
+          "description": "agent_tasks.source of this task itself."
+        },
+        "provider": {
+          "type": "string"
+        },
+        "harnessVariant": {
+          "type": "string"
+        },
+        "harnessVersion": {
+          "type": "string"
+        },
+        "agentId": {
+          "type": "string"
+        },
+        "durationMs": {
+          "type": "integer"
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "task.failed",
+      "description": "A task failed.",
+      "since": "2026-09-30",
+      "source": "api-server",
+      "properties": {
+        "taskId": {
+          "type": "string",
+          "required": true
+        },
+        "trigger_surface": {
+          "ref": "trigger_surface",
+          "required": true,
+          "description": "Surface that started the whole chain of work: the source of the root task."
+        },
+        "task_source": {
+          "ref": "trigger_surface",
+          "required": true,
+          "description": "agent_tasks.source of this task itself."
+        },
+        "provider": {
+          "type": "string"
+        },
+        "harnessVariant": {
+          "type": "string"
+        },
+        "harnessVersion": {
+          "type": "string"
+        },
+        "agentId": {
+          "type": "string"
+        },
+        "durationMs": {
+          "type": "integer"
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "task.cancelled",
+      "description": "A task was cancelled.",
+      "since": "2026-09-30",
+      "source": "api-server",
+      "properties": {
+        "taskId": {
+          "type": "string",
+          "required": true
+        },
+        "trigger_surface": {
+          "ref": "trigger_surface",
+          "required": true,
+          "description": "Surface that started the whole chain of work: the source of the root task."
+        },
+        "task_source": {
+          "ref": "trigger_surface",
+          "required": true,
+          "description": "agent_tasks.source of this task itself."
+        },
+        "agentId": {
+          "type": "string"
+        },
+        "previousStatus": {
+          "type": "string",
+          "required": true
+        },
+        "durationMs": {
+          "type": "integer"
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "task.superseded",
+      "description": "A task was superseded by another task.",
+      "since": "2026-09-30",
+      "source": "api-server",
+      "properties": {
+        "taskId": {
+          "type": "string",
+          "required": true
+        },
+        "trigger_surface": {
+          "ref": "trigger_surface",
+          "required": true,
+          "description": "Surface that started the whole chain of work: the source of the root task."
+        },
+        "task_source": {
+          "ref": "trigger_surface",
+          "required": true,
+          "description": "agent_tasks.source of this task itself."
+        },
+        "provider": {
+          "type": "string"
+        },
+        "harnessVariant": {
+          "type": "string"
+        },
+        "harnessVersion": {
+          "type": "string"
+        },
+        "agentId": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string",
+          "required": true
+        },
+        "durationMs": {
+          "type": "integer"
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "task.session_completed",
+      "description": "A worker session for a task finished.",
+      "since": "2026-09-30",
+      "source": "worker",
+      "properties": {
+        "taskId": {
+          "type": "string",
+          "required": true,
+          "nullable": true,
+          "description": "Task the session ran, or null for a session with no task."
+        },
+        "trigger_surface": {
+          "ref": "trigger_surface",
+          "required": true,
+          "nullable": true,
+          "description": "Root surface of the task, or null for a session with no task."
+        },
+        "agentId": {
+          "type": "string",
+          "required": true
+        },
+        "provider": {
+          "type": "string",
+          "required": true
+        },
+        "model": {
+          "type": "string",
+          "required": true
+        },
+        "harnessVariant": {
+          "type": "string"
+        },
+        "harnessVersion": {
+          "type": "string"
+        },
+        "exitCode": {
+          "type": "integer",
+          "required": true
+        },
+        "isError": {
+          "type": "boolean",
+          "required": true
+        },
+        "durationMs": {
+          "type": "integer",
+          "required": true
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "server.started",
+      "description": "The API server started.",
+      "since": "2026-09-30",
+      "source": "api-server",
+      "properties": {
+        "port": {
+          "type": "integer",
+          "required": true
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "server.shutdown",
+      "description": "The API server shut down.",
+      "since": "2026-09-30",
+      "source": "api-server",
+      "properties": {
+        "signal": {
+          "type": "string",
+          "required": true
+        },
+        "uptimeMs": {
+          "type": "integer",
+          "required": true
+        },
+        "sessionsProcessed": {
+          "type": "integer",
+          "required": true
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "session.started",
+      "description": "A worker or lead session started.",
+      "since": "2026-09-30",
+      "source": "worker",
+      "properties": {
+        "taskId": {
+          "type": "string",
+          "required": true,
+          "nullable": true,
+          "description": "Task the session ran, or null for a session with no task."
+        },
+        "trigger_surface": {
+          "ref": "trigger_surface",
+          "required": true,
+          "nullable": true,
+          "description": "Root surface of the task, or null for a session with no task."
+        },
+        "agentId": {
+          "type": "string",
+          "required": true
+        },
+        "harnessProvider": {
+          "type": "string",
+          "required": true
+        },
+        "model": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string",
+          "required": true
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "session.ended",
+      "description": "A worker or lead session ended.",
+      "since": "2026-09-30",
+      "source": "worker",
+      "properties": {
+        "taskId": {
+          "type": "string",
+          "required": true,
+          "nullable": true,
+          "description": "Task the session ran, or null for a session with no task."
+        },
+        "trigger_surface": {
+          "ref": "trigger_surface",
+          "required": true,
+          "nullable": true,
+          "description": "Root surface of the task, or null for a session with no task."
+        },
+        "agentId": {
+          "type": "string",
+          "required": true
+        },
+        "durationMs": {
+          "type": "integer"
+        },
+        "tasksProcessed": {
+          "type": "integer",
+          "required": true
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "session.cost",
+      "description": "Token usage and cost of one session.",
+      "since": "2026-09-30",
+      "source": "worker",
+      "properties": {
+        "taskId": {
+          "type": "string",
+          "required": true,
+          "nullable": true,
+          "description": "Task the session ran, or null for a session with no task."
+        },
+        "trigger_surface": {
+          "ref": "trigger_surface",
+          "required": true,
+          "nullable": true,
+          "description": "Root surface of the task, or null for a session with no task."
+        },
+        "agentId": {
+          "type": "string",
+          "required": true
+        },
+        "model": {
+          "type": "string",
+          "required": true
+        },
+        "provider": {
+          "type": "string",
+          "required": true
+        },
+        "inputTokens": {
+          "type": "integer",
+          "required": true
+        },
+        "outputTokens": {
+          "type": "integer",
+          "required": true
+        },
+        "cacheReadTokens": {
+          "type": "integer"
+        },
+        "cacheWriteTokens": {
+          "type": "integer"
+        },
+        "reasoningOutputTokens": {
+          "type": "integer"
+        },
+        "thinkingTokens": {
+          "type": "integer"
+        },
+        "totalCostUsd": {
+          "type": "number",
+          "required": true
+        },
+        "durationMs": {
+          "type": "integer",
+          "required": true
+        },
+        "numTurns": {
+          "type": "integer",
+          "required": true,
+          "nullable": true
+        },
+        "isError": {
+          "type": "boolean",
+          "required": true
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "session.failure",
+      "description": "A session failed.",
+      "since": "2026-09-30",
+      "source": "worker",
+      "properties": {
+        "taskId": {
+          "type": "string",
+          "required": true,
+          "nullable": true,
+          "description": "Task the session ran, or null for a session with no task."
+        },
+        "trigger_surface": {
+          "ref": "trigger_surface",
+          "required": true,
+          "nullable": true,
+          "description": "Root surface of the task, or null for a session with no task."
+        },
+        "agentId": {
+          "type": "string",
+          "required": true
+        },
+        "errorCategory": {
+          "type": "string",
+          "required": true
+        },
+        "provider": {
+          "type": "string",
+          "required": true
+        },
+        "model": {
+          "type": "string",
+          "required": true
+        },
+        "durationMs": {
+          "type": "integer",
+          "required": true
+        },
+        "wasRateLimited": {
+          "type": "boolean",
+          "required": true
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "session.cancelled",
+      "description": "A session was cancelled.",
+      "since": "2026-09-30",
+      "source": "worker",
+      "properties": {
+        "taskId": {
+          "type": "string",
+          "required": true,
+          "nullable": true,
+          "description": "Task the session ran, or null for a session with no task."
+        },
+        "trigger_surface": {
+          "ref": "trigger_surface",
+          "required": true,
+          "nullable": true,
+          "description": "Root surface of the task, or null for a session with no task."
+        },
+        "agentId": {
+          "type": "string",
+          "required": true
+        },
+        "errorCategory": {
+          "type": "string",
+          "required": true
+        },
+        "provider": {
+          "type": "string",
+          "required": true
+        },
+        "model": {
+          "type": "string",
+          "required": true
+        },
+        "durationMs": {
+          "type": "integer",
+          "required": true
+        },
+        "wasRateLimited": {
+          "type": "boolean",
+          "required": true
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "compaction.triggered",
+      "description": "The harness compacted a session context.",
+      "since": "2026-09-30",
+      "source": "worker",
+      "properties": {
+        "compactTrigger": {
+          "type": "string",
+          "required": true
+        },
+        "preCompactTokens": {
+          "type": "integer",
+          "required": true
+        },
+        "contextTotalTokens": {
+          "type": "integer",
+          "required": true
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "schedule.executed",
+      "description": "A schedule fired.",
+      "since": "2026-09-30",
+      "source": "api-server",
+      "properties": {
+        "scheduleType": {
+          "type": "string",
+          "required": true
+        },
+        "triggeredWorkflows": {
+          "type": "boolean",
+          "required": true
+        },
+        "wasRecovered": {
+          "type": "boolean",
+          "required": true
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "schedule.error",
+      "description": "A schedule failed to fire.",
+      "since": "2026-09-30",
+      "source": "api-server",
+      "properties": {
+        "scheduleType": {
+          "type": "string",
+          "required": true
+        },
+        "triggeredWorkflows": {
+          "type": "boolean",
+          "required": true
+        },
+        "wasRecovered": {
+          "type": "boolean",
+          "required": true
+        },
+        "consecutiveErrors": {
+          "type": "integer",
+          "required": true
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "workflow.created",
+      "description": "A workflow was created.",
+      "since": "2026-09-30",
+      "source": "api-server",
+      "properties": {
+        "workflowId": {
+          "type": "string",
+          "required": true
+        },
+        "nodeCount": {
+          "type": "integer",
+          "required": true
+        },
+        "via": {
+          "type": "string",
+          "enum": ["api", "mcp"],
+          "description": "Interface that created the workflow. Sent as the property source in v1."
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "workflow.deleted",
+      "description": "A workflow was deleted.",
+      "since": "2026-09-30",
+      "source": "api-server",
+      "properties": {
+        "workflowId": {
+          "type": "string",
+          "required": true
+        },
+        "via": {
+          "type": "string",
+          "enum": ["api", "mcp"],
+          "description": "Interface that deleted the workflow. Sent as the property source in v1."
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "workflow.started",
+      "description": "A workflow run started.",
+      "since": "2026-09-30",
+      "source": "api-server",
+      "properties": {
+        "workflowId": {
+          "type": "string",
+          "required": true
+        },
+        "nodeCount": {
+          "type": "integer",
+          "required": true
+        },
+        "triggerType": {
+          "type": "string",
+          "required": true
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "workflow.completed",
+      "description": "A workflow run completed.",
+      "since": "2026-09-30",
+      "source": "api-server",
+      "properties": {
+        "workflowId": {
+          "type": "string",
+          "required": true
+        },
+        "durationMs": {
+          "type": "integer"
+        },
+        "stepsCompleted": {
+          "type": "integer",
+          "required": true
+        },
+        "stepsFailed": {
+          "type": "integer",
+          "required": true
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "workflow.failed",
+      "description": "A workflow run failed.",
+      "since": "2026-09-30",
+      "source": "api-server",
+      "properties": {
+        "workflowId": {
+          "type": "string",
+          "required": true
+        },
+        "durationMs": {
+          "type": "integer"
+        },
+        "stepsCompleted": {
+          "type": "integer",
+          "required": true
+        },
+        "stepsFailed": {
+          "type": "integer",
+          "required": true
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "agent.registered",
+      "description": "An agent registered or reconnected.",
+      "since": "2026-09-30",
+      "source": "api-server",
+      "properties": {
+        "role": {
+          "type": "string"
+        },
+        "capabilities": {
+          "type": "array",
+          "required": true
+        },
+        "isReconnect": {
+          "type": "boolean",
+          "required": true
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "integration.connected",
+      "description": "An integration was connected.",
+      "since": "2026-09-30",
+      "source": "api-server",
+      "properties": {
+        "type": {
+          "type": "string",
+          "required": true
+        },
+        "provider": {
+          "type": "string"
+        },
+        "first_of_type": {
+          "type": "boolean",
+          "required": true
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "onboarding.started",
+      "description": "Onboarding started.",
+      "since": "2026-09-30",
+      "source": "api-server",
+      "properties": {
+        "seconds_since_start": {
+          "type": "integer",
+          "required": true
+        },
+        "seconds_since_install": {
+          "type": "integer"
+        },
+        "existing_install": {
+          "type": "boolean",
+          "required": true
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "onboarding.step_viewed",
+      "description": "An onboarding step was shown.",
+      "since": "2026-09-30",
+      "source": "api-server",
+      "properties": {
+        "seconds_since_start": {
+          "type": "integer",
+          "required": true
+        },
+        "seconds_since_install": {
+          "type": "integer"
+        },
+        "step": {
+          "type": "string",
+          "required": true
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "onboarding.step_completed",
+      "description": "An onboarding step was completed.",
+      "since": "2026-09-30",
+      "source": "api-server",
+      "properties": {
+        "seconds_since_start": {
+          "type": "integer",
+          "required": true
+        },
+        "seconds_since_install": {
+          "type": "integer"
+        },
+        "step": {
+          "type": "string",
+          "required": true
+        },
+        "method": {
+          "type": "string"
+        },
+        "derived": {
+          "type": "boolean",
+          "required": true
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "onboarding.step_skipped",
+      "description": "An onboarding step was skipped.",
+      "since": "2026-09-30",
+      "source": "api-server",
+      "properties": {
+        "seconds_since_start": {
+          "type": "integer",
+          "required": true
+        },
+        "seconds_since_install": {
+          "type": "integer"
+        },
+        "step": {
+          "type": "string",
+          "required": true
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "onboarding.step_failed",
+      "description": "An onboarding step failed.",
+      "since": "2026-09-30",
+      "source": "api-server",
+      "properties": {
+        "seconds_since_start": {
+          "type": "integer",
+          "required": true
+        },
+        "seconds_since_install": {
+          "type": "integer"
+        },
+        "step": {
+          "type": "string",
+          "required": true
+        },
+        "error_class": {
+          "type": "string",
+          "required": true
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "onboarding.dismissed",
+      "description": "Onboarding was dismissed.",
+      "since": "2026-09-30",
+      "source": "api-server",
+      "properties": {
+        "seconds_since_start": {
+          "type": "integer",
+          "required": true
+        },
+        "seconds_since_install": {
+          "type": "integer"
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "onboarding.completed",
+      "description": "Onboarding was completed.",
+      "since": "2026-09-30",
+      "source": "api-server",
+      "properties": {
+        "seconds_since_start": {
+          "type": "integer",
+          "required": true
+        },
+        "seconds_since_install": {
+          "type": "integer"
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "onboarding.first_task_completed",
+      "description": "The first task after onboarding completed.",
+      "since": "2026-09-30",
+      "source": "api-server",
+      "properties": {
+        "seconds_since_start": {
+          "type": "integer",
+          "required": true
+        },
+        "seconds_since_install": {
+          "type": "integer"
+        },
+        "method": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "org.snapshot",
+      "description": "Daily per-install user and agent counts. Counts only: no names, emails or IDs.",
+      "since": "2026-09-30",
+      "source": "api-server",
+      "properties": {
+        "users_total": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "Active users."
+        },
+        "users_suspended": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "Suspended users."
+        },
+        "users_admin": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "Active users with an admin grant."
+        },
+        "users_with_login": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "Active users with an email or a live aswt_ token."
+        },
+        "users_linked_slack": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "Active users with a linked Slack identity."
+        },
+        "users_linked_github": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "Active users with a linked GitHub identity."
+        },
+        "users_linked_gitlab": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "Active users with a linked GitLab identity."
+        },
+        "users_linked_linear": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "Active users with a linked Linear identity."
+        },
+        "users_linked_jira": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "Active users with a linked Jira identity."
+        },
+        "users_linked_other": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "Active users with any other linked identity."
+        },
+        "users_active_7d": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "Distinct requesting users on tasks created in the last 7 days."
+        },
+        "agents_total": {
+          "type": "integer",
+          "required": true,
+          "minimum": 0,
+          "description": "Registered agents."
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "ui.session_started",
+      "description": "A dashboard session started.",
+      "since": "2026-09-30",
+      "source": "ui",
+      "properties": {}
+    },
+    {
+      "product": "agent-swarm",
+      "event": "page.viewed",
+      "description": "A dashboard page was viewed.",
+      "since": "2026-09-30",
+      "source": "ui",
+      "properties": {
+        "route_template": {
+          "type": "string",
+          "required": true,
+          "description": "Route pattern, never the concrete URL."
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "notification.viewed",
+      "description": "A notification-centre item was shown.",
+      "since": "2026-09-30",
+      "source": "ui",
+      "properties": {
+        "key": {
+          "type": "string",
+          "required": true
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "notification.dismissed",
+      "description": "A notification-centre item was dismissed.",
+      "since": "2026-09-30",
+      "source": "ui",
+      "properties": {
+        "key": {
+          "type": "string",
+          "required": true
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "notification.submitted",
+      "description": "A notification-centre item was submitted.",
+      "since": "2026-09-30",
+      "source": "ui",
+      "properties": {
+        "key": {
+          "type": "string",
+          "required": true
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "feature.used",
+      "description": "A dashboard feature was used.",
+      "since": "2026-09-30",
+      "source": "ui",
+      "properties": {
+        "feature": {
+          "type": "string",
+          "required": true
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "skill.invoked",
+      "description": "A skill was invoked in a session.",
+      "since": "2026-09-30",
+      "source": "worker",
+      "properties": {
+        "skill_name": {
+          "type": "string",
+          "required": true
+        },
+        "skill_source": {
+          "type": "string",
+          "required": true
+        },
+        "trigger_surface": {
+          "ref": "trigger_surface",
+          "required": true,
+          "nullable": true,
+          "description": "Root surface of the task, or null for a session with no task."
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "session.steered",
+      "description": "A running session received a steering message.",
+      "since": "2026-09-30",
+      "source": "api-server",
+      "properties": {
+        "trigger_surface": {
+          "ref": "trigger_surface",
+          "required": true,
+          "nullable": true,
+          "description": "Root surface of the steered task, or null when unknown."
+        },
+        "by_kind": {
+          "type": "string",
+          "required": true
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "lead.captured",
+      "description": "A consented lead (Teams waitlist or private-beta sign-up). The email stays in feedback_submissions.",
+      "since": "2026-09-30",
+      "source": "api-server",
+      "properties": {
+        "channel": {
+          "type": "string",
+          "required": true
+        },
+        "submission_id": {
+          "type": "string",
+          "required": true
+        },
+        "consent": {
+          "type": "boolean",
+          "required": true
+        }
+      }
+    },
+    {
+      "product": "agent-fs",
+      "event": "server.started",
+      "description": "The agent-fs server started.",
+      "since": "2026-09-30",
+      "source": "api-server",
+      "properties": {
+        "users": {
+          "type": "integer"
+        },
+        "orgs": {
+          "type": "integer"
+        },
+        "drives": {
+          "type": "integer"
+        },
+        "files": {
+          "type": "integer"
+        },
+        "storage_provider": {
+          "type": "string"
+        },
+        "embedding_provider": {
+          "type": "string"
+        },
+        "os": {
+          "type": "string"
+        },
+        "arch": {
+          "type": "string"
+        },
+        "is_cloud": {
+          "type": "boolean",
+          "required": true
+        },
+        "version": {
+          "type": "string",
+          "required": true
+        }
+      }
+    },
+    {
+      "product": "agent-fs",
+      "event": "server.heartbeat",
+      "description": "Daily agent-fs server heartbeat. v1 also sends one ops_<op> count per operation; list them before agent-fs moves to schema_version 2.",
+      "since": "2026-09-30",
+      "source": "api-server",
+      "properties": {
+        "users": {
+          "type": "integer"
+        },
+        "orgs": {
+          "type": "integer"
+        },
+        "drives": {
+          "type": "integer"
+        },
+        "files": {
+          "type": "integer"
+        },
+        "storage_provider": {
+          "type": "string"
+        },
+        "embedding_provider": {
+          "type": "string"
+        },
+        "os": {
+          "type": "string"
+        },
+        "arch": {
+          "type": "string"
+        },
+        "is_cloud": {
+          "type": "boolean",
+          "required": true
+        },
+        "version": {
+          "type": "string",
+          "required": true
+        },
+        "ops_total": {
+          "type": "integer",
+          "required": true
+        },
+        "shutdown": {
+          "type": "boolean"
+        }
+      }
+    },
+    {
+      "product": "agent-fs",
+      "event": "live.session_started",
+      "description": "An agent-fs live (browser) session started.",
+      "since": "2026-09-30",
+      "source": "live",
+      "properties": {
+        "is_cloud": {
+          "type": "boolean",
+          "required": true
+        },
+        "version": {
+          "type": "string",
+          "required": true
+        },
+        "entry_route": {
+          "type": "string",
+          "required": true
+        }
+      }
+    }
+  ]
+}

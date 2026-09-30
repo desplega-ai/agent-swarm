@@ -1,0 +1,9 @@
+{
+  "repo": "desplega-ai/proxy",
+  "commit": "9a76aa6ad422ad1d37fd8ffd1f54b024f6ec11b3",
+  "files": {
+    "src/types.gen.ts": "11e8f600077f96b3e9ec183e435c0cb048b8e0501d356c06f0af6abed738a099",
+    "src/catalog.json": "7437b9f64548537ca9869a4d63691e6b5f44b226367f5bab653a500142ccec56",
+    "src/EVENTS.md": "90a71a8813b9d02553776c1bf7850b522ba581d4913e747f09f8ea0a8b7e93bb"
+  }
+}
