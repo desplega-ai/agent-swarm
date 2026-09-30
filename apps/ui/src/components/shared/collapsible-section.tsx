@@ -85,7 +85,8 @@ export function CollapsibleSection({
         <button
           type="button"
           onClick={toggle}
-          className="flex items-center gap-2 w-full px-3 py-2 text-left"
+          aria-expanded={open}
+          className="flex items-center gap-2 w-full px-3 py-2 text-left rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
         >
           {chevron}
           {Icon && <Icon className={cn("h-3.5 w-3.5 shrink-0", iconColor)} />}
@@ -101,7 +102,12 @@ export function CollapsibleSection({
 
   return (
     <div className={cn("space-y-1", className)}>
-      <button type="button" onClick={toggle} className="flex items-center gap-1.5 text-left group">
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={open}
+        className="flex items-center gap-1.5 text-left group rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+      >
         {chevron}
         {Icon && <Icon className={cn("h-3 w-3 text-muted-foreground", iconColor)} />}
         <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
