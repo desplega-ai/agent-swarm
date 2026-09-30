@@ -145,8 +145,10 @@
   user-select: none;
 }
 
-.cms-row:hover {
-  background: var(--panel-2);
+@media (hover: hover) {
+  .cms-row:hover {
+    background: var(--panel-2);
+  }
 }
 
 .cms-row:has(input:checked) {

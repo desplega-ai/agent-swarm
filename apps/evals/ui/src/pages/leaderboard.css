@@ -3,6 +3,7 @@
 
 .lb-tabs {
   display: flex;
+  flex-wrap: wrap; /* 320px: the four view tabs must not push the page sideways */
   gap: 2px;
   border-bottom: 1px solid var(--border);
   margin-bottom: 10px;
@@ -24,6 +25,11 @@
 .lb-tab.active {
   color: var(--accent);
   border-bottom-color: var(--accent);
+}
+
+.lb-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .lb-head {

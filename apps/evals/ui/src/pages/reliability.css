@@ -41,8 +41,10 @@ button.rel-row {
   cursor: pointer;
 }
 
-button.rel-row:hover {
-  background: var(--panel-2);
+@media (hover: hover) {
+  button.rel-row:hover {
+    background: var(--panel-2);
+  }
 }
 
 button.rel-row:focus-visible {
