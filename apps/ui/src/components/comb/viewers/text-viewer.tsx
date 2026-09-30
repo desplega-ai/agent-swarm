@@ -29,7 +29,15 @@ export function TextLines({ text }: { text: string }) {
       <div className="min-w-max py-2 font-mono text-xs leading-5">
         {shown.map((line, index) => (
           // Lines are positional and never reorder, so the index is a stable key.
-          <div key={index} data-line-start={index + 1} data-line-end={index + 1} className="flex">
+          // `data-comb-row`: the row adds one "\n" to the text space, blank rows too,
+          // so a comment quote is verbatim file text (step-7, `TEXT_ROW_ATTR`).
+          <div
+            key={index}
+            data-line-start={index + 1}
+            data-line-end={index + 1}
+            data-comb-row=""
+            className="flex"
+          >
             <span
               aria-hidden
               data-comb-skip

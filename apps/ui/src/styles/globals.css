@@ -510,6 +510,28 @@ summary {
   }
 }
 
+/* Comb comment passages (components/comb/comment-highlights.tsx). The CSS
+ * Custom Highlight API paints text ranges. `-moved` marks a passage found
+ * after the text changed. `-active` is the selected or hovered thread and the
+ * passage a new comment is written on. Browsers without the API get the
+ * `-fallback` classes on the blocks instead. */
+::highlight(comb-comment) {
+  background-color: color-mix(in oklch, var(--color-primary) 16%, transparent);
+}
+::highlight(comb-comment-moved) {
+  background-color: color-mix(in oklch, var(--color-status-warning) 24%, transparent);
+  text-decoration: underline dotted var(--color-status-warning-strong);
+}
+::highlight(comb-comment-active) {
+  background-color: color-mix(in oklch, var(--color-primary) 34%, transparent);
+}
+.comb-comment-fallback {
+  background-color: color-mix(in oklch, var(--color-primary) 10%, transparent);
+}
+.comb-comment-fallback-active {
+  background-color: color-mix(in oklch, var(--color-primary) 22%, transparent);
+}
+
 /* Chat message markdown prose */
 .prose-chat {
   font-size: 0.85rem;

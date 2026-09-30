@@ -190,7 +190,10 @@ function ConnectedView() {
             {location.isFolder ? (
               <FolderView folder={location} />
             ) : (
-              <FileView key={location.path} file={location} />
+              <FileView
+                key={`${location.orgId}/${location.driveId}:${location.path}`}
+                file={location}
+              />
             )}
           </section>
         </div>
