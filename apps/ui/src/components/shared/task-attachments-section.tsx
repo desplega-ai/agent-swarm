@@ -14,12 +14,16 @@ import {
   Trash2,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
 import { fetchTaskAttachmentBlob, useDeleteAttachment, useTaskAttachments } from "@/api/fs";
 import type { TaskAttachment, TaskAttachmentKind } from "@/api/types";
 import { Spinner } from "@/components/kibo-ui/spinner";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
-import { AttachmentName, buildAgentFsLiveUrl } from "@/components/shared/task-attachment-link";
+import { InAppOrExternalLink } from "@/components/shared/in-app-or-external-link";
+import {
+  type AgentFsLinkContext,
+  AttachmentName,
+  agentFsAttachmentLinks,
+} from "@/components/shared/task-attachment-link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -31,39 +35,32 @@ import {
 } from "@/components/ui/dialog";
 import { MiddleTruncation } from "@/components/ui/middle-truncation";
 import { useOptionalAgentFs } from "@/contexts/agent-fs-context";
-import { useCombLinks } from "@/hooks/use-comb-links";
 import { scrubSecretText } from "@/lib/scrub-secrets";
 import { cn } from "@/lib/utils";
-
-/** The live host and the swarm drive from `/status` (`agent_fs.comb`). */
-type AgentFsLinkDefaults = Pick<
-  Parameters<typeof buildAgentFsLiveUrl>[0],
-  "liveUrl" | "defaultOrgId" | "defaultDriveId"
->;
 
 /**
  * Per-row resolution mirrors `resolveAttachmentDisplay` in `src/slack/blocks.ts`.
  * For `agent-fs` we build a public live-URL from the row's `orgId` and
- * `driveId` (or the swarm drive when the row has neither); otherwise the row
- * stays non-clickable and we surface the raw path so users can copy it manually.
+ * `driveId` (or, while Comb is on, the swarm drive when the row has neither);
+ * otherwise the row stays non-clickable and we surface the raw path so users
+ * can copy it manually. `combTo` opens an agent-fs file in Comb (same tab)
+ * while Comb is connected; `href` then stays the "Open in agent-fs" action.
  */
-function resolveHref(a: TaskAttachment, agentFs: AgentFsLinkDefaults): string | null {
+function resolveLinks(
+  a: TaskAttachment,
+  agentFs: AgentFsLinkContext | null,
+): { href: string | null; combTo: string | null } {
   switch (a.kind) {
     case "url":
-      return a.url ?? null;
+      return { href: a.url ?? null, combTo: null };
     case "page":
       // SPA-relative — react-router handles `/pages/:id`. We still render as
       // an anchor with target="_blank" so the link survives copy/paste.
-      return a.pageId ? `/pages/${a.pageId}` : null;
+      return { href: a.pageId ? `/pages/${a.pageId}` : null, combTo: null };
     case "agent-fs":
-      return buildAgentFsLiveUrl({
-        path: a.path,
-        orgId: a.orgId,
-        driveId: a.driveId,
-        ...agentFs,
-      });
+      return agentFsAttachmentLinks(a, agentFs);
     case "shared-fs":
-      return null;
+      return { href: null, combTo: null };
   }
 }
 
@@ -221,14 +218,7 @@ function AttachmentRow({
   variant?: "card" | "prompt";
 }) {
   const agentFs = useOptionalAgentFs();
-  const href = resolveHref(attachment, {
-    liveUrl: agentFs?.liveUrl,
-    defaultOrgId: agentFs?.orgId,
-    defaultDriveId: agentFs?.driveId,
-  });
-  // A connected Comb opens agent-fs files in the dashboard. `href` stays the
-  // "Open in agent-fs" action.
-  const combTo = useCombLinks()(attachment.kind === "agent-fs" ? href : null);
+  const { href, combTo } = resolveLinks(attachment, agentFs);
   const descriptor = attachment.intent || attachment.description;
   const previewKind = getPreviewKind(attachment);
   const [expanded, setExpanded] = useState(false);
@@ -407,53 +397,34 @@ function AttachmentRow({
         .filter(Boolean)
         .join(" · ");
       const filename = attachment.path?.split("/").filter(Boolean).at(-1);
-      const pillClassName =
-        "group flex min-w-0 flex-1 items-center gap-3 rounded-l-xl px-3 py-2.5 text-left hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60";
-      const pillBody = (
-        <>
-          <span className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted sm:flex">
-            <PreviewIcon kind={previewKind} />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="line-clamp-2 break-words text-sm font-medium text-foreground group-hover:text-primary">
-              {attachment.name}
-            </span>
-            {metadata && <span className="block text-xs text-muted-foreground">{metadata}</span>}
-            {!attachment.mimeType && filename && filename !== attachment.name && (
-              <MiddleTruncation className="hidden font-mono text-xs text-muted-foreground sm:block">
-                {filename}
-              </MiddleTruncation>
-            )}
-          </span>
-          {!combTo && (
-            <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground group-hover:text-primary" />
-          )}
-        </>
-      );
 
       return (
         <div className="inline-flex w-[24rem] max-w-full items-center rounded-xl border border-border bg-background shadow-sm">
-          {combTo ? (
-            <Link
-              to={combTo}
-              className={pillClassName}
-              aria-label={`Open ${attachment.name}`}
-              title={attachment.path || attachment.name}
-            >
-              {pillBody}
-            </Link>
-          ) : (
-            <a
-              href={href}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={pillClassName}
-              aria-label={`Open ${attachment.name} in a new tab`}
-              title={attachment.path || attachment.name}
-            >
-              {pillBody}
-            </a>
-          )}
+          <InAppOrExternalLink
+            to={combTo}
+            href={href}
+            className="group flex min-w-0 flex-1 items-center gap-3 rounded-l-xl px-3 py-2.5 text-left hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+            aria-label={combTo ? `Open ${attachment.name}` : `Open ${attachment.name} in a new tab`}
+            title={attachment.path || attachment.name}
+          >
+            <span className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted sm:flex">
+              <PreviewIcon kind={previewKind} />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="line-clamp-2 break-words text-sm font-medium text-foreground group-hover:text-primary">
+                {attachment.name}
+              </span>
+              {metadata && <span className="block text-xs text-muted-foreground">{metadata}</span>}
+              {!attachment.mimeType && filename && filename !== attachment.name && (
+                <MiddleTruncation className="hidden font-mono text-xs text-muted-foreground sm:block">
+                  {filename}
+                </MiddleTruncation>
+              )}
+            </span>
+            {!combTo && (
+              <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground group-hover:text-primary" />
+            )}
+          </InAppOrExternalLink>
           {combTo && (
             <Button
               asChild

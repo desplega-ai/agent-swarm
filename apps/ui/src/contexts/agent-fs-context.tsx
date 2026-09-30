@@ -154,29 +154,52 @@ export function AgentFsProvider({ children }: { children: ReactNode }) {
     void refetchMe();
   }, [refetchMe]);
 
-  const { state, error } = deriveAgentFsState({
-    statusLoading: status === undefined && statusLoading,
-    endpoint,
-    hasCredential: saved !== null,
-    me: meQuery.data,
-    meError: meQuery.error,
-  });
+  const statusPending = status === undefined && statusLoading;
+  const hasCredential = saved !== null;
+  const me = meQuery.data;
+  const meError = meQuery.error;
+  const { state, error } = useMemo(
+    () =>
+      deriveAgentFsState({ statusLoading: statusPending, endpoint, hasCredential, me, meError }),
+    [statusPending, endpoint, hasCredential, me, meError],
+  );
 
-  const value: AgentFsContextValue = {
-    state,
-    endpoint,
-    orgId: comb?.org_id ?? null,
-    driveId: comb?.drive_id ?? null,
-    liveUrl: comb?.live_url ?? null,
-    credential,
-    client,
-    me: state === "ready" ? (meQuery.data ?? null) : null,
-    features,
-    error,
-    connect,
-    disconnect,
-    retry,
-  };
+  // Memoized: every link and attachment row reads this context.
+  const orgId = comb?.org_id ?? null;
+  const driveId = comb?.drive_id ?? null;
+  const liveUrl = comb?.live_url ?? null;
+  const value = useMemo<AgentFsContextValue>(
+    () => ({
+      state,
+      endpoint,
+      orgId,
+      driveId,
+      liveUrl,
+      credential,
+      client,
+      me: state === "ready" ? (me ?? null) : null,
+      features,
+      error,
+      connect,
+      disconnect,
+      retry,
+    }),
+    [
+      state,
+      endpoint,
+      orgId,
+      driveId,
+      liveUrl,
+      credential,
+      client,
+      me,
+      features,
+      error,
+      connect,
+      disconnect,
+      retry,
+    ],
+  );
 
   return <AgentFsContext.Provider value={value}>{children}</AgentFsContext.Provider>;
 }

@@ -1,5 +1,5 @@
 import { useAgentFs } from "@/contexts/agent-fs-context";
-import { CombLiveUrlContext, CombMarkdown } from "./comb-markdown";
+import { CombMarkdown } from "./comb-markdown";
 import type { ViewerProps } from "./file-viewer";
 import { TextGate } from "./text-gate";
 
@@ -14,9 +14,7 @@ export default function MarkdownViewer({ file, stat }: ViewerProps) {
     <TextGate file={file} stat={stat}>
       {(text) => (
         <article className="mx-auto max-w-4xl px-6 py-5 text-sm leading-relaxed">
-          <CombLiveUrlContext.Provider value={liveUrl}>
-            <CombMarkdown text={text} doc={file} />
-          </CombLiveUrlContext.Provider>
+          <CombMarkdown text={text} doc={file} liveUrl={liveUrl} />
         </article>
       )}
     </TextGate>

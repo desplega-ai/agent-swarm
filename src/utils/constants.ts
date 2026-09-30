@@ -115,11 +115,15 @@ export interface AgentFsFileRef {
   driveId?: string | null;
 }
 
+/** A "." or ".." path segment, raw or encoded (`%2e`). */
+const DOT_SEGMENT_RE = /^(?:\.|%2e){1,2}$/i;
+
 /**
  * `<orgId>/<driveId>/<encoded-path>` for an agent-fs file link, when we have
  * enough info: `path` plus a matched `orgId`/`driveId` pair. When a row
  * supplies neither ID, the pair may come from env-var defaults. A partial row
- * never mixes its ID with a default.
+ * never mixes its ID with a default. A "." or ".." segment returns null: the
+ * browser would resolve it to a path outside the drive.
  */
 function agentFsFileRoute(opts: AgentFsFileRef): string | null {
   const path = opts.path?.trim();
@@ -130,11 +134,11 @@ function agentFsFileRoute(opts: AgentFsFileRef): string | null {
   const orgId = hasRowId ? rowOrgId : getAgentFsDefaultOrgId();
   const driveId = hasRowId ? rowDriveId : getAgentFsDefaultDriveId();
   if (!orgId || !driveId) return null;
-  const normalizedPath = path.replace(/^\/+/, "");
+  const segments = path.replace(/^\/+/, "").split("/");
+  if (segments.some((segment) => DOT_SEGMENT_RE.test(segment))) return null;
   // Never double-encode an already-encoded segment: preserve existing %HH
   // escapes byte-for-byte, including in segments that also contain raw text.
-  const encodedPath = normalizedPath
-    .split("/")
+  const encodedPath = segments
     .map((segment) => encodeURIComponent(segment).replace(/%25([0-9a-f]{2})/gi, "%$1"))
     .join("/");
   return `${orgId}/${driveId}/${encodedPath}`;
@@ -142,8 +146,9 @@ function agentFsFileRoute(opts: AgentFsFileRef): string | null {
 
 /**
  * Resolve a public agent-fs live URL for an attachment (see
- * {@link agentFsFileRoute} for the id and encoding rules). Null when the ids
- * are missing; callers fall back to the raw `agent-fs:<path>` display instead.
+ * {@link agentFsFileRoute} for the id, dot-segment, and encoding rules). Null
+ * when that route is null; callers fall back to the raw `agent-fs:<path>`
+ * display instead.
  *
  * Shape:  ${liveHost}/file/~/<orgId>/<driveId>/<normalized-path>
  */

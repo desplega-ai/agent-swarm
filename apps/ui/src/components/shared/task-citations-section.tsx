@@ -1,6 +1,6 @@
 import { Quote } from "lucide-react";
-import { Link } from "react-router-dom";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
+import { InAppOrExternalLink } from "@/components/shared/in-app-or-external-link";
 import { Badge } from "@/components/ui/badge";
 import { useCombLinks } from "@/hooks/use-comb-links";
 import {
@@ -77,19 +77,14 @@ export function TaskCitationsSection({
                 <Badge variant="outline" size="tag" className={TONE_CLASS[state.tone]}>
                   {state.label}
                 </Badge>
-                {combTo ? (
-                  <Link to={combTo} className="text-primary underline-offset-4 hover:underline">
-                    {citation.label || citation.ref}
-                  </Link>
-                ) : href ? (
-                  <a
+                {href ? (
+                  <InAppOrExternalLink
+                    to={combTo}
                     href={href}
-                    target="_blank"
-                    rel="noreferrer"
                     className="text-primary underline-offset-4 hover:underline"
                   >
                     {citation.label || citation.ref}
-                  </a>
+                  </InAppOrExternalLink>
                 ) : (
                   <span>{citation.label || citation.ref}</span>
                 )}

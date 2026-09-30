@@ -39,9 +39,9 @@ export const COMB_REHYPE_PLUGINS = [
 const CombDocContext = createContext<DrivePath | null>(null);
 /**
  * The agent-fs live UI host (`useAgentFs().liveUrl`), so live links to drive
- * files open in Comb (step-13). Provided around `CombMarkdown`.
+ * files open in Comb (step-13). `CombMarkdown` provides it.
  */
-export const CombLiveUrlContext = createContext<string | null>(null);
+const CombLiveUrlContext = createContext<string | null>(null);
 
 type ElementProps<Tag extends keyof React.JSX.IntrinsicElements> = ComponentProps<Tag> & {
   node?: unknown;
@@ -125,19 +125,33 @@ export const COMB_MD_COMPONENTS: Components = {
   a: CombLink,
 };
 
-/** Render a markdown file. `doc` is the file itself (its links resolve against it). */
-export function CombMarkdown({ text, doc }: { text: string; doc: DrivePath }): ReactNode {
+/**
+ * Render a markdown file. `doc` is the file itself (its links resolve against
+ * it). `liveUrl` is the agent-fs live UI host: live links to drive files open
+ * in Comb (step-13).
+ */
+export function CombMarkdown({
+  text,
+  doc,
+  liveUrl = null,
+}: {
+  text: string;
+  doc: DrivePath;
+  liveUrl?: string | null;
+}): ReactNode {
   return (
     <CombDocContext.Provider value={doc}>
-      <Streamdown
-        mode="static"
-        parseIncompleteMarkdown={false}
-        controls={false}
-        rehypePlugins={COMB_REHYPE_PLUGINS}
-        components={COMB_MD_COMPONENTS}
-      >
-        {text}
-      </Streamdown>
+      <CombLiveUrlContext.Provider value={liveUrl}>
+        <Streamdown
+          mode="static"
+          parseIncompleteMarkdown={false}
+          controls={false}
+          rehypePlugins={COMB_REHYPE_PLUGINS}
+          components={COMB_MD_COMPONENTS}
+        >
+          {text}
+        </Streamdown>
+      </CombLiveUrlContext.Provider>
     </CombDocContext.Provider>
   );
 }

@@ -121,6 +121,8 @@ function escapeRegExp(value: string): string {
  * `APP_URL` / `DASHBOARD_URL` or `localhost:<port>`. Both use the same
  * `/file/~/<org>/<drive>/<path>` route and path encoding, so they resolve to
  * the same target. Built per call: a config reload can change the app URLs.
+ * A host must start the host name (`evil-swarm.example.com` does not match
+ * `swarm.example.com`). Hosts are case-insensitive.
  */
 function agentFsPathRegex(): RegExp {
   const appHosts = getConfiguredAppUrls().flatMap((value) => {
@@ -132,7 +134,7 @@ function agentFsPathRegex(): RegExp {
     }
   });
   const hosts = [AGENT_FS_LIVE_HOSTS, ...appHosts, String.raw`localhost:\d+`].join("|");
-  return new RegExp(`(?:${hosts})${AGENT_FS_FILE_ROUTE}`, "g");
+  return new RegExp(`(?<![\\w.-])(?:${hosts})${AGENT_FS_FILE_ROUTE}`, "gi");
 }
 
 const agentFsMatcher: Matcher = (content) => {
