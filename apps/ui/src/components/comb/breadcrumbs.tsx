@@ -2,6 +2,7 @@ import { ChevronRight, HardDrive } from "lucide-react";
 import { Fragment } from "react";
 import { Link } from "react-router-dom";
 import { ancestorFolders, baseName, type CombLocation, combPath } from "@/lib/comb/paths";
+import { cn } from "@/lib/utils";
 
 /** The path trail: the drive root, each folder, then the current file or folder. */
 export function CombBreadcrumbs({ location }: { location: CombLocation }) {
@@ -14,6 +15,10 @@ export function CombBreadcrumbs({ location }: { location: CombLocation }) {
         {crumbs.map((path, index) => {
           const isLast = index === crumbs.length - 1;
           const isRoot = path === "/";
+          // Phones keep the drive root, the parent folder, and the name. The
+          // parent keeps its width there: the header below repeats the name.
+          const isParent = !isRoot && index === crumbs.length - 2;
+          const collapse = !isRoot && !isLast && !isParent;
           // Phones show the drive icon only. Parent folders give up their width
           // before the current name does.
           const label = isRoot ? (
@@ -27,12 +32,16 @@ export function CombBreadcrumbs({ location }: { location: CombLocation }) {
           return (
             <Fragment key={path}>
               {index > 0 ? (
-                <li aria-hidden className="shrink-0">
+                <li aria-hidden className={cn("shrink-0", collapse && "max-sm:hidden")}>
                   <ChevronRight className="size-3" />
                 </li>
               ) : null}
               <li
-                className={isLast ? "min-w-0" : isRoot ? "shrink-0" : "min-w-0 max-w-48 shrink-[8]"}
+                className={cn(
+                  isLast ? "min-w-0" : isRoot ? "shrink-0" : "min-w-0 max-w-48 shrink-[8]",
+                  collapse && "max-sm:hidden",
+                  isParent && "max-sm:max-w-16 max-sm:shrink-0",
+                )}
               >
                 {isLast ? (
                   <span aria-current="page" className="block truncate font-medium text-foreground">
