@@ -28,13 +28,17 @@ describe("agentFsKey", () => {
 });
 
 describe("agentFsRetry", () => {
-  test("never retries a 401, retries other failures twice", () => {
-    const unauthorized = new AgentFsError(401, "UNAUTHORIZED", "bad key");
+  test("never retries a 4xx, retries network failures and 5xx twice", () => {
+    for (const status of [400, 401, 403, 404]) {
+      expect(agentFsRetry(0, new AgentFsError(status, "CLIENT", "no"))).toBe(false);
+    }
     const down = new AgentFsError(0, "NETWORK", "down");
-    expect(agentFsRetry(0, unauthorized)).toBe(false);
+    const broken = new AgentFsError(500, "INTERNAL", "boom");
     expect(agentFsRetry(0, down)).toBe(true);
     expect(agentFsRetry(1, down)).toBe(true);
     expect(agentFsRetry(2, down)).toBe(false);
+    expect(agentFsRetry(0, broken)).toBe(true);
+    expect(agentFsRetry(2, broken)).toBe(false);
   });
 });
 

@@ -3,7 +3,7 @@
 // hooks import the context and never the reverse.
 
 import { hashKey, type QueryClient, type QueryKey } from "@tanstack/react-query";
-import { isAgentFsAuthError } from "./client";
+import { AgentFsError, isAgentFsAuthError } from "./client";
 
 /**
  * Every agent-fs query key: `["agent-fs", endpoint, userId, orgId, driveId, ...rest]`.
@@ -30,9 +30,13 @@ export function agentFsKey(
   return ["agent-fs", endpoint, userId, orgId, driveId, ...rest] as const;
 }
 
-/** `retry` for every agent-fs query. A 401 is a bad key, so a retry cannot help. */
+/**
+ * `retry` for every agent-fs query. A 4xx does not change on retry (a 401 key,
+ * a 404 path, a 403 role), so only network failures and 5xx retry.
+ */
 export function agentFsRetry(failureCount: number, error: Error): boolean {
-  return !isAgentFsAuthError(error) && failureCount < 2;
+  if (error instanceof AgentFsError && error.status >= 400 && error.status < 500) return false;
+  return failureCount < 2;
 }
 
 /**
