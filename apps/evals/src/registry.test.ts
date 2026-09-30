@@ -1,8 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import { configs } from "../configs/index.ts";
 import { CONFIG_PRESETS, expandPresetSelection, presetRunDefaults } from "../configs/presets.ts";
+import { SCENARIO_CARDS, scenarioCard } from "../scenarios/cards.ts";
+import { scenarios } from "../scenarios/index.ts";
+import { SCENARIO_HASHES } from "../scenarios/scenario-hashes.ts";
 import { serializeConfig, serializeScenario, validateScenario } from "./registry.ts";
-import type { CheckResult, DeterministicCheck, DimensionSpec, Scenario } from "./types.ts";
+import {
+  type CheckResult,
+  type DeterministicCheck,
+  type DimensionSpec,
+  type Scenario,
+  scenarioWorkerCount,
+} from "./types.ts";
 
 /** Minimal valid scenario; tests override single fields to isolate one rule. */
 function scenario(overrides: Partial<Scenario>): Scenario {
@@ -641,5 +650,72 @@ describe("validateScenario dependsOn (round 10 — relaxed range + cycle chain e
       'task 0 ("A"): dependsOn entry 9 must reference an existing task index [0, 2]',
     );
     expect(errors).toContain('dependency cycle: 0 ("A") → 1 ("B") → 0 ("A")');
+  });
+});
+
+describe("scenario cards (Phase 6): every registered scenario says what it tests", () => {
+  const TOPOLOGIES = ["single-agent", "swarm"];
+  const FLOWS = ["parallel", "sequential"];
+  const KINDS = ["regression", "capability"];
+
+  test("every registered scenario has a card, and no card is orphaned", () => {
+    const registered = scenarios.map((s) => s.id).sort();
+    expect(Object.keys(SCENARIO_CARDS).sort()).toEqual(registered);
+  });
+
+  test("summary, agentDoes and scoredBy are real sentences, not placeholders", () => {
+    for (const s of scenarios) {
+      const card = scenarioCard(s.id);
+      expect(card, s.id).not.toBeNull();
+      for (const field of ["summary", "agentDoes", "scoredBy"] as const) {
+        const text = card?.[field] ?? "";
+        expect(text.trim().length, `${s.id}.${field}`).toBeGreaterThanOrEqual(40);
+        expect(text, `${s.id}.${field}`).not.toMatch(/\b(TODO|TBD|FIXME)\b/);
+      }
+    }
+  });
+
+  test("tags carry one value from each axis", () => {
+    for (const s of scenarios) {
+      const tags = scenarioCard(s.id)?.tags;
+      expect(TOPOLOGIES, s.id).toContain(tags?.topology ?? "");
+      expect(FLOWS, s.id).toContain(tags?.flow ?? "");
+      expect(KINDS, s.id).toContain(tags?.kind ?? "");
+    }
+  });
+
+  test("the topology tag matches the roster: a lead or several workers is a swarm", () => {
+    for (const s of scenarios) {
+      const isSwarm = s.lead !== undefined || scenarioWorkerCount(s.workers) > 1;
+      expect(scenarioCard(s.id)?.tags.topology, s.id).toBe(isSwarm ? "swarm" : "single-agent");
+    }
+  });
+
+  test("a solo baseline is a single-agent scenario", () => {
+    for (const s of scenarios.filter((x) => x.baselineOf !== undefined)) {
+      expect(scenarioCard(s.id)?.tags.topology, s.id).toBe("single-agent");
+    }
+  });
+
+  test("the changelog has one line per pinned version, so a bump cannot skip the card", () => {
+    for (const s of scenarios) {
+      const pinned = (SCENARIO_HASHES[s.id] ?? []).map((h) => h.version);
+      const noted = (scenarioCard(s.id)?.changelog ?? []).map((c) => c.version);
+      expect(noted, s.id).toEqual(pinned);
+      expect(noted.at(-1), s.id).toBe(s.version);
+      for (const entry of scenarioCard(s.id)?.changelog ?? []) {
+        expect(entry.note.trim().length, `${s.id} v${entry.version}`).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  test("serializeScenario carries the card and the suite it belongs to", () => {
+    const sql = scenarios.find((s) => s.id === "sql-audit") as Scenario;
+    const j = serializeScenario(sql);
+    expect(j.card).toEqual(scenarioCard("sql-audit"));
+    expect(j.suite).toBe("swarm-evals@1.0");
+    // A scenario outside the manifest (or at another version) has no suite.
+    expect(serializeScenario(scenario({ id: "sql-audit", version: 99 })).suite).toBeNull();
+    expect(serializeScenario(scenario({ id: "not-registered" })).card).toBeNull();
   });
 });

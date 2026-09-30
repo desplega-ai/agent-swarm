@@ -356,3 +356,243 @@ export function scoreDomain(dots: readonly FrontierDot[]): { lo: number; hi: num
   if (domHi - domLo >= 0.1) return { lo: domLo, hi: domHi };
   return { lo: Number(Math.max(0, domHi - 0.1).toFixed(2)), hi: domHi };
 }
+
+// ---- heatmap, reliability and cell (Phase 6) ----
+
+export interface HeatmapCell {
+  scenarioId: string;
+  configId: string;
+  graded: number;
+  passed: number;
+  errors: number;
+  passRate: number | null;
+  avgScore: number | null;
+  lowN: boolean;
+}
+
+export interface HeatmapAnyRow {
+  scenarioId: string;
+  graded: number;
+  passed: number;
+  passRate: number | null;
+  configs: number;
+  configsPassing: number;
+}
+
+export interface HeatmapResponse {
+  suiteVersion: string;
+  generatedAt: string;
+  lowNThreshold: number;
+  scenarioIds: string[];
+  configIds: string[];
+  cells: HeatmapCell[];
+  anyConfig: HeatmapAnyRow[];
+}
+
+export interface ReliabilityPoint {
+  k: number;
+  passPowK: number | null;
+  passAtK: number | null;
+  scenarios: number;
+}
+
+export interface TrendPoint {
+  runId: string;
+  runName: string | null;
+  createdAt: string;
+  scenarios: number;
+  attempts: number;
+  score: number | null;
+  scoreCi: CiBounds | null;
+  passRate: number | null;
+}
+
+export interface ReliabilityConfig {
+  configId: string;
+  harness: string;
+  resolvedModel: string;
+  fullCoverage: boolean;
+  lowN: boolean;
+  attempts: number;
+  passAt1: number | null;
+  curve: ReliabilityPoint[];
+  trend: TrendPoint[];
+}
+
+export interface ReliabilityResponse {
+  suiteVersion: string;
+  generatedAt: string;
+  maxK: number;
+  configs: ReliabilityConfig[];
+}
+
+export interface CellAttempt {
+  id: string;
+  runId: string;
+  runName: string | null;
+  runCreatedAt: string;
+  attemptIndex: number;
+  status: string;
+  exclusion: string | null;
+  score: number | null;
+  costUsd: number | null;
+  durationMs: number | null;
+  agentMs: number | null;
+  startedAt: string | null;
+  error: string | null;
+  resolvedModel: string | null;
+  reasoningEffort: string | null;
+}
+
+export interface CellResponse {
+  suiteVersion: string;
+  scenarioId: string;
+  configId: string;
+  graded: number;
+  passed: number;
+  failed: number;
+  errors: number;
+  attempts: CellAttempt[];
+  truncated: boolean;
+}
+
+/** Configs a scenario needs before an all-red or all-green column means anything. */
+export const FLAG_MIN_CONFIGS = 3;
+
+export type ScenarioHealth = "broken-or-hard" | "saturated" | "mixed" | "thin";
+
+/**
+ * What a scenario's "any config" reading says about the scenario itself. Nothing
+ * passes it (`broken-or-hard`) or everything does (`saturated`): both mean the
+ * scenario stops separating setups. With fewer than {@link FLAG_MIN_CONFIGS}
+ * configs the reading is `thin`: too little to call.
+ */
+export function scenarioHealth(row: HeatmapAnyRow | undefined): ScenarioHealth {
+  if (row === undefined || row.configs < FLAG_MIN_CONFIGS || row.graded === 0) return "thin";
+  if (row.configsPassing === 0) return "broken-or-hard";
+  if (row.passed === row.graded) return "saturated";
+  return "mixed";
+}
+
+export const HEALTH_TEXT: Record<Exclude<ScenarioHealth, "mixed" | "thin">, string> = {
+  "broken-or-hard": "No config passes it: broken or too hard",
+  saturated: "Every graded attempt passes: it no longer separates setups",
+};
+
+/** The heatmap's cells keyed by `scenarioId` then `configId`, for O(1) lookup while drawing. */
+export function heatmapIndex(h: HeatmapResponse): Map<string, HeatmapCell> {
+  return new Map(h.cells.map((c) => [cellKey(c.scenarioId, c.configId), c]));
+}
+
+export function cellKey(scenarioId: string, configId: string): string {
+  return `${scenarioId}\u0000${configId}`;
+}
+
+/**
+ * Cell background: red at a 0% pass rate through amber to green at 100%. Mixing
+ * in `--panel` keeps text readable in both themes. Null (errors only) is neutral.
+ */
+export function passRateColor(rate: number | null): string {
+  if (rate === null) return "var(--panel-2)";
+  const t = Math.max(0, Math.min(1, rate));
+  const hue = t < 0.5 ? "var(--red)" : "var(--green)";
+  const strength = Math.round(Math.abs(t - 0.5) * 2 * 62 + 14);
+  return `color-mix(in oklab, ${hue} ${strength}%, var(--panel))`;
+}
+
+export interface ReliabilityRow {
+  configId: string;
+  harness: string;
+  resolvedModel: string;
+  attempts: number;
+  fullCoverage: boolean;
+  lowN: boolean;
+  /** Chance one attempt passes. */
+  passAt1: number;
+  /** Chance k attempts in a row all pass. */
+  passPowK: number;
+  /** Scenarios that have at least k graded attempts. */
+  scenarios: number;
+  /** passAt1 - passPowK: what repeating the task costs. 0 = fully reliable. */
+  gap: number;
+}
+
+/**
+ * Rows for the pass@1 vs pass^k chart at one `k`, most reliable first. A config
+ * with no scenario at k graded attempts has no pass^k yet and is left out (the
+ * page lists it as waiting for more repeats).
+ */
+export function reliabilityRows(
+  rel: ReliabilityResponse,
+  k: number,
+): { rows: ReliabilityRow[]; waiting: ReliabilityConfig[] } {
+  const rows: ReliabilityRow[] = [];
+  const waiting: ReliabilityConfig[] = [];
+  for (const c of rel.configs) {
+    const point = c.curve.find((p) => p.k === k);
+    if (c.passAt1 === null || point === undefined || point.passPowK === null) {
+      waiting.push(c);
+      continue;
+    }
+    rows.push({
+      configId: c.configId,
+      harness: c.harness,
+      resolvedModel: c.resolvedModel,
+      attempts: c.attempts,
+      fullCoverage: c.fullCoverage,
+      lowN: c.lowN,
+      passAt1: c.passAt1,
+      passPowK: point.passPowK,
+      scenarios: point.scenarios,
+      gap: Math.max(0, c.passAt1 - point.passPowK),
+    });
+  }
+  rows.sort((a, b) => b.passPowK - a.passPowK || b.passAt1 - a.passAt1);
+  return { rows, waiting };
+}
+
+export interface TrendLine {
+  configId: string;
+  points: { x: number; y: number; lo: number | null; hi: number | null; point: TrendPoint }[];
+}
+
+export type TrendMetric = "score" | "passRate";
+
+/**
+ * A config's runs as chart points, oldest first. The score has a bootstrap band;
+ * the pass rate does not, so its band ends are null. Runs with no value on the
+ * metric are skipped rather than drawn as zero.
+ */
+export function trendLine(c: ReliabilityConfig, metric: TrendMetric): TrendLine {
+  const points: TrendLine["points"] = [];
+  for (const p of c.trend) {
+    const x = Date.parse(p.createdAt);
+    const y = metric === "score" ? p.score : p.passRate;
+    if (!Number.isFinite(x) || y === null) continue;
+    const width = p.scoreCi === null ? 0 : p.scoreCi.hi - p.scoreCi.lo;
+    const band = metric === "score" && p.scoreCi !== null && width > 1e-6;
+    points.push({
+      x,
+      y,
+      lo: band ? (p.scoreCi as CiBounds).lo : null,
+      hi: band ? (p.scoreCi as CiBounds).hi : null,
+      point: p,
+    });
+  }
+  return { configId: c.configId, points };
+}
+
+/** Configs worth drawing by default: the best few by score, at least two runs each. */
+export function defaultTrendConfigs(rel: ReliabilityResponse, limit = 3): string[] {
+  const withHistory = rel.configs.filter((c) => c.trend.filter((p) => p.score !== null).length >= 2);
+  const pool = withHistory.length > 0 ? withHistory : rel.configs;
+  return pool
+    .slice()
+    .sort(
+      (a, b) =>
+        Number(b.fullCoverage) - Number(a.fullCoverage) ||
+        (b.trend.at(-1)?.score ?? 0) - (a.trend.at(-1)?.score ?? 0),
+    )
+    .slice(0, limit)
+    .map((c) => c.configId);
+}

@@ -10,6 +10,7 @@ import { HarnessIcon } from "../components/HarnessIcon.tsx";
 import { ModelChip } from "../components/ModelChip.tsx";
 import { Seg } from "../components/Seg.tsx";
 import { Spinner } from "../components/Spinner.tsx";
+import { SuiteSelect } from "../components/SuiteSelect.tsx";
 import { InfoTip } from "../components/Tooltip.tsx";
 import { navigate, replaceHashQuery, useHashRoute, usePoll } from "../hooks.ts";
 import {
@@ -26,7 +27,6 @@ import {
   type LeaderboardRow,
   rankSortValue,
   SHAPE_LEGEND,
-  type SuitesResponse,
   type Track,
   timeTicks,
   trackConfigIds,
@@ -458,14 +458,6 @@ function oneOf<T extends string>(raw: string | null, allowed: readonly T[], fall
   return allowed.find((a) => a === raw) ?? fallback;
 }
 
-function suiteLabel(suites: SuitesResponse, version: string): string {
-  const s = suites.suites.find((x) => x.suiteVersion === version);
-  const current = version === suites.current ? " (current)" : "";
-  return s
-    ? `${version}${current} · ${s.attempts} attempts`
-    : `${version}${current} · no attempts yet`;
-}
-
 function RankingView(): ReactNode {
   const route = useHashRoute();
   const { query } = route;
@@ -547,29 +539,7 @@ function RankingView(): ReactNode {
   const header = (
     <div className="lb-head">
       <h2 className="an-title">Leaderboard</h2>
-      <label className="lb-field">
-        <span className="dim">Suite</span>
-        <select
-          className="lb-select"
-          value={suite ?? ""}
-          disabled={suites.data === null}
-          onChange={(e) => setSuiteChoice(e.target.value)}
-        >
-          {suites.data !== null
-            ? [
-                ...new Set([
-                  suites.data.current,
-                  ...suites.data.suites.map((s) => s.suiteVersion),
-                  ...(suite === null ? [] : [suite]),
-                ]),
-              ].map((v) => (
-                <option key={v} value={v}>
-                  {suiteLabel(suites.data as SuitesResponse, v)}
-                </option>
-              ))
-            : null}
-        </select>
-      </label>
+      <SuiteSelect suites={suites.data} value={suite} onChange={setSuiteChoice} />
       <div className="lb-field">
         <span className="dim">
           Track{" "}

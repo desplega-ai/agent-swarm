@@ -1,6 +1,8 @@
 import { getAaForConfig } from "../configs/aa.ts";
 import { configs } from "../configs/index.ts";
+import { type ScenarioCard, scenarioCard } from "../scenarios/cards.ts";
 import { scenarios } from "../scenarios/index.ts";
+import { SUITE_ID, suiteVersionFor } from "../scenarios/suite.ts";
 import { soloVariantId } from "./baseline.ts";
 import { validateConfigModel } from "./cost/resolve-alias.ts";
 import { normalizeOutcome } from "./normalize-outcome.ts";
@@ -433,6 +435,10 @@ export interface SerializedScenario {
   lead: SerializedWorkerSpec | null;
   /** Swarm scenario id this single-agent baseline pairs with (plan Q6); null otherwise. */
   baselineOf: string | null;
+  /** Plain-English card (summary, what the agent does, how it is scored, tags, changelog); null when none is registered. */
+  card: ScenarioCard | null;
+  /** `swarm-evals@1.0` when this scenario version is in the suite manifest, else null. */
+  suite: string | null;
   tasks: {
     title: string;
     description: string;
@@ -491,6 +497,8 @@ export function serializeScenario(s: Scenario): SerializedScenario {
     workerSpecs: Array.isArray(s.workers) ? s.workers.map(serializeWorkerSpec) : null,
     lead: s.lead ? serializeWorkerSpec(s.lead) : null,
     baselineOf: s.baselineOf ?? null,
+    card: scenarioCard(s.id),
+    suite: suiteVersionFor(s.id, s.version) === null ? null : `${SUITE_ID}@${suiteVersionFor(s.id, s.version)}`,
     tasks: s.tasks.map((t) => ({
       title: t.title,
       description: t.description,

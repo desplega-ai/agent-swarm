@@ -61,6 +61,12 @@ import {
   SUITES_SQL,
 } from "./analytics-source.ts";
 import {
+  buildCell,
+  CELL_ATTEMPT_LIMIT,
+  CELL_ATTEMPTS_SQL,
+  parseCellQuery,
+} from "./analytics-cell.ts";
+import {
   createConfig,
   effortLevelsFor,
   initHarnessConfigs,
@@ -947,6 +953,21 @@ export async function startServer(
       "/api/analytics/suites": async (req) => {
         if (!(await isAuthorized(req))) return unauthorized();
         return json(mapSuitesResponse((await db.execute(SUITES_SQL)).rows));
+      },
+      /**
+       * The attempts behind one heatmap cell (suite x scenario x config), newest
+       * run first, so a reader can open one and read its transcript.
+       */
+      "/api/analytics/cell": async (req) => {
+        if (!(await isAuthorized(req))) return unauthorized();
+        const parsed = parseCellQuery(new URL(req.url).searchParams);
+        if (!parsed.ok) return json({ error: parsed.error }, 400);
+        const { suiteVersion, scenarioId, configId } = parsed.query;
+        const res = await db.execute({
+          sql: CELL_ATTEMPTS_SQL,
+          args: [suiteVersion, scenarioId, configId, CELL_ATTEMPT_LIMIT + 1],
+        });
+        return json(buildCell(parsed.query, res.rows));
       },
       "/api/analytics/frontier": (req) => serveSuiteAnalytics(req, "frontier"),
       "/api/analytics/leaderboard": (req) => serveSuiteAnalytics(req, "leaderboard"),

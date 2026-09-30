@@ -1,6 +1,9 @@
 import type {
+  CellResponse,
   FrontierResponse,
+  HeatmapResponse,
   LeaderboardResponse,
+  ReliabilityResponse,
   SuitesResponse,
 } from "./lib/suite-analytics.ts";
 import type {
@@ -272,4 +275,22 @@ export function artifactUrl(id: string, opts?: { download?: boolean }): string {
 
 export function getArtifactText(id: string): Promise<string> {
   return requestText(artifactUrl(id));
+}
+
+/** Scenario x config pass fractions plus an "any config" row for one suite version (Phase 4). */
+export function getHeatmap(suite: string): Promise<HeatmapResponse> {
+  return request(`/api/analytics/heatmap?suite=${encodeURIComponent(suite)}`);
+}
+
+/** pass@k / pass^k curves and the per-run score trend for each config (Phase 4). */
+export function getReliability(suite: string, maxK?: number): Promise<ReliabilityResponse> {
+  const params = new URLSearchParams({ suite });
+  if (maxK !== undefined) params.set("maxK", String(maxK));
+  return request(`/api/analytics/reliability?${params.toString()}`);
+}
+
+/** The attempts behind one heatmap cell, newest run first. */
+export function getCell(suite: string, scenarioId: string, configId: string): Promise<CellResponse> {
+  const params = new URLSearchParams({ suite, scenario: scenarioId, config: configId });
+  return request(`/api/analytics/cell?${params.toString()}`);
 }
