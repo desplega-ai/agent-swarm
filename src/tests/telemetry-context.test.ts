@@ -163,9 +163,11 @@ describe("telemetry envelope", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
 
-  test("an event that is not in the catalog fails to compile and is not sent before init", async () => {
-    // @ts-expect-error "not.in.catalog" is not a catalogued agent-swarm event
-    track({ event: "not.in.catalog", properties: {} });
+  // The compile-time bound on `track()` (unknown event, unknown property) is
+  // asserted in src/telemetry-types.typetest.ts: `tsconfig.json` excludes
+  // src/tests, so a `@ts-expect-error` here would never be compiled.
+  test("track before init sends nothing", async () => {
+    track({ event: "server.started", properties: { port: 3013 } });
     await tick();
     expect(sent).toEqual([]);
   });

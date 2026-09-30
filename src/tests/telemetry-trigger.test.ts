@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { readFileSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import {
   closeDb,
@@ -9,8 +8,11 @@ import {
   failTask,
   getDbClient,
   initDb,
+  updateAgentProfile,
 } from "../be/db";
-import { createBootTriageTask } from "../heartbeat/heartbeat";
+import { checkHeartbeatChecklist, createBootTriageTask } from "../heartbeat/heartbeat";
+// Side-effect import: the checklist and boot-triage prompts come from the heartbeat templates.
+import "../heartbeat/templates";
 import { telemetry } from "../telemetry";
 import { _resetTriggerSurfaceCacheForTests, resolveTriggerSurface } from "../telemetry-trigger";
 
@@ -121,18 +123,37 @@ describe("trigger_surface on task telemetry", () => {
     for (const call of calls) expect("source" in call.props).toBe(false);
   });
 
-  test("a heartbeat task reports system, not mcp", async () => {
-    await createBootTriageTask();
-    await flush();
-    const created = calls.find((c) => c.event === "created");
-    expect(created?.props.trigger_surface).toBe("system");
-    expect(created?.props.task_source).toBe("system");
-    // The row itself says system too, so the dashboard UI stops calling it mcp.
-    const row = await getDbClient().get<{ source: string }>(
-      "SELECT source FROM agent_tasks WHERE taskType = 'boot-triage'",
-    );
-    expect(row?.source).toBe("system");
-  });
+  // The two heartbeat creators default to source "mcp" when they omit `source`,
+  // so each one is run for real and judged on the row it persists and the
+  // task.created event it emits.
+  const heartbeatCreators: Array<{ taskType: string; create: () => Promise<void> }> = [
+    { taskType: "boot-triage", create: createBootTriageTask },
+    {
+      taskType: "heartbeat-checklist",
+      create: async () => {
+        await updateAgentProfile(LEAD_ID, { heartbeatMd: "- Check for stuck tasks\n" });
+        await checkHeartbeatChecklist();
+      },
+    },
+  ];
+
+  for (const { taskType, create } of heartbeatCreators) {
+    test(`a ${taskType} task reports system, not mcp`, async () => {
+      await create();
+      await flush();
+
+      const row = await getDbClient().get<{ id: string; source: string }>(
+        "SELECT id, source FROM agent_tasks WHERE taskType = ?",
+        [taskType],
+      );
+      // The row says system too, so the dashboard UI stops calling it mcp.
+      expect(row?.source).toBe("system");
+
+      const created = forTask(row?.id as string, "created");
+      expect(created?.props.trigger_surface).toBe("system");
+      expect(created?.props.task_source).toBe("system");
+    });
+  }
 
   test("an orphan (parent row deleted) uses the deepest row that still exists", async () => {
     const root = await createTaskExtended("root", { agentId: LEAD_ID, source: "github" });
@@ -175,37 +196,5 @@ describe("trigger_surface on task telemetry", () => {
     expect(await resolveTriggerSurface("chain-59")).toBe("mcp");
     // A chain inside the cap reaches the slack root.
     expect(await resolveTriggerSurface("chain-40")).toBe("slack");
-  });
-});
-
-/** Index just past the `)` that closes the call whose `(` is at `open`. Enough for source text without parens in strings. */
-function balancedCallEnd(text: string, open: number): number {
-  let depth = 0;
-  for (let i = open; i < text.length; i++) {
-    if (text[i] === "(") depth += 1;
-    else if (text[i] === ")" && --depth === 0) return i + 1;
-  }
-  return text.length;
-}
-
-describe("heartbeat task sources", () => {
-  test("every createTaskExtended call in src/heartbeat passes an explicit source", () => {
-    const dir = new URL("../heartbeat/", import.meta.url);
-    const files = new Bun.Glob("*.ts").scanSync({ cwd: dir.pathname });
-    let callSites = 0;
-    for (const file of files) {
-      const text = readFileSync(`${dir.pathname}${file}`, "utf8");
-      let from = 0;
-      for (;;) {
-        const at = text.indexOf("createTaskExtended(", from);
-        if (at < 0) break;
-        from = at + 1;
-        if (text.slice(Math.max(0, at - 10), at).includes("function")) continue;
-        callSites += 1;
-        const call = text.slice(at, balancedCallEnd(text, at + "createTaskExtended".length));
-        expect(call, `${file}: createTaskExtended without source`).toMatch(/\bsource:/);
-      }
-    }
-    expect(callSites).toBeGreaterThanOrEqual(3);
   });
 });
