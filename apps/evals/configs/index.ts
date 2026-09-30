@@ -774,6 +774,20 @@ export const configs: HarnessConfig[] = [
     provider: "codex",
     model: "gpt-6-luna",
   },
+  // Round-13 (2026-09-30): the catalog's two codex ids with no config. The
+  // "every codex model has a config" test in index.test.ts catches the next one.
+  {
+    id: "codex-6.1-sol",
+    label: "Codex / gpt-6.1-sol",
+    provider: "codex",
+    model: "gpt-6.1-sol",
+  },
+  {
+    id: "codex-5.6",
+    label: "Codex / gpt-5.6",
+    provider: "codex",
+    model: "gpt-5.6",
+  },
 ];
 
 export const DEFAULT_CONFIG_IDS = ["claude-haiku", "pi-deepseek-flash", "opencode-gemini-flash"];
