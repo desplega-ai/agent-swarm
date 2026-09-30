@@ -704,6 +704,7 @@ The flag defaults to `false`. Loading a deferred tool changes the tool set mid-s
 - `models: false` keeps model calls out of scripts, where they would bypass the session's cost accounting.
 - Scripts receive a tool's `structuredContent` when the tool declares an `outputSchema`, which every swarm tool does.
 - Nested calls go through pi's tool pipeline, so the swarm `tool_call` hooks (cancellation, loop detection) still see them.
+- `createBoundedCodemodeExtension` caps each script: a 120 s deadline (pi's default is none, and it also overrides a longer `timeout_ms` in the script's `// @options` line), 32 nested tool calls, and 4 running at once. Hitting a limit, or cancelling the task, aborts the sandbox signal, which interrupts the QuickJS worker and fails the codemode call.
 
 The flag is the only switch: when it is on, every pi session gets codemode, whatever the task's model or tier. Our July scripts-only eval found small models degrade as coordinators when they must work through scripts, so pilot it on an agent that runs a capable model. Leave the flag off unless you are piloting it, and compare tool calls per task and cost against a pi agent without it.
 

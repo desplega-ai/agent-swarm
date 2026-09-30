@@ -126,7 +126,7 @@ On success the pi wrapper also returns the server's `structuredContent` next to 
 
 **pi tool deferral** (`PI_TOOL_DEFERRAL`, default off): non-core swarm tools get `exposure: "deferred"` and the session adds pi's `tool_search`. The adapter's `traits` getter reads the same flag for `hasToolSearch`, so the prompt and the session agree. Keep both reads on `process.env`. Pilot procedure: the harness-providers guide, section "pi tool deferral".
 
-**pi codemode** (`PI_CODEMODE`, default off): adds `createCodemodeExtension({ mode: "on", models: false })` and `+codemode` on every pi session. Never switch to `mode: "only"`: lifecycle tools must stay directly callable.
+**pi codemode** (`PI_CODEMODE`, default off): adds `createCodemodeExtension({ mode: "on", models: false })`, wrapped by `createBoundedCodemodeExtension` (120 s per-script deadline, 32 nested calls, 4 concurrent), and `+codemode` on every pi session. Never switch to `mode: "only"`: lifecycle tools must stay directly callable.
 
 ## Live task steering
 

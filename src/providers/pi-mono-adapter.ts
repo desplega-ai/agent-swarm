@@ -1161,11 +1161,123 @@ export function piExtensionFactories(
   const factories: ExtensionFactory[] = [swarmExtension];
   if (features.toolDeferral) factories.push(createToolSearchExtension());
   if (features.installedMcp) factories.push(createSwarmMcpExtension());
-  // "on" keeps declared tools declared; "only" would hide the lifecycle tools
-  // behind scripts. `models: false` keeps model calls out of scripts, where
-  // they would bypass the session's cost accounting.
-  if (features.codemode) factories.push(createCodemodeExtension({ mode: "on", models: false }));
+  if (features.codemode) factories.push(createBoundedCodemodeExtension());
   return factories;
+}
+
+/** Hard deadline for one codemode script. pi's default is none. */
+export const PI_CODEMODE_TIMEOUT_MS = 120_000;
+/** Nested tool calls one codemode script may start. */
+export const PI_CODEMODE_MAX_NESTED_CALLS = 32;
+/** Nested tool calls one codemode script may run at once. */
+export const PI_CODEMODE_MAX_CONCURRENT_CALLS = 4;
+
+export interface CodemodeLimits {
+  timeoutMs: number;
+  maxNestedCalls: number;
+  maxConcurrentCalls: number;
+}
+
+const DEFAULT_CODEMODE_LIMITS: CodemodeLimits = {
+  timeoutMs: PI_CODEMODE_TIMEOUT_MS,
+  maxNestedCalls: PI_CODEMODE_MAX_NESTED_CALLS,
+  maxConcurrentCalls: PI_CODEMODE_MAX_CONCURRENT_CALLS,
+};
+
+/**
+ * pi's codemode extension with a per-script deadline and nested-call budget.
+ * pi has no option for either: a script runs until it returns unless its own
+ * `// @options` line sets `timeout_ms`. Both limits abort the signal pi hands
+ * the sandbox, which interrupts the QuickJS worker and fails the codemode call.
+ *
+ * "on" keeps declared tools declared; "only" would hide the lifecycle tools
+ * behind scripts. `models: false` keeps model calls out of scripts, where
+ * they would bypass the session's cost accounting.
+ */
+export function createBoundedCodemodeExtension(
+  limits: CodemodeLimits = DEFAULT_CODEMODE_LIMITS,
+): ExtensionFactory {
+  const codemode = createCodemodeExtension({ mode: "on", models: false });
+  return (pi) =>
+    codemode(
+      new Proxy(pi, {
+        get(target, prop) {
+          if (prop === "registerTool") {
+            return (tool: ToolDefinition) => target.registerTool(boundCodemodeTool(tool, limits));
+          }
+          const value = Reflect.get(target, prop, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      }),
+    );
+}
+
+export function boundCodemodeTool(tool: ToolDefinition, limits: CodemodeLimits): ToolDefinition {
+  return {
+    ...tool,
+    execute: async (toolCallId, params, signal, onUpdate, ctx) => {
+      const script = new AbortController();
+      const stop = (message: string) => {
+        if (!script.signal.aborted) script.abort(new Error(message));
+      };
+      const onOuterAbort = () =>
+        script.abort(signal?.reason ?? new Error("Codemode script cancelled"));
+      if (signal?.aborted) onOuterAbort();
+      else signal?.addEventListener("abort", onOuterAbort, { once: true });
+      const timer = setTimeout(
+        () => stop(`Codemode script exceeded its ${limits.timeoutMs} ms deadline`),
+        limits.timeoutMs,
+      );
+
+      let started = 0;
+      let running = 0;
+      const waiters: Array<() => void> = [];
+      const release = () => {
+        running--;
+        waiters.shift()?.();
+      };
+      const executeTool: typeof ctx.executeTool = async (name, args, options) => {
+        if (script.signal.aborted) throw new Error("Codemode script already stopped");
+        if (++started > limits.maxNestedCalls) {
+          const message = `Codemode script exceeded its budget of ${limits.maxNestedCalls} nested tool calls`;
+          stop(message);
+          throw new Error(message);
+        }
+        while (running >= limits.maxConcurrentCalls) {
+          await new Promise<void>((resolve) => {
+            waiters.push(resolve);
+            script.signal.addEventListener("abort", () => resolve(), { once: true });
+          });
+          if (script.signal.aborted) {
+            waiters.shift()?.();
+            throw new Error("Codemode script already stopped");
+          }
+        }
+        running++;
+        try {
+          return await ctx.executeTool(name, args, options);
+        } finally {
+          release();
+        }
+      };
+      const boundedCtx = ctx
+        ? new Proxy(ctx, {
+            get(target, prop) {
+              if (prop === "executeTool") return executeTool;
+              const value = Reflect.get(target, prop, target);
+              return typeof value === "function" ? value.bind(target) : value;
+            },
+          })
+        : ctx;
+
+      try {
+        return await tool.execute(toolCallId, params, script.signal, onUpdate, boundedCtx);
+      } finally {
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", onOuterAbort);
+      }
+    },
+  };
 }
 
 /**
