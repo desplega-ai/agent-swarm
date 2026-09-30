@@ -16,14 +16,33 @@ export function hasSwarmMarker(body: string): boolean {
   return SWARM_MARKER_RE.test(body);
 }
 
-/** The task id of a "sent" reply, else null. */
+/** The task id when a body starts with the "sent" marker, else null. Parsing only: see `sentReplyTaskId`. */
 export function sentTaskIdOf(reply: { body: string }): string | null {
   return SENT_MARKER_RE.exec(reply.body)?.[1] ?? null;
 }
 
-/** True when any reply of the thread is a "sent" reply. */
-export function isSentToSwarm(thread: { replies: ReadonlyArray<{ body: string }> }): boolean {
-  return thread.replies.some((reply) => sentTaskIdOf(reply) !== null);
+interface Authored {
+  body: string;
+  author: string;
+}
+
+/**
+ * The task id when `reply` is the swarm's "sent" reply on `thread`, else
+ * null. The browser cannot tell which drive member is the swarm service
+ * account (`/status` does not name it, and its email is configurable), so
+ * the rule is: the marker opens the reply, and the reply's author is not the
+ * thread's author. A human cannot mark their own thread as sent.
+ */
+export function sentReplyTaskId(thread: { author: string }, reply: Authored): string | null {
+  return reply.author !== thread.author ? sentTaskIdOf(reply) : null;
+}
+
+/** True when any reply of the thread is the swarm's "sent" reply (`sentReplyTaskId`). */
+export function isSentToSwarm(thread: {
+  author: string;
+  replies: ReadonlyArray<Authored>;
+}): boolean {
+  return thread.replies.some((reply) => sentReplyTaskId(thread, reply) !== null);
 }
 
 export type BodySegment = { kind: "text"; text: string } | { kind: "swarm"; text: string };

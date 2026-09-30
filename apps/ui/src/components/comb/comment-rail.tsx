@@ -1,5 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { CloudOff, MessageSquare, MessageSquarePlus, RefreshCw, X } from "lucide-react";
+import { CloudOff, Lock, MessageSquare, MessageSquarePlus, RefreshCw, X } from "lucide-react";
+import { useReducedMotion } from "motion/react";
 import {
   type ReactNode,
   type RefObject,
@@ -15,6 +16,7 @@ import { toast } from "sonner";
 import {
   addAgentFsComment,
   agentFsCommentsKey,
+  agentFsCommentsQuery,
   useAgentFsAccess,
   useAgentFsComments,
 } from "@/api/hooks/use-agent-fs";
@@ -28,10 +30,16 @@ import { useCommentAnchors } from "@/hooks/use-comment-anchors";
 import { useConfig } from "@/hooks/use-config";
 import type { CommentAddParams, CommentListEntry, StatResult } from "@/lib/agent-fs/types";
 import type { AnchorResolution } from "@/lib/comb/comment-anchor";
+import { COMMENT_LIST_MAX } from "@/lib/comb/comments";
 import type { DomTextSpace } from "@/lib/comb/dom-text-space";
-import type { OutboxEntry } from "@/lib/comb/drafts";
+import { browserStorage, type OutboxEntry, sweepExpiredDrafts } from "@/lib/comb/drafts";
 import type { DrivePath } from "@/lib/comb/paths";
-import { CommentComposer, type ComposerExtrasContext, useHasDraft } from "./comment-composer";
+import {
+  CommentComposer,
+  type ComposerExtrasContext,
+  READ_ONLY_MESSAGE,
+  useHasDraft,
+} from "./comment-composer";
 import {
   CommentContextProvider,
   type CommentContextValue,
@@ -39,6 +47,7 @@ import {
 } from "./comment-context";
 import { CommentHighlights } from "./comment-highlights";
 import { CommentThread } from "./comment-thread";
+import { QuoteExcerpt } from "./quote-excerpt";
 import { SelectionCommentButton } from "./selection-comment-button";
 import { type CommentOutbox, useCommentOutbox } from "./use-comment-outbox";
 import { useDomTextSpace } from "./use-dom-text-space";
@@ -61,20 +70,17 @@ function useWideLayout(): boolean {
   );
 }
 
-function prefersReducedMotion(): boolean {
-  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-}
-
 /** Scroll the viewer pane to a comment's passage. False when it has none. */
-function scrollToPassage(space: DomTextSpace | null, anchor: AnchorResolution | undefined) {
+function scrollToPassage(
+  space: DomTextSpace | null,
+  anchor: AnchorResolution | undefined,
+  reduceMotion: boolean,
+) {
   if (!space || anchor?.start == null || anchor.end == null) return false;
   const target =
     space.blocksFor(anchor.start, anchor.end)[0] ??
     space.toRange(anchor.start, anchor.end)?.startContainer.parentElement;
-  target?.scrollIntoView({
-    block: "center",
-    behavior: prefersReducedMotion() ? "auto" : "smooth",
-  });
+  target?.scrollIntoView({ block: "center", behavior: reduceMotion ? "auto" : "smooth" });
   return target != null;
 }
 
@@ -107,31 +113,47 @@ export function CommentRail({
 }: CommentRailProps) {
   const access = useAgentFsAccess();
   const { apiUrl } = useConfig().config;
-  const openQuery = useAgentFsComments(file);
-  const resolvedQuery = useAgentFsComments(file, { resolved: true });
-  const open = openQuery.data ?? NO_THREADS;
-  const resolved = resolvedQuery.data ?? NO_THREADS;
+  const query = useAgentFsComments(file);
+  const threads = query.data?.threads ?? NO_THREADS;
+  const open = useMemo(() => threads.filter((thread) => !thread.resolved), [threads]);
+  const resolved = useMemo(() => threads.filter((thread) => thread.resolved), [threads]);
   const queryClient = useQueryClient();
+  const reduceMotion = useReducedMotion() ?? false;
+
+  // Expired drafts of any file go once the rail mounts.
+  useEffect(() => sweepExpiredDrafts(browserStorage(), Date.now()), []);
 
   const [readOnly, setReadOnly] = useState(false);
   const scope = useMemo(
     () => ({
       apiUrl,
       endpoint: access.endpoint,
+      userId: access.userId ?? "",
       orgId: file.orgId,
       driveId: file.driveId,
       path: file.path,
     }),
-    [apiUrl, access.endpoint, file.orgId, file.driveId, file.path],
+    [apiUrl, access.endpoint, access.userId, file.orgId, file.driveId, file.path],
   );
-  const outbox = useCommentOutbox(scope, async (params: CommentAddParams) => {
-    await addAgentFsComment(access, file, params);
-    void queryClient.invalidateQueries({ queryKey: agentFsCommentsKey(access, file) });
+  const outbox = useCommentOutbox(scope, {
+    send: async (params: CommentAddParams) => {
+      await addAgentFsComment(access, file, params);
+      void queryClient.invalidateQueries({ queryKey: agentFsCommentsKey(access, file) });
+    },
+    // Fresh, not paused while offline, and no retries: an offline retry fails fast.
+    fetchThreads: async () =>
+      (
+        await queryClient.fetchQuery({
+          ...agentFsCommentsQuery(access, file),
+          staleTime: 0,
+          retry: false,
+          networkMode: "always",
+        })
+      ).threads,
   });
 
   // Anchors: resolve every thread against the text the viewer shows.
   const space = useDomTextSpace(viewerRef);
-  const threads = useMemo(() => [...open, ...resolved], [open, resolved]);
   const anchors = useCommentAnchors(file, threads, space, stat.currentVersion);
 
   const [searchParams, setSearchParams] = useSearchParams();
@@ -158,30 +180,34 @@ export function CommentRail({
         { replace: true },
       );
       const anchor = anchors.get(id);
-      if (scrollToPassage(space, anchor)) setSheetOpen(false);
+      if (scrollToPassage(space, anchor, reduceMotion)) setSheetOpen(false);
       else if (anchor?.status === "lost") {
         toast.info("The text this comment pointed to is no longer in the file.");
       }
     },
-    [anchors, space, setSearchParams],
+    [anchors, space, reduceMotion, setSearchParams],
   );
 
-  // Deep link `?comment=<id>`: once the thread loads, open its tab and select
-  // it. Scroll to its passage as soon as the passage resolves.
+  // Deep link `?comment=<id>`: once the thread loads, open its tab (and the
+  // sheet on narrow layouts) and select it. Scroll to its passage as soon as
+  // the passage resolves.
   const linkedId = searchParams.get("comment");
   useEffect(() => {
     if (!linkedId) return;
     let link = linkRef.current;
     if (link?.id !== linkedId) {
-      const inOpen = open.some((thread) => thread.id === linkedId);
-      if (!inOpen && !resolved.some((thread) => thread.id === linkedId)) return;
-      setTab(inOpen ? "open" : "resolved");
+      const thread = threads.find((t) => t.id === linkedId);
+      if (!thread) return;
+      setTab(thread.resolved ? "resolved" : "open");
       setActiveId(linkedId);
+      if (!wide) setSheetOpen(true);
       link = { id: linkedId, scrolled: false };
       linkRef.current = link;
     }
-    if (!link.scrolled && scrollToPassage(space, anchors.get(linkedId))) link.scrolled = true;
-  }, [linkedId, open, resolved, anchors, space]);
+    if (!link.scrolled && scrollToPassage(space, anchors.get(linkedId), reduceMotion)) {
+      link.scrolled = true;
+    }
+  }, [linkedId, threads, anchors, space, wide, reduceMotion]);
 
   // Keep the selected or doc-hovered card in view in the rail.
   const listRef = useRef<HTMLDivElement>(null);
@@ -221,16 +247,16 @@ export function CommentRail({
     [file, scope, outbox, readOnly, renderComposerExtras],
   );
 
-  // A failed poll keeps the threads it already has on screen.
-  const tabQuery = tab === "open" ? openQuery : resolvedQuery;
   const rail = (
     <RailBody
       tab={tab}
       onTabChange={setTab}
       open={open}
       resolved={resolved}
-      loading={tabQuery.isPending}
-      error={tabQuery.data === undefined ? tabQuery.error : null}
+      truncated={query.data?.truncated ?? false}
+      loading={query.isPending}
+      // A failed poll keeps the threads it already has on screen.
+      error={query.data === undefined ? query.error : null}
       anchors={anchors}
       activeId={activeId}
       hoveredId={hover?.from === "doc" ? hover.id : null}
@@ -242,6 +268,7 @@ export function CommentRail({
       threadActions={threadActions}
     />
   );
+  const notSent = outbox.entries.length;
 
   return (
     <CommentContextProvider value={context}>
@@ -259,11 +286,7 @@ export function CommentRail({
         }
         onActivate={activate}
       />
-      <SelectionCommentButton
-        rootRef={viewerRef}
-        enabled={space !== null}
-        onPendingChange={setPending}
-      />
+      <SelectionCommentButton rootRef={viewerRef} space={space} onPendingChange={setPending} />
       {wide ? (
         <aside
           aria-label="Comments"
@@ -278,10 +301,10 @@ export function CommentRail({
               variant="outline"
               size="sm"
               className="fixed right-4 bottom-4 z-30 shadow-sm"
-              aria-label={`Comments (${open.length} open)`}
+              aria-label={`Comments (${open.length} open${notSent ? `, ${notSent} not sent` : ""})`}
             >
-              <MessageSquare />
-              {open.length}
+              {notSent ? <CloudOff className="text-status-error-strong" /> : <MessageSquare />}
+              {open.length + notSent}
             </Button>
           </SheetTrigger>
           <SheetContent
@@ -305,6 +328,8 @@ interface RailBodyProps {
   onTabChange: (tab: RailTab) => void;
   open: CommentListEntry[];
   resolved: CommentListEntry[];
+  /** Only the newest `COMMENT_LIST_MAX` threads are listed. */
+  truncated: boolean;
   loading: boolean;
   error: Error | null;
   anchors: Map<string, AnchorResolution>;
@@ -324,6 +349,7 @@ function RailBody({
   onTabChange,
   open,
   resolved,
+  truncated,
   loading,
   error,
   anchors,
@@ -336,11 +362,20 @@ function RailBody({
   header,
   threadActions,
 }: RailBodyProps) {
-  const { renderComposerExtras } = useCommentContext();
+  const { readOnly, renderComposerExtras } = useCommentContext();
   // A saved file-level draft reopens its composer (after a reload).
   const hasFileDraft = useHasDraft({ kind: "file" });
   const [composing, setComposing] = useState(hasFileDraft);
   const threads = tab === "open" ? open : resolved;
+
+  // A closed file-level composer gives focus back to its button.
+  const fileButtonRef = useRef<HTMLButtonElement>(null);
+  const restoreFocus = useRef(false);
+  useEffect(() => {
+    if (composing || !restoreFocus.current) return;
+    restoreFocus.current = false;
+    fileButtonRef.current?.focus();
+  }, [composing]);
 
   return (
     <>
@@ -356,16 +391,24 @@ function RailBody({
           </TabsList>
         </Tabs>
         <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            className="flex-1"
-            onClick={() => setComposing(true)}
-            disabled={composing}
-          >
-            <MessageSquarePlus />
-            Comment on file
-          </Button>
+          {readOnly ? (
+            <p className="flex flex-1 items-center gap-1.5 text-xs text-muted-foreground">
+              <Lock className="size-3.5 shrink-0" aria-hidden />
+              {READ_ONLY_MESSAGE}
+            </p>
+          ) : (
+            <Button
+              ref={fileButtonRef}
+              size="sm"
+              variant="outline"
+              className="flex-1"
+              onClick={() => setComposing(true)}
+              disabled={composing}
+            >
+              <MessageSquarePlus />
+              Comment on file
+            </Button>
+          )}
           {/* Rail header actions mount point (step-9 Send N to swarm). */}
           {header}
         </div>
@@ -374,13 +417,22 @@ function RailBody({
             target={{ kind: "file" }}
             placeholder="Comment on this file"
             autoFocus
-            onClose={() => setComposing(false)}
+            onClose={() => {
+              restoreFocus.current = true;
+              setComposing(false);
+            }}
             renderComposerExtras={renderComposerExtras}
           />
         ) : null}
       </div>
+      {/* Both tabs: a comment that did not post is never out of sight. */}
+      <OutboxList />
       <div ref={listRef} className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-3">
-        {tab === "open" ? <OutboxList /> : null}
+        {truncated ? (
+          <p className="text-xs text-muted-foreground">
+            Showing the newest {COMMENT_LIST_MAX.toLocaleString()} threads.
+          </p>
+        ) : null}
         {loading ? (
           <>
             <Skeleton className="h-24 w-full" />
@@ -393,7 +445,7 @@ function RailBody({
             icon={MessageSquare}
             title={tab === "open" ? "No open comments" : "No resolved comments"}
             description={
-              tab === "open"
+              tab === "open" && !readOnly
                 ? canAnchor
                   ? "Select text to comment on a passage, or comment on the whole file."
                   : "Comment on the whole file."
@@ -419,28 +471,69 @@ function RailBody({
   );
 }
 
-/** Comments that failed to post (network error or 5xx), with Retry and Discard. */
+/**
+ * Comments that failed to post (network error or 5xx), with Retry and
+ * Discard. The live region stays mounted, so a new entry is announced.
+ */
 function OutboxList() {
   const { outbox } = useCommentContext();
-  if (outbox.entries.length === 0) return null;
+  const { entries, sending } = outbox;
   return (
-    <section aria-label="Not sent" className="flex flex-col gap-2">
-      {outbox.entries.map((entry) => (
-        <OutboxCard key={entry.id} entry={entry} outbox={outbox} />
-      ))}
-    </section>
+    <div aria-live="polite" aria-atomic={false}>
+      {entries.length > 0 ? (
+        <section
+          aria-label="Not sent"
+          className="flex max-h-60 flex-col gap-2 overflow-y-auto border-b border-border-subtle p-3"
+        >
+          {entries.length > 1 ? (
+            <div className="flex items-center justify-between gap-2 text-xs">
+              <span className="font-medium text-status-error-strong">
+                {entries.length} not sent
+              </span>
+              <Button
+                size="xs"
+                variant="ghost"
+                onClick={() => void outbox.retryAll()}
+                disabled={sending.size === entries.length}
+              >
+                <RefreshCw />
+                Retry all
+              </Button>
+            </div>
+          ) : null}
+          {entries.map((entry) => (
+            <OutboxCard
+              key={entry.id}
+              entry={entry}
+              outbox={outbox}
+              sending={sending.has(entry.id)}
+            />
+          ))}
+        </section>
+      ) : null}
+    </div>
   );
 }
 
-function OutboxCard({ entry, outbox }: { entry: OutboxEntry; outbox: CommentOutbox }) {
+function OutboxCard({
+  entry,
+  outbox,
+  sending,
+}: {
+  entry: OutboxEntry;
+  outbox: CommentOutbox;
+  /** This tab is sending it now: Retry and Discard wait. */
+  sending: boolean;
+}) {
+  const label = `${sending ? "Sending" : "Not sent"}${entry.params.parentId ? " (reply)" : ""}`;
   return (
-    <article className="flex flex-col gap-2 rounded-lg border border-dashed border-status-error/40 p-3">
+    <article className="flex flex-col gap-2 rounded-lg border border-dashed border-status-error/40 bg-card p-3">
       <div className="flex items-center justify-between gap-2 text-xs">
         <Tooltip>
           <TooltipTrigger asChild>
             <span className="flex items-center gap-1.5 font-medium text-status-error-strong">
               <CloudOff className="size-3.5" aria-hidden />
-              Not sent{entry.params.parentId ? " (reply)" : ""}
+              {label}
             </span>
           </TooltipTrigger>
           <TooltipContent>{entry.error}</TooltipContent>
@@ -449,8 +542,8 @@ function OutboxCard({ entry, outbox }: { entry: OutboxEntry; outbox: CommentOutb
           <Button
             size="xs"
             variant="ghost"
-            onClick={() => void outbox.retryAll()}
-            disabled={outbox.retrying}
+            onClick={() => void outbox.retry(entry.id)}
+            disabled={sending}
           >
             <RefreshCw />
             Retry
@@ -459,17 +552,14 @@ function OutboxCard({ entry, outbox }: { entry: OutboxEntry; outbox: CommentOutb
             size="icon-xs"
             variant="ghost"
             aria-label="Discard"
+            disabled={sending}
             onClick={() => outbox.discard(entry.id)}
           >
             <X />
           </Button>
         </div>
       </div>
-      {entry.params.quote?.exact ? (
-        <p className="line-clamp-2 border-l-2 border-border pl-2 text-xs text-muted-foreground">
-          {entry.params.quote.exact}
-        </p>
-      ) : null}
+      {entry.params.quote?.exact ? <QuoteExcerpt text={entry.params.quote.exact} /> : null}
       <p className="whitespace-pre-wrap break-words text-sm">{entry.params.body}</p>
     </article>
   );

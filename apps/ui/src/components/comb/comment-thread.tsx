@@ -1,5 +1,5 @@
 import { Check, MessageSquare, RotateCcw, Send, TriangleAlert } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { useResolveComment } from "@/api/hooks/use-agent-fs";
@@ -10,11 +10,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { AgentFsError } from "@/lib/agent-fs/client";
 import type { CommentEntry, CommentListEntry } from "@/lib/agent-fs/types";
 import { type AnchorResolution, commentQuote } from "@/lib/comb/comment-anchor";
-import { sentTaskIdOf, splitSwarmMarkers } from "@/lib/comb/markers";
+import { sentReplyTaskId, splitSwarmMarkers } from "@/lib/comb/markers";
 import { formatRelative } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
-import { CommentComposer, useHasDraft } from "./comment-composer";
+import { CommentComposer, READ_ONLY_MESSAGE, useHasDraft } from "./comment-composer";
 import { useCommentContext } from "./comment-context";
+import { QuoteExcerpt } from "./quote-excerpt";
 
 /** A comment body: plain text, with each `@swarm` token as a chip. */
 function CommentBody({ body }: { body: string }) {
@@ -56,8 +57,8 @@ function Byline({ entry, children }: { entry: CommentEntry; children?: ReactNode
   );
 }
 
-function Reply({ reply }: { reply: CommentEntry }) {
-  const taskId = sentTaskIdOf(reply);
+function Reply({ thread, reply }: { thread: CommentListEntry; reply: CommentEntry }) {
+  const taskId = sentReplyTaskId(thread, reply);
   return (
     <li className="flex flex-col gap-1 py-2">
       <Byline entry={reply} />
@@ -124,6 +125,25 @@ export function CommentThread({
   const lineStart = anchor?.lineStart ?? thread.lineStart;
   const lineEnd = anchor?.lineStart != null ? anchor.lineEnd : thread.lineEnd;
   const badge = anchor && anchor.status !== "anchored" ? ANCHOR_BADGES[anchor.status] : null;
+  const fileLevel = !quote && thread.lineStart == null;
+  const lines =
+    lineStart && anchor?.status !== "lost"
+      ? `L${lineStart}${lineEnd && lineEnd !== lineStart ? `-${lineEnd}` : ""}`
+      : null;
+
+  // A closed reply box gives focus back to the Reply button.
+  const replyButtonRef = useRef<HTMLButtonElement>(null);
+  const restoreReplyFocus = useRef(false);
+  useEffect(() => {
+    if (replying || !restoreReplyFocus.current) return;
+    restoreReplyFocus.current = false;
+    replyButtonRef.current?.focus();
+  }, [replying]);
+
+  const activate = (event: { stopPropagation: () => void }) => {
+    event.stopPropagation();
+    onActivate(thread.id);
+  };
 
   const toggleResolved = () =>
     resolve.mutate(
@@ -132,7 +152,7 @@ export function CommentThread({
         onError: (error) => {
           if (error instanceof AgentFsError && error.status === 403) {
             markReadOnly();
-            toast.error("You have view-only access");
+            toast.error(READ_ONLY_MESSAGE);
           } else {
             toast.error(error.message);
           }
@@ -155,11 +175,17 @@ export function CommentThread({
     >
       <header className="flex items-start justify-between gap-2">
         <Byline entry={thread}>
-          {lineStart && anchor?.status !== "lost" ? (
-            <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
-              L{lineStart}
-              {lineEnd && lineEnd !== lineStart ? `-${lineEnd}` : ""}
-            </span>
+          {lines || fileLevel ? (
+            // The card's keyboard handle: select it (and scroll to its passage).
+            <button
+              type="button"
+              onClick={activate}
+              aria-label={fileLevel ? "Select this file comment" : `Show ${lines} in the file`}
+              title={fileLevel ? "Comment on the whole file" : "Show in the file"}
+              className="shrink-0 rounded-sm font-mono text-[11px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
+            >
+              {fileLevel ? "File" : lines}
+            </button>
           ) : null}
         </Byline>
         <div className="flex shrink-0 items-center gap-1">
@@ -197,19 +223,8 @@ export function CommentThread({
       </header>
 
       {quote ? (
-        <button
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation();
-            onActivate(thread.id);
-          }}
-          className={cn(
-            "line-clamp-2 border-l-2 border-border pl-2 text-left text-xs text-muted-foreground",
-            anchor?.status === "lost" && "line-through",
-          )}
-          title="Show in the file"
-        >
-          {quote}
+        <button type="button" onClick={activate} title="Show in the file" className="text-left">
+          <QuoteExcerpt text={quote} struck={anchor?.status === "lost"} />
         </button>
       ) : null}
 
@@ -218,7 +233,7 @@ export function CommentThread({
       {thread.replies.length > 0 ? (
         <ol className="flex flex-col divide-y divide-border-subtle border-t border-border-subtle">
           {thread.replies.map((reply) => (
-            <Reply key={reply.id} reply={reply} />
+            <Reply key={reply.id} thread={thread} reply={reply} />
           ))}
         </ol>
       ) : null}
@@ -230,30 +245,35 @@ export function CommentThread({
             target={replyTarget}
             placeholder="Reply"
             autoFocus
-            onClose={() => setReplying(false)}
+            onClose={() => {
+              restoreReplyFocus.current = true;
+              setReplying(false);
+            }}
             renderComposerExtras={renderComposerExtras}
           />
         </div>
-      ) : (
-        <footer className="flex flex-wrap items-center gap-1">
-          {readOnly ? null : (
-            <Button
-              size="xs"
-              variant="ghost"
-              className="text-muted-foreground"
-              onClick={(event) => {
-                event.stopPropagation();
-                setReplying(true);
-              }}
-            >
-              <MessageSquare />
-              Reply
-            </Button>
-          )}
-          {/* Thread actions mount point (step-9 Send to swarm, step-10 Review changes). */}
-          {actions}
-        </footer>
-      )}
+      ) : null}
+
+      {/* Always rendered: a reply box that is open (or restored from a draft) keeps the thread actions. */}
+      <footer className="flex flex-wrap items-center gap-1 empty:hidden">
+        {readOnly || replying ? null : (
+          <Button
+            ref={replyButtonRef}
+            size="xs"
+            variant="ghost"
+            className="text-muted-foreground"
+            onClick={(event) => {
+              event.stopPropagation();
+              setReplying(true);
+            }}
+          >
+            <MessageSquare />
+            Reply
+          </Button>
+        )}
+        {/* Thread actions mount point (step-9 Send to swarm, step-10 Review changes). */}
+        {actions}
+      </footer>
     </article>
   );
 }

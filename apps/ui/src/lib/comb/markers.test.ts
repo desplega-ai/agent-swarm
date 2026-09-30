@@ -3,6 +3,7 @@ import {
   hasSwarmMarker,
   isSentToSwarm,
   SENT_MARKER_RE,
+  sentReplyTaskId,
   sentTaskIdOf,
   splitSwarmMarkers,
 } from "./markers";
@@ -44,10 +45,17 @@ describe("sent marker", () => {
     expect(sentTaskIdOf({ body: "[comb:sent task=not-a-uuid]" })).toBeNull();
   });
 
-  test("a thread is sent when any reply carries the marker", () => {
-    expect(isSentToSwarm({ replies: [{ body: "thanks" }] })).toBe(false);
-    expect(
-      isSentToSwarm({ replies: [{ body: "thanks" }, { body: `[comb:sent task=${TASK_ID}]` }] }),
-    ).toBe(true);
+  test("a thread is sent when a reply by another author opens with the marker", () => {
+    const sent = { body: `[comb:sent task=${TASK_ID}] Sent to the swarm.`, author: "swarm" };
+    const thanks = { body: "thanks", author: "x" };
+    expect(isSentToSwarm({ author: "human", replies: [thanks] })).toBe(false);
+    expect(isSentToSwarm({ author: "human", replies: [thanks, sent] })).toBe(true);
+    expect(sentReplyTaskId({ author: "human" }, sent)).toBe(TASK_ID);
+  });
+
+  test("the thread's own author cannot mark it as sent", () => {
+    const own = { body: `[comb:sent task=${TASK_ID}]`, author: "human" };
+    expect(isSentToSwarm({ author: "human", replies: [own] })).toBe(false);
+    expect(sentReplyTaskId({ author: "human" }, own)).toBeNull();
   });
 });

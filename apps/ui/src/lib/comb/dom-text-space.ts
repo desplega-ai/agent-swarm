@@ -1,12 +1,18 @@
 // Ported from agent-fs `live/src/lib/dom-text-space.ts` (agent-fs commit
 // 08e7d89). Adaptations: the walker also skips `data-comb-skip` elements and
-// Streamdown chrome (`isSkippedElement`), and `anchorFromRange` comes from
-// live/ `MarkdownViewer.tsx` (`targetFromDom`). `rehypeSourceLines` lives in
-// `rehype-source-lines.ts`.
+// Streamdown chrome (`isSkippedElement`), text viewer rows (`data-comb-row`)
+// end with exactly one "\n", `offsetToLineEnd` is new, and `anchorFromRange`
+// comes from live/ `MarkdownViewer.tsx` (`targetFromDom`, with the line range
+// fix described there). `rehypeSourceLines` lives in `rehype-source-lines.ts`.
 //
 // Relative imports only: `bun:test` runs this from the repo root.
 
-import { type AnchorQuote, captureQuote, type TextSpace } from "./comment-anchor";
+import {
+  type AnchorQuote,
+  type AnchorResolution,
+  captureQuote,
+  type TextSpace,
+} from "./comment-anchor";
 
 /**
  * A TextSpace over rendered DOM text (the markdown preview, the text viewer
@@ -18,6 +24,8 @@ import { type AnchorQuote, captureQuote, type TextSpace } from "./comment-anchor
 export interface DomTextSpace extends TextSpace {
   lineRangeToOffsets: NonNullable<TextSpace["lineRangeToOffsets"]>;
   offsetToLine: NonNullable<TextSpace["offsetToLine"]>;
+  /** Last source line of the innermost block at an offset (`offsetToLine` gives the first). */
+  offsetToLineEnd(offset: number): number | null;
   /** DOM Range for [start, end) offsets. */
   toRange(start: number, end: number): Range | null;
   /** Text offset of a DOM boundary point (e.g. a Selection range edge). */
@@ -87,6 +95,13 @@ interface Block {
   lineEnd: number;
 }
 
+/**
+ * Marks a text viewer row (one source line). A row ends with exactly one
+ * "\n", blank rows included, so the text viewer's text space is the file's
+ * own text (with LF line ends) and a quote is a verbatim substring of it.
+ */
+export const TEXT_ROW_ATTR = "data-comb-row";
+
 export function buildDomTextSpace(root: HTMLElement): DomTextSpace {
   let text = "";
   const segments: Segment[] = [];
@@ -113,7 +128,8 @@ export function buildDomTextSpace(root: HTMLElement): DomTextSpace {
     if (ls && le) {
       blocks.push({ el, start, end: text.length, lineStart: Number(ls), lineEnd: Number(le) });
     }
-    if (isBlock && text && !text.endsWith("\n")) text += "\n";
+    if (el.hasAttribute(TEXT_ROW_ATTR)) text += "\n";
+    else if (isBlock && text && !text.endsWith("\n")) text += "\n";
   };
   walk(root);
 
@@ -190,6 +206,10 @@ export function buildDomTextSpace(root: HTMLElement): DomTextSpace {
       const hits = innermost(blocks.filter((bl) => bl.start <= offset && offset < bl.end));
       return hits.length ? hits[0].lineStart : null;
     },
+    offsetToLineEnd(offset) {
+      const hits = innermost(blocks.filter((bl) => bl.start <= offset && offset < bl.end));
+      return hits.length ? hits[0].lineEnd : null;
+    },
     blocksFor(start, end) {
       return innermost(
         blocks.filter((bl) => bl.start < Math.max(end, start + 1) && bl.end > start),
@@ -208,23 +228,47 @@ export interface NewCommentAnchor {
 }
 
 /**
- * Anchor data for a new comment on a DOM range under `root`: the quote with
+ * Anchor data for a new comment on a DOM range in `space`: the quote with
  * context from the rendered text, and the source lines of the blocks it spans.
  * Null when the range holds no document text.
  */
-export function anchorFromRange(root: HTMLElement, range: Range): NewCommentAnchor | null {
-  const space = buildDomTextSpace(root);
-  const start = space.pointToOffset(range.startContainer, range.startOffset);
-  const end = space.pointToOffset(range.endContainer, range.endOffset);
+export function anchorFromRange(space: DomTextSpace, range: Range): NewCommentAnchor | null {
+  let start = space.pointToOffset(range.startContainer, range.startOffset);
+  let end = space.pointToOffset(range.endContainer, range.endOffset);
   if (start == null || end == null || end <= start) return null;
   const quote = captureQuote(space.text, start, end);
   if (!quote) return null;
+  // The lines cover the trimmed quote (`captureQuote` trims the same way):
+  // from the first block's start line to the LAST block's end line. live/
+  // takes `offsetToLine(end - 1)`, which gives the start line of a multi-line
+  // block, or no line when the selection ends at the start of the next block
+  // (a block separator). live/ has the same bug: fix it upstream too.
+  while (start < end && /\s/.test(space.text[start])) start++;
+  while (end > start && /\s/.test(space.text[end - 1])) end--;
   const lineStart = space.offsetToLine(start) ?? undefined;
-  const lineEnd = space.offsetToLine(end - 1) ?? undefined;
+  const lineEnd = space.offsetToLineEnd(end - 1) ?? undefined;
   return {
     quote,
     lineStart,
     lineEnd: lineStart != null ? Math.max(lineStart, lineEnd ?? lineStart) : undefined,
     quotedContent: quote.exact.slice(0, 200),
   };
+}
+
+/** A text space that may know the end line of the block at an offset (a `DomTextSpace` does). */
+export type AnchorSpace = TextSpace & { offsetToLineEnd?: (offset: number) => number | null };
+
+/**
+ * live/'s `withLines` reports a quote's end line as `offsetToLine(end - 1)`:
+ * the START line of a multi-line block (a paragraph over lines 3-5 shows as
+ * L3). With a space that knows block end lines, the range ends at the last
+ * block's end line, like the range stored at capture (`anchorFromRange`).
+ * Line-placed resolutions keep their own range. Fix upstream in live/ too.
+ */
+export function withBlockLineEnd(space: AnchorSpace, r: AnchorResolution): AnchorResolution {
+  if (!space.offsetToLineEnd || r.method === "lines" || r.start == null || r.end == null) return r;
+  const blockEnd = space.offsetToLineEnd(Math.max(r.start, r.end - 1));
+  return blockEnd != null && (r.lineEnd == null || blockEnd > r.lineEnd)
+    ? { ...r, lineEnd: blockEnd }
+    : r;
 }

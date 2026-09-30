@@ -46,18 +46,24 @@ export function CommentHighlights({
   onHover,
   onActivate,
 }: CommentHighlightsProps) {
-  // Painted ranges by comment id, for hit-testing.
-  const rangesRef = useRef(new Map<string, Range>());
+  // Painted ranges by comment id with their text length, for hit-testing.
+  const rangesRef = useRef(new Map<string, { range: Range; length: number }>());
   const callbacks = useRef({ onHover, onActivate });
   callbacks.current = { onHover, onActivate };
 
   useEffect(() => {
-    const ranges = new Map<string, Range>();
+    const ranges = new Map<string, { range: Range; length: number }>();
     rangesRef.current = ranges;
     if (!space) return;
     const native = supportsHighlights();
     const groups: Record<keyof typeof NAMES, Range[]> = { anchored: [], moved: [], active: [] };
     const marked: Element[] = [];
+    const markBlocks = (start: number, end: number, className: string) => {
+      for (const el of space.blocksFor(start, end)) {
+        el.classList.add(className);
+        marked.push(el);
+      }
+    };
 
     anchors.forEach((resolution, id) => {
       const painted = paintIds.has(id);
@@ -66,17 +72,25 @@ export function CommentHighlights({
       if (resolution.start == null || resolution.end == null) return;
       const range = space.toRange(resolution.start, resolution.end);
       if (!range) return;
-      ranges.set(id, range);
+      ranges.set(id, { range, length: resolution.end - resolution.start });
       if (painted) groups[resolution.status === "moved" ? "moved" : "anchored"].push(range);
       if (emphasized) groups.active.push(range);
       if (!native) {
-        for (const el of space.blocksFor(resolution.start, resolution.end)) {
-          el.classList.add(emphasized ? FALLBACK_ACTIVE_CLASS : FALLBACK_CLASS);
-          marked.push(el);
-        }
+        markBlocks(
+          resolution.start,
+          resolution.end,
+          emphasized ? FALLBACK_ACTIVE_CLASS : FALLBACK_CLASS,
+        );
       }
     });
-    if (pending) groups.active.push(pending);
+    if (pending) {
+      groups.active.push(pending);
+      if (!native) {
+        const start = space.pointToOffset(pending.startContainer, pending.startOffset);
+        const end = space.pointToOffset(pending.endContainer, pending.endOffset);
+        if (start != null && end != null) markBlocks(start, end, FALLBACK_ACTIVE_CLASS);
+      }
+    }
 
     if (native) {
       for (const [group, name] of Object.entries(NAMES) as [keyof typeof NAMES, string][]) {
@@ -98,8 +112,7 @@ export function CommentHighlights({
     const hitAt = (x: number, y: number): string | null => {
       let hit: string | null = null;
       let hitLength = Number.POSITIVE_INFINITY;
-      rangesRef.current.forEach((range, id) => {
-        const length = range.toString().length;
+      rangesRef.current.forEach(({ range, length }, id) => {
         if (length >= hitLength) return;
         for (const rect of range.getClientRects()) {
           if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {

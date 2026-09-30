@@ -2,10 +2,16 @@ import { MessageSquarePlus } from "lucide-react";
 import { type RefObject, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Kbd } from "@/components/ui/kbd";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
-import { anchorFromRange, type NewCommentAnchor } from "@/lib/comb/dom-text-space";
+import {
+  anchorFromRange,
+  type DomTextSpace,
+  type NewCommentAnchor,
+} from "@/lib/comb/dom-text-space";
 import { CommentComposer } from "./comment-composer";
 import { useCommentContext } from "./comment-context";
+import { QuoteExcerpt } from "./quote-excerpt";
 
 interface Selected {
   range: Range;
@@ -15,20 +21,28 @@ interface Selected {
 
 interface SelectionCommentButtonProps {
   rootRef: RefObject<HTMLElement | null>;
-  /** The pane shows text with source lines (a text space exists). */
-  enabled: boolean;
+  /** The pane's text space. Null: the pane shows no text with source lines. */
+  space: DomTextSpace | null;
   /** The passage being commented on, so the page keeps it highlighted while typing. */
   onPendingChange: (range: Range | null) => void;
 }
 
+// The "C" shortcut does not fire while the human types or another overlay is
+// open (the dashboard shortcut rules). This popover is a dialog too.
+const TYPING_TARGET =
+  'input, textarea, select, [contenteditable=""], [contenteditable="true"], [role="combobox"], [role="listbox"], [role="menu"], [role="option"]';
+const OPEN_OVERLAY =
+  '[role="dialog"][data-state="open"]:not([data-comb-selection]), [role="menu"], [role="listbox"]';
+
 /**
  * A "Comment" button next to a text selection in the viewer pane. It opens
  * the composer in place, anchored to the selected passage (the quote with 32
- * characters of context, and the source lines of the blocks it spans).
+ * characters of context, and the source lines of the blocks it spans). While
+ * the button shows, "C" does the same (keyboard selections: caret browsing).
  */
 export function SelectionCommentButton({
   rootRef,
-  enabled,
+  space,
   onPendingChange,
 }: SelectionCommentButtonProps) {
   const { readOnly, renderComposerExtras } = useCommentContext();
@@ -36,6 +50,7 @@ export function SelectionCommentButton({
   const composing = selected?.anchor != null;
   const composingRef = useRef(false);
   composingRef.current = composing;
+  const enabled = space !== null;
 
   // Radix positions the popover on a virtual element that follows the range.
   // `contextElement` lets it track scrolling inside the viewer pane.
@@ -106,23 +121,56 @@ export function SelectionCommentButton({
   }, [composing, selected]);
   useEffect(() => () => pendingRef.current(null), []);
 
+  // Where focus was before the composer opened. It goes back there on close.
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+
   const close = () => setSelected(null);
 
   const startComment = () => {
-    const root = rootRef.current;
-    const anchor = root && selected ? anchorFromRange(root, selected.range) : null;
+    const anchor = space && selected ? anchorFromRange(space, selected.range) : null;
     if (!anchor || !selected) {
       toast.error("Select text in the file to comment on it.");
       close();
       return;
     }
+    const focused = document.activeElement;
+    returnFocusRef.current =
+      focused instanceof HTMLElement && focused !== document.body ? focused : null;
     setSelected({ range: selected.range, anchor });
+  };
+  const startRef = useRef(startComment);
+  startRef.current = startComment;
+
+  // "C" while the button shows opens the composer.
+  const buttonShown = selected !== null && !composing;
+  useEffect(() => {
+    if (!buttonShown) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "c" && event.key !== "C") return;
+      if (event.defaultPrevented || event.isComposing || event.repeat) return;
+      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      const target = event.target instanceof Element ? event.target : null;
+      if (target?.closest(TYPING_TARGET) || document.querySelector(OPEN_OVERLAY)) return;
+      event.preventDefault();
+      startRef.current();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [buttonShown]);
+
+  const closeComposer = () => {
+    window.getSelection()?.removeAllRanges();
+    close();
+    const target = returnFocusRef.current;
+    returnFocusRef.current = null;
+    if (target?.isConnected) requestAnimationFrame(() => target.focus());
   };
 
   return (
     <Popover open={selected !== null} onOpenChange={(open) => (open ? undefined : close())}>
       <PopoverAnchor virtualRef={virtualRef} />
       <PopoverContent
+        data-comb-selection=""
         side="bottom"
         align={composing ? "start" : "center"}
         sideOffset={6}
@@ -136,17 +184,12 @@ export function SelectionCommentButton({
       >
         {selected?.anchor ? (
           <div className="flex flex-col gap-2">
-            <p className="line-clamp-2 border-l-2 border-border pl-2 text-xs text-muted-foreground">
-              {selected.anchor.quote?.exact}
-            </p>
+            <QuoteExcerpt text={selected.anchor.quote?.exact ?? ""} />
             <CommentComposer
               target={{ kind: "anchor", anchor: selected.anchor }}
               placeholder="Comment on this passage"
               autoFocus
-              onClose={() => {
-                window.getSelection()?.removeAllRanges();
-                close();
-              }}
+              onClose={closeComposer}
               renderComposerExtras={renderComposerExtras}
             />
           </div>
@@ -157,9 +200,13 @@ export function SelectionCommentButton({
             // Keep the document selection when the button is pressed.
             onMouseDown={(event) => event.preventDefault()}
             onClick={startComment}
+            aria-keyshortcuts="C"
           >
             <MessageSquarePlus />
             Comment
+            <Kbd aria-hidden className="hidden sm:inline-flex">
+              C
+            </Kbd>
           </Button>
         )}
       </PopoverContent>

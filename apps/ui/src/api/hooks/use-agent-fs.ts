@@ -20,7 +20,6 @@ import { agentFsKey, agentFsRetry } from "@/lib/agent-fs/query";
 import type {
   CommentAddParams,
   CommentAddResult,
-  CommentListEntry,
   CommentListResult,
   CommentResolveResult,
   DiffResult,
@@ -29,7 +28,12 @@ import type {
   LsResult,
   StatResult,
 } from "@/lib/agent-fs/types";
-import { commentReadPaths, mergeCommentLists } from "@/lib/comb/comments";
+import {
+  COMB_LOG_LIMIT,
+  commentReadPaths,
+  type FileThreads,
+  listFileThreads,
+} from "@/lib/comb/comments";
 import type { DrivePath } from "@/lib/comb/paths";
 
 export { agentFsKey, agentFsRetry };
@@ -183,14 +187,11 @@ export function useDriveMembers(drive: { orgId: string; driveId: string }) {
 
 // --- Comments (step-7) -------------------------------------------------------
 
-/** Threads per `comment-list` call (agent-fs answers 50 without a limit). */
-const COMMENT_LIST_LIMIT = 200;
-
 /**
  * `["agent-fs", endpoint, userId, orgId, driveId, "comments", ...rest]`. One
- * file's lists are `(..., "comments", path, "open" | "resolved")`, with the
- * Comb path ("/docs/a.md"). Invalidate one file with `rest = [path]`, and
- * every comment query of the drive (folder lists included) with no `rest`.
+ * file's threads are `(..., "comments", path)`, with the Comb path
+ * ("/docs/a.md"). Invalidate one file with `rest = [path]`, and every comment
+ * query of the drive (folder lists included) with no `rest`.
  */
 export function agentFsCommentsKey(
   access: AgentFsAccess,
@@ -213,35 +214,35 @@ function connectedClient(access: AgentFsAccess): AgentFsClient {
 }
 
 /**
- * Root threads of one file, newest first, with their replies. Open threads by
- * default. `resolved: true` answers the resolved ones. Reads both stored path
- * forms (see `lib/comb/comments.ts`). Polls on the dashboard default (10 s).
+ * Every root thread of one file (open and resolved), newest first, with its
+ * replies: `{threads, truncated}` (`listFileThreads`, at most the newest
+ * 2,000). `comment-list {resolved: true}` answers every root, paged per
+ * stored path form (see `lib/comb/comments.ts`). Key: `(..., "comments", path)`.
  */
-export function useAgentFsComments(file: DrivePath, opts: { resolved?: boolean } = {}) {
-  const access = useAgentFsAccess();
-  const resolved = opts.resolved ?? false;
-  return useQuery({
-    queryKey: agentFsCommentsKey(access, file, file.path, resolved ? "resolved" : "open"),
-    queryFn: async ({ signal }): Promise<CommentListEntry[]> => {
+export function agentFsCommentsQuery(access: AgentFsAccess, file: DrivePath) {
+  return queryOptions({
+    queryKey: agentFsCommentsKey(access, file, file.path),
+    queryFn: ({ signal }): Promise<FileThreads> => {
       const client = connectedClient(access);
-      const lists = await Promise.all(
-        commentReadPaths(file.path).map((path) =>
-          client.callOp<CommentListResult>(
-            file.orgId,
-            "comment-list",
-            // `resolved: true` lists every root: keep the resolved ones.
-            { path, limit: COMMENT_LIST_LIMIT, ...(resolved ? { resolved: true } : {}) },
-            file.driveId,
-            { signal },
-          ),
-        ),
-      );
-      const threads = mergeCommentLists(lists.map((list) => list.comments));
-      return resolved ? threads.filter((thread) => thread.resolved) : threads;
+      return listFileThreads(commentReadPaths(file.path), async (path, offset, limit) => {
+        const page = await client.callOp<CommentListResult>(
+          file.orgId,
+          "comment-list",
+          { path, resolved: true, limit, offset },
+          file.driveId,
+          { signal },
+        );
+        return page.comments;
+      });
     },
     enabled: access.client !== null,
     retry: agentFsRetry,
   });
+}
+
+/** The file's threads. Polls on the dashboard default (10 s). Split open and resolved by `thread.resolved`. */
+export function useAgentFsComments(file: DrivePath) {
+  return useQuery(agentFsCommentsQuery(useAgentFsAccess(), file));
 }
 
 /** `comment-add`, for the composer and the outbox retry. */
@@ -267,6 +268,9 @@ export function useAddComment(file: DrivePath) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (params: CommentAddParams) => addAgentFsComment(access, file, params),
+    // Offline, try anyway: the failure moves the comment to the outbox. The
+    // default ("online") pauses the send, and the composer waits with it.
+    networkMode: "always",
     onSuccess: () => queryClient.invalidateQueries({ queryKey: agentFsCommentsKey(access, file) }),
   });
 }
@@ -314,7 +318,7 @@ export function agentFsLogQuery(
       connectedClient(access).callOp<LogResult>(
         file.orgId,
         "log",
-        { path: file.path, limit: 200 },
+        { path: file.path, limit: COMB_LOG_LIMIT },
         file.driveId,
         { signal },
       ),

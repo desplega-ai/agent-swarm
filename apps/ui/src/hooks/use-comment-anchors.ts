@@ -2,25 +2,39 @@
 // commit 08e7d89). Comb changes: `useAgentFs()` access instead of live/'s
 // `useAuth`, the version comes from the caller's `stat`, the diff key follows
 // the Comb query-key contract, a missing `fileVersion` is read from the file's
-// log, and the result is returned instead of being published to a store (the
-// comment rail owns it).
+// log (`anchorInputs`), a quote's end line is its last block's end line
+// (`withBlockLineEnd`), and the result is returned instead of being published
+// to a store (the comment rail owns it).
 
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { type QueryObserverResult, useQueries, useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { agentFsDiffQuery, agentFsLogQuery, useAgentFsAccess } from "@/api/hooks/use-agent-fs";
-import type { CommentListEntry } from "@/lib/agent-fs/types";
+import type { CommentListEntry, DiffResult } from "@/lib/agent-fs/types";
 import {
   type AnchorDiffChange,
-  type AnchorInput,
   type AnchorResolution,
   anchorNeedsDiff,
   commentAnchorInput,
   diffHasLineNumbers,
   resolveAnchor,
-  type TextSpace,
 } from "@/lib/comb/comment-anchor";
-import { versionAt } from "@/lib/comb/comments";
+import { anchorInputs } from "@/lib/comb/comments";
+import { type AnchorSpace, withBlockLineEnd } from "@/lib/comb/dom-text-space";
 import type { DrivePath } from "@/lib/comb/paths";
+
+/** One diff query: its changes, "pending" while it loads, null when unusable. */
+type DiffOutcome = AnchorDiffChange[] | null | "pending";
+
+// Module scope: `useQueries` re-runs `combine` when its identity changes. The
+// combined array is structurally shared, so it keeps its identity until an
+// outcome changes.
+function combineDiffs(results: QueryObserverResult<DiffResult>[]): DiffOutcome[] {
+  return results.map((q) => {
+    if (q.isPending && q.fetchStatus !== "idle") return "pending";
+    if (q.data && diffHasLineNumbers(q.data.changes)) return q.data.changes;
+    return null; // failed, old server, or no versioning: resolve without
+  });
+}
 
 /**
  * Resolve every anchored comment against the text the viewer shows, and fetch
@@ -33,12 +47,12 @@ import type { DrivePath } from "@/lib/comb/paths";
 export function useCommentAnchors(
   file: DrivePath,
   comments: CommentListEntry[],
-  space: TextSpace | null,
+  space: AnchorSpace | null,
   currentVersion: number | undefined,
 ): Map<string, AnchorResolution> {
   const access = useAgentFsAccess();
 
-  // Comments stored in the live/ form come without `fileVersion` (see
+  // Comments stored in the live/ form can come without `fileVersion` (see
   // `versionAt`): read it from the file's log, so their line ranges remap too.
   const needsLog = useMemo(
     () => comments.some((c) => c.fileVersion == null && commentAnchorInput(c, undefined)),
@@ -50,20 +64,14 @@ export function useCommentAnchors(
   });
   const logLoading = log.isPending && log.fetchStatus !== "idle";
 
-  const inputs = useMemo(() => {
-    const out: Array<{ id: string; version?: number; input: AnchorInput }> = [];
-    for (const c of comments) {
-      let fileVersion = c.fileVersion;
-      if (fileVersion == null) {
-        // Hold the comment back rather than trust its stored lines too early.
-        if (logLoading) continue;
-        fileVersion = log.data ? versionAt(log.data.versions, c.createdAt) : undefined;
-      }
-      const entry = commentAnchorInput({ ...c, fileVersion }, currentVersion);
-      if (entry) out.push({ id: c.id, ...entry }); // null: general comment, nothing to anchor
-    }
-    return out;
-  }, [comments, currentVersion, log.data, logLoading]);
+  const inputs = useMemo(
+    () =>
+      anchorInputs(comments, currentVersion, {
+        loading: logLoading,
+        versions: log.data?.versions,
+      }),
+    [comments, currentVersion, log.data, logLoading],
+  );
 
   const firstPass = useMemo(() => {
     const out = new Map<string, AnchorResolution>();
@@ -85,19 +93,14 @@ export function useCommentAnchors(
 
   const diffs = useQueries({
     queries: neededVersions.map((v) => agentFsDiffQuery(access, file, v, currentVersion ?? 0)),
+    combine: combineDiffs,
   });
-  // `diffs` is a new array every render: this string stands in for it.
-  const diffsKey = diffs.map((q) => `${q.status}:${q.fetchStatus}:${q.dataUpdatedAt}`).join(",");
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: diffsKey stands in for diffs.
   return useMemo(() => {
     if (!space) return firstPass;
-    const byVersion = new Map<number, AnchorDiffChange[] | null | "pending">();
+    const byVersion = new Map<number, DiffOutcome>();
     neededVersions.forEach((v, i) => {
-      const q = diffs[i];
-      if (q?.isPending && q.fetchStatus !== "idle") byVersion.set(v, "pending");
-      else if (q?.data && diffHasLineNumbers(q.data.changes)) byVersion.set(v, q.data.changes);
-      else byVersion.set(v, null); // failed, old server, or no versioning: resolve without
+      byVersion.set(v, diffs[i] ?? null);
     });
     const out = new Map(firstPass);
     for (const { id, version, input } of inputs) {
@@ -110,6 +113,7 @@ export function useCommentAnchors(
       }
       out.set(id, resolveAnchor(space, { ...input, changes }));
     }
+    for (const [id, resolution] of out) out.set(id, withBlockLineEnd(space, resolution));
     return out;
-  }, [firstPass, inputs, neededVersions, diffsKey, space]);
+  }, [firstPass, inputs, neededVersions, diffs, space]);
 }
