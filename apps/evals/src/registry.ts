@@ -190,6 +190,9 @@ function validateDimensions(
 export function validateScenario(s: Scenario): string[] {
   const errors: string[] = [];
   const names = new Set<string>();
+  if (!Number.isInteger(s.version) || s.version < 1) {
+    errors.push(`version must be a positive integer, got ${s.version}`);
+  }
   if (Array.isArray(s.workers)) {
     // WorkerSpec[] shape (v7 §9): 1..MAX entries; identity/env rules per spec.
     if (s.workers.length < 1 || s.workers.length > MAX_WORKERS) {
@@ -359,6 +362,8 @@ export interface SerializedWorkerSpec {
  */
 export interface SerializedScenario {
   id: string;
+  /** Scenario version (bumped on any prompt, fixture or check change). */
+  version: number;
   name: string;
   description: string | null;
   /** Worker COUNT for either Scenario.workers shape (back-compat). */
@@ -418,6 +423,7 @@ export function serializeScenario(s: Scenario): SerializedScenario {
   const normalized = normalizeOutcome(s.outcome);
   return {
     id: s.id,
+    version: s.version,
     name: s.name,
     description: s.description ?? null,
     workers: scenarioWorkerCount(s.workers),

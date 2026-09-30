@@ -235,4 +235,15 @@ const COLUMN_MIGRATIONS = [
   // reported applying (agent latestModel). NULL = harness default / none reported.
   "ALTER TABLE attempts ADD COLUMN reasoning_effort TEXT",
   "ALTER TABLE attempts ADD COLUMN applied_reasoning_effort TEXT",
+  // Phase 3 suite freeze: the scenario version an attempt ran at, and the suite
+  // version ("1.0") when that scenario version belongs to the suite manifest.
+  // NULL on pre-versioning rows and on off-suite runs.
+  "ALTER TABLE attempts ADD COLUMN scenario_version INTEGER",
+  "ALTER TABLE attempts ADD COLUMN suite_version TEXT",
+  // Phase 3 status hygiene: why an `error` attempt is excluded from scores
+  // ('cancelled' | 'harness-error'). The status CHECK on attempts cannot take a
+  // 'cancelled' value additively, so the reason lives here and status stays 'error'.
+  "ALTER TABLE attempts ADD COLUMN exclusion TEXT",
+  // Phase 3 hard cost cap: the run's metered spend ceiling in USD; NULL = uncapped.
+  "ALTER TABLE eval_runs ADD COLUMN max_metered_usd REAL",
 ];

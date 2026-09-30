@@ -56,7 +56,7 @@ async function setupDb() {
        config_id TEXT NOT NULL, attempt_index INTEGER NOT NULL, status TEXT NOT NULL,
        score REAL, cost_usd REAL, cost_source TEXT, judge_cost_usd REAL,
        duration_ms INTEGER, tokens_json TEXT, sandbox_json TEXT, resolved_model TEXT,
-       reasoning_effort TEXT
+       reasoning_effort TEXT, exclusion TEXT, timings_json TEXT
      )`,
   );
   await db.execute(
@@ -103,6 +103,26 @@ describe("ANALYTICS_SQL worker_version extraction", () => {
     expect(rows[2]!.worker_version).toBeNull(); // v2 with null capture
     expect(rows[3]!.worker_version).toBeNull(); // malformed JSON → json_valid guard
     expect(rows[4]!.worker_version).toBeNull(); // sandbox_json never written
+    db.close();
+  });
+});
+
+describe("ANALYTICS_SQL agent time and exclusion (Phase 3)", () => {
+  test("agent_ms is timings_json.tasksMs (null when absent or malformed); exclusion passes through", async () => {
+    const db = await setupDb();
+    const insert = (id: string, index: number, timings: string | null, exclusion: string | null) =>
+      db.execute({
+        sql: `INSERT INTO attempts (id, run_id, scenario_id, config_id, attempt_index, status, timings_json, exclusion)
+              VALUES (?, 'run-1', 's1', 'c1', ?, 'passed', ?, ?)`,
+        args: [id, index, timings, exclusion],
+      });
+    await insert("t-ok", 0, JSON.stringify({ bootMs: 50_000, tasksMs: 61_000, checksMs: 2 }), null);
+    await insert("t-null-tasks", 1, JSON.stringify({ bootMs: 50_000, tasksMs: null }), null);
+    await insert("t-garbage", 2, "not-json{", "cancelled");
+    await insert("t-missing", 3, null, "harness-error");
+    const rows = (await db.execute(ANALYTICS_SQL)).rows;
+    expect(rows.map((r) => r.agent_ms)).toEqual([61_000, null, null, null]);
+    expect(rows.map((r) => r.exclusion)).toEqual([null, null, "cancelled", "harness-error"]);
     db.close();
   });
 });

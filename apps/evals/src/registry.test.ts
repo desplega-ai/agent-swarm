@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { configs } from "../configs/index.ts";
-import { CONFIG_PRESETS, expandPresetSelection } from "../configs/presets.ts";
+import { CONFIG_PRESETS, expandPresetSelection, presetRunDefaults } from "../configs/presets.ts";
 import { serializeConfig, serializeScenario, validateScenario } from "./registry.ts";
 import type { CheckResult, DeterministicCheck, DimensionSpec, Scenario } from "./types.ts";
 
@@ -8,6 +8,7 @@ import type { CheckResult, DeterministicCheck, DimensionSpec, Scenario } from ".
 function scenario(overrides: Partial<Scenario>): Scenario {
   return {
     id: "test-scenario",
+    version: 1,
     name: "Test scenario",
     tasks: [{ title: "t0", description: "d0" }],
     outcome: {},
@@ -18,6 +19,15 @@ function scenario(overrides: Partial<Scenario>): Scenario {
 describe("validateScenario (v6 §0.11 frozen rules)", () => {
   test("a plain single-task scenario is valid", () => {
     expect(validateScenario(scenario({}))).toEqual([]);
+  });
+
+  test("version must be a positive integer", () => {
+    expect(validateScenario(scenario({ version: 3 }))).toEqual([]);
+    for (const bad of [0, -1, 1.5, Number.NaN]) {
+      expect(validateScenario(scenario({ version: bad }))).toEqual([
+        `version must be a positive integer, got ${bad}`,
+      ]);
+    }
   });
 
   test("workers bounds: 1..3 accepted, 0 / 4 / non-integers rejected", () => {
@@ -232,14 +242,50 @@ describe("serializeScenario — workerSpecs + lead (v7 §9/§12)", () => {
 });
 
 describe("CONFIG_PRESETS (v7.7 item 1 — frozen contract)", () => {
-  test("display order is frozen: frontier, challengers, oss, claude-family, budget", () => {
+  test("display order is frozen: frontier, challengers, oss, claude-family, budget, then the scheduled tiers", () => {
     expect(CONFIG_PRESETS.map((p) => p.id)).toEqual([
       "frontier",
       "challengers",
       "oss",
       "claude-family",
       "budget",
+      "nightly-canary",
+      "weekly-matrix",
     ]);
+  });
+
+  test("scheduled tiers name the plan's reference configs and carry a valid run plan", () => {
+    const nightly = CONFIG_PRESETS.find((p) => p.id === "nightly-canary");
+    const weekly = CONFIG_PRESETS.find((p) => p.id === "weekly-matrix");
+    expect(nightly?.configIds).toEqual(["claude-opus-5.5", "codex-6-luna"]);
+    expect(weekly?.configIds).toEqual([
+      "claude-opus-5.5",
+      "codex-6-luna",
+      "codex-6-astra",
+      "pi-deepseek-v4.1-flash",
+    ]);
+    expect(nightly?.runDefaults).toEqual({ attemptsPerCell: 3, maxMeteredUsd: 2 });
+    expect(weekly?.runDefaults).toEqual({ attemptsPerCell: 5, maxMeteredUsd: 12 });
+    for (const preset of CONFIG_PRESETS) {
+      const plan = preset.runDefaults;
+      if (!plan) continue;
+      expect(Number.isInteger(plan.attemptsPerCell) && plan.attemptsPerCell >= 1).toBe(true);
+      expect(Number.isFinite(plan.maxMeteredUsd) && plan.maxMeteredUsd > 0).toBe(true);
+    }
+  });
+
+  test("presetRunDefaults: first preset that sets a field wins; presets without a plan add nothing", () => {
+    expect(presetRunDefaults(["nightly-canary"])).toEqual({ attemptsPerCell: 3, maxMeteredUsd: 2 });
+    expect(presetRunDefaults(["budget", "weekly-matrix"])).toEqual({
+      attemptsPerCell: 5,
+      maxMeteredUsd: 12,
+    });
+    expect(presetRunDefaults(["nightly-canary", "weekly-matrix"])).toEqual({
+      attemptsPerCell: 3,
+      maxMeteredUsd: 2,
+    });
+    expect(presetRunDefaults(["budget"])).toEqual({});
+    expect(() => presetRunDefaults(["nope"])).toThrow('unknown preset "nope"');
   });
 
   test("preset ids are unique; configIds non-empty with no internal duplicates", () => {
@@ -362,7 +408,7 @@ describe("expandPresetSelection — CLI --preset expansion (v7.7 item 1)", () =>
 
   test("unknown preset throws the frozen error before anything else", () => {
     expect(() => expandPresetSelection(["nope"], [])).toThrow(
-      'unknown preset "nope" (available: frontier, challengers, oss, claude-family, budget)',
+      'unknown preset "nope" (available: frontier, challengers, oss, claude-family, budget, nightly-canary, weekly-matrix)',
     );
   });
 });

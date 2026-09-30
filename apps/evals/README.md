@@ -21,6 +21,10 @@ Each attempt (one cell of the matrix, run `n` times per cell):
 - Every execution starts by **sweeping leaked sandboxes** of that run (matched via `metadata.swarm`), so a SIGKILL'd run never leaves orphans past one resume.
 - Ctrl-C (CLI) and server shutdown abort gracefully: stop starting attempts, tear down live sandboxes, leave interrupted attempts resumable.
 - Infra failures retry with fresh sandboxes (`--max-retries`); harness-level task failures are *results*, not retried.
+- **Attempt hygiene.** A crash of the harness or its provider is not a model failure. Task failures that match `src/runner/harness-crash.ts` (context overflow, a dead provider stream) and tasks that time out with no session-log row end the attempt as `error` with `attempts.exclusion = 'harness-error'`; no score, pass rate or analytics aggregate counts them. Provider errors and no-output timeouts retry once on a fresh sandbox; a context overflow does not. Model-caused failures (tool loops, bad answers) stay `failed`.
+- **Dead runs leave nothing in flight.** On boot the server marks every run still `running` as `failed` (as before) and closes out every attempt still `pending`/`running`/`judging` as `error` + `exclusion = 'cancelled'`. Cancelling a run does the same to its unfinished attempts. Cancelled attempts are not attempts: analytics drops them, and `resume` resets them to `pending`. The status column stays inside its existing CHECK constraint (`pending, running, judging, passed, failed, error`), so `exclusion` carries the reason.
+- **Hard cost cap.** `--max-metered-usd <n>` (or a preset's) caps a run's metered spend: agent cost of configs billed per token, plus the judge, plus an E2B estimate (published per-second rates x the two sandbox shapes, about $0.13/h for the API sandbox and $0.33/h per worker; `EVALS_E2B_USD_PER_SANDBOX_HOUR` replaces it with one flat rate per sandbox). Once finished attempts reach the cap the runner starts nothing new and cancels the rest (`exclusion = 'cancelled'`). Attempts already running finish, so the total can pass the cap by up to `--concurrency` attempts. Billing follows the credential the sandbox gets: claude with an OAuth token is a subscription, claude with an API key is metered, codex (`OPENAI_API_KEY`) is metered unless `EVALS_CODEX_BILLING=subscription`, pi/opencode are metered (`src/cost/billing.ts`).
+- **Per-config concurrency.** A subscription-billed config runs at most 3 attempts at once whatever `--concurrency` says (`EVALS_SUBSCRIPTION_CONFIG_CONCURRENCY`), so one run cannot drain a subscription's rate window.
 
 ## Usage
 
@@ -40,6 +44,8 @@ EVALS_DB_PATH=$PWD/evals.db bun --env-file=../../.env src/cli.ts resume <runId> 
 EVALS_DB_PATH=$PWD/evals.db bun --env-file=../../.env src/cli.ts show <runId>     # terminal result matrix
 EVALS_DB_PATH=$PWD/evals.db bun --env-file=../../.env src/cli.ts serve            # UI on http://localhost:4801
 ```
+
+Scheduled-tier presets (`--preset nightly-canary`, `--preset weekly-matrix`) also carry a run plan (repeats and metered cap) that explicit flags override; `--scenarios suite` expands to every scenario of the current suite version. `POST /api/runs` takes the same via `preset` and `maxMeteredUsd`; a `preset` with no `scenarioIds` runs the whole suite. No schedule is switched on: these only name what a run contains.
 
 ### Evaluating a branch
 
@@ -228,6 +234,14 @@ Judge model precedence: `scenario.judge.model` > run `--judge-model` > `EVAL_JUD
 
 Scoring per cell: the headline is a convergent **mean dimension-score ± bootstrap CI** with a **Wilson pass-rate** companion (the CI tightens ~1/√n, so `n` is a confidence dial, not a luck dial), surfaced in `show`/serve as a ✓/~/✗ threshold-vs-CI indicator; `passedAny`/pass@1/`bestScore` remain as drill-down fields. Plus total cost and avg duration. Cost is **always tracked** via a fallback chain: harness-reported session-cost rows (`costSource: "harness"`) → recomputed from per-message token usage × the models.dev pricing snapshot (`"recomputed"`) → tagged `"unpriced"` with any extracted tokens still stored. **Token usage is tracked universally**: when harness-priced rows carry no token columns, the recompute extractor still runs (tokens only — cost/source untouched), so every attempt with parseable harness output stores `tokens_json`. On heterogeneous rosters the extractor runs per member (each member's provider/model/session files) and results merge.
 
+## Suite versions and grader validation
+
+Scenarios carry an integer `version`, and `scenarios/suite.ts` lists the versions that make up `swarm-evals@1.0`. Every attempt records `scenario_version`, and `suite_version` when its scenario at that version is in the manifest (NULL otherwise, so off-suite runs never mix into a suite chart). `scenarios/scenario-hashes.ts` pins a content hash per version (prompt, fixtures and check source); `bun test scenarios/versioning.test.ts` fails when content changes without a bump. `scenarios/CHANGELOG.md` has the bump rules.
+
+`scenarios/grader-validation.test.ts` grades every registered scenario offline: a null agent (tasks completed, nothing done) must score below 0.75 and fail a scenario gate even under a judge that gives full marks, and a reference solution (`scenarios/grader-fixtures/<id>.ts`) must pass every gate. A new scenario fails the suite until it has a fixture.
+
+The DB gained additive columns (`attempts.scenario_version`, `suite_version`, `exclusion`; `eval_runs.max_metered_usd`) via the usual boot-time `ALTER TABLE`; agent time (`agentMs`, from `timings_json.tasksMs`, sandbox boot and seeding excluded) is derived at query time.
+
 ## Database
 
 The DB of record is the Turso database `swarm-evals-local`, accessed through a **libsql embedded replica**: a local WAL file at `evals/evals-replica.db` (gitignored, disposable — rebuilt by sync) whose writes forward synchronously to the remote primary. `initDb()` syncs on boot, pulls in the background every 60 s, and asserts the replica is in WAL mode. Configuration is explicit — with no env set, `bun src/cli.ts serve` fails with a clear error instead of silently creating an empty DB:
@@ -252,6 +266,9 @@ The DB of record is the Turso database `swarm-evals-local`, accessed through a *
 | `EVALS_API_KEY` | static master key for deployed `/api/*`; when unset the API is open for local dev/tests |
 | `EVALS_MAX_CONCURRENT_RUNS` | max active runs accepted by `serve` (default `1`; over-cap creates/resumes return 429) |
 | `EVALS_PORT` | serve port override |
+| `EVALS_CODEX_BILLING` | `subscription` if the `OPENAI_API_KEY` given to codex workers fronts a flat plan; default metered (counts toward the run's cost cap) |
+| `EVALS_SUBSCRIPTION_CONFIG_CONCURRENCY` | max concurrent attempts per subscription-billed config (default `3`) |
+| `EVALS_E2B_USD_PER_SANDBOX_HOUR` | flat per-sandbox E2B price for the cost cap's sandbox estimate; unset = E2B's published rates for the API (2 vCPU / 2 GiB) and worker (4 vCPU / 8 GiB) templates, see `src/cost/billing.ts` |
 | `EVALS_MODEL_CATALOG_REFRESH` | set to `off` to skip the models.dev boot load and 6h refresh and serve the committed snapshot (see [Model catalog](#model-catalog-and-latest-aliases)) |
 | `EVALS_E2B_TEMPLATE_API` / `EVALS_E2B_TEMPLATE_WORKER` | template overrides (default `agent-swarm-{api,worker}-latest`; see [Evaluating a branch](#evaluating-a-branch)) |
 

@@ -97,15 +97,29 @@ function dependsOnChild(child: SwarmTask, children: SwarmTask[]): boolean {
   return deps.some((dep) => children.some((candidate) => candidate.id === dep));
 }
 
+/**
+ * Children in chain order: by dependency depth (how many dependsOn hops sit
+ * between a child and a root), ties broken by id. Independent of the order the
+ * API lists tasks in (it lists newest first, so a correct 1 -> 2 -> 3 chain
+ * arrives as 3, 2, 1). The old pairwise comparator returned "after" for BOTH
+ * (b, c) and (c, b) of a chain, so 3 of the 6 listing orders scored a correct
+ * chain as out of order.
+ */
 function childOrder(children: SwarmTask[]): SwarmTask[] {
   const byId = new Map(children.map((c) => [c.id, c]));
-  return [...children].sort((a, b) => {
-    const aDeps = Array.isArray(a.dependsOn) ? (a.dependsOn as string[]) : [];
-    const bDeps = Array.isArray(b.dependsOn) ? (b.dependsOn as string[]) : [];
-    if (aDeps.some((id) => id === b.id || byId.has(id))) return 1;
-    if (bDeps.some((id) => id === a.id || byId.has(id))) return -1;
-    return a.id.localeCompare(b.id);
-  });
+  const depth = (child: SwarmTask, path: ReadonlySet<string>): number => {
+    if (path.has(child.id)) return 0; // dependency cycle: stop, never loop
+    const deps = (Array.isArray(child.dependsOn) ? (child.dependsOn as string[]) : [])
+      .map((id) => byId.get(id))
+      .filter((d): d is SwarmTask => d !== undefined);
+    if (deps.length === 0) return 0;
+    const next = new Set(path).add(child.id);
+    return 1 + Math.max(...deps.map((d) => depth(d, next)));
+  };
+  return [...children]
+    .map((child) => ({ child, depth: depth(child, new Set()) }))
+    .sort((a, b) => a.depth - b.depth || a.child.id.localeCompare(b.child.id))
+    .map((entry) => entry.child);
 }
 
 const chainStructureCheck: DeterministicCheck = {
@@ -286,6 +300,7 @@ const finalReportGate: DeterministicCheck = {
 
 export const delegationChain: Scenario = {
   id: "delegation-chain",
+  version: 2,
   name: "Delegation chain",
   description:
     "Lead-driven sequential delegation with dependsOn links, grading the child-task paper trail instead of raw audit ability.",
@@ -316,6 +331,7 @@ export const delegationChain: Scenario = {
 };
 
 export const __test__ = {
+  childOrder,
   chainStructureCheck,
   dispatchStructureCheck,
   chainCorrectnessCheck,

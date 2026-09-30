@@ -56,11 +56,21 @@ export interface AnalyticsSourceRow {
   configId: string;
   /** AttemptStatus as stored; any status counts toward `attempts`. */
   status: string;
+  /**
+   * attempts.exclusion. A `cancelled` row (dead run, cost cap) is dropped before
+   * any count; a `harness-error` row stays visible in `errors` and is never graded.
+   */
+  exclusion?: string | null;
   score: number | null;
   costUsd: number | null;
   costSource: string | null;
   judgeCostUsd: number | null;
   durationMs: number | null;
+  /**
+   * json_extract(timings_json, '$.tasksMs'): time the agent worked, boot and
+   * seeding excluded. Null on rows without timings. `durationMs` stays the total.
+   */
+  agentMs?: number | null;
   /** attempts.resolved_model — the concrete model the attempt ran on (null on old rows). */
   resolvedModel?: string | null;
   /** eval_run_configs.resolved_model — the run's pin for an alias config. */
@@ -89,6 +99,15 @@ function sum(values: number[]): number {
 function mean(values: number[]): number | null {
   if (values.length === 0) return null;
   const v = sum(values) / values.length;
+  return Number.isFinite(v) ? v : null;
+}
+
+/** Median over the given values; null when empty (never NaN). */
+function median(values: number[]): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  const v = sorted.length % 2 === 1 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
   return Number.isFinite(v) ? v : null;
 }
 
@@ -216,6 +235,8 @@ interface MetricAcc {
   costs: number[];
   judgeCosts: number[];
   durations: number[];
+  /** Agent time per attempt (timings.tasksMs); see AnalyticsSourceRow.agentMs. */
+  agentTimes: number[];
   scores: number[];
   /** Token sums over token-bearing attempts (v7 §11). */
   tokenAttempts: number;
@@ -234,6 +255,7 @@ function newMetricAcc(): MetricAcc {
     costs: [],
     judgeCosts: [],
     durations: [],
+    agentTimes: [],
     scores: [],
     tokenAttempts: 0,
     tokenInput: 0,
@@ -251,6 +273,7 @@ function accumulate(acc: MetricAcc, row: AnalyticsSourceRow): void {
   if (row.costUsd !== null) acc.costs.push(row.costUsd);
   if (row.judgeCostUsd !== null) acc.judgeCosts.push(row.judgeCostUsd);
   if (row.durationMs !== null) acc.durations.push(row.durationMs);
+  if (row.agentMs !== null && row.agentMs !== undefined) acc.agentTimes.push(row.agentMs);
   if (row.score !== null) acc.scores.push(row.score);
   // v7 §6.1: an attempt is token-bearing iff any token field is > 0 — all-zero
   // tokens_json blobs (the pre-v7 harness-priced gap) contribute nothing.
@@ -370,6 +393,8 @@ function finishGroup(g: GroupAcc): AnalyticsGroupRollup {
     minCostUsd: minOrNull(g.costs),
     maxCostUsd: maxOrNull(g.costs),
     avgDurationMs: mean(g.durations),
+    avgAgentMs: mean(g.agentTimes),
+    medianAgentMs: median(g.agentTimes),
     tokens: tokenSums(g),
   };
 }
@@ -394,6 +419,9 @@ export function buildAnalytics(
    */
   filter?: AnalyticsFilter | null,
 ): AnalyticsResponse {
+  // A cancelled attempt (dead run, cost cap) never ran to a verdict: it is not an
+  // attempt, an error or a failure, so it leaves every count and option list.
+  sourceRows = sourceRows.filter((row) => row.exclusion !== "cancelled");
   // filterOptions over ALL rows BEFORE filtering (first-seen order) — the bar
   // keeps every option visible while a filter is active.
   const filterOptions: AnalyticsFilterOptions = { harnesses: [], configIds: [], efforts: [] };
@@ -541,6 +569,8 @@ export function buildAnalytics(
       totalJudgeCostUsd,
       avgJudgeCostUsd: mean(cell.judgeCosts),
       avgDurationMs: mean(cell.durations),
+      avgAgentMs: mean(cell.agentTimes),
+      medianAgentMs: median(cell.agentTimes),
       avgScore: mean(cell.scores),
       lastRunAt: cell.lastRunAt,
       minCostUsd: minOrNull(cell.costs),
@@ -576,6 +606,8 @@ export function buildAnalytics(
         costPerMinute:
           m.pairedDurationMs > 0 ? ratio(m.pairedCostUsd, m.pairedDurationMs / 60_000) : null,
         avgDurationMs: mean(m.durations),
+        avgAgentMs: mean(m.agentTimes),
+        medianAgentMs: median(m.agentTimes),
         minCostUsd: minOrNull(m.costs),
         maxCostUsd: maxOrNull(m.costs),
         vendor: m.vendor,
@@ -592,6 +624,8 @@ export function buildAnalytics(
         avgScore: rollup.avgScore,
         avgCostUsd: avgCostPerAttempt,
         avgDurationMs: rollup.avgDurationMs,
+        avgAgentMs: rollup.avgAgentMs,
+        medianAgentMs: rollup.medianAgentMs,
         avgTotalTokens: tokens?.avgTotalTokens ?? null,
         totalTokens: tokens?.totalTokens ?? 0,
       };
@@ -627,6 +661,8 @@ export function buildAnalytics(
           avgCostUsd: totalCostUsd === null ? null : ratio(totalCostUsd, p.costs.length),
           avgJudgeCostUsd: mean(p.judgeCosts),
           avgDurationMs: mean(p.durations),
+          avgAgentMs: mean(p.agentTimes),
+          medianAgentMs: median(p.agentTimes),
           apiVersion: p.apiVersion,
           workerVersion: p.workerVersion,
           minCostUsd: minOrNull(p.costs),

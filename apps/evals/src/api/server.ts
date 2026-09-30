@@ -1,7 +1,8 @@
 import { join, normalize, sep } from "node:path";
 import { attachmentContentDisposition } from "../../../../src/utils/content-disposition.ts";
 import { DEFAULT_CONFIG_IDS } from "../../configs/index.ts";
-import { CONFIG_PRESETS } from "../../configs/presets.ts";
+import { CONFIG_PRESETS, presetRunDefaults } from "../../configs/presets.ts";
+import { SUITE_SCENARIO_VERSIONS } from "../../scenarios/suite.ts";
 import {
   getCatalog,
   getResolutionCatalog,
@@ -390,8 +391,10 @@ function computeRunVersions(attempts: AttemptRow[]): RunVersions {
  * Mirrors computeRunVersions() above.
  */
 export const ANALYTICS_SQL = `
-  SELECT a.run_id, a.scenario_id, a.config_id, a.status, a.score, a.cost_usd, a.cost_source,
+  SELECT a.run_id, a.scenario_id, a.config_id, a.status, a.exclusion, a.score, a.cost_usd, a.cost_source,
          a.judge_cost_usd, a.duration_ms,
+         CASE WHEN json_valid(a.timings_json)
+              THEN json_extract(a.timings_json, '$.tasksMs') END     AS agent_ms,
          CASE WHEN json_valid(a.tokens_json)
               THEN json_extract(a.tokens_json, '$.model') END        AS token_model,
          CASE WHEN json_valid(a.tokens_json)
@@ -586,25 +589,57 @@ export async function startServer(
             judgeModel?: string;
             /** configId → reasoning effort (null = harness default), over the config default. */
             efforts?: unknown;
+            /**
+             * A preset id (e.g. "nightly-canary"). Fills whatever the body leaves unset:
+             * configIds, attemptsPerCell, maxMeteredUsd, and scenarioIds (the whole suite).
+             */
+            preset?: string;
+            /** Hard cap on the run's metered spend, USD. */
+            maxMeteredUsd?: number;
           } | null;
-          if (!body?.scenarioIds?.length || !body?.configIds?.length) {
+          let planned: ReturnType<typeof presetRunDefaults> = {};
+          let presetConfigIds: string[] = [];
+          if (body?.preset !== undefined) {
+            const preset = CONFIG_PRESETS.find((p) => p.id === body.preset);
+            if (!preset) return json({ error: `unknown preset "${body.preset}"` }, 400);
+            planned = presetRunDefaults([preset.id]);
+            presetConfigIds = preset.configIds;
+          }
+          const scenarioIds = body?.scenarioIds?.length
+            ? body.scenarioIds
+            : body?.preset !== undefined
+              ? Object.keys(SUITE_SCENARIO_VERSIONS)
+              : [];
+          const configIds = body?.configIds?.length ? body.configIds : presetConfigIds;
+          if (!body || !scenarioIds.length || !configIds.length) {
             return json({ error: "scenarioIds and configIds are required" }, 400);
           }
+          const maxMeteredUsd = body.maxMeteredUsd ?? planned.maxMeteredUsd;
+          if (
+            maxMeteredUsd !== undefined &&
+            !(
+              typeof maxMeteredUsd === "number" &&
+              Number.isFinite(maxMeteredUsd) &&
+              maxMeteredUsd > 0
+            )
+          ) {
+            return json({ error: "maxMeteredUsd must be a positive number" }, 400);
+          }
           const registry = loadRegistry();
-          for (const id of body.scenarioIds) {
+          for (const id of scenarioIds) {
             if (!registry.scenarios.has(id))
               return json({ error: `unknown scenario "${id}"` }, 400);
           }
-          for (const id of body.configIds) {
+          for (const id of configIds) {
             if (!registry.configs.has(id)) return json({ error: `unknown config "${id}"` }, 400);
           }
           let efforts: Awaited<ReturnType<typeof planRunEfforts>>;
           try {
-            await assertRunConfigsResolve(registry, body.scenarioIds, body.configIds);
+            await assertRunConfigsResolve(registry, scenarioIds, configIds);
             efforts = planRunEfforts({
               registry,
-              scenarioIds: body.scenarioIds,
-              configIds: body.configIds,
+              scenarioIds,
+              configIds,
               overrides: parseEffortOverrides(body.efforts),
               catalog: await getResolutionCatalog(),
             });
@@ -615,14 +650,15 @@ export async function startServer(
           await createRun(db, {
             id: runId,
             name: body.name,
-            scenarioIds: body.scenarioIds,
-            configIds: body.configIds,
-            attemptsPerCell: Math.max(1, body.attemptsPerCell ?? 1),
+            scenarioIds,
+            configIds,
+            attemptsPerCell: Math.max(1, body.attemptsPerCell ?? planned.attemptsPerCell ?? 1),
             concurrency: Math.max(1, body.concurrency ?? 2),
             judgeModel: body.judgeModel || undefined,
             efforts,
+            maxMeteredUsd,
           });
-          await ensureRunConfigPins(db, runId, registry, body.scenarioIds, body.configIds);
+          await ensureRunConfigPins(db, runId, registry, scenarioIds, configIds);
           startRunExecution(db, runId);
           return json({ runId }, 201);
         },
@@ -934,11 +970,13 @@ export async function startServer(
           scenarioId: r.scenario_id as string,
           configId: r.config_id as string,
           status: r.status as string,
+          exclusion: (r.exclusion as string) ?? null,
           score: r.score === null ? null : Number(r.score),
           costUsd: r.cost_usd === null ? null : Number(r.cost_usd),
           costSource: (r.cost_source as string) ?? null,
           judgeCostUsd: r.judge_cost_usd === null ? null : Number(r.judge_cost_usd),
           durationMs: r.duration_ms === null ? null : Number(r.duration_ms),
+          agentMs: numOrNull(r.agent_ms),
           resolvedModel: (r.resolved_model as string) ?? null,
           reasoningEffort: (r.reasoning_effort as string) ?? null,
           pinnedModel: (r.pinned_model as string) ?? null,
