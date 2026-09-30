@@ -696,6 +696,17 @@ Swarm tools carry `namespace: { name: "agent-swarm" }` and, when the server decl
 
 The flag defaults to `false`. Loading a deferred tool changes the tool set mid-session, and pi falls back to a transcript checkpoint for providers that cannot represent that change, which can invalidate the prompt cache. Pilot it on one pi agent with agent-scoped configuration (`PI_TOOL_DEFERRAL=true`) and compare against a pi agent on the same model: context tokens at session start, cost per task, and cache-read tokens as a share of input tokens. The worker picks the value up on its next task.
 
+### pi codemode
+
+`PI_CODEMODE=true` adds pi's codemode tool: a QuickJS sandbox inside the worker process in which the model's JavaScript calls tools (`await tools.get_task_details({ taskId })`) in any order or in parallel and returns only the result. The adapter uses `createCodemodeExtension({ mode: "on", models: false })` and `+codemode`:
+
+- `mode: "on"` keeps every declared tool declared, so lifecycle tools (`store-progress`, `send-task`, …) are still called directly. `mode: "only"` is never used.
+- `models: false` keeps model calls out of scripts, where they would bypass the session's cost accounting.
+- Scripts receive a tool's `structuredContent` when the tool declares an `outputSchema`, which every swarm tool does.
+- Nested calls go through pi's tool pipeline, so the swarm `tool_call` hooks (cancellation, loop detection) still see them.
+
+Codemode is gated to the `smart` and `ultra` tiers (`ProviderSessionConfig.modelTier`, set only when the tier picked the model). Our July scripts-only eval found small models degrade as coordinators when they must work through scripts. Leave the flag off unless you are piloting it, and compare tool calls per task and cost against a pi agent without it.
+
 ### How each adapter delivers the prompt
 
 - **Claude** — CLI flag: `cmd.push("--append-system-prompt", this.config.systemPrompt)` at [`claude-adapter.ts:245–247`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-adapter.ts).

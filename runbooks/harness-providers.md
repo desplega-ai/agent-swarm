@@ -126,6 +126,8 @@ On success the pi wrapper also returns the server's `structuredContent` next to 
 
 **pi tool deferral** (`PI_TOOL_DEFERRAL`, default off): non-core swarm tools get `exposure: "deferred"` and the session adds pi's `tool_search`. The adapter's `traits` getter reads the same flag for `hasToolSearch`, so the prompt and the session agree. Keep both reads on `process.env`. Pilot procedure: the harness-providers guide, section "pi tool deferral".
 
+**pi codemode** (`PI_CODEMODE`, default off): adds `createCodemodeExtension({ mode: "on", models: false })` and `+codemode`, only when `config.modelTier` is `smart` or `ultra`. Never switch to `mode: "only"`: lifecycle tools must stay directly callable. The runner sets `modelTier` only when the tier chose the model.
+
 ## Live task steering
 
 `ProviderSession.deliverSteering?(delivery: SteerDelivery): Promise<SteerDeliveryResult>` is the optional live-input seam. `ProviderTraits.steerModes` advertises the modes an adapter can provide; an absent field means `[]`.

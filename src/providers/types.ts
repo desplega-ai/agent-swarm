@@ -49,7 +49,7 @@ export interface CostData {
   provider?: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "acp";
 }
 
-import type { ProviderName, SteerMode } from "../types";
+import type { ModelTier, ProviderName, SteerMode } from "../types";
 import type { RateLimitWindowTelemetry } from "../utils/error-tracker";
 import type { ModelFamily } from "../utils/model-rate-limit-windows";
 import type { ReasoningEffort } from "./reasoning-effort";
@@ -144,6 +144,11 @@ export interface ProviderSessionConfig {
    * (Phase 4).
    */
   reasoningEffort?: ReasoningEffort;
+  /**
+   * The task's portable tier when the tier (not an explicit model) picked the
+   * model. Adapters may gate tier-sensitive features on it (pi codemode).
+   */
+  modelTier?: ModelTier;
 }
 
 export type SteerDelivery = { mode: SteerMode; text: string };

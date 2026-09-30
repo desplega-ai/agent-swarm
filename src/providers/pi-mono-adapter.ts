@@ -24,6 +24,7 @@ import type {
 import {
   type AgentSession,
   createAgentSession,
+  createCodemodeExtension,
   createMcpExtension,
   createToolSearchExtension,
   DefaultResourceLoader,
@@ -34,6 +35,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { type TSchema, Type } from "typebox";
 import { CORE_TOOLS } from "../tools/tool-config";
+import type { ModelTier } from "../types";
 import { classifyAwsSdkError } from "../utils/aws-error-classifier";
 import { parseEnvFlag } from "../utils/env-flag";
 import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
@@ -328,6 +330,25 @@ export const SWARM_TOOL_NAMESPACE = { name: "agent-swarm" } as const;
  */
 export function isPiToolDeferralEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return parseEnvFlag(env.PI_TOOL_DEFERRAL, false);
+}
+
+/**
+ * `PI_CODEMODE`: add pi's codemode tool (a harness-side JS sandbox whose
+ * scripts call tools) next to the declared tools. Off by default, and only
+ * for smart/ultra tiers: small models coordinate worse through scripts.
+ */
+export function isPiCodemodeEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return parseEnvFlag(env.PI_CODEMODE, false);
+}
+
+/** Tiers codemode runs on. Tasks with an explicit model or no tier stay off. */
+export const PI_CODEMODE_TIERS: ReadonlySet<ModelTier> = new Set(["smart", "ultra"]);
+
+export function isPiCodemodeActive(
+  modelTier: ModelTier | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return isPiCodemodeEnabled(env) && modelTier !== undefined && PI_CODEMODE_TIERS.has(modelTier);
 }
 
 /**
@@ -1128,6 +1149,8 @@ export interface PiSessionFeatures {
   toolDeferral: boolean;
   /** The agent has installed MCP servers for pi's MCP extension to connect. */
   installedMcp?: boolean;
+  /** PI_CODEMODE is on and the task tier allows it. */
+  codemode?: boolean;
 }
 
 /**
@@ -1149,6 +1172,10 @@ export function piExtensionFactories(
   const factories: ExtensionFactory[] = [swarmExtension];
   if (features.toolDeferral) factories.push(createToolSearchExtension());
   if (features.installedMcp) factories.push(createSwarmMcpExtension());
+  // "on" keeps declared tools declared; "only" would hide the lifecycle tools
+  // behind scripts. `models: false` keeps model calls out of scripts, where
+  // they would bypass the session's cost accounting.
+  if (features.codemode) factories.push(createCodemodeExtension({ mode: "on", models: false }));
   return factories;
 }
 
@@ -1206,6 +1233,7 @@ export function toPiMcpServers(
 export function piDefaultToolAdditions(features: PiSessionFeatures): string[] {
   const additions: string[] = [];
   if (features.toolDeferral) additions.push("+tool_search");
+  if (features.codemode) additions.push("+codemode");
   return additions;
 }
 
@@ -1342,19 +1370,25 @@ export class PiMonoAdapter implements ProviderAdapter {
       mcpServers: piMcpServers,
     });
 
+    const features: PiSessionFeatures = {
+      toolDeferral: deferTools,
+      installedMcp: Object.keys(piMcpServers).length > 0,
+      codemode: isPiCodemodeActive(config.modelTier),
+    };
+    if (features.codemode) {
+      console.log(`\x1b[2m[${config.role}]\x1b[0m codemode on (tier ${config.modelTier})`);
+    }
+
     // 5. Create resource loader with system prompt + extensions. SDK sessions
     // load no built-in pi extension, so tool_search is added explicitly.
     const { resourceLoader, settingsManager } = await createPiResourceLoader({
       cwd: config.cwd,
       agentDir: getAgentDir(),
       systemPrompt: config.systemPrompt,
-      extensionFactories: piExtensionFactories(swarmExtension, {
-        toolDeferral: deferTools,
-        installedMcp: Object.keys(piMcpServers).length > 0,
-      }),
+      extensionFactories: piExtensionFactories(swarmExtension, features),
     });
     // tool_search registers inactive; `+` adds it to the default tool set.
-    const extraDefaultTools = piDefaultToolAdditions({ toolDeferral: deferTools });
+    const extraDefaultTools = piDefaultToolAdditions(features);
     if (extraDefaultTools.length > 0) {
       settingsManager.applyOverrides({ defaultTools: extraDefaultTools });
     }

@@ -38,6 +38,7 @@ import { initTelemetry, telemetry } from "../telemetry.ts";
 import {
   type ModelTierOverrides,
   type ProviderName,
+  parseModelTier,
   parseWorkerModelTierOverrides,
   type ReasoningEffort,
   type RepoGuidelines,
@@ -1073,8 +1074,9 @@ export const RELOADABLE_ENV_KEYS: ReadonlySet<string> = new Set([
   "TEMPLATE_REGISTRY_URL",
   "SLACK_DISABLE",
   "SWARM_ORG_NAME",
-  // pi reads this from process.env for both its traits and its session.
+  // pi reads these from process.env for its traits and its session.
   "PI_TOOL_DEFERRAL",
+  "PI_CODEMODE",
 ]);
 
 /**
@@ -3740,6 +3742,8 @@ async function spawnProviderProcess(
     codexSlot: oauthIsPoolBacked ? oauthSelection?.index : undefined,
     contextKey: opts.contextKey,
     reasoningEffort: reasoningEffortOverride,
+    // Tier label only when the tier chose the model; an explicit model wins.
+    modelTier: opts.model ? undefined : parseModelTier(opts.modelTier),
   };
 
   // Create the long-lived `worker.session` span up front so the provider
