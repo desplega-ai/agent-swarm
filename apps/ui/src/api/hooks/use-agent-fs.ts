@@ -305,8 +305,10 @@ export function useDriveMembers(drive: { orgId: string; driveId: string }) {
       ),
     enabled: access.client !== null && features.has("drive-members"),
     retry: agentFsRetry,
-    // Members change rarely: no polling.
-    staleTime: 5 * 60_000,
+    // Members change rarely: no polling. A short staleTime still refetches on
+    // the next mount or focus, so a member who joined after the first fetch (a
+    // new mention actor or comment author) shows by name, not as "someone".
+    staleTime: 30_000,
     refetchInterval: false,
   });
 }

@@ -1,0 +1,166 @@
+---
+title: "Comb (beta)"
+description: "Review agent-written agent-fs files in the dashboard: comment on passages, mention teammates, send comments to the swarm, and review the changes"
+---
+
+**Comb** shows the swarm's agent-fs drive inside the dashboard. Humans open files that agents wrote, comment on passages, and mention teammates. A comment that carries `@swarm` goes to the lead. The agent answers with a new file version and a reply. The human reviews the diff and resolves the thread.
+
+Comb reads and comments only. Humans do not edit files in Comb. A revert to an earlier version is the only change that a human makes to file content.
+
+## Requirements
+
+- An agent-fs server that the swarm uses (`AGENT_FS_API_URL`). See [agent-fs co-deployment](/docs/guides/agent-fs-co-deployment).
+- agent-fs **0.15.0** or later for the full feature set. The dashboard reads the `features` list from agent-fs `/health` and hides the parts that the server does not support.
+- Object versioning on the agent-fs S3 bucket, for **Review changes** and **Revert**. The Docker Compose files enable it on their MinIO bucket. The agent-fs local storage backend always keeps versions.
+
+| agent-fs feature | What it adds | Without it |
+| --- | --- | --- |
+| `comment-path-prefix` | The **Open comments** panel of a folder, and **Send N to swarm** for a folder | The folder panel does not show |
+| `drive-members` | Author names, and the member list for the mention picker | Authors show as a short user id. The mention picker does not show |
+| `comment-mentions` | `@name` mentions and the **Mentions** list in the notification bell | The picker and the Mentions list do not show |
+| `change-stream` | Live updates (the header shows **Live**) | Comb checks for changes every 10 seconds (the header shows **Polling**) |
+
+agent-fs 0.14.0 still works: Comb shows files and comments, and every other part in the table hides.
+
+## Turn on Comb
+
+Set these on the API server, in **Settings → Configuration** or in the deployment environment:
+
+| Key | Value |
+| --- | --- |
+| `COMB_ENABLED` | `true`. The flag has no effect until `AGENT_FS_API_URL` is set. |
+| `AGENT_FS_PUBLIC_URL` | The agent-fs URL that browsers use. It defaults to `AGENT_FS_API_URL`. Set it when the API reaches agent-fs on an internal hostname. In Docker Compose the API uses `http://agent-fs:7433`, and the browser needs `http://localhost:7433`. |
+| `APP_URL` | The dashboard URL. Slack messages and lead prompts link to Comb only when it is set. |
+
+A saved value reloads the API. The dashboard reads the new state on its next status poll, 30 seconds at most. The sidebar then shows **Comb** with a beta badge, and `/file` opens the swarm drive.
+
+The swarm drive is the shared org and drive that the API provisions in agent-fs (`AGENT_FS_DEFAULT_ORG_ID`, `AGENT_FS_DEFAULT_DRIVE_ID`). Comb shows only this drive.
+
+## Connect
+
+Each person connects their own agent-fs identity in their own browser. The swarm API key does not give access to agent-fs files.
+
+1. Open **Comb**.
+2. Choose one of the two tabs:
+   - **Create with my email** registers a new agent-fs account and saves its key in this browser only.
+   - **Paste a key** uses an agent-fs key (`af_...`) that you already have. Use it for an account that you also use with the agent-fs CLI.
+3. Comb checks that you can read the swarm drive. If you cannot, the swarm API invites your agent-fs account as an editor.
+
+An existing drive member keeps their role. A viewer can read files and comments but cannot comment. When a viewer tries, Comb shows "You have view-only access". **Disconnect** in the page header removes the key from the browser.
+
+## Browse
+
+The left rail shows the drive as a tree. A folder opens as a grid of its files. Comb shows these file types in the page:
+
+- Markdown, rendered. HTML files show as source code.
+- Code and other text files, with line numbers.
+- PDF, images, and video.
+- CSV and TSV files as a table, with a **Source** view.
+
+Other files show **Download** and **Open in agent-fs**.
+
+**Pin to sidebar** on a file or folder adds it under **Comb** in the sidebar. The swarm API stores the pins for the key that the dashboard uses: the operator key, or your user token.
+
+## Comment
+
+- Select a passage in a markdown or text file, then click **Comment** (or press `C`). The comment anchors to that passage.
+- **Comment on file** adds a comment about the whole file.
+- Reply, **Resolve**, and **Reopen** work on every thread.
+
+Anchors follow the text across versions. A thread shows **Moved** when the text changed and Comb found the closest match. It shows **Lost** when the passage is gone.
+
+A draft stays in this browser until you send it. If agent-fs cannot be reached, the comment waits under **Not sent** in the comment rail. Retry it from there.
+
+### Mentions
+
+Type `@` to open the member picker. Only a person that you pick from the list gets a notification. A name that you type by hand notifies nobody. The mention shows in that person's notification bell, under **Mentions**. A click opens the file at the thread.
+
+### `@swarm`
+
+Put `@swarm` in a comment to mark it for the swarm. A marked comment does nothing until you send it.
+
+## Send comments to the swarm
+
+Three buttons send comments. Each click creates **one** task for the lead, with every selected comment in it.
+
+| Button | Where | What it sends |
+| --- | --- | --- |
+| **Send to swarm** | On a thread whose first comment has `@swarm` | That thread |
+| **Send N** | The comment rail header of a file | The open `@swarm` threads of the file |
+| **Send N to swarm** | The **Open comments** panel of a folder | The open `@swarm` threads of every file under the folder |
+
+Comb asks you to confirm before it sends. One batch holds at most 50 comments. Send again for the rest.
+
+The task has the source `comb`. The swarm posts a reply on each sent comment, which shows as "Sent to the swarm · task ...". A comment that the swarm already received is skipped on the next send.
+
+### What the agent does
+
+The lead handles the batch or delegates it to one worker, so only one agent edits these files at a time. For each comment, the agent:
+
+1. Reads the file at its current version, and the diff since the comment's version.
+2. Makes the change with `agent-fs edit` or `agent-fs write`. This adds a new file version.
+3. Replies on the comment with what it changed.
+
+The agent does not resolve the comment, unless the comment asks for it. When a comment needs a human decision, the agent replies and mentions the author.
+
+## Review the changes
+
+A thread whose file has a newer version shows **Review changes (vA → vB)**. It opens the diff from the version that the comment was made on to the current version. **Versions** in the file header opens the diff for any earlier version.
+
+From the review you can resolve or reopen the thread, and revert the file.
+
+**Revert to vA** writes a new version with the content of vA. Earlier versions stay in the history. Comb shows **Revert** only when all of these are true:
+
+- The file is a markdown, text, or table file.
+- The diff has changes.
+- The diff ends at the current version.
+
+If an agent writes a new version while you review, agent-fs refuses the revert. Comb then shows the new version. Click **Reload the diff** and review again before you revert.
+
+## Live updates
+
+With `change-stream`, the header shows **Live**. Agent edits, new files, and new replies show without a reload. Otherwise the header shows **Polling**, and Comb checks every 10 seconds.
+
+- A tab in the background closes its stream after 10 seconds, and reconnects when you return to it.
+- When agent-fs is served over `http:`, the Comb tabs of one browser share one stream for each drive. One tab holds the stream and sends the changes to the other tabs. The sharing needs a secure dashboard origin (`https:` or `localhost`).
+- agent-fs allows 8 streams for each user. A refused stream falls back to polling.
+
+## Links to agent-fs files
+
+With Comb on, agent-fs links in the dashboard open in Comb while you are connected. This covers task attachments, citations, attachment links in prompts, and links inside Comb files. Session logs and task outputs keep the link safety prompt and open agent-fs.
+
+When `APP_URL` is set, Slack attachment links and the lead's follow-up prompts point at `APP_URL/file/~/<org>/<drive>/<path>`. Without `APP_URL`, they keep the agent-fs link.
+
+## Turn off Comb
+
+Set `COMB_ENABLED` to `false`. Within one status poll (30 seconds at most):
+
+- The sidebar hides **Comb**.
+- `/file` shows "Comb is off". A file route also shows **Open in agent-fs**.
+- `POST /api/comb/review-batches` answers 404.
+- Task attachment links point at agent-fs again.
+
+The dashboard and the API then behave as they do without Comb. Comments, mentions, and file versions stay in agent-fs. Tasks that Comb created stay in the task list.
+
+## Security
+
+- The agent-fs key lives in this browser's local storage, separately for each swarm API and agent-fs URL. The dashboard sends it only to agent-fs, never to the swarm API. **Disconnect** removes it.
+- The dashboard saves its query cache in local storage. File contents and comments never go into it.
+- Comb shows HTML files as source code and never runs them.
+- The swarm API receives only comment ids when you send. It reads the comments from agent-fs with its own key.
+
+## Troubleshooting
+
+**"Comb is off" after you set the flag.** `AGENT_FS_API_URL` is not set on the API, or the dashboard has not polled yet. Wait 30 seconds and reload.
+
+**"Cannot reach agent-fs".** The browser cannot reach `AGENT_FS_PUBLIC_URL`. Check the URL from the browser's machine. A self-hosted agent-fs allows every origin by default. If you set `server.cors.origins` in its `config.json`, add the dashboard origin.
+
+**The header shows "Polling" instead of "Live".** Hover the status for the reason. Common causes: agent-fs is older than 0.15.0, a proxy buffers the event stream, or you have more than 8 open streams.
+
+**"This email already has an agent-fs account".** Use **Paste a key** with that account's key.
+
+**"Ask a swarm admin to invite ... to the drive".** The swarm API could not invite your account. An admin can invite the email with `POST /api/fs/members/invite`, then you connect again. If you just created the account, Comb puts its new key in the **Paste a key** field. Copy it now: agent-fs shows a new key only once.
+
+**Review changes shows only the last edit, or Revert fails.** The agent-fs bucket has no object versioning. Turn it on (for MinIO: `mc version enable <alias>/<bucket>`), then restart agent-fs: it checks versioning once at startup. Versions written before that have no stored content, so their diffs stay partial.
+
+**A file shows no version, and Review changes does not appear.** agent-fs 0.15.0 stores the history of a file under the path as it was written. A path without a leading `/` (for example `docs/a.md`) keeps its history under that exact string. Write paths with a leading `/`. A later agent-fs release normalizes the paths.

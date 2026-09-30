@@ -1,5 +1,5 @@
 {
   "title": "UI",
   "description": "Dashboard reference",
-  "pages": ["index", "configuration"]
+  "pages": ["index", "configuration", "comb"]
 }

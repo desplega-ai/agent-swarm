@@ -167,7 +167,7 @@ already created on this install.
 
 ## Comb (beta)
 
-`COMB_ENABLED` (default `false`) turns on Comb, the agent-fs review space in the dashboard. It needs agent-fs: the flag has no effect until `AGENT_FS_API_URL` is set. With the flag on, the sidebar shows a **Comb** item and `/file` opens the swarm drive. Each person connects their own agent-fs identity in the browser. The key stays in that browser and never reaches the swarm API. Saving the flag auto-reloads, and the dashboard picks it up on its next status poll (30 seconds at most).
+`COMB_ENABLED` (default `false`) turns on [Comb](/docs/ui/comb), the agent-fs review space in the dashboard. It needs agent-fs: the flag has no effect until `AGENT_FS_API_URL` is set. With the flag on, the sidebar shows a **Comb** item and `/file` opens the swarm drive. Each person connects their own agent-fs identity in the browser. The key stays in that browser and never reaches the swarm API. Saving the flag auto-reloads, and the dashboard picks it up on its next status poll (30 seconds at most).
 
 `AGENT_FS_PUBLIC_URL` is the agent-fs URL that browsers use. It defaults to `AGENT_FS_API_URL`. Set it when the API reaches agent-fs on an internal hostname, for example `http://agent-fs:7433` in Docker Compose, where the browser needs `http://localhost:7433`. The value must be an http(s) URL with no query string or fragment.
 

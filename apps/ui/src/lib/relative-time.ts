@@ -4,7 +4,7 @@ import { parseUTCDate } from "./utils";
  * Compact relative-time formatter optimized for dense tables (identities,
  * events, audit logs).
  *
- *   < 30s    → "just now"
+ *   < 1m     → "just now"
  *   < 60m    → "4m ago"
  *   < 24h    → "2h ago"
  *   < 7d     → "3d ago"
@@ -19,8 +19,9 @@ export function formatRelative(dateInput: string | Date): string {
   const diffMs = now - d.getTime();
   const diffSec = Math.floor(diffMs / 1000);
 
-  if (diffSec < 30) return "just now";
   const diffMin = Math.floor(diffSec / 60);
+  // Under a minute: "0m ago" (30-59 s) read as a different age than "just now".
+  if (diffMin < 1) return "just now";
   if (diffMin < 60) return `${diffMin}m ago`;
   const diffHr = Math.floor(diffMin / 60);
   if (diffHr < 24) return `${diffHr}h ago`;
