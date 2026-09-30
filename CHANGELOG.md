@@ -6,6 +6,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.159.0] - 2026-09-30
+
+### Added
+- Live model catalog: a persistent catalog refreshed from models.dev, hand-verified overlays, and the lead-only `model-catalog-refresh` and `model-catalog-overlay-upsert` MCP tools (#1691).
+- Claim-time model-tier resolution: the API server resolves a task's model when a worker claims it, from `MODEL_TIER_<PROVIDER>_<TIER>` config, `latest:<provider>/<target>` aliases guarded by `MODEL_LATEST_SOAK_DAYS` and `MODEL_AUTO_UPGRADE`, and worker overrides, and records `resolvedModel`, `modelSource` and `modelAlias` on the task (#1691).
+- `allowCustomModel` on `send-task`, `task-action` and the schedule tools accepts a model id the catalog does not list; without it an unknown id is rejected (#1691).
+- Native `system-one-decision` workflow node with key preflight, an OpenRouter provider and confidence-band human review; saving a workflow whose decision key is missing returns warnings (#1715).
+- Codex CLI 0.159.0 and GPT-6.1 Sol (#1719).
+- Evals: reasoning effort per harness and model (#1710).
+- Dashboard dev mode for version gates (#1726).
+
+### Changed
+- Worker image bumps claude-code 2.1.285, pi 0.99.1, codex 0.159.1 and opencode 1.18.33 (#1724).
+- CI: Merge Gate requires the migration conflict check (#1709); GitHub Actions audit fixes, including the BuildKit cache moving to the GHCR registry (#1717).
+- Agent status counts in stats are computed in SQL (#1716).
+- Docs clarify external agent-fs links (#1705).
+- `MCP.md` now documents tools registered in a subdirectory `index.ts`, so the model-catalog tools are no longer "Documentation not available".
+
+### Fixed
+- Registry configures the human MCP remote with user tokens (#1723).
+- `onboard` from the Node bin restarts under Bun (#1722).
+- Codex worker sessions run with apps disabled (#1720).
+- Usage reports read a stored human-free flag and no longer bust their cache on every new task (#1698).
+- Task audit seed script hydrates failure reasons (#1718).
+- Heartbeat: `HEARTBEAT_CHECKLIST_DISABLE` parses as a flag and `HEARTBEAT_CHECKLIST_INTERVAL_MS=0` turns the recurring check off (#1711); fresh installs are no longer pointed at unseeded scripts (#1714).
+- Slack follow-up task prompts render each human message once (#1712).
+- Dependents of a superseded task are re-pointed to its resume (#1713).
+
 ## [1.158.0] - 2026-09-29
 
 ### Added
