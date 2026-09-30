@@ -16,6 +16,18 @@
 #                                     covers a run that never started, timed out, or a service
 #                                     with no webhook of its own.
 #   variable EVALS_API_URL            optional; defaults to https://evals.agent-swarm.dev
+#   environment evals-nightly         put both secrets here, not at repo level, and set its
+#                                     deployment branch policy to `main` only. No required
+#                                     reviewers: the cron has to run unattended. See "Trust" below.
+#
+# Trust: EVALS_API_KEY is the service master key, so the secret-bearing job only ever runs code
+# from `main`. Two layers, and only the second one holds against a writer who edits this file:
+#   1. The job runs only when the dispatch ref is `refs/heads/main`, and checks out `main`
+#      explicitly, so a dispatch on another branch cannot run that branch's run-scheduled.ts.
+#   2. The job is bound to the `evals-nightly` environment. With the secrets stored there and
+#      the deployment branch policy set to `main`, GitHub itself withholds them from any other
+#      branch, including one whose copy of this workflow dropped the guard in (1). Repo-level
+#      secrets have no such check: any writer can read them from a workflow on their own branch.
 #
 # The schedule is commented out on purpose: nothing runs on a cron until the last step of the
 # plan (Taras confirms after three clean manual dispatches):
@@ -55,8 +67,9 @@ permissions:
 
 jobs:
   run:
-    if: github.repository == 'desplega-ai/agent-swarm'
+    if: github.repository == 'desplega-ai/agent-swarm' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    environment: evals-nightly
     # The weekly matrix takes ~3 h; the script gives up on its own before this.
     timeout-minutes: 350
     env:
@@ -68,9 +81,11 @@ jobs:
       EVALS_SLACK_WEBHOOK_URL: ${{ secrets.EVALS_SLACK_WEBHOOK_URL }}
 
     steps:
+      # Explicit `main`, never the dispatch-selected ref: this job holds the service master key.
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: main
           persist-credentials: false
 
       - name: Setup Bun
