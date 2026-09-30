@@ -1,10 +1,14 @@
 import type { ViewerProps } from "./file-viewer";
 import { MediaGate } from "./media-gate";
 
-/** Videos play with the browser's controls. Only the metadata loads before play. */
-export default function VideoViewer({ file }: ViewerProps) {
+/**
+ * Videos play with the browser's controls. From a presigned URL only the
+ * metadata loads before play. In blob mode the whole file loads first (up to
+ * `COMB_MEDIA_MAX_BYTES`).
+ */
+export default function VideoViewer({ file, stat }: ViewerProps) {
   return (
-    <MediaGate file={file} noun="video">
+    <MediaGate file={file} stat={stat} kind="video">
       {(url, onError) => (
         <div className="flex min-h-full p-6">
           <video

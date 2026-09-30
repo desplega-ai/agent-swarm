@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { CSV_MAX_ROWS, delimiterFor, parseDelimited } from "./csv";
+import { CSV_MAX_ROWS, compareCells, delimiterFor, parseDelimited } from "./csv";
 
 describe("parseDelimited", () => {
   test("header and rows", () => {
@@ -94,8 +94,64 @@ describe("parseDelimited", () => {
 });
 
 describe("delimiterFor", () => {
-  test("tab for .tsv, comma otherwise", () => {
-    expect(delimiterFor("/data/report.TSV")).toBe("\t");
-    expect(delimiterFor("/data/report.csv")).toBe(",");
+  test("tab for .tsv, comma for other files", () => {
+    expect(delimiterFor("/data/report.TSV", "a,b\n")).toBe("\t");
+    expect(delimiterFor("/data/notes.txt", "a;b;c\n")).toBe(",");
+  });
+
+  test(".csv picks the most frequent delimiter on the header line", () => {
+    expect(delimiterFor("/data/report.csv", "a,b,c\n1;2;3;4;5\n")).toBe(",");
+    expect(delimiterFor("/data/report.csv", "a\tb\tc\n")).toBe("\t");
+    expect(delimiterFor("/data/report.csv", "")).toBe(",");
+    expect(delimiterFor("/data/report.csv", "only\n")).toBe(",");
+  });
+
+  test("a tie keeps the comma, and quoted delimiters do not count", () => {
+    expect(delimiterFor("/data/report.csv", "a,b;c\n")).toBe(",");
+    expect(delimiterFor("/data/report.csv", '"a;b;c",d\n')).toBe(",");
+  });
+
+  test("a semicolon export (comma decimals) parses into its columns", () => {
+    const text = '\uFEFFName;Amount;City\n"Smith, J";1,5;Paris\nLee;-2,25;"Rome; IT"\n';
+    const delimiter = delimiterFor("/exports/sales.CSV", text);
+    expect(delimiter).toBe(";");
+    expect(parseDelimited(text, { delimiter })).toEqual({
+      header: ["Name", "Amount", "City"],
+      rows: [
+        ["Smith, J", "1,5", "Paris"],
+        ["Lee", "-2,25", "Rome; IT"],
+      ],
+      truncated: false,
+    });
+  });
+});
+
+describe("compareCells", () => {
+  const sorted = (cells: string[]) => [...cells].sort(compareCells);
+
+  test("decimals sort by value", () => {
+    expect(sorted(["1.5", "10", "1.25", "2", "0.75"])).toEqual(["0.75", "1.25", "1.5", "2", "10"]);
+  });
+
+  test("negatives sort by value", () => {
+    expect(sorted(["-2", "3", "-10", "0", "-2.5"])).toEqual(["-10", "-2.5", "-2", "0", "3"]);
+  });
+
+  test("padded numbers compare as numbers", () => {
+    expect(compareCells(" 5 ", "10")).toBeLessThan(0);
+    expect(compareCells("1e3", "999")).toBeGreaterThan(0);
+  });
+
+  test("a mixed column: numbers by value, text by the collator", () => {
+    expect(sorted(["n/a", "10", "b10", "", "2.5", "b2", "-1", "abc"])).toEqual([
+      "",
+      "-1",
+      "2.5",
+      "10",
+      "abc",
+      "b2",
+      "b10",
+      "n/a",
+    ]);
   });
 });

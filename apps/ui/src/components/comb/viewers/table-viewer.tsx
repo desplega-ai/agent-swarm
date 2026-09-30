@@ -4,7 +4,13 @@ import { useMemo, useState } from "react";
 import { DataGrid } from "@/components/shared/data-grid";
 import { EmptyState } from "@/components/shared/empty-state";
 import { SegmentedControl } from "@/components/ui/segmented-control";
-import { CSV_MAX_ROWS, delimiterFor, parseDelimited } from "@/lib/comb/csv";
+import {
+  CSV_MAX_COLUMNS,
+  CSV_MAX_ROWS,
+  compareCells,
+  delimiterFor,
+  parseDelimited,
+} from "@/lib/comb/csv";
 import type { DrivePath } from "@/lib/comb/paths";
 import type { ViewerProps } from "./file-viewer";
 import { TextGate } from "./text-gate";
@@ -22,9 +28,6 @@ interface TableRow {
   cells: string[];
 }
 
-// Cells are text. Numbers in them sort by value ("2" before "10").
-const CELL_ORDER = new Intl.Collator(undefined, { numeric: true });
-
 /**
  * CSV and TSV files as a grid, with a Source view that shows the text rows
  * (so line comments work on the source too).
@@ -40,23 +43,30 @@ export default function TableViewer({ file, stat }: ViewerProps) {
 function TableBody({ file, text }: { file: DrivePath; text: string }) {
   const [view, setView] = useState<TableView>("table");
   const table = useMemo(
-    () => parseDelimited(text, { delimiter: delimiterFor(file.path) }),
+    () => parseDelimited(text, { delimiter: delimiterFor(file.path, text) }),
     [text, file.path],
   );
 
-  const { columnDefs, rowData } = useMemo(() => {
+  const { columnDefs, rowData, columnsTruncated } = useMemo(() => {
     // Ragged rows can be longer than the header: they get extra columns.
     const width = Math.max(table.header.length, ...table.rows.map((row) => row.length));
-    const columnDefs: ColDef<TableRow>[] = Array.from({ length: width }, (_, column) => ({
+    const shown = Math.min(width, CSV_MAX_COLUMNS);
+    const columnDefs: ColDef<TableRow>[] = Array.from({ length: shown }, (_, column) => ({
       colId: String(column),
       headerName: table.header[column] || `Column ${column + 1}`,
       valueGetter: ({ data }) => data?.cells[column] ?? "",
-      comparator: (a: string, b: string) => CELL_ORDER.compare(a, b),
+      comparator: compareCells,
       minWidth: 120,
     }));
     const rowData = table.rows.map((cells, index) => ({ index, cells }));
-    return { columnDefs, rowData };
+    return { columnDefs, rowData, columnsTruncated: width > shown };
   }, [table]);
+  const cut = [
+    table.truncated && `${CSV_MAX_ROWS.toLocaleString()} rows`,
+    columnsTruncated && `${CSV_MAX_COLUMNS} columns`,
+  ]
+    .filter(Boolean)
+    .join(" and ");
 
   return (
     <div className="flex h-full min-h-[32rem] flex-col">
@@ -71,10 +81,9 @@ function TableBody({ file, text }: { file: DrivePath; text: string }) {
           onValueChange={setView}
           options={VIEW_OPTIONS}
         />
-        {table.truncated ? (
+        {view === "table" && cut ? (
           <p className="text-xs text-muted-foreground">
-            Showing the first {CSV_MAX_ROWS.toLocaleString()} rows. Download the file to see all of
-            them.
+            Showing the first {cut}. Download the file to see all of them.
           </p>
         ) : null}
       </div>

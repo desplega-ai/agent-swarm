@@ -3,9 +3,9 @@ import type { ViewerProps } from "./file-viewer";
 import { MediaGate } from "./media-gate";
 
 /** PDFs render in the browser's own PDF viewer (an inline URL in a frame). */
-export default function PdfViewer({ file }: ViewerProps) {
+export default function PdfViewer({ file, stat }: ViewerProps) {
   return (
-    <MediaGate file={file} noun="PDF" type="application/pdf">
+    <MediaGate file={file} stat={stat} kind="pdf">
       {(url) => (
         <iframe
           src={url}
