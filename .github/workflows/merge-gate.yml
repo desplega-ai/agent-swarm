@@ -619,11 +619,16 @@ jobs:
         id: tests
         run: |
           set +e
-          timeout 420 bun test --timeout 10000 src/tests/rbac-admission-e2e.test.ts 2>&1 | tail -80
-          echo "=== bun test exit: ${PIPESTATUS[0]}"
+          mkdir -p .bun-test-timings/next
+          timeout 500 bun test --timeout 10000 --parallel=4 --shard=${{ matrix.shard }}/2 \
+            --update-timings --timings=.bun-test-timings/next/${{ matrix.shard }}.json \
+            $(ls .bun-test-timings/*.json 2>/dev/null | sed 's/^/--timings=/') > /tmp/shard.log 2>&1
+          echo "=== bun test exit: $?"
+          tail -5 /tmp/shard.log
+          echo "=== last groups"; grep -a "##\[group\]\|^src/.*test.ts" /tmp/shard.log | tail -3
           ls -d /tmp/rbac-e2e-* 2>/dev/null
           for f in /tmp/rbac-e2e-*/*.log; do echo "=== $f"; tail -60 "$f"; done
-          ps aux | grep "src/http.ts" | grep -v grep | head
+          echo "=== procs"; ps aux --sort=-%cpu | head -15 | cut -c1-200
           echo "duration_ms=1" >> "$GITHUB_OUTPUT"
           echo "status=failure" >> "$GITHUB_OUTPUT"
           exit 1
