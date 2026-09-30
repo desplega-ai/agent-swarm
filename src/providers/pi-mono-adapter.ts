@@ -1255,19 +1255,25 @@ export function boundCodemodeTool(tool: ToolDefinition, limits: CodemodeLimits):
         }
         running++;
         try {
-          return await ctx.executeTool(name, args, options);
+          return await ctx.executeTool(name, args, {
+            ...options,
+            signal: options?.signal ?? script.signal,
+          });
         } finally {
           release();
         }
       };
+      // pi defines `executeTool` non-writable and non-configurable, so a Proxy
+      // may not return a different function for it. Copy the descriptors onto
+      // a fresh object instead; the getters stay lazy, as in pi's own copies.
       const boundedCtx = ctx
-        ? new Proxy(ctx, {
-            get(target, prop) {
-              if (prop === "executeTool") return executeTool;
-              const value = Reflect.get(target, prop, target);
-              return typeof value === "function" ? value.bind(target) : value;
+        ? (Object.defineProperties(
+            {},
+            {
+              ...Object.getOwnPropertyDescriptors(ctx),
+              executeTool: { value: executeTool, enumerable: true },
             },
-          })
+          ) as typeof ctx)
         : ctx;
 
       try {

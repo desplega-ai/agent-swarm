@@ -151,25 +151,33 @@ describe("bounded codemode", () => {
     const calls: string[] = [];
     let running = 0;
     let peak = 0;
-    const ctx = {
-      tools: [{ name: "noop", description: "does nothing", parameters: { type: "object" } }],
-      sessionManager: { getBranch: () => [] },
-      executeTool: async (name: string) => {
-        calls.push(name);
-        running++;
-        peak = Math.max(peak, running);
-        try {
-          await onCall();
-        } finally {
-          running--;
-        }
-        return {
-          toolCall: { id: `call-${calls.length}` },
-          result: { content: [{ type: "text", text: "ok" }] },
-          isError: false,
-        };
+    // Same shape as pi's createToolContext(): executeTool is defined
+    // non-writable and non-configurable, so a Proxy cannot swap it.
+    const ctx = Object.defineProperties(
+      {
+        tools: [{ name: "noop", description: "does nothing", parameters: { type: "object" } }],
+        sessionManager: { getBranch: () => [] },
       },
-    } as unknown as ExtensionToolContext;
+      {
+        executeTool: {
+          value: async (name: string) => {
+            calls.push(name);
+            running++;
+            peak = Math.max(peak, running);
+            try {
+              await onCall();
+            } finally {
+              running--;
+            }
+            return {
+              toolCall: { id: `call-${calls.length}` },
+              result: { content: [{ type: "text", text: "ok" }] },
+              isError: false,
+            };
+          },
+        },
+      },
+    ) as unknown as ExtensionToolContext;
     return { ctx, calls, peak: () => peak };
   }
 
