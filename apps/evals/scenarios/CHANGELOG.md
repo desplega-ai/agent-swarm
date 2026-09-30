@@ -20,6 +20,10 @@ content hash of each version is pinned in `scenario-hashes.ts`;
   affects by hand.
 - Add or change a scenario: also add its reference fixture in
   `grader-fixtures/<id>.ts` (`grader-validation.test.ts` fails without one).
+- A `-solo` baseline is derived in its swarm scenario's module (`soloVariant()`),
+  shares its `version` and hashes the same source file, so any edit to the
+  module moves both hashes: bump both, append both hashes, one changelog line
+  each.
 
 `1.0` is the suite Phase 10 publishes; until then it stays open and Phases 7-8
 add scenarios to it without a MAJOR bump. Nothing published depends on it yet.
@@ -34,6 +38,10 @@ add scenarios to it without a MAJOR bump. Nothing published depends on it yet.
 | script-authoring | 1 | Fixed `script-created` / `script-run-output` (Phase 1). |
 | delegation-chain | 2 | See below. |
 | tool-routing | 1 | Structured-output gate, partial hop order (Phase 2). |
+| fanout-research | 1 | Lead + 3 workers, 45 seeded incidents in 3 region shards (Phase 7). |
+| fanout-research-solo | 1 | Single-agent baseline of fanout-research (Phase 7, plan Q6). |
+| worker-recovery | 1 | Lead + 2 workers, clerk-2's ledger poisoned at seed time (Phase 7). |
+| worker-recovery-solo | 1 | Single-agent baseline of worker-recovery (Phase 7, plan Q6). |
 
 Versions 1 above are the state of `main` when versioning was introduced
 (Phase 3); earlier fixes (Phases 1-2) predate it and are not versioned.

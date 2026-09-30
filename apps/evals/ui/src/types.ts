@@ -469,6 +469,8 @@ export interface ScenarioJson {
   workerSpecs?: WorkerSpecJson[] | null;
   /** v7 §12: optional lead member; null/absent = no lead. */
   lead?: WorkerSpecJson | null;
+  /** Swarm scenario id this single-agent baseline pairs with; null/absent otherwise. */
+  baselineOf?: string | null;
   tasks: { title: string; description: string; worker: number | "lead"; dependsOn: number[] }[];
   seed: { exec: string[]; sqlDump: string | null; memories: string[] } | null;
   timeoutMs: number;

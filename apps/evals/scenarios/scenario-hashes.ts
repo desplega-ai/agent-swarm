@@ -27,4 +27,8 @@ export const SCENARIO_HASHES: Readonly<Record<string, readonly PinnedScenarioHas
     { version: 2, hash: "2a1dc408cb6a731e" },
   ],
   "tool-routing": [{ version: 1, hash: "e41b42bf3bcc1a9a" }],
+  "fanout-research": [{ version: 1, hash: "4ad89cd28b49d168" }],
+  "fanout-research-solo": [{ version: 1, hash: "d78c739359c4ee4d" }],
+  "worker-recovery": [{ version: 1, hash: "fd694b7a337a206d" }],
+  "worker-recovery-solo": [{ version: 1, hash: "1c9099583f923431" }],
 };

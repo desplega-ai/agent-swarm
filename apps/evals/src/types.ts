@@ -392,6 +392,15 @@ export interface Scenario {
    * the lead like any member. The lead does NOT count toward the 3-worker cap.
    */
   lead?: WorkerSpec;
+  /**
+   * Single-agent baseline pairing (swarm-evals plan Q6). Set on a `<id>-solo`
+   * variant to the id of the swarm scenario it baselines: same brief and answer
+   * key, one worker, no lead, the same timeout and budgets, and a rubric made of
+   * the swarm scenario's outcome dimensions only. Build it with `soloVariant()`
+   * (scenarios/orchestration-utils.ts); `validateBaselinePairs` (src/registry.ts)
+   * rejects a pairing that drifts. See src/baseline.ts for the comparison.
+   */
+  baselineOf?: string;
 }
 
 /** Worker count for either `Scenario.workers` shape (v7 §9). */
