@@ -1,8 +1,7 @@
 import { join, normalize, sep } from "node:path";
 import { attachmentContentDisposition } from "../../../../src/utils/content-disposition.ts";
 import { DEFAULT_CONFIG_IDS } from "../../configs/index.ts";
-import { CONFIG_PRESETS, presetRunDefaults } from "../../configs/presets.ts";
-import { SUITE_SCENARIO_VERSIONS } from "../../scenarios/suite.ts";
+import { CONFIG_PRESETS, presetRunDefaults, presetScenarioIds } from "../../configs/presets.ts";
 import {
   getCatalog,
   getResolutionCatalog,
@@ -74,6 +73,13 @@ import {
   patchConfig,
   serializeConfigResolved,
 } from "./configs-routes.ts";
+import {
+  buildRunSummaryText,
+  isScheduledPreset,
+  onRunFinished,
+  type RunCompletionDeps,
+  slackWebhookPoster,
+} from "./run-completion.ts";
 import {
   mapSuitesResponse,
   parseSuiteQuery,
@@ -454,8 +460,22 @@ function startRunExecution(db: ReturnType<typeof getDb>, runId: string): boolean
     log: (msg) => console.log(`[${runId}] ${msg}`),
   })
     .catch((err) => console.error(`[${runId}] execution crashed:`, err))
-    .finally(() => activeRuns.delete(runId));
+    .finally(() => activeRuns.delete(runId))
+    // Scheduled runs: regression check, reruns, one Slack summary. Never throws into the runner.
+    .then(() => onRunFinished(runCompletionDeps(db), runId))
+    .catch((err) => console.error(`[${runId}] run-completion hook failed:`, err));
   return true;
+}
+
+function runCompletionDeps(db: ReturnType<typeof getDb>): RunCompletionDeps {
+  return {
+    db,
+    registry: loadRegistry(),
+    startRun: (id) => startRunExecution(db, id),
+    postSlack: slackWebhookPoster(process.env.EVALS_SLACK_WEBHOOK_URL),
+    publicUrl: process.env.EVALS_PUBLIC_URL,
+    log: (msg) => console.log(msg),
+  };
 }
 
 async function sha256(value: string): Promise<Uint8Array> {
@@ -599,7 +619,7 @@ export async function startServer(
           const scenarioIds = body?.scenarioIds?.length
             ? body.scenarioIds
             : body?.preset !== undefined
-              ? Object.keys(SUITE_SCENARIO_VERSIONS)
+              ? presetScenarioIds(body.preset)
               : [];
           const configIds = body?.configIds?.length ? body.configIds : presetConfigIds;
           if (!body || !scenarioIds.length || !configIds.length) {
@@ -648,6 +668,7 @@ export async function startServer(
             judgeModel: body.judgeModel || undefined,
             efforts,
             maxMeteredUsd,
+            preset: body.preset,
           });
           await ensureRunConfigPins(db, runId, registry, scenarioIds, configIds);
           startRunExecution(db, runId);
@@ -678,6 +699,31 @@ export async function startServer(
           startRunExecution(db, run.id);
           return json({ runId: run.id, resumed: true }, 202);
         },
+      },
+      /**
+       * Regression report and Slack text of a scheduled run (Phase 9), computed from the
+       * database now. `final` is true once no rerun is pending; `summaryPostedAt` is
+       * set once the summary went to Slack. The scheduled-run workflow polls this.
+       */
+      "/api/runs/:id/regression": async (req) => {
+        if (!(await isAuthorized(req))) return unauthorized();
+        const run = await getRun(db, req.params.id);
+        if (!run) return json({ error: "run not found" }, 404);
+        if (!isScheduledPreset(run.preset)) {
+          return json({ error: "run was not started from a scheduled preset" }, 400);
+        }
+        const deps = runCompletionDeps(db);
+        const base = {
+          runId: run.id,
+          preset: run.preset,
+          status: run.status,
+          summaryPostedAt: run.summaryPostedAt ?? null,
+        };
+        if (!TERMINAL_RUN_STATUSES.has(run.status)) {
+          return json({ ...base, final: false, report: null, text: null });
+        }
+        const summary = await buildRunSummaryText(deps, run);
+        return json({ ...base, final: summary.final, report: summary.report, text: summary.text });
       },
       "/api/runs/:id/cancel": {
         POST: async (req) => {

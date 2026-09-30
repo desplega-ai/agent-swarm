@@ -103,6 +103,12 @@ export interface ConfigPreset {
     /** Hard cap on metered spend for the run, USD. */
     maxMeteredUsd: number;
   };
+  /**
+   * Scenario set POST /api/runs runs when the caller names this preset and no
+   * scenarios (Phase 9). `suite` (default) = every scenario in the suite manifest;
+   * `canary` = the public single-run scenarios only (no held-out, no `-solo`).
+   */
+  scenarioSet?: "canary" | "suite";
 }
 
 export interface TaskSpec {
@@ -961,6 +967,16 @@ export interface EvalRunRow {
    * rest cancelled. Null = no cap (pre-cap runs).
    */
   maxMeteredUsd?: number | null;
+  /**
+   * Preset the run was started from via POST /api/runs (Phase 9). A run of a
+   * scheduled preset gets the regression check and one Slack summary when it
+   * finishes; null on runs started any other way and on pre-Phase-9 rows.
+   */
+  preset?: string | null;
+  /** Set on the automatic reruns of a flagged cell: the scheduled run they confirm. */
+  rerunOf?: string | null;
+  /** When the run's Slack summary was posted; null until then (dedupe for resume). */
+  summaryPostedAt?: string | null;
   createdAt: string;
   finishedAt: string | null;
 }

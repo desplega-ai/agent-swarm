@@ -1,0 +1,83 @@
+# Scheduled swarm evals (Phase 9 of the swarm-evals plan): a nightly canary and a weekly matrix.
+#
+# This workflow only starts a run on the deployed evals service and waits for it. The service
+# runs the preset (configs, repeats and the hard metered $ cap all come from the preset in
+# apps/evals/configs/presets.ts), then does the regression check, any reruns, and posts one
+# Slack summary. See apps/evals/src/regression.ts for the rule and apps/evals/README.md
+# ("Scheduled runs") for the service side.
+#
+#   canary  -> preset nightly-canary  (Opus 5.5 + Codex 6 luna, 9 scenarios x 3, $2 cap)
+#   weekly  -> preset weekly-matrix   (+ Codex 6 astra + DeepSeek V4.1 Flash, whole suite x 5, $12 cap)
+#
+# Repo settings this needs (none of them exist until someone adds them):
+#   secret   EVALS_API_KEY            the evals service's EVALS_API_KEY (bearer token for /api/*)
+#   secret   EVALS_SLACK_WEBHOOK_URL  Slack incoming webhook. Optional here: the service posts the
+#                                     summary with its own EVALS_SLACK_WEBHOOK_URL; this copy only
+#                                     covers a run that never started, timed out, or a service
+#                                     with no webhook of its own.
+#   variable EVALS_API_URL            optional; defaults to https://evals.agent-swarm.dev
+#
+# The schedule is commented out on purpose: nothing runs on a cron until the last step of the
+# plan (Taras confirms after three clean manual dispatches):
+#   gh workflow run evals-nightly.yml -f tier=canary
+# To switch it on, uncomment the `schedule:` block below and nothing else.
+name: Evals nightly
+
+on:
+  # schedule:
+  #   # 03:00 UTC, off-hours so the run does not compete with daytime swarm work on the same
+  #   # subscriptions. GitHub may start it a few minutes late. Mon-Sat is the canary; Sunday is
+  #   # the weekly matrix, which already covers the canary configs (and the service runs one
+  #   # eval run at a time, so the two never share a night).
+  #   - cron: "0 3 * * 1-6"
+  #   - cron: "0 3 * * 0"
+  workflow_dispatch:
+    inputs:
+      tier:
+        description: "canary (nightly-canary preset) or weekly (weekly-matrix preset)"
+        type: choice
+        options:
+          - canary
+          - weekly
+        default: canary
+      concurrency:
+        description: "Attempts in flight at once (default: 3 for canary, 6 for weekly)"
+        type: string
+        required: false
+
+# One at a time, and never cancel a run mid-flight: the service caps active runs at one.
+concurrency:
+  group: evals-nightly
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    if: github.repository == 'desplega-ai/agent-swarm'
+    runs-on: ubuntu-latest
+    # The weekly matrix takes ~3 h; the script gives up on its own before this.
+    timeout-minutes: 350
+    env:
+      # Via env, never inline in `run:`, so an input cannot inject shell.
+      TIER: ${{ inputs.tier || (github.event.schedule == '0 3 * * 0' && 'weekly' || 'canary') }}
+      CONCURRENCY: ${{ inputs.concurrency }}
+      EVALS_API_KEY: ${{ secrets.EVALS_API_KEY }}
+      EVALS_API_URL: ${{ vars.EVALS_API_URL }}
+      EVALS_SLACK_WEBHOOK_URL: ${{ secrets.EVALS_SLACK_WEBHOOK_URL }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      # No `bun install`: the script uses only Bun built-ins and fetch.
+      - name: Start the run and wait for it
+        run: bun apps/evals/scripts/run-scheduled.ts --tier "$TIER" ${CONCURRENCY:+--concurrency "$CONCURRENCY"}

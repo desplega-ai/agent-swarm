@@ -1,9 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import { configs } from "../configs/index.ts";
-import { CONFIG_PRESETS, expandPresetSelection, presetRunDefaults } from "../configs/presets.ts";
+import {
+  CONFIG_PRESETS,
+  expandPresetSelection,
+  presetRunDefaults,
+  presetScenarioIds,
+  SCHEDULED_PRESET_IDS,
+} from "../configs/presets.ts";
 import { SCENARIO_CARDS, scenarioCard } from "../scenarios/cards.ts";
 import { scenarios } from "../scenarios/index.ts";
 import { SCENARIO_HASHES } from "../scenarios/scenario-hashes.ts";
+import { canarySuiteScenarioIds, isHeldOut, SUITE_SCENARIO_VERSIONS } from "../scenarios/suite.ts";
 import { serializeConfig, serializeScenario, validateScenario } from "./registry.ts";
 import {
   type CheckResult,
@@ -280,6 +287,38 @@ describe("CONFIG_PRESETS (v7.7 item 1 — frozen contract)", () => {
       if (!plan) continue;
       expect(Number.isInteger(plan.attemptsPerCell) && plan.attemptsPerCell >= 1).toBe(true);
       expect(Number.isFinite(plan.maxMeteredUsd) && plan.maxMeteredUsd > 0).toBe(true);
+    }
+  });
+
+  test("the nightly canary runs the 9 public single-run scenarios; every other preset runs the whole suite", () => {
+    expect(canarySuiteScenarioIds()).toEqual([
+      "sql-audit",
+      "delegation-probe",
+      "workflow-authoring",
+      "script-authoring",
+      "tool-routing",
+      "fanout-research",
+      "worker-recovery",
+      "implement-review",
+      "human-in-loop",
+    ]);
+    // no held-out scenario and no -solo baseline: those run in the weekly matrix only
+    for (const id of canarySuiteScenarioIds()) {
+      expect(isHeldOut(id)).toBe(false);
+      expect(id.endsWith("-solo")).toBe(false);
+    }
+    expect(presetScenarioIds("nightly-canary")).toEqual(canarySuiteScenarioIds());
+    expect(presetScenarioIds("weekly-matrix")).toEqual(Object.keys(SUITE_SCENARIO_VERSIONS));
+    expect(presetScenarioIds("frontier")).toEqual(Object.keys(SUITE_SCENARIO_VERSIONS));
+    expect(() => presetScenarioIds("nope")).toThrow('unknown preset "nope"');
+  });
+
+  test("every scheduled preset exists and carries a repeat count and a hard $ cap", () => {
+    expect(SCHEDULED_PRESET_IDS).toEqual(["nightly-canary", "weekly-matrix"]);
+    for (const id of SCHEDULED_PRESET_IDS) {
+      const preset = CONFIG_PRESETS.find((p) => p.id === id);
+      expect(preset?.runDefaults?.maxMeteredUsd).toBeGreaterThan(0);
+      expect(preset?.runDefaults?.attemptsPerCell).toBeGreaterThanOrEqual(3);
     }
   });
 

@@ -28,6 +28,9 @@ function rowToRun(r: Row): EvalRunRow {
     judgeModel: (r.judge_model as string) ?? null,
     efforts: parseJsonColumn<Record<string, ReasoningEffortLevel>>(r.efforts_json),
     maxMeteredUsd: r.max_metered_usd == null ? null : Number(r.max_metered_usd),
+    preset: (r.preset as string) ?? null,
+    rerunOf: (r.rerun_of as string) ?? null,
+    summaryPostedAt: (r.summary_posted_at as string) ?? null,
     createdAt: r.created_at as string,
     finishedAt: (r.finished_at as string) ?? null,
   };
@@ -116,12 +119,16 @@ export async function createRun(
     efforts?: Record<string, ReasoningEffortLevel>;
     /** Hard cap on metered spend in USD; omit for no cap. */
     maxMeteredUsd?: number;
+    /** Preset the run was started from (POST /api/runs `preset`); scheduled presets get a summary. */
+    preset?: string;
+    /** The scheduled run this run is an automatic rerun of. */
+    rerunOf?: string;
   },
 ): Promise<void> {
   await db.execute({
     sql: `INSERT INTO eval_runs
-            (id, name, scenario_ids, config_ids, attempts_per_cell, concurrency, judge_model, efforts_json, max_metered_usd)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            (id, name, scenario_ids, config_ids, attempts_per_cell, concurrency, judge_model, efforts_json, max_metered_usd, preset, rerun_of)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     args: [
       run.id,
       run.name ?? null,
@@ -132,6 +139,8 @@ export async function createRun(
       run.judgeModel ?? null,
       JSON.stringify(run.efforts ?? {}),
       run.maxMeteredUsd ?? null,
+      run.preset ?? null,
+      run.rerunOf ?? null,
     ],
   });
 }
@@ -153,6 +162,68 @@ export async function getRun(db: Client, id: string): Promise<EvalRunRow | null>
 export async function listRuns(db: Client): Promise<EvalRunRow[]> {
   const res = await db.execute("SELECT * FROM eval_runs ORDER BY created_at DESC");
   return res.rows.map(rowToRun);
+}
+
+/**
+ * The most recent finished runs of one preset that started before `beforeCreatedAt`,
+ * newest first: the regression baseline's nights. Reruns (`rerun_of` set) and runs that
+ * did not finish cleanly are not nights.
+ */
+export async function listBaselineRunIds(
+  db: Client,
+  opts: { preset: string; beforeCreatedAt: string; limit: number },
+): Promise<string[]> {
+  const res = await db.execute({
+    sql: `SELECT id FROM eval_runs
+          WHERE preset = ? AND rerun_of IS NULL AND status = 'done' AND created_at < ?
+          ORDER BY created_at DESC LIMIT ?`,
+    args: [opts.preset, opts.beforeCreatedAt, opts.limit],
+  });
+  return res.rows.map((r) => r.id as string);
+}
+
+/** The automatic reruns of a scheduled run, oldest first. */
+export async function listRerunRuns(db: Client, parentRunId: string): Promise<EvalRunRow[]> {
+  const res = await db.execute({
+    sql: "SELECT * FROM eval_runs WHERE rerun_of = ? ORDER BY created_at ASC",
+    args: [parentRunId],
+  });
+  return res.rows.map(rowToRun);
+}
+
+/** An attempt row plus the concrete model it ran on (`attempts.resolved_model`). */
+export type AttemptWithModel = AttemptRow & { resolvedModel: string | null };
+
+/** Every attempt of the given runs, oldest run first. Chunked: SQLite caps bound variables. */
+export async function listAttemptsForRuns(
+  db: Client,
+  runIds: string[],
+): Promise<AttemptWithModel[]> {
+  const out: AttemptWithModel[] = [];
+  for (let i = 0; i < runIds.length; i += 200) {
+    const chunk = runIds.slice(i, i + 200);
+    const res = await db.execute({
+      sql: `SELECT a.*, r.created_at AS run_created_at FROM attempts a
+            JOIN eval_runs r ON r.id = a.run_id
+            WHERE a.run_id IN (${chunk.map(() => "?").join(",")})
+            ORDER BY r.created_at ASC, a.attempt_index ASC`,
+      args: chunk,
+    });
+    for (const r of res.rows) {
+      out.push({ ...rowToAttempt(r), resolvedModel: (r.resolved_model as string) ?? null });
+    }
+  }
+  return out;
+}
+
+/** Record that a run's Slack summary went out. False when it was already recorded. */
+export async function markSummaryPosted(db: Client, runId: string): Promise<boolean> {
+  const res = await db.execute({
+    sql: `UPDATE eval_runs SET summary_posted_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+          WHERE id = ? AND summary_posted_at IS NULL`,
+    args: [runId],
+  });
+  return res.rowsAffected > 0;
 }
 
 export async function insertAttempt(

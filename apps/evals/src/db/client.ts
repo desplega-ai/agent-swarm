@@ -246,4 +246,9 @@ const COLUMN_MIGRATIONS = [
   "ALTER TABLE attempts ADD COLUMN exclusion TEXT",
   // Phase 3 hard cost cap: the run's metered spend ceiling in USD; NULL = uncapped.
   "ALTER TABLE eval_runs ADD COLUMN max_metered_usd REAL",
+  // Phase 9 scheduled runs: the preset a run was started from, the run an
+  // automatic rerun confirms, and when the run's Slack summary went out.
+  "ALTER TABLE eval_runs ADD COLUMN preset TEXT",
+  "ALTER TABLE eval_runs ADD COLUMN rerun_of TEXT",
+  "ALTER TABLE eval_runs ADD COLUMN summary_posted_at TEXT",
 ];
