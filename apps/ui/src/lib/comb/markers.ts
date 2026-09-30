@@ -6,8 +6,14 @@
 //   comment went to the swarm as that task. The swarm service account writes
 //   it (`src/comb/markers.ts` keeps the server copy of the pattern).
 
-/** `@swarm` as its own word. `me@swarm.local` does not match. */
-export const SWARM_MARKER_RE = /(^|\s)@swarm\b/i;
+/**
+ * `@swarm` as its own word. `me@swarm.local` does not match. A name that
+ * continues does not match either: `@swarm-admin`, `@swarmy`, `@swarm.bot`,
+ * `@swarm@x.io`. A "." or "@" ends the marker only when no name character
+ * follows ("ask @swarm."), the same rule as a mention token
+ * (`lib/comb/mentions.ts`).
+ */
+export const SWARM_MARKER_RE = /(^|\s)@swarm(?![\p{L}\p{N}_-]|[.@][\p{L}\p{N}_-])/iu;
 
 /** The machine-readable "sent" reply. Group 1 is the task id. */
 export const SENT_MARKER_RE = /^\[comb:sent task=([0-9a-f-]{36})\]/;
@@ -54,7 +60,7 @@ export type BodySegment = { kind: "text"; text: string } | { kind: "swarm"; text
  */
 export function splitSwarmMarkers(body: string): BodySegment[] {
   const segments: BodySegment[] = [];
-  const re = new RegExp(SWARM_MARKER_RE.source, "gi");
+  const re = new RegExp(SWARM_MARKER_RE.source, `${SWARM_MARKER_RE.flags}g`);
   let last = 0;
   for (let match = re.exec(body); match; match = re.exec(body)) {
     const tokenStart = match.index + match[1].length;

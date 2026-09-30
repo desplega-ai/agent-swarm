@@ -15,6 +15,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { useState } from "react";
+import { toast } from "sonner";
 import { useAgentFs } from "@/contexts/agent-fs-context";
 import { useDataUrl, useObjectUrl } from "@/hooks/use-object-url";
 import { type AgentFsClient, AgentFsError } from "@/lib/agent-fs/client";
@@ -23,6 +24,8 @@ import type {
   CommentAddParams,
   CommentAddResult,
   CommentListResult,
+  CommentNotificationListResult,
+  CommentNotificationReadResult,
   CommentResolveResult,
   DiffResult,
   DriveMembersResult,
@@ -47,6 +50,7 @@ import {
   type MediaSource,
   mediaSourceFrom,
 } from "@/lib/comb/media";
+import { markMentionsRead } from "@/lib/comb/mentions";
 import type { DrivePath } from "@/lib/comb/paths";
 import { type AgentFsText, COMB_TEXT_MAX_BYTES, readDriveText } from "@/lib/comb/text-content";
 
@@ -295,6 +299,77 @@ export function useDriveMembers(drive: { orgId: string; driveId: string }) {
     // Members change rarely: no polling.
     staleTime: 5 * 60_000,
     refetchInterval: false,
+  });
+}
+
+// --- Mentions (step-8) -------------------------------------------------------
+
+/** The mention inbox of the swarm drive: `(..., "notifications", "mention")`. */
+function mentionsKey(access: AgentFsAccess, orgId: string | null, driveId: string | null) {
+  return agentFsKey(access.endpoint, access.userId, orgId, driveId, "notifications", "mention");
+}
+
+/**
+ * The connected human's mentions on the swarm drive (newest 20, unread
+ * first). `drive` is null while Comb is not `ready` or agent-fs lacks
+ * `comment-mentions`: the bell then shows no Mentions section. Polls every
+ * 30 s. Works without a swarm user: it reads the agent-fs identity.
+ */
+export function useAgentFsMentions() {
+  const access = useAgentFsAccess();
+  const { orgId, driveId, features } = useAgentFs();
+  const drive =
+    access.client !== null && orgId !== null && driveId !== null && features.has("comment-mentions")
+      ? { orgId, driveId }
+      : null;
+  const active = drive !== null;
+  const query = useQuery({
+    queryKey: mentionsKey(access, orgId, driveId),
+    queryFn: ({ signal }) =>
+      connectedClient(access).callOp<CommentNotificationListResult>(
+        orgId as string,
+        "comment-notification-list",
+        { kinds: ["mention"], limit: 20 },
+        driveId as string,
+        { signal },
+      ),
+    enabled: active,
+    retry: agentFsRetry,
+    refetchInterval: 30_000,
+  });
+  return { drive, query };
+}
+
+/** What `useAgentFsMentions` returns. The bell passes it down to its Mentions section. */
+export type AgentFsMentions = ReturnType<typeof useAgentFsMentions>;
+
+/**
+ * Mark mentions of `drive` (the `useAgentFsMentions` drive) read: some ids
+ * (a click), or `all` (Mark all read). A failure shows a toast.
+ */
+export function useMarkMentionsRead(drive: { orgId: string; driveId: string }) {
+  const access = useAgentFsAccess();
+  const queryClient = useQueryClient();
+  const key = mentionsKey(access, drive.orgId, drive.driveId);
+  return useMutation({
+    mutationFn: (target: { ids: string[] } | { all: true }) =>
+      connectedClient(access).callOp<CommentNotificationReadResult>(
+        drive.orgId,
+        "comment-notification-read",
+        "all" in target ? { all: true, kinds: ["mention"] } : { ids: target.ids },
+        drive.driveId,
+      ),
+    // A poll that started before the write must not bring the unread state back.
+    onMutate: () => queryClient.cancelQueries({ queryKey: key }),
+    onSuccess: (_result, target) => {
+      queryClient.setQueryData<CommentNotificationListResult>(key, (current) =>
+        current ? markMentionsRead(current, "all" in target ? null : target.ids) : current,
+      );
+      return queryClient.invalidateQueries({ queryKey: key });
+    },
+    onError: (err) => {
+      toast.error(err.message || "Could not mark mentions read");
+    },
   });
 }
 

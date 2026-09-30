@@ -4,6 +4,7 @@ import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { useAgentFsLs, useAgentFsStat } from "@/api/hooks/use-agent-fs";
 import { CommentRail } from "@/components/comb/comment-rail";
 import { FileHeader } from "@/components/comb/file-header";
+import { renderMentionPicker } from "@/components/comb/mention-picker";
 import { ReviewChangesButton } from "@/components/comb/review/review-changes-button";
 import { ReviewPanel, ReviewRangeNotice } from "@/components/comb/review/review-panel";
 import { FileViewer } from "@/components/comb/viewers/file-viewer";
@@ -94,6 +95,8 @@ function FileBody({ file, stat }: { file: DrivePath; stat: StatResult }) {
           file={file}
           stat={stat}
           viewerRef={viewerRef}
+          // step-8: "@" mention picker in every composer.
+          renderComposerExtras={renderMentionPicker}
           // step-10: the shared read-only flag, the review param, and "Review changes (vX → vY)".
           readOnly={readOnly}
           onReadOnly={markReadOnly}

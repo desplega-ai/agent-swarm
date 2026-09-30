@@ -80,14 +80,20 @@ function hashText(text: string): string {
 interface StoredDraft {
   text: string;
   savedAt: number;
+  /** step-8: the mentions picked in this composer, as `[label, userId]` pairs. */
+  mentions?: Array<[string, string]>;
 }
 
-/** The saved draft text, or "". An expired or unreadable draft is removed. */
-export function readDraft(storage: DraftStorage | null, key: string, now: number): string {
-  if (!storage) return "";
+/** The saved draft, or null. An expired or unreadable draft is removed. */
+function readStoredDraft(
+  storage: DraftStorage | null,
+  key: string,
+  now: number,
+): StoredDraft | null {
+  if (!storage) return null;
   try {
     const raw = storage.getItem(key);
-    if (!raw) return "";
+    if (!raw) return null;
     const value = JSON.parse(raw) as Partial<StoredDraft> | null;
     if (
       !value ||
@@ -96,26 +102,55 @@ export function readDraft(storage: DraftStorage | null, key: string, now: number
       now - value.savedAt > DRAFT_MAX_AGE_MS
     ) {
       storage.removeItem(key);
-      return "";
+      return null;
     }
-    return value.text;
+    return value as StoredDraft;
   } catch {
     clearDraft(storage, key);
-    return "";
+    return null;
   }
 }
 
-/** Save the draft. Blank text removes it. */
+/** The saved draft text, or "". An expired or unreadable draft is removed. */
+export function readDraft(storage: DraftStorage | null, key: string, now: number): string {
+  return readStoredDraft(storage, key, now)?.text ?? "";
+}
+
+function isLabelPair(value: unknown): value is [string, string] {
+  return (
+    Array.isArray(value) &&
+    value.length === 2 &&
+    typeof value[0] === "string" &&
+    typeof value[1] === "string"
+  );
+}
+
+/** step-8: the mentions picked in the saved draft (`@label` -> user id). Empty without a draft. */
+export function readDraftMentions(
+  storage: DraftStorage | null,
+  key: string,
+  now: number,
+): Map<string, string> {
+  const pairs = readStoredDraft(storage, key, now)?.mentions;
+  return new Map(Array.isArray(pairs) ? pairs.filter(isLabelPair) : []);
+}
+
+/** Save the draft with its picked mentions (step-8). Blank text removes it. */
 export function writeDraft(
   storage: DraftStorage | null,
   key: string,
   text: string,
   now: number,
+  mentions?: ReadonlyMap<string, string>,
 ): void {
   if (!storage) return;
   try {
     if (text.trim() === "") storage.removeItem(key);
-    else storage.setItem(key, JSON.stringify({ text, savedAt: now } satisfies StoredDraft));
+    else {
+      const draft: StoredDraft = { text, savedAt: now };
+      if (mentions && mentions.size > 0) draft.mentions = [...mentions];
+      storage.setItem(key, JSON.stringify(draft));
+    }
   } catch {
     // A full or blocked localStorage only loses the draft.
   }
