@@ -8,11 +8,13 @@ import type { DomTextSpace } from "@/lib/comb/dom-text-space";
 const NAMES = {
   anchored: "comb-comment",
   moved: "comb-comment-moved",
+  pending: "comb-comment-pending",
   active: "comb-comment-active",
 } as const;
 
 // Older browsers: a class on the blocks that hold the passage instead.
 const FALLBACK_CLASS = "comb-comment-fallback";
+const FALLBACK_PENDING_CLASS = "comb-comment-fallback-pending";
 const FALLBACK_ACTIVE_CLASS = "comb-comment-fallback-active";
 
 function supportsHighlights(): boolean {
@@ -23,8 +25,10 @@ interface CommentHighlightsProps {
   rootRef: RefObject<HTMLElement | null>;
   space: DomTextSpace | null;
   anchors: Map<string, AnchorResolution>;
-  /** Comments to paint (the open threads). */
+  /** Comments to paint (the open threads the rail's search and filter show). */
   paintIds: ReadonlySet<string>;
+  /** Painted comments in the pending style (`@swarm`, not sent yet). */
+  pendingIds: ReadonlySet<string>;
   /** Painted in the active style, open or not: the selected card, the hovered card. */
   emphasizedIds: ReadonlySet<string>;
   /** The passage a new comment is being written on. */
@@ -41,6 +45,7 @@ export function CommentHighlights({
   space,
   anchors,
   paintIds,
+  pendingIds,
   emphasizedIds,
   pending,
   onHover,
@@ -56,7 +61,12 @@ export function CommentHighlights({
     rangesRef.current = ranges;
     if (!space) return;
     const native = supportsHighlights();
-    const groups: Record<keyof typeof NAMES, Range[]> = { anchored: [], moved: [], active: [] };
+    const groups: Record<keyof typeof NAMES, Range[]> = {
+      anchored: [],
+      moved: [],
+      pending: [],
+      active: [],
+    };
     const marked: Element[] = [];
     const markBlocks = (start: number, end: number, className: string) => {
       for (const el of space.blocksFor(start, end)) {
@@ -73,13 +83,23 @@ export function CommentHighlights({
       const range = space.toRange(resolution.start, resolution.end);
       if (!range) return;
       ranges.set(id, { range, length: resolution.end - resolution.start });
-      if (painted) groups[resolution.status === "moved" ? "moved" : "anchored"].push(range);
+      // A pending passage keeps the pending style when it moved: the card says "Moved".
+      const style = pendingIds.has(id)
+        ? "pending"
+        : resolution.status === "moved"
+          ? "moved"
+          : "anchored";
+      if (painted) groups[style].push(range);
       if (emphasized) groups.active.push(range);
       if (!native) {
         markBlocks(
           resolution.start,
           resolution.end,
-          emphasized ? FALLBACK_ACTIVE_CLASS : FALLBACK_CLASS,
+          emphasized
+            ? FALLBACK_ACTIVE_CLASS
+            : style === "pending"
+              ? FALLBACK_PENDING_CLASS
+              : FALLBACK_CLASS,
         );
       }
     });
@@ -101,9 +121,11 @@ export function CommentHighlights({
     }
     return () => {
       if (native) for (const name of Object.values(NAMES)) CSS.highlights.delete(name);
-      for (const el of marked) el.classList.remove(FALLBACK_CLASS, FALLBACK_ACTIVE_CLASS);
+      for (const el of marked) {
+        el.classList.remove(FALLBACK_CLASS, FALLBACK_PENDING_CLASS, FALLBACK_ACTIVE_CLASS);
+      }
     };
-  }, [space, anchors, paintIds, emphasizedIds, pending]);
+  }, [space, anchors, paintIds, pendingIds, emphasizedIds, pending]);
 
   // Pointer hit-testing over the painted ranges (the smallest range wins).
   useEffect(() => {

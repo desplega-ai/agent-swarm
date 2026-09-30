@@ -1,4 +1,4 @@
-import { SendHorizontal } from "lucide-react";
+import { Check, SendHorizontal } from "lucide-react";
 import {
   type MutableRefObject,
   type ReactNode,
@@ -9,11 +9,11 @@ import {
   useState,
 } from "react";
 import { toast } from "sonner";
-import { useAddComment } from "@/api/hooks/use-agent-fs";
+import { useAddComment, useUpdateComment } from "@/api/hooks/use-agent-fs";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
 import { Textarea } from "@/components/ui/textarea";
-import type { CommentAddParams } from "@/lib/agent-fs/types";
+import type { CommentAddParams, CommentEntry, CommentUpdateParams } from "@/lib/agent-fs/types";
 import { commentWritePath } from "@/lib/comb/comments";
 import type { NewCommentAnchor } from "@/lib/comb/dom-text-space";
 import {
@@ -27,13 +27,18 @@ import {
   sendFailureRoute,
   writeDraft,
 } from "@/lib/comb/drafts";
+import { mentionPicks } from "@/lib/comb/mentions";
 import { useCommentContext } from "./comment-context";
 
-/** What the composer posts: a file-level comment, an anchored one, or a reply. */
+/**
+ * What the composer posts: a file-level comment, an anchored one, a reply, or
+ * a new text for a saved comment or reply (`edit`: no draft, no outbox).
+ */
 export type ComposerTarget =
   | { kind: "file" }
   | { kind: "anchor"; anchor: NewCommentAnchor }
-  | { kind: "reply"; parentId: string };
+  | { kind: "reply"; parentId: string }
+  | { kind: "edit"; comment: CommentEntry };
 
 /** What `renderComposerExtras` (step-8 mention picker) gets from the composer. */
 export interface ComposerExtrasContext {
@@ -59,10 +64,15 @@ export const READ_ONLY_MESSAGE = "You have view-only access";
 function draftSlot(target: ComposerTarget): string {
   if (target.kind === "reply") return target.parentId;
   if (target.kind === "anchor") return anchorKeyOf(target.anchor);
+  if (target.kind === "edit") return `edit:${target.comment.id}`;
   return "file";
 }
 
-function paramsFor(target: ComposerTarget, path: string, body: string): CommentAddParams {
+function paramsFor(
+  target: Exclude<ComposerTarget, { kind: "edit" }>,
+  path: string,
+  body: string,
+): CommentAddParams {
   if (target.kind === "reply") return { parentId: target.parentId, body };
   if (target.kind === "file") return { path: commentWritePath(path), body };
   const { quote, lineStart, lineEnd, quotedContent } = target.anchor;
@@ -94,6 +104,10 @@ interface CommentComposerProps {
  * network error or a 5xx moves the comment to the outbox ("Not sent" in the
  * rail). A 403 marks the rail read-only. Read-only renders nothing: the rail
  * shows the notice.
+ *
+ * An `edit` target starts from the saved text and its mentions and saves
+ * with `comment-update`. It keeps no draft and no outbox entry: a failed save
+ * shows the error and keeps the editor open.
  */
 export function CommentComposer({
   target,
@@ -104,10 +118,21 @@ export function CommentComposer({
 }: CommentComposerProps) {
   const { file, scope, outbox, readOnly, markReadOnly } = useCommentContext();
   const addComment = useAddComment(file);
-  const draftKey = draftStorageKey(scope, draftSlot(target));
-  const [body, setBodyState] = useState(() => readDraft(browserStorage(), draftKey, Date.now()));
-  // step-8: one Map for the composer's life (the picker adds to it), restored with the draft.
-  const [picked] = useState(() => readDraftMentions(browserStorage(), draftKey, Date.now()));
+  const updateComment = useUpdateComment(file);
+  const editing = target.kind === "edit" ? target.comment : null;
+  const pending = addComment.isPending || updateComment.isPending;
+  // Edits keep no draft: a null key turns every draft read and write off.
+  const draftKey = editing ? null : draftStorageKey(scope, draftSlot(target));
+  const [body, setBodyState] = useState(() =>
+    draftKey ? readDraft(browserStorage(), draftKey, Date.now()) : (editing?.body ?? ""),
+  );
+  // step-8: one Map for the composer's life (the picker adds to it), restored
+  // with the draft. An edit starts from the comment's own mentions.
+  const [picked] = useState(() =>
+    draftKey
+      ? readDraftMentions(browserStorage(), draftKey, Date.now())
+      : mentionPicks(editing?.body ?? "", editing?.mentions),
+  );
   const [error, setError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const sendParamsRef = useRef<((body: string) => Partial<CommentAddParams>) | null>(null);
@@ -116,6 +141,7 @@ export function CommentComposer({
   const pendingDraft = useRef<string | null>(null);
   const scheduleDraftSave = useRef<() => void>(() => {});
   useEffect(() => {
+    if (!draftKey) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const flush = () => {
       if (pendingDraft.current === null) return;
@@ -133,6 +159,14 @@ export function CommentComposer({
     };
   }, [draftKey, picked]);
 
+  // An edit opens with the caret after the saved text.
+  const editingId = editing?.id;
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (editingId && textarea)
+      textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+  }, [editingId]);
+
   const setBody = useCallback((next: string, caret?: number) => {
     setBodyState(next);
     setError(null);
@@ -147,15 +181,41 @@ export function CommentComposer({
   // and a click outside close the composer and keep the draft.
   const finish = () => {
     pendingDraft.current = null;
-    clearDraft(browserStorage(), draftKey);
+    if (draftKey) clearDraft(browserStorage(), draftKey);
     picked.clear();
     setBodyState("");
     onClose();
   };
 
+  const save = async (comment: CommentEntry, text: string) => {
+    // With the mention picker on, the edit replaces the stored mentions (none
+    // left in the text: an empty list). Without it, they stay as they are.
+    const mentions = sendParamsRef.current ? (sendParamsRef.current(text).mentions ?? []) : null;
+    const params: CommentUpdateParams = {
+      id: comment.id,
+      body: text,
+      ...(mentions ? { mentions } : {}),
+    };
+    try {
+      await updateComment.mutateAsync(params);
+      finish();
+    } catch (err) {
+      if (sendFailureRoute(err) === "read-only") {
+        toast.error(READ_ONLY_MESSAGE);
+        markReadOnly();
+      } else {
+        setError(errorMessage(err));
+      }
+    }
+  };
+
   const send = async () => {
     const text = body.trim();
-    if (!text || addComment.isPending) return;
+    if (!text || pending) return;
+    if (target.kind === "edit") {
+      await save(target.comment, text);
+      return;
+    }
     const params = {
       ...paramsFor(target, file.path, text),
       ...sendParamsRef.current?.(text),
@@ -228,11 +288,11 @@ export function CommentComposer({
           type="button"
           size="sm"
           onClick={() => void send()}
-          disabled={!body.trim() || addComment.isPending}
+          disabled={!body.trim() || pending}
           aria-keyshortcuts="Meta+Enter Control+Enter"
         >
-          <SendHorizontal />
-          Send
+          {editing ? <Check /> : <SendHorizontal />}
+          {editing ? "Save" : "Send"}
           <Kbd tone="inverted" aria-hidden className="hidden sm:inline-flex">
             ⌘⏎
           </Kbd>

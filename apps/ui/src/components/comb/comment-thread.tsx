@@ -1,25 +1,55 @@
-import { Check, CheckCheck, MessageSquare, RotateCcw, Send, TriangleAlert } from "lucide-react";
+import {
+  Check,
+  CheckCheck,
+  Ellipsis,
+  MessageSquare,
+  Pencil,
+  RotateCcw,
+  Send,
+  Trash2,
+  TriangleAlert,
+} from "lucide-react";
 import { Fragment, type ReactNode, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { useResolveComment } from "@/api/hooks/use-agent-fs";
+import { useAgentFsAccess, useDeleteComment, useResolveComment } from "@/api/hooks/use-agent-fs";
 import { useAuthorLabel } from "@/components/comb/use-author-label";
 import { useCombServiceUserId } from "@/components/comb/use-comb-service-user";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { AgentFsError } from "@/lib/agent-fs/client";
 import type { CommentEntry, CommentListEntry, CommentMention } from "@/lib/agent-fs/types";
 import { type AnchorResolution, commentQuote } from "@/lib/comb/comment-anchor";
+import { commentEditBlock } from "@/lib/comb/comment-edit";
 import { lineRangeLabel } from "@/lib/comb/comments";
 import { getFileKind } from "@/lib/comb/file-kinds";
 import { sentReplyTaskId, splitSwarmMarkers } from "@/lib/comb/markers";
 import { splitMentions } from "@/lib/comb/mentions";
+import type { ThreadSwarmState } from "@/lib/comb/thread-status";
 import { formatRelative } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
 import { CommentComposer, READ_ONLY_MESSAGE, useHasDraft } from "./comment-composer";
 import { useCommentContext } from "./comment-context";
 import { QuoteExcerpt } from "./quote-excerpt";
+import { SwarmStateLine } from "./swarm-state";
 
 /**
  * Comment text with each `@swarm` token as a chip. `renderText` renders the
@@ -103,13 +133,141 @@ function Byline({ entry, children }: { entry: CommentEntry; children?: ReactNode
   );
 }
 
-function Reply({ thread, reply }: { thread: CommentListEntry; reply: CommentEntry }) {
+/**
+ * "..." with Edit and Delete on the connected user's own comment or reply
+ * (`commentEditBlock`). A root that went to the swarm keeps the menu with
+ * both items off and says why. Nothing for other people's comments, the
+ * swarm's replies, or a read-only rail.
+ */
+function CommentMenu({
+  entry,
+  thread,
+  onEdit,
+  onDelete,
+}: {
+  entry: CommentEntry;
+  thread: CommentListEntry;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const { readOnly } = useCommentContext();
+  const { userId } = useAgentFsAccess();
+  const serviceUserId = useCombServiceUserId();
+  // Edit moves the focus to its text box: the closing menu must not take it back.
+  const keepFocus = useRef(false);
+  const block = commentEditBlock(entry, thread, userId, serviceUserId);
+  if (readOnly || (block !== null && block !== "sent")) return null;
+  const sent = block === "sent";
+  const label = entry.id === thread.id ? "Comment actions" : "Reply actions";
+  return (
+    <DropdownMenu>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <Button
+              size="icon-xs"
+              variant="ghost"
+              aria-label={label}
+              data-menu-for={entry.id}
+              className="text-muted-foreground"
+              // The card selects itself on click. This button does not.
+              onClick={(event) => event.stopPropagation()}
+            >
+              <Ellipsis />
+            </Button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent>{label}</TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent
+        align="end"
+        className="w-52"
+        // A portal still bubbles React events to the card.
+        onClick={(event) => event.stopPropagation()}
+        onCloseAutoFocus={(event) => {
+          if (!keepFocus.current) return;
+          keepFocus.current = false;
+          // The menu held the focus while it closed: hand it to the editor now.
+          event.preventDefault();
+          document
+            .querySelector<HTMLElement>(`[data-comb-editor="${CSS.escape(entry.id)}"] textarea`)
+            ?.focus();
+        }}
+      >
+        <DropdownMenuItem
+          disabled={sent}
+          onSelect={() => {
+            keepFocus.current = true;
+            onEdit();
+          }}
+        >
+          <Pencil />
+          Edit
+        </DropdownMenuItem>
+        <DropdownMenuItem variant="destructive" disabled={sent} onSelect={onDelete}>
+          <Trash2 />
+          Delete
+        </DropdownMenuItem>
+        {sent ? (
+          <>
+            <DropdownMenuSeparator />
+            <p className="px-2 py-1.5 text-xs text-muted-foreground">
+              Sent to the swarm. Resolve it instead.
+            </p>
+          </>
+        ) : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** The inline editor of a saved comment or reply: the composer with its text. */
+function CommentEditor({ entry, onClose }: { entry: CommentEntry; onClose: () => void }) {
+  const { renderComposerExtras } = useCommentContext();
+  return (
+    // Typing in the editor does not select the card.
+    <div data-comb-editor={entry.id} onClick={(event) => event.stopPropagation()}>
+      <CommentComposer
+        target={{ kind: "edit", comment: entry }}
+        placeholder={entry.parentId ? "Edit reply" : "Edit comment"}
+        autoFocus
+        onClose={onClose}
+        renderComposerExtras={renderComposerExtras}
+      />
+    </div>
+  );
+}
+
+interface EntryActions {
+  /** The comment or reply whose editor is open. */
+  editingId: string | null;
+  onEdit: (id: string | null) => void;
+  onDelete: (entry: CommentEntry) => void;
+}
+
+function Reply({
+  thread,
+  reply,
+  editingId,
+  onEdit,
+  onDelete,
+}: { thread: CommentListEntry; reply: CommentEntry } & EntryActions) {
   const serviceUserId = useCombServiceUserId();
   const taskId = sentReplyTaskId(thread, reply, serviceUserId);
   return (
     <li className="flex flex-col gap-1 py-2">
-      <Byline entry={reply} />
-      {taskId ? (
+      <div className="flex items-start justify-between gap-2">
+        <Byline entry={reply} />
+        <CommentMenu
+          entry={reply}
+          thread={thread}
+          onEdit={() => onEdit(reply.id)}
+          onDelete={() => onDelete(reply)}
+        />
+      </div>
+      {editingId === reply.id ? (
+        <CommentEditor entry={reply} onClose={() => onEdit(null)} />
+      ) : taskId ? (
         <Link
           to={`/tasks/${taskId}`}
           onClick={(event) => event.stopPropagation()}
@@ -177,9 +335,15 @@ interface CommentThreadProps {
   onHover: (id: string | null) => void;
   /** Thread actions mount point: step-9 "Send to swarm", step-10 "Review changes". */
   actions?: ReactNode;
+  /** "Pending" or "Processing" (`threadSwarmStates`). Undefined: neither. */
+  swarmState?: ThreadSwarmState;
 }
 
-/** One root comment with its replies, reply box, and Resolve / Reopen. */
+/**
+ * One root comment with its replies, reply box, Resolve / Reopen, its swarm
+ * state ("Pending" or "Processing"), and Edit / Delete on the connected
+ * user's own comments.
+ */
 export function CommentThread({
   thread,
   anchor,
@@ -188,9 +352,20 @@ export function CommentThread({
   onActivate,
   onHover,
   actions,
+  swarmState,
 }: CommentThreadProps) {
   const { file, readOnly, markReadOnly, renderComposerExtras } = useCommentContext();
   const resolve = useResolveComment(file);
+  const remove = useDeleteComment(file);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  // The comment the delete dialog asks about. It stays set while the dialog
+  // closes, so the title does not change during the exit.
+  const [deleting, setDeleting] = useState<CommentEntry | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const askDelete = (entry: CommentEntry) => {
+    setDeleting(entry);
+    setDeleteOpen(true);
+  };
   const replyTarget = { kind: "reply", parentId: thread.id } as const;
   // A saved reply draft reopens the reply box (after a reload).
   const hasReplyDraft = useHasDraft(replyTarget);
@@ -211,28 +386,47 @@ export function CommentThread({
     replyButtonRef.current?.focus();
   }, [replying]);
 
+  // A closed editor gives focus back to the "..." of the comment it edited.
+  const articleRef = useRef<HTMLElement>(null);
+  const editedId = useRef<string | null>(null);
+  useEffect(() => {
+    if (editingId) {
+      editedId.current = editingId;
+      return;
+    }
+    const id = editedId.current;
+    editedId.current = null;
+    if (!id) return;
+    articleRef.current?.querySelector<HTMLElement>(`[data-menu-for="${CSS.escape(id)}"]`)?.focus();
+  }, [editingId]);
+
   const activate = (event: { stopPropagation: () => void }) => {
     event.stopPropagation();
     onActivate(thread.id);
   };
 
+  const onWriteError = (error: Error) => {
+    if (error instanceof AgentFsError && error.status === 403) {
+      markReadOnly();
+      toast.error(READ_ONLY_MESSAGE);
+    } else {
+      toast.error(error.message);
+    }
+  };
+
   const toggleResolved = () =>
-    resolve.mutate(
-      { id: thread.id, resolved: !thread.resolved },
-      {
-        onError: (error) => {
-          if (error instanceof AgentFsError && error.status === 403) {
-            markReadOnly();
-            toast.error(READ_ONLY_MESSAGE);
-          } else {
-            toast.error(error.message);
-          }
-        },
-      },
-    );
+    resolve.mutate({ id: thread.id, resolved: !thread.resolved }, { onError: onWriteError });
+
+  const entryActions: EntryActions = {
+    editingId,
+    onEdit: setEditingId,
+    onDelete: askDelete,
+  };
+  const deletingRoot = deleting?.id === thread.id;
 
   return (
     <article
+      ref={articleRef}
       data-comment-id={thread.id}
       aria-current={active ? "true" : undefined}
       onClick={() => onActivate(thread.id)}
@@ -298,8 +492,16 @@ export function CommentThread({
               <TooltipContent>{thread.resolved ? "Reopen" : "Resolve"}</TooltipContent>
             </Tooltip>
           )}
+          <CommentMenu
+            entry={thread}
+            thread={thread}
+            onEdit={() => setEditingId(thread.id)}
+            onDelete={() => askDelete(thread)}
+          />
         </div>
       </header>
+
+      {swarmState ? <SwarmStateLine state={swarmState} /> : null}
 
       {quote ? (
         <button
@@ -316,12 +518,16 @@ export function CommentThread({
         </button>
       ) : null}
 
-      <CommentBody body={thread.body} mentions={thread.mentions} />
+      {editingId === thread.id ? (
+        <CommentEditor entry={thread} onClose={() => setEditingId(null)} />
+      ) : (
+        <CommentBody body={thread.body} mentions={thread.mentions} />
+      )}
 
       {thread.replies.length > 0 ? (
         <ol className="flex flex-col divide-y divide-border-subtle border-t border-border-subtle">
           {thread.replies.map((reply) => (
-            <Reply key={reply.id} thread={thread} reply={reply} />
+            <Reply key={reply.id} thread={thread} reply={reply} {...entryActions} />
           ))}
         </ol>
       ) : null}
@@ -364,6 +570,33 @@ export function CommentThread({
         {/* Thread actions mount point (step-9 Send to swarm, step-10 Review changes). */}
         {actions}
       </footer>
+
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        {/* A portal still bubbles React events to the card. */}
+        <AlertDialogContent onClick={(event) => event.stopPropagation()}>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {deletingRoot ? "Delete this comment?" : "Delete this reply?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {deletingRoot && thread.replies.length > 0
+                ? `Its ${thread.replies.length === 1 ? "reply goes" : `${thread.replies.length} replies go`} with it. You cannot undo this.`
+                : "You cannot undo this."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep it</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => {
+                if (deleting) remove.mutate(deleting.id, { onError: onWriteError });
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </article>
   );
 }

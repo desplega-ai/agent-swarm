@@ -27,10 +27,13 @@ import { agentFsKey, agentFsRetry } from "@/lib/agent-fs/query";
 import type {
   CommentAddParams,
   CommentAddResult,
+  CommentDeleteResult,
   CommentListResult,
   CommentNotificationListResult,
   CommentNotificationReadResult,
   CommentResolveResult,
+  CommentUpdateParams,
+  CommentUpdateResult,
   DiffResult,
   DriveMembersResult,
   LogResult,
@@ -489,6 +492,48 @@ export function useResolveComment(file: DrivePath) {
         file.driveId,
       ),
     // A poll that started before the write must not bring the old state back.
+    onMutate: () => queryClient.cancelQueries({ queryKey: key }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: key }),
+  });
+}
+
+/**
+ * Edit a comment or a reply (author only). Success refreshes every comment
+ * query of the drive, like `useResolveComment`.
+ */
+export function useUpdateComment(file: DrivePath) {
+  const access = useAgentFsAccess();
+  const queryClient = useQueryClient();
+  const key = agentFsCommentsKey(access, file);
+  return useMutation({
+    mutationFn: (params: CommentUpdateParams) =>
+      connectedClient(access).callOp<CommentUpdateResult>(
+        file.orgId,
+        "comment-update",
+        { ...params },
+        file.driveId,
+      ),
+    onMutate: () => queryClient.cancelQueries({ queryKey: key }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: key }),
+  });
+}
+
+/**
+ * Delete a comment or a reply (author only). agent-fs deletes a root's
+ * replies with it. Success refreshes every comment query of the drive.
+ */
+export function useDeleteComment(file: DrivePath) {
+  const access = useAgentFsAccess();
+  const queryClient = useQueryClient();
+  const key = agentFsCommentsKey(access, file);
+  return useMutation({
+    mutationFn: (id: string) =>
+      connectedClient(access).callOp<CommentDeleteResult>(
+        file.orgId,
+        "comment-delete",
+        { id },
+        file.driveId,
+      ),
     onMutate: () => queryClient.cancelQueries({ queryKey: key }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: key }),
   });

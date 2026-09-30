@@ -260,6 +260,22 @@ export function splitMentions(
 }
 
 /**
+ * The picks of a saved comment (`label` -> user id, the composer's `picked`
+ * shape): each `@label` token of its mentions (`splitMentions`). An edit
+ * starts from them, so the mentions it keeps stay mentions.
+ */
+export function mentionPicks(
+  text: string,
+  mentions: readonly CommentMention[] | undefined,
+): Map<string, string> {
+  const picks = new Map<string, string>();
+  for (const segment of splitMentions(text, mentions)) {
+    if (segment.kind === "mention") picks.set(segment.text.slice(1), segment.mention.userId);
+  }
+  return picks;
+}
+
+/**
  * The Comb route of a mention notification: the file, with its thread
  * selected (`?comment=` is the root, so a reply opens its thread). The stored
  * path can come in either form ("docs/a.md" or "/docs/a.md").

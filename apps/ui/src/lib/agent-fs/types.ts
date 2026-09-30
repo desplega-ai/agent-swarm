@@ -192,6 +192,24 @@ export interface CommentResolveResult {
   resolvedAt?: string;
 }
 
+/** `comment-update` (author only). `mentions` replaces the stored mentions; omit it to keep them. */
+export interface CommentUpdateParams {
+  id: string;
+  body: string;
+  mentions?: string[];
+}
+
+export interface CommentUpdateResult {
+  id: string;
+  body: string;
+  updatedAt: string;
+}
+
+/** `comment-delete` (author only). A root takes its replies with it. */
+export interface CommentDeleteResult {
+  deleted: boolean;
+}
+
 export interface CommentNotificationEntry {
   /** Notification event ID. */
   id: string;
