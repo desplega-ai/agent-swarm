@@ -8,10 +8,21 @@
 // the reverse.
 
 import { type QueryKey, queryOptions, useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { useAgentFs } from "@/contexts/agent-fs-context";
+import { useDataUrl, useObjectUrl } from "@/hooks/use-object-url";
 import type { AgentFsClient } from "@/lib/agent-fs/client";
 import { agentFsKey, agentFsRetry } from "@/lib/agent-fs/query";
 import type { DriveMembersResult, LsResult, StatResult } from "@/lib/agent-fs/types";
+import {
+  blobUrlPlan,
+  COMB_MEDIA_MAX_BYTES,
+  freshPresignedUrl,
+  MEDIA_URL_EXPIRY_MARGIN_MS,
+  type MediaKind,
+  type MediaSource,
+  mediaSourceFrom,
+} from "@/lib/comb/media";
 import type { DrivePath } from "@/lib/comb/paths";
 import { type AgentFsText, COMB_TEXT_MAX_BYTES, readDriveText } from "@/lib/comb/text-content";
 
@@ -98,7 +109,7 @@ export function useAgentFsStat(target: DrivePath) {
 export function useAgentFsText(target: DrivePath) {
   const access = useAgentFsAccess();
   const stat = useAgentFsStat(target).data;
-  const revision = stat ? (stat.currentVersion ?? stat.etag ?? stat.modifiedAt) : null;
+  const revision = fileRevision(stat);
   const fileKey = drivePathKey(access, target, "content");
   return useQuery({
     queryKey: [...fileKey, revision] as const,
@@ -111,13 +122,125 @@ export function useAgentFsText(target: DrivePath) {
     // One entry per revision: drop each as soon as no viewer reads it, so a
     // file that changes on every poll does not pile up copies of its bytes.
     gcTime: 0,
-    placeholderData: (previous, previousQuery) =>
-      previousQuery && sameKeyPrefix(previousQuery.queryKey, fileKey) ? previous : undefined,
+    placeholderData: keepSameFile(fileKey),
   });
 }
 
 function sameKeyPrefix(key: QueryKey, prefix: readonly unknown[]): boolean {
   return prefix.every((part, index) => key[index] === part);
+}
+
+/** The version id that content keys end with, so each version loads once. */
+function fileRevision(stat: StatResult | undefined) {
+  return stat ? (stat.currentVersion ?? stat.etag ?? stat.modifiedAt) : null;
+}
+
+/**
+ * `placeholderData` that keeps the previous data of the same file (keys under
+ * `fileKey`) on screen while a new revision loads.
+ */
+function keepSameFile(fileKey: readonly unknown[]) {
+  return <T>(previous: T | undefined, previousQuery?: { queryKey: QueryKey }) =>
+    previousQuery && sameKeyPrefix(previousQuery.queryKey, fileKey) ? previous : undefined;
+}
+
+// --- Media URLs (step-6: image, video, and PDF viewers) ---
+
+/** Presigned media URLs live one hour. */
+const MEDIA_URL_EXPIRES_IN_SECONDS = 3600;
+
+export interface AgentFsMediaUrl {
+  /** Null while the URL loads, after an error, and when `tooLarge`. */
+  url: string | null;
+  /** Blob mode only: the file is above `COMB_MEDIA_MAX_BYTES`, so its bytes do not load. */
+  tooLarge: boolean;
+  error: Error | null;
+}
+
+/**
+ * A URL for `<img>`, `<video>`, or a PDF `<iframe>`. It is a presigned
+ * storage URL when the backend supports them. Otherwise (a 422, or an `app`
+ * link, for example on the local storage backend) the Bearer `/raw` bytes
+ * load into a local URL, up to `COMB_MEDIA_MAX_BYTES`. `blobUrlPlan` sets
+ * that URL's type, so it never renders as a document at the dashboard's
+ * origin. The local URL is revoked when the file, its revision, or the
+ * component changes.
+ *
+ * Keys: `[..., "media", path, revision, "signed-url"]` and
+ * `[..., "media", path, revision, "raw"]`. Neither the keys nor the cached
+ * bytes depend on `kind`. Invalidate both by the prefix `(..., "media", path)`.
+ */
+export function useAgentFsMediaUrl(target: DrivePath, kind: MediaKind): AgentFsMediaUrl {
+  const access = useAgentFsAccess();
+  const stat = useAgentFsStat(target).data;
+  const revision = fileRevision(stat);
+  const mediaKey = drivePathKey(access, target, "media");
+  const enabled = access.client !== null && stat !== undefined;
+  // A cached presigned URL near its expiry never shows on mount. It is stale
+  // (see `staleTime`), so the mount mints a new one.
+  const [mountedAt] = useState(Date.now);
+
+  const signed = useQuery({
+    queryKey: [...mediaKey, revision, "signed-url"] as const,
+    queryFn: async (): Promise<MediaSource> => {
+      const mintedAt = Date.now();
+      const outcome = await (access.client as AgentFsClient)
+        .getSignedUrl(target.orgId, target.driveId, target.path, {
+          disposition: "inline",
+          expiresIn: MEDIA_URL_EXPIRES_IN_SECONDS,
+        })
+        .then(
+          (result) => ({ result }),
+          (error: unknown) => ({ error }),
+        );
+      const source = mediaSourceFrom(outcome, mintedAt);
+      if (source.kind === "error") throw source.error;
+      return source;
+    },
+    enabled,
+    retry: agentFsRetry,
+    // A presigned URL goes stale when it enters the expiry margin, so the next
+    // mount mints a new one. Blob mode changes only with the backend.
+    staleTime: ({ state }) =>
+      state.data?.kind === "presigned"
+        ? state.data.expiresAt - MEDIA_URL_EXPIRY_MARGIN_MS - state.dataUpdatedAt
+        : Number.POSITIVE_INFINITY,
+    gcTime: 10 * 60_000,
+    // A URL on screen never changes under the viewer: a new URL reloads a
+    // PDF at page 1 and restarts a video.
+    refetchInterval: false,
+    refetchOnWindowFocus: false,
+    placeholderData: keepSameFile(mediaKey),
+  });
+  const presignedUrl = freshPresignedUrl(signed.data, mountedAt);
+  const blobMode = signed.data?.kind === "blob";
+  const tooLarge = blobMode && stat !== undefined && stat.size > COMB_MEDIA_MAX_BYTES;
+
+  const raw = useQuery({
+    queryKey: [...mediaKey, revision, "raw"] as const,
+    queryFn: ({ signal }) =>
+      (access.client as AgentFsClient).fetchRaw(target.orgId, target.driveId, target.path, {
+        signal,
+      }),
+    enabled: enabled && blobMode && !tooLarge,
+    retry: agentFsRetry,
+    staleTime: Number.POSITIVE_INFINITY,
+    refetchInterval: false,
+    // Never keep media bytes (or their object URLs) for a file that is not on screen.
+    gcTime: 0,
+    placeholderData: keepSameFile(mediaKey),
+  });
+  const plan = blobUrlPlan(kind, target.path, stat?.contentType);
+  const blob = blobMode && !tooLarge ? raw.data : undefined;
+  const objectUrl = useObjectUrl(plan.as === "object-url" ? blob : undefined, plan.type);
+  const dataUrl = useDataUrl(plan.as === "data-url" ? blob : undefined, plan.type);
+  const blobUrl = objectUrl ?? dataUrl;
+
+  // Data wins over an error: a failed background refetch keeps the URL on screen.
+  if (presignedUrl) return { url: presignedUrl, tooLarge: false, error: null };
+  if (tooLarge) return { url: null, tooLarge: true, error: null };
+  if (blobUrl) return { url: blobUrl, tooLarge: false, error: null };
+  return { url: null, tooLarge: false, error: signed.error ?? raw.error };
 }
 
 /**

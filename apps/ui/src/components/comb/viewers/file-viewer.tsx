@@ -17,14 +17,13 @@ export interface ViewerProps {
 const FallbackViewer = lazy(() => import("./fallback-viewer"));
 
 // Add a viewer = one entry + one component, same as live/ FileViewer.
-// Step-6 points image, video, pdf, and table at their own viewers.
 export const VIEWERS: Record<FileKind, LazyExoticComponent<ComponentType<ViewerProps>>> = {
   markdown: lazy(() => import("./markdown-viewer")),
   text: lazy(() => import("./text-viewer")),
-  image: FallbackViewer,
-  video: FallbackViewer,
-  pdf: FallbackViewer,
-  table: FallbackViewer,
+  image: lazy(() => import("./image-viewer")),
+  video: lazy(() => import("./video-viewer")),
+  pdf: lazy(() => import("./pdf-viewer")),
+  table: lazy(() => import("./table-viewer")),
   fallback: FallbackViewer,
 };
 

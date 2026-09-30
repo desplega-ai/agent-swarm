@@ -23,6 +23,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useObjectUrl } from "@/hooks/use-object-url";
 import { isCoarsePointerInput, shouldSubmitOnEnterKeyDown } from "@/lib/enter-submit";
 import { cn } from "@/lib/utils";
 
@@ -85,13 +86,7 @@ function partitionAttachmentFiles(files: File[]): { valid: File[]; error: string
 /** An image previews as a thumbnail, anything else as a file icon. */
 function AttachmentIcon({ file }: { file: File }) {
   const isImage = file.type.startsWith("image/");
-  const [url, setUrl] = useState<string | null>(null);
-  useEffect(() => {
-    if (!isImage) return;
-    const next = URL.createObjectURL(file);
-    setUrl(next);
-    return () => URL.revokeObjectURL(next);
-  }, [file, isImage]);
+  const url = useObjectUrl(isImage ? file : undefined);
   if (!isImage || !url) return <FileText className="h-3 w-3 shrink-0 text-muted-foreground" />;
   return (
     <img
