@@ -123,7 +123,9 @@ function isEntityId(segment: string | undefined): boolean {
 
 export function Breadcrumbs() {
   const location = useLocation();
-  const segments = location.pathname.split("/").filter(Boolean);
+  const pathSegments = location.pathname.split("/").filter(Boolean);
+  // Comb (`/file/~/<org>/<drive>/<path>`) draws its own path trail in the page.
+  const segments = pathSegments[0] === "file" ? pathSegments.slice(0, 1) : pathSegments;
   // Home shows the greeting in the breadcrumb slot (there is no trail to
   // draw and no in-page h1 anymore). Called before the early return so hook
   // order stays stable across routes.

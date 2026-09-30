@@ -1,0 +1,44 @@
+import { DownloadButton, OpenInAgentFsButton } from "@/components/comb/file-actions";
+import { useAuthorLabel } from "@/components/comb/use-author-label";
+import { PageHeader } from "@/components/ui/page-header";
+import type { StatResult } from "@/lib/agent-fs/types";
+import { baseName, type DrivePath } from "@/lib/comb/paths";
+import { formatBytes } from "@/lib/format-bytes";
+import { formatRelative } from "@/lib/relative-time";
+
+/** File name, version, size, author, and modified time, with the file actions. */
+export function FileHeader({ file, stat }: { file: DrivePath; stat: StatResult }) {
+  const authorLabel = useAuthorLabel(file);
+  const facts = [
+    stat.currentVersion !== undefined ? `v${stat.currentVersion}` : null,
+    formatBytes(stat.size),
+    authorLabel(stat.author),
+  ].filter(Boolean);
+
+  return (
+    <PageHeader
+      title={
+        <div className="min-w-0">
+          <h2 className="truncate text-base font-semibold">{baseName(file.path)}</h2>
+          <p className="flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
+            {facts.map((fact) => (
+              <span key={fact} className="after:ml-1.5 after:content-['·']">
+                {fact}
+              </span>
+            ))}
+            <time dateTime={stat.modifiedAt} title={stat.modifiedAt}>
+              {formatRelative(stat.modifiedAt)}
+            </time>
+          </p>
+        </div>
+      }
+      action={
+        <>
+          {/* File actions: later steps add buttons here (step-12 pin). */}
+          <DownloadButton file={file} />
+          <OpenInAgentFsButton target={file} />
+        </>
+      }
+    />
+  );
+}

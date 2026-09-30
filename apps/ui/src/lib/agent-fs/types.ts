@@ -58,6 +58,17 @@ export interface StatResult {
   etag?: string;
 }
 
+/** One member of a drive (`drive-members` op, agent-fs `/health` feature `drive-members`). */
+export interface DriveMember {
+  userId: string;
+  email: string;
+  displayName: string | null;
+}
+
+export interface DriveMembersResult {
+  members: DriveMember[];
+}
+
 export interface DiffChange {
   type: "add" | "remove" | "context";
   content: string;
