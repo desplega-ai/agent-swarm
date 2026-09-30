@@ -6,6 +6,7 @@ import {
   createLogEntry,
   failTask,
   getAgentById,
+  getAgentCurrentTask,
   getDbClient,
   getResolvedConfig,
   getTaskById,
@@ -48,6 +49,29 @@ const BLOCKED_WAITING_PATTERN =
 // Below this, two check-ins are close enough together that "blocked" reads as
 // noise and calling defer-task buys nothing over checking in again shortly.
 const BLOCKED_WAITING_MIN_ELAPSED_MS = 3 * 60 * 1000;
+
+/**
+ * Only the assigned agent may write a task's progress, status, or artifacts.
+ * Workflow siblings see each other's task ids in their prompt, and a worker
+ * once completed a sibling's task with its own report. Leads keep cross-task
+ * writes (the task-citations suite pins lead completion of a worker task);
+ * unassigned tasks stay writable, matching `POST /api/tasks/:id/finish`.
+ * Returns the refusal message, naming the caller's own task so it can retry.
+ */
+async function foreignTaskWriteError(
+  caller: { id: string; isLead?: boolean },
+  task: { id: string; agentId?: string | null },
+  sourceTaskId: string | undefined,
+): Promise<string | undefined> {
+  if (!task.agentId || task.agentId === caller.id || caller.isLead) return undefined;
+  const sourceTask = sourceTaskId ? await getTaskById(sourceTaskId) : null;
+  const ownTask =
+    sourceTask?.agentId === caller.id ? sourceTask : await getAgentCurrentTask(caller.id);
+  const retry = ownTask
+    ? ` Your own task is "${ownTask.id}"; call store-progress with that taskId.`
+    : " You have no in-progress task.";
+  return `Task "${task.id}" is assigned to another agent; only its assignee may store progress on it. Nothing was written.${retry}`;
+}
 
 export const storeProgressOutputSchema = swarmToolOutputSchema({
   // Bounded confirmation only. The handler keeps the full task row internally
@@ -227,14 +251,18 @@ export const registerStoreProgressTool = (server: McpServer) => {
         // Validate the caller and target before an agent-fs lookup. Otherwise a
         // forged X-Agent-ID or unknown task could use this tool as a file-existence
         // oracle through the API-owned agent-fs credential fallback.
-        if (!(await getAgentById(requestInfo.agentId))) {
+        const caller = await getAgentById(requestInfo.agentId);
+        if (!caller) {
           return toolErr(
             `Agent with ID "${requestInfo.agentId}" not found in the swarm, register before storing task progress.`,
           );
         }
-        if (!(await getTaskById(taskId))) {
+        const target = await getTaskById(taskId);
+        if (!target) {
           return toolErr(`Task with ID "${taskId}" not found.`);
         }
+        const foreignError = await foreignTaskWriteError(caller, target, requestInfo.sourceTaskId);
+        if (foreignError) return toolErr(foreignError);
 
         const configs = await getResolvedConfig(requestInfo.agentId ?? undefined);
         const configValue = (key: string) => configs.find((c) => c.key === key)?.value?.trim();
@@ -315,6 +343,15 @@ export const registerStoreProgressTool = (server: McpServer) => {
           };
         }
 
+        const foreignError = await foreignTaskWriteError(
+          agent,
+          existingTask,
+          requestInfo.sourceTaskId,
+        );
+        if (foreignError) {
+          return { success: false, message: foreignError };
+        }
+
         let updatedTask = existingTask;
         const isTerminal = isTerminalTaskStatus(existingTask.status);
         // This call's own status can finish the task even though existingTask
@@ -382,8 +419,8 @@ export const registerStoreProgressTool = (server: McpServer) => {
           }
         }
 
-        // Explicit task IDs retain the existing progress-update policy, but
-        // only the assigned agent may author sources. Check under the same
+        // A lead may update another agent's task (see foreignTaskWriteError),
+        // but only the assigned agent may author sources. Check under the same
         // transaction as the upsert, including for terminal tasks. Ignore an
         // unauthorized batch so citations never block the task update itself.
         if (citations?.length && existingTask.agentId === agent.id) {
