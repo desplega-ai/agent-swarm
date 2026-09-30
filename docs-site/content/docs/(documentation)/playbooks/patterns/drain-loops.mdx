@@ -5,7 +5,7 @@ description: Turn one big parent issue into a chain of small, individually-revie
 
 Turn one big parent issue into a chain of small, individually-reviewable PRs — then review-and-merge them bottom-up, halting on the first failure.
 
-<Mermaid chart={`flowchart TB
+<Mermaid title="Drain loop: for each sub-issue, branch off the previous PR, implement and open a stacked PR until none remain. The merge loop then reviews the bottom-most PR, squash-merges it when approved with green CI, and halts on changes requested or red CI." chart={`flowchart TB
   P["Parent issue<br/>(N sub-issues)"] --> D["Drain loop"]
   D --> B["Pick next Backlog/Todo sub-issue"]
   B --> BR["Branch off previous PR's branch<br/>(stacked)"]

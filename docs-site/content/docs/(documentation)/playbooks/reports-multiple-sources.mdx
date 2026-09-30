@@ -21,7 +21,7 @@ description: Integrate your data warehouse, product analytics, billing, search a
 
 The swarm joins data across [ClickHouse](https://clickhouse.com/), [Postgres](https://www.postgresql.org/), [Convex](https://www.convex.dev/), [Clerk](https://clerk.com/), [PostHog](https://posthog.com/), [Stripe](https://stripe.com/), [Google Search Console](https://search.google.com/search-console), [GitHub](https://github.com), and [SigNoz](https://signoz.io/), and answers **scheduled questions** ("daily product-growth update?", "weekly GTM metrics?") and **on-demand questions** in Slack ("how many active orgs signed up last week?").
 
-<Mermaid chart={`flowchart LR
+<Mermaid title="Multi-source reports: ClickHouse, Postgres, Clerk, PostHog via Convex, GitHub and Search Console feed a swarm-script that fetches deterministic JSON, which the Lead or Researcher synthesizes into a Slack thread and a Page with charts." chart={`flowchart LR
   subgraph SRC["Sources"]
     CH["ClickHouse"]
     PG["Postgres"]

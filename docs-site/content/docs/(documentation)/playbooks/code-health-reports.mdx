@@ -22,7 +22,7 @@ description: Run recurring Code Maat + D3.js code-health reports for any Git rep
 
 This is the Code Health home for recurring repository analysis. The main flow is the **reports-on-autopilot** path for Code Maat + D3.js; the alerting-specific playbook is now focused on [Observability Alert Management](/docs/playbooks/code-health-alert-management).
 
-<Mermaid chart={`flowchart LR
+<Mermaid title="Code health report: a Lead prompt sets up a worker workspace that runs Code Maat and Lizard, joins and scores the results in report.mjs, and publishes a stable D3 Page. A weekly cron reruns it." chart={`flowchart LR
   LP["Lead prompt<br/>repo + branch + scope"] --> WR["Worker workspace<br/>/workspace/code-maat"]
   WR --> CM["Code Maat<br/>history CSVs"]
   WR --> LZ["Lizard<br/>complexity CSV"]
