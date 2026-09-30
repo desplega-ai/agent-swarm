@@ -164,6 +164,26 @@ The v2 renderer is enabled by default. Set `SLACK_RENDER_V2=false` to use the le
 
 The tree is rendered as footer-weight context blocks and contains status, elapsed time, hierarchy, task links, and the latest bounded progress for active tasks. It does not repeat worker output or cross-link Slack messages: keeping message permalinks out of the tree prevents Slack from producing noisy link previews. Updates are debounced, link/media unfurls are disabled, and rate-limit retries honor Slack backoff.
 
+### Working status
+
+With the v2 renderer, Slack's own "working" state follows the whole life of an ask, in channel threads and DMs, so anyone reading a long thread can tell whether the swarm is still on it. It uses [`agents.sessions.setStatus`](https://docs.slack.dev/reference/methods/agents.sessions.setStatus), which needs only the `chat:write` bot scope. There is no manifest change and no reinstall.
+
+| Thread state | Status |
+| --- | --- |
+| Any task in the thread is running or queued | `processing`: Slack shows its loading indicator |
+| Nothing is running, and a `request-human-input` request from the thread is still open | `suspended`: waiting on a person |
+| Everything is finished, or the ask is deferred and waits for its wake-up | `active`: indicator cleared |
+
+The status starts when the ask is accepted, is re-asserted every 30 minutes because Slack ends a `processing` session after one hour, and is cleared when the outcome card lands. If a second ask in the thread is still running when the first card lands, the indicator stays. The swarm does not subscribe to `agent_session_stopped`, so Slack shows no Stop button. Cancelling still goes through the task itself.
+
+Setting the status also opens the thread for the person who asked, and Slack's free-text status (`is working on your request...`) is not available with this method, so Slack shows its standard loading indicator.
+
+The indicator never blocks a task. If Slack refuses the call, the swarm logs it once and keeps the :eyes: reaction and the tree message:
+
+- **Workspace or app cannot use it** (`missing_scope`, `feature_disabled`, a revoked token): the native call is switched off for an hour, then probed again. DMs keep the legacy `assistant.threads.setStatus` indicator.
+- **Slack refuses one thread** (for example the bot is not in the channel): that thread is left alone until it goes idle.
+- **Transient errors** (rate limit, timeout, `internal_error`): retried with backoff, at most eight calls per render tick.
+
 ### Outcome Cards and Message Provenance
 
 Each completed Slack ask gets one outcome card containing the full multi-paragraph Markdown result, bounded only by Slack's presentation limit with a link to the full task when truncation is required. If the agent already delivered the result with `slack-reply`, the outcome card collapses to a compact completion instead of repeating that message. The renderer re-reads this delivery marker before finalizing, so a retry cannot preserve stale duplicate content. Outcome cards do not link back to the tree, which avoids an otherwise redundant Slack permalink unfurl.
@@ -218,7 +238,7 @@ The bot supports Slack's [Assistant](https://api.slack.com/docs/apps/ai) sidebar
 - Follow-up messages in assistant threads route to the same agent that handled the original task
 - Assistant-thread messages that only @mention another user are ignored unless they also mention the swarm bot, preventing accidental task creation from co-mentions like `@Devin are you here?`
 - Files shared in assistant threads — with or without a caption — reach the task as attachments (see [Attachment Handling](#attachment-handling))
-- The assistant sets a typing status while the agent is working (gracefully handles permission errors in non-assistant threads)
+- The assistant shows the [working status](#working-status) while the agent is working (with the legacy renderer, a typing status that handles permission errors in non-assistant threads)
 
 ### Progress Updates
 

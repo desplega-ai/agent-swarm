@@ -399,6 +399,45 @@ describe("Slack renderer v2", () => {
     });
   });
 
+  test("starts Slack's native working status with the tree and clears it after the outcome card", async () => {
+    const lead = await createAgent({ name: "Status Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_RENDER_STATUS");
+    const setStatusCalls = () =>
+      calls.filter((call) => call.method === "agents.sessions.setStatus");
+    const ask = await createTaskExtended("status ask", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    await startTask(ask.id);
+    calls.length = 0;
+
+    await ensureSlackThreadTree([ask.id]);
+    expect(setStatusCalls().map((call) => call.payload)).toEqual([
+      { channel_id: channelId, thread_ts: threadTs, status: "processing" },
+    ]);
+
+    // Ticks while the ask runs keep the state without new calls.
+    await processSlackRenderV2();
+    await processSlackRenderV2();
+    expect(setStatusCalls()).toHaveLength(1);
+
+    await completeTask(ask.id, "Done");
+    calls.length = 0;
+    await processSlackRenderV2();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const methods = calls.map((call) => call.method);
+    expect(setStatusCalls().map((call) => call.payload.status)).toEqual(["active"]);
+    // Cleared after the card landed, not before, and once.
+    expect(methods.indexOf("agents.sessions.setStatus")).toBeGreaterThan(
+      methods.indexOf("chat.stopStream"),
+    );
+    expect(methods).not.toContain("assistant.threads.setStatus");
+  });
+
   for (const delegationEnabled of [false, true]) {
     test(`relays a deferred schedule continuation with delegation=${delegationEnabled}`, async () => {
       process.env.SLACK_RENDER_V2_DELEGATION = String(delegationEnabled);

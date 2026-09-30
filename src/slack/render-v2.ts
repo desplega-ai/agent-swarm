@@ -53,6 +53,11 @@ import {
 import { buildAskClosure, type ClosureState, closureState } from "./closure";
 import { reactionName, type SlackReactionEvent } from "./reaction-shortcode";
 import { getAgentDisplayName, getAgentEmoji } from "./responses";
+import {
+  _resetSlackSessionStatusForTests,
+  beginSlackStatusTick,
+  reconcileSlackSessionStatus,
+} from "./session-status";
 import { getSlackOutputAttachments } from "./task-attachments";
 import { isAwaitingWake, isDeferredTask, slackTaskOutput } from "./task-output";
 
@@ -276,24 +281,16 @@ async function surfaceOutcomeDeliveryGiveUp(
   await clearAssistantStatus(app.client, task.slackChannelId, task.slackThreadTs);
 }
 
-/** Clears the assistant "is working" indicator in DM channels. Best-effort: the
- * call throws when the thread isn't an assistant thread, which is expected
- * for non-DM channels and safe to ignore. */
+/** Re-syncs Slack's native "working" status once an outcome card has landed:
+ * cleared when nothing else in the thread is still running, kept while it is.
+ * Best-effort and never throws. When the native call is unavailable a DM
+ * falls back to clearing the legacy assistant indicator, as it always did. */
 async function clearAssistantStatus(
   client: WebClient,
   channelId: string,
   threadTs: string,
 ): Promise<void> {
-  if (!channelId.startsWith("D")) return;
-  try {
-    await client.apiCall("assistant.threads.setStatus", {
-      channel_id: channelId,
-      thread_ts: threadTs,
-      status: "",
-    });
-  } catch (error) {
-    console.warn(`[Slack] Failed to clear assistant status for ${channelId}/${threadTs}:`, error);
-  }
+  await reconcileSlackSessionStatus({ client, channelId, threadTs, outcomeDelivered: true });
 }
 
 function slackTreeStallMinutes(): number {
@@ -703,6 +700,12 @@ export async function ensureSlackThreadTree(taskIds: string[]): Promise<SlackMes
     (candidate): candidate is AgentTask => !!candidate,
   );
   if (!task?.slackChannelId || !task.slackThreadTs) return null;
+  // Every accepted ask passes through here: start Slack's own "working" state
+  // with the tree. A no-op when the thread is already showing it.
+  await reconcileSlackSessionStatus({
+    channelId: task.slackChannelId,
+    threadTs: task.slackThreadTs,
+  });
   const contextKey =
     task.contextKey ??
     slackContextKey({
@@ -1559,6 +1562,7 @@ export async function processSlackRenderV2(): Promise<void> {
   const activatedAt = await ensureSlackRenderV2Activation();
   const delegationEnabled = isSlackDelegationEnabled();
   const delegationActivatedAt = delegationEnabled ? await ensureSlackDelegationActivation() : null;
+  const statusTick = beginSlackStatusTick();
 
   for (const task of await getSlackTasksMissingTree()) {
     if (!isSlackRenderV2Enabled()) return;
@@ -1792,9 +1796,11 @@ export async function processSlackRenderV2(): Promise<void> {
     } catch (error) {
       console.error(`[Slack] Failed to update v2 tree ${tree.id}:`, error);
     }
+    await statusTick.reconcile(tree.channelId, tree.threadTs);
   }
 
   await refreshResolvedDeferralCards();
+  await statusTick.finish();
 }
 
 export function _resetSlackRenderV2ForTests(): void {
@@ -1807,6 +1813,7 @@ export function _resetSlackRenderV2ForTests(): void {
   cachedTeamId = undefined;
   outcomeDeliveryNextAttemptAt.clear();
   outcomeReservedWithoutAttempt.clear();
+  _resetSlackSessionStatusForTests();
 }
 
 /**

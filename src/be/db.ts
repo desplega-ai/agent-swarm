@@ -895,6 +895,44 @@ export async function getSlackTasksInThread(
   return rows.map(rowToAgentTask);
 }
 
+/**
+ * Slack threads with an open human request raised by one of their own tasks
+ * (`request-human-input`): the swarm cannot go on until a person answers.
+ * A request past its `expiresAt` is about to become a timeout follow-up, so
+ * it no longer counts as waiting.
+ */
+export async function listSlackThreadsAwaitingHuman(): Promise<
+  Array<{ channelId: string; threadTs: string }>
+> {
+  return getDbClient().query<{ channelId: string; threadTs: string }>(
+    `SELECT DISTINCT task.slackChannelId AS channelId, task.slackThreadTs AS threadTs
+       FROM approval_requests request
+       JOIN agent_tasks task ON task.id = request.sourceTaskId
+       WHERE request.status = 'pending'
+       AND (request.expiresAt IS NULL OR request.expiresAt > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+       AND task.slackChannelId IS NOT NULL
+       AND task.slackThreadTs IS NOT NULL`,
+  );
+}
+
+export async function isSlackThreadAwaitingHuman(
+  channelId: string,
+  threadTs: string,
+): Promise<boolean> {
+  const row = await getDbClient().get<{ waiting: number }>(
+    `SELECT 1 AS waiting
+       FROM approval_requests request
+       JOIN agent_tasks task ON task.id = request.sourceTaskId
+       WHERE request.status = 'pending'
+       AND (request.expiresAt IS NULL OR request.expiresAt > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+       AND task.slackChannelId = ?
+       AND task.slackThreadTs = ?
+       LIMIT 1`,
+    [channelId, threadTs],
+  );
+  return !!row;
+}
+
 export async function markTaskSlackReplySent(taskId: string): Promise<void> {
   await getDbClient().run(`UPDATE agent_tasks SET slackReplySent = 1 WHERE id = ?`, [taskId]);
 }
