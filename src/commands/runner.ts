@@ -35,6 +35,7 @@ import {
 } from "../providers/index.ts";
 import type { SteerDeliveryResult } from "../providers/types.ts";
 import { initTelemetry, telemetry } from "../telemetry.ts";
+import { mapTriggerSurface } from "../telemetry-context.ts";
 import {
   type ModelTierOverrides,
   type ProviderName,
@@ -2320,6 +2321,9 @@ function setupShutdownHandlers(
     if (apiConfig) {
       telemetry.session("ended", {
         agentId: apiConfig.agentId,
+        // A runner session spans many tasks, so it belongs to none.
+        taskId: null,
+        trigger_surface: null,
         durationMs: state ? Date.now() - state.startedAt : undefined,
         tasksProcessed: state?.tasksProcessed ?? 0,
       });
@@ -2384,6 +2388,10 @@ interface RunningTask {
   promise: Promise<ProviderResult>;
   /** The trigger type that caused this task to be spawned */
   triggerType?: string;
+  /** Surface that started the task's whole chain (root task source); tags session telemetry */
+  triggerSurface?: string | null;
+  /** `users.id` of the requester; hashed into `user_ref` on session telemetry */
+  requestedByUserId?: string;
   /** Set when the promise resolves, enabling non-blocking completion checks */
   result: ProviderResult | null;
   /** Deferred cursor updates for channel_activity triggers — committed after success */
@@ -2879,6 +2887,15 @@ async function triggerHeartbeatSweep(config: ApiConfig): Promise<boolean> {
   }
 }
 
+/**
+ * `trigger_surface` for a worker event: the server-resolved root surface of the
+ * task, or null when the server did not send one (an older server, or a
+ * session with no task).
+ */
+function workerTriggerSurface(raw: string | null | undefined) {
+  return raw ? mapTriggerSurface(raw) : null;
+}
+
 /** Trigger types returned by the poll API */
 interface Trigger {
   type:
@@ -2889,6 +2906,8 @@ interface Trigger {
     | "channel_activity"
     | "budget_refused";
   taskId?: string;
+  /** Surface that started the task's whole chain (server-resolved); tags session telemetry. */
+  triggerSurface?: string;
   task?: unknown;
   mentionsCount?: number;
   count?: number;
@@ -3584,6 +3603,10 @@ async function spawnProviderProcess(
     runnerSessionId: string;
     iteration: number;
     taskId?: string;
+    /** Surface that started the task chain, for session telemetry. */
+    triggerSurface?: string | null;
+    /** `users.id` of the requester; hashed into `user_ref` on session telemetry. */
+    requestedByUserId?: string;
     model?: string;
     modelTier?: string;
     /** Server claim-time resolution (task.resolvedModel); wins over the local one. */
@@ -4359,21 +4382,28 @@ async function spawnProviderProcess(
             "gen_ai.usage.output_tokens": result.cost.outputTokens ?? 0,
             "agentswarm.cost.total_usd": result.cost.totalCostUsd ?? 0,
           });
-          telemetry.session("cost", {
-            agentId: opts.agentId,
-            model: result.cost.model,
-            provider: result.cost.provider ?? opts.harnessProvider,
-            inputTokens: result.cost.inputTokens ?? 0,
-            outputTokens: result.cost.outputTokens ?? 0,
-            cacheReadTokens: result.cost.cacheReadTokens,
-            cacheWriteTokens: result.cost.cacheWriteTokens,
-            reasoningOutputTokens: result.cost.reasoningOutputTokens,
-            thinkingTokens: result.cost.thinkingTokens,
-            totalCostUsd: result.cost.totalCostUsd,
-            durationMs: result.cost.durationMs,
-            numTurns: result.cost.numTurns,
-            isError: result.cost.isError,
-          });
+          telemetry.session(
+            "cost",
+            {
+              agentId: opts.agentId,
+              // Lets cost be split by the surface that started the work.
+              taskId: realTaskId ?? null,
+              trigger_surface: workerTriggerSurface(opts.triggerSurface),
+              model: result.cost.model,
+              provider: result.cost.provider ?? opts.harnessProvider,
+              inputTokens: result.cost.inputTokens ?? 0,
+              outputTokens: result.cost.outputTokens ?? 0,
+              cacheReadTokens: result.cost.cacheReadTokens,
+              cacheWriteTokens: result.cost.cacheWriteTokens,
+              reasoningOutputTokens: result.cost.reasoningOutputTokens,
+              thinkingTokens: result.cost.thinkingTokens,
+              totalCostUsd: result.cost.totalCostUsd,
+              durationMs: result.cost.durationMs,
+              numTurns: result.cost.numTurns,
+              isError: result.cost.isError,
+            },
+            { userId: opts.requestedByUserId ?? null },
+          );
           try {
             await saveCostData(
               { ...result.cost, taskId: realTaskId, sessionId: opts.runnerSessionId },
@@ -4497,6 +4527,8 @@ async function spawnProviderProcess(
     startTime: new Date(),
     promise,
     result: null,
+    triggerSurface: opts.triggerSurface,
+    requestedByUserId: opts.requestedByUserId,
     credentialInfo,
     // Snapshot the provider + local-env trait of the adapter this session is
     // spawned on, so the session-end sync decision survives a live provider
@@ -4537,6 +4569,8 @@ async function checkCompletedProcesses(
     taskId: string;
     result: ProviderResult;
     triggerType?: string;
+    triggerSurface?: string | null;
+    requestedByUserId?: string;
     cursorUpdates?: Array<{ channelId: string; ts: string }>;
     workingDir?: string;
     credentialInfo?: RunningTask["credentialInfo"];
@@ -4559,6 +4593,8 @@ async function checkCompletedProcesses(
         taskId,
         result: task.result,
         triggerType: task.triggerType,
+        triggerSurface: task.triggerSurface,
+        requestedByUserId: task.requestedByUserId,
         cursorUpdates: task.cursorUpdates,
         workingDir: task.workingDir,
         credentialInfo: task.credentialInfo,
@@ -4577,6 +4613,8 @@ async function checkCompletedProcesses(
   for (const {
     taskId,
     result,
+    triggerSurface,
+    requestedByUserId,
     cursorUpdates,
     workingDir,
     credentialInfo,
@@ -4727,31 +4765,44 @@ async function checkCompletedProcesses(
         bridgeFailureDiagnostics,
       );
 
-      telemetry.taskEvent("session_completed", {
-        taskId,
-        agentId: apiConfig.agentId,
-        provider: result.cost?.provider ?? harnessProvider,
-        model: result.cost?.model ?? model,
-        harnessVariant,
-        harnessVersion:
-          typeof harnessVariantMeta?.version === "string" ||
-          typeof harnessVariantMeta?.version === "number"
-            ? String(harnessVariantMeta.version)
-            : undefined,
-        exitCode: result.exitCode,
-        isError: result.exitCode !== 0,
-        durationMs,
-      });
+      const sessionTriggerSurface = workerTriggerSurface(triggerSurface);
+      const sessionActor = { userId: requestedByUserId ?? null };
+      telemetry.taskEvent(
+        "session_completed",
+        {
+          taskId,
+          trigger_surface: sessionTriggerSurface,
+          agentId: apiConfig.agentId,
+          provider: result.cost?.provider ?? harnessProvider,
+          model: result.cost?.model ?? model ?? "unknown",
+          harnessVariant,
+          harnessVersion:
+            typeof harnessVariantMeta?.version === "string" ||
+            typeof harnessVariantMeta?.version === "number"
+              ? String(harnessVariantMeta.version)
+              : undefined,
+          exitCode: result.exitCode,
+          isError: result.exitCode !== 0,
+          durationMs,
+        },
+        sessionActor,
+      );
       const sessionTelemetryEvent = resolveSessionTelemetryEvent(result);
       if (sessionTelemetryEvent) {
-        telemetry.session(sessionTelemetryEvent, {
-          agentId: apiConfig.agentId,
-          errorCategory: normalizeSessionErrorCategory(result.errorCategory),
-          provider: result.cost?.provider ?? harnessProvider,
-          model: result.cost?.model ?? model,
-          durationMs: result.cost?.durationMs ?? durationMs,
-          wasRateLimited: result.rateLimitResetAt != null,
-        });
+        telemetry.session(
+          sessionTelemetryEvent,
+          {
+            agentId: apiConfig.agentId,
+            taskId,
+            trigger_surface: sessionTriggerSurface,
+            errorCategory: normalizeSessionErrorCategory(result.errorCategory),
+            provider: result.cost?.provider ?? harnessProvider,
+            model: result.cost?.model ?? model ?? "unknown",
+            durationMs: result.cost?.durationMs ?? durationMs,
+            wasRateLimited: result.rateLimitResetAt != null,
+          },
+          sessionActor,
+        );
       }
       state.tasksProcessed += 1;
 
@@ -5030,6 +5081,9 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   }
   telemetry.session("started", {
     agentId,
+    // The boot session is not tied to a task.
+    taskId: null,
+    trigger_surface: null,
     harnessProvider: bootProvider,
     model: bootModel || undefined,
     role,
@@ -6592,6 +6646,8 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               runnerSessionId: taskRunnerSessionId,
               iteration,
               taskId: trigger.taskId,
+              triggerSurface: trigger.triggerSurface,
+              requestedByUserId: trigger.requestedBy?.id,
               model: taskModel,
               modelTier: taskModelTier,
               resolvedModel: (trigger.task as { resolvedModel?: string } | undefined)

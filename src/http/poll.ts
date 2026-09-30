@@ -37,7 +37,7 @@ import { poolTaskRunsOnHarness } from "../be/model-validation";
 import { touchRuntimeInstance } from "../be/multi-runtime";
 import { hasCapability } from "../server";
 import { fetchChannelActivity } from "../slack/channel-activity";
-import { telemetry } from "../telemetry";
+import { emitTaskTelemetry, resolveTriggerSurface } from "../telemetry-trigger";
 import {
   AgentTaskSchema,
   BudgetRefusedTriggerSchema,
@@ -123,6 +123,9 @@ const PollTaskOfferedTriggerSchema = z.object({
 const PollTaskAssignedTriggerSchema = z.object({
   type: z.literal("task_assigned"),
   taskId: z.string(),
+  // Surface that started the whole task chain (root task's source, mapped to
+  // the telemetry catalog). Workers tag their session telemetry with it.
+  triggerSurface: z.string().optional(),
   task: AgentTaskSchema.extend({
     attachments: z.array(PollTriggerAttachmentSchema),
   }),
@@ -470,7 +473,7 @@ export async function handlePoll(
                 conditions: [{ timeout_ms: 300_000 }], // 5 min: polling interval + queue wait
               });
 
-              telemetry.taskEvent("started", {
+              void emitTaskTelemetry("started", {
                 taskId: pendingTask.id,
                 source: pendingTask.source,
                 agentId: myAgentId,
@@ -480,11 +483,18 @@ export async function handlePoll(
             // Resolve requesting user if available (UNKNOWN sentinel handling
             // lives in buildTriggerRequestedBy).
             const assignedRequestedBy = await buildTriggerRequestedBy(pendingTask);
+            // The surface that started the whole chain, so the worker can tag
+            // its session events with it (workers cannot read the task tree).
+            const assignedTriggerSurface = await resolveTriggerSurface(
+              pendingTask.id,
+              pendingTask.source,
+            );
 
             return {
               trigger: {
                 type: "task_assigned",
                 taskId: pendingTask.id,
+                triggerSurface: assignedTriggerSurface,
                 task: {
                   ...pendingTask,
                   ...(await claimModelFields(pendingTask, agent)),
@@ -612,17 +622,19 @@ export async function handlePoll(
                 // Post-commit (see the `started` path above): a rolled-back
                 // claim must not report the task as claimed.
                 getDbClient().afterCommit(() => {
-                  telemetry.taskEvent("claimed", {
+                  void emitTaskTelemetry("claimed", {
                     taskId: claimed.id,
                     source: claimed.source,
                     agentId: myAgentId,
                   });
                 });
                 const claimedRequestedBy = await buildTriggerRequestedBy(claimed);
+                const claimedTriggerSurface = await resolveTriggerSurface(claimed.id, claimed.source);
                 return {
                   trigger: {
                     type: "task_assigned",
                     taskId: claimed.id,
+                    triggerSurface: claimedTriggerSurface,
                     task: {
                       ...claimed,
                       ...(await claimModelFields(claimed, agent)),

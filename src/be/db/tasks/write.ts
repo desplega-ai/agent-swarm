@@ -1,6 +1,6 @@
 import pkg from "../../../../package.json";
 import { defaultAssetKey } from "../../../assets/key";
-import type { telemetry } from "../../../telemetry";
+import type { TaskTelemetryEvent, TaskTelemetryInput } from "../../../telemetry-trigger";
 import type {
   Agent,
   AgentLog,
@@ -42,10 +42,11 @@ type TaskWriteDependencies = {
     agentId: string | null,
     sourceTexts: Array<string | null | undefined>,
   ) => Promise<TaskAttachment[]>;
-  emitTaskLifecycleTelemetryAfterCommit: (
-    event: string,
-    props: Parameters<typeof telemetry.taskEvent>[1],
+  emitTaskLifecycleTelemetryAfterCommit: <S extends TaskTelemetryEvent>(
+    event: S,
+    props: TaskTelemetryInput<S>,
     verify?: (task: AgentTask | null) => boolean,
+    actorUserId?: string | null,
   ) => void;
   taskContextForTelemetry: (task: AgentTask) => {
     provider?: ProviderName;

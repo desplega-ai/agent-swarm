@@ -1,5 +1,6 @@
 import { telemetry } from "../telemetry";
 import { ProviderNameSchema } from "../types";
+import { getCurrentRequestUserId } from "../utils/request-auth-context";
 import { z } from "../utils/zod-openapi";
 import { getDbClient, getSwarmConfigs, getTaskById, upsertSwarmConfig } from "./db";
 import { validateConfigValue } from "./swarm-config-guard";
@@ -359,8 +360,11 @@ function addTelemetry<Event extends OnboardingTelemetryEvent>(
 }
 
 function queueTelemetry(events: PendingTelemetry[]): void {
+  // Captured now: the request's user is ambient state, and the post-commit hook
+  // may run after it has moved on. Null for an operator (API key) request.
+  const actor = { userId: getCurrentRequestUserId() ?? null };
   for (const item of events) {
-    getDbClient().afterCommit(() => telemetry.onboarding(item.event, item.properties));
+    getDbClient().afterCommit(() => telemetry.onboarding(item.event, item.properties, actor));
   }
 }
 

@@ -1643,6 +1643,9 @@ export async function checkHeartbeatChecklist(): Promise<void> {
     agentId: lead.id,
     routingReason: "skill",
     routingSource: "engine_default",
+    // Not "mcp" (the createTaskExtended default): telemetry reports this as
+    // the swarm's own work, not as a human's MCP usage.
+    source: "system",
     taskType: "heartbeat-checklist",
     tags: ["checklist", "auto-generated"],
     priority: 60,
@@ -1875,6 +1878,7 @@ export async function createBootTriageTask(): Promise<void> {
     agentId: lead.id,
     routingReason: "skill",
     routingSource: "engine_default",
+    source: "system",
     taskType: "boot-triage",
     tags: ["boot", "triage", "auto-generated"],
     priority: 70, // Higher than regular checklist (60)
