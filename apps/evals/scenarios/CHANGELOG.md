@@ -42,6 +42,11 @@ add scenarios to it without a MAJOR bump. Nothing published depends on it yet.
 | fanout-research-solo | 1 | Single-agent baseline of fanout-research (Phase 7, plan Q6). |
 | worker-recovery | 1 | Lead + 2 workers, clerk-2's ledger poisoned at seed time (Phase 7). |
 | worker-recovery-solo | 1 | Single-agent baseline of worker-recovery (Phase 7, plan Q6). |
+| implement-review | 1 | Lead + coder + reviewer; reviewer alone holds the spec exposing a planted bug (Phase 8). |
+| implement-review-solo | 1 | Single-agent baseline of implement-review (Phase 8, plan Q6). |
+| capability-routing | 1 | Lead + 3 workers with declared profiles; each input on one worker only (Phase 8). |
+| human-in-loop | 1 | Ambiguous export, canned reply to request-human-input (Phase 8). |
+| human-in-loop-solo | 1 | Single-agent baseline of human-in-loop (Phase 8, plan Q6). |
 
 Versions 1 above are the state of `main` when versioning was introduced
 (Phase 3); earlier fixes (Phases 1-2) predate it and are not versioned.

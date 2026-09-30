@@ -92,6 +92,22 @@ function validateWorkerSpec(
       errors.push(`${label}.env key "${key}" is reserved by the boot path`);
     }
   }
+  if (spec.profile !== undefined) {
+    const { role, description, capabilities } = spec.profile;
+    if (role === undefined && description === undefined && capabilities === undefined) {
+      errors.push(`${label}.profile must set role, description or capabilities`);
+    }
+    // The swarm API's profile route caps role at 100 chars.
+    if (role !== undefined && (role.trim().length === 0 || role.length > 100)) {
+      errors.push(`${label}.profile.role must be 1..100 chars`);
+    }
+    if (description !== undefined && description.trim().length === 0) {
+      errors.push(`${label}.profile.description must be non-empty when present`);
+    }
+    if (capabilities?.some((c) => typeof c !== "string" || c.trim().length === 0)) {
+      errors.push(`${label}.profile.capabilities entries must be non-empty strings`);
+    }
+  }
 }
 
 /**
@@ -276,6 +292,18 @@ export function validateScenario(s: Scenario): string[] {
         errors.push(`seed.memories[${i}] must be a non-empty string`);
       }
     });
+  }
+  s.seed?.workerExec?.forEach((entry, i) => {
+    if (!Number.isInteger(entry.worker) || entry.worker < 0 || entry.worker >= workers) {
+      errors.push(`seed.workerExec[${i}].worker ${entry.worker} out of range [0, ${workers - 1}]`);
+    }
+    if (entry.commands.length === 0) errors.push(`seed.workerExec[${i}].commands is empty`);
+  });
+  if (s.humanInput !== undefined) {
+    if (s.humanInput.reply.trim().length === 0) errors.push("humanInput.reply must be non-empty");
+    // The answer arrives as a hitl-follow-up task; without this the runner
+    // grades as soon as the upfront task ends, before the work resumes.
+    if (!s.awaitSpawnedTasks) errors.push("humanInput requires awaitSpawnedTasks");
   }
   // OutcomeSpec v2 (v8.0): weighted graded dimensions.
   if (s.outcome.dimensions !== undefined) {

@@ -1,7 +1,13 @@
 import type { GraderFixture } from "../grader-validation-support.ts";
+import { fixture as capabilityRouting } from "./capability-routing.ts";
 import { fixture as delegationChain } from "./delegation-chain.ts";
 import { fixture as delegationProbe } from "./delegation-probe.ts";
 import { fixture as fanoutResearch, soloFixture as fanoutResearchSolo } from "./fanout-research.ts";
+import { fixture as humanInLoop, soloFixture as humanInLoopSolo } from "./human-in-loop.ts";
+import {
+  fixture as implementReview,
+  soloFixture as implementReviewSolo,
+} from "./implement-review.ts";
 import { fixture as scriptAuthoring } from "./script-authoring.ts";
 import { fixture as sqlAudit } from "./sql-audit.ts";
 import { fixture as toolRouting } from "./tool-routing.ts";
@@ -24,4 +30,9 @@ export const GRADER_FIXTURES: Readonly<Record<string, GraderFixture>> = {
   "fanout-research-solo": fanoutResearchSolo,
   "worker-recovery": workerRecovery,
   "worker-recovery-solo": workerRecoverySolo,
+  "implement-review": implementReview,
+  "implement-review-solo": implementReviewSolo,
+  "capability-routing": capabilityRouting,
+  "human-in-loop": humanInLoop,
+  "human-in-loop-solo": humanInLoopSolo,
 };

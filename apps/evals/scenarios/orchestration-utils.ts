@@ -6,6 +6,7 @@ import type {
   JudgeContext,
   OutcomeSpec,
   Scenario,
+  ScenarioSeed,
   SwarmTask,
   TaskSpec,
   WorkerSpec,
@@ -20,6 +21,14 @@ export interface SoloVariantSpec {
   /** The swarm rubric's outcome dimensions only, read from worker 0. */
   outcome: OutcomeSpec;
   worker?: WorkerSpec;
+  /**
+   * Replaces the derived seed, for a swarm scenario whose teammates hold
+   * different files (seed.workerExec): the lone worker gets what the whole team
+   * held between them, so the baseline sees the same information.
+   */
+  seed?: ScenarioSeed;
+  /** Not inherited: a lone worker usually has no spawned work to wait for (human-in-loop does). */
+  awaitSpawnedTasks?: boolean;
 }
 
 /**
@@ -29,7 +38,9 @@ export interface SoloVariantSpec {
  * can only drift apart through `spec`. `validateBaselinePairs` checks the rest.
  */
 export function soloVariant(swarm: Scenario, spec: SoloVariantSpec): Scenario {
-  const { workerFailures: _noTeammate, ...seed } = swarm.seed ?? {};
+  const { workerFailures: _noTeammate, ...derived } = swarm.seed ?? {};
+  const seed = spec.seed ?? derived;
+  const awaitSpawnedTasks = spec.awaitSpawnedTasks;
   return {
     id: soloVariantId(swarm.id),
     version: swarm.version,
@@ -40,6 +51,8 @@ export function soloVariant(swarm: Scenario, spec: SoloVariantSpec): Scenario {
     seed: Object.keys(seed).length > 0 ? seed : undefined,
     tasks: [{ ...spec.task, worker: 0 }],
     outcome: spec.outcome,
+    ...(swarm.humanInput ? { humanInput: swarm.humanInput } : {}),
+    ...(awaitSpawnedTasks ? { awaitSpawnedTasks } : {}),
     timeoutMs: swarm.timeoutMs,
     budgetUsd: swarm.budgetUsd,
     budgetMs: swarm.budgetMs,

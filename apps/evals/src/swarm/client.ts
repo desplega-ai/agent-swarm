@@ -28,6 +28,29 @@ export interface SessionCostRow {
  * The GET /api/agents subset the roster capture consumes (v7 §10.1 — per the
  * root AgentSchema: src/types.ts + src/http/agents.ts `listAgents`, slim shape).
  */
+/** One question of an approval request (root src/tools/request-human-input.ts QuestionSchema). */
+export interface ApprovalQuestionJson {
+  id: string;
+  type: "approval" | "text" | "single-select" | "multi-select" | "boolean";
+  label: string;
+  required?: boolean;
+  options?: { value: string; label: string; description?: string }[];
+  minSelections?: number;
+  maxSelections?: number;
+}
+
+/** Approval request as `GET /api/approval-requests` returns it (full shape). */
+export interface ApprovalRequestJson {
+  id: string;
+  title: string;
+  questions: ApprovalQuestionJson[];
+  sourceTaskId: string | null;
+  status: string;
+  responses: Record<string, unknown> | null;
+  resolvedAt: string | null;
+  createdAt: string;
+}
+
 export interface AgentJson {
   id: string;
   name: string | null;
@@ -123,6 +146,40 @@ export class SwarmClient {
     if (!task.id)
       throw new Error(`task create returned no id: ${JSON.stringify(res).slice(0, 300)}`);
     return normalizeTask(task);
+  }
+
+  /** Write a member's declared profile (role, description, capabilities). */
+  async updateAgentProfile(
+    agentId: string,
+    profile: { role?: string; description?: string; capabilities?: string[] },
+  ): Promise<void> {
+    await this.request("PUT", `/api/agents/${agentId}/profile`, {
+      ...profile,
+      changeSource: "api",
+      changeReason: "eval scenario profile",
+    });
+  }
+
+  /** Approval requests of the attempt's swarm (fresh DB per attempt), filtered by status. */
+  async listApprovalRequests(status?: string): Promise<ApprovalRequestJson[]> {
+    const query = status ? `?status=${encodeURIComponent(status)}&limit=100` : "?limit=100";
+    const res = await this.request<{ approvalRequests?: ApprovalRequestJson[] }>(
+      "GET",
+      `/api/approval-requests${query}`,
+    );
+    return res.approvalRequests ?? [];
+  }
+
+  /** Answer one approval request. The server creates the requester's hitl-follow-up task. */
+  async respondApprovalRequest(
+    id: string,
+    responses: Record<string, unknown>,
+    respondedBy: string,
+  ): Promise<void> {
+    await this.request("POST", `/api/approval-requests/${id}/respond`, {
+      responses,
+      respondedBy,
+    });
   }
 
   /**

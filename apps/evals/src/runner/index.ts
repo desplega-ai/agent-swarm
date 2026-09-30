@@ -87,6 +87,13 @@ import {
   classifyNoOutputTimeout,
   HarnessCrashError,
 } from "./harness-crash.ts";
+import { HumanResponder, settleWithHumanInput } from "./human-input.ts";
+import {
+  applyMemberProfiles,
+  runWorkerExec,
+  type SeedMember,
+  type WorkerExecOutput,
+} from "./member-seeding.ts";
 import { applyRunConfigPins, ensureRunConfigPins } from "./run-configs.ts";
 import { applyRunEfforts } from "./run-efforts.ts";
 import { topoOrder } from "./topo.ts";
@@ -1156,16 +1163,32 @@ async function runAttemptOnce(opts: {
 
     // Seed-memories record for the artifacts phase (v6 §2.4).
     let seedMemories: { requested: number; memoryIds: string[]; readinessMs: number } | null = null;
+    const seedMembers: SeedMember[] = stack.workers.map((w) => ({
+      index: w.index,
+      role: w.member.role,
+      agentId: w.agentId,
+      sandboxId: w.sandbox.sandboxID,
+      profile: w.member.spec.profile,
+    }));
     if (
       scenario.seed?.memories?.length ||
       scenario.seed?.scripts?.length ||
       scenario.seed?.exec?.length ||
-      scenario.seed?.workerFailures?.length
+      scenario.seed?.workerExec?.length ||
+      scenario.seed?.workerFailures?.length ||
+      seedMembers.some((m) => m.profile)
     ) {
       signal?.throwIfAborted();
       setAttemptPhase(attempt.id, "seed");
       const seedT0 = Date.now();
       try {
+        // 0. Declared member profiles (what the lead reads in get-swarm).
+        await applyMemberProfiles(
+          seedMembers,
+          (agentId, profile) => client.updateAgentProfile(agentId, profile),
+          log,
+        );
+
         // 1. Memories FIRST (v6 §2.2): index all entries, then gate on
         // searchability — both complete before the first createTask, since
         // memory injection happens at task-prompt build time on the server.
@@ -1264,6 +1287,29 @@ async function runAttemptOnce(opts: {
               kind: "meta",
               name: "seed-output.json",
               content: stack.redact(JSON.stringify(seedOutputs, null, 2)),
+            });
+          }
+        }
+
+        // 2b. Then seed.workerExec: each worker's own files, strict like exec.
+        if (scenario.seed?.workerExec?.length) {
+          const outputs: WorkerExecOutput[] = [];
+          try {
+            await runWorkerExec({
+              entries: scenario.seed.workerExec,
+              members: seedMembers,
+              exec: sandboxExec,
+              outputs,
+              clip: SEED_OUTPUT_CLIP,
+              log,
+            });
+          } finally {
+            await insertArtifact(db, {
+              id: crypto.randomUUID(),
+              attemptId: attempt.id,
+              kind: "meta",
+              name: "seed-worker-exec.json",
+              content: stack.redact(JSON.stringify(outputs, null, 2)),
             });
           }
         }
@@ -1459,23 +1505,47 @@ async function runAttemptOnce(opts: {
     await updateAttempt(db, attempt.id, {
       taskIds: createdByIndex.map((created) => created.id),
     });
-    for (const created of createdByIndex) {
-      signal?.throwIfAborted();
-      log(`[task] waiting for ${created.id} (timeout ${Math.round(taskTimeoutMs / 1000)}s)`);
-      tasks.push(await awaitTask(created.id));
-    }
-    if (scenario.awaitSpawnedTasks) {
-      const upfront = new Set(tasks.map((t) => t.id));
-      const agentIds = new Set(
-        stack.workers.map((w) => w.agentId).filter((id): id is string => !!id),
-      );
-      log("[task] waiting for runtime-spawned tasks to settle");
-      const { open } = await client.waitForQuiescence(
-        (t) => classifyTaskOrigin(t, upfront, agentIds) === "run",
-        { deadline: tasksT0 + taskTimeoutMs, signal },
-      );
-      if (open.length > 0)
-        log(`[task] ${open.length} spawned task(s) still open at the deadline; grading as-is`);
+    // Canned human (human-in-loop): answers request-human-input while tasks run.
+    const responder = scenario.humanInput
+      ? new HumanResponder(client, scenario.humanInput, log)
+      : null;
+    responder?.start(3_000, signal);
+    try {
+      for (const created of createdByIndex) {
+        signal?.throwIfAborted();
+        log(`[task] waiting for ${created.id} (timeout ${Math.round(taskTimeoutMs / 1000)}s)`);
+        tasks.push(await awaitTask(created.id));
+      }
+      if (scenario.awaitSpawnedTasks) {
+        const upfront = new Set(tasks.map((t) => t.id));
+        const agentIds = new Set(
+          stack.workers.map((w) => w.agentId).filter((id): id is string => !!id),
+        );
+        log("[task] waiting for runtime-spawned tasks to settle");
+        const deadline = tasksT0 + taskTimeoutMs;
+        const quiesce = () =>
+          client.waitForQuiescence((t) => classifyTaskOrigin(t, upfront, agentIds) === "run", {
+            deadline,
+            signal,
+          });
+        const { open } = responder
+          ? await settleWithHumanInput({ responder, waitForQuiescence: quiesce, deadline })
+          : await quiesce();
+        if (open.length > 0)
+          log(`[task] ${open.length} spawned task(s) still open at the deadline; grading as-is`);
+      }
+    } finally {
+      if (responder) {
+        await responder.stop();
+        await insertArtifact(db, {
+          id: crypto.randomUUID(),
+          attemptId: attempt.id,
+          kind: "meta",
+          name: "human-input.json",
+          content: stack.redact(JSON.stringify(responder.answered, null, 2)),
+        });
+        log(`[human] answered ${responder.answered.length} request(s)`);
+      }
     }
     timings.tasksMs = Date.now() - tasksT0;
     recordAttemptTimings(attempt.id, timings);

@@ -124,7 +124,7 @@ describe("compareSwarmSolo", () => {
 });
 
 describe("registered baselines", () => {
-  test("every swarm scenario added in Phase 7 has a solo baseline, compared on quality dimensions", () => {
+  test("every swarm scenario from Phases 7-8 but capability-routing has a solo baseline, compared on quality dimensions", () => {
     expect(baselinePairs(scenarios)).toEqual([
       {
         swarmId: "fanout-research",
@@ -135,6 +135,12 @@ describe("registered baselines", () => {
         swarmId: "worker-recovery",
         soloId: "worker-recovery-solo",
         dimensions: ["correctness", "communication"],
+      },
+      { swarmId: "implement-review", soloId: "implement-review-solo", dimensions: ["tests"] },
+      {
+        swarmId: "human-in-loop",
+        soloId: "human-in-loop-solo",
+        dimensions: ["question-quality", "correctness"],
       },
     ]);
   });
