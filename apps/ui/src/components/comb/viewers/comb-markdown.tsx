@@ -17,6 +17,7 @@ import {
 } from "react";
 import { Link } from "react-router-dom";
 import { type Components, defaultRehypePlugins, Streamdown } from "streamdown";
+import { HIGHLIGHT_MAX_CHARS, prismLanguageForFence } from "../../../lib/comb/code-language";
 import { combPathForLink } from "../../../lib/comb/links";
 import {
   baseName,
@@ -27,6 +28,7 @@ import {
   resolveRelative,
 } from "../../../lib/comb/paths";
 import { rehypeSourceLines } from "../../../lib/comb/rehype-source-lines";
+import { type CodeTheme, HighlightedCode } from "./code-tokens";
 
 type Pluggable = (typeof defaultRehypePlugins)[string];
 
@@ -70,11 +72,13 @@ export interface DriveImageProps {
  * The file being rendered (relative links resolve against it), its drive image
  * renderer, and the agent-fs live UI host (`useAgentFs().liveUrl`), so live
  * links to drive files open in Comb (step-13). `CombMarkdown` provides it.
+ * `codeTheme` picks the fenced code colors.
  */
 const CombDocContext = createContext<{
   doc: DrivePath;
   DriveImage?: ComponentType<DriveImageProps>;
   liveUrl: string | null;
+  codeTheme: CodeTheme;
 } | null>(null);
 
 type ElementProps<Tag extends keyof React.JSX.IntrinsicElements> = ComponentProps<Tag> & {
@@ -171,11 +175,33 @@ function CombImage({ node: _node, src, alt, ...rest }: ElementProps<"img">) {
 }
 
 /**
+ * A fenced code block's `<code>`. A fence that names a language with a bundled
+ * Prism grammar is highlighted (`code-tokens.tsx`, the same text in token
+ * spans). Other fences, and fences over `HIGHLIGHT_MAX_CHARS`, stay plain.
+ */
+function CombCode({ node: _node, children, className }: ElementProps<"code">) {
+  const codeTheme = useContext(CombDocContext)?.codeTheme ?? "dark";
+  const language = prismLanguageForFence(className);
+  const text =
+    typeof children === "string"
+      ? children
+      : Array.isArray(children) && children.every((child) => typeof child === "string")
+        ? children.join("")
+        : null;
+  if (!language || text === null || text.length > HIGHLIGHT_MAX_CHARS) {
+    return <code className={className}>{children}</code>;
+  }
+  return (
+    <HighlightedCode text={text} language={language} theme={codeTheme} className={className} />
+  );
+}
+
+/**
  * Component overrides:
- * - Fenced code is a plain `<pre><code>` text block. Monaco (used by
- *   `MarkdownView`) builds its own DOM, which comment anchors cannot address.
- *   `pre` marks its child the way Streamdown's own `pre` does, so `code`
- *   renders blocks and `inlineCode` renders inline spans.
+ * - Fenced code is a `<pre><code>` text block, highlighted by `CombCode`.
+ *   Monaco (used by `MarkdownView`) builds its own DOM, which comment anchors
+ *   cannot address. `pre` marks its child the way Streamdown's own `pre` does,
+ *   so `code` renders blocks and `inlineCode` renders inline spans.
  * - Relative links, agent-fs live links, and dashboard file links open the
  *   target file in Comb.
  * - Web images load. Drive images load through `DriveImage`. Without it, they
@@ -196,9 +222,7 @@ export const COMB_MD_COMPONENTS: Components = {
       </pre>
     );
   },
-  code({ node: _node, children, className }: ElementProps<"code"> & { "data-block"?: string }) {
-    return <code className={className}>{children}</code>;
-  },
+  code: CombCode,
   inlineCode({ node: _node, children, className: _className, ...rest }: ElementProps<"code">) {
     return (
       <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs" {...rest}>
@@ -215,23 +239,26 @@ export const COMB_MD_COMPONENTS: Components = {
  * it). `DriveImage` renders relative images from the drive. This module keeps
  * relative imports only, so the caller passes the data-loading component in.
  * `liveUrl` is the agent-fs live UI host: live links to drive files open in
- * Comb (step-13).
+ * Comb (step-13). `codeTheme` is the dashboard theme (`useTheme().theme`),
+ * for the fenced code colors.
  */
 export function CombMarkdown({
   text,
   doc,
   DriveImage,
   liveUrl = null,
+  codeTheme = "dark",
 }: {
   text: string;
   doc: DrivePath;
   DriveImage?: ComponentType<DriveImageProps>;
   liveUrl?: string | null;
+  codeTheme?: CodeTheme;
 }): ReactNode {
   const { orgId, driveId, path } = doc;
   const ctx = useMemo(
-    () => ({ doc: { orgId, driveId, path }, DriveImage, liveUrl }),
-    [orgId, driveId, path, DriveImage, liveUrl],
+    () => ({ doc: { orgId, driveId, path }, DriveImage, liveUrl, codeTheme }),
+    [orgId, driveId, path, DriveImage, liveUrl, codeTheme],
   );
   return (
     <CombDocContext.Provider value={ctx}>

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useAgentFsMediaUrl } from "@/api/hooks/use-agent-fs";
 import { useAgentFs } from "@/contexts/agent-fs-context";
+import { useTheme } from "@/hooks/use-theme";
 import { CombMarkdown, type DriveImageProps } from "./comb-markdown";
 import type { ViewerProps } from "./file-viewer";
 import { TextGate } from "./text-gate";
@@ -12,11 +13,18 @@ import { TextGate } from "./text-gate";
  */
 export default function MarkdownViewer({ file, stat }: ViewerProps) {
   const { liveUrl } = useAgentFs();
+  const { theme } = useTheme();
   return (
     <TextGate file={file} stat={stat}>
       {(text) => (
         <article className="prose-doc mx-auto max-w-[72ch] px-6 py-5">
-          <CombMarkdown text={text} doc={file} DriveImage={DriveImage} liveUrl={liveUrl} />
+          <CombMarkdown
+            text={text}
+            doc={file}
+            DriveImage={DriveImage}
+            liveUrl={liveUrl}
+            codeTheme={theme}
+          />
         </article>
       )}
     </TextGate>
