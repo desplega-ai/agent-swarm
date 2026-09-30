@@ -438,6 +438,63 @@ describe("Slack renderer v2", () => {
     expect(methods).not.toContain("assistant.threads.setStatus");
   });
 
+  describe("native status budget across one render tick", () => {
+    const setStatusCalls = () =>
+      calls.filter((call) => call.method === "agents.sessions.setStatus");
+
+    async function slackAsks(count: number, prefix: string) {
+      const lead = await createAgent({ name: `${prefix} Lead`, isLead: true, status: "idle" });
+      const asks = [];
+      for (let i = 0; i < count; i++) {
+        const { channelId, threadTs } = uniqueSlackAddress(`${prefix}_${i}`);
+        const ask = await createTaskExtended(`${prefix} ask ${i}`, {
+          agentId: lead.id,
+          source: "slack",
+          slackChannelId: channelId,
+          slackThreadTs: threadTs,
+          contextKey: slackContextKey({ channelId, threadTs }),
+        });
+        asks.push({ ask, channelId, threadTs });
+      }
+      return asks;
+    }
+
+    test("tree creation for a burst of new asks starts at most eight status writes per tick", async () => {
+      const asks = await slackAsks(12, "C_BURST_TREE");
+      calls.length = 0;
+
+      await processSlackRenderV2();
+      expect(setStatusCalls()).toHaveLength(8);
+      expect(setStatusCalls().every((call) => call.payload.status === "processing")).toBe(true);
+
+      // The threads the cap left out catch up on the next tick, each written once.
+      await processSlackRenderV2();
+      const written = setStatusCalls().map((call) => call.payload.thread_ts);
+      expect(written).toHaveLength(12);
+      expect(new Set(written)).toEqual(new Set(asks.map((a) => a.threadTs)));
+    });
+
+    test("outcome delivery shares the same budget and the rest clear on the next tick", async () => {
+      const asks = await slackAsks(10, "C_BURST_OUTCOME");
+      for (const { ask } of asks) await startTask(ask.id);
+      // Trees and the initial processing writes happen outside a render tick.
+      for (const { ask } of asks) await ensureSlackThreadTree([ask.id]);
+      for (const { ask } of asks) await completeTask(ask.id, "Done");
+      calls.length = 0;
+
+      await processSlackRenderV2();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(setStatusCalls()).toHaveLength(8);
+      expect(setStatusCalls().every((call) => call.payload.status === "active")).toBe(true);
+
+      await processSlackRenderV2();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const cleared = setStatusCalls().map((call) => call.payload.thread_ts);
+      expect(cleared).toHaveLength(10);
+      expect(new Set(cleared)).toEqual(new Set(asks.map((a) => a.threadTs)));
+    });
+  });
+
   for (const delegationEnabled of [false, true]) {
     test(`relays a deferred schedule continuation with delegation=${delegationEnabled}`, async () => {
       process.env.SLACK_RENDER_V2_DELEGATION = String(delegationEnabled);

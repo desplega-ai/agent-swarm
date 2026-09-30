@@ -1,3 +1,4 @@
+import { webApi } from "@slack/bolt";
 import type { WebClient } from "@slack/web-api";
 import {
   getSlackTasksInThread,
@@ -28,13 +29,22 @@ import { getSlackApp } from "./app";
  * The indicator is only ever a nicety. Every failure is absorbed here: the
  * thread keeps the reaction and the tree message (DMs also keep the legacy
  * indicator), and nothing in this file throws into a task.
+ *
+ * A write that got no answer (timeout, reset) may still have reached Slack, so
+ * the thread is marked `uncertain` and the next reconcile writes whatever it
+ * wants even when the books say "already clear". Writes go through an isolated
+ * client (see `statusTransport`) so such a write is aborted at the timeout
+ * instead of landing minutes later.
  */
 
 export type SlackSessionStatus = "processing" | "suspended" | "active";
 
 /** Slack ends a `processing` session after one hour; re-assert well inside it. */
 const REFRESH_MS = 30 * 60_000;
-const CALL_TIMEOUT_MS = 8_000;
+const DEFAULT_CALL_TIMEOUT_MS = 8_000;
+/** The status client aborts its HTTP request this long before the local timeout backstops a transport that does not. */
+const TRANSPORT_MARGIN_MS = 500;
+let callTimeoutMs = DEFAULT_CALL_TIMEOUT_MS;
 const RETRY_BASE_MS = 30_000;
 const RETRY_MAX_MS = 10 * 60_000;
 /** After a workspace-level refusal, stay off the native call this long, then probe again. */
@@ -90,6 +100,17 @@ type ThreadEntry = {
   retryAt: number;
   /** Slack refused this thread (e.g. the bot is not in the channel); leave it alone until it goes idle. */
   refused: boolean;
+  /**
+   * The last write got no answer, so Slack may hold a status that `status`
+   * does not show. Reconciling writes the desired status even if it equals
+   * `status`, and a clear is never skipped as "already clear".
+   */
+  uncertain: boolean;
+  /**
+   * A reconcile that knew the thread's tasks wanted a different status but the
+   * tick's budget was spent. Due on the next sweep, grace period or not.
+   */
+  deferred?: boolean;
 };
 
 const threads = new Map<string, ThreadEntry>();
@@ -121,12 +142,49 @@ function warnOnce(key: string, message: string): void {
   console.warn(scrubSecrets(`[Slack] ${message}`));
 }
 
+class CallTimeoutError extends Error {
+  constructor(ms: number) {
+    super(`timed out after ${ms}ms`);
+    this.name = "CallTimeoutError";
+  }
+}
+
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms);
+    timer = setTimeout(() => reject(new CallTimeoutError(ms)), ms);
   });
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+type StatusTransport = Pick<WebClient, "apiCall">;
+let transports = new WeakMap<WebClient, StatusTransport>();
+
+/**
+ * The client native status writes go through. The shared Bolt client retries
+ * a failed call for up to 30 minutes and, on a 429, pauses its queue for every
+ * method, so a slow status write could land long after the ask ended and stall
+ * tree delivery. This is a sibling client with its own queue, no automatic
+ * retries, rate limits surfaced as errors, and an HTTP timeout that aborts the
+ * request. Anything that is not a real `WebClient` (a test double, or a
+ * transport that is already isolated) is used as it is.
+ */
+function statusTransport(client: WebClient): StatusTransport {
+  if (!(client instanceof webApi.WebClient)) return client;
+  let transport = transports.get(client);
+  if (!transport) {
+    const timeout = Math.max(callTimeoutMs - TRANSPORT_MARGIN_MS, 1);
+    transport = new webApi.WebClient(client.token ?? process.env.SLACK_BOT_TOKEN, {
+      slackApiUrl: client.slackApiUrl,
+      retryConfig: { retries: 0 },
+      rejectRateLimitedCalls: true,
+      timeout,
+      // Axios' own timeout leaves the socket open under Bun; an abort signal closes it.
+      requestInterceptor: (config) => ({ ...config, signal: AbortSignal.timeout(timeout) }),
+    });
+    transports.set(client, transport);
+  }
+  return transport;
 }
 
 /** Runs `fn` after every earlier call for the same thread has finished. */
@@ -200,31 +258,50 @@ async function applyStatus(
     return "unavailable";
   }
   if (desired === "active") {
-    // Nothing was ever set for this thread, or it is already clear.
-    if (!entry || entry.status === "active") {
+    // Nothing was ever set for this thread, or it is known to be clear. An
+    // entry whose last write went unanswered is not known to be either.
+    if (!entry || (entry.status === "active" && !entry.uncertain)) {
       threads.delete(key);
       return "idle";
     }
-  } else if (entry && entry.status === desired && now - entry.setAt < REFRESH_MS) {
+  } else if (
+    entry &&
+    entry.status === desired &&
+    !entry.uncertain &&
+    now - entry.setAt < REFRESH_MS
+  ) {
     return "current";
   }
   if (entry && now < entry.retryAt) return "unavailable";
   if (budget) {
-    if (budget.remaining <= 0) return "unavailable";
+    if (budget.remaining <= 0) {
+      if (entry) threads.set(key, { ...entry, deferred: true });
+      return "unavailable";
+    }
     budget.remaining--;
   }
 
+  const pending = statusTransport(client).apiCall("agents.sessions.setStatus", {
+    channel_id: channelId,
+    thread_ts: threadTs,
+    status: desired,
+  });
   try {
-    const result = (await withTimeout(
-      client.apiCall("agents.sessions.setStatus", {
-        channel_id: channelId,
-        thread_ts: threadTs,
-        status: desired,
-      }),
-      CALL_TIMEOUT_MS,
-    )) as { ok?: boolean; error?: string };
+    const result = (await withTimeout(pending, callTimeoutMs)) as { ok?: boolean; error?: string };
     if (result?.ok === false) throw { data: { error: result.error ?? "unknown_error" } };
   } catch (error) {
+    // The request is still out there. If it lands after we gave up, record
+    // what Slack now holds and reconcile against the thread's tasks again.
+    if (error instanceof CallTimeoutError) {
+      pending.then(
+        (late) => {
+          if ((late as { ok?: boolean })?.ok !== false) {
+            void noteLateWrite(client, channelId, threadTs, desired);
+          }
+        },
+        () => {},
+      );
+    }
     const failure = classify(error);
     if (failure.kind === "unavailable") {
       unavailableUntil = now + UNAVAILABLE_COOLDOWN_MS;
@@ -241,6 +318,7 @@ async function applyStatus(
         failures: 0,
         retryAt: 0,
         refused: true,
+        uncertain: false,
       });
       warnOnce(
         `refused:${failure.code}`,
@@ -255,6 +333,8 @@ async function applyStatus(
         failures,
         retryAt: now + Math.max(backoff, retryAfterMs(error) ?? 0),
         refused: false,
+        // No verdict: the write may have reached Slack before the answer was lost.
+        uncertain: true,
       });
       warnOnce(
         `transient:${failure.code}`,
@@ -265,8 +345,54 @@ async function applyStatus(
   }
 
   if (desired === "active") threads.delete(key);
-  else threads.set(key, { status: desired, setAt: now, failures: 0, retryAt: 0, refused: false });
+  else {
+    threads.set(key, {
+      status: desired,
+      setAt: now,
+      failures: 0,
+      retryAt: 0,
+      refused: false,
+      uncertain: false,
+    });
+  }
   return "applied";
+}
+
+/**
+ * A write we timed out on has now been answered, so Slack holds `landed`,
+ * which may not be what the thread's tasks call for by now (the ask finished
+ * while the request was out). Record that and reconcile again. The isolated
+ * transport aborts at its timeout, so this is the path for a transport that
+ * cannot, and for an answer that was only slow.
+ */
+async function noteLateWrite(
+  client: WebClient,
+  channelId: string,
+  threadTs: string,
+  landed: SlackSessionStatus,
+): Promise<void> {
+  try {
+    const key = threadKey(channelId, threadTs);
+    await withThreadLock(key, async () => {
+      if (landed === "active") threads.delete(key);
+      else {
+        threads.set(key, {
+          status: landed,
+          setAt: Date.now(),
+          failures: 0,
+          retryAt: 0,
+          refused: false,
+          uncertain: false,
+        });
+      }
+    });
+    await reconcileSlackSessionStatus({ channelId, threadTs, client });
+  } catch (error) {
+    warnOnce(
+      "late-write",
+      `Reconciling a late session status write failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }
 
 /** The pre-native DM indicator, kept as the fallback for an outcome that just landed. */
@@ -358,12 +484,15 @@ export async function markSlackSessionProcessing(input: {
  * be cleared or retried.
  */
 export function beginSlackStatusTick(): {
+  /** Shared by every native status write the tick starts; hand it to anything the tick calls that may write. */
+  budget: StatusBudget;
   reconcile: (channelId: string, threadTs: string) => Promise<void>;
   finish: () => Promise<void>;
 } {
   const budget: StatusBudget = { remaining: CALLS_PER_TICK };
   const visited = new Set<string>();
   return {
+    budget,
     reconcile: async (channelId, threadTs) => {
       visited.add(threadKey(channelId, threadTs));
       await reconcileSlackSessionStatus({ channelId, threadTs, budget });
@@ -373,7 +502,12 @@ export function beginSlackStatusTick(): {
         const targets = new Map<string, { channelId: string; threadTs: string }>();
         const now = Date.now();
         for (const [key, entry] of threads) {
-          if (entry.status === "processing" && now - entry.setAt < ORPHAN_GRACE_MS) continue;
+          const inGrace =
+            entry.status === "processing" &&
+            !entry.uncertain &&
+            !entry.deferred &&
+            now - entry.setAt < ORPHAN_GRACE_MS;
+          if (inGrace) continue;
           targets.set(key, splitKey(key));
         }
         for (const thread of await listSlackThreadsAwaitingHuman()) {
@@ -393,7 +527,13 @@ export function beginSlackStatusTick(): {
   };
 }
 
+export function _setSlackSessionStatusTimeoutForTests(ms: number | undefined): void {
+  callTimeoutMs = ms ?? DEFAULT_CALL_TIMEOUT_MS;
+}
+
 export function _resetSlackSessionStatusForTests(): void {
+  callTimeoutMs = DEFAULT_CALL_TIMEOUT_MS;
+  transports = new WeakMap();
   threads.clear();
   keyTails.clear();
   warned.clear();

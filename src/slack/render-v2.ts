@@ -57,6 +57,7 @@ import {
   _resetSlackSessionStatusForTests,
   beginSlackStatusTick,
   reconcileSlackSessionStatus,
+  type StatusBudget,
 } from "./session-status";
 import { getSlackOutputAttachments } from "./task-attachments";
 import { isAwaitingWake, isDeferredTask, slackTaskOutput } from "./task-output";
@@ -172,6 +173,7 @@ function outcomeDeliveryGate(taskId: string, card: SlackMessageRecord | null): b
 async function reconcileStuckOutcomeDelivery(
   task: AgentTask,
   card: SlackMessageRecord | null,
+  statusBudget: StatusBudget | undefined,
 ): Promise<void> {
   if (!card || card.deliveryAbandonedAt) return;
   if (card.deliveryAttempts < OUTCOME_DELIVERY_MAX_ATTEMPTS) return;
@@ -183,15 +185,16 @@ async function reconcileStuckOutcomeDelivery(
     `[Slack] Recovered a stuck outcome delivery for task ${task.id} left at ` +
       `${card.deliveryAttempts} attempt(s) without a give-up; surfacing failure and clearing the working indicator`,
   );
-  await surfaceOutcomeDeliveryGiveUp(task, lastError, card.deliveryAttempts);
+  await surfaceOutcomeDeliveryGiveUp(task, lastError, card.deliveryAttempts, statusBudget);
 }
 
 /** Reconciles a stuck card (see reconcileStuckOutcomeDelivery), then applies the gate. */
 async function checkOutcomeDeliveryGate(
   task: AgentTask,
   card: SlackMessageRecord | null,
+  statusBudget: StatusBudget | undefined,
 ): Promise<boolean> {
-  await reconcileStuckOutcomeDelivery(task, card);
+  await reconcileStuckOutcomeDelivery(task, card, statusBudget);
   return outcomeDeliveryGate(task.id, card);
 }
 
@@ -203,6 +206,7 @@ async function noteOutcomeDeliveryFailure(
   task: AgentTask,
   tree: SlackMessageRecord,
   error: unknown,
+  statusBudget: StatusBudget | undefined,
 ): Promise<void> {
   const detail = describeSlackError(error);
   // Scrubbed once here so every downstream sink — the two DB writes below and
@@ -254,7 +258,7 @@ async function noteOutcomeDeliveryFailure(
     `[Slack] Giving up on outcome delivery for task ${task.id} after ${attempts} attempt(s)` +
       `${terminal ? " (Slack refused the delivery)" : ""}; surfacing failure and clearing the working indicator`,
   );
-  await surfaceOutcomeDeliveryGiveUp(task, summary, attempts);
+  await surfaceOutcomeDeliveryGiveUp(task, summary, attempts, statusBudget);
 }
 
 /** Best-effort: post a visible failure notice and clear the "is working" status.
@@ -263,6 +267,7 @@ async function surfaceOutcomeDeliveryGiveUp(
   task: AgentTask,
   summary: string,
   attempts: number,
+  statusBudget: StatusBudget | undefined,
 ): Promise<void> {
   const app = getSlackApp();
   if (!app || !task.slackChannelId || !task.slackThreadTs) return;
@@ -278,19 +283,27 @@ async function surfaceOutcomeDeliveryGiveUp(
       scrubSecrets(postError instanceof Error ? postError.message : String(postError)),
     );
   }
-  await clearAssistantStatus(app.client, task.slackChannelId, task.slackThreadTs);
+  await clearAssistantStatus(app.client, task.slackChannelId, task.slackThreadTs, statusBudget);
 }
 
 /** Re-syncs Slack's native "working" status once an outcome card has landed:
  * cleared when nothing else in the thread is still running, kept while it is.
  * Best-effort and never throws. When the native call is unavailable a DM
- * falls back to clearing the legacy assistant indicator, as it always did. */
+ * falls back to clearing the legacy assistant indicator, as it always did.
+ * A render tick passes its budget; past it the clear waits for the next tick. */
 async function clearAssistantStatus(
   client: WebClient,
   channelId: string,
   threadTs: string,
+  statusBudget: StatusBudget | undefined,
 ): Promise<void> {
-  await reconcileSlackSessionStatus({ client, channelId, threadTs, outcomeDelivered: true });
+  await reconcileSlackSessionStatus({
+    client,
+    channelId,
+    threadTs,
+    budget: statusBudget,
+    outcomeDelivered: true,
+  });
 }
 
 function slackTreeStallMinutes(): number {
@@ -695,7 +708,14 @@ async function createThreadTree(task: AgentTask): Promise<SlackMessageRecord | n
   return record;
 }
 
-export async function ensureSlackThreadTree(taskIds: string[]): Promise<SlackMessageRecord | null> {
+/**
+ * `statusBudget` is the render tick's shared cap on native status writes; calls
+ * from outside a tick (a newly accepted ask) pass none.
+ */
+export async function ensureSlackThreadTree(
+  taskIds: string[],
+  statusBudget?: StatusBudget,
+): Promise<SlackMessageRecord | null> {
   const task = (await Promise.all(taskIds.map(getTaskById))).find(
     (candidate): candidate is AgentTask => !!candidate,
   );
@@ -705,6 +725,7 @@ export async function ensureSlackThreadTree(taskIds: string[]): Promise<SlackMes
   await reconcileSlackSessionStatus({
     channelId: task.slackChannelId,
     threadTs: task.slackThreadTs,
+    budget: statusBudget,
   });
   const contextKey =
     task.contextKey ??
@@ -722,7 +743,7 @@ export async function ensureSlackThreadTree(taskIds: string[]): Promise<SlackMes
     } catch (error) {
       if (!isSlackMessageNotFound(error)) throw error;
       await discardTreeRecord(existing);
-      return ensureSlackThreadTree(taskIds);
+      return ensureSlackThreadTree(taskIds, statusBudget);
     }
   }
   const creationKey = physicalThreadKey(task.slackChannelId, task.slackThreadTs);
@@ -773,17 +794,21 @@ async function withTreeUpdateLock<T>(
   }
 }
 
-async function replaceMissingTree(tree: SlackMessageRecord): Promise<SlackMessageRecord | null> {
+async function replaceMissingTree(
+  tree: SlackMessageRecord,
+  statusBudget: StatusBudget | undefined,
+): Promise<SlackMessageRecord | null> {
   await discardTreeRecord(tree);
   const taskIds = (await getSlackTasksInThread(tree.channelId, tree.threadTs)).map(
     (task) => task.id,
   );
-  return taskIds.length > 0 ? ensureSlackThreadTree(taskIds) : null;
+  return taskIds.length > 0 ? ensureSlackThreadTree(taskIds, statusBudget) : null;
 }
 
 async function updateThreadTree(
   tree: SlackMessageRecord,
   bypassThrottle = false,
+  statusBudget?: StatusBudget,
 ): Promise<boolean> {
   const result = await withTreeUpdateLock(tree.channelId, tree.threadTs, async () => {
     const app = getSlackApp();
@@ -827,7 +852,7 @@ async function updateThreadTree(
   });
 
   if (result === "missing") {
-    await replaceMissingTree(tree);
+    await replaceMissingTree(tree, statusBudget);
     return false;
   }
   return result === "updated";
@@ -1240,6 +1265,8 @@ export async function streamOutcomeCard(
   options?: {
     buildContent?: (task: AgentTask, slackReplySent: boolean) => Promise<string>;
     conclusionKind?: SlackConclusionKind;
+    /** The render tick's shared cap on native status writes. */
+    statusBudget?: StatusBudget;
   },
 ): Promise<SlackMessageRecord | null> {
   const app = getSlackApp();
@@ -1390,7 +1417,12 @@ export async function streamOutcomeCard(
   // what normally clears Slack's own "is working…" assistant indicator.
   // Clear it explicitly too, so a delivery that only ever fails still
   // doesn't leave the thread stuck spinning.
-  await clearAssistantStatus(app.client, task.slackChannelId, task.slackThreadTs);
+  await clearAssistantStatus(
+    app.client,
+    task.slackChannelId,
+    task.slackThreadTs,
+    options?.statusBudget,
+  );
   const permalink = await resolvePermalink(app.client, task.slackChannelId, outcome.ts);
   return await updateSlackMessageRecord(outcome.id, {
     permalink,
@@ -1568,7 +1600,7 @@ export async function processSlackRenderV2(): Promise<void> {
     if (!isSlackRenderV2Enabled()) return;
     if (!task.slackChannelId || !task.slackThreadTs) continue;
     try {
-      await ensureSlackThreadTree([task.id]);
+      await ensureSlackThreadTree([task.id], statusTick.budget);
     } catch (error) {
       console.error(`[Slack] Failed to create v2 tree for task ${task.id}:`, error);
     }
@@ -1580,7 +1612,10 @@ export async function processSlackRenderV2(): Promise<void> {
     const initialTasks = await getSlackTasksInThread(tree.channelId, tree.threadTs);
     if (isPendingSlackMessage(tree)) {
       try {
-        const recovered = await ensureSlackThreadTree(initialTasks.map((task) => task.id));
+        const recovered = await ensureSlackThreadTree(
+          initialTasks.map((task) => task.id),
+          statusTick.budget,
+        );
         if (!recovered) continue;
         tree = recovered;
       } catch (error) {
@@ -1595,7 +1630,7 @@ export async function processSlackRenderV2(): Promise<void> {
       } catch (error) {
         if (isSlackMessageNotFound(error)) {
           try {
-            await replaceMissingTree(tree);
+            await replaceMissingTree(tree, statusTick.budget);
           } catch (replacementError) {
             console.error(
               `[Slack] Failed to replace missing v2 tree ${tree.id}:`,
@@ -1639,7 +1674,7 @@ export async function processSlackRenderV2(): Promise<void> {
           continue;
         }
         try {
-          const replacement = await replaceMissingTree(tree);
+          const replacement = await replaceMissingTree(tree, statusTick.budget);
           if (!replacement) continue;
           tree = replacement;
           tasks = await getSlackTasksInThread(tree.channelId, tree.threadTs);
@@ -1696,9 +1731,12 @@ export async function processSlackRenderV2(): Promise<void> {
       if (!ownerAsk || ownerAsk.createdAt < delegationActivatedAt) continue;
       if (childCardsThisTick >= CHILD_CARDS_PER_TICK) continue;
       if (askId && (await childCardCountFor(askId)) >= CHILD_CARDS_PER_ASK) continue;
-      if (!(await checkOutcomeDeliveryGate(task, card))) continue;
+      if (!(await checkOutcomeDeliveryGate(task, card, statusTick.budget))) continue;
       try {
-        const outcome = await streamOutcomeCard(task, tree, { buildContent: childOutcomeContent });
+        const outcome = await streamOutcomeCard(task, tree, {
+          buildContent: childOutcomeContent,
+          statusBudget: statusTick.budget,
+        });
         if (outcome) {
           noteOutcomeDeliverySuccess(task.id);
           childCardsThisTick++;
@@ -1707,7 +1745,7 @@ export async function processSlackRenderV2(): Promise<void> {
         }
         outcomeCreated ||= !!outcome;
       } catch (error) {
-        await noteOutcomeDeliveryFailure(task, tree, error);
+        await noteOutcomeDeliveryFailure(task, tree, error, statusTick.budget);
       }
     }
 
@@ -1724,16 +1762,16 @@ export async function processSlackRenderV2(): Promise<void> {
         task.createdAt >= delegationActivatedAt;
 
       if (!deferByClosure) {
-        if (!(await checkOutcomeDeliveryGate(task, card))) continue;
+        if (!(await checkOutcomeDeliveryGate(task, card, statusTick.budget))) continue;
         try {
-          const outcome = await streamOutcomeCard(task, tree);
+          const outcome = await streamOutcomeCard(task, tree, { statusBudget: statusTick.budget });
           if (outcome) {
             noteOutcomeDeliverySuccess(task.id);
             await finalizeTerminalSlackReactions([task]);
           }
           outcomeCreated ||= !!outcome;
         } catch (error) {
-          await noteOutcomeDeliveryFailure(task, tree, error);
+          await noteOutcomeDeliveryFailure(task, tree, error, statusTick.budget);
         }
         continue;
       }
@@ -1759,12 +1797,13 @@ export async function processSlackRenderV2(): Promise<void> {
       if (childCardPending) continue;
       const state = closureState(task, closure, new Date(), settleSec, timeoutMin);
       if (state === "open") continue;
-      if (!(await checkOutcomeDeliveryGate(task, card))) continue;
+      if (!(await checkOutcomeDeliveryGate(task, card, statusTick.budget))) continue;
       try {
         const outcome = await streamOutcomeCard(task, tree, {
           buildContent: (_t, slackReplySent) =>
             askConclusionContent(task, closure, state, slackReplySent),
           conclusionKind: state === "timedOut" ? "timeout" : "complete",
+          statusBudget: statusTick.budget,
         });
         if (outcome) {
           noteOutcomeDeliverySuccess(task.id);
@@ -1788,11 +1827,11 @@ export async function processSlackRenderV2(): Promise<void> {
         }
         outcomeCreated ||= !!outcome;
       } catch (error) {
-        await noteOutcomeDeliveryFailure(task, tree, error);
+        await noteOutcomeDeliveryFailure(task, tree, error, statusTick.budget);
       }
     }
     try {
-      await updateThreadTree(tree, outcomeCreated);
+      await updateThreadTree(tree, outcomeCreated, statusTick.budget);
     } catch (error) {
       console.error(`[Slack] Failed to update v2 tree ${tree.id}:`, error);
     }
@@ -1821,4 +1860,8 @@ export function _resetSlackRenderV2ForTests(): void {
  * its pre-reservation branch (a DB read throwing before streamOutcomeCard's
  * own reservation) aren't practical to reproduce end-to-end in tests.
  */
-export const _noteOutcomeDeliveryFailureForTests = noteOutcomeDeliveryFailure;
+export const _noteOutcomeDeliveryFailureForTests = (
+  task: AgentTask,
+  tree: SlackMessageRecord,
+  error: unknown,
+): Promise<void> => noteOutcomeDeliveryFailure(task, tree, error, undefined);

@@ -10,6 +10,8 @@ import {
   test,
 } from "bun:test";
 import { unlink } from "node:fs/promises";
+import { createServer, type Server } from "node:http";
+import { webApi } from "@slack/bolt";
 import {
   cancelTask,
   closeDb,
@@ -24,11 +26,13 @@ import {
 } from "../be/db";
 import {
   _resetSlackSessionStatusForTests,
+  _setSlackSessionStatusTimeoutForTests,
   beginSlackStatusTick,
   markSlackSessionProcessing,
   reconcileSlackSessionStatus,
 } from "../slack/session-status";
 import { slackContextKey } from "../tasks/context-key";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-slack-session-status.sqlite";
 
@@ -429,5 +433,194 @@ describe("tick sweep", () => {
     const second = beginSlackStatusTick();
     for (const thread of threads) await second.reconcile(thread.channelId, thread.threadTs);
     expect(statusCalls()).toHaveLength(12);
+  });
+});
+
+/** A Slack whose status writes can be held mid-flight and applied only when released. */
+function remoteSlack() {
+  const held: Array<{ release: () => void; drop: () => void }> = [];
+  let holdNext = 0;
+  const state = { remote: "none" };
+  const apiCall = async (method: string, payload: Record<string, unknown>) => {
+    calls.push({ method, payload });
+    if (method !== "agents.sessions.setStatus") return { ok: true };
+    const status = String(payload.status);
+    if (holdNext > 0) {
+      holdNext--;
+      await new Promise<void>((resolve, reject) => {
+        held.push({
+          release: () => {
+            state.remote = status;
+            resolve();
+          },
+          drop: () => reject(new Error("socket hang up")),
+        });
+      });
+      return { ok: true };
+    }
+    state.remote = status;
+    return { ok: true };
+  };
+  return {
+    client: { apiCall } as unknown as NonNullable<typeof client>,
+    state,
+    held,
+    holdNext: () => {
+      holdNext++;
+    },
+  };
+}
+
+async function waitFor(condition: () => boolean, ms = 2_000): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (!condition() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 5));
+}
+
+describe("a status write that gets no answer", () => {
+  test("a write that lands after its timeout cannot leave the thread stuck on working", async () => {
+    _setSlackSessionStatusTimeoutForTests(30);
+    const slack = remoteSlack();
+    const thread = address();
+    const taskId = await slackTask(thread.channelId, thread.threadTs, { start: true });
+
+    slack.holdNext();
+    await reconcileSlackSessionStatus({ ...thread, client: slack.client });
+    expect(statusCalls()).toEqual(["processing"]);
+    expect(slack.state.remote).toBe("none");
+
+    // The ask ends while the request is still out, then the request lands.
+    await completeTask(taskId, "Done");
+    await reconcileSlackSessionStatus({ ...thread, client: slack.client, outcomeDelivered: true });
+    slack.held[0]?.release();
+    expect(slack.state.remote).toBe("processing");
+
+    await waitFor(() => slack.state.remote === "active");
+    expect(slack.state.remote).toBe("active");
+    expect(statusCalls()).toEqual(["processing", "active"]);
+  });
+
+  test("a write Slack may have applied is cleared at the end of the ask, not skipped as already clear", async () => {
+    _setSlackSessionStatusTimeoutForTests(30);
+    const slack = remoteSlack();
+    const thread = address();
+    const taskId = await slackTask(thread.channelId, thread.threadTs, { start: true });
+    const realNow = Date.now();
+    const now = spyOn(Date, "now");
+    try {
+      now.mockReturnValue(realNow);
+      slack.holdNext();
+      await reconcileSlackSessionStatus({ ...thread, client: slack.client });
+
+      await completeTask(taskId, "Done");
+      now.mockReturnValue(realNow + 31_000);
+      await reconcileSlackSessionStatus({ ...thread, client: slack.client });
+      expect(statusCalls()).toEqual(["processing", "active"]);
+      expect(slack.state.remote).toBe("active");
+
+      // Once answered the thread is known to be clear, so it stays quiet.
+      await reconcileSlackSessionStatus({ ...thread, client: slack.client });
+      expect(statusCalls()).toEqual(["processing", "active"]);
+    } finally {
+      now.mockRestore();
+      slack.held[0]?.drop();
+    }
+  });
+
+  test("a clear that lands late does not wipe the status of a newer task", async () => {
+    _setSlackSessionStatusTimeoutForTests(30);
+    const slack = remoteSlack();
+    const thread = address();
+    const first = await slackTask(thread.channelId, thread.threadTs, { start: true });
+    const realNow = Date.now();
+    const now = spyOn(Date, "now");
+    try {
+      now.mockReturnValue(realNow);
+      await reconcileSlackSessionStatus({ ...thread, client: slack.client });
+      await completeTask(first, "Done");
+      slack.holdNext();
+      await reconcileSlackSessionStatus({
+        ...thread,
+        client: slack.client,
+        outcomeDelivered: true,
+      });
+
+      await slackTask(thread.channelId, thread.threadTs, { start: true });
+      now.mockReturnValue(realNow + 31_000);
+      await reconcileSlackSessionStatus({ ...thread, client: slack.client });
+      expect(slack.state.remote).toBe("processing");
+
+      slack.held[0]?.release();
+      expect(slack.state.remote).toBe("active");
+      await waitFor(() => slack.state.remote === "processing");
+      expect(slack.state.remote).toBe("processing");
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  describe("against a real Slack client", () => {
+    let server: Server;
+    let port = 0;
+    let setStatusHits = 0;
+    let abortedRequests = 0;
+    let mode: "rate-limit" | "hang" = "rate-limit";
+
+    beforeAll(async () => {
+      server = createServer((req, res) => {
+        if (req.url?.endsWith("/agents.sessions.setStatus")) {
+          setStatusHits++;
+          if (mode === "rate-limit") {
+            res.writeHead(429, { "retry-after": "1" }).end("rate limited");
+          } else {
+            // Never answers: the client closing the socket is the only way out.
+            res.on("close", () => abortedRequests++);
+          }
+          return;
+        }
+        res.writeHead(200, { "content-type": "application/json" }).end('{"ok":true}');
+      });
+      port = await listenOnFreePort(server, "127.0.0.1");
+    });
+    afterAll(() => {
+      server.closeAllConnections();
+      server.close();
+    });
+    beforeEach(() => {
+      setStatusHits = 0;
+      abortedRequests = 0;
+      mode = "rate-limit";
+    });
+
+    const sharedClient = () =>
+      new webApi.WebClient("xoxb-test", { slackApiUrl: `http://127.0.0.1:${port}/api/` });
+
+    test("a rate limit is not retried and does not pause the shared client's queue", async () => {
+      const shared = sharedClient();
+      const thread = address();
+      await slackTask(thread.channelId, thread.threadTs, { start: true });
+
+      const started = Date.now();
+      await reconcileSlackSessionStatus({ ...thread, client: shared });
+      expect(Date.now() - started).toBeLessThan(800);
+      expect(setStatusHits).toBe(1);
+
+      // Delivery on the shared client keeps flowing while the status is backing off.
+      const delivery = Date.now();
+      await shared.apiCall("chat.postMessage", { channel: thread.channelId, text: "tree" });
+      expect(Date.now() - delivery).toBeLessThan(500);
+      expect(setStatusHits).toBe(1);
+    });
+
+    test("a request that never answers is aborted at the timeout", async () => {
+      _setSlackSessionStatusTimeoutForTests(700);
+      mode = "hang";
+      const thread = address();
+      await slackTask(thread.channelId, thread.threadTs, { start: true });
+
+      await reconcileSlackSessionStatus({ ...thread, client: sharedClient() });
+      await waitFor(() => abortedRequests > 0);
+      expect(setStatusHits).toBe(1);
+      expect(abortedRequests).toBe(1);
+    });
   });
 });

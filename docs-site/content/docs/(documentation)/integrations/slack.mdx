@@ -182,7 +182,8 @@ The indicator never blocks a task. If Slack refuses the call, the swarm logs it 
 
 - **Workspace or app cannot use it** (`missing_scope`, `feature_disabled`, a revoked token): the native call is switched off for an hour, then probed again. DMs keep the legacy `assistant.threads.setStatus` indicator.
 - **Slack refuses one thread** (for example the bot is not in the channel): that thread is left alone until it goes idle.
-- **Transient errors** (rate limit, timeout, `internal_error`): retried with backoff, at most eight calls per render tick.
+- **Transient errors** (rate limit, timeout, `internal_error`): retried with backoff by the swarm, never by the Slack client. At most eight status writes start per render tick, counting tree creation, tree recovery, and outcome delivery; threads past the cap catch up on the next tick.
+- **A write that gets no answer** (timeout, reset): status calls use their own Slack client, separate from message delivery, with no automatic retries and an 8 second limit that aborts the request. Slack may still have applied the write, so the next reconcile sends its status even if the thread looked already clear. A write that lands after the timeout is reconciled against the thread's tasks again.
 
 ### Outcome Cards and Message Provenance
 
