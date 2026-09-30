@@ -1,6 +1,6 @@
 import { Send, UserRound } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { pickableMembers, useAgentFsAccess, useDriveMembers } from "@/api/hooks/use-agent-fs";
+import { useAgentFsAccess, useDriveMembers } from "@/api/hooks/use-agent-fs";
 import { Command, CommandItem, CommandList } from "@/components/ui/command";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { useAgentFs } from "@/contexts/agent-fs-context";
@@ -9,35 +9,24 @@ import {
   activeMentionQuery,
   collectMentionIds,
   insertMention,
-  type LabeledMember,
   labelMembers,
-  SWARM_LABEL,
+  type PickerItem,
+  pickableMembers,
+  pickerItems,
 } from "@/lib/comb/mentions";
 import type { ComposerExtrasContext } from "./comment-composer";
 import { useCommentContext } from "./comment-context";
 
-interface PickerItem {
-  /** cmdk item value. */
-  value: string;
-  /** Inserted as `@<label>`. */
-  label: string;
-  detail: string;
-  kind: "swarm" | "member";
-}
+/** The textarea's list attributes, removed when the picker turns off or unmounts. */
+const LIST_ATTRIBUTES = ["aria-autocomplete", "aria-controls", "aria-activedescendant"] as const;
 
-/** The swarm entry first, then the members whose label or email contains the query. */
-function pickerItems(members: readonly LabeledMember[], query: string): PickerItem[] {
-  const q = query.toLowerCase();
-  const items: PickerItem[] = [];
-  if (SWARM_LABEL.includes(q)) {
-    items.push({ value: "swarm", label: SWARM_LABEL, detail: "Send to the swarm", kind: "swarm" });
-  }
-  for (const { member, label } of members) {
-    if (label.toLowerCase().includes(q) || member.email.toLowerCase().includes(q)) {
-      items.push({ value: `member:${member.userId}`, label, detail: member.email, kind: "member" });
-    }
-  }
-  return items;
+/**
+ * True while an IME composes text (same rule as `lib/enter-submit.ts`).
+ * Safari sends the key that ends a composition with `isComposing` false and
+ * keyCode 229.
+ */
+function isImeKey(event: KeyboardEvent): boolean {
+  return event.isComposing || event.keyCode === 229;
 }
 
 /** `CommentRail`'s `renderComposerExtras`: the mention picker in every composer. */
@@ -48,12 +37,20 @@ export function renderMentionPicker(ctx: ComposerExtrasContext) {
 /**
  * "@" in a comment composer opens a list at the caret: "swarm" (inserts the
  * `@swarm` marker) and the drive's human members. Picking a member inserts
- * `@<label>` and the send adds their user id to `mentions`. The focus stays
- * in the textarea: Up and Down move, Enter or Tab picks, Escape closes (until
- * the next "@"). With the list closed, every key goes to the textarea.
- * Renders nothing when agent-fs lacks `comment-mentions` or `drive-members`.
+ * `@<label>` and records the pick: the send adds the user ids of the picked
+ * labels still in the text to `mentions`. A typed name notifies nobody. The
+ * focus stays in the textarea: Up and Down move, Enter or Tab picks, Escape
+ * closes (until the next "@"). With the list closed, every key goes to the
+ * textarea. Renders nothing when agent-fs lacks `comment-mentions` or
+ * `drive-members`.
  */
-function MentionPicker({ textareaRef, body, setBody, sendParamsRef }: ComposerExtrasContext) {
+function MentionPicker({
+  textareaRef,
+  body,
+  setBody,
+  picked,
+  sendParamsRef,
+}: ComposerExtrasContext) {
   const { file } = useCommentContext();
   const { features } = useAgentFs();
   const { userId } = useAgentFsAccess();
@@ -65,19 +62,18 @@ function MentionPicker({ textareaRef, body, setBody, sendParamsRef }: ComposerEx
     [members, userId],
   );
 
-  // Every member label still written in the body is a mention (a pick, a
-  // typed name, or a restored draft), so the ids also reach the outbox.
+  // Only picked labels still in the text are mentions. The ids also reach
+  // the outbox entry, because they go into the `comment-add` params.
   useEffect(() => {
     if (!enabled) return;
-    const labels = new Map(labeled.map(({ member, label }) => [label, member.userId]));
     sendParamsRef.current = (text) => {
-      const mentions = collectMentionIds(text, labels);
+      const mentions = collectMentionIds(text, picked);
       return mentions.length > 0 ? { mentions } : {};
     };
     return () => {
       sendParamsRef.current = null;
     };
-  }, [enabled, labeled, sendParamsRef]);
+  }, [enabled, picked, sendParamsRef]);
 
   // The caret while the textarea has focus and no text is selected.
   const [caret, setCaret] = useState<number | null>(null);
@@ -123,23 +119,25 @@ function MentionPicker({ textareaRef, body, setBody, sendParamsRef }: ComposerEx
 
   const pick = (item: PickerItem) => {
     if (!match) return;
+    // Record the pick before `setBody`, so the draft save includes it.
+    if (item.userId !== null) picked.set(item.label, item.userId);
     const next = insertMention(body, match, item.label);
     setBody(next.text, next.caret);
     setCaret(next.caret);
     textareaRef.current?.focus();
   };
-  const dismiss = () => setDismissedAt(matchStart);
 
   // Keys go to the list only while it is open. The listener runs on the
   // textarea before the composer's own handler, which skips prevented events.
-  const latest = useRef({ open, items, active, pick, dismiss });
-  latest.current = { open, items, active, pick, dismiss };
+  // Escape never gets here: the popover's dismiss layer handles it first.
+  const latest = useRef({ open, items, active, pick });
+  latest.current = { open, items, active, pick };
   useEffect(() => {
     const textarea = textareaRef.current;
     if (!enabled || !textarea) return;
     const onKeyDown = (event: KeyboardEvent) => {
       const state = latest.current;
-      if (!state.open || event.defaultPrevented || event.isComposing) return;
+      if (!state.open || event.defaultPrevented || isImeKey(event)) return;
       if (event.altKey || event.ctrlKey || event.metaKey) return;
       const count = state.items.length;
       switch (event.key) {
@@ -154,9 +152,6 @@ function MentionPicker({ textareaRef, body, setBody, sendParamsRef }: ComposerEx
           if (event.shiftKey) return;
           state.pick(state.items[state.active]);
           break;
-        case "Escape":
-          state.dismiss();
-          break;
         default:
           return;
       }
@@ -167,12 +162,20 @@ function MentionPicker({ textareaRef, body, setBody, sendParamsRef }: ComposerEx
   }, [enabled, textareaRef]);
 
   // The textarea points at the list and its active option (the focus never
-  // leaves the textarea). cmdk sets the option ids, so read them after it renders.
-  const listRef = useRef<HTMLDivElement>(null);
+  // leaves the textarea).
   useEffect(() => {
     const textarea = textareaRef.current;
     if (!enabled || !textarea) return;
     textarea.setAttribute("aria-autocomplete", "list");
+    return () => {
+      for (const name of LIST_ATTRIBUTES) textarea.removeAttribute(name);
+    };
+  }, [enabled, textareaRef]);
+  // cmdk sets the option ids, so read them after it renders.
+  const listRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!enabled || !textarea) return;
     const frame = requestAnimationFrame(() => {
       const list = listRef.current;
       const option = list?.querySelector<HTMLElement>('[cmdk-item][aria-selected="true"]');
@@ -185,9 +188,11 @@ function MentionPicker({ textareaRef, body, setBody, sendParamsRef }: ComposerEx
     return () => cancelAnimationFrame(frame);
   });
 
-  // The list opens under the "@", so it stays put while the query grows.
+  // The list opens under the "@", so it stays put while the query grows. It
+  // keeps the last "@" while it closes.
   const anchorAt = useRef(0);
-  anchorAt.current = matchStart ?? 0;
+  const anchorStart = matchStart ?? anchorAt.current;
+  anchorAt.current = anchorStart;
   const virtualRef = useRef({
     getBoundingClientRect: () =>
       textareaRef.current ? caretClientRect(textareaRef.current, anchorAt.current) : new DOMRect(),
@@ -202,18 +207,25 @@ function MentionPicker({ textareaRef, body, setBody, sendParamsRef }: ComposerEx
     <Popover
       open={open}
       onOpenChange={(next) => {
-        if (!next) dismiss();
+        if (!next) setDismissedAt(matchStart);
       }}
     >
       <PopoverAnchor virtualRef={virtualRef} />
       <PopoverContent
+        // A new "@" places a new list (the virtual anchor moved).
+        key={anchorStart}
         side="bottom"
         align="start"
         sideOffset={4}
         hideWhenDetached
-        className="w-72 p-1"
+        // Opened by typing: no open or close motion (apps/ui/CLAUDE.md, Motion).
+        className="w-72 p-1 animate-none!"
         onOpenAutoFocus={(event) => event.preventDefault()}
         onCloseAutoFocus={(event) => event.preventDefault()}
+        onEscapeKeyDown={(event) => {
+          // Escape that cancels an IME composition keeps the list open.
+          if (isImeKey(event)) event.preventDefault();
+        }}
         onInteractOutside={(event) => {
           // A click in the textarea moves the caret. The list follows it.
           if (event.target === textareaRef.current) event.preventDefault();
@@ -232,7 +244,7 @@ function MentionPicker({ textareaRef, body, setBody, sendParamsRef }: ComposerEx
           <CommandList ref={listRef} label="Mention suggestions">
             {items.map((item) => (
               <CommandItem key={item.value} value={item.value} onSelect={() => pick(item)}>
-                {item.kind === "swarm" ? <Send /> : <UserRound />}
+                {item.userId === null ? <Send /> : <UserRound />}
                 <span className="max-w-[60%] shrink-0 truncate font-medium">{item.label}</span>
                 <span className="ml-auto min-w-0 truncate text-xs text-muted-foreground">
                   {item.detail}

@@ -23,6 +23,7 @@ import {
   draftStorageKey,
   errorMessage,
   readDraft,
+  readDraftMentions,
   sendFailureRoute,
   writeDraft,
 } from "@/lib/comb/drafts";
@@ -40,6 +41,12 @@ export interface ComposerExtrasContext {
   body: string;
   /** Replace the text. `caret` moves the cursor after the change. */
   setBody: (body: string, caret?: number) => void;
+  /**
+   * step-8: the mentions picked in this composer (`@label` -> user id). Saved
+   * with the draft, cleared after a send. Add to it before `setBody`, so the
+   * draft save includes the pick.
+   */
+  picked: Map<string, string>;
   /** Extra `comment-add` params, read at send time (step-8: `mentions`). */
   sendParamsRef: MutableRefObject<((body: string) => Partial<CommentAddParams>) | null>;
 }
@@ -99,6 +106,8 @@ export function CommentComposer({
   const addComment = useAddComment(file);
   const draftKey = draftStorageKey(scope, draftSlot(target));
   const [body, setBodyState] = useState(() => readDraft(browserStorage(), draftKey, Date.now()));
+  // step-8: one Map for the composer's life (the picker adds to it), restored with the draft.
+  const [picked] = useState(() => readDraftMentions(browserStorage(), draftKey, Date.now()));
   const [error, setError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const sendParamsRef = useRef<((body: string) => Partial<CommentAddParams>) | null>(null);
@@ -110,7 +119,7 @@ export function CommentComposer({
     let timer: ReturnType<typeof setTimeout> | undefined;
     const flush = () => {
       if (pendingDraft.current === null) return;
-      writeDraft(browserStorage(), draftKey, pendingDraft.current, Date.now());
+      writeDraft(browserStorage(), draftKey, pendingDraft.current, Date.now(), picked);
       pendingDraft.current = null;
     };
     const schedule = () => {
@@ -122,7 +131,7 @@ export function CommentComposer({
       clearTimeout(timer);
       flush();
     };
-  }, [draftKey]);
+  }, [draftKey, picked]);
 
   const setBody = useCallback((next: string, caret?: number) => {
     setBodyState(next);
@@ -139,6 +148,7 @@ export function CommentComposer({
   const finish = () => {
     pendingDraft.current = null;
     clearDraft(browserStorage(), draftKey);
+    picked.clear();
     setBodyState("");
     onClose();
   };
@@ -200,7 +210,7 @@ export function CommentComposer({
           }}
         />
         {/* Composer extras mount point (step-8 mention picker). */}
-        {renderComposerExtras?.({ textareaRef, body, setBody, sendParamsRef })}
+        {renderComposerExtras?.({ textareaRef, body, setBody, picked, sendParamsRef })}
       </div>
       {error ? (
         <p role="alert" className="text-xs text-status-error-strong">

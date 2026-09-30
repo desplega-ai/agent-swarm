@@ -23,7 +23,27 @@ describe("@swarm marker", () => {
     expect(hasSwarmMarker("no marker here")).toBe(false);
   });
 
+  test("a member whose label starts with swarm is not the marker", () => {
+    expect(hasSwarmMarker("@swarm-admin please check")).toBe(false);
+    expect(hasSwarmMarker("@swarm_bot and @swarm2")).toBe(false);
+    expect(hasSwarmMarker("@swarm.bot please check")).toBe(false);
+    expect(hasSwarmMarker("@swarm@example.com please check")).toBe(false);
+    expect(hasSwarmMarker("@Swarmé")).toBe(false);
+  });
+
+  test("punctuation after the marker still ends it", () => {
+    expect(hasSwarmMarker("please fix this @swarm.")).toBe(true);
+    expect(hasSwarmMarker("@swarm, then")).toBe(true);
+    expect(hasSwarmMarker("now @swarm!")).toBe(true);
+    expect(hasSwarmMarker("ask @swarm")).toBe(true);
+  });
+
   test("splits a body into text and chips", () => {
+    expect(splitSwarmMarkers("@swarm-admin and @swarm.")).toEqual([
+      { kind: "text", text: "@swarm-admin and " },
+      { kind: "swarm", text: "@swarm" },
+      { kind: "text", text: "." },
+    ]);
     expect(splitSwarmMarkers("@swarm fix, then @Swarm check. me@swarm.local stays")).toEqual([
       { kind: "swarm", text: "@swarm" },
       { kind: "text", text: " fix, then " },

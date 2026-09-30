@@ -49,7 +49,10 @@ export function caretOffset(
   style.left = "-9999px";
   style.whiteSpace = "pre-wrap";
   style.overflowWrap = "break-word";
-  style.overflow = "hidden";
+  // A scrollable textarea gives width to its scrollbar. The mirror keeps a
+  // scrollbar too, so its lines wrap at the same place.
+  style.overflowX = "hidden";
+  style.overflowY = textarea.scrollHeight > textarea.clientHeight ? "scroll" : "hidden";
   style.height = "auto";
 
   mirror.textContent = textarea.value.slice(0, position);

@@ -1,17 +1,51 @@
 import { describe, expect, test } from "bun:test";
-import type { DriveMember } from "../agent-fs/types";
+import type {
+  CommentNotificationEntry,
+  CommentNotificationListResult,
+  DriveMember,
+} from "../agent-fs/types";
+import { hasSwarmMarker } from "./markers";
 import {
   activeMentionQuery,
   collectMentionIds,
   insertMention,
   labelMembers,
+  markMentionsRead,
   mentionRoute,
+  pickableMembers,
+  pickerItems,
   splitMentions,
 } from "./mentions";
 
 function member(userId: string, email: string, displayName: string | null = null): DriveMember {
   return { userId, email, displayName };
 }
+
+describe("pickableMembers", () => {
+  const members = [
+    member("u-me", "me@example.com", "Me"),
+    member("u-bob", "bob@example.com", "Bob"),
+    member("u-agent", "worker-1@swarm.local", "Worker 1"),
+    member("u-lead", "Lead@Swarm.Local"),
+    member("u-service", "swarm-admin@agent-fs.local"),
+  ];
+
+  test("drops the caller and the swarm's agent accounts", () => {
+    expect(pickableMembers(members, "u-me").map((m) => m.userId)).toEqual(["u-bob", "u-service"]);
+  });
+
+  test("drops the swarm service account when its id is known", () => {
+    expect(pickableMembers(members, "u-me", "u-service").map((m) => m.userId)).toEqual(["u-bob"]);
+  });
+
+  test("keeps everyone else without a caller id", () => {
+    expect(pickableMembers(members, null).map((m) => m.userId)).toEqual([
+      "u-me",
+      "u-bob",
+      "u-service",
+    ]);
+  });
+});
 
 describe("activeMentionQuery", () => {
   test("detects a query at the start of the text", () => {
@@ -42,6 +76,22 @@ describe("activeMentionQuery", () => {
   test("allows letters with accents, dots, and dashes in the query", () => {
     expect(activeMentionQuery("@josé.m-r", 9)?.query).toBe("josé.m-r");
   });
+
+  test("reads a query of up to 64 characters", () => {
+    const long = `@${"a".repeat(64)}`;
+    expect(activeMentionQuery(long, long.length)?.query).toBe("a".repeat(64));
+    const tooLong = `@${"a".repeat(65)}`;
+    expect(activeMentionQuery(tooLong, tooLong.length)).toBeNull();
+  });
+
+  test("returns quickly on a 20k-character unbroken word", () => {
+    const word = "a".repeat(20_000);
+    const started = performance.now();
+    for (const text of [`${word} `, `${word}!`, `x @${word}`, word]) {
+      expect(activeMentionQuery(text, text.length)).toBeNull();
+    }
+    expect(performance.now() - started).toBeLessThan(50);
+  });
 });
 
 describe("insertMention", () => {
@@ -68,29 +118,50 @@ describe("insertMention", () => {
 });
 
 describe("collectMentionIds", () => {
-  const labels = new Map([
+  const picked = new Map([
     ["Alice", "u-alice"],
     ["Alice Lee", "u-alee"],
     ["bob", "u-bob"],
   ]);
 
-  test("returns the ids of the labels written in the body, in body order", () => {
-    expect(collectMentionIds("@bob and @Alice, please", labels)).toEqual(["u-bob", "u-alice"]);
+  test("returns the ids of the picked labels written in the body, in body order", () => {
+    expect(collectMentionIds("@bob and @Alice, please", picked)).toEqual(["u-bob", "u-alice"]);
   });
 
   test("a deleted token drops its mention", () => {
-    expect(collectMentionIds("@bob and please", labels)).toEqual(["u-bob"]);
-    expect(collectMentionIds("bob and Alice", labels)).toEqual([]);
+    expect(collectMentionIds("@bob and please", picked)).toEqual(["u-bob"]);
+    expect(collectMentionIds("bob and Alice", picked)).toEqual([]);
   });
 
-  test("prefers the longest label and ignores partial names", () => {
-    expect(collectMentionIds("@Alice Lee can you check?", labels)).toEqual(["u-alee"]);
-    expect(collectMentionIds("@bobby and @alice.smith", labels)).toEqual([]);
+  test("prefers the longest picked label and ignores partial names", () => {
+    expect(collectMentionIds("@Alice Lee can you check?", picked)).toEqual(["u-alee"]);
+    expect(collectMentionIds("@bobby and @alice.smith", picked)).toEqual([]);
   });
 
   test("ignores tokens inside emails and repeats", () => {
-    expect(collectMentionIds("mail x@bob.io", labels)).toEqual([]);
-    expect(collectMentionIds("@bob @bob. (@BOB)", labels)).toEqual(["u-bob"]);
+    expect(collectMentionIds("mail x@bob.io", picked)).toEqual([]);
+    expect(collectMentionIds("@bob @bob. (@BOB)", picked)).toEqual(["u-bob"]);
+  });
+
+  test("'Ann' picked, then 'Lee is on it' typed, mentions Ann only", () => {
+    // "Ann Lee" is a member too, but nobody picked her.
+    const labeled = labelMembers([
+      member("u-ann", "ann@x.io", "Ann"),
+      member("u-lee", "al@x.io", "Ann Lee"),
+    ]);
+    expect(labeled.map((l) => l.label)).toEqual(["Ann", "Ann Lee"]);
+    const range = activeMentionQuery("@An", 3);
+    const next = insertMention("@An", range as { start: number; end: number }, "Ann");
+    const body = `${next.text}Lee is on it`;
+    expect(body).toBe("@Ann Lee is on it");
+    expect(collectMentionIds(body, new Map([["Ann", "u-ann"]]))).toEqual(["u-ann"]);
+  });
+
+  test("a typed name that was not picked mentions nobody", () => {
+    const labeled = labelMembers([member("u-admin", "admin@x.io")]);
+    expect(labeled[0].label).toBe("admin");
+    expect(collectMentionIds("ask @admin", new Map())).toEqual([]);
+    expect(collectMentionIds("@Ann, ask @admin", new Map([["Ann", "u-ann"]]))).toEqual(["u-ann"]);
   });
 });
 
@@ -114,8 +185,78 @@ describe("labelMembers", () => {
     expect(labeled.map((l) => l.label)).toEqual(["a (a)", "a (a@y.io)"]);
   });
 
-  test("never labels a member 'swarm'", () => {
-    expect(labelMembers([member("1", "swarm@x.io")])[0].label).toBe("swarm (swarm)");
+  test("a label that would read as the @swarm marker is reserved", () => {
+    const labeled = labelMembers([
+      member("1", "swarm@x.io"),
+      member("2", "fan@x.io", "Swarm Fan"),
+      member("3", "swarm@y.io", "swarm"),
+    ]);
+    expect(labeled.map((l) => l.label)).toEqual(["swarm@x.io", "fan", "swarm@y.io"]);
+    for (const { label } of labeled) expect(hasSwarmMarker(`@${label} please`)).toBe(false);
+  });
+
+  test("a label that only starts with swarm stays (the marker needs a word end)", () => {
+    const labeled = labelMembers([
+      member("1", "swarm-admin@agent-fs.local"),
+      member("2", "s@x.io", "Swarmy"),
+    ]);
+    expect(labeled.map((l) => l.label)).toEqual(["swarm-admin", "Swarmy"]);
+    for (const { label } of labeled) expect(hasSwarmMarker(`@${label} please`)).toBe(false);
+  });
+});
+
+describe("pickerItems", () => {
+  const labeled = labelMembers([
+    member("u-ann", "ann@x.io", "Ann Lee"),
+    member("u-bob", "bob@swarmcorp.io", "Bob"),
+  ]);
+
+  test("lists the swarm entry first, then every member for an empty query", () => {
+    expect(pickerItems(labeled, "").map((item) => [item.label, item.userId])).toEqual([
+      ["swarm", null],
+      ["Ann Lee", "u-ann"],
+      ["Bob", "u-bob"],
+    ]);
+  });
+
+  test("matches the label or the email, case-insensitively", () => {
+    expect(pickerItems(labeled, "LEE").map((item) => item.userId)).toEqual(["u-ann"]);
+    expect(pickerItems(labeled, "ann@x").map((item) => item.userId)).toEqual(["u-ann"]);
+    // "sw" matches the swarm entry and Bob's email.
+    expect(pickerItems(labeled, "sw").map((item) => item.label)).toEqual(["swarm", "Bob"]);
+    expect(pickerItems(labeled, "zed")).toEqual([]);
+  });
+
+  test("finds a reserved label by the display name, and the detail names the member", () => {
+    const fan = labelMembers([member("u-fan", "fan@x.io", "Swarm Fan")]);
+    expect(pickerItems(fan, "swarm")).toEqual([
+      { value: "swarm", label: "swarm", detail: "Send to the swarm", userId: null },
+      { value: "member:u-fan", label: "fan", detail: "Swarm Fan · fan@x.io", userId: "u-fan" },
+    ]);
+    expect(pickerItems(labeled, "Bob")[0].detail).toBe("bob@swarmcorp.io");
+  });
+});
+
+describe("a disambiguated label round trip", () => {
+  test("pick, insert, send, and render the chip", () => {
+    const alexB = member("u-alex-b", "alex.b@y.io", "alex");
+    const labeled = labelMembers([member("u-alex-a", "alex.a@x.io", "Alex"), alexB]);
+    const item = pickerItems(labeled, "alex.b")[0];
+    expect(item).toMatchObject({ label: "alex (alex.b)", userId: "u-alex-b" });
+
+    const text = "cc @alex.b";
+    const range = activeMentionQuery(text, text.length) as { start: number; end: number };
+    const next = insertMention(text, range, item.label);
+    const body = `${next.text}please`;
+    expect(body).toBe("cc @alex (alex.b) please");
+
+    const picked = new Map([[item.label, item.userId as string]]);
+    expect(collectMentionIds(body, picked)).toEqual(["u-alex-b"]);
+    expect(splitMentions(body, [alexB])).toEqual([
+      { kind: "text", text: "cc " },
+      { kind: "mention", text: "@alex (alex.b)", mention: alexB },
+      { kind: "text", text: " please" },
+    ]);
   });
 });
 
@@ -161,5 +302,47 @@ describe("mentionRoute", () => {
     expect(mentionRoute(drive, { path: "a b.md", commentId: "reply-1", parentId: "root-1" })).toBe(
       "/file/~/org-1/drive-1/a%20b.md?comment=root-1",
     );
+  });
+});
+
+describe("markMentionsRead", () => {
+  function entry(id: string, read: boolean): CommentNotificationEntry {
+    return {
+      id,
+      kind: "mention",
+      commentId: `c-${id}`,
+      path: "notes.md",
+      body: "@Ann hi",
+      actor: "u-bob",
+      createdAt: "2026-09-30T10:00:00.000Z",
+      read,
+    };
+  }
+  const list: CommentNotificationListResult = {
+    notifications: [entry("n1", false), entry("n2", false), entry("n3", true)],
+    unreadCount: 5, // Unread mentions beyond the 20 listed count too.
+  };
+
+  test("marks the given ids read and lowers the count by the newly read ones", () => {
+    const next = markMentionsRead(list, ["n1", "n3"]);
+    expect(next.notifications.map((n) => [n.id, n.read])).toEqual([
+      ["n1", true],
+      ["n2", false],
+      ["n3", true],
+    ]);
+    expect(next.unreadCount).toBe(4);
+    // The input list is not changed.
+    expect(list.notifications[0].read).toBe(false);
+  });
+
+  test("null marks every entry read and zeroes the count", () => {
+    const next = markMentionsRead(list, null);
+    expect(next.notifications.every((n) => n.read)).toBe(true);
+    expect(next.unreadCount).toBe(0);
+  });
+
+  test("the count never goes below 0", () => {
+    const stale = { ...list, unreadCount: 1 };
+    expect(markMentionsRead(stale, ["n1", "n2"]).unreadCount).toBe(0);
   });
 });

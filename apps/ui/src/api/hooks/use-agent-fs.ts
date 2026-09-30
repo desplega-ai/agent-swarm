@@ -15,6 +15,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { useState } from "react";
+import { toast } from "sonner";
 import { useAgentFs } from "@/contexts/agent-fs-context";
 import { useDataUrl, useObjectUrl } from "@/hooks/use-object-url";
 import { type AgentFsClient, AgentFsError } from "@/lib/agent-fs/client";
@@ -47,13 +48,12 @@ import {
   type MediaSource,
   mediaSourceFrom,
 } from "@/lib/comb/media";
-import { pickableMembers } from "@/lib/comb/mentions";
+import { markMentionsRead } from "@/lib/comb/mentions";
 import type { DrivePath } from "@/lib/comb/paths";
 import { type AgentFsText, COMB_TEXT_MAX_BYTES, readDriveText } from "@/lib/comb/text-content";
 
 export { agentFsKey, agentFsRetry };
 export { type AgentFsText, COMB_TEXT_MAX_BYTES };
-export { pickableMembers };
 
 /** The connected client (null until `ready`) and the key parts for drive queries. */
 export interface AgentFsAccess {
@@ -338,44 +338,37 @@ export function useAgentFsMentions() {
   return { drive, query };
 }
 
-/** Mark mentions read: some ids (a click), or `all` (Mark all read). */
-export function useMarkMentionsRead() {
+/** What `useAgentFsMentions` returns. The bell passes it down to its Mentions section. */
+export type AgentFsMentions = ReturnType<typeof useAgentFsMentions>;
+
+/**
+ * Mark mentions of `drive` (the `useAgentFsMentions` drive) read: some ids
+ * (a click), or `all` (Mark all read). A failure shows a toast.
+ */
+export function useMarkMentionsRead(drive: { orgId: string; driveId: string }) {
   const access = useAgentFsAccess();
-  const { orgId, driveId } = useAgentFs();
   const queryClient = useQueryClient();
-  const key = mentionsKey(access, orgId, driveId);
+  const key = mentionsKey(access, drive.orgId, drive.driveId);
   return useMutation({
     mutationFn: (target: { ids: string[] } | { all: true }) =>
       connectedClient(access).callOp<CommentNotificationReadResult>(
-        orgId as string,
+        drive.orgId,
         "comment-notification-read",
         "all" in target ? { all: true, kinds: ["mention"] } : { ids: target.ids },
-        driveId as string,
+        drive.driveId,
       ),
     // A poll that started before the write must not bring the unread state back.
     onMutate: () => queryClient.cancelQueries({ queryKey: key }),
     onSuccess: (_result, target) => {
       queryClient.setQueryData<CommentNotificationListResult>(key, (current) =>
-        current ? markRead(current, "all" in target ? null : target.ids) : current,
+        current ? markMentionsRead(current, "all" in target ? null : target.ids) : current,
       );
       return queryClient.invalidateQueries({ queryKey: key });
     },
+    onError: (err) => {
+      toast.error(err.message || "Could not mark mentions read");
+    },
   });
-}
-
-/** The list with `ids` (every entry when null) marked read and the unread count updated. */
-function markRead(
-  list: CommentNotificationListResult,
-  ids: string[] | null,
-): CommentNotificationListResult {
-  let newlyRead = 0;
-  const notifications = list.notifications.map((entry) => {
-    if (entry.read || (ids !== null && !ids.includes(entry.id))) return entry;
-    newlyRead += 1;
-    return { ...entry, read: true };
-  });
-  const unreadCount = ids === null ? 0 : Math.max(0, list.unreadCount - newlyRead);
-  return { notifications, unreadCount };
 }
 
 // --- Comments (step-7) -------------------------------------------------------

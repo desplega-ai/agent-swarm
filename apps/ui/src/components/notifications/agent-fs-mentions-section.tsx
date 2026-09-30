@@ -1,6 +1,10 @@
 import { CheckCheck } from "lucide-react";
 import { Link } from "react-router-dom";
-import { useAgentFsMentions, useDriveMembers, useMarkMentionsRead } from "@/api/hooks/use-agent-fs";
+import {
+  type AgentFsMentions,
+  useDriveMembers,
+  useMarkMentionsRead,
+} from "@/api/hooks/use-agent-fs";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { CommentNotificationEntry } from "@/lib/agent-fs/types";
@@ -11,8 +15,10 @@ import { formatRelative } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
 
 interface AgentFsMentionsSectionProps {
-  /** The swarm drive (`useAgentFs()`), where the mentions live. */
+  /** The swarm drive (`useAgentFsMentions().drive`), where the mentions live. */
   drive: { orgId: string; driveId: string };
+  /** The bell's mentions query (one observer, one poll). */
+  query: AgentFsMentions["query"];
   /** A mention was opened: close the panel. */
   onNavigate: () => void;
 }
@@ -20,11 +26,11 @@ interface AgentFsMentionsSectionProps {
 /**
  * Comb mentions of the connected agent-fs identity on the swarm drive. A
  * click opens the comment's thread and marks that mention read. Opening the
- * panel does not mark mentions read.
+ * panel does not mark mentions read. The list scrolls in its own capped
+ * area, so the cards under it stay in view.
  */
-export function AgentFsMentionsSection({ drive, onNavigate }: AgentFsMentionsSectionProps) {
-  const { query } = useAgentFsMentions();
-  const markRead = useMarkMentionsRead();
+export function AgentFsMentionsSection({ drive, query, onNavigate }: AgentFsMentionsSectionProps) {
+  const markRead = useMarkMentionsRead(drive);
   const members = useDriveMembers(drive).data?.members;
   const actorName = (userId: string) => {
     const member = members?.find((m) => m.userId === userId);
@@ -63,7 +69,7 @@ export function AgentFsMentionsSection({ drive, onNavigate }: AgentFsMentionsSec
       ) : notifications.length === 0 ? (
         <p className="px-4 py-2 text-sm text-muted-foreground">No mentions</p>
       ) : (
-        <ul className="flex flex-col">
+        <ul className="flex max-h-64 flex-col overflow-y-auto">
           {notifications.map((entry) => (
             <li key={entry.id}>
               <MentionItem

@@ -34,6 +34,9 @@ const { toast } = await import("sonner");
 const { AgentFsError } = await import("../../lib/agent-fs/client");
 const { CommentContextProvider } = await import("./comment-context");
 const { CommentComposer } = await import("./comment-composer");
+const { draftStorageKey, writeDraft } = await import("../../lib/comb/drafts");
+const { collectMentionIds } = await import("../../lib/comb/mentions");
+type ComposerExtrasContext = import("./comment-composer").ComposerExtrasContext;
 
 const toastError = spyOn(toast, "error").mockImplementation(() => 0);
 const toastWarning = spyOn(toast, "warning").mockImplementation(() => 0);
@@ -44,19 +47,22 @@ afterAll(async () => {
 });
 
 const FILE = { orgId: "org-1", driveId: "drive-1", path: "/comb-qa/notes.md" };
+const SCOPE = {
+  apiUrl: "http://localhost:3013",
+  endpoint: "http://localhost:7433",
+  userId: "user-1",
+  ...FILE,
+};
 
-async function renderComposer(opts: { readOnly?: boolean } = {}) {
+async function renderComposer(
+  opts: { readOnly?: boolean; renderComposerExtras?: (ctx: ComposerExtrasContext) => null } = {},
+) {
   const outboxAdds: Array<[unknown, string]> = [];
   const markReadOnly = mock(() => {});
   const onClose = mock(() => {});
   const value = {
     file: FILE as never,
-    scope: {
-      apiUrl: "http://localhost:3013",
-      endpoint: "http://localhost:7433",
-      userId: "user-1",
-      ...FILE,
-    },
+    scope: SCOPE,
     outbox: {
       entries: [],
       sending: new Set<string>(),
@@ -74,7 +80,11 @@ async function renderComposer(opts: { readOnly?: boolean } = {}) {
   await act(async () =>
     root.render(
       <CommentContextProvider value={value}>
-        <CommentComposer target={{ kind: "file" }} onClose={onClose} />
+        <CommentComposer
+          target={{ kind: "file" }}
+          onClose={onClose}
+          renderComposerExtras={opts.renderComposerExtras}
+        />
       </CommentContextProvider>,
     ),
   );
@@ -89,6 +99,10 @@ async function typeAndSend(container: HTMLElement, text: string) {
     setter?.call(textarea, text);
     textarea.dispatchEvent(new Event("input", { bubbles: true }));
   });
+  await clickSend(container);
+}
+
+async function clickSend(container: HTMLElement) {
   const send = [...container.querySelectorAll("button")].find((b) =>
     b.textContent?.includes("Send"),
   );
@@ -156,6 +170,57 @@ describe("CommentComposer send errors", () => {
   test("read-only renders no composer (the rail shows the notice)", async () => {
     const { container, root } = await renderComposer({ readOnly: true });
     expect(container.querySelector("textarea")).toBeNull();
+    await act(async () => root.unmount());
+  });
+});
+
+describe("CommentComposer picked mentions (step-8)", () => {
+  beforeEach(() => {
+    nextError = null;
+    sent.length = 0;
+    localStorage.clear();
+  });
+
+  // The mention picker's send hook (`mention-picker.tsx`), without the list.
+  const mentionExtras = (ctx: ComposerExtrasContext) => {
+    ctx.sendParamsRef.current = (text) => {
+      const mentions = collectMentionIds(text, ctx.picked);
+      return mentions.length > 0 ? { mentions } : {};
+    };
+    return null;
+  };
+  const draftKey = draftStorageKey(SCOPE, "file");
+
+  test("a restored draft keeps its picks, and a typed name mentions nobody", async () => {
+    const body = "@Ann Lee is on it, ask @admin";
+    writeDraft(localStorage, draftKey, body, Date.now(), new Map([["Ann", "u-ann"]]));
+    const { container, root } = await renderComposer({ renderComposerExtras: mentionExtras });
+    expect(container.querySelector("textarea")?.value).toBe(body);
+    await clickSend(container);
+    expect(sent).toEqual([{ path: "comb-qa/notes.md", body, mentions: ["u-ann"] }]);
+    await act(async () => root.unmount());
+  });
+
+  test("the outbox entry keeps the picked mentions, and the draft goes", async () => {
+    nextError = new AgentFsError(503, "UNAVAILABLE", "agent-fs is down");
+    writeDraft(
+      localStorage,
+      draftKey,
+      "@Ann can you check?",
+      Date.now(),
+      new Map([["Ann", "u-ann"]]),
+    );
+    const { container, outboxAdds, root } = await renderComposer({
+      renderComposerExtras: mentionExtras,
+    });
+    await clickSend(container);
+    expect(outboxAdds).toEqual([
+      [
+        { path: "comb-qa/notes.md", body: "@Ann can you check?", mentions: ["u-ann"] },
+        "agent-fs is down",
+      ],
+    ]);
+    expect(localStorage.getItem(draftKey)).toBeNull();
     await act(async () => root.unmount());
   });
 });

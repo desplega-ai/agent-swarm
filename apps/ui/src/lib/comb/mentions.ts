@@ -2,12 +2,19 @@
 //
 // The composer inserts `@<label>` and sends the member's agent-fs user id in
 // `mentions[]`. agent-fs stores the ids and notifies each mentioned member.
+// Only a pick in the list makes a mention: typed text never notifies anyone.
 // The thread renders the tokens that match `comment.mentions` as chips.
 //
 // Relative imports only: `bun:test` runs this from the repo root.
 
-import type { CommentMention, CommentNotificationEntry, DriveMember } from "../agent-fs/types";
+import type {
+  CommentMention,
+  CommentNotificationEntry,
+  CommentNotificationListResult,
+  DriveMember,
+} from "../agent-fs/types";
 import { commentWritePath } from "./comments";
+import { hasSwarmMarker } from "./markers";
 import { combPath } from "./paths";
 
 /** agent-fs accounts that the swarm creates for its agents. */
@@ -45,13 +52,17 @@ export interface LabeledMember {
 }
 
 /**
- * One label per member: the display name, else the email local part. Labels
- * that repeat (or equal "swarm") get the local part appended, then the full
- * email.
+ * One label per member: the display name, else the email local part, else
+ * the email. A label that would read as the `@swarm` marker ("Swarm Fan",
+ * "swarm") is reserved: the next form is used. Labels that repeat get the
+ * local part appended, then the full email.
  */
 export function labelMembers(members: readonly DriveMember[]): LabeledMember[] {
-  const base = (member: DriveMember) => member.displayName?.trim() || localPart(member.email);
-  const counts = new Map<string, number>([[SWARM_LABEL, 1]]);
+  const base = (member: DriveMember) =>
+    [member.displayName?.trim(), localPart(member.email), member.email].find(
+      (name) => name && !hasSwarmMarker(`@${name}`),
+    ) ?? member.userId;
+  const counts = new Map<string, number>();
   for (const member of members) {
     const key = base(member).toLowerCase();
     counts.set(key, (counts.get(key) ?? 0) + 1);
@@ -71,11 +82,53 @@ export function labelMembers(members: readonly DriveMember[]): LabeledMember[] {
   });
 }
 
+/** One row of the picker. */
+export interface PickerItem {
+  /** cmdk item value. */
+  value: string;
+  /** Inserted as `@<label>`. */
+  label: string;
+  detail: string;
+  /** The member's user id. Null for the swarm entry. */
+  userId: string | null;
+}
+
+/**
+ * The swarm entry first, then the members whose label, display name, or
+ * email contains the query. The detail names the member when the label does
+ * not (a reserved label).
+ */
+export function pickerItems(members: readonly LabeledMember[], query: string): PickerItem[] {
+  const q = query.toLowerCase();
+  const items: PickerItem[] = [];
+  if (SWARM_LABEL.includes(q)) {
+    items.push({ value: "swarm", label: SWARM_LABEL, detail: "Send to the swarm", userId: null });
+  }
+  for (const { member, label } of members) {
+    const name = member.displayName?.trim() ?? "";
+    if ([label, name, member.email].some((text) => text.toLowerCase().includes(q))) {
+      items.push({
+        value: `member:${member.userId}`,
+        label,
+        detail: name && !label.includes(name) ? `${name} · ${member.email}` : member.email,
+        userId: member.userId,
+      });
+    }
+  }
+  return items;
+}
+
 /** Characters that continue a name: "@ann" is not a whole token of "@anna". */
 const NAME_CHAR = /[\p{L}\p{N}_-]/u;
 /** Characters of a query while typing ("@al", "@ann.lee"). */
 const QUERY_CHARS = /[\p{L}\p{N}_.-]*$/u;
 const TRAILING_QUERY_CHARS = /^[\p{L}\p{N}_.-]*/u;
+/**
+ * The longest query the picker reads. `QUERY_CHARS` runs on this many
+ * characters before the caret only: on a long unbroken word the regex is
+ * quadratic.
+ */
+const MAX_QUERY_LENGTH = 64;
 
 /** A mention starts at the text start, after whitespace, or after an opening bracket or quote. */
 function startsToken(text: string, at: number): boolean {
@@ -106,7 +159,7 @@ export interface MentionQuery {
 
 /** The mention being typed: the caret follows `@<word chars>` at a word boundary. */
 export function activeMentionQuery(text: string, caret: number): MentionQuery | null {
-  const before = text.slice(0, caret);
+  const before = text.slice(Math.max(0, caret - MAX_QUERY_LENGTH), caret);
   const query = QUERY_CHARS.exec(before)?.[0] ?? "";
   const start = caret - query.length - 1;
   if (start < 0 || text[start] !== "@" || !startsToken(text, start)) return null;
@@ -151,11 +204,13 @@ function byLengthDesc<T>(entries: Iterable<readonly [string, T]>): Array<readonl
 }
 
 /**
- * The user ids whose `@label` appears in the body, in body order, without
- * duplicates. A deleted token drops its mention.
+ * The user ids of the picked labels (`@label` -> user id, the picks of this
+ * composer) that still appear in the body, in body order, without
+ * duplicates. A deleted token drops its mention. A typed name that the human
+ * did not pick is plain text.
  */
-export function collectMentionIds(body: string, labels: ReadonlyMap<string, string>): string[] {
-  const sorted = byLengthDesc(labels);
+export function collectMentionIds(body: string, picked: ReadonlyMap<string, string>): string[] {
+  const sorted = byLengthDesc(picked);
   const ids: string[] = [];
   for (let at = body.indexOf("@"); at !== -1; at = body.indexOf("@", at + 1)) {
     const token = tokenAt(body, at, sorted);
@@ -216,4 +271,22 @@ export function mentionRoute(
   const path = `/${commentWritePath(entry.path)}`;
   const thread = entry.parentId ?? entry.commentId;
   return `${combPath({ ...drive, path })}?comment=${encodeURIComponent(thread)}`;
+}
+
+/**
+ * The mention list after a `comment-notification-read`: `ids` (every entry
+ * when null) marked read and the unread count lowered to match, never below 0.
+ */
+export function markMentionsRead(
+  list: CommentNotificationListResult,
+  ids: readonly string[] | null,
+): CommentNotificationListResult {
+  let newlyRead = 0;
+  const notifications = list.notifications.map((entry) => {
+    if (entry.read || (ids !== null && !ids.includes(entry.id))) return entry;
+    newlyRead += 1;
+    return { ...entry, read: true };
+  });
+  const unreadCount = ids === null ? 0 : Math.max(0, list.unreadCount - newlyRead);
+  return { notifications, unreadCount };
 }

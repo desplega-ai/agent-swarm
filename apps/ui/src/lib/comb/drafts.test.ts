@@ -17,6 +17,7 @@ import {
   type OutboxRetryOptions,
   outboxStorageKey,
   readDraft,
+  readDraftMentions,
   readOutbox,
   retryOutboxEntries,
   returnToOutbox,
@@ -25,6 +26,7 @@ import {
   writeDraft,
   writeOutbox,
 } from "./drafts";
+import { collectMentionIds } from "./mentions";
 
 function memoryStorage(): DraftStorage &
   Pick<Storage, "key" | "length"> & {
@@ -106,6 +108,31 @@ describe("drafts", () => {
     storage.setItem("swarm:v1:x:unrelated", "{not json");
     sweepExpiredDrafts(storage, now);
     expect([...storage.map.keys()].sort()).toEqual([fresh, "swarm:v1:x:unrelated"].sort());
+  });
+
+  test("a restored draft keeps its picked mentions (step-8)", () => {
+    const storage = memoryStorage();
+    const key = draftStorageKey(SCOPE, "file");
+    const now = Date.UTC(2026, 8, 30);
+    const body = "@Ann Lee is on it, ask @admin";
+    writeDraft(storage, key, body, now, new Map([["Ann", "u-ann"]]));
+    const restored = readDraftMentions(storage, key, now);
+    expect([...restored]).toEqual([["Ann", "u-ann"]]);
+    expect(readDraft(storage, key, now)).toBe(body);
+    expect(collectMentionIds(readDraft(storage, key, now), restored)).toEqual(["u-ann"]);
+  });
+
+  test("a draft without picks, an expired one, or bad mention data restores no mentions", () => {
+    const storage = memoryStorage();
+    const key = draftStorageKey(SCOPE, "file");
+    const now = Date.UTC(2026, 8, 30);
+    writeDraft(storage, key, "no picks", now, new Map());
+    expect(storage.map.get(key)).not.toContain("mentions");
+    expect(readDraftMentions(storage, key, now).size).toBe(0);
+    writeDraft(storage, key, "@Ann", now, new Map([["Ann", "u-ann"]]));
+    expect(readDraftMentions(storage, key, now + DRAFT_MAX_AGE_MS + 1).size).toBe(0);
+    storage.setItem(key, JSON.stringify({ text: "@Ann", savedAt: now, mentions: [["Ann"], 3] }));
+    expect(readDraftMentions(storage, key, now).size).toBe(0);
   });
 });
 

@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { NOTIFICATION_DEFINITIONS } from "@/lib/notifications/definitions";
-import { totalUnread, unreadBadgeLabel } from "@/lib/notifications/unread";
+import { unreadBadgeLabel } from "@/lib/notifications/unread";
 import { NotificationPanel } from "./notification-panel";
 
 /**
@@ -40,10 +40,8 @@ export function NotificationBell() {
     ? NOTIFICATION_DEFINITIONS.filter((definition) => isUnread(stateByKey.get(definition.key)))
         .length
     : 0;
-  const unreadCount = totalUnread({
-    staticUnread,
-    mentionsUnread: mentions.drive ? (mentions.query.data?.unreadCount ?? 0) : null,
-  });
+  // Static notifications (per swarm user) plus Comb mentions (per agent-fs identity).
+  const unreadCount = staticUnread + (mentions.drive ? (mentions.query.data?.unreadCount ?? 0) : 0);
 
   // Opening marks the static definitions read. Mentions stay unread until
   // clicked or "Mark all read".
@@ -90,7 +88,7 @@ export function NotificationBell() {
         <NotificationPanel
           stateByKey={stateByKey}
           showStatic={hasUser}
-          mentionsDrive={mentions.drive}
+          mentions={mentions}
           onNavigate={() => setOpen(false)}
         />
       </PopoverContent>
