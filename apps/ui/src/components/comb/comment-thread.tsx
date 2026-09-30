@@ -1,8 +1,12 @@
-import { Check, MessageSquare, RotateCcw, Send, TriangleAlert } from "lucide-react";
+import { Check, CheckCheck, MessageSquare, RotateCcw, Send, TriangleAlert } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { useResolveComment } from "@/api/hooks/use-agent-fs";
+import {
+  useCommentAuthorNames,
+  useDriveMembers,
+  useResolveComment,
+} from "@/api/hooks/use-agent-fs";
 import { useAuthorLabel } from "@/components/comb/use-author-label";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -75,6 +79,35 @@ function Reply({ thread, reply }: { thread: CommentListEntry; reply: CommentEntr
         <CommentBody body={reply.body} />
       )}
     </li>
+  );
+}
+
+/**
+ * "Resolved by <name>" (step-10), so a thread that an agent resolved itself
+ * is visible. The name comes from the file's loaded comments (the resolver
+ * almost always wrote in the thread), then from the drive members when the
+ * server lists them, else "another member".
+ */
+function ResolvedBy({ thread }: { thread: CommentListEntry }) {
+  const { file } = useCommentContext();
+  const names = useCommentAuthorNames(file);
+  const members = useDriveMembers(file).data?.members;
+  const { resolvedBy, resolvedAt } = thread;
+  if (!resolvedBy) return null;
+  const member = members?.find((m) => m.userId === resolvedBy);
+  const name = names.get(resolvedBy) || member?.displayName || member?.email || "another member";
+  return (
+    <p className="flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
+      <CheckCheck className="size-3.5 shrink-0" aria-hidden />
+      <span>
+        Resolved by <span className="font-medium text-foreground">{name}</span>
+      </span>
+      {resolvedAt ? (
+        <time dateTime={resolvedAt} title={resolvedAt}>
+          {formatRelative(resolvedAt)}
+        </time>
+      ) : null}
+    </p>
   );
 }
 
@@ -237,6 +270,8 @@ export function CommentThread({
           ))}
         </ol>
       ) : null}
+
+      {thread.resolved ? <ResolvedBy thread={thread} /> : null}
 
       {replying ? (
         // Typing in the reply box does not select the card.

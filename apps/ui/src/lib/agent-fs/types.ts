@@ -98,6 +98,18 @@ export interface DiffResult {
   changes: DiffChange[];
 }
 
+export interface RevertParams {
+  path: string;
+  version: number;
+  /** Expected current head version (the one being replaced). */
+  expectedVersion?: number;
+}
+
+export interface RevertResult {
+  version: number;
+  revertedTo: number;
+}
+
 /**
  * Text-quote anchor: the exact selected text plus up to 32 chars of context on
  * each side, used to re-find the selection after the file changes.

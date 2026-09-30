@@ -132,3 +132,14 @@ export function anchorInputs(
   }
   return out;
 }
+
+/** `author → authorDisplayName` over every loaded comment and reply that has a name. */
+export function commentAuthorNames({ threads }: FileThreads): Map<string, string> {
+  const names = new Map<string, string>();
+  for (const thread of threads) {
+    for (const entry of [thread, ...thread.replies]) {
+      if (entry.authorDisplayName) names.set(entry.author, entry.authorDisplayName);
+    }
+  }
+  return names;
+}

@@ -5,6 +5,7 @@ import {
   COMB_LOG_LIMIT,
   COMMENT_LIST_MAX,
   COMMENT_PAGE_SIZE,
+  commentAuthorNames,
   commentReadPaths,
   commentWritePath,
   listFileThreads,
@@ -147,5 +148,26 @@ describe("anchorInputs (useCommentAnchors' log fallback)", () => {
       { loading: true },
     );
     expect(inputs.map((i) => [i.id, i.version, i.input.stale])).toEqual([["c", undefined, false]]);
+  });
+});
+
+describe("commentAuthorNames", () => {
+  test("maps the authors of threads and replies to their display names", () => {
+    const reply = { ...thread("r", "2026-09-30T10:01:00.000Z"), author: "u2" };
+    const names = commentAuthorNames({
+      threads: [
+        thread("a", "2026-09-30T10:00:00.000Z", {
+          author: "u1",
+          authorDisplayName: "QA Human",
+          replies: [{ ...reply, authorDisplayName: "Agent" }],
+        }),
+        thread("b", "2026-09-30T09:00:00.000Z", { author: "u3" }),
+      ],
+      truncated: false,
+    });
+    expect([...names]).toEqual([
+      ["u1", "QA Human"],
+      ["u2", "Agent"],
+    ]);
   });
 });

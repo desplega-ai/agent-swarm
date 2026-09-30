@@ -28,10 +28,13 @@ import type {
   DriveMembersResult,
   LogResult,
   LsResult,
+  RevertParams,
+  RevertResult,
   StatResult,
 } from "@/lib/agent-fs/types";
 import {
   COMB_LOG_LIMIT,
+  commentAuthorNames,
   commentReadPaths,
   type FileThreads,
   listFileThreads,
@@ -471,5 +474,55 @@ export function agentFsDiffQuery(access: AgentFsAccess, file: DrivePath, v1: num
     refetchInterval: false,
     retry: false,
     gcTime: 5 * 60_000,
+  });
+}
+
+// --- Review changes (step-10) -------------------------------------------------
+
+/**
+ * The file's versions, newest first. Same cache entry as the comment anchors
+ * (`agentFsLogQuery`). `enabled: false` skips the call.
+ */
+export function useAgentFsLog(
+  file: DrivePath,
+  currentVersion: number | undefined,
+  { enabled = true }: { enabled?: boolean } = {},
+) {
+  const query = agentFsLogQuery(useAgentFsAccess(), file, currentVersion);
+  return useQuery({ ...query, enabled: enabled && query.enabled === true });
+}
+
+/** The diff from `from` to `to` (`from < to`). Same cache entry as the comment anchors. */
+export function useAgentFsDiff(file: DrivePath, from: number, to: number) {
+  return useQuery(agentFsDiffQuery(useAgentFsAccess(), file, from, to));
+}
+
+const NO_AUTHOR_NAMES: ReadonlyMap<string, string> = new Map();
+
+/** `author → authorDisplayName` over the file's loaded comments (the rail's query, no extra call). */
+export function useCommentAuthorNames(file: DrivePath): ReadonlyMap<string, string> {
+  const query = agentFsCommentsQuery(useAgentFsAccess(), file);
+  return useQuery({ ...query, select: commentAuthorNames }).data ?? NO_AUTHOR_NAMES;
+}
+
+/**
+ * `revert`: write an old version again, as a new version. `expectedVersion`
+ * is the head the human reviewed. agent-fs answers 409 (`EDIT_CONFLICT`) and
+ * writes nothing when the file has moved on since. Either way `stat`
+ * refetches, so the view learns the new head.
+ */
+export function useRevertFile(file: DrivePath) {
+  const access = useAgentFsAccess();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ version, expectedVersion }: { version: number; expectedVersion: number }) =>
+      connectedClient(access).callOp<RevertResult>(
+        file.orgId,
+        "revert",
+        { path: file.path, version, expectedVersion } satisfies RevertParams,
+        file.driveId,
+      ),
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: drivePathKey(access, file, "stat") }),
   });
 }
