@@ -2,7 +2,9 @@
 
 Every TLA+ action maps to the code path it models and the SQL guard it relies on. Line numbers are for `main` @ `80949f9a`. A counterexample is only acted on if every step in its trace maps to a row here.
 
-## Heartbeat.tla (current code)
+## Heartbeat.tla (before model)
+
+Line numbers are for `main` @ `f031fa8e`, before Reclaim replaced supersede/resume and the reboot sweep. Kept as the "before" model; these rows no longer describe the code.
 
 | TLA+ action | Code | Guard modeled | Abstraction |
 |---|---|---|---|
@@ -31,12 +33,30 @@ Every TLA+ action maps to the code path it models and the SQL guard it relies on
 | `RebootFail(t)` | `runRebootSweep` `src/heartbeat/heartbeat.ts:774` | skip if `lastUpdatedAt >= bootEpoch-5s` (`G_REBOOT_TOUCHED`), session heartbeat `>= bootEpoch-5s`, or session heartbeat younger than `stallThresholdStaleHeartbeatMin()` (15 min, `heartbeat.ts:838`, `G_REBOOT_HB_AGE`, #1669); else `failTask(…, { cascadeDependents: false })` (no CAS, `heartbeat.ts:850`) | Read and write collapsed into one step (window is milliseconds). Session age is chosen per step (`hbOld`), constrained to `hbOld => stale[t]` because worker `lastUpdatedAt` writes come with a tool-call heartbeat. A task with no session row is still failed. `FIX_NO_REBOOT` removes the sweep. |
 | `RebootRetry` | `runRebootSweep` retry child `src/heartbeat/heartbeat.ts:928` | none; separate write | Generation restarts at 0 (retry children carry no `resume-generation` tag). Dependents are not modeled: #1664 re-points never-started dependents to the retry child, then cascade-fails the rest in a `finally` (`heartbeat.ts:968`). |
 
-## HeartbeatSimple.tla (proposed, not implemented)
+## HeartbeatSimple.tla (current code)
 
-| TLA+ action | Replaces | Proposed SQL |
+A model `Worker` is one runtime (worker process). `own[t]` is the runtime that started the current attempt: in code, the row's `agentId` plus `attemptRuntimeId`.
+
+| TLA+ action | Code | Guard |
 |---|---|---|
-| `ClaimRead`/`ClaimWrite`, `AcceptRead`/`AcceptWrite`, `Reject`, `PollStart`, `RegisterSession` | same as above | `acceptTask` adds `AND offeredTo = ?` to its WHERE. |
-| `Progress`, `Complete` | `updateTaskProgress`, `completeTask`, `failTask` (worker) | `WHERE id=? AND status='in_progress' AND agentId=? AND attempt=?` (fence). |
-| `AbortStale(w,t,g)` | `/cancelled-tasks` polling | Any fenced write that matches 0 rows tells the worker to stop. |
-| `Reclaim(t)` | `HbRead`, `HbWrite`, `HbResume`, `HbRepair`, `RebootFail`, `RebootRetry`, `CleanupSession` | One transaction: `UPDATE agent_tasks SET status='pending', attempt=attempt+1 WHERE id=? AND status='in_progress' AND attempt=? AND lastUpdatedAt < :cutoff AND NOT EXISTS (fresh session)` + `DELETE FROM active_sessions WHERE taskId=?`; `status='failed'` once the attempt budget is spent. The same shape already exists worker-side as `resetOrphanedInProgressTasksForAgent` (`src/be/db/tasks/write.ts:992`). |
-| `Unpin(t)` | `Reaper`, `AutoAssign`, `releaseStaleOfferedTasksForOfflineAgents` | `UPDATE … SET status='unassigned', agentId=NULL, offeredTo=NULL WHERE id=? AND status IN ('pending','offered') AND lastUpdatedAt < :pinGrace`. The pool stays affinity-gated, so a role-mismatched worker still cannot claim it. |
+| `ClaimRead`/`ClaimWrite`, `AcceptRead`/`AcceptWrite`, `Reject` | unchanged, see the table above; `claimTask` also stamps `attemptRuntimeId` | unchanged |
+| `PollStart(w,t)` / `Start` | `/api/poll` and `poll-task` → `startTask(id, { runtimeInstanceId })`; paused resume → `resumeTask`; pool claim → `claimTask` | Stamps `attemptRuntimeId` = caller's `X-Runtime-Instance-ID`. `FreeFor(w,t)`: a runtime whose only work is an earlier copy of `t` may start it; the runner then keeps that process (`src/commands/runner.ts` `activeTasks` keep-branch), which `Start` models by replacing the old `<<t, g>>`. |
+| `RegisterSession` | runner POST `/api/active-sessions` before provider spawn | `UNIQUE(taskId)` |
+| `Progress`, `Complete` (`Fenced`) | `staleAttemptWriteReason` `src/tasks/attempt-fence.ts`, called on a fresh read inside the write's transaction by `store-progress`, `defer-task`, `/finish`, `/pause`, `/supersede`, `/progress`, `task-action release` | Reject unless `status='in_progress'`, `agentId` = caller agent and `attemptRuntimeId` = caller runtime. On a reclaimed row (`attempt > 0`) any non-lead write that is not the `in_progress` holder's is rejected too. |
+| `AbortStale(w,t,g)` | the refused writes above tell the process to stop | |
+| `Complete` session delete | `DELETE /api/active-sessions/by-task/:id` → `deleteActiveSession(taskId, { agentId, runtimeInstanceId })` | Deletes only the caller's own row, never a replacement's. On a reclaimed live row the caller must name agent and runtime (exact match); an agent-only caller fails closed. The heartbeat's delete is `deleteActiveSessionServerSide`, a separate path. |
+| `Reclaim(t)` | `reclaimStalledTasks` → `remediateStalledTask` `src/heartbeat/heartbeat.ts` → `reclaimTask` `src/be/db/tasks/write.ts` | One transaction: `UPDATE agent_tasks SET status='pending', attempt=attempt+1 WHERE id=? AND status='in_progress' AND attempt=? AND lastUpdatedAt=? AND NOT EXISTS (fresher active_sessions row)` + `DELETE FROM active_sessions WHERE taskId=?`. Budget spent (`attempt+1 > MAX_RESUME_GENERATIONS`) → `failTask` with the same guards, `attempt` unchanged (model: `att + 1 > MaxGen`). |
+| `Unpin(t)` | `unpinUnclaimedTasks` `src/heartbeat/heartbeat.ts` → `getUnclaimedPins` + `unpinTask` | `UPDATE … SET status='unassigned', agentId=NULL, routingAffinity=COALESCE(routingAffinity, snapshot) WHERE id=? AND status='pending' AND lastUpdatedAt=?`, for reclaimed rows idle past `HEARTBEAT_RESUME_PIN_GRACE_MIN`. |
+| `ApiCrash`/`ApiBoot` | API restart | No boot sweep. The normal sweep reclaims what the crash left. Graceful/context-limit/manual supersede writes `supersedeTask` + resume child + backfill in one transaction, so an API crash leaves no half-written supersede. |
+
+TLC (`HeartbeatSimple.cfg`): every invariant and property holds. With `FENCE = FALSE`, `NoZombieWrite` is violated, so the runtime fence is what keeps stale attempts out.
+
+### Deviations from the model
+
+- **Fence by runtime, not attempt number.** A process never sends `attempt`; the fence compares the caller's runtime with `attemptRuntimeId`. This equals the model's `Current` check because a runtime runs at most one process per task id (`FreeFor` + `Start` above). A caller without `X-Runtime-Instance-ID` is refused on a reclaimed row a runtime restarted (fail closed). On a never-reclaimed row, and for an attempt started without a runtime id, the fence falls back to the status + agent check; with one attempt only there is no stale attempt to fence.
+- **Unfenced worker writes outside the model:** the session heartbeat (refreshes `lastHeartbeatAt`, never status). `/api/tasks/:id/progress` from a caller that names no agent is refused on a reclaimed live row and keeps the legacy write on a never-reclaimed one; with `X-Agent-ID` it is fenced like the other writes.
+- **Unpin covers pins, not offers** (`UNPIN_OFFERED = FALSE`). Offers keep `releaseStaleOfferedTasksForOfflineAgents`, modeled by `Reject`. `acceptTask` still checks `offeredTo` in JS, not SQL.
+- **Unpin skips Lead-held pins.** Not modeled (the model has no Lead).
+- **Fail instead of Reclaim** for workflow steps (the workflow engine's retry owns them), control-plane task types, and an extension that proposes `fail`. This is Reclaim's budget branch taken early, so it adds no new state.
+- **Extension override on a fresh session is NOT covered.** `pre.heartbeat.remediate` may modify a `fresh-stalled` classification to `supersede-resume` (tested in `extensions-heartbeat.test.ts`). That Reclaim runs while `sess = live`, which the model's `Reclaim` forbids, so `NoLiveKill` does not hold for an extension that chooses it. The default policy never does.
+- **Other status writers kept outside the model:** `autoAssignPoolTasks` (`unassigned → pending`), `releaseStaleReviewingTasks`, `promoteAbandonedDraftTasks`, approval auto-cancel of linked workflow tasks, the steering grace (only skips), and worker-side `resetOrphanedInProgressTasksForAgent` (`in_progress → pending` at runner boot, without `attempt + 1`; the next start re-stamps `attemptRuntimeId`).

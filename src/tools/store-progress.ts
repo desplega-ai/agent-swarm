@@ -23,6 +23,7 @@ import {
 } from "@/be/task-citations";
 import { AgentFsProvider } from "@/fs/agent-fs-provider";
 import { can } from "@/rbac";
+import { staleAttemptWriteReason } from "@/tasks/attempt-fence";
 import { runTaskTerminalEffects } from "@/tasks/task-terminal-effects";
 import {
   getTaskOutputValidationError,
@@ -358,6 +359,18 @@ export const registerStoreProgressTool = (server: McpServer) => {
         );
         if (foreignError) {
           return { success: false, message: foreignError };
+        }
+
+        // Attempt fence (src/tasks/attempt-fence.ts): a write from the attempt
+        // the heartbeat reclaimed the row from is rejected here, inside the
+        // same transaction as the write below.
+        const staleAttempt = staleAttemptWriteReason(existingTask, {
+          agentId: agent.id,
+          isLead: agent.isLead,
+          runtimeInstanceId: requestInfo.runtimeInstanceId,
+        });
+        if (staleAttempt) {
+          return { success: false, message: staleAttempt };
         }
 
         let updatedTask = existingTask;

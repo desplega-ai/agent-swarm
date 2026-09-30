@@ -73,6 +73,30 @@ describe("createCodexSwarmEventHandler", () => {
       expect(urls.some((u) => u.includes("/api/agents/agent-1/activity"))).toBe(true);
     });
 
+    test("the heartbeat names the agent and the runtime so the API can fence a stale attempt", async () => {
+      const previous = process.env.SWARM_RUNTIME_INSTANCE_ID;
+      process.env.SWARM_RUNTIME_INSTANCE_ID = "runtime-under-test";
+      try {
+        const { calls } = installFetchStub(
+          () => new Response(JSON.stringify({ cancelled: [] }), { status: 200 }),
+        );
+        createCodexSwarmEventHandler(buildOpts())({
+          type: "tool_start",
+          toolCallId: "call-1",
+          toolName: "bash",
+          args: { command: "ls" },
+        });
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        const heartbeat = calls.find((c) => c.url.includes("/api/active-sessions/heartbeat/"));
+        const headers = heartbeat?.init?.headers as Record<string, string>;
+        expect(headers["X-Agent-ID"]).toBe("agent-1");
+        expect(headers["X-Runtime-Instance-ID"]).toBe("runtime-under-test");
+      } finally {
+        if (previous === undefined) delete process.env.SWARM_RUNTIME_INSTANCE_ID;
+        else process.env.SWARM_RUNTIME_INSTANCE_ID = previous;
+      }
+    });
+
     test("aborts the running turn when the cancellation endpoint reports cancelled", async () => {
       installFetchStub((url) => {
         if (url.includes("/cancelled-tasks")) {

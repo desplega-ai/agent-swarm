@@ -11,6 +11,7 @@ import {
   resetOrphanedInProgressTasksForAgent,
   updateActiveSessionProviderSessionId,
 } from "../be/db";
+import { headerRuntimeInstanceId } from "../tasks/attempt-fence";
 import { ActiveSessionSchema, AgentTaskSchema } from "../types";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
 import { route } from "./route-def";
@@ -177,7 +178,15 @@ export async function handleActiveSessions(
   if (deleteSessionByTask.match(req.method, pathSegments)) {
     const parsed = await deleteSessionByTask.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const deleted = await deleteActiveSession(parsed.params.taskId);
+    // A worker deletes only its own session: its cleanup can land after the
+    // heartbeat reclaimed the task and another attempt registered a session
+    // for the same task id. The caller's identity always scopes the delete,
+    // including a caller that sent none (the unscoped delete is the server's
+    // own `deleteActiveSessionServerSide`, not reachable from here).
+    const deleted = await deleteActiveSession(parsed.params.taskId, {
+      agentId: myAgentId,
+      runtimeInstanceId: headerRuntimeInstanceId(req),
+    });
     deleteSessionByTask.respond(res, 200, { deleted });
     return true;
   }
@@ -193,7 +202,12 @@ export async function handleActiveSessions(
   if (heartbeatSession.match(req.method, pathSegments)) {
     const parsed = await heartbeatSession.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const updated = await heartbeatActiveSession(parsed.params.taskId);
+    // Same caller scope as the delete: a process holding an attempt the
+    // heartbeat reclaimed must not refresh the replacement attempt's session.
+    const updated = await heartbeatActiveSession(parsed.params.taskId, {
+      agentId: myAgentId,
+      runtimeInstanceId: headerRuntimeInstanceId(req),
+    });
     heartbeatSession.respond(res, 200, { updated });
     return true;
   }
@@ -204,6 +218,7 @@ export async function handleActiveSessions(
     const updated = await updateActiveSessionProviderSessionId(
       parsed.params.taskId,
       parsed.body.providerSessionId,
+      { agentId: myAgentId, runtimeInstanceId: headerRuntimeInstanceId(req) },
     );
     updateProviderSession.respond(res, 200, { updated });
     return true;

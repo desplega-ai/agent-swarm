@@ -19,7 +19,7 @@ import {
   startTask,
   updateTaskProgress,
 } from "../be/db";
-import { codeLevelTriage, setBeforeHeartbeatSupersedeForTests } from "../heartbeat/heartbeat";
+import { codeLevelTriage, setBeforeHeartbeatReclaimForTests } from "../heartbeat/heartbeat";
 
 const TEST_DB_PATH = "./test-heartbeat-stall-cas.sqlite";
 
@@ -53,7 +53,7 @@ describe("Heartbeat stall classifier CAS (TLA+ counterexample)", () => {
   });
 
   beforeEach(async () => {
-    setBeforeHeartbeatSupersedeForTests(null);
+    setBeforeHeartbeatReclaimForTests(null);
     const db = getDbClient();
     await db.run("DELETE FROM agent_tasks");
     await db.run("DELETE FROM agents");
@@ -61,6 +61,7 @@ describe("Heartbeat stall classifier CAS (TLA+ counterexample)", () => {
   });
 
   // Trace: PollStart -> Age -> HbRead -> Progress -> HbWrite (NoLiveKill).
+  // HbWrite is now Reclaim; its WHERE re-checks the lastUpdatedAt it read.
   test("stall classifier does not supersede a task that made progress after the candidate read", async () => {
     const agent = await createAgent({ name: "quiet-worker", isLead: false, status: "busy" });
     const task = await createTaskExtended("Long quiet work", { agentId: agent.id });
@@ -68,13 +69,14 @@ describe("Heartbeat stall classifier CAS (TLA+ counterexample)", () => {
     await backdateTask(task.id, new Date(Date.now() - 10 * 60 * 1000).toISOString());
 
     // The worker reports progress after the sweep read the candidate list.
-    setBeforeHeartbeatSupersedeForTests(async (candidate) => {
+    setBeforeHeartbeatReclaimForTests(async (candidate) => {
       await updateTaskProgress(candidate.id, "still working");
     });
 
     await codeLevelTriage();
 
     expect((await getTaskById(task.id))?.status).toBe("in_progress");
+    expect((await getTaskById(task.id))?.attempt).toBe(0);
     expect(await getChildTasks(task.id)).toHaveLength(0);
   });
 });

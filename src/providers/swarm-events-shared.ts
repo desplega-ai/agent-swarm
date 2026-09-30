@@ -41,6 +41,7 @@
  */
 
 import { checkToolLoop } from "../hooks/tool-loop-detection";
+import { swarmRuntimeInstanceId } from "../utils/multi-runtime";
 import type { ProviderEvent } from "./types";
 
 /** Throttle windows (ms) keyed by action name. Exported for unit assertions. */
@@ -73,10 +74,14 @@ export interface SwarmEventHandlerOpts {
 }
 
 export function apiHeaders(opts: SwarmEventHandlerOpts): Record<string, string> {
+  // The runtime id lets the API tell this attempt's session heartbeat from an
+  // earlier attempt's (src/tasks/attempt-fence.ts).
+  const runtimeInstanceId = swarmRuntimeInstanceId();
   return {
     "Content-Type": "application/json",
     Authorization: `Bearer ${opts.apiKey}`,
     "X-Agent-ID": opts.agentId,
+    ...(runtimeInstanceId ? { "X-Runtime-Instance-ID": runtimeInstanceId } : {}),
   };
 }
 

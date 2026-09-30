@@ -117,10 +117,10 @@ describe("pre.heartbeat.remediate extensions", () => {
 
     const findings = await codeLevelTriage();
 
-    expect(findings.autoResumedTasks).toHaveLength(1);
-    expect(findings.autoResumedTasks[0]?.taskId).toBe(task.id);
+    expect(findings.reclaimedTasks).toHaveLength(1);
+    expect(findings.reclaimedTasks[0]?.taskId).toBe(task.id);
     expect(findings.extensionSkipped).toEqual([]);
-    expect((await getTaskById(task.id))?.status).toBe("superseded");
+    expect((await getTaskById(task.id))?.status).toBe("pending");
   });
 
   test("changes a workflow-step fail proposal to record", async () => {
@@ -131,7 +131,7 @@ describe("pre.heartbeat.remediate extensions", () => {
 
     expect(findings.stalledTasks.map((candidate) => candidate.id)).toContain(task.id);
     expect(findings.autoFailedTasks).toEqual([]);
-    expect(findings.autoResumedTasks).toEqual([]);
+    expect(findings.reclaimedTasks).toEqual([]);
     expect((await getTaskById(task.id))?.status).toBe("in_progress");
     expect(await listExtensionRuns(extension.id)).toMatchObject([
       { event: "pre.heartbeat.remediate", action: "modify" },
@@ -158,9 +158,9 @@ export default extension;
     const findings = await codeLevelTriage();
 
     expect(findings.autoFailedTasks).toEqual([]);
-    expect(findings.autoResumedTasks[0]?.taskId).toBe(task.id);
-    expect((await getTaskById(task.id))?.status).toBe("superseded");
-    expect((await getChildTasks(task.id))[0]?.taskType).toBe("resume");
+    expect(findings.reclaimedTasks[0]?.taskId).toBe(task.id);
+    expect((await getTaskById(task.id))?.status).toBe("pending");
+    expect(await getChildTasks(task.id)).toEqual([]);
     expect(await listExtensionRuns(extension.id)).toMatchObject([
       { event: "pre.heartbeat.remediate", action: "modify" },
     ]);
@@ -185,8 +185,8 @@ export default extension;
 
     await disableExtension(extension.id);
     const withoutExtension = await codeLevelTriage();
-    expect(withoutExtension.autoResumedTasks[0]?.taskId).toBe(task.id);
-    expect((await getTaskById(task.id))?.status).toBe("superseded");
+    expect(withoutExtension.reclaimedTasks[0]?.taskId).toBe(task.id);
+    expect((await getTaskById(task.id))?.status).toBe("pending");
   });
 
   test("provides stale-session details before remediation", async () => {
@@ -214,7 +214,7 @@ export default extension;
     const findings = await codeLevelTriage();
 
     expect(findings.stalledTasks.map((candidate) => candidate.id)).toContain(task.id);
-    expect(findings.autoResumedTasks).toEqual([]);
+    expect(findings.reclaimedTasks).toEqual([]);
     expect((await getTaskById(task.id))?.status).toBe("in_progress");
   });
 
@@ -236,8 +236,8 @@ export default extension;
 
     try {
       const findings = await codeLevelTriage();
-      expect(findings.autoResumedTasks[0]?.taskId).toBe(task.id);
-      expect((await getTaskById(task.id))?.status).toBe("superseded");
+      expect(findings.reclaimedTasks[0]?.taskId).toBe(task.id);
+      expect((await getTaskById(task.id))?.status).toBe("pending");
       expect(warning).toHaveBeenCalledWith(
         "[Heartbeat] Extension returned an invalid remediation action:",
         "invalid-action",
@@ -266,10 +266,10 @@ export default extension;
 
     const findings = await codeLevelTriage();
 
-    expect(findings.autoResumedTasks[0]?.taskId).toBe(task.id);
+    expect(findings.reclaimedTasks[0]?.taskId).toBe(task.id);
     expect(findings.stalledTasks).toEqual([]);
-    expect((await getTaskById(task.id))?.status).toBe("superseded");
-    expect((await getChildTasks(task.id))[0]?.taskType).toBe("resume");
+    expect((await getTaskById(task.id))?.status).toBe("pending");
+    expect(await getChildTasks(task.id)).toEqual([]);
   });
 
   test("skips the extension that created the stalled task", async () => {
@@ -285,7 +285,7 @@ export default extension;
     const findings = await codeLevelTriage();
 
     expect(findings.extensionSkipped).toEqual([]);
-    expect(findings.autoResumedTasks[0]?.taskId).toBe(task.id);
+    expect(findings.reclaimedTasks[0]?.taskId).toBe(task.id);
     expect(await listExtensionRuns(extension.id)).toEqual([]);
   });
 });

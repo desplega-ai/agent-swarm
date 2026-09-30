@@ -59,6 +59,7 @@ import {
 } from "../utils/error-tracker.ts";
 import { probeHarnessCliVersion, reportHarnessModelOutcome } from "../utils/harness-cli-version.ts";
 import { resolveHarnessProvider } from "../utils/harness-provider.ts";
+import { swarmRuntimeInstanceId } from "../utils/multi-runtime.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
 import { terminateRegisteredProcessGroups } from "../utils/process-group.ts";
 import { refreshRuntimeModelCatalog } from "../utils/runtime-model-catalog.ts";
@@ -1424,9 +1425,14 @@ async function updateProgressViaAPI(
   apiKey: string,
   taskId: string,
   progress: string,
+  identity: { agentId?: string; runtimeInstanceId?: string } = {},
 ): Promise<void> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+  // The API fences progress by attempt: a process holding a reclaimed attempt
+  // is refused instead of refreshing the replacement's `lastUpdatedAt`.
+  if (identity.agentId) headers["X-Agent-ID"] = identity.agentId;
+  if (identity.runtimeInstanceId) headers["X-Runtime-Instance-ID"] = identity.runtimeInstanceId;
 
   try {
     await fetch(`${apiUrl}/api/tasks/${taskId}/progress`, {
@@ -1636,6 +1642,11 @@ export async function ensureTaskFinished(
   };
   if (config.apiKey) {
     headers.Authorization = `Bearer ${config.apiKey}`;
+  }
+  // Attempt fence: the server refuses to let this runner finish an attempt
+  // another runtime started after the heartbeat reclaimed the task.
+  if (config.runtimeInstanceId) {
+    headers["X-Runtime-Instance-ID"] = config.runtimeInstanceId;
   }
 
   // Determine status and reason based on exit code
@@ -2027,6 +2038,10 @@ async function supersedeTaskViaAPI(
   if (config.apiKey) {
     headers.Authorization = `Bearer ${config.apiKey}`;
   }
+  // Attempt fence: refused when another runtime holds the current attempt.
+  if (config.runtimeInstanceId) {
+    headers["X-Runtime-Instance-ID"] = config.runtimeInstanceId;
+  }
 
   try {
     const response = await fetch(`${config.apiUrl}/api/tasks/${taskId}/supersede`, {
@@ -2096,6 +2111,10 @@ async function pauseTaskViaAPI(config: ApiConfig, role: string, taskId: string):
   };
   if (config.apiKey) {
     headers.Authorization = `Bearer ${config.apiKey}`;
+  }
+  // Attempt fence: refused when another runtime holds the current attempt.
+  if (config.runtimeInstanceId) {
+    headers["X-Runtime-Instance-ID"] = config.runtimeInstanceId;
   }
 
   try {
@@ -2191,6 +2210,10 @@ async function resumeTaskViaAPI(config: ApiConfig, taskId: string): Promise<bool
   };
   if (config.apiKey) {
     headers.Authorization = `Bearer ${config.apiKey}`;
+  }
+  // Stamps this runtime as the one running the resumed attempt.
+  if (config.runtimeInstanceId) {
+    headers["X-Runtime-Instance-ID"] = config.runtimeInstanceId;
   }
 
   try {
@@ -2803,10 +2826,15 @@ async function registerActiveSession(
   }
 }
 
-/** Remove an active session by taskId (fire-and-forget) */
+/**
+ * Remove this runtime's active session for a task (fire-and-forget). The
+ * server deletes only the row this agent + runtime registered, so a late
+ * cleanup never removes the session of a replacement attempt.
+ */
 async function removeActiveSession(config: ApiConfig, taskId: string): Promise<void> {
   const headers: Record<string, string> = { "X-Agent-ID": config.agentId };
   if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`;
+  if (config.runtimeInstanceId) headers["X-Runtime-Instance-ID"] = config.runtimeInstanceId;
   try {
     await fetch(`${config.apiUrl}/api/active-sessions/by-task/${taskId}`, {
       method: "DELETE",
@@ -4072,9 +4100,10 @@ async function spawnProviderProcess(
             const progress = toolCallToProgress(event.toolName, event.args);
             if (progress) {
               lastProgressTime = now;
-              updateProgressViaAPI(opts.apiUrl, opts.apiKey, effectiveTaskId, progress).catch(
-                () => {},
-              );
+              updateProgressViaAPI(opts.apiUrl, opts.apiKey, effectiveTaskId, progress, {
+                agentId: opts.agentId,
+                runtimeInstanceId: swarmRuntimeInstanceId(),
+              }).catch(() => {});
             }
           }
 
@@ -4274,9 +4303,10 @@ async function spawnProviderProcess(
             const now = Date.now();
             if (now - lastProgressTime >= PROGRESS_THROTTLE_MS) {
               lastProgressTime = now;
-              updateProgressViaAPI(opts.apiUrl, opts.apiKey, effectiveTaskId, event.message).catch(
-                () => {},
-              );
+              updateProgressViaAPI(opts.apiUrl, opts.apiKey, effectiveTaskId, event.message, {
+                agentId: opts.agentId,
+                runtimeInstanceId: swarmRuntimeInstanceId(),
+              }).catch(() => {});
             }
           }
           break;
@@ -6274,6 +6304,26 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
         console.log(`[${role}] Trigger received: ${trigger.type}`);
 
+        // The heartbeat reclaims a task in place (same id, `attempt + 1`). If
+        // this runner still has the earlier attempt running (it was
+        // unresponsive, not dead), keep that one and never run two copies.
+        // Reclaim deleted its session row, so register it again or the next
+        // sweep would reclaim the live process a second time.
+        if (
+          trigger.type === "task_assigned" &&
+          trigger.taskId &&
+          state.activeTasks.has(trigger.taskId)
+        ) {
+          console.warn(
+            `[${role}] Task ${trigger.taskId.slice(0, 8)} is already running here; keeping it, not starting a second copy`,
+          );
+          await registerActiveSession(apiConfig, {
+            taskId: trigger.taskId,
+            triggerType: trigger.type,
+          });
+          continue;
+        }
+
         if (
           trigger.taskId &&
           (trigger.type === "task_assigned" || trigger.type === "task_offered")
@@ -6330,8 +6380,20 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         // acts as a bounded safety net for resumable ones (claude/codex).
         // For taskType="resume" (created by supersedeTaskViaAPI), use the
         // larger resume preamble that includes a session-log tool-call summary.
-        const taskObj = trigger.task as { parentTaskId?: string; taskType?: string } | undefined;
-        if (taskObj?.parentTaskId && apiUrl) {
+        const taskObj = trigger.task as
+          | { id?: string; parentTaskId?: string; taskType?: string; attempt?: number }
+          | undefined;
+        if (taskObj?.id && (taskObj.attempt ?? 0) > 0 && apiUrl) {
+          // Reclaimed by the heartbeat: the same row runs again, so continuity
+          // comes from this row's own earlier attempts (their session logs).
+          const resumePreamble = await buildResumeContextPreamble(apiUrl, apiKey, taskObj.id);
+          if (resumePreamble) {
+            triggerPrompt = prependContextPreamble(triggerPrompt, resumePreamble);
+            console.log(
+              `[${role}] Injected resume preamble for reclaimed task (attempt ${taskObj.attempt})`,
+            );
+          }
+        } else if (taskObj?.parentTaskId && apiUrl) {
           const isResumeTask = taskObj.taskType === "resume";
           const contextPreamble = isResumeTask
             ? await buildResumeContextPreamble(apiUrl, apiKey, taskObj.parentTaskId)

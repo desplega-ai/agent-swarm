@@ -30,6 +30,7 @@ import {
 import { explicitModelErrorForAgent } from "@/be/model-validation";
 import { touchRuntimeInstance } from "@/be/multi-runtime";
 import { applyPreTaskCreate } from "@/extensions/apply-task-create";
+import { staleAttemptWriteReason } from "@/tasks/attempt-fence";
 import { assertOwnsTask, ownerCtx, type ToolCtx } from "@/tools/task-tool-ctx";
 import {
   createToolRegistrar,
@@ -395,7 +396,9 @@ export async function taskActionHandler(
           };
         }
         // Atomic claim — only one agent can win this race
-        const claimedTask = await claimTask(taskId, agentId);
+        const claimedTask = await claimTask(taskId, agentId, {
+          runtimeInstanceId: ctx.kind === "owner" ? ctx.runtimeInstanceId : undefined,
+        });
         if (!claimedTask) {
           return {
             success: false,
@@ -443,6 +446,15 @@ export async function taskActionHandler(
             message: `Cannot release task in status "${existingTask.status}". Only 'pending' or 'in_progress' tasks can be released.`,
           };
         }
+        // Attempt fence (src/tasks/attempt-fence.ts), for every releasable
+        // status and inside this action's transaction: a process holding an
+        // attempt the heartbeat reclaimed must not release the replacement, or
+        // drop a reclaimed pin back to the pool before the Unpin grace.
+        const staleAttempt = staleAttemptWriteReason(existingTask, {
+          agentId,
+          runtimeInstanceId: ctx.kind === "owner" ? ctx.runtimeInstanceId : undefined,
+        });
+        if (staleAttempt) return { success: false, message: staleAttempt };
         const releasedTask = await releaseTask(taskId);
         if (!releasedTask) {
           return { success: false, message: `Failed to release task "${taskId}".` };

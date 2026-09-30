@@ -123,6 +123,7 @@ import {
   parseModelTier,
   SERVER_GENERATED_ATTACHMENT_CAPABILITY,
   SessionCostModelBreakdownSchema,
+  TERMINAL_TASK_STATUSES,
 } from "../types";
 import { deriveProviderFromKeyType } from "../utils/credentials";
 import type { RateLimitWindowTelemetry } from "../utils/error-tracker";
@@ -292,11 +293,13 @@ export {
   getRecentlyCancelledTasksForAgent,
   overwriteTerminalTaskResultText,
   pauseTask,
+  reclaimTask,
   resetOrphanedInProgressTasksForAgent,
   resumeTask,
   settleSupersededTaskDependents,
   startTask,
   supersedeTask,
+  unpinTask,
   updateTaskClaudeSessionId,
   updateTaskProgress,
   updateTaskTitle,
@@ -2910,7 +2913,11 @@ export async function createTaskExtended(
   return rowToAgentTask(row);
 }
 
-export async function claimTask(taskId: string, agentId: string): Promise<AgentTask | null> {
+export async function claimTask(
+  taskId: string,
+  agentId: string,
+  opts: { runtimeInstanceId?: string | null } = {},
+): Promise<AgentTask | null> {
   // Static per (agent, task), so this pre-check does not reopen the atomic
   // claim race. It always applies to lead-only authorization.
   {
@@ -2940,9 +2947,9 @@ export async function claimTask(taskId: string, agentId: string): Promise<AgentT
   // already working on the task (prevents duplicate task_assigned triggers).
   const now = new Date().toISOString();
   const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET agentId = ?, status = 'in_progress', lastUpdatedAt = ?
+    `UPDATE agent_tasks SET agentId = ?, status = 'in_progress', attemptRuntimeId = ?, lastUpdatedAt = ?
        WHERE id = ? AND status = 'unassigned' RETURNING *`,
-    [agentId, now, taskId],
+    [agentId, opts.runtimeInstanceId ?? null, now, taskId],
   );
 
   if (row) {
@@ -6947,7 +6954,51 @@ export async function insertActiveSession(session: {
   return row;
 }
 
-export async function deleteActiveSession(taskId: string): Promise<boolean> {
+/**
+ * Caller scope for an HTTP write to a task's active session. Reclaim keeps the
+ * task id, so a process holding an earlier attempt must not touch the
+ * replacement's session (a heartbeat would hide its stall). On a live
+ * reclaimed row (`attempt > 0`, not terminal) the caller must name agent AND
+ * runtime and match both; one with no runtime (an older runner) matches
+ * nothing and the heartbeat's stale sweep decides. Other rows keep the legacy
+ * scope: no agent = any session of the task, else agent match with runtime
+ * match-or-unset. The row check is part of the statement, so check and write
+ * are atomic. Server-side deletes use `deleteActiveSessionServerSide`.
+ */
+function activeSessionCallerScope(caller: {
+  agentId?: string | null;
+  runtimeInstanceId?: string | null;
+}): { sql: string; params: (string | null)[] } {
+  const agentId = caller.agentId ?? null;
+  const runtime = caller.runtimeInstanceId ?? null;
+  const terminal = TERMINAL_TASK_STATUSES.map((status) => `'${status}'`).join(", ");
+  return {
+    sql: `AND (
+      (NOT EXISTS (SELECT 1 FROM agent_tasks t
+                    WHERE t.id = active_sessions.taskId AND t.attempt > 0 AND t.status NOT IN (${terminal}))
+       AND (? IS NULL OR (agentId = ? AND (? IS NULL OR runtimeInstanceId IS NULL OR runtimeInstanceId = ?))))
+      OR (agentId = ? AND runtimeInstanceId = ?))`,
+    params: [agentId, agentId, runtime, runtime, agentId, runtime],
+  };
+}
+
+export async function deleteActiveSession(
+  taskId: string,
+  caller: { agentId?: string | null; runtimeInstanceId?: string | null },
+): Promise<boolean> {
+  const scope = activeSessionCallerScope(caller);
+  const result = await getDbClient().run(
+    `DELETE FROM active_sessions WHERE taskId = ? ${scope.sql}`,
+    [taskId, ...scope.params],
+  );
+  return result.changes > 0;
+}
+
+/**
+ * Trusted server-side delete of a task's active sessions (the heartbeat, after
+ * it failed the task). No caller identity; never reachable from an HTTP route.
+ */
+export async function deleteActiveSessionServerSide(taskId: string): Promise<boolean> {
   const result = await getDbClient().run("DELETE FROM active_sessions WHERE taskId = ?", [taskId]);
   return result.changes > 0;
 }
@@ -6969,11 +7020,14 @@ export async function getActiveSessions(agentId?: string): Promise<ActiveSession
   );
 }
 
-export async function heartbeatActiveSession(taskId: string): Promise<boolean> {
-  const now = new Date().toISOString();
+export async function heartbeatActiveSession(
+  taskId: string,
+  caller: { agentId?: string | null; runtimeInstanceId?: string | null },
+): Promise<boolean> {
+  const scope = activeSessionCallerScope(caller);
   const result = await getDbClient().run(
-    "UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?",
-    [now, taskId],
+    `UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ? ${scope.sql}`,
+    [new Date().toISOString(), taskId, ...scope.params],
   );
   return result.changes > 0;
 }
@@ -6997,10 +7051,12 @@ export async function cleanupAgentSessions(agentId: string): Promise<number> {
 export async function updateActiveSessionProviderSessionId(
   taskId: string,
   providerSessionId: string,
+  caller: { agentId?: string | null; runtimeInstanceId?: string | null },
 ): Promise<boolean> {
+  const scope = activeSessionCallerScope(caller);
   const result = await getDbClient().run(
-    "UPDATE active_sessions SET providerSessionId = ? WHERE taskId = ?",
-    [providerSessionId, taskId],
+    `UPDATE active_sessions SET providerSessionId = ? WHERE taskId = ? ${scope.sql}`,
+    [providerSessionId, taskId, ...scope.params],
   );
   return result.changes > 0;
 }
@@ -7057,92 +7113,35 @@ export async function getStalledInProgressTasks(
 }
 
 /**
- * Genuine same-agent protected pins — resumes tagged `crash-recovery-pin` /
- * `graceful-shutdown-pin`, OR a reboot-retry child tagged `reboot-retry-pin`
- * (routing-affinity Phase 3) — that are still `pending` `graceMin` minutes
- * after creation. The heartbeat reaper escalates these to a Lead
- * reroute-decision.
- *
- * Scoping clauses, each load-bearing:
- *  - `taskType = 'resume' AND (crash/graceful pin tags)` OR `reboot-retry-pin`
- *    tag alone — restricts to work actually pinned to its original agent on a
- *    protected path. A reboot-retry-pin task is a FRESH task (`taskType`
- *    mirrors the original work, not `'resume'`), so it needs its own
- *    disjunct rather than reusing the `taskType = 'resume'` gate. Without
- *    this, a *pooled* resume that `autoAssignPoolTasks` flips to `pending`
- *    earlier in the SAME sweep (keeping its old `createdAt`) would be reaped
- *    and cancelled before the assigned worker polls; it also keeps
- *    `context_limits` / `manual_supersede` pins from being escalated under
- *    the protected-pin label. (Literals must match the pin tag constants in
- *    src/tasks/worker-follow-up.ts.)
- *  - `status = 'pending'` — the "currently unreclaimed" discriminator: when the
- *    agent reclaims via the normal poll path, `startTask` flips the row to
- *    `in_progress` and it drops out of this set. (A reclaimed resume whose
- *    session later orphans can be flipped back to `pending` by
- *    `resetOrphanedInProgressTasksForAgent`, re-entering this set on a later
- *    sweep — re-escalating genuinely re-stalled work, which is fine.) We do NOT
- *    gate on `lastActivityAt` — it is stale for a returned-but-idle agent.
- *  - `createdAt < cutoff` — `createdAt` is the resume's creation = crash-DETECTION
- *    time, so the grace window is measured from detection.
- *
- * Keys only on reboot-durable columns, so a pending pin survives a server reboot
- * and is caught on the first post-reboot sweep.
+ * Pins nobody picked up (HeartbeatSimple.tla `Unpin`): `pending` rows held by
+ * an agent that did not start them within `graceMin` minutes. Two kinds:
+ *  - rows the heartbeat reclaimed (`attempt > 0`), and
+ *  - resumes pinned to their original agent by the runner's graceful-shutdown
+ *    supersede or the pre-Reclaim heartbeat (`crash-recovery-pin`,
+ *    `reboot-retry-pin`; literals match src/tasks/worker-follow-up.ts).
+ * A task assigned directly to a busy agent is not a pin and stays queued.
+ * Grace runs from `lastUpdatedAt`, when the row became `pending`. Lead-held
+ * pins are excluded (the sweep never unpins them) so they cannot fill the
+ * window. At most `limit` rows, oldest first; a backlog drains across sweeps.
  */
-export async function getStalePinnedResumes(graceMin: number): Promise<AgentTask[]> {
+export async function getUnclaimedPins(graceMin: number, limit = 100): Promise<AgentTask[]> {
   const cutoff = new Date(Date.now() - graceMin * 60 * 1000).toISOString();
   const rows = await getDbClient().query<AgentTaskRow>(
     `SELECT * FROM agent_tasks
        WHERE status = 'pending'
+         AND agentId IS NOT NULL
+         AND lastUpdatedAt < ?
          AND (
-           (taskType = 'resume' AND (tags LIKE '%"crash-recovery-pin"%' OR tags LIKE '%"graceful-shutdown-pin"%'))
+           attempt > 0
+           OR (taskType = 'resume' AND (tags LIKE '%"crash-recovery-pin"%' OR tags LIKE '%"graceful-shutdown-pin"%'))
            OR tags LIKE '%"reboot-retry-pin"%'
          )
-         AND createdAt < ?
-       ORDER BY createdAt ASC`,
-    [cutoff],
+         AND agentId NOT IN (SELECT id FROM agents WHERE isLead = 1)
+       ORDER BY lastUpdatedAt ASC
+       LIMIT ?`,
+    [cutoff, limit],
   );
   return rows.map(rowToAgentTask);
-}
-
-/**
- * Atomically terminalize a pinned resume ONLY if it is still `pending`, in one
- * `UPDATE … RETURNING`. Returns the row when the transition fired, or `null`
- * when it did not (the agent reclaimed it in the gap → `startTask` already
- * flipped it to `in_progress`). The heartbeat reaper escalates to the Lead ONLY
- * when this returns a row, closing the TOCTOU window between reading the resume
- * as `pending` and writing.
- *
- * Deliberately NOT `failTask`: `failTask`'s backing SQL is keyed on `id` with no
- * status precondition, so it would terminalize an `in_progress` resume the
- * worker just started. The `AND status = 'pending'` here is the guard.
- */
-export async function failPendingResumeIfUnclaimed(
-  taskId: string,
-  status: "cancelled" | "failed",
-  failureReason: string,
-): Promise<AgentTask | null> {
-  const now = new Date().toISOString();
-  const scrubbedReason = scrubSecrets(failureReason);
-  const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET status = ?, failureReason = ?, finishedAt = ?, lastUpdatedAt = ?
-       WHERE id = ? AND status = 'pending' RETURNING *`,
-    [status, scrubbedReason, now, now, taskId],
-  );
-
-  if (row) {
-    try {
-      await createLogEntry({
-        eventType: "task_status_change",
-        taskId,
-        agentId: row.agentId ?? undefined,
-        oldValue: "pending",
-        newValue: status,
-        metadata: { reason: scrubbedReason, reaper: "pin_unreclaimed" },
-      });
-    } catch {}
-  }
-
-  return row ? rowToAgentTask(row) : null;
 }
 
 /**

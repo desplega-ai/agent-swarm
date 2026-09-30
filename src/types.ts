@@ -706,6 +706,13 @@ export const AgentTaskSchema = z
     // Stored affinity that fails validation is quarantined rather than silently
     // treated as an ordinary, claimable task. Internal read-path signal.
     routingAffinityInvalid: z.boolean().optional(),
+    // Times the heartbeat reclaimed this row (in_progress -> pending in place).
+    // 0 = never reclaimed. See `reclaimTask` in src/be/db/tasks/write.ts.
+    attempt: z.number().int().nonnegative().optional(),
+    // Runtime instance that started the current attempt (the attempt fence,
+    // `src/tasks/attempt-fence.ts`). Unset when the starter sent no
+    // X-Runtime-Instance-ID.
+    attemptRuntimeId: z.string().optional(),
   })
   .openapi("AgentTask");
 
@@ -1459,7 +1466,7 @@ export const AgentLogEventTypeSchema = z.enum([
   "task_dispatch_rejected_affinity",
   "task_authorization_rejected",
   "task_recovery_authorization",
-  // Reboot sweep moved a never-started dependent from the swept task to its retry
+  // A superseded task's never-started dependent was re-pointed to its resume child
   "task_dependency_repointed",
   "task_released",
   // A settled task's settlement fired a deferred wait (metadata names the waiter)

@@ -162,7 +162,9 @@ export const registerPollTaskTool = (server: McpServer) => {
             // task past the agent's limit. Same gate as HTTP /api/poll.
             if (!(await hasCapacity(agentId))) return "at-capacity";
 
-            const maybeTask = await startTask(pendingTask.id);
+            const maybeTask = await startTask(pendingTask.id, {
+              runtimeInstanceId: requestInfo.runtimeInstanceId,
+            });
 
             if (maybeTask) {
               // Update automatically in case the agent forgets xd

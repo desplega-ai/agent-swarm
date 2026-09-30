@@ -447,7 +447,7 @@ export async function handlePoll(
             }
 
             // Mark task as in_progress immediately to prevent duplicate polling
-            await startTask(pendingTask.id);
+            await startTask(pendingTask.id, { runtimeInstanceId });
             await updateAgentStatusFromCapacity(myAgentId);
 
             // Lifecycle announcements go through `afterCommit`, not straight
@@ -606,7 +606,7 @@ export async function handlePoll(
               }
             }
             for (const candidateId of unassignedIds) {
-              const claimed = await claimTask(candidateId, myAgentId);
+              const claimed = await claimTask(candidateId, myAgentId, { runtimeInstanceId });
               if (claimed) {
                 await updateAgentStatusFromCapacity(myAgentId);
                 // Post-commit (see the `started` path above): a rolled-back

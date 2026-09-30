@@ -179,6 +179,7 @@ value:createWorkflowRunStep
 value:createWorkflowVersion
 value:deleteActiveSession
 value:deleteActiveSessionById
+value:deleteActiveSessionServerSide
 value:deleteAgent
 value:deleteAgentMailInboxMapping
 value:deleteBudget
@@ -208,7 +209,6 @@ value:emitMcpServerConnectedTelemetry
 value:ensureSlackDelegationActivation
 value:ensureSlackRenderV2Activation
 value:extensionAgentAssignmentError
-value:failPendingResumeIfUnclaimed
 value:failTask
 value:findCompletedTaskInThread
 value:findExistingLinearTrackerContextWork
@@ -378,7 +378,6 @@ value:getSlackTreeMessage
 value:getSlackTreeMessageByThread
 value:getSlackTreeMessages
 value:getStaleApprovalRequests
-value:getStalePinnedResumes
 value:getStaleUnassignedAffinityTasks
 value:getStalledInProgressTasks
 value:getSteeringMessageById
@@ -410,6 +409,7 @@ value:getUnassignedPoolTasks
 value:getUnassignedTaskIds
 value:getUnassignedTaskIdsForAgent
 value:getUnassignedTasksCount
+value:getUnclaimedPins
 value:getUnreadInboxMessages
 value:getUnreadMessages
 value:getUserById
@@ -498,6 +498,7 @@ value:postMessage
 value:promoteAbandonedDraftTasks
 value:promoteDraftTask
 value:reassociateSessionLogs
+value:reclaimTask
 value:recordBudgetRefusalNotification
 value:recordInlineScriptRun
 value:recordKeyRateLimitWindows
@@ -542,6 +543,7 @@ value:sweepExpiredKvPrefix
 value:toggleAgentSkill
 value:uninstallMcpServer
 value:uninstallSkill
+value:unpinTask
 value:updateActiveSessionProviderSessionId
 value:updateAgentActivity
 value:updateAgentCredStatus
@@ -599,11 +601,13 @@ value:getPendingTaskForAgent
 value:getRecentlyCancelledTasksForAgent
 value:overwriteTerminalTaskResultText
 value:pauseTask
+value:reclaimTask
 value:resetOrphanedInProgressTasksForAgent
 value:resumeTask
 value:settleSupersededTaskDependents
 value:startTask
 value:supersedeTask
+value:unpinTask
 value:updateTaskClaudeSessionId
 value:updateTaskProgress
 value:updateTaskTitle`.split("\n");

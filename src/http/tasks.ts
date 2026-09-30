@@ -45,6 +45,7 @@ import {
 import { getTaskCitations, TaskCitationSchema } from "../be/task-citations";
 import { findUserById } from "../be/users";
 import { can, type RbacPrincipal, type RbacResource } from "../rbac";
+import { headerRuntimeInstanceId, staleAttemptWriteReason } from "../tasks/attempt-fence";
 import { TaskCreationBlockedError } from "../tasks/errors";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { guardTerminalTaskResultWrite } from "../tasks/terminal-result-guard";
@@ -565,7 +566,10 @@ const finishTask = route({
   responses: {
     200: { description: "Task finished", schema: FinishTaskSuccessSchema },
     400: { description: "Invalid status" },
-    403: { description: "Not assigned to this agent" },
+    403: {
+      description:
+        "Not assigned to this agent, or the current attempt runs in another runtime (attempt fence)",
+    },
     404: { description: "Task not found" },
     409: {
       description: "Differing terminal result text was discarded",
@@ -601,7 +605,9 @@ const pauseTaskRoute = route({
   responses: {
     200: { description: "Task paused", schema: TaskActionResultSchema },
     400: { description: "Task not in_progress" },
-    403: { description: "Task belongs to another agent" },
+    403: {
+      description: "Task belongs to another agent, or its current attempt runs in another runtime",
+    },
     404: { description: "Task not found" },
   },
 });
@@ -638,7 +644,9 @@ const supersedeTaskRoute = route({
       schema: SupersedeTaskResponseSchema,
     },
     400: { description: "Task not in_progress" },
-    403: { description: "Task belongs to another agent" },
+    403: {
+      description: "Task belongs to another agent, or its current attempt runs in another runtime",
+    },
     404: { description: "Task not found" },
   },
 });
@@ -1411,28 +1419,37 @@ export async function handleTasks(
     const parsed = await updateTaskProgressRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const principal = await resolveTaskWritePrincipal(req, myAgentId);
+    const runtimeInstanceId = headerRuntimeInstanceId(req);
 
     // Check and write in one transaction so a reassignment cannot slip between.
-    const status = await getDbClient().transaction(async (): Promise<200 | 403 | 404> => {
-      const task = await getTaskById(parsed.params.id);
-      if (!task) return 404;
-      const decision = can({
-        principal,
-        verb: "task.progress.write",
-        resource: { kind: "task", taskId: task.id, agentId: task.agentId },
-        source: "http",
-      });
-      if (!decision.allow) return 403;
-      await updateTaskProgress(parsed.params.id, parsed.body.progress);
-      return 200;
-    });
-
-    if (status === 404) {
-      jsonError(res, "Task not found", 404);
-      return true;
-    }
-    if (status === 403) {
-      jsonError(res, "Task is assigned to another agent", 403);
+    // Two gates on a fresh read: RBAC (`task.progress.write`, only the assignee
+    // or a lead), then the attempt fence (src/tasks/attempt-fence.ts): progress
+    // from an attempt the heartbeat reclaimed must not refresh `lastUpdatedAt`
+    // on the replacement and hide its stall. A caller that names no agent keeps
+    // the pre-fence behavior only on a row never reclaimed (older runners); on a
+    // reclaimed row it is refused.
+    const outcome = await getDbClient().transaction(
+      async (): Promise<{ error: string; status: number } | null> => {
+        const task = await getTaskById(parsed.params.id);
+        if (!task) return { error: "Task not found", status: 404 };
+        const decision = can({
+          principal,
+          verb: "task.progress.write",
+          resource: { kind: "task", taskId: task.id, agentId: task.agentId },
+          source: "http",
+        });
+        if (!decision.allow) return { error: "Task is assigned to another agent", status: 403 };
+        const staleAttempt = staleAttemptWriteReason(task, {
+          agentId: principal.kind === "agent" ? principal.agentId : myAgentId,
+          runtimeInstanceId,
+        });
+        if (staleAttempt) return { error: staleAttempt, status: 403 };
+        await updateTaskProgress(parsed.params.id, parsed.body.progress);
+        return null;
+      },
+    );
+    if (outcome) {
+      jsonError(res, outcome.error, outcome.status);
       return true;
     }
     updateTaskProgressRoute.respond(res, 200, { success: true });
@@ -1512,6 +1529,16 @@ export async function handleTasks(
 
         if (task.status !== "in_progress") {
           return { success: true, task, alreadyFinished: true };
+        }
+
+        // Attempt fence (src/tasks/attempt-fence.ts): the runner of an attempt
+        // the heartbeat reclaimed must not finish the replacement attempt.
+        if (myAgentId) {
+          const staleAttempt = staleAttemptWriteReason(task, {
+            agentId: myAgentId,
+            runtimeInstanceId: headerRuntimeInstanceId(req),
+          });
+          if (staleAttempt) return { error: staleAttempt, status: 403 };
         }
 
         const wasPaused = task.wasPaused;
@@ -1629,28 +1656,42 @@ export async function handleTasks(
   if (pauseTaskRoute.match(req.method, pathSegments)) {
     const parsed = await pauseTaskRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const task = await getTaskById(parsed.params.id);
+    const runtimeInstanceId = headerRuntimeInstanceId(req);
 
-    if (!task) {
-      jsonError(res, "Task not found", 404);
+    // Read, attempt fence and pause in one transaction: a Reclaim or a
+    // replacement start between the check and the write cannot slip through.
+    const outcome = await getDbClient().transaction(
+      async (): Promise<
+        { error: string; status: number } | { task: AgentTask; paused: AgentTask }
+      > => {
+        const current = await getTaskById(parsed.params.id);
+        if (!current) return { error: "Task not found", status: 404 };
+        if (myAgentId && current.agentId !== myAgentId) {
+          return { error: "Task belongs to another agent", status: 403 };
+        }
+        if (current.status !== "in_progress") {
+          return { error: `Task status is '${current.status}', not 'in_progress'`, status: 400 };
+        }
+        // Attempt fence (src/tasks/attempt-fence.ts): a runner shutting down
+        // with an attempt the heartbeat reclaimed must not pause the replacement.
+        if (myAgentId) {
+          const staleAttempt = staleAttemptWriteReason(current, {
+            agentId: myAgentId,
+            runtimeInstanceId,
+          });
+          if (staleAttempt) return { error: staleAttempt, status: 403 };
+        }
+        const paused = await pauseTask(parsed.params.id);
+        if (!paused) return { error: "Failed to pause task", status: 500 };
+        return { task: current, paused };
+      },
+    );
+    if ("error" in outcome) {
+      jsonError(res, outcome.error, outcome.status);
       return true;
     }
-
-    if (myAgentId && task.agentId !== myAgentId) {
-      jsonError(res, "Task belongs to another agent", 403);
-      return true;
-    }
-
-    if (task.status !== "in_progress") {
-      jsonError(res, `Task status is '${task.status}', not 'in_progress'`, 400);
-      return true;
-    }
-
-    const pausedTask = await pauseTask(parsed.params.id);
-    if (!pausedTask) {
-      jsonError(res, "Failed to pause task", 500);
-      return true;
-    }
+    const task = outcome.task;
+    const pausedTask = outcome.paused;
 
     ensure({
       id: "paused",
@@ -1716,7 +1757,9 @@ export async function handleTasks(
       return true;
     }
 
-    const resumedTask = await resumeTask(parsed.params.id);
+    const resumedTask = await resumeTask(parsed.params.id, {
+      runtimeInstanceId: headerRuntimeInstanceId(req),
+    });
     if (!resumedTask) {
       jsonError(res, "Failed to resume task", 500);
       return true;
@@ -1775,6 +1818,19 @@ export async function handleTasks(
       return true;
     }
 
+    // Attempt fence (src/tasks/attempt-fence.ts): a runner shutting down with
+    // an attempt the heartbeat reclaimed must not supersede the replacement.
+    if (myAgentId) {
+      const staleAttempt = staleAttemptWriteReason(task, {
+        agentId: myAgentId,
+        runtimeInstanceId: headerRuntimeInstanceId(req),
+      });
+      if (staleAttempt) {
+        jsonError(res, staleAttempt, 403);
+        return true;
+      }
+    }
+
     // Workflow-step tasks: fail back to the engine instead of superseding.
     // Check this BEFORE the supersede UPDATE so we don't leave a workflow
     // step in `superseded` if the engine expects `failed`.
@@ -1800,16 +1856,65 @@ export async function handleTasks(
       return true;
     }
 
-    // Supersede FIRST (atomic + idempotent in db.ts) so we don't orphan a
-    // resume child if a worker races to complete/fail/cancel between the
-    // pre-read status check and the supersede UPDATE.
-    const superseded = await supersedeTask(parsed.params.id, {
-      reason: parsed.body.reason,
-      // resumeTaskId is attached AFTER the child is created. Lost race here
-      // means no child is created at all, so the log entry's null is accurate.
-      resumeTaskId: null,
+    // Supersede, resume child and backfill commit together or not at all. A
+    // crash between separate writes would leave a `superseded` row with no
+    // continuation, and the heartbeat no longer sweeps for those. A throw
+    // rolls the supersede back: the task stays in_progress and the heartbeat
+    // reclaims it like any other stall.
+    const outcome = await getDbClient().transaction(async () => {
+      // Re-check the attempt fence on a fresh read under the write lock: a
+      // Reclaim or replacement start since the check above must stop the
+      // supersede.
+      if (myAgentId) {
+        const current = await getTaskById(parsed.params.id);
+        const staleAttempt =
+          current?.status === "in_progress"
+            ? staleAttemptWriteReason(current, {
+                agentId: myAgentId,
+                runtimeInstanceId: headerRuntimeInstanceId(req),
+              })
+            : null;
+        if (staleAttempt) return { kind: "fenced" as const, message: staleAttempt };
+        if (current && current.status !== "in_progress" && !isTerminalTaskStatus(current.status)) {
+          return {
+            kind: "fenced" as const,
+            message: `Task status is '${current.status}', not 'in_progress'`,
+          };
+        }
+      }
+      // Supersede FIRST (atomic + idempotent in db.ts) so we don't create a
+      // resume child if a worker raced to complete/fail/cancel between the
+      // pre-read status check and the supersede UPDATE.
+      const superseded = await supersedeTask(parsed.params.id, {
+        reason: parsed.body.reason,
+        // resumeTaskId is attached AFTER the child is created.
+        resumeTaskId: null,
+      });
+      if (!superseded) return { kind: "lost" as const };
+
+      const followUp = await createResumeFollowUp({
+        parentId: parsed.params.id,
+        reason: parsed.body.reason,
+      });
+      // `workflow-skip` is unreachable here (workflow-step path branched
+      // above). `skipped` covers parent_not_found / lead_not_found: no agent
+      // can take a resume, so the supersede still lands without one.
+      if (followUp.kind !== "created") {
+        // Nothing to re-point the dependents to: they cascade-fail with the
+        // supersede, in the same commit (no gap for a crash to leave them pending).
+        await settleSupersededTaskDependents(parsed.params.id, null);
+        return { kind: "skipped" as const, superseded, followUp };
+      }
+      await backfillSupersedeTaskResumeTaskId(parsed.params.id, followUp.task.id);
+      return { kind: "created" as const, superseded, resumeTask: followUp.task };
     });
-    if (!superseded) {
+
+    if (outcome.kind === "fenced") {
+      jsonError(res, outcome.message, 403);
+      return true;
+    }
+
+    if (outcome.kind === "lost") {
       // Worker won the race (terminal transition between status check and
       // this UPDATE). Treat as `alreadyFinished` — no resume child is created.
       const fresh = await getTaskById(parsed.params.id);
@@ -1822,34 +1927,22 @@ export async function handleTasks(
       return true;
     }
 
-    // Parent is now superseded. Create the resume child.
-    const followUp = await createResumeFollowUp({
-      parentId: parsed.params.id,
-      reason: parsed.body.reason,
-    });
-
-    // `workflow-skip` is unreachable here (workflow-step path branched above).
-    // `skipped` covers parent_not_found / lead_not_found edge cases — the
-    // supersede already landed, so log + roll forward without a resume task.
-    if (followUp.kind !== "created") {
-      await settleSupersededTaskDependents(parsed.params.id, null);
+    if (outcome.kind === "skipped") {
       console.warn(
         `[Supersede] Task ${parsed.params.id.slice(0, 8)} superseded but resume creation skipped (${
-          followUp.kind === "skipped" ? followUp.reason : followUp.kind
+          outcome.followUp.kind === "skipped" ? outcome.followUp.reason : outcome.followUp.kind
         })`,
       );
       supersedeTaskRoute.respond(res, 200, {
         success: true,
         kind: "resumed",
-        task: superseded,
+        task: outcome.superseded,
         resumeTaskId: null,
       });
       return true;
     }
 
-    const resumeTaskId = followUp.task.id;
-    await backfillSupersedeTaskResumeTaskId(parsed.params.id, resumeTaskId);
-
+    const resumeTaskId = outcome.resumeTask.id;
     ensure({
       id: "task.superseded",
       flow: "task",
@@ -1865,9 +1958,9 @@ export async function handleTasks(
     supersedeTaskRoute.respond(res, 200, {
       success: true,
       kind: "resumed",
-      task: superseded,
+      task: outcome.superseded,
       resumeTaskId,
-      resumeTaskStatus: followUp.task.status,
+      resumeTaskStatus: outcome.resumeTask.status,
     });
     return true;
   }

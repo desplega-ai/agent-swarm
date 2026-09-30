@@ -590,6 +590,9 @@ describe("script connections", () => {
       // 184 alters agents and agent_tasks, which this migration-112-only fixture
       // does not create.
       markMigrationApplied(database, "184_model_catalog.sql");
+      // 185 and 186 alter agent_tasks, which this partial fixture creates without its columns.
+      markMigrationApplied(database, "185_agent_task_attempt.sql");
+      markMigrationApplied(database, "186_agent_task_attempt_runtime.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

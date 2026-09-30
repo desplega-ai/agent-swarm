@@ -1,30 +1,39 @@
 ------------------------- MODULE HeartbeatSimple -------------------------
 (***************************************************************************)
-(* Proposed heartbeat. NOT implemented; see the proposal doc.              *)
+(* The heartbeat as implemented (Reclaim + Unpin). ACTIONS.md maps each    *)
+(* action to code and lists where the code deviates from this model.     *)
 (*                                                                         *)
 (* One idea replaces supersede + resume child + backfill + reaper + reboot *)
 (* sweep + pool auto-assign: a stalled task is re-queued IN PLACE by one   *)
-(* compare-and-swap, and every worker write is fenced by the row's         *)
-(* `attempt` counter. A stale worker's writes then fail and it aborts.     *)
+(* compare-and-swap, and every worker write is fenced: it lands only while *)
+(* the row is in_progress on the runtime that started the current attempt *)
+(* (`attemptRuntimeId`). A stale worker's writes then fail and it aborts.  *)
 (*                                                                         *)
 (*   Reclaim:  UPDATE agent_tasks SET status='pending', attempt=attempt+1  *)
 (*             WHERE id=? AND status='in_progress' AND attempt=?           *)
 (*               AND lastUpdatedAt < :cutoff                               *)
 (*               AND NOT EXISTS (fresh active_sessions row)                *)
 (*             (+ DELETE active_sessions row, same transaction)            *)
-(*             attempt >= MaxGen  ->  status='failed' instead              *)
+(*             attempt + 1 > MaxGen  ->  status='failed' instead,          *)
+(*             attempt unchanged                                           *)
 (*   Unpin:    UPDATE ... SET status='unassigned' WHERE status='pending'   *)
 (*               AND attempt=? AND lastUpdatedAt < :pinGrace               *)
-(*   Worker writes (progress/complete): ... WHERE status='in_progress'     *)
-(*               AND agentId=? AND attempt=?                               *)
+(*   Start:    ... SET status='in_progress', attemptRuntimeId=:runtime     *)
+(*   Worker writes (progress/complete/defer/finish), same transaction:     *)
+(*             reject unless status='in_progress' AND agentId=:agent       *)
+(*               AND attemptRuntimeId=:runtime                             *)
+(* A Worker here is one runtime (worker process); `own` is the runtime     *)
+(* that started the current attempt, i.e. `attemptRuntimeId`.              *)
 (***************************************************************************)
 EXTENDS Naturals, FiniteSets
 
 CONSTANTS Workers, NTasks, MaxVer, MaxGen, MaxWorkerCrashes, MaxApiCrashes,
     GoneWorkers,  \* workers that never come back after a crash
-    FENCE,        \* ablation: worker writes check attempt (TRUE = proposed)
-    UNPIN,        \* ablation: expired pins return to the pool (TRUE = proposed)
-    RECLAIM_CAS   \* ablation: Reclaim re-checks staleness in its WHERE
+    FENCE,        \* ablation: worker writes check the attempt's runtime (TRUE = code)
+    UNPIN,        \* ablation: expired pins return to the pool (TRUE = code)
+    RECLAIM_CAS,  \* ablation: Reclaim re-checks staleness in its WHERE
+    UNPIN_OFFERED \* Unpin also returns stale offers (FALSE = code: offers keep
+                  \* the offline-offeree release, modeled here by Reject)
 
 None == "none"
 Tasks == 1..NTasks
@@ -62,18 +71,25 @@ Init ==
     /\ apiUp = TRUE /\ wc = 0 /\ ac = 0
     /\ liveKill = FALSE /\ badAcc = FALSE /\ zw = FALSE
 
+\* A runtime handed a task it still runs (reclaimed while unresponsive) keeps
+\* that process and does not start a second one (runner `activeTasks`
+\* keep-branch): the running copy becomes the current attempt.
 Start(w, t) ==
     /\ st' = [st EXCEPT ![t] = "in_progress"]
     /\ own' = [own EXCEPT ![t] = w]
-    /\ running' = [running EXCEPT ![w] = @ \cup {<<t, att[t]>>}]
+    /\ running' = [running EXCEPT ![w] = {r \in @ : r[1] # t} \cup {<<t, att[t]>>}]
     /\ sess' = [sess EXCEPT ![t] = "none"]
     /\ stale' = [stale EXCEPT ![t] = FALSE]
 
 ---------------------------------------------------------------------------
 (* Worker side: unchanged except for the attempt fence.                   *)
 
+\* Free for t: idle, or its only work is an earlier copy of t (the reclaimed
+\* row's capacity slot is free once it is back to pending/unassigned).
+FreeFor(w, t) == \A r \in running[w] : r[1] = t
+
 ClaimRead(w, t) ==
-    /\ apiUp /\ alive[w] /\ cl[w] = 0 /\ ~Busy(w) /\ st[t] = "unassigned"
+    /\ apiUp /\ alive[w] /\ cl[w] = 0 /\ FreeFor(w, t) /\ st[t] = "unassigned"
     /\ cl' = [cl EXCEPT ![w] = t]
     /\ UNCHANGED <<st, own, offTo, att, ver, stale, sess, running, alive, acc,
                    apiUp, wc, ac, liveKill, badAcc, zw>>
@@ -112,7 +128,7 @@ Reject(t) ==
                    ac, liveKill, badAcc, zw>>
 
 PollStart(w, t) ==
-    /\ apiUp /\ alive[w] /\ ~Busy(w) /\ st[t] = "pending" /\ own[t] = w
+    /\ apiUp /\ alive[w] /\ FreeFor(w, t) /\ st[t] = "pending" /\ own[t] = w
     /\ Start(w, t)
     /\ UNCHANGED <<offTo, att, ver, alive, cl, acc, apiUp, wc, ac, liveKill, badAcc, zw>>
 
@@ -122,11 +138,15 @@ RegisterSession(w, t) ==
     /\ UNCHANGED <<st, own, offTo, att, ver, stale, running, alive, cl, acc, apiUp,
                    wc, ac, liveKill, badAcc, zw>>
 
+\* The code does not know which attempt a process holds, only which runtime
+\* sent the write. NoZombieWrite checks that this runtime fence still keeps
+\* every stale attempt out.
+Holds(w, t) == \E g \in 0..MaxGen : <<t, g>> \in running[w]
 Fenced(w, t) ==
-    IF FENCE THEN Current(w, t) /\ st[t] = "in_progress" /\ own[t] = w
-             ELSE (\E g \in 0..MaxGen : <<t, g>> \in running[w]) /\ st[t] \notin Terminal
+    IF FENCE THEN Holds(w, t) /\ st[t] = "in_progress" /\ own[t] = w
+             ELSE Holds(w, t) /\ st[t] \notin Terminal
 
-\* Fenced: WHERE status='in_progress' AND agentId=? AND attempt=?
+\* Fenced: status='in_progress' AND agentId=:agent AND attemptRuntimeId=:runtime
 Progress(w, t) ==
     /\ apiUp /\ alive[w] /\ Fenced(w, t)
     /\ ver[t] < MaxVer
@@ -149,7 +169,7 @@ Complete(w, t) ==
 \* Any fenced write that matches 0 rows tells the worker to stop.
 AbortStale(w, t, g) ==
     /\ apiUp /\ alive[w] /\ <<t, g>> \in running[w]
-    /\ IF FENCE THEN (g # att[t] \/ st[t] # "in_progress" \/ own[t] # w)
+    /\ IF FENCE THEN (st[t] # "in_progress" \/ own[t] # w)
                 ELSE st[t] \in Terminal
     /\ running' = [running EXCEPT ![w] = @ \ {<<t, g>>}]
     /\ UNCHANGED <<st, own, offTo, att, ver, stale, sess, alive, cl, acc, apiUp,
@@ -200,8 +220,8 @@ ApiBoot ==
 Reclaim(t) ==
     /\ apiUp /\ st[t] = "in_progress" /\ (RECLAIM_CAS => (stale[t] /\ sess[t] # "live"))
     /\ liveKill' = (liveKill \/ LiveNow(t))
-    /\ st' = [st EXCEPT ![t] = IF att[t] + 1 >= MaxGen THEN "failed" ELSE "pending"]
-    /\ att' = [att EXCEPT ![t] = @ + 1]
+    /\ st' = [st EXCEPT ![t] = IF att[t] + 1 > MaxGen THEN "failed" ELSE "pending"]
+    /\ att' = [att EXCEPT ![t] = IF att[t] + 1 > MaxGen THEN @ ELSE @ + 1]
     /\ stale' = [stale EXCEPT ![t] = FALSE]
     /\ sess' = [sess EXCEPT ![t] = "none"]
     /\ UNCHANGED <<own, offTo, ver, running, alive, cl, acc, apiUp, wc, ac, badAcc, zw>>
@@ -211,7 +231,7 @@ Reclaim(t) ==
 Unpin(t) ==
     /\ UNPIN /\ apiUp /\ stale[t]
     /\ \/ st[t] = "pending" /\ own[t] # None
-       \/ st[t] = "offered"
+       \/ UNPIN_OFFERED /\ st[t] = "offered"
     /\ st' = [st EXCEPT ![t] = "unassigned"]
     /\ own' = [own EXCEPT ![t] = None]
     /\ offTo' = [offTo EXCEPT ![t] = None]

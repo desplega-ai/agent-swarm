@@ -180,7 +180,7 @@ describe("steering promotion on terminal tasks", () => {
     ]);
 
     const duringGrace = await codeLevelTriage();
-    expect(duringGrace.autoResumedTasks).toEqual([]);
+    expect(duringGrace.reclaimedTasks).toEqual([]);
     expect((await getTaskById(task.id))?.status).toBe("in_progress");
 
     const expiredSteeringTime = new Date(Date.now() - 6 * 60 * 1000).toISOString();
@@ -190,14 +190,12 @@ describe("steering promotion on terminal tasks", () => {
     ]);
     const afterGrace = await codeLevelTriage();
 
-    expect(afterGrace.autoResumedTasks).toHaveLength(1);
-    expect((await getTaskById(task.id))?.status).toBe("superseded");
+    expect(afterGrace.reclaimedTasks).toHaveLength(1);
+    // Reclaim keeps the row, so the steer stays pending on it and is delivered
+    // when the agent restarts the same task. Nothing is promoted to a new row.
+    expect((await getTaskById(task.id))?.status).toBe("pending");
     expect(await getSteeringMessagesForTask(task.id)).toEqual([
-      expect.objectContaining({
-        id: message.id,
-        status: "promoted",
-        promotedTaskId: expect.any(String),
-      }),
+      expect.objectContaining({ id: message.id, status: "pending" }),
     ]);
   });
 

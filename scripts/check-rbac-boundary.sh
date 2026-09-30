@@ -30,6 +30,10 @@
 #                                     (increment-4 hardening surface)
 #        src/tools/send-task.ts     — target-shape guard (task TO lead)
 #        src/http/poll.ts           — lead-vs-worker trigger routing
+#        src/tools/store-progress.ts — heartbeat reclaim fence: the lead holds
+#                                     no attempt, so it is not a stale worker
+#                                     write; the fence only ever narrows a
+#                                     worker, it never grants the lead access
 #   4. Principal-construction plumbing:
 #        src/http/kv.ts             — buildAuthCtx isLead local feeding can()
 
@@ -52,6 +56,7 @@ ALLOWED_PATTERNS=(
   'src/tools/join-swarm.ts|agent\.isLead \? "Lead" : "Worker"'
   'src/tools/send-task.ts|if \(taskOptions\.routingAffinity\?\.leadOnly && !agent\.isLead\) \{'
   'src/http/poll.ts|if \(agent\??\.isLead\) \{'
+  'src/tools/store-progress.ts|^[[:space:]]*!agent\.isLead &&$'
   'src/http/kv.ts|let isLead = false;'
   'src/http/kv.ts|isLead = agent\?\.isLead === true;'
   # Response-schema FIELD declarations (`isLeadTask` on the steering-fields

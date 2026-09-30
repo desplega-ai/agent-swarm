@@ -85,14 +85,14 @@ export const RESUME_GENERATION_TAG_PREFIX = "resume-generation:";
 
 /**
  * Tag set ONLY on a genuine same-agent `crash_recovery` pin (i.e. when the
- * resume is actually assigned back to the original agent). The heartbeat reaper
- * (`getStalePinnedResumes`) scopes its sweep to this tag so it cannot mistake a
+ * resume is actually assigned back to the original agent). The heartbeat Unpin
+ * (`getUnclaimedPins`) scopes its sweep to this tag so it cannot mistake a
  * *pooled* resume that `autoAssignPoolTasks` later flips to `pending` — which
  * keeps its original `createdAt` and would otherwise look identical to a stale
  * pin — for an unreclaimed crash pin, and so it never escalates a
  * `context_limits` / `manual_supersede` pin under a `crash_recovery` label.
  *
- * The literal is duplicated in `getStalePinnedResumes` (src/be/db.ts) rather
+ * The literal is duplicated in `getUnclaimedPins` (src/be/db.ts) rather
  * than imported, to avoid a worker-follow-up ↔ db import cycle — keep them in sync.
  */
 export const CRASH_RECOVERY_PIN_TAG = "crash-recovery-pin";
@@ -100,7 +100,7 @@ export const CRASH_RECOVERY_PIN_TAG = "crash-recovery-pin";
 /**
  * Tag set ONLY on a genuine same-agent `graceful_shutdown` pin. The stale-pin
  * reaper treats it like `CRASH_RECOVERY_PIN_TAG` while preserving which resume
- * path produced the pin. Keep the literal in sync with `getStalePinnedResumes`.
+ * path produced the pin. Keep the literal in sync with `getUnclaimedPins`.
  */
 export const GRACEFUL_SHUTDOWN_PIN_TAG = "graceful-shutdown-pin";
 
@@ -108,15 +108,15 @@ export const GRACEFUL_SHUTDOWN_PIN_TAG = "graceful-shutdown-pin";
  * Tag set on a reboot-sweep retry child that was pinned back to its
  * original agent (routing-affinity Phase 3). Same reaper-scoping purpose as
  * `CRASH_RECOVERY_PIN_TAG`/`GRACEFUL_SHUTDOWN_PIN_TAG` — kept in sync with
- * the literal duplicated in `getStalePinnedResumes` (src/be/db.ts).
+ * the literal duplicated in `getUnclaimedPins` (src/be/db.ts).
  */
 export const REBOOT_RETRY_PIN_TAG = "reboot-retry-pin";
 
 /**
  * Shared "is this agent even a pin candidate" gate: the row still exists and
  * is not `offline`. Used identically by `createResumeFollowUp`'s same-agent
- * pin and the heartbeat's reboot-retry pin (`runRebootSweep`) — both then
- * apply their own capacity (and, for resumes, freshness) rules on top.
+ * pin. Also read by rows created by the removed reboot sweep (`reboot-retry-pin`),
+ * which Unpin still covers.
  */
 export async function getPinCandidateAgent(agentId: string): Promise<Agent | null> {
   const candidate = await getAgentById(agentId);
@@ -396,10 +396,9 @@ export type CreateResumeFollowUpResult =
  * unassigned pool only when the agent is genuinely gone (graceful close →
  * `offline`) or its row is absent.
  *
- * Gone-agent / never-reclaimed case: a pin whose agent never returns is NOT
- * re-pooled — the heartbeat's stale-resume reaper (`escalateUnreclaimedResumes`
- * in `src/heartbeat/heartbeat.ts`) escalates it to a Lead re-delegation decision
- * once `HEARTBEAT_RESUME_PIN_GRACE_MIN` lapses.
+ * Gone-agent / never-reclaimed case: a pin whose agent never returns goes back
+ * to the affinity-gated pool: the heartbeat's Unpin (`unpinUnclaimedTasks` in
+ * `src/heartbeat/heartbeat.ts`) once `HEARTBEAT_RESUME_PIN_GRACE_MIN` lapses.
  *
  * The crash pin is gated by `HEARTBEAT_PIN_CRASH_RESUME`; the graceful shutdown
  * pin is gated by `HEARTBEAT_PIN_GRACEFUL_RESUME`. Both default on.
@@ -511,7 +510,7 @@ export async function createResumeFollowUp(args: {
     `${RESUME_GENERATION_TAG_PREFIX}${getNextResumeGeneration(parent)}`,
   ];
   // Mark a GENUINE same-agent crash pin (crash_recovery that actually pinned to
-  // the original agent) so the heartbeat reaper can scope to these only. A
+  // the original agent) so the heartbeat Unpin can scope to these only. A
   // pooled resume — including a crash_recovery resume that fell to the pool at
   // capacity — never gets this tag, so it can't be mistaken for a stale pin
   // after autoAssignPoolTasks flips it to `pending`.
@@ -604,103 +603,6 @@ export async function createResumeFollowUp(args: {
   return { kind: "created", task: created };
 }
 
-/** Result of `createRerouteDecisionTask`. */
-export type CreateRerouteDecisionResult =
-  | { kind: "created"; task: AgentTask }
-  | { kind: "skipped"; reason: "lead_not_found" | "duplicate_exists" };
-
-/**
- * Hand the Lead a re-delegation DECISION task for a crash-recovery resume that
- * was pinned to its original agent but never reclaimed within the grace window
- * (DES-523). The Lead receives context — the crashed agent's identity + the
- * original work — and must re-dispatch via `send-task` with an explicit
- * `agentId`; it does NOT execute the work itself, and the work is never
- * re-pooled. Mirrors `createWorkerTaskFollowUp`'s Lead-owned-follow-up shape.
- *
- * Invoked by the heartbeat reaper (`escalateUnreclaimedResumes`), NOT at crash
- * time: "gone" can't be distinguished from "restarting" at detection time, so
- * the Lead path is only reached after a pin has demonstrably failed to be
- * reclaimed.
- *
- * Discriminator: `taskType: "reroute-decision"` (NOT "follow-up") so it is
- * distinguishable from ordinary completion follow-ups for dedup and so the
- * `send-task` Slack re-delegation guard (which only fires for `taskType ===
- * "follow-up"`) never blocks the Lead's re-dispatch.
- *
- * Idempotent: skips when a non-terminal reroute-decision child already exists
- * for the original. No lead → no-op (fail-safe), mirroring
- * `createWorkerTaskFollowUp`.
- *
- * @param staleResume the failed pinned resume (R1). The generation budget for
- *   the Lead's re-dispatch is derived from it (`gen(R1)+1`), NOT from the root
- *   `original` (which carries no resume-generation tag and would reset to 1
- *   every escalation cycle, defeating MAX_RESUME_GENERATIONS via the Lead path).
- * @param maxGenerations passed in (rather than imported from heartbeat.ts) to
- *   avoid a circular import — heartbeat.ts already imports this module.
- */
-export async function createRerouteDecisionTask(args: {
-  original: AgentTask;
-  staleResume: AgentTask;
-  reason: ResumeReason;
-  maxGenerations: number;
-}): Promise<CreateRerouteDecisionResult> {
-  const { original, staleResume, reason, maxGenerations } = args;
-
-  const leadAgent = await getLeadAgent();
-  if (!leadAgent) return { kind: "skipped", reason: "lead_not_found" };
-
-  // Idempotency: a prior sweep may already have escalated this original.
-  if (await hasNonTerminalRerouteDecisionChild(original.id)) {
-    return { kind: "skipped", reason: "duplicate_exists" };
-  }
-
-  const crashedAgent = original.agentId ? await getAgentById(original.agentId) : null;
-  const agentName = crashedAgent?.name || original.agentId?.slice(0, 8) || "unknown";
-  const identitySlice = crashedAgent?.identityMd
-    ? `${crashedAgent.identityMd.slice(0, 500)}${crashedAgent.identityMd.length > 500 ? "..." : ""}`
-    : "(no identity recorded)";
-  const attachmentsBlock = formatAttachmentsBlock(await getTaskAttachments(original.id));
-
-  const decision = resolveTemplate("task.reroute.decision", {
-    original_agent_name: agentName,
-    original_agent_identity: identitySlice,
-    original_task_id: original.id,
-    reason,
-    task_desc: original.task.slice(0, 200),
-    // Derive from the FAILED PIN (staleResume), not `original` (the root with no
-    // generation tag) — otherwise every escalation resets to gen 1 and the
-    // MAX_RESUME_GENERATIONS cap is never reached on the Lead path.
-    generation_next: getNextResumeGeneration(staleResume),
-    max_generations: maxGenerations,
-    artifacts_block: attachmentsBlock,
-  });
-
-  // Lead-owned `pending` decision task (createTaskExtended derives `pending`
-  // from a set agentId). Slack/VCS/etc. context is inherited from the original
-  // via parentTaskId. taskType is the distinct "reroute-decision" marker.
-  const created = await createTaskExtended(decision.text, {
-    agentId: leadAgent.id,
-    routingReason: "reroute_fault",
-    routingSource: "engine_default",
-    creatorAgentId: original.creatorAgentId,
-    source: "system",
-    taskType: "reroute-decision",
-    tags: ["reroute-decision"],
-    priority: Math.min(100, (original.priority ?? 50) + 10),
-    parentTaskId: original.id,
-    // Inherit Slack/VCS context from the original, but NOT its outputSchema: this
-    // is a control-plane task the Lead completes by re-delegating via send-task,
-    // not by producing the original work's structured output. Inheriting it would
-    // make store-progress reject the Lead's completion and strand the decision
-    // (blocking further escalation via the duplicate-decision guard) — DES-523.
-    inheritParentOutputSchema: false,
-    inheritParentRoutingAffinity: false,
-    routingAffinity: leadControlPlaneRoutingAffinity(),
-  });
-
-  return { kind: "created", task: created };
-}
-
 /** Result of `createPoolStarvationDecisionTask`. */
 export type CreatePoolStarvationDecisionResult =
   | { kind: "created"; task: AgentTask }
@@ -720,12 +622,10 @@ function leadControlPlaneRoutingAffinity(): RoutingAffinity {
  * Hand the Lead a re-delegation DECISION task for a pooled, affinity-tagged
  * task that has sat `unassigned` past `POOL_AFFINITY_ESCALATION_MIN` with
  * ZERO eligible registered agents (routing affinity Phase 3). This is the
- * "queue, then escalate" fallback for the pool legs (7/8) that `createResumeFollowUp`
- * and the reboot-retry pin can fall to — mirrors `createRerouteDecisionTask`'s
- * shape (same `taskType: "reroute-decision"` discriminator, so it reuses the
- * same idempotency check and Slack re-delegation carve-out) but for a task
- * that was never pinned in the first place, so there is no `staleResume` /
- * resume-generation budget to derive.
+ * "queue, then escalate" fallback for the pool legs that `createResumeFollowUp`
+ * and the heartbeat's Unpin can fall to. `taskType: "reroute-decision"` is the
+ * discriminator, so it shares the idempotency check and the Slack
+ * re-delegation carve-out with every other Lead re-delegation decision.
  *
  * Invoked by the heartbeat (`escalateStarvedPoolTasks`), which has already
  * confirmed no registered agent (any status) satisfies `isAgentEligibleForTask`
@@ -769,8 +669,8 @@ export async function createPoolStarvationDecisionTask(args: {
     tags: ["reroute-decision", "pool-starvation"],
     priority: Math.min(100, (original.priority ?? 50) + 10),
     parentTaskId: original.id,
-    // Same rationale as createRerouteDecisionTask: don't hold the Lead's
-    // re-delegation decision to the original work's output contract.
+    // Don't hold the Lead's re-delegation decision to the original work's
+    // output contract: the Lead completes it by re-delegating via send-task.
     inheritParentOutputSchema: false,
     inheritParentRoutingAffinity: false,
     // Explicit authorization, not an inherited-affinity side effect. Without

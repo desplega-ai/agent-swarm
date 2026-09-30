@@ -242,7 +242,16 @@ export async function assignUnassignedTaskPending(
   return row ? rowToAgentTask(row) : null;
 }
 
-export async function startTask(taskId: string): Promise<AgentTask | null> {
+/**
+ * Starts an attempt. `runtimeInstanceId` is the runtime that will execute it;
+ * it is stamped as `attemptRuntimeId` (the attempt fence, see
+ * `src/tasks/attempt-fence.ts`). Omit it when the caller sent none: the stamp
+ * is then cleared, never left pointing at an earlier attempt's runtime.
+ */
+export async function startTask(
+  taskId: string,
+  opts: { runtimeInstanceId?: string | null } = {},
+): Promise<AgentTask | null> {
   const oldTask = await getTaskById(taskId);
   if (!oldTask) return null;
 
@@ -252,9 +261,9 @@ export async function startTask(taskId: string): Promise<AgentTask | null> {
   }
 
   const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET status = 'in_progress', lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    `UPDATE agent_tasks SET status = 'in_progress', attemptRuntimeId = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded') RETURNING *`,
-    [taskId],
+    [opts.runtimeInstanceId ?? null, taskId],
   );
   if (row && oldTask) {
     try {
@@ -466,11 +475,13 @@ export async function failTask(
      */
     expectedLastUpdatedAt?: string;
     /**
-     * `false` skips the dependent cascade. Only for a caller that settles the
-     * dependents itself — the reboot sweep re-points them to the retry child,
-     * then cascades whatever is left.
+     * Compare-and-swap on the session the caller observed (the heartbeat's
+     * classifier read). `null` = no session row existed, so none may exist
+     * now; an ISO time = the session's `lastHeartbeatAt`, so no session may
+     * have heartbeated after it. Omit to skip the check. Same guard as
+     * `reclaimTask`: a tool call after the read cancels the write.
      */
-    cascadeDependents?: boolean;
+    observedSessionHeartbeatAt?: string | null;
   } = {},
 ): Promise<AgentTask | null> {
   const oldTask = await getTaskById(id);
@@ -485,18 +496,27 @@ export async function failTask(
 
   const finishedAt = new Date().toISOString();
   const scrubbedReason = scrubSecrets(reason);
+  const checkSession = opts.observedSessionHeartbeatAt !== undefined ? 1 : 0;
+  const observedHeartbeat = opts.observedSessionHeartbeatAt ?? null;
   // Status predicate re-checks the idempotency guard atomically (a racing
   // terminal transition can land during the await above).
   const row = await getDbClient().get<AgentTaskRow>(
     `UPDATE agent_tasks SET status = 'failed', failureReason = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
-         AND (? IS NULL OR lastUpdatedAt = ?) RETURNING *`,
+         AND (? IS NULL OR lastUpdatedAt = ?)
+         AND (? = 0 OR NOT EXISTS (
+           SELECT 1 FROM active_sessions s
+            WHERE s.taskId = agent_tasks.id AND (? IS NULL OR s.lastHeartbeatAt > ?)
+         )) RETURNING *`,
     [
       scrubbedReason,
       finishedAt,
       id,
       opts.expectedLastUpdatedAt ?? null,
       opts.expectedLastUpdatedAt ?? null,
+      checkSession,
+      observedHeartbeat,
+      observedHeartbeat,
     ],
   );
   if (row && oldTask) {
@@ -554,12 +574,10 @@ export async function failTask(
 
     // Cascade-fail any non-terminal tasks that depend on this one.
     // The cascade is recursive (transitive closure) and cycle-safe.
-    if (opts.cascadeDependents !== false) {
-      try {
-        await dependencies.cascadeFailDependents(id, "failed");
-      } catch (err) {
-        console.error("[failTask] cascade-fail dependents error:", err);
-      }
+    try {
+      await dependencies.cascadeFailDependents(id, "failed");
+    } catch (err) {
+      console.error("[failTask] cascade-fail dependents error:", err);
     }
   }
   return row ? rowToAgentTask(row) : null;
@@ -924,7 +942,10 @@ export async function pauseTask(id: string): Promise<AgentTask | null> {
  * Resume a paused task - transitions it back to in_progress.
  * Called when worker restarts and picks up paused work.
  */
-export async function resumeTask(taskId: string): Promise<AgentTask | null> {
+export async function resumeTask(
+  taskId: string,
+  opts: { runtimeInstanceId?: string | null } = {},
+): Promise<AgentTask | null> {
   const oldTask = await getTaskById(taskId);
   if (!oldTask || oldTask.status !== "paused") return null;
 
@@ -932,10 +953,11 @@ export async function resumeTask(taskId: string): Promise<AgentTask | null> {
     `UPDATE agent_tasks
        SET status = 'in_progress',
            was_paused = 1,
+           attemptRuntimeId = ?,
            lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ? AND status = 'paused'
        RETURNING *`,
-    [taskId],
+    [opts.runtimeInstanceId ?? null, taskId],
   );
 
   if (row && oldTask) {
@@ -1033,6 +1055,100 @@ export async function resetOrphanedInProgressTasksForAgent(
  * Used by hooks to detect task cancellation and stop the worker loop.
  * Returns tasks cancelled within the last 5 minutes.
  */
+/**
+ * Heartbeat Reclaim (specs/tla/heartbeat/HeartbeatSimple.tla `Reclaim`).
+ * Puts a stalled task back to `pending` on the SAME row, still pinned to its
+ * agent, and deletes its session row, in one transaction. No new task row.
+ *
+ * Everything the heartbeat's classifier read is re-checked in the WHERE, so a
+ * worker write that lands after the read cancels the reclaim: `attempt` and
+ * `lastUpdatedAt` must be the values it saw, and no session may be newer than
+ * the one it saw (`observedSessionHeartbeatAt`: `null` = there was none).
+ */
+export async function reclaimTask(
+  id: string,
+  opts: {
+    expectedAttempt: number;
+    expectedLastUpdatedAt: string;
+    observedSessionHeartbeatAt: string | null;
+    reason: string;
+  },
+): Promise<AgentTask | null> {
+  return getDbClient().transaction(async (tx) => {
+    const row = await tx.get<AgentTaskRow>(
+      `UPDATE agent_tasks
+         SET status = 'pending',
+             attempt = attempt + 1,
+             lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+         WHERE id = ?
+           AND status = 'in_progress'
+           AND attempt = ?
+           AND lastUpdatedAt = ?
+           AND NOT EXISTS (
+             SELECT 1 FROM active_sessions s
+              WHERE s.taskId = agent_tasks.id AND (? IS NULL OR s.lastHeartbeatAt > ?)
+           )
+         RETURNING *`,
+      [
+        id,
+        opts.expectedAttempt,
+        opts.expectedLastUpdatedAt,
+        opts.observedSessionHeartbeatAt,
+        opts.observedSessionHeartbeatAt,
+      ],
+    );
+    if (!row) return null;
+    await tx.run("DELETE FROM active_sessions WHERE taskId = ?", [id]);
+    try {
+      await dependencies.createLogEntry({
+        eventType: "task_status_change",
+        taskId: id,
+        agentId: row.agentId ?? undefined,
+        oldValue: "in_progress",
+        newValue: "pending",
+        metadata: { reclaimed: true, attempt: row.attempt ?? 0, reason: scrubSecrets(opts.reason) },
+      });
+    } catch {}
+    return rowToAgentTask(row);
+  });
+}
+
+/**
+ * Heartbeat Unpin (HeartbeatSimple.tla `Unpin`). A pinned task whose agent did
+ * not pick it up within the grace window goes back to the pool. The caller
+ * selects the candidates (`getUnclaimedPins`: reclaimed rows and legacy resume
+ * pins), so a directly assigned task queued behind a busy agent keeps its pin.
+ * `routingAffinity` is stamped from the previous holder when the row has none,
+ * so the pool stays role-gated. CAS on the `lastUpdatedAt` the caller read: a
+ * start in between wins.
+ */
+export async function unpinTask(
+  id: string,
+  opts: { expectedLastUpdatedAt: string; routingAffinity?: string | null },
+): Promise<AgentTask | null> {
+  const row = await getDbClient().get<AgentTaskRow>(
+    `UPDATE agent_tasks
+       SET status = 'unassigned',
+           agentId = NULL,
+           routingAffinity = COALESCE(routingAffinity, ?),
+           lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE id = ? AND status = 'pending' AND lastUpdatedAt = ?
+       RETURNING *`,
+    [opts.routingAffinity ?? null, id, opts.expectedLastUpdatedAt],
+  );
+  if (!row) return null;
+  try {
+    await dependencies.createLogEntry({
+      eventType: "task_status_change",
+      taskId: id,
+      oldValue: "pending",
+      newValue: "unassigned",
+      metadata: { unpinned: true, attempt: row.attempt ?? 0 },
+    });
+  } catch {}
+  return rowToAgentTask(row);
+}
+
 export async function getRecentlyCancelledTasksForAgent(agentId: string): Promise<AgentTask[]> {
   const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
   const rows = await getDbClient().query<AgentTaskRow>(
@@ -1062,11 +1178,14 @@ export async function deleteTask(id: string): Promise<boolean> {
 
 export async function updateTaskProgress(id: string, progress: string): Promise<AgentTask | null> {
   const scrubbedProgress = scrubSecrets(progress);
+  // A reclaimed row waiting for its next attempt (`attempt > 0`, pending or
+  // back in the pool) is not revived: the write comes from the attempt the
+  // heartbeat took the row away from.
   const row = await getDbClient().get<AgentTaskRow>(
     `UPDATE agent_tasks SET progress = ?,
        status = CASE WHEN status IN ('completed', 'failed', 'cancelled', 'superseded') THEN status ELSE 'in_progress' END,
        lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? RETURNING *`,
+       WHERE id = ? AND NOT (attempt > 0 AND status IN ('pending', 'unassigned')) RETURNING *`,
     [scrubbedProgress, id],
   );
   if (row) {

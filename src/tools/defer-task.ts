@@ -13,6 +13,7 @@ import {
   updateAgentStatusFromCapacity,
 } from "@/be/db";
 import { reconcileDeferredTaskWaits } from "@/scheduler/deferred-task-waits";
+import { staleAttemptWriteReason } from "@/tasks/attempt-fence";
 import { runTaskTerminalEffects } from "@/tasks/task-terminal-effects";
 import { getTaskOutputValidationError } from "@/tasks/terminal-result-guard";
 import { assertOwnsTask, ownerCtx } from "@/tools/task-tool-ctx";
@@ -256,6 +257,14 @@ export const registerDeferTaskTool = (server: McpServer) => {
         return toolErr(`Task ${taskId} is already ${task.status}; nothing to defer.`);
       }
 
+      const fenceCaller = {
+        agentId: agent.id,
+        isLead: agent.isLead,
+        runtimeInstanceId: requestInfo.runtimeInstanceId,
+      };
+      const staleAttempt = staleAttemptWriteReason(task, fenceCaller);
+      if (staleAttempt) return toolErr(staleAttempt);
+
       // A workflow step's completion drives `src/workflows/resume.ts` to advance
       // `next` nodes immediately using this call's output. The scheduled wake-up
       // task runs outside that workflow run and has no way to feed its eventual
@@ -306,6 +315,16 @@ export const registerDeferTaskTool = (server: McpServer) => {
 
       try {
         const committed = await getDbClient().transaction(async () => {
+          // Re-check the attempt fence on a fresh read inside the transaction:
+          // a reclaim between the check above and here must stop both the
+          // schedule INSERT and the terminal write below.
+          const current = await getTaskById(taskId);
+          const staleNow = current
+            ? current.agentId === requestInfo.agentId
+              ? staleAttemptWriteReason(current, fenceCaller)
+              : `Task "${taskId}" is not assigned to you.`
+            : `Task with ID "${taskId}" not found.`;
+          if (staleNow) throw new DeferAbortedError(staleNow);
           const watchedAgentNames: string[] = [];
           for (const watchedId of watchedTaskIds) {
             if (watchedId === taskId)

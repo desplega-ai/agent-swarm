@@ -237,6 +237,8 @@ declare module "swarm-extension" {
         }
       | undefined;
     routingAffinityInvalid?: boolean | undefined;
+    attempt?: number | undefined;
+    attemptRuntimeId?: string | undefined;
   };
 
   export type ActiveSession = {

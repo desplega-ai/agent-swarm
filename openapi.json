@@ -466,6 +466,13 @@
           },
           "routingAffinityInvalid": {
             "type": "boolean"
+          },
+          "attempt": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "attemptRuntimeId": {
+            "type": "string"
           }
         },
         "required": [
@@ -47311,7 +47318,7 @@
             }
           },
           "403": {
-            "description": "Not assigned to this agent",
+            "description": "Not assigned to this agent, or the current attempt runs in another runtime (attempt fence)",
             "content": {
               "application/json": {
                 "schema": {
@@ -47485,7 +47492,7 @@
             }
           },
           "403": {
-            "description": "Task belongs to another agent",
+            "description": "Task belongs to another agent, or its current attempt runs in another runtime",
             "content": {
               "application/json": {
                 "schema": {
@@ -47709,7 +47716,7 @@
             }
           },
           "403": {
-            "description": "Task belongs to another agent",
+            "description": "Task belongs to another agent, or its current attempt runs in another runtime",
             "content": {
               "application/json": {
                 "schema": {
