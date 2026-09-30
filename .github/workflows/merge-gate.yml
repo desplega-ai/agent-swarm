@@ -617,27 +617,16 @@ jobs:
 
       - name: Run tests
         id: tests
-        # apps/evals/ is excluded from the root run via bunfig.toml pathIgnorePatterns
-        # (it's a separate bun package with its own deps + its own CI test step in
-        # the lint-and-typecheck job). --parallel=4 runs each test file in its own
-        # worker process (implies --isolate), 4 at a time per runner; the restored
-        # per-file durations balance files across the 2 shards by total time.
-        # --timeout 10000 matches ci.yml (main): 4 workers saturate the runner and
-        # bunfig.toml no longer sets a global retry.
         run: |
-          start=$(date +%s%3N)
           set +e
-          mkdir -p .bun-test-timings/next
-          echo "timings snapshot: $(cat .bun-test-timings/snapshot-key.txt 2>/dev/null || echo none)"
-          # shellcheck disable=SC2046
-          bun run test:root -- --timeout 10000 --parallel=4 --shard=${{ matrix.shard }}/2 \
-            --update-timings --timings=.bun-test-timings/next/${{ matrix.shard }}.json \
-            $(ls .bun-test-timings/*.json 2>/dev/null | sed 's/^/--timings=/')
-          code=$?
-          set -e
-          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
-          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
-          exit $code
+          timeout 420 bun test --timeout 10000 src/tests/rbac-admission-e2e.test.ts 2>&1 | tail -80
+          echo "=== bun test exit: ${PIPESTATUS[0]}"
+          ls -d /tmp/rbac-e2e-* 2>/dev/null
+          for f in /tmp/rbac-e2e-*/*.log; do echo "=== $f"; tail -60 "$f"; done
+          ps aux | grep "src/http.ts" | grep -v grep | head
+          echo "duration_ms=1" >> "$GITHUB_OUTPUT"
+          echo "status=failure" >> "$GITHUB_OUTPUT"
+          exit 1
 
       - name: Upload this shard's test timings
         if: always()
