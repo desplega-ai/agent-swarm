@@ -498,7 +498,10 @@ export function serializeScenario(s: Scenario): SerializedScenario {
     lead: s.lead ? serializeWorkerSpec(s.lead) : null,
     baselineOf: s.baselineOf ?? null,
     card: scenarioCard(s.id),
-    suite: suiteVersionFor(s.id, s.version) === null ? null : `${SUITE_ID}@${suiteVersionFor(s.id, s.version)}`,
+    suite:
+      suiteVersionFor(s.id, s.version) === null
+        ? null
+        : `${SUITE_ID}@${suiteVersionFor(s.id, s.version)}`,
     tasks: s.tasks.map((t) => ({
       title: t.title,
       description: t.description,

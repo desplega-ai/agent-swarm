@@ -98,11 +98,6 @@
   font-family: var(--font-mono);
 }
 
-.hm-any-cell .hm-frac,
-.hm-any-cell .hm-sub {
-  display: block;
-}
-
 .hm-sub {
   font-size: 9.5px;
   color: var(--dim);
@@ -114,6 +109,11 @@
   font-size: 12px;
   font-weight: 600;
   color: var(--text);
+}
+
+.hm-any-cell .hm-frac,
+.hm-any-cell .hm-sub {
+  display: block;
 }
 
 .hm-btn {
@@ -150,7 +150,7 @@
 }
 
 .hm-btn.empty {
-  background: transparent !important;
+  background: transparent;
   border: 1px dotted var(--border);
   cursor: default;
 }

@@ -513,6 +513,8 @@ export interface ReliabilityRow {
   passPowK: number;
   /** Scenarios that have at least k graded attempts. */
   scenarios: number;
+  /** Scenarios with any graded attempt: `scenarios` out of this many feed pass^k. */
+  scenariosTotal: number;
   /** passAt1 - passPowK: what repeating the task costs. 0 = fully reliable. */
   gap: number;
 }
@@ -544,6 +546,7 @@ export function reliabilityRows(
       passAt1: c.passAt1,
       passPowK: point.passPowK,
       scenarios: point.scenarios,
+      scenariosTotal: c.curve[0]?.scenarios ?? point.scenarios,
       gap: Math.max(0, c.passAt1 - point.passPowK),
     });
   }
@@ -584,7 +587,9 @@ export function trendLine(c: ReliabilityConfig, metric: TrendMetric): TrendLine 
 
 /** Configs worth drawing by default: the best few by score, at least two runs each. */
 export function defaultTrendConfigs(rel: ReliabilityResponse, limit = 3): string[] {
-  const withHistory = rel.configs.filter((c) => c.trend.filter((p) => p.score !== null).length >= 2);
+  const withHistory = rel.configs.filter(
+    (c) => c.trend.filter((p) => p.score !== null).length >= 2,
+  );
   const pool = withHistory.length > 0 ? withHistory : rel.configs;
   return pool
     .slice()

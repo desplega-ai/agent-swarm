@@ -2,7 +2,7 @@ import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { getReliability, getSuites } from "../api.ts";
 import { ConfigChip } from "../components/ConfigChip.tsx";
 import { seriesColor } from "../components/charts/chart-utils.ts";
-import { type TrendSeries, TrendChart } from "../components/charts/TrendChart.tsx";
+import { TrendChart, type TrendSeries } from "../components/charts/TrendChart.tsx";
 import { fmtAgo, fmtDate } from "../components/format.ts";
 import { Seg } from "../components/Seg.tsx";
 import { Spinner } from "../components/Spinner.tsx";
@@ -78,10 +78,11 @@ function ReliabilityPanel(props: {
   const { rel, k } = props;
   const { rows, waiting } = useMemo(() => reliabilityRows(rel, k), [rel, k]);
   const ks = useMemo(
-    () => Array.from({ length: rel.maxK - 1 }, (_, i) => i + 2).map((n) => ({
-      key: String(n),
-      label: `k = ${n}`,
-    })),
+    () =>
+      Array.from({ length: rel.maxK - 1 }, (_, i) => i + 2).map((n) => ({
+        key: String(n),
+        label: `k = ${n}`,
+      })),
     [rel.maxK],
   );
   return (
@@ -147,9 +148,14 @@ function ReliabilityPanel(props: {
                 <span className="rel-num">{pct(row.passAt1)}</span>
                 <span className="rel-num">
                   {pct(row.passPowK)}
-                  {row.scenarios < rel.configs.find((c) => c.configId === row.configId)?.curve[0]?.scenarios!
-                    ? <span className="dim" title={`Over ${row.scenarios} scenarios with ${k}+ graded attempts`}>*</span>
-                    : null}
+                  {row.scenarios < row.scenariosTotal ? (
+                    <span
+                      className="dim"
+                      title={`Over ${row.scenarios} of ${row.scenariosTotal} scenarios: the rest have fewer than ${k} graded attempts`}
+                    >
+                      *
+                    </span>
+                  ) : null}
                 </span>
                 <span className={row.gap >= 0.25 ? "rel-num tone-red" : "rel-num dim"}>
                   {row.gap < 0.005 ? "0" : `−${Math.round(row.gap * 100)}`}
@@ -222,7 +228,7 @@ function TrendPanel(props: {
           <Seg options={METRICS} value={metric} onChange={props.onMetric} />
         </div>
       </div>
-      <div className="rel-picks" role="group" aria-label="Configs to draw">
+      <fieldset className="rel-picks" aria-label="Configs to draw">
         {rel.configs.map((c) => {
           const on = selected.includes(c.configId);
           const idx = selected.indexOf(c.configId);
@@ -246,7 +252,7 @@ function TrendPanel(props: {
             </button>
           );
         })}
-      </div>
+      </fieldset>
       <TrendChart
         series={series}
         yFormat={(v) => (metric === "score" ? v.toFixed(2) : `${Math.round(v * 100)}%`)}
@@ -262,7 +268,9 @@ function TrendPanel(props: {
           : runs === 1
             ? "One run so far: a trend needs two or more. Each new run adds a point."
             : `${runs} runs drawn`}
-        {selected.length >= MAX_TREND_CONFIGS ? ` · at most ${MAX_TREND_CONFIGS} configs at once` : ""}
+        {selected.length >= MAX_TREND_CONFIGS
+          ? ` · at most ${MAX_TREND_CONFIGS} configs at once`
+          : ""}
       </p>
     </div>
   );
@@ -356,8 +364,7 @@ export default function ReliabilityView(): ReactNode {
             onMetric={setMetric}
           />
           <p className="dim lb-foot">
-            Latest run in this suite:{" "}
-            {(() => {
+            Latest run in this suite: {(() => {
               const last = data.configs
                 .flatMap((c) => c.trend)
                 .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];

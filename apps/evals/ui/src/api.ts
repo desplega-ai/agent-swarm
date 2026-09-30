@@ -290,7 +290,11 @@ export function getReliability(suite: string, maxK?: number): Promise<Reliabilit
 }
 
 /** The attempts behind one heatmap cell, newest run first. */
-export function getCell(suite: string, scenarioId: string, configId: string): Promise<CellResponse> {
+export function getCell(
+  suite: string,
+  scenarioId: string,
+  configId: string,
+): Promise<CellResponse> {
   const params = new URLSearchParams({ suite, scenario: scenarioId, config: configId });
   return request(`/api/analytics/cell?${params.toString()}`);
 }

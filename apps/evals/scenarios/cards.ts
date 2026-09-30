@@ -99,7 +99,8 @@ export const SCENARIO_CARDS: Readonly<Record<string, ScenarioCard>> = {
     ],
   },
   "script-authoring": {
-    summary: "Can an agent write, save and run a reusable typed swarm script through the swarm tools?",
+    summary:
+      "Can an agent write, save and run a reusable typed swarm script through the swarm tools?",
     agentDoes:
       "Saves one agent-scoped TypeScript script that fetches task details through the swarm SDK and returns the total count, the completion rate and the title of the highest-priority completed task. It then runs the script at least once on real task ids and reports the output. Raw fetch, curl and API keys are off limits.",
     scoredBy:

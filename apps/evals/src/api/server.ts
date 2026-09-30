@@ -53,6 +53,12 @@ import {
 } from "../types.ts";
 import { type AnalyticsSourceRow, buildAnalytics } from "./analytics.ts";
 import {
+  buildCell,
+  CELL_ATTEMPT_LIMIT,
+  CELL_ATTEMPTS_SQL,
+  parseCellQuery,
+} from "./analytics-cell.ts";
+import {
   ANALYTICS_SQL,
   mapAnalyticsRow,
   numOrNull,
@@ -60,12 +66,6 @@ import {
   SUITE_ANALYTICS_SQL,
   SUITES_SQL,
 } from "./analytics-source.ts";
-import {
-  buildCell,
-  CELL_ATTEMPT_LIMIT,
-  CELL_ATTEMPTS_SQL,
-  parseCellQuery,
-} from "./analytics-cell.ts";
 import {
   createConfig,
   effortLevelsFor,

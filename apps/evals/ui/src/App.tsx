@@ -7,7 +7,7 @@ import {
 } from "./api.ts";
 import { navigate, useHashRoute } from "./hooks.ts";
 import ConfigsPage from "./pages/ConfigsPage.tsx";
-import LeaderboardPage from "./pages/LeaderboardPage.tsx";
+import LeaderboardPage, { leaderboardTab } from "./pages/LeaderboardPage.tsx";
 import RunDetailsPage from "./pages/RunDetailsPage.tsx";
 import RunsPage from "./pages/RunsPage.tsx";
 import ScenariosPage from "./pages/ScenariosPage.tsx";
@@ -136,12 +136,8 @@ export default function App(): ReactNode {
     // keyed by the hash so `#/runs?config=x` opens narrowed and `#/runs` resets it
     page = <RunsPage key={path} />;
   } else {
-    // Home: `#/`, `#/leaderboard`, `#/leaderboard/analytics` (and the legacy `#/analytics`).
-    page = (
-      <LeaderboardPage
-        tab={parts[1] === "analytics" || parts[0] === "analytics" ? "analytics" : "ranking"}
-      />
-    );
+    // Home: `#/`, `#/leaderboard[/heatmap|/reliability|/analytics]` (and the legacy `#/analytics`).
+    page = <LeaderboardPage tab={leaderboardTab(parts)} />;
   }
 
   const section =

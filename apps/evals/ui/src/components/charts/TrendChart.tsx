@@ -96,7 +96,8 @@ export function TrendChart(props: {
 
   const onMove = (e: MouseEvent<SVGSVGElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    const dataX = layout.x0 + ((e.clientX - rect.left - marginLeft) / innerW) * (layout.x1 - layout.x0);
+    const dataX =
+      layout.x0 + ((e.clientX - rect.left - marginLeft) / innerW) * (layout.x1 - layout.x0);
     let nearest = layout.snapXs[0] as number;
     for (const x of layout.snapXs) {
       if (Math.abs(x - dataX) < Math.abs(nearest - dataX)) nearest = x;

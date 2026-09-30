@@ -313,7 +313,11 @@ function Grid(props: {
                     <button
                       type="button"
                       className={cls}
-                      style={{ background: passRateColor(cell?.passRate ?? null) }}
+                      style={
+                        cell === undefined
+                          ? undefined
+                          : { background: passRateColor(cell.passRate) }
+                      }
                       title={cellTitle(cell, scenarioId, configId)}
                       aria-label={cellTitle(cell, scenarioId, configId)}
                       aria-pressed={isSel}
