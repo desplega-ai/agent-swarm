@@ -1298,7 +1298,12 @@ export class PiMonoAdapter implements ProviderAdapter {
 
     // 5. Create resource loader with system prompt + extensions. SDK sessions
     // load no built-in pi extension, so tool_search is added explicitly.
-    const settingsManager = SettingsManager.create(config.cwd, getAgentDir());
+    // The cwd is a task repo clone, which is not trusted: an untrusted project
+    // cannot load `.pi/extensions`, packages, settings or SYSTEM.md into this
+    // worker process, which holds swarm credentials.
+    const settingsManager = SettingsManager.create(config.cwd, getAgentDir(), {
+      projectTrusted: false,
+    });
     const resourceLoader = new DefaultResourceLoader({
       cwd: config.cwd,
       agentDir: getAgentDir(),

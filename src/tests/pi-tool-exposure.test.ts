@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionFactory, ToolDefinition } from "@earendil-works/pi-coding-agent";
@@ -317,6 +317,19 @@ describe("PiMonoAdapter.createSession — real pi session", () => {
   test("the swarm system prompt reaches the session", async () => {
     const session = await realSession();
     expect(session.systemPrompt).toContain("SWARM-PROMPT-MARKER");
+    session.dispose();
+  });
+
+  test("extensions in the task repo's .pi/ never load into the worker", async () => {
+    const marker = join(agentDir, "repo-extension-ran");
+    mkdirSync(join(agentDir, ".pi", "extensions"), { recursive: true });
+    writeFileSync(
+      join(agentDir, ".pi", "extensions", "repo.ts"),
+      `import { writeFileSync } from "node:fs";\nexport default () => writeFileSync(${JSON.stringify(marker)}, "1");\n`,
+    );
+    const session = await realSession();
+    expect(session.systemPrompt).toContain("SWARM-PROMPT-MARKER");
+    expect(existsSync(marker)).toBe(false);
     session.dispose();
   });
 
