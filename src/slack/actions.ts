@@ -5,6 +5,7 @@ import { slackContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { buildCancelledBlocks, getTaskLink } from "./blocks";
 import { resolveSlackUserId } from "./enrich";
+import { ignoreSlackInbound, noteSlackInboundSideEffect } from "./inbound-dispatch";
 import { ensureSlackThreadTree, isSlackRenderV2Enabled } from "./render-v2";
 import { getAgentDisplayName, getAgentEmoji } from "./responses";
 
@@ -70,10 +71,12 @@ export function registerActionHandlers(app: App): void {
     const taskId = view.private_metadata;
     const followUpText = view.state.values.follow_up_input?.follow_up_text?.value || "";
 
-    if (!taskId || !followUpText) return;
+    if (!taskId || !followUpText) return ignoreSlackInbound("empty_follow_up");
 
     const originalTask = await getTaskById(taskId);
-    if (!originalTask || !originalTask.slackChannelId) return;
+    if (!originalTask || !originalTask.slackChannelId) {
+      return ignoreSlackInbound("follow_up_target_missing");
+    }
 
     const lead = await getLeadAgent();
     // Resolve via the shared cascade. Sample context = the modal callback ID
@@ -82,6 +85,7 @@ export function registerActionHandlers(app: App): void {
       sampleEventType: "view_submission",
       sampleContext: view.callback_id || "follow_up_submit",
     });
+    noteSlackInboundSideEffect("task_created");
     const followUpTask = await createTaskWithSiblingAwareness(
       followUpText,
       {

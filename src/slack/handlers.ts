@@ -22,6 +22,12 @@ import { enrichSlackUserEmail, resolveSlackUserId, rewriteSlackMentions } from "
 import { wasEventSeen } from "./event-dedup";
 import type { SlackFile } from "./files";
 import {
+  ignoreSlackInbound,
+  isAdmittedSlackDelivery,
+  noteSlackInboundSideEffect,
+  reportSlackInboundFailure,
+} from "./inbound-dispatch";
+import {
   buildEffectiveText,
   createSlackTaskWithFiles,
   fetchSlackFiles,
@@ -409,17 +415,18 @@ export function registerMessageHandler(app: App): void {
   // Handle all message events
   app.event("message", async ({ event, body, client, say }) => {
     // Slack retries deliveries on 3s timeout / 5xx. Drop the duplicates
-    // before any task-creation work runs (DES-293).
+    // before any task-creation work runs (DES-293). A delivery admitted from a
+    // durable receipt was already deduplicated by its unique key.
     const eventId = body?.event_id;
-    if (wasEventSeen(eventId)) {
+    if (!isAdmittedSlackDelivery() && wasEventSeen(eventId)) {
       console.log(`[Slack] dropping Slack retry: event_id=${eventId}`);
-      return;
+      return ignoreSlackInbound("duplicate_event");
     }
 
     const msg = event as MessageEvent;
 
     // Ignore message_changed events
-    if (msg.subtype === "message_changed") return;
+    if (msg.subtype === "message_changed") return ignoreSlackInbound("message_changed");
 
     // Cache bot user ID on first message (avoids calling auth.test on every event)
     if (!cachedBotUserId) {
@@ -438,24 +445,26 @@ export function registerMessageHandler(app: App): void {
     // causing agent completion messages to be misidentified as human messages
     // and triggering duplicate task creation.
     if (isBotMessage(msg, cachedBotUserId)) {
-      return;
+      return ignoreSlackInbound("bot_message");
     }
     const hasText = !!msg.text?.trim();
     const hasFiles = !!(msg.files && msg.files.length > 0);
 
     // Require either text or files, and always require a user
-    if ((!hasText && !hasFiles) || !msg.user) return;
+    if ((!hasText && !hasFiles) || !msg.user) return ignoreSlackInbound("empty_message");
 
-    // Deduplicate events (Slack can send same event twice)
+    // Deduplicate events (Slack can send same event twice). An admitted
+    // delivery skips this cache too: a retry of a receipt released after a
+    // pre-side-effect failure must not be dropped as its own duplicate.
     const messageKey = `${msg.channel}:${msg.ts}`;
-    if (isMessageProcessed(messageKey)) {
-      return;
+    if (!isAdmittedSlackDelivery() && isMessageProcessed(messageKey)) {
+      return ignoreSlackInbound("duplicate_message");
     }
 
     // Check user authorization
     if (!(await isUserAllowed(client, msg.user))) {
       console.log(`[Slack] Ignoring message from unauthorized user ${msg.user}`);
-      return;
+      return ignoreSlackInbound("unauthorized_user");
     }
 
     // Resolve canonical user identity via the three-step cascade:
@@ -468,6 +477,7 @@ export function registerMessageHandler(app: App): void {
     });
 
     // Keep channel/user for legacy consumers and channelId/userId for the extension contract.
+    noteSlackInboundSideEffect("workflow_event");
     workflowEventBus.emit("slack.message", {
       channel: msg.channel,
       channelId: msg.channel,
@@ -486,7 +496,7 @@ export function registerMessageHandler(app: App): void {
       console.error(
         "[Slack] Bot user ID unavailable — skipping message to avoid silent misbehavior",
       );
-      return;
+      return reportSlackInboundFailure("bot_user_unavailable");
     }
     const botUserId = cachedBotUserId;
 
@@ -523,6 +533,7 @@ export function registerMessageHandler(app: App): void {
           `[Slack] !now command detected in thread ${threadKey}${nowMessage ? ` with message: "${nowMessage}"` : ""}`,
         );
 
+        noteSlackInboundSideEffect("thread_flush");
         if (nowMessage || msg.files?.length) {
           bufferThreadMessage(
             msg.channel,
@@ -553,7 +564,7 @@ export function registerMessageHandler(app: App): void {
         console.log(
           `[Slack] Skipping ADDITIVE buffer in ${msg.channel}/${msg.thread_ts}: message mentions another user`,
         );
-        return;
+        return ignoreSlackInbound("other_user_mention");
       }
       // Treat the thread as having swarm activity if either:
       //  - a Slack task is already linked to it (someone started it via @mention), or
@@ -565,6 +576,7 @@ export function registerMessageHandler(app: App): void {
 
       if (hasSwarmActivity) {
         const threadKey = `${msg.channel}:${msg.thread_ts}`;
+        noteSlackInboundSideEffect("thread_buffer");
         bufferThreadMessage(
           msg.channel,
           msg.thread_ts,
@@ -614,7 +626,7 @@ export function registerMessageHandler(app: App): void {
     );
     if (routeResult.action === "block") {
       console.info("[Slack] Extension blocked message routing:", scrubSecrets(routeResult.reason));
-      return;
+      return ignoreSlackInbound("extension_blocked");
     }
 
     let matches: AgentMatch[] | undefined;
@@ -658,7 +670,7 @@ export function registerMessageHandler(app: App): void {
     );
 
     if (matches.length === 0) {
-      if (!botMentioned && !isImplicitMention) return;
+      if (!botMentioned && !isImplicitMention) return ignoreSlackInbound("not_addressed");
 
       // Bot was mentioned (or message is in assistant thread) but no online agents matched — queue the request
       if (!checkRateLimit(msg.user)) {
@@ -668,7 +680,7 @@ export function registerMessageHandler(app: App): void {
             thread_ts: msg.thread_ts || msg.ts,
           });
         }
-        return;
+        return ignoreSlackInbound("rate_limited");
       }
 
       await using inbound = await fetchSlackFiles(client, msg.files);
@@ -683,7 +695,7 @@ export function registerMessageHandler(app: App): void {
             thread_ts: msg.thread_ts || msg.ts,
           });
         }
-        return;
+        return ignoreSlackInbound("empty_task");
       }
 
       const threadTs = msg.thread_ts || msg.ts;
@@ -743,7 +755,7 @@ export function registerMessageHandler(app: App): void {
           thread_ts: msg.thread_ts || msg.ts,
         });
       }
-      return;
+      return ignoreSlackInbound("rate_limited");
     }
 
     // Extract task description (the text plus a `[File: …]` line per attachment)
@@ -759,7 +771,7 @@ export function registerMessageHandler(app: App): void {
           thread_ts: msg.thread_ts || msg.ts,
         });
       }
-      return;
+      return ignoreSlackInbound("empty_task");
     }
 
     // Create tasks for each matched agent
@@ -803,6 +815,7 @@ export function registerMessageHandler(app: App): void {
         if (agent.isLead) {
           // Steering only carries text into the running session; a message with
           // files becomes a follow-up task so the files land as attachments.
+          if (msg.thread_ts && inbound.files.length === 0) noteSlackInboundSideEffect("steering");
           const steering =
             msg.thread_ts && inbound.files.length === 0
               ? await requestSlackThreadSteering({
@@ -879,6 +892,11 @@ export function registerMessageHandler(app: App): void {
           results.assigned.push({ agentName: agent.name, taskId: task.id });
         }
       } catch (error) {
+        // A policy block is an answered outcome; anything else is a failure the
+        // user sees as "could not assign" and the dispatcher must not call success.
+        if (!(error instanceof TaskCreationBlockedError)) {
+          reportSlackInboundFailure("task_creation_error");
+        }
         results.failed.push({
           agentName: agent.name,
           reason: error instanceof TaskCreationBlockedError ? error.reason : "error",
