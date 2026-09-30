@@ -168,7 +168,7 @@ export function AgentFsProvider({ children }: { children: ReactNode }) {
 
   // Live updates (step-11): the change stream follows the drive in view, on Comb pages only.
   const combRoute = useMatch("/file/~/:orgId/:driveId/*");
-  const { liveState, liveDriveId, subscribeLive } = useAgentFsLive({
+  const { liveState, liveRelayed, liveDriveId, subscribeLive } = useAgentFsLive({
     client: state === "ready" && features.has("change-stream") ? client : null,
     endpoint,
     userId,
@@ -196,6 +196,7 @@ export function AgentFsProvider({ children }: { children: ReactNode }) {
       disconnect,
       retry,
       liveState,
+      liveRelayed,
       liveDriveId,
       subscribeLive,
     }),
@@ -214,6 +215,7 @@ export function AgentFsProvider({ children }: { children: ReactNode }) {
       disconnect,
       retry,
       liveState,
+      liveRelayed,
       liveDriveId,
       subscribeLive,
     ],

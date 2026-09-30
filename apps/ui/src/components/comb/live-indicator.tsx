@@ -1,24 +1,30 @@
 import { useEffect, useState } from "react";
+import { StatusIcon, type StatusTone } from "@/components/shared/status-icon";
 import { Badge } from "@/components/ui/badge";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { type LiveState, useAgentFs } from "@/contexts/agent-fs-context";
 import { combEventPath } from "@/lib/agent-fs/invalidation";
 import type { DrivePath } from "@/lib/comb/paths";
-import { cn } from "@/lib/utils";
 
-const DOT: Record<LiveState, string> = {
-  live: "bg-status-success",
-  connecting: "bg-status-pending",
-  retrying: "bg-status-pending",
-  stopped: "bg-status-neutral",
-  paused: "bg-status-neutral",
-  off: "bg-status-neutral",
+/**
+ * `busy` only while a connection opens (a real wait). Polling still
+ * refreshes the view, so its states get the quiet `saved` check, and a
+ * refused stream gets `warning`.
+ */
+const TONE: Record<LiveState, StatusTone> = {
+  live: "success",
+  connecting: "busy",
+  retrying: "busy",
+  stopped: "warning",
+  paused: "saved",
+  off: "saved",
 };
 
-function liveReason(state: LiveState, hasStream: boolean): string {
+function liveReason(state: LiveState, hasStream: boolean, relayed: boolean): string {
   switch (state) {
     case "live":
-      return "Changes from agents and teammates show without a reload.";
+      return relayed
+        ? "Another Comb tab holds the change stream for this drive and sends its changes to this tab."
+        : "Changes from agents and teammates show without a reload.";
     case "connecting":
       return "Comb checks for changes every 10 s until the change stream connects.";
     case "retrying":
@@ -34,21 +40,21 @@ function liveReason(state: LiveState, hasStream: boolean): string {
   }
 }
 
-/** "Live" while the drive's change stream is up, "Polling" otherwise. The tooltip says why. */
+/**
+ * "Live" while the drive's change stream is up, "Polling" otherwise. The
+ * reason is the `StatusIcon` label: its tooltip, its focus stop, and its
+ * polite live region.
+ */
 export function LiveIndicator() {
-  const { liveState, features } = useAgentFs();
+  const { liveState, liveRelayed, features } = useAgentFs();
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Badge variant="outline" tabIndex={0} className="gap-1.5">
-          <span aria-hidden className={cn("size-1.5 rounded-full", DOT[liveState])} />
-          {liveState === "live" ? "Live" : "Polling"}
-        </Badge>
-      </TooltipTrigger>
-      <TooltipContent className="max-w-64">
-        {liveReason(liveState, features.has("change-stream"))}
-      </TooltipContent>
-    </Tooltip>
+    <span className="flex items-center gap-1.5 text-muted-foreground text-xs">
+      <StatusIcon
+        tone={TONE[liveState]}
+        label={liveReason(liveState, features.has("change-stream"), liveRelayed)}
+      />
+      {liveState === "live" ? "Live" : "Polling"}
+    </span>
   );
 }
 
@@ -83,7 +89,11 @@ export function UpdatedChip({ file }: { file: DrivePath }) {
   return (
     <span aria-live="polite">
       {version === null ? null : (
-        <Badge variant="outline" className="border-status-info/30 py-0 text-status-info-strong">
+        <Badge
+          variant="outline"
+          size="tag"
+          className="border-status-info/30 text-status-info-strong"
+        >
           Updated to v{version}
         </Badge>
       )}

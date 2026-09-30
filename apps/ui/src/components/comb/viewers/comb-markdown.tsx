@@ -235,7 +235,11 @@ export function CombMarkdown({
   );
   return (
     <CombDocContext.Provider value={ctx}>
+      {/* step-11: remount per text. Streamdown memoizes each block by its
+          source position only, so an edit that keeps a block's line and
+          columns (a same-length fix) never rendered. */}
       <Streamdown
+        key={text}
         mode="static"
         parseIncompleteMarkdown={false}
         controls={false}

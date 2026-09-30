@@ -18,16 +18,37 @@ export interface SseMessage {
 }
 
 export interface SseParser {
-  /** Feed the next chunk of the body. Complete events go to `onMessage` in order. */
+  /**
+   * Feed the next chunk of the body. Complete events go to `onMessage` in
+   * order. Throws `SseOverflowError` when the event being read grows past
+   * `SSE_MAX_PENDING`: the caller must close the connection.
+   */
   push(chunk: Uint8Array): void;
+}
+
+/** The largest event the parser holds (its data lines plus the unfinished line), in characters. */
+export const SSE_MAX_PENDING = 1024 * 1024;
+
+export class SseOverflowError extends Error {
+  constructor() {
+    super(`An event-stream event is larger than ${SSE_MAX_PENDING} characters`);
+    this.name = "SseOverflowError";
+  }
 }
 
 export function createSseParser(onMessage: (message: SseMessage) => void): SseParser {
   // Stream mode keeps a multi-byte character that a chunk splits.
   const decoder = new TextDecoder();
-  let buffer = "";
+  // The pieces of the unfinished line. None holds a line end, so a push
+  // scans only its own chunk, and a long line is joined once.
+  let line: string[] = [];
+  let lineSize = 0;
+  // The last chunk ended with a CR, which ended its line at once. A LF at
+  // the start of the next chunk is the second half of that CRLF.
+  let skipLf = false;
   let event = "";
   let data: string[] = [];
+  let dataSize = 0;
   let lastId: string | undefined;
 
   function processLine(line: string) {
@@ -37,6 +58,7 @@ export function createSseParser(onMessage: (message: SseMessage) => void): SsePa
       }
       event = "";
       data = [];
+      dataSize = 0;
       return;
     }
     if (line.startsWith(":")) return;
@@ -45,24 +67,38 @@ export function createSseParser(onMessage: (message: SseMessage) => void): SsePa
     let value = colon === -1 ? "" : line.slice(colon + 1);
     if (value.startsWith(" ")) value = value.slice(1);
     if (field === "event") event = value;
-    else if (field === "data") data.push(value);
-    else if (field === "id" && !value.includes("\0")) lastId = value;
+    else if (field === "data") {
+      data.push(value);
+      dataSize += value.length;
+    } else if (field === "id" && !value.includes("\0")) lastId = value;
   }
 
   return {
     push(chunk) {
-      buffer += decoder.decode(chunk, { stream: true });
+      let text = decoder.decode(chunk, { stream: true });
+      if (skipLf && text.length > 0) {
+        if (text[0] === "\n") text = text.slice(1);
+        skipLf = false;
+      }
       let start = 0;
-      for (let i = 0; i < buffer.length; i++) {
-        const char = buffer[i];
+      for (let i = 0; i < text.length; i++) {
+        const char = text[i];
         if (char !== "\n" && char !== "\r") continue;
-        // A CR at the end of the buffer can be the first half of a CRLF.
-        if (char === "\r" && i === buffer.length - 1) break;
-        processLine(buffer.slice(start, i));
-        if (char === "\r" && buffer[i + 1] === "\n") i++;
+        line.push(text.slice(start, i));
+        processLine(line.join(""));
+        line = [];
+        lineSize = 0;
+        if (char === "\r") {
+          if (i === text.length - 1) skipLf = true;
+          else if (text[i + 1] === "\n") i++;
+        }
         start = i + 1;
       }
-      buffer = buffer.slice(start);
+      if (start < text.length) {
+        line.push(text.slice(start));
+        lineSize += text.length - start;
+      }
+      if (lineSize + dataSize > SSE_MAX_PENDING) throw new SseOverflowError();
     },
   };
 }

@@ -82,8 +82,9 @@ export interface DriveStreamOptions {
 
 /**
  * Keep the drive's change stream open until `signal` aborts or agent-fs
- * refuses it. Reconnects with `backoffDelay`, and waits the full cap after a
- * 429. The returned promise settles when the stream stops for good.
+ * refuses it. Reconnects with `backoffDelay`, and waits exactly
+ * `STREAM_BACKOFF_CAP_MS` after a 429 (agent-fs sends no `Retry-After` for
+ * its stream cap). The returned promise settles when the stream stops for good.
  */
 export async function openDriveStream(opts: DriveStreamOptions): Promise<void> {
   const { signal } = opts;
@@ -106,7 +107,7 @@ export async function openDriveStream(opts: DriveStreamOptions): Promise<void> {
       setState("stopped");
       return;
     }
-    const delay = backoffDelay(status === 429 ? Number.POSITIVE_INFINITY : attempt, Math.random());
+    const delay = status === 429 ? STREAM_BACKOFF_CAP_MS : backoffDelay(attempt, Math.random());
     attempt++;
     setState("retrying");
     await sleep(delay, signal);
@@ -116,7 +117,8 @@ export async function openDriveStream(opts: DriveStreamOptions): Promise<void> {
 /**
  * One connection, read until it ends. Returns the HTTP status when agent-fs
  * answered with an error, and null when the stream ended, went quiet for
- * `STREAM_DEAD_MS`, or the network failed.
+ * `STREAM_DEAD_MS`, sent an event larger than `SSE_MAX_PENDING` (the parser
+ * throws), or the network failed.
  */
 async function connectOnce(
   opts: DriveStreamOptions,

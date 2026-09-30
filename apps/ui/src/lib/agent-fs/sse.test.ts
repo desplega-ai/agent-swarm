@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createSseParser, type SseMessage } from "./sse";
+import { createSseParser, SSE_MAX_PENDING, type SseMessage, SseOverflowError } from "./sse";
 
 const encoder = new TextEncoder();
 
@@ -89,5 +89,68 @@ describe("createSseParser", () => {
     expect(messages).toEqual([]);
     parser.push(encoder.encode("\n"));
     expect(messages).toEqual([{ event: "file.changed", data: "{}", id: undefined }]);
+  });
+
+  test("a CR at the end of a chunk ends its line at once", () => {
+    const messages: SseMessage[] = [];
+    const parser = createSseParser((message) => messages.push(message));
+    // No later chunk: the event must not wait for the next ping.
+    parser.push(encoder.encode("event: file.changed\rdata: {}\r\r"));
+    expect(messages).toEqual([{ event: "file.changed", data: "{}", id: undefined }]);
+  });
+
+  test("a LF that starts the next chunk completes the CRLF, not a blank line", () => {
+    const messages: SseMessage[] = [];
+    const parser = createSseParser((message) => messages.push(message));
+    parser.push(encoder.encode("data: one\r"));
+    // An empty chunk (a split multi-byte character, say) keeps the CR pending.
+    parser.push(new Uint8Array());
+    parser.push(encoder.encode("\ndata: two\r"));
+    expect(messages).toEqual([]);
+    parser.push(encoder.encode("\n\r"));
+    expect(messages).toEqual([{ event: "message", data: "one\ntwo", id: undefined }]);
+    // The LF after that last CR is skipped too: it adds no blank line.
+    parser.push(encoder.encode("\ndata: three\n\n"));
+    expect(messages).toEqual([
+      { event: "message", data: "one\ntwo", id: undefined },
+      { event: "message", data: "three", id: undefined },
+    ]);
+  });
+
+  test("reads a long line in small chunks in linear time", () => {
+    const messages: SseMessage[] = [];
+    const parser = createSseParser((message) => messages.push(message));
+    const value = "x".repeat(1_000_000);
+    const bytes = encoder.encode(`data: ${value}`);
+    // A parser that scans the whole unfinished line on every chunk takes
+    // many seconds here.
+    for (let offset = 0; offset < bytes.length; offset += 64) {
+      parser.push(bytes.slice(offset, offset + 64));
+    }
+    parser.push(encoder.encode("\n\n"));
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.data.length).toBe(value.length);
+  }, 2000);
+
+  test("throws when an unfinished line passes the limit", () => {
+    const parser = createSseParser(() => {});
+    parser.push(encoder.encode(`data: ${"x".repeat(SSE_MAX_PENDING - 10)}`));
+    expect(() => parser.push(encoder.encode("x".repeat(10)))).toThrow(SseOverflowError);
+  });
+
+  test("throws when the data lines of one event pass the limit", () => {
+    const parser = createSseParser(() => {});
+    const line = `data: ${"x".repeat(1000)}\n`;
+    const lines = Math.floor(SSE_MAX_PENDING / 1000);
+    expect(() => parser.push(encoder.encode(line.repeat(lines - 1)))).not.toThrow();
+    expect(() => parser.push(encoder.encode(line.repeat(2)))).toThrow(SseOverflowError);
+  });
+
+  test("the limit applies to one event, not to the whole stream", () => {
+    const messages: SseMessage[] = [];
+    const parser = createSseParser((message) => messages.push(message));
+    const event = `data: ${"x".repeat(SSE_MAX_PENDING / 2)}\n\n`;
+    for (let i = 0; i < 4; i++) parser.push(encoder.encode(event));
+    expect(messages).toHaveLength(4);
   });
 });

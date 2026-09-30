@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { combEventPath, keysToInvalidate, type LiveKeyContext } from "./invalidation";
+import {
+  agentFsFolderCommentsKey,
+  COMB_POLL_MS,
+  combEventPath,
+  drivePoll,
+  keysToInvalidate,
+  type LiveKeyContext,
+} from "./invalidation";
 import type { CommentChangedEvent, FileChangedEvent } from "./stream";
 
 const CTX: LiveKeyContext = {
@@ -91,5 +98,33 @@ describe("keysToInvalidate", () => {
       [...PREFIX, "ls"],
       [...PREFIX, "comments"],
     ]);
+  });
+});
+
+describe("agentFsFolderCommentsKey", () => {
+  test("is the drive's comment key for the folder prefix", () => {
+    const folder = { orgId: "org-1", driveId: "drive-1", path: "/a/" };
+    expect(agentFsFolderCommentsKey(CTX, folder)).toEqual([...PREFIX, "comments", "prefix", "/a/"]);
+    // comment.changed below the folder refreshes this exact key.
+    expect(keysToInvalidate(commentChanged("a/b.md"), CTX)).toContainEqual(
+      agentFsFolderCommentsKey(CTX, folder),
+    );
+  });
+});
+
+describe("drivePoll", () => {
+  const target = { driveId: "drive-1" };
+
+  test("stops polling the live query kinds of the live drive", () => {
+    for (const kind of ["stat", "ls", "comments"]) {
+      expect(drivePoll({ liveDriveId: "drive-1" }, target, kind)).toBe(false);
+    }
+  });
+
+  test("keeps polling other kinds, other drives, and a drive with no live stream", () => {
+    expect(drivePoll({ liveDriveId: "drive-1" }, target, "drive-members")).toBe(COMB_POLL_MS);
+    expect(drivePoll({ liveDriveId: "drive-2" }, target, "comments")).toBe(COMB_POLL_MS);
+    expect(drivePoll({ liveDriveId: null }, target, "stat")).toBe(COMB_POLL_MS);
+    expect(drivePoll({}, target, "ls")).toBe(COMB_POLL_MS);
   });
 });

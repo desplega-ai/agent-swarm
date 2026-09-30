@@ -18,6 +18,7 @@ import { useState } from "react";
 import { useAgentFs } from "@/contexts/agent-fs-context";
 import { useDataUrl, useObjectUrl } from "@/hooks/use-object-url";
 import { type AgentFsClient, AgentFsError } from "@/lib/agent-fs/client";
+import { drivePoll } from "@/lib/agent-fs/invalidation";
 import { agentFsKey, agentFsRetry } from "@/lib/agent-fs/query";
 import type {
   CommentAddParams,
@@ -57,7 +58,7 @@ export interface AgentFsAccess {
   /** `useAgentFs().endpoint`, so the `connect()` eviction matches every key. */
   endpoint: string;
   userId: string | null;
-  /** The drive whose change stream is live (step-11). Its queries do not poll. */
+  /** The drive whose change stream is live (step-11). See `drivePoll`. */
   liveDriveId?: string | null;
 }
 
@@ -69,18 +70,6 @@ export function useAgentFsAccess(): AgentFsAccess {
     userId: credential?.userId ?? null,
     liveDriveId,
   };
-}
-
-/** The dashboard's default poll (`app/providers.tsx`). */
-const COMB_POLL_MS = 10_000;
-
-/**
- * `refetchInterval` for `stat`, `ls`, and comment queries: off while the
- * drive's change stream is live (its events refresh them, see
- * `keysToInvalidate`), the dashboard's 10 s poll otherwise.
- */
-function drivePoll(access: AgentFsAccess, target: { driveId: string }) {
-  return access.liveDriveId === target.driveId ? false : COMB_POLL_MS;
 }
 
 /** `["agent-fs", endpoint, userId, orgId, driveId, kind, path]` for one drive path. */
@@ -112,7 +101,7 @@ export function agentFsLsQuery(access: AgentFsAccess, target: DrivePath) {
       ),
     enabled: access.client !== null,
     retry: agentFsRetry,
-    refetchInterval: drivePoll(access, target),
+    refetchInterval: drivePoll(access, target, "ls"),
   });
 }
 
@@ -135,7 +124,7 @@ export function useAgentFsStat(target: DrivePath) {
       ),
     enabled: access.client !== null,
     retry: agentFsRetry,
-    refetchInterval: drivePoll(access, target),
+    refetchInterval: drivePoll(access, target, "stat"),
   });
 }
 
@@ -365,7 +354,7 @@ export function agentFsCommentsQuery(access: AgentFsAccess, file: DrivePath) {
     },
     enabled: access.client !== null,
     retry: agentFsRetry,
-    refetchInterval: drivePoll(access, file),
+    refetchInterval: drivePoll(access, file, "comments"),
   });
 }
 
