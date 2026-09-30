@@ -621,6 +621,9 @@ export default function RunDetailsPage(props: {
             ) : null}
           </div>
 
+          {attempt !== null ? (
+            <AttemptOutcome status={attempt.status} score={attempt.score} judgments={judgments} />
+          ) : null}
           <AttemptSummary
             attempt={attempt}
             selId={selId}
@@ -631,9 +634,6 @@ export default function RunDetailsPage(props: {
             members={memberLookup}
             onOpenTask={openTaskInTranscript}
           />
-          {attempt !== null ? (
-            <AttemptOutcome status={attempt.status} score={attempt.score} judgments={judgments} />
-          ) : null}
           <WorkersPanel attempt={attempt} onOpenTask={openTaskInTranscript} />
         </div>
 

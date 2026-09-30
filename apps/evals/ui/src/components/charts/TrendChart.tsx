@@ -146,13 +146,14 @@ export function TrendChart(props: {
             y1={MARGIN.top + innerH}
             y2={MARGIN.top + innerH}
           />
-          {xTicks.map((t) => (
+          {xTicks.map((t, i) => (
             <text
               key={`x${t}`}
               className="chart-tick"
               x={sx(t)}
               y={MARGIN.top + innerH + 15}
-              textAnchor="middle"
+              // the first and last labels hug the plot edges instead of spilling past them
+              textAnchor={i === 0 ? "start" : i === xTicks.length - 1 ? "end" : "middle"}
             >
               {fmtDate(new Date(t).toISOString())}
             </text>
