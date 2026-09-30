@@ -147,7 +147,7 @@ describe("GET /api/analytics suite endpoints", () => {
       expect(body.frontier.cost).toEqual(["claude-opus-5.5"]);
       expect(body.frontier.time).toEqual(["claude-opus-5.5"]);
       const opus = body.points.find((p: any) => p.configId === "claude-opus-5.5");
-      expect(opus.attempts).toBe(6 * 3);
+      expect(opus.attempts).toBe(SCENARIOS.length * 3);
       expect(opus.avgCostUsd).toBeCloseTo(1, 12);
       expect(opus.medianAgentMs).toBe(60_000);
       expect(opus.harness).toBe("claude");
