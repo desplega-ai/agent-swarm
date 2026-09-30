@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Vendor the telemetry event catalog from the proxy into packages/telemetry-contract.
+ * Vendor the telemetry event catalog from the proxy into src/telemetry-contract.
  *
  * Usage: bun run sync:telemetry-contract <proxy-commit-sha>
  *        bun run check:telemetry-contract
@@ -20,16 +20,16 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const REPO_ROOT = join(import.meta.dir, "..");
-const PACKAGE_ROOT = join(REPO_ROOT, "packages", "telemetry-contract");
+const PACKAGE_ROOT = join(REPO_ROOT, "src", "telemetry-contract");
 const SOURCE_PATH = join(PACKAGE_ROOT, "SOURCE.json");
 const PROXY_REPO = "desplega-ai/proxy";
 const FULL_SHA = /^[0-9a-f]{40}$/;
 
 /** Vendored file (relative to the package) -> its path in the proxy repo. */
 export const VENDORED_FILES: Readonly<Record<string, string>> = {
-  "src/types.gen.ts": "contracts/telemetry/generated/types.ts",
-  "src/catalog.json": "contracts/telemetry/catalog/events.json",
-  "src/EVENTS.md": "contracts/telemetry/catalog/EVENTS.md",
+  "types.gen.ts": "contracts/telemetry/generated/types.ts",
+  "catalog.json": "contracts/telemetry/catalog/events.json",
+  "EVENTS.md": "contracts/telemetry/catalog/EVENTS.md",
 };
 
 export interface ContractSource {

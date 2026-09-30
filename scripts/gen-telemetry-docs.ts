@@ -6,7 +6,7 @@
  * Usage: bun run build:telemetry-docs   (rewrite the generated block)
  *        bun run check:telemetry-docs   (fail when the block is stale)
  *
- * Source: packages/telemetry-contract/src/EVENTS.md (vendored from the proxy).
+ * Source: src/telemetry-contract/EVENTS.md (vendored from the proxy).
  * Target: the block between the BEGIN/END markers in reference/telemetry.mdx.
  * Only the `trigger_surface` and `agent-swarm` sections are published here.
  * Other products document themselves.
@@ -19,8 +19,8 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const REPO_ROOT = join(import.meta.dir, "..");
-const EVENTS_PATH = join(REPO_ROOT, "packages", "telemetry-contract", "src", "EVENTS.md");
-const TYPES_PATH = join(REPO_ROOT, "packages", "telemetry-contract", "src", "types.gen.ts");
+const EVENTS_PATH = join(REPO_ROOT, "src", "telemetry-contract", "EVENTS.md");
+const TYPES_PATH = join(REPO_ROOT, "src", "telemetry-contract", "types.gen.ts");
 const DOC_PATH = join(
   REPO_ROOT,
   "docs-site",

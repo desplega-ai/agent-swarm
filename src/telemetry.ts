@@ -7,11 +7,10 @@
  * - Importable from both API server and workers
  * - Every event is schema_version 2: a top-level `context` identity envelope
  *   plus properties typed against the proxy's event catalog
- *   (`@desplega/telemetry-contract`). An event or property that is not in the
+ *   (`src/telemetry-contract`). An event or property that is not in the
  *   catalog fails `tsc`, and the proxy rejects it at ingest.
  */
 import { randomUUID } from "node:crypto";
-import type { PropsFor, TelemetryEventName } from "@desplega/telemetry-contract";
 import pkg from "../package.json";
 import { isSlackConfigured } from "./slack/config";
 import {
@@ -23,6 +22,7 @@ import {
   validOrgDomain,
   validOrgId,
 } from "./telemetry-context";
+import type { PropsFor, TelemetryEventName } from "./telemetry-contract";
 import { isEnvFlagEnabled } from "./utils/env-flag";
 import { getCurrentRequestUserId } from "./utils/request-auth-context";
 

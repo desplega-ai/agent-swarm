@@ -7,12 +7,8 @@
  * reference. It never carries an email address, a user name or a raw user ID.
  */
 import { createHash, randomBytes } from "node:crypto";
-import {
-  type EventContext,
-  TRIGGER_SURFACES,
-  type TriggerSurface,
-} from "@desplega/telemetry-contract";
-import catalog from "@desplega/telemetry-contract/catalog.json";
+import { type EventContext, TRIGGER_SURFACES, type TriggerSurface } from "./telemetry-contract";
+import catalog from "./telemetry-contract/catalog.json";
 
 /** `org_` + 16 lowercase hex (self-host, minted here) or 27 alphanumerics (cloud). Same pattern the proxy enforces. */
 const ORG_ID_PATTERN = /^org_([0-9a-f]{16}|[A-Za-z0-9]{27})$/;

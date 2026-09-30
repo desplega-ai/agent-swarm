@@ -7,9 +7,10 @@
  *
  * API server only. Workers never import this file.
  */
-import type { PropsFor } from "@desplega/telemetry-contract";
+
 import { getDbClient } from "./be/db/runtime";
 import { isTelemetryReady, setTelemetryRoleResolver, telemetry } from "./telemetry";
+import type { PropsFor } from "./telemetry-contract";
 import {
   cachedUserRole,
   configureOrgDomainPersistence,

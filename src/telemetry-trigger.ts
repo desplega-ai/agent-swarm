@@ -9,10 +9,11 @@
  * API server only: it reads `agent_tasks`. Workers receive the resolved value
  * from the poll response.
  */
-import type { PropsFor, TriggerSurface } from "@desplega/telemetry-contract";
+
 import { getDbClient } from "./be/db/runtime";
 import { isTelemetryEnabled, telemetry } from "./telemetry";
 import { mapTriggerSurface } from "./telemetry-context";
+import type { PropsFor, TriggerSurface } from "./telemetry-contract";
 import { primeUserRole } from "./telemetry-identity";
 import { scrubSecrets } from "./utils/secret-scrubber";
 
