@@ -803,6 +803,8 @@ export interface DashboardStats {
    * Optional for compatibility with older API servers.
    */
   steeringEnabled?: boolean;
+  /** Dev deployments can bypass UI version checks. Absent on older APIs. */
+  devMode?: boolean;
 }
 
 export type TaskStatus = AgentTaskStatus;

@@ -21,6 +21,17 @@ Each row shows a source chip when the underlying environment variable is set on 
 
 ## Groups
 
+### Dev mode
+
+Set `SWARM_DEV_MODE=true` on the API server, or enable **Dev mode** under **Harness & tools**.
+The default is `false`.
+This setting bypasses dashboard version checks for deployments that follow `main` instead of numbered releases.
+The header shows a **DEV** badge while the API reports dev mode.
+The dashboard still requires a successful health response.
+Keep the API current with the dashboard because dev mode does not check feature compatibility.
+It does not enable server features that have separate flags.
+A saved change takes effect after automatic config reload and dashboard polling, without a server restart.
+
 ### Claude transport default
 
 The **Harness & tools** group includes `CLAUDE_TRANSPORT`, with `cli` as the default and `sdk` as the optional value.

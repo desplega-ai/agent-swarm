@@ -43609,13 +43609,17 @@
                     },
                     "multiRuntimeEnabled": {
                       "type": "boolean"
+                    },
+                    "devMode": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
                     "agents",
                     "tasks",
                     "steeringEnabled",
-                    "multiRuntimeEnabled"
+                    "multiRuntimeEnabled",
+                    "devMode"
                   ]
                 }
               }

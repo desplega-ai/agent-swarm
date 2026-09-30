@@ -274,6 +274,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     return null;
   },
   ...booleanValidators([
+    "SWARM_DEV_MODE",
     "MULTI_RUNTIME_ENABLED",
     "STEERING_ENABLED",
     "MEMORY_HYBRID_SEARCH",

@@ -313,6 +313,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
     icon: Cpu,
     entries: [
       {
+        key: "SWARM_DEV_MODE",
+        label: "Dev mode",
+        description:
+          "Bypass dashboard version checks for deployments that follow main. Keep the API current with the dashboard. Shows a DEV badge.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}ui/configuration#dev-mode`,
+      },
+      {
         key: "CLAUDE_TRANSPORT",
         label: "Default Claude transport",
         description:

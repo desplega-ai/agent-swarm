@@ -15,6 +15,7 @@ import { getDbRetentionStats } from "../be/db-retention";
 import { isSteeringEnabled } from "../be/steering";
 import type { AgentLog } from "../types";
 import { AgentLogSchema, ScheduledTaskSchema, ServiceSchema } from "../types";
+import { isEnvFlagEnabled } from "../utils/env-flag";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
 import { route } from "./route-def";
@@ -51,6 +52,7 @@ const DashboardStatsSchema = z.object({
   tasks: TaskCountsSchema,
   steeringEnabled: z.boolean(),
   multiRuntimeEnabled: z.boolean(),
+  devMode: z.boolean(),
 });
 
 /** Mirrors `DbRetentionTableStats` (src/be/db-retention.ts). */
@@ -266,6 +268,7 @@ export async function handleStats(
       // Authenticated home for the steering feature flag — deliberately NOT on
       // the unauthenticated /health endpoint (config must not leak).
       steeringEnabled: isSteeringEnabled(),
+      devMode: isEnvFlagEnabled("SWARM_DEV_MODE", false),
       // Same authenticated home, for the same reason. Read through the helper
       // the server itself branches on, and read PER REQUEST rather than
       // captured at module load, so the reported value tracks a `swarm_config`
