@@ -619,14 +619,15 @@ jobs:
         id: tests
         run: |
           set +e
-          mkdir -p .bun-test-timings/next
-          ( sleep 270; echo "=== WATCHDOG"; ps -eo pid,ppid,stat,pcpu,etime,cmd | grep -a "test-worker" | grep -v grep | cut -c1-120; echo "--- repo root files by mtime"; ls -lat --time-style=full-iso . | head -25; echo "--- tmp by mtime"; ls -lat --time-style=full-iso /tmp "$RUNNER_TEMP" 2>/dev/null | head -30; sudo apt-get install -y -qq strace >/dev/null 2>&1; for p in $(pgrep -f test-worker); do echo "--- strace $p"; timeout 4 sudo strace -f -p $p -e trace=openat,stat,newfstatat,read,write -s 120 2>&1 | head -40; echo "--- fds $p"; ls -l /proc/$p/fd 2>/dev/null | awk '{print $NF}' | sort | uniq -c | sort -rn | head -15; done ) &
-          WD=$!
-          timeout 420 bun run test:root -- --timeout 10000 --parallel=4 --shard=${{ matrix.shard }}/2 \
-            --update-timings --timings=.bun-test-timings/next/${{ matrix.shard }}.json \
-            $(ls .bun-test-timings/*.json 2>/dev/null | sed 's/^/--timings=/')
-          echo "=== test:root exit: $?"
-          kill $WD 2>/dev/null
+          echo "=== A: pi-tool-exposure alone"
+          timeout 100 bun test --timeout 10000 src/tests/pi-tool-exposure.test.ts 2>&1 | tail -15
+          echo "=== A exit: ${PIPESTATUS[0]}"
+          echo "=== B: pi-tool-exposure with three neighbours in parallel"
+          timeout 100 bun test --timeout 10000 --parallel=4 src/tests/pi-tool-exposure.test.ts src/tests/pi-mono-adapter.test.ts src/tests/pi-codemode.test.ts src/tests/page-session.test.ts 2>&1 | grep -a "##\[group\]\|pass$\|fail$\|Ran " | tail -15
+          echo "=== B exit: ${PIPESTATUS[0]}"
+          echo "=== C: pi-tool-exposure first 3 tests verbose"
+          timeout 100 bun test --timeout 10000 src/tests/pi-tool-exposure.test.ts -t "deferral on" 2>&1 | tail -8
+          echo "=== C exit: ${PIPESTATUS[0]}"
           echo "duration_ms=1" >> "$GITHUB_OUTPUT"
           echo "status=failure" >> "$GITHUB_OUTPUT"
           exit 1
