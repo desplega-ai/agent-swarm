@@ -171,8 +171,14 @@ export default function App(): ReactNode {
           <a className={section === "configs" ? "pill active" : "pill"} href="#/configs">
             Configs
           </a>
-          <a className="pill" href="/benchmark">
-            Benchmark
+          <a
+            className="pill"
+            href="/benchmark"
+            target="_blank"
+            rel="noopener"
+            title="Open the public benchmark in a new tab"
+          >
+            Benchmark ↗
           </a>
         </nav>
         <button

@@ -225,6 +225,12 @@ table.heat th.heat-corner {
   opacity: 0.9;
 }
 
+.chart-scatter-dot.on-frontier {
+  opacity: 1;
+  stroke: var(--text);
+  stroke-width: 1.5;
+}
+
 .chart-scatter-dot.hover {
   opacity: 1;
   stroke: var(--text);

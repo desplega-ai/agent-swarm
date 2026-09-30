@@ -231,3 +231,20 @@ table.data.bm-table td {
   text-align: center;
   color: var(--dim);
 }
+
+/* logged-in viewers only: the way back into the evals app */
+.bm-app-link {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--dim);
+  font-size: 12px;
+  line-height: 1;
+  padding: 5px 9px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.bm-app-link:hover {
+  color: var(--text);
+  background: var(--panel-2);
+}

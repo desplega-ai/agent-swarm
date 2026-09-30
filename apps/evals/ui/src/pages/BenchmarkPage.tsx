@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { getStoredApiKey } from "../api.ts";
 import { colorForGroup } from "../components/charts/chart-utils.ts";
 import { FrontierChart } from "../components/charts/FrontierChart.tsx";
 import { fmtCost, fmtDuration } from "../components/format.ts";
@@ -372,6 +373,8 @@ function PublicHeader(props: {
   onVersion: (v: string) => void;
 }): ReactNode {
   const versions = props.index?.versions ?? [];
+  // Logged in = the evals app has a stored key; anonymous visitors see no link.
+  const [loggedIn] = useState(() => getStoredApiKey() !== null);
   return (
     <header className="app-header bm-header">
       <a className="brand" href="/benchmark">
@@ -399,6 +402,11 @@ function PublicHeader(props: {
             ))}
           </select>
         </label>
+      ) : null}
+      {loggedIn ? (
+        <a className="bm-app-link" href="/#/leaderboard">
+          ← Back to evals
+        </a>
       ) : null}
     </header>
   );
