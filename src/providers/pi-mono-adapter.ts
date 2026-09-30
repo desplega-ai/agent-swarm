@@ -24,6 +24,7 @@ import type {
 import {
   type AgentSession,
   createAgentSession,
+  createCodemodeExtension,
   createMcpExtension,
   createToolSearchExtension,
   DefaultResourceLoader,
@@ -328,6 +329,15 @@ export const SWARM_TOOL_NAMESPACE = { name: "agent-swarm" } as const;
  */
 export function isPiToolDeferralEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return parseEnvFlag(env.PI_TOOL_DEFERRAL, false);
+}
+
+/**
+ * `PI_CODEMODE`: add pi's codemode tool (a harness-side JS sandbox whose
+ * scripts call tools) next to the declared tools, on every pi session.
+ * Off by default.
+ */
+export function isPiCodemodeEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return parseEnvFlag(env.PI_CODEMODE, false);
 }
 
 /**
@@ -1128,6 +1138,8 @@ export interface PiSessionFeatures {
   toolDeferral: boolean;
   /** The agent has installed MCP servers for pi's MCP extension to connect. */
   installedMcp?: boolean;
+  /** PI_CODEMODE is on. */
+  codemode?: boolean;
 }
 
 /**
@@ -1149,7 +1161,129 @@ export function piExtensionFactories(
   const factories: ExtensionFactory[] = [swarmExtension];
   if (features.toolDeferral) factories.push(createToolSearchExtension());
   if (features.installedMcp) factories.push(createSwarmMcpExtension());
+  if (features.codemode) factories.push(createBoundedCodemodeExtension());
   return factories;
+}
+
+/** Hard deadline for one codemode script. pi's default is none. */
+export const PI_CODEMODE_TIMEOUT_MS = 120_000;
+/** Nested tool calls one codemode script may start. */
+export const PI_CODEMODE_MAX_NESTED_CALLS = 32;
+/** Nested tool calls one codemode script may run at once. */
+export const PI_CODEMODE_MAX_CONCURRENT_CALLS = 4;
+
+export interface CodemodeLimits {
+  timeoutMs: number;
+  maxNestedCalls: number;
+  maxConcurrentCalls: number;
+}
+
+const DEFAULT_CODEMODE_LIMITS: CodemodeLimits = {
+  timeoutMs: PI_CODEMODE_TIMEOUT_MS,
+  maxNestedCalls: PI_CODEMODE_MAX_NESTED_CALLS,
+  maxConcurrentCalls: PI_CODEMODE_MAX_CONCURRENT_CALLS,
+};
+
+/**
+ * pi's codemode extension with a per-script deadline and nested-call budget.
+ * pi has no option for either: a script runs until it returns unless its own
+ * `// @options` line sets `timeout_ms`. Both limits abort the signal pi hands
+ * the sandbox, which interrupts the QuickJS worker and fails the codemode call.
+ *
+ * "on" keeps declared tools declared; "only" would hide the lifecycle tools
+ * behind scripts. `models: false` keeps model calls out of scripts, where
+ * they would bypass the session's cost accounting.
+ */
+export function createBoundedCodemodeExtension(
+  limits: CodemodeLimits = DEFAULT_CODEMODE_LIMITS,
+): ExtensionFactory {
+  const codemode = createCodemodeExtension({ mode: "on", models: false });
+  return (pi) =>
+    codemode(
+      new Proxy(pi, {
+        get(target, prop) {
+          if (prop === "registerTool") {
+            return (tool: ToolDefinition) => target.registerTool(boundCodemodeTool(tool, limits));
+          }
+          const value = Reflect.get(target, prop, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      }),
+    );
+}
+
+export function boundCodemodeTool(tool: ToolDefinition, limits: CodemodeLimits): ToolDefinition {
+  return {
+    ...tool,
+    execute: async (toolCallId, params, signal, onUpdate, ctx) => {
+      const script = new AbortController();
+      const stop = (message: string) => {
+        if (!script.signal.aborted) script.abort(new Error(message));
+      };
+      const onOuterAbort = () =>
+        script.abort(signal?.reason ?? new Error("Codemode script cancelled"));
+      if (signal?.aborted) onOuterAbort();
+      else signal?.addEventListener("abort", onOuterAbort, { once: true });
+      const timer = setTimeout(
+        () => stop(`Codemode script exceeded its ${limits.timeoutMs} ms deadline`),
+        limits.timeoutMs,
+      );
+
+      let started = 0;
+      let running = 0;
+      const waiters: Array<() => void> = [];
+      const release = () => {
+        running--;
+        waiters.shift()?.();
+      };
+      const executeTool: typeof ctx.executeTool = async (name, args, options) => {
+        if (script.signal.aborted) throw new Error("Codemode script already stopped");
+        if (++started > limits.maxNestedCalls) {
+          const message = `Codemode script exceeded its budget of ${limits.maxNestedCalls} nested tool calls`;
+          stop(message);
+          throw new Error(message);
+        }
+        while (running >= limits.maxConcurrentCalls) {
+          await new Promise<void>((resolve) => {
+            waiters.push(resolve);
+            script.signal.addEventListener("abort", () => resolve(), { once: true });
+          });
+          if (script.signal.aborted) {
+            waiters.shift()?.();
+            throw new Error("Codemode script already stopped");
+          }
+        }
+        running++;
+        try {
+          return await ctx.executeTool(name, args, {
+            ...options,
+            signal: options?.signal ?? script.signal,
+          });
+        } finally {
+          release();
+        }
+      };
+      // pi defines `executeTool` non-writable and non-configurable, so a Proxy
+      // may not return a different function for it. Copy the descriptors onto
+      // a fresh object instead; the getters stay lazy, as in pi's own copies.
+      const boundedCtx = ctx
+        ? (Object.defineProperties(
+            {},
+            {
+              ...Object.getOwnPropertyDescriptors(ctx),
+              executeTool: { value: executeTool, enumerable: true },
+            },
+          ) as typeof ctx)
+        : ctx;
+
+      try {
+        return await tool.execute(toolCallId, params, script.signal, onUpdate, boundedCtx);
+      } finally {
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", onOuterAbort);
+      }
+    },
+  };
 }
 
 /**
@@ -1206,6 +1340,7 @@ export function toPiMcpServers(
 export function piDefaultToolAdditions(features: PiSessionFeatures): string[] {
   const additions: string[] = [];
   if (features.toolDeferral) additions.push("+tool_search");
+  if (features.codemode) additions.push("+codemode");
   return additions;
 }
 
@@ -1342,19 +1477,25 @@ export class PiMonoAdapter implements ProviderAdapter {
       mcpServers: piMcpServers,
     });
 
+    const features: PiSessionFeatures = {
+      toolDeferral: deferTools,
+      installedMcp: Object.keys(piMcpServers).length > 0,
+      codemode: isPiCodemodeEnabled(),
+    };
+    if (features.codemode) {
+      console.log(`\x1b[2m[${config.role}]\x1b[0m codemode on`);
+    }
+
     // 5. Create resource loader with system prompt + extensions. SDK sessions
     // load no built-in pi extension, so tool_search is added explicitly.
     const { resourceLoader, settingsManager } = await createPiResourceLoader({
       cwd: config.cwd,
       agentDir: getAgentDir(),
       systemPrompt: config.systemPrompt,
-      extensionFactories: piExtensionFactories(swarmExtension, {
-        toolDeferral: deferTools,
-        installedMcp: Object.keys(piMcpServers).length > 0,
-      }),
+      extensionFactories: piExtensionFactories(swarmExtension, features),
     });
     // tool_search registers inactive; `+` adds it to the default tool set.
-    const extraDefaultTools = piDefaultToolAdditions({ toolDeferral: deferTools });
+    const extraDefaultTools = piDefaultToolAdditions(features);
     if (extraDefaultTools.length > 0) {
       settingsManager.applyOverrides({ defaultTools: extraDefaultTools });
     }

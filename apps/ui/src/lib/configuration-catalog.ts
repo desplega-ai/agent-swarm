@@ -422,6 +422,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}guides/harness-providers`,
       },
       {
+        key: "PI_CODEMODE",
+        label: "pi codemode (pilot)",
+        description:
+          "pi workers only. Add pi's codemode tool, a JavaScript sandbox in the worker whose scripts call tools, so one call can fan out many tool calls. Declared tools stay declared. Applies to every pi session when on. Off by default. Takes effect on the worker's next task.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}guides/harness-providers`,
+      },
+      {
         key: "SCRIPTS_ONLY_MCP",
         label: "Scripts-only MCP",
         description:
