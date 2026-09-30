@@ -113,7 +113,7 @@ test("Comb connects, comments, replies, and resolves on agent-fs", { tag: "@loca
     const thread = page.getByRole("article").filter({ hasText: "E2E file comment" });
     await expect(thread).toBeVisible();
 
-    await thread.getByRole("button", { name: "Reply" }).click();
+    await thread.getByRole("button", { name: "Reply", exact: true }).click();
     await thread.getByRole("textbox", { name: "Reply" }).fill("E2E reply");
     await thread.getByRole("button", { name: "Send", exact: true }).click();
     await expect(thread.getByText("E2E reply")).toBeVisible();
