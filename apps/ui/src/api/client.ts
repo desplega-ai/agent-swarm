@@ -810,6 +810,27 @@ class ApiClient {
     return res.json();
   }
 
+  /**
+   * Invite an agent-fs user (by email) into the swarm's shared org and drive.
+   * The API runs the invite with its own bootstrap key. Only the email is sent.
+   */
+  async inviteAgentFsMember(data: {
+    email: string;
+    role: "viewer" | "editor" | "admin";
+  }): Promise<{ orgId: string; invited: boolean }> {
+    const url = `${this.getBaseUrl()}/api/fs/members/invite`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `Failed to invite agent-fs member: ${res.status}`);
+    }
+    return res.json();
+  }
+
   async createChannel(data: {
     name: string;
     description?: string;

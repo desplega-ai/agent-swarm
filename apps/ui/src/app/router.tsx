@@ -62,6 +62,7 @@ const PageDetailPage = lazy(() => import("@/pages/pages/[id]/page"));
 const PagesListingPage = lazy(() => import("@/pages/pages/page"));
 const AppsListingPage = lazy(() => import("@/pages/apps/page"));
 const AppDetailPage = lazy(() => import("@/pages/apps/[id]/page"));
+const CombPage = lazy(() => import("@/pages/comb/page"));
 const NotFoundPage = lazy(() => import("@/pages/not-found/page"));
 const SetupPage = lazy(() => import("@/pages/setup/page"));
 
@@ -201,6 +202,9 @@ export const router = createBrowserRouter([
       // A named page of a multi-page app. Same component as `apps/:id` (which
       // renders the app's `defaultPage`) — both URLs stay valid, no redirect.
       { path: "apps/:id/p/:page", element: <AppDetailPage /> },
+      // Comb. `/file` redirects to the swarm drive once `/status` names it.
+      { path: "file", element: <CombPage /> },
+      { path: "file/~/:orgId/:driveId/*", element: <CombPage /> },
       ...devRoutes,
       ...redirectRoutes,
       { path: "*", element: <NotFoundPage /> },

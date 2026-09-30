@@ -16,6 +16,7 @@ import { ClockIcon } from "@/components/icons/clock";
 import { ContactIcon } from "@/components/icons/contact";
 import { FileClockIcon } from "@/components/icons/file-clock";
 import { FileTextIcon } from "@/components/icons/file-text";
+import { FolderOpenIcon } from "@/components/icons/folder-open";
 import { GlobeIcon } from "@/components/icons/globe";
 import { HomeIcon } from "@/components/icons/home";
 import { LayoutGridIcon } from "@/components/icons/layout-grid";
@@ -76,6 +77,11 @@ interface NavItem {
    */
   beta?: { tooltip: string };
   /**
+   * Runtime switch: the item renders only when the named feature is on.
+   * `comb` reads `/status` `agent_fs.comb.enabled` (COMB_ENABLED + agent-fs).
+   */
+  requires?: "comb";
+  /**
    * Declarative minimum role required to see this item. Purely a type-level
    * annotation for future RBAC — render logic does NOT consult it today, so
    * every item stays visible to everyone. See plan Phase 1 / Appendix.
@@ -121,6 +127,13 @@ const navGroups: NavGroup[] = [
         path: "/pages",
         icon: GlobeIcon,
         gate: { minVersion: "1.79.0" },
+      },
+      {
+        title: "Comb",
+        path: "/file",
+        icon: FolderOpenIcon,
+        beta: { tooltip: "Review agent-fs files with the swarm" },
+        requires: "comb",
       },
       {
         title: "Apps",
@@ -366,6 +379,8 @@ export function AppSidebar() {
   };
   const isGated = (item: NavItem) =>
     !!item.gate && gates[item.gate.minVersion]?.supported === false;
+  const combEnabled = status?.agent_fs?.comb?.enabled === true;
+  const isHidden = (item: NavItem) => isGated(item) || (item.requires === "comb" && !combEnabled);
 
   // Live counts surfaced as right-aligned badges on existing nav items.
   // Gated entirely on API ≥1.82 — the backing queries don't even fire on
@@ -463,8 +478,7 @@ export function AppSidebar() {
                               !!item.children?.some((child) =>
                                 location.pathname.startsWith(child.path),
                               );
-                        const gated = isGated(item);
-                        if (gated) return null;
+                        if (isHidden(item)) return null;
                         const badge = badges[item.path];
                         return (
                           <SidebarMenuItem key={item.path}>
@@ -513,8 +527,7 @@ export function AppSidebar() {
                         item.path === "/"
                           ? location.pathname === "/"
                           : location.pathname.startsWith(item.path);
-                      const gated = isGated(item);
-                      if (gated) return null;
+                      if (isHidden(item)) return null;
                       return (
                         <SidebarMenuItem key={item.path}>
                           <NavIconLink

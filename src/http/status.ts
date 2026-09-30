@@ -34,6 +34,7 @@ import {
   NOT_EXTENSION_AGENT_SQL,
 } from "../be/db";
 import { getEmbeddingProvider } from "../be/memory";
+import { getCombConfig } from "../comb/config";
 import { getFileStorageProvider } from "../fs/registry";
 import { getSlackConfiguration } from "../slack/config";
 import { getSlackConnectionState } from "../slack/connection-state";
@@ -119,11 +120,21 @@ export const StatusActivitySchema = z.object({
 });
 export type StatusActivity = z.infer<typeof StatusActivitySchema>;
 
+export const StatusCombSchema = z.object({
+  enabled: z.boolean(),
+  api_url: z.string().nullable(),
+  live_url: z.string(),
+  org_id: z.string().nullable(),
+  drive_id: z.string().nullable(),
+});
+
 export const StatusAgentFsSchema = z.object({
   configured: z.boolean(),
   base_url: z.string().nullable(),
   provider_id: z.string(),
   capabilities: z.record(z.string(), z.unknown()),
+  /** Comb, the agent-fs review space in the dashboard. */
+  comb: StatusCombSchema,
 });
 export type StatusAgentFs = z.infer<typeof StatusAgentFsSchema>;
 
@@ -689,9 +700,21 @@ export async function buildStatusPayload(): Promise<StatusResponse> {
       configured: !!process.env.AGENT_FS_API_URL,
       base_url: process.env.AGENT_FS_API_URL ?? null,
       ...getAgentFsStatusProvider(),
+      comb: getCombStatus(),
     },
     automations,
     health: computeHealth(setup),
+  };
+}
+
+function getCombStatus(): StatusAgentFs["comb"] {
+  const comb = getCombConfig();
+  return {
+    enabled: comb.enabled,
+    api_url: comb.apiUrl,
+    live_url: comb.liveUrl,
+    org_id: comb.orgId,
+    drive_id: comb.driveId,
   };
 }
 
@@ -721,7 +744,7 @@ const getStatus = route({
   pattern: ["status"],
   summary: "Identity + setup readiness + live activity for the swarm dashboard",
   description:
-    "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set.",
+    "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set, plus the Comb settings (COMB_ENABLED, the browser-facing agent-fs URL, and the shared org and drive ids).",
   tags: ["Status"],
   responses: {
     200: { description: "Status payload", schema: StatusResponseSchema },

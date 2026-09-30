@@ -874,6 +874,23 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         placeholder: "20000",
         docsUrl: `${DOCS}ui/configuration`,
       },
+      {
+        key: "COMB_ENABLED",
+        label: "Comb (beta)",
+        description: "Show the agent-fs review space in the dashboard. Needs agent-fs.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}ui/comb`,
+      },
+      {
+        key: "AGENT_FS_PUBLIC_URL",
+        label: "agent-fs public URL",
+        description:
+          "agent-fs URL that browsers use. Defaults to AGENT_FS_API_URL. Set it when the API reaches agent-fs on an internal hostname.",
+        kind: "string",
+        placeholder: "https://agent-fs.example.com",
+        docsUrl: `${DOCS}ui/configuration`,
+      },
     ],
   },
   {

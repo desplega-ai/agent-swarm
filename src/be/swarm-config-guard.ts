@@ -167,6 +167,26 @@ function boundedIntegerValidators(
   );
 }
 
+/**
+ * Blank or an http(s) URL with no query string or fragment. Returns `invalid`
+ * for anything else. Blank is allowed: it is how an operator reverts to the
+ * key's fallback without deleting the row.
+ */
+function validateHttpBaseUrl(value: unknown, invalid: string): string | null {
+  if (typeof value !== "string") return invalid;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return null;
+
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return invalid;
+    if (url.search || url.hash) return invalid;
+  } catch {
+    return invalid;
+  }
+  return null;
+}
+
 function validateFloatRange(
   key: string,
   value: unknown,
@@ -213,22 +233,17 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   // or a fragment would build a nonsense URL — reject those here rather than
   // letting workers fail one request at a time. Blank is meaningful and allowed:
   // it is how an operator reverts to openrouter.ai without deleting the row.
-  OPENROUTER_BASE_URL: (value) => {
-    const invalid =
-      "Invalid OPENROUTER_BASE_URL (must be an http(s) URL with no query string or fragment, e.g. https://api.example.com/v1 — leave blank for openrouter.ai)";
-    if (typeof value !== "string") return invalid;
-    const trimmed = value.trim();
-    if (trimmed.length === 0) return null;
-
-    try {
-      const url = new URL(trimmed);
-      if (url.protocol !== "https:" && url.protocol !== "http:") return invalid;
-      if (url.search || url.hash) return invalid;
-    } catch {
-      return invalid;
-    }
-    return null;
-  },
+  OPENROUTER_BASE_URL: (value) =>
+    validateHttpBaseUrl(
+      value,
+      "Invalid OPENROUTER_BASE_URL (must be an http(s) URL with no query string or fragment, e.g. https://api.example.com/v1. Leave blank for openrouter.ai)",
+    ),
+  // Browser-facing agent-fs URL for Comb. Blank falls back to AGENT_FS_API_URL.
+  AGENT_FS_PUBLIC_URL: (value) =>
+    validateHttpBaseUrl(
+      value,
+      "Invalid AGENT_FS_PUBLIC_URL (must be an http(s) URL with no query string or fragment, e.g. https://agent-fs.example.com. Leave blank to use AGENT_FS_API_URL)",
+    ),
   HARNESS_PROVIDER: (value) => {
     const parsed = ProviderNameSchema.safeParse(value);
     if (parsed.success) return null;
@@ -306,6 +321,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     "DB_QUERY_BOUNDED_ENABLED",
     "DB_RETENTION_DRY_RUN",
     "MODEL_AUTO_UPGRADE",
+    "COMB_ENABLED",
   ]),
   ...enumValidator("SLACK_MODE", ["socket", "http"]),
   ...enumValidator("SLACK_THREAD_STEERING", ["off", "lead", "all"]),

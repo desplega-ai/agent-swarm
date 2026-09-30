@@ -15,6 +15,7 @@ import { NameConnectionModal } from "@/components/shared/name-connection-modal";
 import { OrganizationNameDialog } from "@/components/shared/organization-name-dialog";
 import { LeadCredentialDialog } from "@/components/support/lead-credential-dialog";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
+import { AgentFsProvider } from "@/contexts/agent-fs-context";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useConfig } from "@/hooks/use-config";
 import { cn } from "@/lib/utils";
@@ -63,41 +64,43 @@ export function RootLayout() {
 
   return (
     <StatusProvider pollIntervalMs={30_000}>
-      <ContextPanelProvider>
-        <SidebarProvider className="h-svh max-w-full overflow-hidden">
-          <AppSidebar />
-          <SidebarInset className="min-w-0">
-            <AppHeader />
-            {/* Below lg the main column is the scroll container so pages that
-              flow naturally (detail pages, forms) can scroll; at lg+ it goes
-              back to overflow-hidden and pages own their scroll regions
-              (pinned headers, grid-internal scrolling). */}
-            <main
-              className={cn(
-                "flex flex-1 flex-col min-h-0 min-w-0 overflow-x-hidden overflow-y-auto lg:overflow-hidden",
-                mainPadding,
-              )}
-            >
-              <ErrorBoundary>
-                <Suspense fallback={<HiveLoadingScreen />}>
-                  <Outlet />
-                </Suspense>
-              </ErrorBoundary>
-            </main>
-            <AppFooter />
-          </SidebarInset>
-          {/* Contextual session panel: a flex sibling of the inset, so the page
-            stays interactive while the user gives feedback. */}
-          <ContextSessionPanel />
-        </SidebarProvider>
-      </ContextPanelProvider>
-      <CommandMenu />
-      <OnboardingRedirect />
-      <IdentityGate />
-      <NameConnectionModal />
-      <OrganizationNameDialog key={`organization:${config.apiUrl}`} />
-      <LeadCredentialDialog key={config.apiUrl} />
-      <FeedbackDialog key={`feedback:${config.apiUrl}`} />
+      <AgentFsProvider>
+        <ContextPanelProvider>
+          <SidebarProvider className="h-svh max-w-full overflow-hidden">
+            <AppSidebar />
+            <SidebarInset className="min-w-0">
+              <AppHeader />
+              {/* Below lg the main column is the scroll container so pages that
+                flow naturally (detail pages, forms) can scroll; at lg+ it goes
+                back to overflow-hidden and pages own their scroll regions
+                (pinned headers, grid-internal scrolling). */}
+              <main
+                className={cn(
+                  "flex flex-1 flex-col min-h-0 min-w-0 overflow-x-hidden overflow-y-auto lg:overflow-hidden",
+                  mainPadding,
+                )}
+              >
+                <ErrorBoundary>
+                  <Suspense fallback={<HiveLoadingScreen />}>
+                    <Outlet />
+                  </Suspense>
+                </ErrorBoundary>
+              </main>
+              <AppFooter />
+            </SidebarInset>
+            {/* Contextual session panel: a flex sibling of the inset, so the page
+              stays interactive while the user gives feedback. */}
+            <ContextSessionPanel />
+          </SidebarProvider>
+        </ContextPanelProvider>
+        <CommandMenu />
+        <OnboardingRedirect />
+        <IdentityGate />
+        <NameConnectionModal />
+        <OrganizationNameDialog key={`organization:${config.apiUrl}`} />
+        <LeadCredentialDialog key={config.apiUrl} />
+        <FeedbackDialog key={`feedback:${config.apiUrl}`} />
+      </AgentFsProvider>
     </StatusProvider>
   );
 }

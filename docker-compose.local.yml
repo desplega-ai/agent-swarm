@@ -111,6 +111,8 @@ services:
     environment:
       - API_KEY=${API_KEY}
       - AGENT_FS_API_URL=http://agent-fs:7433
+      # Browser-facing agent-fs URL for Comb (the host port published above).
+      - AGENT_FS_PUBLIC_URL=${AGENT_FS_PUBLIC_URL:-http://localhost:7433}
       - API_AGENT_FS_API_KEY=${API_AGENT_FS_API_KEY:-}
       - AGENT_FS_REGISTER_EMAIL=${AGENT_FS_REGISTER_EMAIL:-swarm-admin@agent-fs.local}
       - SLACK_DISABLE=true

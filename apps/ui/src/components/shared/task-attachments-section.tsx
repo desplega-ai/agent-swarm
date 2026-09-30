@@ -29,6 +29,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { MiddleTruncation } from "@/components/ui/middle-truncation";
+import { scrubSecretText } from "@/lib/scrub-secrets";
 import { cn } from "@/lib/utils";
 
 /**
@@ -190,13 +191,6 @@ function PreviewIcon({ kind }: { kind: PreviewKind | null }) {
   return <File className="h-4 w-4 text-muted-foreground" />;
 }
 
-function scrubPreviewText(text: string): string {
-  return text
-    .replace(/\b(Bearer\s+)[A-Za-z0-9._~+/=-]{16,}/g, "$1[REDACTED]")
-    .replace(/\b([A-Z0-9_]*(?:API|TOKEN|SECRET|KEY)[A-Z0-9_]*\s*=\s*)[^\s"'`]+/gi, "$1[REDACTED]")
-    .replace(/\b(aswt_|sk-|af_)[A-Za-z0-9._-]{12,}/g, "$1[REDACTED]");
-}
-
 function AttachmentRow({
   attachment,
   onDownload,
@@ -266,7 +260,7 @@ function AttachmentRow({
             });
             return;
           }
-          const text = scrubPreviewText(await blob.text());
+          const text = scrubSecretText(await blob.text());
           previewStateRef.current = "text";
           setPreview({
             kind: "text",

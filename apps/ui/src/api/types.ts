@@ -2747,11 +2747,26 @@ export interface StatusActivity {
   recent_tasks_count: number;
 }
 
+/** Comb, the agent-fs review space in the dashboard (`/file`). */
+export interface StatusComb {
+  /** `COMB_ENABLED` is on and `AGENT_FS_API_URL` is set. */
+  enabled: boolean;
+  /** Browser-facing agent-fs URL (`AGENT_FS_PUBLIC_URL`, else `AGENT_FS_API_URL`). */
+  api_url: string | null;
+  /** agent-fs live UI host, for "Open in agent-fs" links. */
+  live_url: string;
+  /** The swarm's shared agent-fs org and drive. */
+  org_id: string | null;
+  drive_id: string | null;
+}
+
 export interface StatusAgentFs {
   configured: boolean;
   base_url: string | null;
   provider_id: string;
   capabilities: Record<string, unknown>;
+  /** Absent when the dashboard talks to an API that predates Comb. */
+  comb?: StatusComb;
 }
 
 export interface StatusAutomation {
