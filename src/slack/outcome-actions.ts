@@ -1,6 +1,14 @@
 import type { App } from "@slack/bolt";
 import type { WebClient } from "@slack/web-api";
-import { getTaskAttachments, getTaskById, insertTaskAttachment, promoteDraftTask } from "../be/db";
+import {
+  deleteTask,
+  failTask,
+  getDbClient,
+  getTaskAttachments,
+  getTaskById,
+  insertTaskAttachment,
+  promoteDraftTask,
+} from "../be/db";
 import { recordTaskFeedback } from "../be/db-queries/task-feedback";
 import { can } from "../rbac/can";
 import { slackContextKey } from "../tasks/context-key";
@@ -212,33 +220,74 @@ async function createRetryTask(
   );
   if (inputs.length === 0) return retry;
   try {
-    for (const attachment of inputs) {
-      await insertTaskAttachment({
-        taskId: retry.id,
-        agentId: attachment.agentId,
-        name: attachment.name,
-        kind: attachment.kind,
-        url: attachment.url,
-        path: attachment.path,
-        pageId: attachment.pageId,
-        providerId: attachment.providerId,
-        providerKey: attachment.providerKey,
-        capabilities: attachment.capabilities,
-        orgId: attachment.orgId,
-        driveId: attachment.driveId,
-        mimeType: attachment.mimeType,
-        sizeBytes: attachment.sizeBytes,
-        sha256: attachment.sha256,
-        intent: attachment.intent,
-        description: attachment.description,
-        isPrimary: attachment.isPrimary,
-        createdBy: attachment.createdBy,
-      });
-    }
-  } finally {
-    await promoteDraftTask(retry.id);
+    // All or nothing: the draft is promoted in the same transaction as the
+    // copies, so it only becomes runnable with every input file attached.
+    await getDbClient().transaction(async () => {
+      for (const attachment of inputs) {
+        await insertTaskAttachment({
+          taskId: retry.id,
+          agentId: attachment.agentId,
+          name: attachment.name,
+          kind: attachment.kind,
+          url: attachment.url,
+          path: attachment.path,
+          pageId: attachment.pageId,
+          providerId: attachment.providerId,
+          providerKey: attachment.providerKey,
+          capabilities: attachment.capabilities,
+          orgId: attachment.orgId,
+          driveId: attachment.driveId,
+          mimeType: attachment.mimeType,
+          sizeBytes: attachment.sizeBytes,
+          sha256: attachment.sha256,
+          intent: attachment.intent,
+          description: attachment.description,
+          isPrimary: attachment.isPrimary,
+          createdBy: attachment.createdBy,
+        });
+      }
+      if (!(await promoteDraftTask(retry.id))) {
+        throw new Error(`retry ${retry.id} left draft before its inputs were attached`);
+      }
+    });
+  } catch (error) {
+    throw new RetryInputsError(retry.id, await discardRetryDraft(retry.id), error);
   }
   return (await getTaskById(retry.id)) ?? retry;
+}
+
+/** The retry's input files could not be copied; `settled` says no draft is left behind. */
+class RetryInputsError extends Error {
+  constructor(
+    readonly retryTaskId: string,
+    readonly settled: boolean,
+    cause: unknown,
+  ) {
+    super(`could not copy the input files to retry ${retryTaskId}`, { cause });
+  }
+}
+
+/**
+ * Remove a retry draft whose inputs did not copy. It was never claimable, so
+ * deleting it leaves no trace of work. If the delete fails, fail the draft
+ * instead: the abandoned-draft sweep would otherwise promote it, runnable and
+ * missing its files. Returns false when neither landed.
+ */
+async function discardRetryDraft(retryTaskId: string): Promise<boolean> {
+  try {
+    await deleteTask(retryTaskId);
+    return true;
+  } catch (error) {
+    console.error(`[Slack] Failed to delete retry draft ${retryTaskId}:`, error);
+  }
+  try {
+    return (
+      (await failTask(retryTaskId, "Retry aborted: the input files could not be copied")) !== null
+    );
+  } catch (error) {
+    console.error(`[Slack] Failed to fail retry draft ${retryTaskId}:`, error);
+    return false;
+  }
 }
 
 export function registerOutcomeActionHandlers(app: App): void {
@@ -320,8 +369,22 @@ export function registerOutcomeActionHandlers(app: App): void {
     try {
       retry = await createRetryTask(original, body.user.id, auth.userId);
     } catch (error) {
-      retriedTaskIds.delete(original.id);
+      // Reopen the guard only when no retry is left that could still run.
+      if (!(error instanceof RetryInputsError) || error.settled) {
+        retriedTaskIds.delete(original.id);
+      }
       console.error(`[Slack] Failed to retry task ${original.id}:`, error);
+      if (error instanceof RetryInputsError) {
+        await postEphemeralQuietly(
+          client,
+          original.slackChannelId,
+          body.user.id,
+          threadTs ?? original.slackThreadTs,
+          error.settled
+            ? "Retry did not start: the files from your ask could not be copied. Try again."
+            : "Retry did not start: the files from your ask could not be copied.",
+        );
+      }
       return;
     }
 

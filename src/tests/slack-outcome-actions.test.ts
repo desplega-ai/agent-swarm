@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { App } from "@slack/bolt";
@@ -8,9 +8,11 @@ import {
   createTaskExtended,
   failTask,
   getAllTasks,
+  getDbClient,
   getTaskAttachments,
   initDb,
   insertTaskAttachment,
+  promoteAbandonedDraftTasks,
   startTask,
 } from "../be/db";
 import { listTaskFeedback, recordTaskFeedback } from "../be/db-queries/task-feedback";
@@ -443,6 +445,111 @@ describe("retry handler", () => {
     });
     const files = await getTaskAttachments(retry!.id);
     expect(files.map((file) => [file.name, file.intent])).toEqual([["brief.pdf", "user-upload"]]);
+  });
+
+  test("an input copy that fails leaves no runnable retry, and a later click retries cleanly", async () => {
+    const { task } = await slackTask("retry-copy-fails");
+    for (const name of ["first.pdf", "second.pdf"]) {
+      await insertTaskAttachment({
+        taskId: task.id,
+        agentId: null,
+        name,
+        kind: "url",
+        url: `https://files.example.com/${name}`,
+        intent: "user-upload",
+      });
+    }
+    await startTask(task.id);
+    await failTask(task.id, "Worker crashed");
+    const click = {
+      ack,
+      client: fakeClient,
+      action: { type: "button", value: task.id },
+      body: { user: { id: "U_ASKER" } },
+    };
+    const retries = () =>
+      getAllTasks().then((all) => all.filter((t) => t.id !== task.id && t.task === task.task));
+    const db = getDbClient();
+
+    // The second file fails to copy, after the first one landed.
+    await db.run(
+      `CREATE TRIGGER reject_retry_copy BEFORE INSERT ON task_attachments
+         WHEN NEW.name = 'second.pdf' AND NEW.task_id != '${task.id}'
+         BEGIN SELECT RAISE(ABORT, 'injected copy failure'); END`,
+    );
+    const quiet = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await actionHandlers.get("retry_task")!(click);
+      await actionHandlers.get("retry_task")!(click);
+    } finally {
+      quiet.mockRestore();
+      await db.run("DROP TRIGGER reject_retry_copy");
+    }
+    expect(await retries()).toEqual([]);
+    expect(await promoteAbandonedDraftTasks(0)).toBe(0);
+    expect(
+      await db.get<{ n: number }>(
+        "SELECT COUNT(*) AS n FROM task_attachments WHERE task_id NOT IN (SELECT id FROM agent_tasks)",
+      ),
+    ).toEqual({ n: 0 });
+    expect(ephemeralTexts()).toEqual([
+      "Retry did not start: the files from your ask could not be copied. Try again.",
+      "Retry did not start: the files from your ask could not be copied. Try again.",
+    ]);
+
+    // The failures released the guard, so the next click starts one complete retry.
+    await actionHandlers.get("retry_task")!(click);
+    await actionHandlers.get("retry_task")!(click);
+    const [retry, ...extra] = await retries();
+    expect(extra).toEqual([]);
+    expect(retry).toMatchObject({ status: "pending" });
+    const files = await getTaskAttachments(retry!.id);
+    expect(files.map((file) => file.name).sort()).toEqual(["first.pdf", "second.pdf"]);
+  });
+
+  test("a retry draft that cannot be deleted is failed, never left to be promoted", async () => {
+    const { task } = await slackTask("retry-copy-fails-sticky");
+    await insertTaskAttachment({
+      taskId: task.id,
+      agentId: null,
+      name: "only.pdf",
+      kind: "url",
+      url: "https://files.example.com/only.pdf",
+      intent: "user-upload",
+    });
+    await startTask(task.id);
+    await failTask(task.id, "Worker crashed");
+    const db = getDbClient();
+    await db.run(
+      `CREATE TRIGGER reject_retry_copy BEFORE INSERT ON task_attachments
+         WHEN NEW.task_id != '${task.id}'
+         BEGIN SELECT RAISE(ABORT, 'injected copy failure'); END`,
+    );
+    await db.run(
+      `CREATE TRIGGER keep_retry_draft BEFORE DELETE ON agent_tasks WHEN OLD.status = 'draft'
+         BEGIN SELECT RAISE(ABORT, 'injected delete failure'); END`,
+    );
+    const quiet = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await actionHandlers.get("retry_task")!({
+        ack,
+        client: fakeClient,
+        action: { type: "button", value: task.id },
+        body: { user: { id: "U_ASKER" } },
+      });
+    } finally {
+      quiet.mockRestore();
+      await db.run("DROP TRIGGER reject_retry_copy");
+      await db.run("DROP TRIGGER keep_retry_draft");
+    }
+    const retries = (await getAllTasks()).filter((t) => t.id !== task.id && t.task === task.task);
+    expect(retries).toHaveLength(1);
+    expect(retries[0]).toMatchObject({
+      status: "failed",
+      failureReason: "Retry aborted: the input files could not be copied",
+    });
+    expect(await getTaskAttachments(retries[0]!.id)).toEqual([]);
+    expect(await promoteAbandonedDraftTasks(0)).toBe(0);
   });
 
   test("a retry of a lead-only task stays lead-only on the same agent", async () => {
