@@ -176,6 +176,13 @@
   background: var(--text);
 }
 
+/* an errored attempt is a ring, not a filled red dot: it was never graded */
+.rd-dot.err {
+  background: transparent;
+  border: 1.5px solid var(--red);
+  box-sizing: border-box;
+}
+
 /* ---- cell summary band (v7 §2.2 — rendered only when attemptsPerCell > 1) ---- */
 
 .rd-cellsum {

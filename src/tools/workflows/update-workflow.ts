@@ -37,7 +37,8 @@ export const registerUpdateWorkflowTool = (server: McpServer) => {
         "WEBHOOK VERIFICATION: webhook triggers use hmacSecret for all verification formats. " +
         "Omit verification for legacy HMAC-SHA256 over the raw body with fallback header scanning; " +
         "or set verification to { format: 'hmac-sha256', header }, { format: 'timestamped-hmac-sha256', header, toleranceSeconds? }, " +
-        "or { format: 'token-equality', header }.",
+        "{ format: 'token-equality', header }, or { format: 'standard-webhooks', toleranceSeconds? } " +
+        "(standardwebhooks.com: webhook-id/webhook-timestamp/webhook-signature headers, hmacSecret is the whsec_ signing secret).",
       inputSchema: z.object({
         id: z.string().uuid().describe("Workflow ID to update"),
         key: AssetKeySchema.optional().describe("Move to a logical namespace."),
@@ -48,7 +49,7 @@ export const registerUpdateWorkflowTool = (server: McpServer) => {
           .array(TriggerConfigSchema)
           .optional()
           .describe(
-            "New trigger configurations. Webhook verification formats: legacy omitted verification, hmac-sha256, timestamped-hmac-sha256, token-equality.",
+            "New trigger configurations. Webhook verification formats: legacy omitted verification, hmac-sha256, timestamped-hmac-sha256, token-equality, standard-webhooks.",
           ),
         cooldown: CooldownConfigSchema.optional()
           .nullable()

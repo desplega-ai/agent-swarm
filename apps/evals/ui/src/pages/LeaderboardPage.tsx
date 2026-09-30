@@ -10,6 +10,7 @@ import { HarnessIcon } from "../components/HarnessIcon.tsx";
 import { ModelChip } from "../components/ModelChip.tsx";
 import { Seg } from "../components/Seg.tsx";
 import { Spinner } from "../components/Spinner.tsx";
+import { SuiteSelect } from "../components/SuiteSelect.tsx";
 import { InfoTip } from "../components/Tooltip.tsx";
 import { navigate, replaceHashQuery, useHashRoute, usePoll } from "../hooks.ts";
 import {
@@ -26,12 +27,13 @@ import {
   type LeaderboardRow,
   rankSortValue,
   SHAPE_LEGEND,
-  type SuitesResponse,
   type Track,
   timeTicks,
   trackConfigIds,
 } from "../lib/suite-analytics.ts";
 import AnalyticsPage from "./AnalyticsPage.tsx";
+import HeatmapView from "./HeatmapView.tsx";
+import ReliabilityView from "./ReliabilityView.tsx";
 import "./leaderboard.css";
 
 /**
@@ -458,14 +460,6 @@ function oneOf<T extends string>(raw: string | null, allowed: readonly T[], fall
   return allowed.find((a) => a === raw) ?? fallback;
 }
 
-function suiteLabel(suites: SuitesResponse, version: string): string {
-  const s = suites.suites.find((x) => x.suiteVersion === version);
-  const current = version === suites.current ? " (current)" : "";
-  return s
-    ? `${version}${current} · ${s.attempts} attempts`
-    : `${version}${current} · no attempts yet`;
-}
-
 function RankingView(): ReactNode {
   const route = useHashRoute();
   const { query } = route;
@@ -547,29 +541,7 @@ function RankingView(): ReactNode {
   const header = (
     <div className="lb-head">
       <h2 className="an-title">Leaderboard</h2>
-      <label className="lb-field">
-        <span className="dim">Suite</span>
-        <select
-          className="lb-select"
-          value={suite ?? ""}
-          disabled={suites.data === null}
-          onChange={(e) => setSuiteChoice(e.target.value)}
-        >
-          {suites.data !== null
-            ? [
-                ...new Set([
-                  suites.data.current,
-                  ...suites.data.suites.map((s) => s.suiteVersion),
-                  ...(suite === null ? [] : [suite]),
-                ]),
-              ].map((v) => (
-                <option key={v} value={v}>
-                  {suiteLabel(suites.data as SuitesResponse, v)}
-                </option>
-              ))
-            : null}
-        </select>
-      </label>
+      <SuiteSelect suites={suites.data} value={suite} onChange={setSuiteChoice} />
       <div className="lb-field">
         <span className="dim">
           Track{" "}
@@ -719,26 +691,45 @@ function RankingView(): ReactNode {
   );
 }
 
+export type LeaderboardTab = "ranking" | "heatmap" | "reliability" | "analytics";
+
+const TABS: readonly { key: LeaderboardTab; label: string; href: string }[] = [
+  { key: "ranking", label: "Frontier & ranking", href: "#/leaderboard" },
+  { key: "heatmap", label: "Scenario heatmap", href: "#/leaderboard/heatmap" },
+  { key: "reliability", label: "Reliability", href: "#/leaderboard/reliability" },
+  { key: "analytics", label: "Trends, cost & models", href: "#/leaderboard/analytics" },
+];
+
+/** The tab a hash path selects: `#/leaderboard/<tab>`; anything else is the ranking. */
+export function leaderboardTab(parts: readonly string[]): LeaderboardTab {
+  const seg = parts[0] === "analytics" ? "analytics" : parts[1];
+  return TABS.find((t) => t.key === seg)?.key ?? "ranking";
+}
+
 /**
- * Home page (Phase 5 of the swarm-evals plan): the Pareto chart and the ranking
- * table over one suite version. The old Analytics page is kept, unchanged, as the
- * second tab.
+ * Home page: the Pareto chart and ranking table (Phase 5), the scenario x config
+ * heatmap and the reliability view (Phase 6), and the old Analytics page kept,
+ * unchanged, as the last tab.
  */
-export default function LeaderboardPage(props: { tab: "ranking" | "analytics" }): ReactNode {
+export default function LeaderboardPage(props: { tab: LeaderboardTab }): ReactNode {
   return (
     <>
       <nav className="lb-tabs" aria-label="Leaderboard views">
-        <a className={props.tab === "ranking" ? "lb-tab active" : "lb-tab"} href="#/leaderboard">
-          Frontier &amp; ranking
-        </a>
-        <a
-          className={props.tab === "analytics" ? "lb-tab active" : "lb-tab"}
-          href="#/leaderboard/analytics"
-        >
-          Trends, cost &amp; models
-        </a>
+        {TABS.map((t) => (
+          <a key={t.key} className={props.tab === t.key ? "lb-tab active" : "lb-tab"} href={t.href}>
+            {t.label}
+          </a>
+        ))}
       </nav>
-      {props.tab === "analytics" ? <AnalyticsPage /> : <RankingView />}
+      {props.tab === "analytics" ? (
+        <AnalyticsPage />
+      ) : props.tab === "heatmap" ? (
+        <HeatmapView />
+      ) : props.tab === "reliability" ? (
+        <ReliabilityView />
+      ) : (
+        <RankingView />
+      )}
     </>
   );
 }

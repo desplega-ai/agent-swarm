@@ -1303,6 +1303,10 @@ export type WebhookVerification =
   | {
       format: "token-equality";
       header: string;
+    }
+  | {
+      format: "standard-webhooks";
+      toleranceSeconds?: number;
     };
 
 export interface TriggerConfig {

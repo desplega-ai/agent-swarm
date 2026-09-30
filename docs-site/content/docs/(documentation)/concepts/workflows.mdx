@@ -327,6 +327,24 @@ Use `token-equality` for shared-token providers such as GitLab. The configured `
 }
 ```
 
+Use `standard-webhooks` for any sender that follows the [Standard Webhooks](https://www.standardwebhooks.com/) specification (for example Granola, or services built on Svix-compatible signing). The headers are fixed by the spec, so there is no `header` field:
+
+- `webhook-id`, `webhook-timestamp` (unix seconds), and `webhook-signature` must all be present.
+- The signed content is `<webhook-id>.<webhook-timestamp>.<raw body>`, HMAC-SHA256 keyed with the base64-decoded secret. Store the sender's signing secret as-is in `hmacSecret`; a `whsec_` prefix is stripped automatically.
+- `webhook-signature` is a space-delimited list of `v1,<base64>` entries. Any matching `v1` entry is accepted, so senders can rotate secrets without downtime. Other versions (such as asymmetric `v1a`) are ignored.
+- Timestamps more than `toleranceSeconds` (default `300`) in the past or future are rejected.
+
+```json
+{
+  "type": "webhook",
+  "hmacSecret": "secret.GRANOLA_WEBHOOK_SECRET",
+  "verification": {
+    "format": "standard-webhooks",
+    "toleranceSeconds": 300
+  }
+}
+```
+
 ### Cooldown
 
 Workflows support a cooldown period to prevent rapid re-triggering:

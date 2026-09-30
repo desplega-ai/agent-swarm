@@ -249,6 +249,75 @@ describe("GET /api/analytics suite endpoints", () => {
     });
   });
 
+  test("cell lists the attempts behind one heatmap cell, cancelled and off-suite ones left out", async () => {
+    await withServer(async (get) => {
+      await seed();
+      const scenario = SCENARIOS[0] as string;
+      // A harness fault stays visible as an error, apart from the graded attempts.
+      await getDb().execute({
+        sql: `INSERT INTO attempts (id, run_id, scenario_id, config_id, attempt_index, status,
+                exclusion, suite_version, error)
+              VALUES ('harness-fault', 'run-1', ?, 'claude-opus-5.5', 13, 'error', 'harness-error',
+                      ?, 'sandbox died before the first task')`,
+        args: [scenario, SUITE_VERSION],
+      });
+      const res = await get(`/api/analytics/cell?scenario=${scenario}&config=claude-opus-5.5`);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as Record<string, any>;
+      expect(body).toMatchObject({
+        suiteVersion: SUITE_VERSION,
+        scenarioId: scenario,
+        configId: "claude-opus-5.5",
+        graded: 3,
+        passed: 3,
+        failed: 0,
+        errors: 1,
+        truncated: false,
+      });
+      const ids = body.attempts.map((a: any) => a.id);
+      expect(ids).toContain("harness-fault");
+      expect(ids).not.toContain("cancelled");
+      expect(ids).not.toContain("off-suite");
+      expect(ids).not.toContain("old-suite");
+      const fault = body.attempts.find((a: any) => a.id === "harness-fault");
+      expect(fault).toMatchObject({
+        status: "error",
+        exclusion: "harness-error",
+        error: "sandbox died before the first task",
+        runId: "run-1",
+        runName: "weekly",
+      });
+      const graded = body.attempts.find((a: any) => a.attemptIndex === 0);
+      expect(graded).toMatchObject({ status: "passed", score: 0.9, costUsd: 1, agentMs: 60_000 });
+      // The counts agree with the heatmap cell they came from.
+      const heat = (await (await get("/api/analytics/heatmap")).json()) as Record<string, any>;
+      const cell = heat.cells.find(
+        (c: any) => c.scenarioId === scenario && c.configId === "claude-opus-5.5",
+      );
+      expect(cell).toMatchObject({ graded: body.graded, passed: body.passed, errors: body.errors });
+    });
+  });
+
+  test("cell asks for a scenario and a config, and a cell with no attempts is empty", async () => {
+    await withServer(async (get) => {
+      await seed();
+      for (const path of [
+        "/api/analytics/cell",
+        "/api/analytics/cell?scenario=sql-audit",
+        "/api/analytics/cell?config=claude-opus-5.5",
+        "/api/analytics/cell?scenario=sql-audit&config=x&suite=..%2Fetc",
+      ]) {
+        const res = await get(path);
+        expect(res.status, path).toBe(400);
+        expect(typeof ((await res.json()) as Record<string, any>).error).toBe("string");
+      }
+      const empty = (await (
+        await get("/api/analytics/cell?scenario=sql-audit&config=no-such-config")
+      ).json()) as Record<string, any>;
+      expect(empty).toMatchObject({ graded: 0, errors: 0, attempts: [], truncated: false });
+    });
+  });
+
   test("bad query params answer 400 with a message", async () => {
     await withServer(async (get) => {
       for (const path of [

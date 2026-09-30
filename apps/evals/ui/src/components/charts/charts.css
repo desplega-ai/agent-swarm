@@ -312,3 +312,43 @@ table.heat th.heat-corner {
 .frontier-tip {
   min-width: 190px;
 }
+
+/* ---- trend chart: one line per config with a confidence band (Phase 6) ---- */
+
+.trend-band {
+  fill-opacity: 0.16;
+  stroke: none;
+}
+
+.trend-line {
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linejoin: round;
+}
+
+.trend-whisker {
+  stroke-width: 1.6;
+  opacity: 0.55;
+}
+
+.trend-dot {
+  stroke: var(--panel);
+  stroke-width: 1.2;
+}
+
+.trend-dot.hover {
+  r: 5;
+}
+
+.trend-tip {
+  min-width: 230px;
+}
+
+.trend-tip-row + .trend-tip-row {
+  margin-top: 4px;
+}
+
+.trend-tip-detail {
+  font-size: 10.5px;
+  padding-left: 12px;
+}

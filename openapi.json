@@ -4815,6 +4815,26 @@
                             "format",
                             "header"
                           ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "format": {
+                              "type": "string",
+                              "enum": [
+                                "standard-webhooks"
+                              ]
+                            },
+                            "toleranceSeconds": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "default": 300,
+                              "description": "Maximum allowed clock skew, in seconds, for the webhook-timestamp header"
+                            }
+                          },
+                          "required": [
+                            "format"
+                          ]
                         }
                       ],
                       "description": "Optional webhook verification format. Omit to keep legacy HMAC-SHA256 behavior with fallback header scanning."
@@ -5442,6 +5462,26 @@
                           "required": [
                             "format",
                             "header"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "format": {
+                              "type": "string",
+                              "enum": [
+                                "standard-webhooks"
+                              ]
+                            },
+                            "toleranceSeconds": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "default": 300,
+                              "description": "Maximum allowed clock skew, in seconds, for the webhook-timestamp header"
+                            }
+                          },
+                          "required": [
+                            "format"
                           ]
                         }
                       ],
@@ -51990,6 +52030,26 @@
                                     "format",
                                     "header"
                                   ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "format": {
+                                      "type": "string",
+                                      "enum": [
+                                        "standard-webhooks"
+                                      ]
+                                    },
+                                    "toleranceSeconds": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "default": 300,
+                                      "description": "Maximum allowed clock skew, in seconds, for the webhook-timestamp header"
+                                    }
+                                  },
+                                  "required": [
+                                    "format"
+                                  ]
                                 }
                               ],
                               "description": "Optional webhook verification format. Omit to keep legacy HMAC-SHA256 behavior with fallback header scanning."
@@ -52361,6 +52421,26 @@
                                   "required": [
                                     "format",
                                     "header"
+                                  ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "format": {
+                                      "type": "string",
+                                      "enum": [
+                                        "standard-webhooks"
+                                      ]
+                                    },
+                                    "toleranceSeconds": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "default": 300,
+                                      "description": "Maximum allowed clock skew, in seconds, for the webhook-timestamp header"
+                                    }
+                                  },
+                                  "required": [
+                                    "format"
                                   ]
                                 }
                               ],
