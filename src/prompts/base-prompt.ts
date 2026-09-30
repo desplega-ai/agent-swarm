@@ -7,7 +7,7 @@
  *              memory, communication, secrets) from session-templates.ts
  *   E          outputs (gated on AGENT_FS_API_URL and the pages capability)
  *   H          deployment-gated notes: slack, steering
- *   I          tools and skills (deferred-tools line, skills, MCP server names)
+ *   I          tools and skills (harness tool discovery, skills, MCP server names)
  *   J          agent notes: CLAUDE.md for codex, opencode, pi, only when edited
  *   K          repository (per task)
  *
@@ -271,7 +271,7 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
 /**
  * Dynamic lines for `system.agent.tools_skills`. The static text lives in the
  * template so operators can override or skip the section; only the lists that
- * depend on the installed skills and MCP servers are built here.
+ * depend on the installed skills, MCP servers, and harness are built here.
  */
 function renderToolsAndSkillsVars(input: {
   skillsSummary?: { name: string; description: string }[];
