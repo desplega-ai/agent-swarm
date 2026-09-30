@@ -21,7 +21,7 @@ description: Plug your alerting tools (Datadog, New Relic, Sentry, SigNoz) into 
 
 Plug your alerting ([Datadog](https://www.datadoghq.com/) / [New Relic](https://newrelic.com/) / [Sentry](https://sentry.io/) / [SigNoz](https://signoz.io/)) into the swarm. Real signals kick off fixes or proposals; noise gets filtered. Daily/weekly health audits catch slow rot.
 
-<Mermaid chart={`flowchart LR
+<Mermaid title="Alert management: the Lead filters incoming alerts into noise, which is dropped, and signal, which becomes a Linear ticket that a Coder fixes and a Reviewer checks. Scheduled audits produce digests and bundled fix PRs." chart={`flowchart LR
   AL["Alert<br/>Sentry/DD/NR/SigNoz"] --> LT{"Lead<br/>signal vs. noise"}
   LT -- noise --> DROP["Filter out"]
   LT -- signal --> TI["Linear ticket"]

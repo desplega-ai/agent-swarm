@@ -64,6 +64,7 @@ type:ExistingTrackerContextWorkReason
 type:InboxSummary
 type:InsertPricingRowInput
 type:InsertTaskAttachmentInput
+type:KeyAuthFailureResult
 type:KeyCostSummary
 type:KvJsonFieldEquals
 type:McpServerFilters
@@ -499,6 +500,7 @@ value:promoteDraftTask
 value:reassociateSessionLogs
 value:recordBudgetRefusalNotification
 value:recordInlineScriptRun
+value:recordKeyAuthFailure
 value:recordKeyRateLimitWindows
 value:recordKeyUsage
 value:recordSlackMessage

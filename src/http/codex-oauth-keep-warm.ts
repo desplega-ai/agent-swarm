@@ -28,14 +28,12 @@ import { getKv } from "../be/db";
 import { deriveCodexKeySuffix } from "../providers/codex-oauth/auth-json.js";
 import { getValidCodexOAuth, loadAllCodexOAuthSlots } from "../providers/codex-oauth/storage.js";
 import { getApiKey } from "../utils/api-key";
+import { CODEX_AUTH_WATCH_NAMESPACE, codexAuthBenchMarkerKey } from "../utils/codex-auth-failure";
 import { route } from "./route-def";
 import { deriveApiBaseUrl } from "./utils";
 
 /** ~weekly refresh cadence, comfortably inside OpenAI's ~8-day staleness window given the 10-day TTL. */
 const KEEP_WARM_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
-
-/** Matches the `codex-auth-watch` KV namespace the `codex-auth-expiry-watch` script benches slots into. */
-const AUTH_WATCH_NAMESPACE = "codex-auth-watch";
 
 type SlotOutcome =
   | { slot: number; keySuffix: string; outcome: "warm" | "refreshed" }
@@ -63,7 +61,7 @@ const keepWarmRoute = route({
   pattern: ["api", "oauth", "keep-warm", "codex"],
   summary: "Locked keep-warm refresh sweep across all Codex OAuth pool slots",
   description:
-    "Enumerates codex_oauth_* slots and refreshes any older than ~7 days through the same locked getValidCodexOAuth path used at task time. Skips slots already benched by codex-auth-expiry-watch.",
+    "Enumerates codex_oauth_* slots and refreshes any older than ~7 days through the same locked getValidCodexOAuth path used at task time. Skips slots with a codex-auth-watch bench marker (auth-failure bench or codex-auth-expiry-watch).",
   tags: ["OAuth"],
   responses: {
     200: {
@@ -90,7 +88,7 @@ export async function handleCodexOAuthKeepWarm(
   for (const { slot, creds } of slots) {
     const keySuffix = deriveCodexKeySuffix(creds.access, creds.accountId);
 
-    if (await getKv(AUTH_WATCH_NAMESPACE, `bench:${keySuffix}`)) {
+    if (await getKv(CODEX_AUTH_WATCH_NAMESPACE, codexAuthBenchMarkerKey(keySuffix))) {
       results.push({ slot, keySuffix, outcome: "skipped-benched" });
       continue;
     }

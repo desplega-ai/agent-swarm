@@ -590,6 +590,8 @@ describe("script connections", () => {
       // 184 alters agents and agent_tasks, which this migration-112-only fixture
       // does not create.
       markMigrationApplied(database, "184_model_catalog.sql");
+      // 185 alters api_key_status, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "185_api_key_auth_failures.sql");
       // 188 rebuilds user_favorites, which this migration-112-only fixture does not create.
       markMigrationApplied(database, "188_favorites_agent_fs_path.sql");
 

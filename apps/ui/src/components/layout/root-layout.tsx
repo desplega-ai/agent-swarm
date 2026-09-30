@@ -75,8 +75,10 @@ export function RootLayout() {
                 back to overflow-hidden and pages own their scroll regions
                 (pinned headers, grid-internal scrolling). */}
               <main
+                id="main-content"
+                tabIndex={-1}
                 className={cn(
-                  "flex flex-1 flex-col min-h-0 min-w-0 overflow-x-hidden overflow-y-auto lg:overflow-hidden",
+                  "flex flex-1 flex-col min-h-0 min-w-0 overflow-x-hidden overflow-y-auto lg:overflow-hidden outline-none",
                   mainPadding,
                 )}
               >

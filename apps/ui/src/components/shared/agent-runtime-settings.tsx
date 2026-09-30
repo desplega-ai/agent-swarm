@@ -370,7 +370,7 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-start gap-3">
-        <div className="w-56 space-y-3">
+        <div className="w-full space-y-3 sm:w-56">
           <div className="space-y-1.5">
             <Label>Harness</Label>
             <Select value={harness} onValueChange={(v) => changeHarness(v as LocalHarnessProvider)}>
@@ -454,7 +454,7 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
         </div>
 
         {modelSelectionEnabled ? (
-          <div className="min-w-[260px] flex-1 space-y-1.5">
+          <div className="w-full min-w-0 flex-1 space-y-1.5 sm:w-auto sm:min-w-[260px]">
             <Label>Model</Label>
             {customMode ? (
               <Input value={model} onChange={(event) => changeModel(event.target.value)} />
@@ -750,7 +750,7 @@ function ReasoningEffortSegment({
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        "flex h-9 items-center gap-1.5 px-3 text-xs font-medium transition-colors",
+        "flex h-9 shrink-0 items-center gap-1.5 px-3 text-xs font-medium whitespace-nowrap transition-colors",
         bordered && "border-l border-border",
         active
           ? "bg-primary text-primary-foreground"
@@ -782,7 +782,9 @@ function ReasoningEffortToggle({
   modelLabel,
 }: ReasoningEffortToggleProps) {
   return (
-    <div className="inline-flex w-fit overflow-hidden rounded-md border border-border">
+    // Seven segments are wider than a phone: the strip scrolls inside its own
+    // border instead of spilling out of the card.
+    <div className="inline-flex w-fit max-w-full overflow-x-auto overflow-y-hidden rounded-md border border-border [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       <ReasoningEffortSegment
         active={value === ""}
         disabled={false}

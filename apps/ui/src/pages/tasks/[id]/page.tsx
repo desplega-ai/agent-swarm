@@ -105,6 +105,7 @@ import { progressBarTone } from "@/lib/percent-progress-tone";
 import { statusTextClass } from "@/lib/status-tone";
 import { taskIsRunning } from "@/lib/task-activity";
 import { describeModelResolution, taskDisplayModel } from "@/lib/task-model-resolution";
+import { taskListTitle } from "@/lib/task-title";
 import { cn, formatRelativeTime, formatSmartTime } from "@/lib/utils";
 
 const TASK_DETAIL_TABS = new Set(["details", "outcome", "logs"]);
@@ -219,12 +220,57 @@ function MetaRow({
 }) {
   return (
     <div className="flex items-start gap-3 py-1.5">
-      <div className="flex items-center gap-2 w-24 shrink-0">
-        <Icon className="h-3.5 w-3.5 text-muted-foreground" />
-        <span className="text-xs text-muted-foreground">{label}</span>
+      {/* The label box and the value share a 20px line, so a label sits on the
+          same baseline as the value's first line even when the value wraps. */}
+      <div className="flex h-5 items-center gap-2 w-24 shrink-0">
+        <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <span className="text-xs text-muted-foreground truncate">{label}</span>
       </div>
       {/* flex-1 gives middle-truncated values a definite width to fit. */}
-      <div className="text-sm min-w-0 flex-1">{children}</div>
+      <div className="text-sm leading-5 min-w-0 flex-1 break-words">{children}</div>
+    </div>
+  );
+}
+
+/** Section label for the meta rail; same type ramp as <DetailPageSection>. */
+function RailHeading({
+  icon: Icon,
+  children,
+}: {
+  icon?: React.ElementType;
+  children: React.ReactNode;
+}) {
+  return (
+    <h4 className="flex items-center gap-1.5 font-mono font-bold text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
+      {Icon ? <Icon className="h-3 w-3" /> : null}
+      {children}
+    </h4>
+  );
+}
+
+/** Task title as the page heading; a long one clamps with a toggle. */
+function TaskHeading({ title }: { title: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const isLong = title.length > 120;
+  return (
+    <div className="space-y-1">
+      <h1
+        className={cn(
+          "text-base lg:text-lg font-semibold leading-snug text-pretty break-words",
+          isLong && !expanded && "line-clamp-3 lg:line-clamp-2",
+        )}
+      >
+        {title}
+      </h1>
+      {isLong ? (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
+          {expanded ? "Show less" : "Show more"}
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -453,9 +499,7 @@ function TaskContextSection({
       <>
         <Separator className="my-2" />
         <div className="space-y-1">
-          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-            ACU Budget
-          </span>
+          <RailHeading>ACU Budget</RailHeading>
           <div className="flex items-center gap-2 py-1">
             <Progress value={percent} className={cn("h-1.5 flex-1", progressBarTone(percent))} />
             <span className="text-[10px] font-mono text-muted-foreground shrink-0">
@@ -477,9 +521,7 @@ function TaskContextSection({
       <>
         <Separator className="my-2" />
         <div className="space-y-1.5">
-          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-            Context Usage
-          </span>
+          <RailHeading>Context Usage</RailHeading>
           <div className="space-y-2">
             <Skeleton className="h-2 w-full rounded-full" />
             <Skeleton className="h-3 w-24" />
@@ -499,9 +541,7 @@ function TaskContextSection({
     <>
       <Separator className="my-2" />
       <div className="space-y-1">
-        <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-          Context Usage
-        </span>
+        <RailHeading>Context Usage</RailHeading>
         {latestUsageSnapshot ? (
           <>
             <div className="flex items-center gap-2 py-1">
@@ -692,7 +732,7 @@ export default function TaskDetailPage() {
         </MetaRow>
       )}
       {task.swarmVersion && (
-        <MetaRow icon={Tag} label="Swarm version">
+        <MetaRow icon={Tag} label="Version">
           <span
             className="text-xs font-mono text-muted-foreground"
             title={`agent-swarm ${task.swarmVersion} at task creation`}
@@ -754,12 +794,11 @@ export default function TaskDetailPage() {
         <>
           <Separator className="my-2" />
           <div className="space-y-1.5">
-            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-              Source Control
-            </span>
+            <RailHeading>Source Control</RailHeading>
             <div className="rounded-md border border-border/50 px-3 py-2.5 space-y-2">
-              {/* Row 1: Provider icon + repo name */}
-              <div className="flex items-center gap-2">
+              {/* Row 1: provider icon + repo name. The author moved to row 2
+                  so a long repo name is not truncated to "desplega-ai/ag…". */}
+              <div className="flex items-center gap-2 min-w-0">
                 {task.vcsProvider === "github" ? (
                   <Github className="h-4 w-4 shrink-0" />
                 ) : task.vcsProvider === "gitlab" ? (
@@ -768,41 +807,45 @@ export default function TaskDetailPage() {
                   <Link2 className="h-4 w-4 shrink-0" />
                 ) : null}
                 {task.vcsRepo && (
-                  <span className="text-xs font-mono text-foreground whitespace-nowrap truncate">
+                  <span className="text-xs font-mono text-foreground truncate" title={task.vcsRepo}>
                     {task.vcsRepo}
                   </span>
                 )}
-                {task.vcsAuthor && (
-                  <span className="text-xs text-muted-foreground flex items-center gap-1 ml-auto">
-                    <User className="h-3 w-3" />
-                    {task.vcsAuthor}
-                  </span>
-                )}
               </div>
-              {/* Row 2: PR/MR link */}
-              {task.vcsUrl && task.vcsNumber && (
-                <a
-                  href={task.vcsUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-1.5 text-xs text-primary hover:underline"
-                >
-                  <GitPullRequest className="h-3.5 w-3.5 shrink-0" />
-                  <span className="font-mono">#{task.vcsNumber}</span>
-                  <ExternalLink className="h-3 w-3 shrink-0 text-muted-foreground" />
-                </a>
-              )}
-              {task.vcsUrl && !task.vcsNumber && (
-                <a
-                  href={task.vcsUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-1.5 text-xs text-primary hover:underline font-mono truncate"
-                >
-                  <Link2 className="h-3.5 w-3.5 shrink-0" />
-                  <MiddleTruncation>{task.vcsUrl}</MiddleTruncation>
-                  <ExternalLink className="h-3 w-3 shrink-0 text-muted-foreground" />
-                </a>
+              {/* Row 2: PR/MR link + author */}
+              {(task.vcsUrl || task.vcsAuthor) && (
+                <div className="flex items-center gap-3 min-w-0">
+                  {task.vcsUrl && task.vcsNumber && (
+                    <a
+                      href={task.vcsUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1.5 text-xs text-primary hover:underline shrink-0"
+                    >
+                      <GitPullRequest className="h-3.5 w-3.5 shrink-0" />
+                      <span className="font-mono">#{task.vcsNumber}</span>
+                      <ExternalLink className="h-3 w-3 shrink-0 text-muted-foreground" />
+                    </a>
+                  )}
+                  {task.vcsUrl && !task.vcsNumber && (
+                    <a
+                      href={task.vcsUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-primary hover:underline font-mono"
+                    >
+                      <Link2 className="h-3.5 w-3.5 shrink-0" />
+                      <MiddleTruncation>{task.vcsUrl}</MiddleTruncation>
+                      <ExternalLink className="h-3 w-3 shrink-0 text-muted-foreground" />
+                    </a>
+                  )}
+                  {task.vcsAuthor && (
+                    <span className="ml-auto flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+                      <User className="h-3 w-3 shrink-0" />
+                      <span className="truncate">{task.vcsAuthor}</span>
+                    </span>
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -813,12 +856,7 @@ export default function TaskDetailPage() {
         <>
           <Separator className="my-2" />
           <div className="space-y-1.5">
-            <div className="flex items-center gap-1.5">
-              <GitBranch className="h-3 w-3 text-muted-foreground" />
-              <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                Dependencies ({task.dependsOn.length})
-              </span>
-            </div>
+            <RailHeading icon={GitBranch}>Dependencies ({task.dependsOn.length})</RailHeading>
             {task.dependsOn.map((depId) => (
               <Link
                 key={depId}
@@ -838,9 +876,7 @@ export default function TaskDetailPage() {
         <>
           <Separator className="my-2" />
           <div className="space-y-1">
-            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-              Progress
-            </span>
+            <RailHeading>Progress</RailHeading>
             <p className="text-xs text-muted-foreground whitespace-pre-wrap leading-relaxed max-h-32 overflow-auto">
               {task.progress}
             </p>
@@ -977,10 +1013,21 @@ export default function TaskDetailPage() {
       className="flex-1 min-h-0"
     />
   ) : (
-    <div className="flex-1 flex items-center justify-center min-h-0">
+    // Only a live task keeps the full height free for logs that are coming; a
+    // finished one gives it to the Output card above.
+    <div
+      className={cn(
+        "flex items-center justify-center rounded-lg border border-dashed border-border px-4 py-8",
+        taskIsRunning(task.status) ? "flex-1 min-h-40" : "shrink-0",
+      )}
+    >
       <div className="text-center text-muted-foreground">
-        <Terminal className="h-8 w-8 mx-auto mb-2 opacity-30" />
-        <p className="text-xs">No session data available</p>
+        <Terminal className="h-6 w-6 mx-auto mb-2 opacity-40" />
+        <p className="text-xs">
+          {taskIsRunning(task.status)
+            ? "Waiting for the first session log"
+            : "No session logs were recorded for this task"}
+        </p>
       </div>
     </div>
   );
@@ -1051,13 +1098,17 @@ export default function TaskDetailPage() {
     ) : null,
   ].filter((chip) => chip !== null);
 
+  const headerTitle = taskListTitle(task);
   const heroBlock = (
     // Phase 17 — generous padding around the badges/description/actions block
     // ("the task details part on top of the logs"). Brand kit's
     // `preview/task-detail.html` `.header { padding: 14px 18px 12px }` informs
     // the new px-4/py-4 values; the `space-y-3` opens up vertical breathing
     // between badge row → description → action row.
-    <div className="space-y-3 px-4 pt-4 pb-5 shrink-0">
+    <div className="space-y-3 px-1 pt-2 pb-4 lg:px-4 lg:pt-4 lg:pb-5 shrink-0">
+      {/* The page's one heading. The breadcrumb truncates the title (and
+          collapses to a few characters on a phone), so it cannot carry it. */}
+      <TaskHeading title={headerTitle} />
       <div className="flex items-center gap-2 flex-wrap">
         <StatusBadge status={task.status} size="md" />
         {task.provider && (
@@ -1148,7 +1199,14 @@ export default function TaskDetailPage() {
           </Popover>
         ) : null}
       </div>
-      <CollapsibleDescription text={task.task} collapsedClassName="line-clamp-3 lg:line-clamp-1" />
+      {/* A one-line prompt is already the heading; repeating it below read
+          as the same sentence twice. */}
+      {task.task.trim() !== headerTitle && (
+        <CollapsibleDescription
+          text={task.task}
+          collapsedClassName="line-clamp-3 lg:line-clamp-2"
+        />
+      )}
       <div className="flex items-center gap-2">
         {(canCancel || canPause || canResume) && (
           <div className="flex items-center gap-1.5 shrink-0">
@@ -1236,7 +1294,7 @@ export default function TaskDetailPage() {
           onValueChange={setActiveTab}
           className="flex flex-col flex-1 min-h-0"
         >
-          <TabsList className="shrink-0 mx-1 mt-2">
+          <TabsList className="shrink-0 mx-1 mt-3 w-auto self-stretch">
             <TabsTrigger value="details">Details</TabsTrigger>
             <TabsTrigger value="outcome">Outcome</TabsTrigger>
             <TabsTrigger value="logs">Session Logs</TabsTrigger>
@@ -1308,11 +1366,14 @@ export default function TaskDetailPage() {
                 iconColor={isCompleted ? "text-status-success-strong" : "text-muted-foreground"}
                 borderColor={isCompleted ? "border-status-success/30" : "border-border"}
                 bgColor={isCompleted ? "bg-status-success/5" : "bg-muted/20"}
+                // A finished task is opened for its result; keep it collapsed
+                // while the task runs so the live log keeps the height.
+                defaultOpen={isTerminal}
               >
                 <StructuredOutputContent
                   citations={task.citations}
                   raw={task.output ?? ""}
-                  maxH="max-h-48"
+                  maxH={showLogViewer ? "max-h-48" : "max-h-[50vh]"}
                 />
               </CollapsibleSection>
             )}

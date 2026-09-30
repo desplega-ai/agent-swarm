@@ -23,7 +23,7 @@ description: Take feature requests from Slack or a Linear ticket and turn them i
 
 Take a feature request from [Slack](https://slack.com) or a [Linear](https://linear.app) ticket and turn it into a merged pull request without losing context across the handoffs.
 
-<Mermaid chart={`flowchart LR
+<Mermaid title="Feature development: a Slack request or Linear ticket goes to the Lead, then Researcher, Plan and Coder, then Reviewer. Approved PRs with green CI are squash-merged, and requested changes return to the Coder." chart={`flowchart LR
   S["Slack request / Linear ticket"] --> L["Lead<br/>triage + route"]
   L --> R["Researcher<br/>research"]
   R --> P["Plan<br/>implementation plan"]

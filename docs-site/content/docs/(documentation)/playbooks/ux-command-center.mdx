@@ -21,7 +21,7 @@ description: A standing UX agent that keeps your product usable — weekly audit
 
 A UX-focused agent walks your frontend every week, audits against UX principles and your design system, and creates a [Linear](https://linear.app) umbrella ticket with one sub-issue per finding — so humans process a curated todo list, not a fire-hose audit report.
 
-<Mermaid chart={`flowchart LR
+<Mermaid title="UX command center: a weekly cron runs the UX agent, which audits the frontend against the design system, reproduces issues with qa-use and PostHog signals, creates a Linear umbrella ticket with sub-issues, and notifies Slack." chart={`flowchart LR
   C["Cron: weekly"] --> UX["UX Principles Agent"]
   UX --> A["Audit FE vs.<br/>design system"]
   A --> B["qa-use repro +<br/>PostHog signals"]

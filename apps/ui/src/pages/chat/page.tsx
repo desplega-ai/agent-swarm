@@ -379,7 +379,11 @@ function MessageInput({
 
   const handleSend = useCallback(() => {
     const trimmed = content.trim();
-    if (!trimmed) return;
+    // Send stays enabled on an empty draft; a click sends focus to the box.
+    if (!trimmed) {
+      textareaRef.current?.focus();
+      return;
+    }
     postMessage.mutate({
       content: trimmed,
       replyToId,
@@ -418,7 +422,8 @@ function MessageInput({
         <Button
           size="icon"
           onClick={handleSend}
-          disabled={!content.trim() || postMessage.isPending}
+          disabled={postMessage.isPending}
+          aria-label="Send message"
           className="shrink-0 h-9 w-9 bg-primary hover:bg-primary/90"
         >
           <Send className="h-3.5 w-3.5" />
