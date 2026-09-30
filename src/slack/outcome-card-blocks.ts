@@ -104,9 +104,37 @@ export function failureHint(failureClass: FailureClass | undefined): string | un
 }
 
 /**
- * Send `interactive` blocks; when Slack answers `invalid_blocks` (a workspace
- * or client that does not accept the action blocks), send `fallback` once
- * instead of dropping the card.
+ * Slack errors that reject the action blocks themselves, so the same card
+ * without them can still post. Source: the Errors tables of
+ * https://docs.slack.dev/reference/methods/chat.postMessage and
+ * https://docs.slack.dev/reference/methods/chat.update:
+ * - `invalid_blocks`: "The blocks were invalid for the requesting user" (a
+ *   workspace, plan or client that does not offer these blocks).
+ * - `invalid_blocks_format`: the blocks do not match the Block Kit syntax
+ *   Slack accepts there (e.g. no `context_actions` / `feedback_buttons`).
+ * - `msg_blocks_too_long`: the action blocks pushed the card past the limit.
+ *
+ * Everything else is rethrown untouched: invalid credentials (`invalid_auth`,
+ * `not_authed`, `token_revoked`, `token_expired`, `account_inactive`), a
+ * channel-wide posting denial (`missing_scope`, `no_permission`,
+ * `not_in_channel`, `restricted_action*`, `ekm_access_denied`, `is_archived`,
+ * `channel_not_found`) and the free-plan message cap (`message_limit_exceeded`)
+ * fail the plain card just the same, so a second send would only add noise.
+ */
+export const RECOVERABLE_BLOCK_ERRORS: ReadonlySet<string> = new Set([
+  "invalid_blocks",
+  "invalid_blocks_format",
+  "msg_blocks_too_long",
+]);
+
+function slackErrorCode(error: unknown): string | undefined {
+  return (error as { data?: { error?: string } })?.data?.error;
+}
+
+/**
+ * Send `interactive` blocks; when Slack rejects them with a recoverable block
+ * error (`RECOVERABLE_BLOCK_ERRORS`), send `fallback` once instead of dropping
+ * the card.
  */
 export async function sendWithBlocksFallback<T>(
   interactive: unknown[],
@@ -118,8 +146,11 @@ export async function sendWithBlocksFallback<T>(
   try {
     return await send(interactive);
   } catch (error) {
-    if ((error as { data?: { error?: string } })?.data?.error !== "invalid_blocks") throw error;
-    console.warn(`[Slack] ${label} rejected the outcome action blocks; retrying without them`);
+    const code = slackErrorCode(error);
+    if (!code || !RECOVERABLE_BLOCK_ERRORS.has(code)) throw error;
+    console.warn(
+      `[Slack] ${label} rejected the outcome action blocks (${code}); retrying without them`,
+    );
     return await send(fallback);
   }
 }

@@ -4,8 +4,12 @@ import { cancelTask, getAgentById, getLeadAgent, getTaskById } from "../be/db";
 import { slackContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { buildCancelledBlocks, getTaskLink } from "./blocks";
-import { resolveSlackUserId } from "./enrich";
-import { registerOutcomeActionHandlers } from "./outcome-actions";
+import {
+  authorizeSlackTaskAction,
+  interactionMessage,
+  postEphemeralQuietly,
+  registerOutcomeActionHandlers,
+} from "./outcome-actions";
 import { ensureSlackThreadTree, isSlackRenderV2Enabled } from "./render-v2";
 import { getAgentDisplayName, getAgentEmoji } from "./responses";
 
@@ -29,9 +33,9 @@ export function registerActionHandlers(app: App): void {
     if (!taskId) return;
 
     const triggerId = "trigger_id" in body ? body.trigger_id : undefined;
-    if (!triggerId) return;
 
     try {
+      if (!triggerId) throw new Error("no trigger_id on the follow-up click");
       await client.views.open({
         trigger_id: triggerId,
         view: {
@@ -60,7 +64,17 @@ export function registerActionHandlers(app: App): void {
         },
       });
     } catch (error) {
+      // No modal (missing scope, restricted client, stale trigger): hand the
+      // clicker the task so the follow-up is still one click away.
       console.error("[Slack] Failed to open follow-up modal:", error);
+      const { channelId, threadTs } = interactionMessage(body);
+      await postEphemeralQuietly(
+        client,
+        channelId,
+        body.user.id,
+        threadTs,
+        `Couldn't open the follow-up form. Reply in this thread, or follow up from ${getTaskLink(taskId)}.`,
+      );
     }
   });
 
@@ -76,13 +90,24 @@ export function registerActionHandlers(app: App): void {
     const originalTask = await getTaskById(taskId);
     if (!originalTask || !originalTask.slackChannelId) return;
 
-    const lead = await getLeadAgent();
     // Resolve via the shared cascade. Sample context = the modal callback ID
     // so operators can see *which* modal-submit triggered an unmapped entry.
-    const requestedByUserId = await resolveSlackUserId(client, body.user.id, {
+    const auth = await authorizeSlackTaskAction(client, body.user.id, originalTask, {
       sampleEventType: "view_submission",
       sampleContext: view.callback_id || "follow_up_submit",
     });
+    if (!auth.allowed) {
+      await postEphemeralQuietly(
+        client,
+        originalTask.slackChannelId,
+        body.user.id,
+        originalTask.slackThreadTs,
+        "Only the person who asked for this task can follow up on it.",
+      );
+      return;
+    }
+    const requestedByUserId = auth.userId;
+    const lead = await getLeadAgent();
     const followUpTask = await createTaskWithSiblingAwareness(
       followUpText,
       {

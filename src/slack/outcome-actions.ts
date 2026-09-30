@@ -1,9 +1,11 @@
 import type { App } from "@slack/bolt";
 import type { WebClient } from "@slack/web-api";
-import { getTaskById } from "../be/db";
+import { getTaskAttachments, getTaskById, insertTaskAttachment, promoteDraftTask } from "../be/db";
 import { recordTaskFeedback } from "../be/db-queries/task-feedback";
+import { can } from "../rbac/can";
 import { slackContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
+import type { AgentTask } from "../types";
 import { getTaskLink } from "./blocks";
 import { resolveSlackUserId } from "./enrich";
 import {
@@ -27,7 +29,41 @@ type FeedbackModalMetadata = {
 // is enough: the button is a human's click, not a replayed event.
 const retriedTaskIds = new Set<string>();
 
-function interactionMessage(body: unknown): {
+// Files the requester sent with the ask (Slack or the dashboard composer).
+const INPUT_ATTACHMENT_INTENT = "user-upload";
+
+/**
+ * `task.action.own` for the Slack user who clicked: only the task's requester
+ * may start new work from it (Retry, Follow up). An unmapped clicker has no
+ * user principal to check, so it is denied too. Returns the canonical user ID
+ * when allowed.
+ */
+export async function authorizeSlackTaskAction(
+  client: WebClient,
+  slackUserId: string,
+  task: AgentTask,
+  eventContext: { sampleEventType: string; sampleContext: string },
+): Promise<{ allowed: true; userId: string } | { allowed: false }> {
+  const userId = await resolveSlackUserId(client, slackUserId, eventContext);
+  if (!userId) return { allowed: false };
+  const decision = can({
+    principal: { kind: "user", userId },
+    verb: "task.action.own",
+    resource: {
+      kind: "task",
+      taskId: task.id,
+      requestedByUserId: task.requestedByUserId,
+      creatorAgentId: task.creatorAgentId,
+      agentId: task.agentId,
+    },
+    // Slack interactions reach the API server outside MCP; the audit table
+    // only admits `mcp` | `http`.
+    source: "http",
+  });
+  return decision.allow ? { allowed: true, userId } : { allowed: false };
+}
+
+export function interactionMessage(body: unknown): {
   channelId?: string;
   messageTs?: string;
   threadTs?: string;
@@ -44,7 +80,7 @@ function interactionMessage(body: unknown): {
   };
 }
 
-async function postEphemeralQuietly(
+export async function postEphemeralQuietly(
   client: WebClient,
   channel: string | undefined,
   user: string,
@@ -121,6 +157,90 @@ function feedbackModal(metadata: FeedbackModalMetadata) {
   };
 }
 
+/**
+ * Re-create a failed Slack task as the same work: prompt, agent, thread, and
+ * every execution input the original ran with (working dir, output contract,
+ * model, effort, repo, asset key, routing affinity, the files the user sent).
+ * Outputs of the failed run are not carried over.
+ */
+async function createRetryTask(
+  original: AgentTask,
+  slackUserId: string,
+  requestedByUserId: string,
+): Promise<AgentTask> {
+  const inputs = (await getTaskAttachments(original.id)).filter(
+    (attachment) => attachment.intent === INPUT_ATTACHMENT_INTENT,
+  );
+  const slackChannelId = original.slackChannelId as string;
+  const retry = await createTaskWithSiblingAwareness(
+    original.task,
+    {
+      key: original.key,
+      agentId: original.agentId ?? undefined,
+      routingReason: original.routingReason ?? undefined,
+      routingSource: original.routingSource ?? undefined,
+      routingAffinity: original.routingAffinity,
+      source: "slack",
+      taskType: original.taskType ?? undefined,
+      tags: original.tags,
+      priority: original.priority,
+      model: original.model ?? undefined,
+      modelTier: original.modelTier ?? undefined,
+      effort: original.effort,
+      dir: original.dir,
+      // The original's stored contract is already the resolved one (its own
+      // or its parent's), so take it verbatim instead of re-inheriting.
+      outputSchema: original.outputSchema,
+      inheritParentOutputSchema: false,
+      vcsProvider: original.vcsProvider,
+      vcsRepo: original.vcsRepo,
+      parentTaskId: original.parentTaskId ?? undefined,
+      slackChannelId,
+      slackThreadTs: original.slackThreadTs,
+      slackTriggerMessageTs: original.slackTriggerMessageTs,
+      slackUserId,
+      requestedByUserId,
+      contextKey:
+        original.contextKey ??
+        (original.slackThreadTs
+          ? slackContextKey({ channelId: slackChannelId, threadTs: original.slackThreadTs })
+          : undefined),
+      // Nobody may claim the retry before its input files are attached (#1240).
+      ...(inputs.length > 0 ? { status: "draft" as const } : {}),
+    },
+    { origin: "slack" },
+  );
+  if (inputs.length === 0) return retry;
+  try {
+    for (const attachment of inputs) {
+      await insertTaskAttachment({
+        taskId: retry.id,
+        agentId: attachment.agentId,
+        name: attachment.name,
+        kind: attachment.kind,
+        url: attachment.url,
+        path: attachment.path,
+        pageId: attachment.pageId,
+        providerId: attachment.providerId,
+        providerKey: attachment.providerKey,
+        capabilities: attachment.capabilities,
+        orgId: attachment.orgId,
+        driveId: attachment.driveId,
+        mimeType: attachment.mimeType,
+        sizeBytes: attachment.sizeBytes,
+        sha256: attachment.sha256,
+        intent: attachment.intent,
+        description: attachment.description,
+        isPrimary: attachment.isPrimary,
+        createdBy: attachment.createdBy,
+      });
+    }
+  } finally {
+    await promoteDraftTask(retry.id);
+  }
+  return (await getTaskById(retry.id)) ?? retry;
+}
+
 export function registerOutcomeActionHandlers(app: App): void {
   // 👍 / 👎 on the outcome card: open a one-field note modal. Submitting it,
   // with or without a note, records the rating; Cancel records nothing.
@@ -178,44 +298,27 @@ export function registerOutcomeActionHandlers(app: App): void {
     const original = await getTaskById(action.value);
     if (!original?.slackChannelId) return;
     if (original.status !== "failed" && original.status !== "cancelled") return;
-    if (retriedTaskIds.has(original.id)) return;
-    retriedTaskIds.add(original.id);
-
-    const requestedByUserId = await resolveSlackUserId(client, body.user.id, {
+    const { threadTs } = interactionMessage(body);
+    const auth = await authorizeSlackTaskAction(client, body.user.id, original, {
       sampleEventType: "block_actions",
       sampleContext: RETRY_TASK_ACTION_ID,
     });
-    let retry: Awaited<ReturnType<typeof createTaskWithSiblingAwareness>>;
-    try {
-      retry = await createTaskWithSiblingAwareness(
-        original.task,
-        {
-          agentId: original.agentId ?? undefined,
-          routingReason: original.routingReason ?? undefined,
-          routingSource: original.routingSource ?? undefined,
-          source: "slack",
-          taskType: original.taskType ?? undefined,
-          tags: original.tags,
-          priority: original.priority,
-          model: original.model ?? undefined,
-          modelTier: original.modelTier ?? undefined,
-          parentTaskId: original.parentTaskId ?? undefined,
-          slackChannelId: original.slackChannelId,
-          slackThreadTs: original.slackThreadTs,
-          slackTriggerMessageTs: original.slackTriggerMessageTs,
-          slackUserId: body.user.id,
-          requestedByUserId,
-          contextKey:
-            original.contextKey ??
-            (original.slackThreadTs
-              ? slackContextKey({
-                  channelId: original.slackChannelId,
-                  threadTs: original.slackThreadTs,
-                })
-              : undefined),
-        },
-        { origin: "slack" },
+    if (!auth.allowed) {
+      await postEphemeralQuietly(
+        client,
+        original.slackChannelId,
+        body.user.id,
+        threadTs ?? original.slackThreadTs,
+        "Only the person who asked for this task can retry it.",
       );
+      return;
+    }
+    if (retriedTaskIds.has(original.id)) return;
+    retriedTaskIds.add(original.id);
+
+    let retry: AgentTask;
+    try {
+      retry = await createRetryTask(original, body.user.id, auth.userId);
     } catch (error) {
       retriedTaskIds.delete(original.id);
       console.error(`[Slack] Failed to retry task ${original.id}:`, error);
