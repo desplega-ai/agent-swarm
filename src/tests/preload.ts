@@ -18,6 +18,9 @@ import { closeDb, getDb, initDb } from "../be/db";
 import "../be/seed-prompt-templates";
 import { getAllTemplateDefinitions } from "../prompts/registry";
 import { clearVolatileSecretsForTesting } from "../utils/secret-scrubber";
+import { startHangWatchdog } from "./hang-watchdog";
+
+startHangWatchdog();
 
 // @hono/node-server (pulled in transitively by @modelcontextprotocol/sdk's
 // streamableHttp transport) replaces globalThis.Response/Request with its own
