@@ -1142,6 +1142,39 @@ export function piDefaultToolAdditions(features: PiSessionFeatures): string[] {
   return additions;
 }
 
+/**
+ * Builds and loads the resource loader for a pi SDK session.
+ *
+ * The cwd is a task repo clone, which is not trusted, and this worker process
+ * holds swarm credentials and tools. So the loader reads nothing from the repo:
+ * `projectTrusted: false` blocks `.pi/extensions`, packages, settings and
+ * SYSTEM.md, and `noContextFiles` blocks AGENTS.md/CLAUDE.md from the cwd and
+ * its ancestors. The system prompt comes only from the server (`systemPrompt`).
+ */
+export async function createPiResourceLoader(opts: {
+  cwd: string;
+  agentDir: string;
+  systemPrompt?: string;
+  extensionFactories: ExtensionFactory[];
+}): Promise<{ resourceLoader: DefaultResourceLoader; settingsManager: SettingsManager }> {
+  const settingsManager = SettingsManager.create(opts.cwd, opts.agentDir, {
+    projectTrusted: false,
+  });
+  const resourceLoader = new DefaultResourceLoader({
+    cwd: opts.cwd,
+    agentDir: opts.agentDir,
+    settingsManager,
+    noContextFiles: true,
+    appendSystemPrompt: opts.systemPrompt ? [opts.systemPrompt] : undefined,
+    extensionFactories: opts.extensionFactories,
+  });
+  // createAgentSession only reloads a loader it builds itself. Without this
+  // call a passed loader stays empty: no appended system prompt and no
+  // extensions (swarm hooks, tool_search) reach the session.
+  await resourceLoader.reload();
+  return { resourceLoader, settingsManager };
+}
+
 export class PiMonoAdapter implements ProviderAdapter {
   readonly name = "pi";
   // A getter so the prompt's tool-discovery line follows PI_TOOL_DEFERRAL
@@ -1298,23 +1331,12 @@ export class PiMonoAdapter implements ProviderAdapter {
 
     // 5. Create resource loader with system prompt + extensions. SDK sessions
     // load no built-in pi extension, so tool_search is added explicitly.
-    // The cwd is a task repo clone, which is not trusted: an untrusted project
-    // cannot load `.pi/extensions`, packages, settings or SYSTEM.md into this
-    // worker process, which holds swarm credentials.
-    const settingsManager = SettingsManager.create(config.cwd, getAgentDir(), {
-      projectTrusted: false,
-    });
-    const resourceLoader = new DefaultResourceLoader({
+    const { resourceLoader, settingsManager } = await createPiResourceLoader({
       cwd: config.cwd,
       agentDir: getAgentDir(),
-      settingsManager,
-      appendSystemPrompt: config.systemPrompt ? [config.systemPrompt] : undefined,
+      systemPrompt: config.systemPrompt,
       extensionFactories: piExtensionFactories(swarmExtension, { toolDeferral: deferTools }),
     });
-    // createAgentSession only reloads a loader it builds itself. Without this
-    // call a passed loader stays empty: no appended system prompt and no
-    // extensions (swarm hooks, tool_search) reach the session.
-    await resourceLoader.reload();
     // tool_search registers inactive; `+` adds it to the default tool set.
     const extraDefaultTools = piDefaultToolAdditions({ toolDeferral: deferTools });
     if (extraDefaultTools.length > 0) {

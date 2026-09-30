@@ -6,6 +6,7 @@ import type { ExtensionFactory, ToolDefinition } from "@earendil-works/pi-coding
 import * as piCodingAgent from "@earendil-works/pi-coding-agent";
 import type { McpHttpClient, McpTool, McpToolCallResult } from "../mcp-client/http-client";
 import {
+  createPiResourceLoader,
   isCoreSwarmTool,
   isPiToolDeferralEnabled,
   mcpToolsToDefinitions,
@@ -143,6 +144,34 @@ describe("pi extension factories and default tools per flag", () => {
     expect(factories).toHaveLength(2);
     expect(factories[0]).toBe(swarm);
     expect(piDefaultToolAdditions({ toolDeferral: true })).toEqual(["+tool_search"]);
+  });
+});
+
+describe("pi resource loader trust", () => {
+  test("task repo context files never reach the session; the server prompt does", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-loader-"));
+    try {
+      const cwd = join(root, "repo");
+      const agentDir = join(root, "agent");
+      mkdirSync(cwd, { recursive: true });
+      mkdirSync(agentDir, { recursive: true });
+      writeFileSync(join(root, "AGENTS.md"), "ancestor instructions");
+      writeFileSync(join(cwd, "AGENTS.md"), "repo instructions");
+      writeFileSync(join(cwd, "CLAUDE.md"), "repo claude instructions");
+
+      const { resourceLoader } = await createPiResourceLoader({
+        cwd,
+        agentDir,
+        systemPrompt: "server prompt",
+        extensionFactories: [() => {}],
+      });
+
+      expect(resourceLoader.getAgentsFiles().agentsFiles).toEqual([]);
+      expect(resourceLoader.getAppendSystemPrompt()).toEqual(["server prompt"]);
+      expect(resourceLoader.getExtensions().extensions).toHaveLength(1);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 
