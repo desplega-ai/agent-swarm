@@ -90,6 +90,7 @@ Each carries:
 - `install_id` and `installed_at` — the installation ID and its anchor timestamp
 - `org_name` — the organization name shown in the dashboard header (`SWARM_ORG_NAME`, or `Swarm` when unset)
 - `swarm_version`
+- `newsletter_consent` — always `false`. Notification events never subscribe anyone to a newsletter.
 - `message` — `[notification_event] key=<notification> action=<view|dismiss|submit|already_have_one>`, plus the email **domain** (never the address) on `submit`
 - `submitted_at`
 
