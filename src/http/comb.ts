@@ -46,7 +46,8 @@ const reviewBatchRoute = route({
   body: z.object({
     orgId: z.string().min(1),
     driveId: z.string().min(1),
-    commentIds: z.array(z.string().min(1)).min(1).max(REVIEW_BATCH_MAX),
+    // agent-fs comment ids are UUIDs, so a malformed id never costs an agent-fs read.
+    commentIds: z.array(z.uuid()).min(1).max(REVIEW_BATCH_MAX),
     /** The file or folder the batch was sent from (a Comb path such as "/docs/"). */
     scopePath: z
       .string()

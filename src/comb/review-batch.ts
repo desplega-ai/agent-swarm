@@ -32,6 +32,8 @@ import "./templates";
 
 /** Most comments one batch may carry. */
 export const REVIEW_BATCH_MAX = 50;
+/** Most agent-fs reads one batch runs at the same time (they use the bootstrap key). */
+export const REVIEW_BATCH_READ_CONCURRENCY = 5;
 
 export const SENT_KV_NAMESPACE = "comb:sent";
 // A claim that never reaches "sent" (the process died mid-send) frees itself.
@@ -117,14 +119,16 @@ export async function sendReviewBatch(
   const drive: AgentFsDrive = { orgId: input.orgId, driveId: input.driveId };
   const createTask = deps.createTask ?? createTaskWithSiblingAwareness;
 
-  // 1. Every agent-fs read runs now, in parallel, before any claim. The
+  // 1. Every agent-fs read runs now, a few at a time, before any claim. The
   //    browser's copy is not trusted. Only DB work runs while this send holds
   //    pending claims, so a pending claim cannot expire mid-send.
   const readStartedAt = Date.now();
   const versionOf = fileVersionLookup(agentFs, drive);
   const [serviceUserId, reads] = await Promise.all([
     agentFs.getServiceUserId().catch(() => null),
-    Promise.all(ids.map((id) => readComment(agentFs, drive, versionOf, id))),
+    mapLimited(ids, REVIEW_BATCH_READ_CONCURRENCY, (id) =>
+      readComment(agentFs, drive, versionOf, id),
+    ),
   ]);
   const skipped: SkippedComment[] = [];
   const candidates: CommentRead[] = [];
@@ -214,6 +218,24 @@ export async function sendReviewBatch(
     throw new ReviewBatchError(409, "Nothing to send", skipped);
   }
   return { taskId, sent: wonIds, skipped, repaired };
+}
+
+/** `items.map(fn)` with at most `limit` calls in flight. Results keep the input order. */
+async function mapLimited<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await fn(items[index] as T);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
 }
 
 async function readComment(

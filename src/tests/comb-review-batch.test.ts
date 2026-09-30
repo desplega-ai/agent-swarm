@@ -32,6 +32,7 @@ import { installExtension } from "../be/extensions/db";
 import { mintToken } from "../be/users";
 import {
   REVIEW_BATCH_MAX,
+  REVIEW_BATCH_READ_CONCURRENCY,
   type ReviewBatchInput,
   type ReviewBatchResult,
   sendReviewBatch,
@@ -79,6 +80,11 @@ class FakeAgentFs {
   versions = new Map<string, AgentFsFileVersion[]>();
   failReplies = false;
   failGets = false;
+  /** `comment-get` calls: total, in flight now, the most in flight at once, and a delay per call. */
+  gets = 0;
+  getsInFlight = 0;
+  maxGetsInFlight = 0;
+  getDelayMs = 0;
   private seq = 0;
 
   add(fields: Partial<AgentFsComment> & { body: string }): AgentFsComment {
@@ -111,6 +117,11 @@ class FakeAgentFs {
     const body = (await request.json()) as Record<string, string>;
     if (body.driveId !== DRIVE) return Response.json({ error: "FORBIDDEN" }, { status: 403 });
     if (body.op === "comment-get") {
+      this.gets++;
+      this.getsInFlight++;
+      this.maxGetsInFlight = Math.max(this.maxGetsInFlight, this.getsInFlight);
+      await Bun.sleep(this.getDelayMs);
+      this.getsInFlight--;
       if (this.failGets) return Response.json({ error: "INTERNAL" }, { status: 500 });
       const comment = this.comments.get(body.id as string);
       if (!comment) return Response.json({ error: "NOT_FOUND" }, { status: 404 });
@@ -228,6 +239,9 @@ beforeEach(async () => {
   fake.versions.clear();
   fake.failReplies = false;
   fake.failGets = false;
+  fake.gets = 0;
+  fake.maxGetsInFlight = 0;
+  fake.getDelayMs = 0;
   for (const key of ENV_KEYS) delete process.env[key];
   process.env.COMB_ENABLED = "true";
   process.env.AGENT_FS_API_URL = `http://localhost:${agentFsServer.port}`;
@@ -244,6 +258,16 @@ afterEach(() => {
 });
 
 describe("sendReviewBatch", () => {
+  test("reads at most REVIEW_BATCH_READ_CONCURRENCY comments from agent-fs at a time", async () => {
+    const ids = Array.from({ length: 12 }, (_, n) => fake.add({ body: `@swarm fix ${n}` }).id);
+    fake.getDelayMs = 20;
+    const result = await sendReviewBatch(batch(ids));
+    expect(result.sent).toEqual(ids);
+    expect(fake.gets).toBe(12);
+    expect(fake.maxGetsInFlight).toBeGreaterThan(1);
+    expect(fake.maxGetsInFlight).toBeLessThanOrEqual(REVIEW_BATCH_READ_CONCURRENCY);
+  });
+
   test("sends every comment as ONE lead task and replies on each", async () => {
     const a = fake.add({
       body: "@swarm tighten this",
@@ -635,6 +659,13 @@ describe("POST /api/comb/review-batches", () => {
     for (const scopePath of ["comb-qa/", "/comb-qa/../x", "/./a.md", `/${"a".repeat(1024)}`]) {
       expect((await postIds([id], scopePath)).status).toBe(400);
     }
+    expect(fake.repliesTo(id)).toHaveLength(0);
+  });
+
+  test("answers 400 for a malformed comment id, before any agent-fs read", async () => {
+    const id = fake.add({ body: "@swarm a" }).id;
+    expect((await postIds([id, "not-a-comment-id"])).status).toBe(400);
+    expect(fake.gets).toBe(0);
     expect(fake.repliesTo(id)).toHaveLength(0);
   });
 
