@@ -13,6 +13,7 @@ afterAll(async () => {
 
 mock.module("@/lib/utils", () => require("../../lib/utils"));
 mock.module("@/lib/enter-submit", () => require("../../lib/enter-submit"));
+mock.module("@/hooks/use-object-url", () => require("../../hooks/use-object-url"));
 mock.module("@/components/ui/button", () => require("../ui/button"));
 mock.module("@/components/ui/textarea", () => require("../ui/textarea"));
 mock.module("@/components/ui/tooltip", () => require("../ui/tooltip"));
