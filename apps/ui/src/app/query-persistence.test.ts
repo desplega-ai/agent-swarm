@@ -5,8 +5,12 @@ import { shouldPersistQuery } from "./query-persistence";
 describe("shouldPersistQuery", () => {
   test("agent-fs queries are not dehydrated, other successful queries are", () => {
     const client = new QueryClient();
-    client.setQueryData(["agent-fs", "http://fs.test", "user-1", "ls", "/"], { entries: [] });
-    client.setQueryData(["agent-fs", "http://fs.test", "user-1", "me"], { userId: "user-1" });
+    client.setQueryData(["agent-fs", "http://fs.test", "user-1", "org-1", "drive-1", "ls", "/"], {
+      entries: [],
+    });
+    client.setQueryData(["agent-fs", "http://fs.test", "user-1", null, null, "me"], {
+      userId: "user-1",
+    });
     client.setQueryData(["tasks"], []);
     client.setQueryData(["status"], { ok: true });
 

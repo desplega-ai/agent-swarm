@@ -2,8 +2,10 @@ import { describe, expect, test } from "bun:test";
 import {
   type AgentFsCredential,
   clearCredential,
+  credentialSnapshot,
   credentialStorageKey,
   readCredential,
+  subscribeCredential,
   writeCredential,
 } from "./credential-store";
 
@@ -80,5 +82,63 @@ describe("credential store", () => {
     expect(() => writeCredential("a", "b", credential, broken)).not.toThrow();
     expect(readCredential("a", "b", broken)).toBeNull();
     expect(() => clearCredential("a", "b", broken)).not.toThrow();
+  });
+
+  test("the snapshot keeps one object until the stored string changes", () => {
+    const storage = memoryStorage();
+    const snapshot = credentialSnapshot("https://swarm.a", "https://fs.one", storage);
+    expect(snapshot()).toBeNull();
+    writeCredential("https://swarm.a", "https://fs.one", credential, storage);
+    const first = snapshot();
+    expect(first).toEqual(credential);
+    expect(snapshot()).toBe(first);
+    writeCredential("https://swarm.a", "https://fs.one", { ...credential, email: "b@x" }, storage);
+    expect(snapshot()?.email).toBe("b@x");
+    clearCredential("https://swarm.a", "https://fs.one", storage);
+    expect(snapshot()).toBeNull();
+  });
+});
+
+describe("subscribeCredential", () => {
+  const ownKey = credentialStorageKey("https://swarm.a", "https://fs.one");
+
+  function storageEvent(key: string | null): Event {
+    return Object.assign(new Event("storage"), { key });
+  }
+
+  test("other tabs: own key fires, a foreign key is ignored, clear() fires", () => {
+    const target = new EventTarget();
+    let calls = 0;
+    const stop = subscribeCredential("https://swarm.a", "https://fs.one", () => calls++, target);
+
+    target.dispatchEvent(storageEvent(ownKey));
+    expect(calls).toBe(1);
+    target.dispatchEvent(storageEvent(credentialStorageKey("https://swarm.a", "https://fs.two")));
+    target.dispatchEvent(storageEvent("agent-swarm-query-cache-v1"));
+    expect(calls).toBe(1);
+    // `localStorage.clear()` in another tab sends `key: null`.
+    target.dispatchEvent(storageEvent(null));
+    expect(calls).toBe(2);
+
+    stop();
+    target.dispatchEvent(storageEvent(ownKey));
+    expect(calls).toBe(2);
+  });
+
+  test("this tab: writes and clears of its own key fire", () => {
+    const storage = memoryStorage();
+    let calls = 0;
+    const stop = subscribeCredential("https://swarm.a", "https://fs.one", () => calls++, null);
+
+    writeCredential("https://swarm.a", "https://fs.one", credential, storage);
+    expect(calls).toBe(1);
+    writeCredential("https://swarm.a", "https://fs.two", credential, storage);
+    expect(calls).toBe(1);
+    clearCredential("https://swarm.a", "https://fs.one", storage);
+    expect(calls).toBe(2);
+
+    stop();
+    writeCredential("https://swarm.a", "https://fs.one", credential, storage);
+    expect(calls).toBe(2);
   });
 });

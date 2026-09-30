@@ -880,7 +880,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         description: "Show the agent-fs review space in the dashboard. Needs agent-fs.",
         kind: "boolean",
         defaultValue: "false",
-        docsUrl: `${DOCS}ui/comb`,
+        docsUrl: `${DOCS}ui/configuration#comb-beta`,
       },
       {
         key: "AGENT_FS_PUBLIC_URL",

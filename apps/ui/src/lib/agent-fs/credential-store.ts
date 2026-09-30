@@ -54,16 +54,53 @@ function parseCredential(raw: string | null): AgentFsCredential | null {
   }
 }
 
+function readRaw(
+  apiUrl: string,
+  endpoint: string,
+  storage: CredentialStorage | null,
+): string | null {
+  try {
+    return storage?.getItem(credentialStorageKey(apiUrl, endpoint)) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export function readCredential(
   apiUrl: string,
   endpoint: string,
   storage: CredentialStorage | null = browserStorage(),
 ): AgentFsCredential | null {
-  try {
-    return parseCredential(storage?.getItem(credentialStorageKey(apiUrl, endpoint)) ?? null);
-  } catch {
-    return null;
-  }
+  return parseCredential(readRaw(apiUrl, endpoint, storage));
+}
+
+/**
+ * A `getSnapshot` for `useSyncExternalStore`. It returns the same object until
+ * the stored string changes.
+ */
+export function credentialSnapshot(
+  apiUrl: string,
+  endpoint: string,
+  storage: CredentialStorage | null = browserStorage(),
+): () => AgentFsCredential | null {
+  let raw: string | null | undefined;
+  let credential: AgentFsCredential | null = null;
+  return () => {
+    const next = readRaw(apiUrl, endpoint, storage);
+    if (next !== raw) {
+      raw = next;
+      credential = parseCredential(next);
+    }
+    return credential;
+  };
+}
+
+// The `storage` event never fires in the tab that made the change, so writes
+// in this tab notify the subscribers directly.
+const sameTabListeners = new Set<(storageKey: string) => void>();
+
+function notifySameTab(storageKey: string): void {
+  for (const listener of sameTabListeners) listener(storageKey);
 }
 
 export function writeCredential(
@@ -72,11 +109,14 @@ export function writeCredential(
   credential: AgentFsCredential,
   storage: CredentialStorage | null = browserStorage(),
 ): void {
+  const key = credentialStorageKey(apiUrl, endpoint);
   try {
-    storage?.setItem(credentialStorageKey(apiUrl, endpoint), JSON.stringify(credential));
+    storage?.setItem(key, JSON.stringify(credential));
   } catch {
-    // Storage unavailable (privacy mode): the credential lasts for this page only.
+    // Storage unavailable: nothing is saved (the dashboard needs localStorage).
+    return;
   }
+  notifySameTab(key);
 }
 
 export function clearCredential(
@@ -84,29 +124,39 @@ export function clearCredential(
   endpoint: string,
   storage: CredentialStorage | null = browserStorage(),
 ): void {
+  const key = credentialStorageKey(apiUrl, endpoint);
   try {
-    storage?.removeItem(credentialStorageKey(apiUrl, endpoint));
+    storage?.removeItem(key);
   } catch {
     // Nothing stored.
+    return;
   }
+  notifySameTab(key);
 }
 
 /**
- * Call `onChange` when another tab writes or clears this credential. The
- * `storage` event never fires in the tab that made the change.
+ * Call `onChange` when this credential is written or cleared, in this tab or
+ * in another one (`target` receives the other tabs' `storage` events).
  */
 export function subscribeCredential(
   apiUrl: string,
   endpoint: string,
-  onChange: (credential: AgentFsCredential | null) => void,
+  onChange: () => void,
+  target: EventTarget | null = typeof window === "undefined" ? null : window,
 ): () => void {
-  if (typeof window === "undefined") return () => {};
   const key = credentialStorageKey(apiUrl, endpoint);
-  const handler = (event: StorageEvent) => {
-    // `key === null` means another tab called `localStorage.clear()`.
-    if (event.key !== null && event.key !== key) return;
-    onChange(readCredential(apiUrl, endpoint));
+  const onSameTab = (changed: string) => {
+    if (changed === key) onChange();
   };
-  window.addEventListener("storage", handler);
-  return () => window.removeEventListener("storage", handler);
+  const onStorage = (event: Event) => {
+    // `key === null` means another tab called `localStorage.clear()`.
+    const changed = (event as StorageEvent).key;
+    if (changed === null || changed === key) onChange();
+  };
+  sameTabListeners.add(onSameTab);
+  target?.addEventListener("storage", onStorage);
+  return () => {
+    sameTabListeners.delete(onSameTab);
+    target?.removeEventListener("storage", onStorage);
+  };
 }

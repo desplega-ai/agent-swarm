@@ -44,6 +44,7 @@ import {
   SidebarRail,
 } from "@/components/ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { navRequirementMet } from "@/lib/agent-fs/state";
 import { formatCost } from "@/lib/cost-format";
 import { isDemoMode } from "@/lib/deployment-config";
 import { cn, formatCompactNumber } from "@/lib/utils";
@@ -379,8 +380,8 @@ export function AppSidebar() {
   };
   const isGated = (item: NavItem) =>
     !!item.gate && gates[item.gate.minVersion]?.supported === false;
-  const combEnabled = status?.agent_fs?.comb?.enabled === true;
-  const isHidden = (item: NavItem) => isGated(item) || (item.requires === "comb" && !combEnabled);
+  const isHidden = (item: NavItem) =>
+    isGated(item) || !navRequirementMet(item.requires, status?.agent_fs?.comb);
 
   // Live counts surfaced as right-aligned badges on existing nav items.
   // Gated entirely on API ≥1.82 — the backing queries don't even fire on

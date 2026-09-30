@@ -1,17 +1,10 @@
 /**
  * Comb's agent-fs connection: the swarm drive from `/status` (`agent_fs.comb`)
- * plus the human's own agent-fs credential from this browser.
- *
- * States:
- * - `disabled`: Comb is off, agent-fs is not configured, or the API predates Comb.
- * - `loading`: `/status` or the identity check is in flight.
- * - `needs-connect`: no credential in this browser.
- * - `invalid-key`: agent-fs rejected the saved key (401).
- * - `unreachable`: the identity check failed for another reason (network, 5xx).
- * - `ready`: `me` is loaded and `client` works.
+ * plus the human's own agent-fs credential from this browser. The states are
+ * documented on `AgentFsState` (`lib/agent-fs/state.ts`).
  */
 
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createContext,
   type ReactNode,
@@ -19,39 +12,35 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useState,
+  useSyncExternalStore,
 } from "react";
-import { useAgentFsHealth, useAgentFsMe } from "@/api/hooks/use-agent-fs";
 import { useStatusContext } from "@/app/status-context";
 import { useConfig } from "@/hooks/use-config";
-import { AgentFsClient, AgentFsError, isAgentFsAuthError } from "@/lib/agent-fs/client";
+import { AgentFsClient, type AgentFsError } from "@/lib/agent-fs/client";
 import {
   type AgentFsCredential,
   clearCredential,
-  readCredential,
+  credentialSnapshot,
   subscribeCredential,
   writeCredential,
 } from "@/lib/agent-fs/credential-store";
+import { agentFsKey, agentFsRetry, recheckMeOnAuthError } from "@/lib/agent-fs/query";
+import { type AgentFsState, combEndpoint, deriveAgentFsState } from "@/lib/agent-fs/state";
 import type { MeResponse } from "@/lib/agent-fs/types";
 
-export type AgentFsState =
-  | "disabled"
-  | "loading"
-  | "needs-connect"
-  | "invalid-key"
-  | "unreachable"
-  | "ready";
+export type { AgentFsState };
 
 export interface AgentFsContextValue {
   state: AgentFsState;
-  /** Browser-facing agent-fs URL. Null while disabled. */
+  /** Browser-facing agent-fs URL. Null while disabled. Build query keys from it. */
   endpoint: string | null;
   /** The swarm's shared org and drive. */
   orgId: string | null;
   driveId: string | null;
   /** agent-fs live UI host, for "Open in agent-fs" links. */
   liveUrl: string | null;
-  credential: AgentFsCredential | null;
+  /** Who is connected. The key itself stays inside `client`. */
+  credential: Omit<AgentFsCredential, "apiKey"> | null;
   /** Set whenever a credential exists, before the key is verified. */
   client: AgentFsClient | null;
   /** Set in `ready`. */
@@ -70,36 +59,79 @@ export interface AgentFsContextValue {
 
 const AgentFsContext = createContext<AgentFsContextValue | null>(null);
 
+/** Connection-level data changes rarely: no polling. */
+const CONNECTION_QUERY = {
+  staleTime: 5 * 60_000,
+  refetchInterval: false,
+  retry: agentFsRetry,
+} as const;
+
+/** Public server info. `features` gates Comb surfaces that need a newer agent-fs. */
+function useAgentFsHealth(endpoint: string | null) {
+  return useQuery({
+    queryKey: agentFsKey(endpoint ?? "", null, null, null, "health"),
+    queryFn: ({ signal }) => AgentFsClient.health(endpoint as string, { signal }),
+    enabled: endpoint !== null,
+    ...CONNECTION_QUERY,
+  });
+}
+
+/** The connected identity: the check that the saved key still works. */
+function useAgentFsMe(meKey: readonly unknown[], client: AgentFsClient | null) {
+  return useQuery({
+    queryKey: meKey,
+    queryFn: ({ signal }) => (client as AgentFsClient).getMe({ signal }),
+    enabled: client !== null,
+    ...CONNECTION_QUERY,
+  });
+}
+
 export function AgentFsProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const { config } = useConfig();
   const apiUrl = config.apiUrl;
   const { data: status, isLoading: statusLoading } = useStatusContext();
   const comb = status?.agent_fs?.comb;
-  const endpoint = comb?.enabled && comb.api_url ? comb.api_url : null;
+  const endpoint = combEndpoint(comb);
 
-  const [credential, setCredential] = useState<AgentFsCredential | null>(() =>
-    endpoint ? readCredential(apiUrl, endpoint) : null,
+  // Read during render, so a hard load never flashes `needs-connect`.
+  const subscribe = useCallback(
+    (onChange: () => void) =>
+      endpoint ? subscribeCredential(apiUrl, endpoint, onChange) : () => {},
+    [apiUrl, endpoint],
   );
-  useEffect(() => {
-    if (!endpoint) {
-      setCredential(null);
-      return;
-    }
-    setCredential(readCredential(apiUrl, endpoint));
-    return subscribeCredential(apiUrl, endpoint, setCredential);
-  }, [apiUrl, endpoint]);
+  const getSnapshot = useMemo(
+    () => (endpoint ? credentialSnapshot(apiUrl, endpoint) : () => null),
+    [apiUrl, endpoint],
+  );
+  const saved = useSyncExternalStore(subscribe, getSnapshot);
 
-  const apiKey = credential?.apiKey;
+  const apiKey = saved?.apiKey;
   const client = useMemo(
     () => (endpoint && apiKey ? new AgentFsClient({ endpoint, apiKey }) : null),
     [endpoint, apiKey],
   );
+  const credential = useMemo(() => {
+    if (!saved) return null;
+    const { apiKey: _key, ...rest } = saved;
+    return rest;
+  }, [saved]);
+  const userId = saved?.userId ?? null;
 
   const health = useAgentFsHealth(endpoint);
-  const meQuery = useAgentFsMe(client, credential?.userId ?? null);
+  const meKey = useMemo(
+    () => agentFsKey(endpoint ?? "", userId, null, null, "me"),
+    [endpoint, userId],
+  );
+  const meQuery = useAgentFsMe(meKey, client);
   const healthFeatures = health.data?.features;
   const features = useMemo(() => new Set(healthFeatures ?? []), [healthFeatures]);
+
+  // A 401 from any agent-fs query (a listing, a file) checks `me` again.
+  useEffect(() => {
+    if (!client) return;
+    return recheckMeOnAuthError(queryClient, meKey);
+  }, [client, meKey, queryClient]);
 
   const connect = useCallback(
     (next: AgentFsCredential) => {
@@ -108,14 +140,12 @@ export function AgentFsProvider({ children }: { children: ReactNode }) {
       // would otherwise keep its 401).
       queryClient.removeQueries({ queryKey: ["agent-fs", endpoint] });
       writeCredential(apiUrl, endpoint, next);
-      setCredential(next);
     },
     [apiUrl, endpoint, queryClient],
   );
 
   const disconnect = useCallback(() => {
     if (endpoint) clearCredential(apiUrl, endpoint);
-    setCredential(null);
     queryClient.removeQueries({ queryKey: ["agent-fs"] });
   }, [apiUrl, endpoint, queryClient]);
 
@@ -124,21 +154,13 @@ export function AgentFsProvider({ children }: { children: ReactNode }) {
     void refetchMe();
   }, [refetchMe]);
 
-  const meError = meQuery.error
-    ? meQuery.error instanceof AgentFsError
-      ? meQuery.error
-      : new AgentFsError(0, "UNKNOWN", "agent-fs identity check failed")
-    : null;
-  let state: AgentFsState;
-  if (status === undefined && statusLoading) state = "loading";
-  else if (!endpoint) state = "disabled";
-  else if (!credential) state = "needs-connect";
-  // A 401 wins over cached data: the key was revoked or reset since.
-  else if (isAgentFsAuthError(meError)) state = "invalid-key";
-  else if (meQuery.data) state = "ready";
-  else if (meError) state = "unreachable";
-  else state = "loading";
-  const error = state === "invalid-key" || state === "unreachable" ? meError : null;
+  const { state, error } = deriveAgentFsState({
+    statusLoading: status === undefined && statusLoading,
+    endpoint,
+    hasCredential: saved !== null,
+    me: meQuery.data,
+    meError: meQuery.error,
+  });
 
   const value: AgentFsContextValue = {
     state,

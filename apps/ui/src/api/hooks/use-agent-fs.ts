@@ -1,69 +1,28 @@
 // react-query hooks for Comb's direct agent-fs calls (the browser talks to
 // agent-fs with the human's own key, never through the swarm API).
 //
-// Every key starts with "agent-fs", so these results never persist to the
-// dashboard's localStorage query cache (`shouldPersistQuery`), and
-// `disconnect()` drops them all at once.
+// Build every key with `agentFsKey` (contract in `lib/agent-fs/query.ts`) and
+// pass `retry: agentFsRetry`. Keys start with "agent-fs", so these results
+// never persist to the dashboard's localStorage query cache, and
+// `disconnect()` drops them all at once. This file imports the context, never
+// the reverse.
 
 import { type QueryKey, queryOptions, useQuery } from "@tanstack/react-query";
 import { useAgentFs } from "@/contexts/agent-fs-context";
-import { AgentFsClient, AgentFsError, isAgentFsAuthError } from "@/lib/agent-fs/client";
+import type { AgentFsClient } from "@/lib/agent-fs/client";
+import { agentFsKey, agentFsRetry } from "@/lib/agent-fs/query";
 import type { DriveMembersResult, LsResult, StatResult } from "@/lib/agent-fs/types";
 import type { DrivePath } from "@/lib/comb/paths";
+
+export { agentFsKey, agentFsRetry };
 
 /** Text files above this size are not loaded (the viewer offers a download). */
 export const COMB_TEXT_MAX_BYTES = 2 * 1024 * 1024;
 
-/**
- * `["agent-fs", endpoint, userId, ...rest]`. `userId` is null for public
- * calls (`/health`). Invalidate by prefix, for example
- * `agentFsKey(endpoint, userId, "ls")` for every folder listing.
- */
-export function agentFsKey(endpoint: string, userId: string | null, ...rest: unknown[]) {
-  return ["agent-fs", endpoint, userId, ...rest] as const;
-}
-
-/** Connection-level data changes rarely: no polling. */
-const CONNECTION_QUERY = { staleTime: 5 * 60_000, refetchInterval: false } as const;
-
-/** Public server info. `features` gates Comb surfaces that need a newer agent-fs. */
-export function useAgentFsHealth(endpoint: string | null) {
-  return useQuery({
-    queryKey: agentFsKey(endpoint ?? "", null, "health"),
-    queryFn: ({ signal }) => AgentFsClient.health(endpoint as string, { signal }),
-    enabled: endpoint !== null,
-    retry: 1,
-    ...CONNECTION_QUERY,
-  });
-}
-
-/**
- * The connected identity. The provider runs it to learn whether the saved key
- * still works (a 401 is not retried). Components read `useAgentFs().me`.
- */
-export function useAgentFsMe(client: AgentFsClient | null, userId: string | null) {
-  return useQuery({
-    queryKey: agentFsKey(client?.endpoint ?? "", userId, "me"),
-    queryFn: ({ signal }) => (client as AgentFsClient).getMe({ signal }),
-    enabled: client !== null,
-    retry: (failureCount, error) => !isAgentFsAuthError(error) && failureCount < 2,
-    ...CONNECTION_QUERY,
-  });
-}
-
-/**
- * A 4xx does not change on retry (a 401 key, a 404 path, a 403 role), so only
- * network failures and 5xx retry.
- */
-function retryAgentFs(failureCount: number, error: Error): boolean {
-  if (isAgentFsAuthError(error)) return false;
-  if (error instanceof AgentFsError && error.status >= 400 && error.status < 500) return false;
-  return failureCount < 2;
-}
-
 /** The connected client (null until `ready`) and the key parts for drive queries. */
 export interface AgentFsAccess {
   client: AgentFsClient | null;
+  /** `useAgentFs().endpoint`, so the `connect()` eviction matches every key. */
   endpoint: string;
   userId: string | null;
 }
@@ -105,7 +64,7 @@ export function agentFsLsQuery(access: AgentFsAccess, target: DrivePath) {
         { signal },
       ),
     enabled: access.client !== null,
-    retry: retryAgentFs,
+    retry: agentFsRetry,
   });
 }
 
@@ -127,7 +86,7 @@ export function useAgentFsStat(target: DrivePath) {
         { signal },
       ),
     enabled: access.client !== null,
-    retry: retryAgentFs,
+    retry: agentFsRetry,
   });
 }
 
@@ -159,7 +118,7 @@ export function useAgentFsText(target: DrivePath, opts: { maxBytes?: number } = 
       return { tooLarge: false, text: await blob.text() };
     },
     enabled: access.client !== null && stat !== undefined,
-    retry: retryAgentFs,
+    retry: agentFsRetry,
     staleTime: Number.POSITIVE_INFINITY,
     refetchInterval: false,
     // File bytes can be large: drop them soon after the viewer unmounts.
@@ -197,7 +156,9 @@ export function useDriveMembers(drive: { orgId: string; driveId: string }) {
         { signal },
       ),
     enabled: access.client !== null && features.has("drive-members"),
-    retry: retryAgentFs,
-    ...CONNECTION_QUERY,
+    retry: agentFsRetry,
+    // Members change rarely: no polling.
+    staleTime: 5 * 60_000,
+    refetchInterval: false,
   });
 }
