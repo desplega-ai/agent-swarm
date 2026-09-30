@@ -52,6 +52,7 @@ import { startScriptRunSupervisor, stopScriptRunSupervisor } from "../script-wor
 import { getServerSessionsProcessed } from "../server-runtime-counters";
 import { startSlackApp, stopSlackApp } from "../slack";
 import { initTelemetry, telemetry } from "../telemetry";
+import { startTelemetryTicker } from "../telemetry-snapshot";
 import { getApiKey } from "../utils/api-key";
 import { getMcpBaseUrl } from "../utils/constants";
 import { isEnvFlagEnabled } from "../utils/env-flag";
@@ -683,15 +684,17 @@ httpServer
     // The api-server is the sole authority for the install identity — pass
     // generateIfMissing so it mints a new install ID on first boot. Workers
     // must NOT mint (see src/commands/runner.ts).
-    await initTelemetry(
-      "api-server",
-      async (key) => (await getSwarmConfigs({ scope: "global", key }))?.[0]?.value,
-      async (key, value) => {
-        await upsertSwarmConfig({ scope: "global", key, value });
-      },
-      { generateIfMissing: true },
-    );
+    const telemetryGetConfig = async (key: string) =>
+      (await getSwarmConfigs({ scope: "global", key }))?.[0]?.value;
+    const telemetrySetConfig = async (key: string, value: string) => {
+      await upsertSwarmConfig({ scope: "global", key, value });
+    };
+    await initTelemetry("api-server", telemetryGetConfig, telemetrySetConfig, {
+      generateIfMissing: true,
+    });
     telemetry.server("started", { port });
+    // Org email domain (hourly + on user changes) and the daily org.snapshot.
+    startTelemetryTicker({ getConfig: telemetryGetConfig, setConfig: telemetrySetConfig });
     if (process.env.GITHUB_TOKEN) {
       await emitBuiltInIntegrationConnectedOnce("github");
     }

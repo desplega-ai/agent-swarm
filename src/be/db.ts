@@ -10,6 +10,7 @@ import {
 import { realtimeBus } from "../realtime/bus";
 import { slackChannelFromContextKey } from "../tasks/slack-routing";
 import { _resolveIntegrationType, emitIntegrationConnected, telemetry } from "../telemetry";
+import { scheduleOrgDomainRecompute } from "../telemetry-identity";
 import {
   emitTaskTelemetry,
   type TaskTelemetryEvent,
@@ -11945,6 +11946,8 @@ export async function createUser(data: {
     ],
   );
   if (!row) throw new Error("Failed to create user");
+  // The org's email domain may come from this user (debounced, post-commit).
+  getDbClient().afterCommit(scheduleOrgDomainRecompute);
   return rowToUser(row);
 }
 
@@ -12017,6 +12020,7 @@ export async function updateUser(
     `UPDATE users SET ${sets.join(", ")} WHERE id = ? RETURNING *`,
     params,
   );
+  if (row) getDbClient().afterCommit(scheduleOrgDomainRecompute);
   return row ? rowToUser(row) : null;
 }
 
@@ -12126,6 +12130,7 @@ export async function deleteUser(id: string, replacementUserId?: string): Promis
     await reclassifyTaskHumanFree(reclassifySeedIds);
 
     const result = await tx.run("DELETE FROM users WHERE id = ?", [id]);
+    if (result.changes > 0) getDbClient().afterCommit(scheduleOrgDomainRecompute);
     return result.changes > 0;
   });
 }

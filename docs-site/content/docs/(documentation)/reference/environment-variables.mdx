@@ -422,9 +422,9 @@ Identity envs that brand the swarm and gate cloud-only UX. All are read on every
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SWARM_CLOUD` | `false` | When `true`, marks the deployment as cloud-hosted. Surfaces Docs/Support/Billing items in the user-menu, suppresses the self-host marketing footer, and is sent as `metadata.is_cloud` (always present) on every telemetry event |
-| `SWARM_ORG_NAME` | `Swarm` | Sidebar header name. Also sent as `metadata.organization_name` on every telemetry event when set |
-| `SWARM_ORG_ID` | none | Stable org/tenant identifier exposed on `/status` as `identity.org_id` and sent as `metadata.organization_id` on every telemetry event when set. Set by the orchestrator on cloud deployments |
+| `SWARM_CLOUD` | `false` | When `true`, marks the deployment as cloud-hosted. Surfaces Docs/Support/Billing items in the user-menu, suppresses the self-host marketing footer, and is sent as `metadata.is_cloud` (always present) on every telemetry event and sets `context.deployment` |
+| `SWARM_ORG_NAME` | `Swarm` | Sidebar header name. Also sent as `metadata.organization_name` and `context.org_name` on every telemetry event when set |
+| `SWARM_ORG_ID` | none | Stable org/tenant identifier exposed on `/status` as `identity.org_id` and sent as `metadata.organization_id` and `context.org_id` on every telemetry event when set. Set by the orchestrator on cloud deployments. Self-host installs that leave it unset get a random `org_` ID instead |
 | `SWARM_ORG_LOGO_URL` | bundled `/logo.png` | Sidebar logo URL (any HTTPS URL). Falls back to the bundled logo if it fails to load |
 | `SWARM_BRAND_COLOR` | none | Tints the org name in the sidebar header (any CSS color, e.g. `#a855f7`) |
 | `SWARM_MARKETING_URL` | none | Self-host marketing footer link target. Suppressed when `SWARM_CLOUD=true` or `SWARM_HIDE_CLOUD_PROMO=true` |
@@ -499,7 +499,7 @@ When a session is spawned, the runner splits the credential value by commas and 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ANONYMIZED_TELEMETRY` | `true` (enabled) | Set to `false` to disable anonymized telemetry. See [Telemetry](/docs/reference/telemetry) for details |
+| `ANONYMIZED_TELEMETRY` | `true` (enabled) | Set to `false` to disable anonymized telemetry. Events carry an org ID, the org name and the admin's email domain, and a pseudonymous user reference (never an email address); see [Identity context](/docs/reference/telemetry#identity-context) |
 | `DESPLEGA_TELEMETRY_ENV` | `production` | Explicit telemetry environment tag. Set to `development` or `test` for intentional non-production telemetry. |
 | `INSTALL_METHOD` | unset | Written automatically by the onboard wizard (`onboard_interactive` / `onboard_noninteractive`); not meant to be hand-set. Unset installs are attributed as `manual` (or `e2b` inside an E2B sandbox). |
 | `INSTALL_PRESET` | unset | Written automatically by the onboard wizard with the chosen preset (e.g. `solo`), when applicable. |

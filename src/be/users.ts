@@ -20,6 +20,7 @@
  */
 
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { scheduleOrgDomainRecompute } from "../telemetry-identity";
 import type { User } from "../types";
 import { getDbClient } from "./db";
 
@@ -369,6 +370,8 @@ export async function findOrCreateUserByEmail(
     await recordIdentityEvent(id, "identity_added", actor, null, { email, name });
     return rowToUser(row);
   });
+  // The org's email domain may come from this user (debounced, post-commit).
+  getDbClient().afterCommit(scheduleOrgDomainRecompute);
 
   return { user: created, created: true };
 }

@@ -492,6 +492,14 @@ export function setTelemetryRoleResolver(
   roleResolver = resolver;
 }
 
+/**
+ * True when `track()` would send: telemetry is on, an install ID exists and an
+ * org ID resolved. Emitters that record "already sent" state check this first.
+ */
+export function isTelemetryReady(): boolean {
+  return isTelemetryEnabled() && installationId !== null && currentOrgId() !== undefined;
+}
+
 /** The install ID, or null before `initTelemetry` resolved one (or after opt-out). */
 export function getTelemetryInstallationId(): string | null {
   return installationId;
@@ -769,6 +777,10 @@ export const telemetry = {
       undefined,
       actor,
     );
+  },
+
+  org<S extends EventSuffix<"org">>(event: S, props: FamilyProps<"org", S>): void {
+    emit(`org.${event}`, props as Record<string, unknown>, undefined);
   },
 
   integration(
